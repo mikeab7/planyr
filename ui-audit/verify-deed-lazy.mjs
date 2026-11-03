@@ -100,7 +100,7 @@ if (modal) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(900);
   const plotted = await page.evaluate(() => {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const mk = (Object.values(m)[0]?.markups || []).filter((x) => x.kind === "encumbrance");
     return mk.map((x) => ({ n: (x.pts || []).length, closed: x.closed, label: x.label }));
   });

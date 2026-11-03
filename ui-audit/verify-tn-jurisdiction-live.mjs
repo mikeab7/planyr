@@ -161,7 +161,7 @@ try {
     const all = Array.from(new Set([...ids, ...((stray || []).map((r) => r.id))]));
     for (const id of all) { try { await sb.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await sb.from("sites").delete().eq("id", id); } catch (_) {} }
     try {
-      const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       for (const id of all) delete raw[id];
       localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
     } catch (_) {}

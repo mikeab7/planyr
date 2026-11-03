@@ -39,7 +39,7 @@ async function at(page, fx, fy) {
   return { x: box.x + v.offX + fx * v.ppf, y: box.y + v.offY + fy * v.ppf };
 }
 const els = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return (map[Object.keys(map)[0]] || {}).els || [];
 });
 const settle = (page) => page.waitForTimeout(900);

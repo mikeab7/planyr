@@ -95,7 +95,7 @@ async function selectAndOpen(page, pt, id) {
 }
 
 const stored = (page, key, id) => page.evaluate(([k, i]) => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s[k] || []).find((x) => x.id === i) || null;
 }, [key, id]);

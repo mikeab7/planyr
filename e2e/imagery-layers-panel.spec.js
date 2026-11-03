@@ -45,7 +45,7 @@ async function open(page, s, { terrain = false } = {}) {
 }
 
 const layers = (page) => page.evaluate(() => window.__plannerLayers && window.__plannerLayers());
-const storedPlan = (page) => page.evaluate(() => localStorage.getItem("planarfit:sites:v1"));
+const storedPlan = (page) => page.evaluate(() => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
 
 test("Hide Layers clears the drawing and nothing else; Show brings back the identical set", async ({ page }) => {
   await open(page, site());

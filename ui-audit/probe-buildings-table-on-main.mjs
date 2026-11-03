@@ -38,7 +38,7 @@ await ctx.route(/^https?:\/\//, (r) => (r.request().url().startsWith(BASE) ? r.c
 const page = await ctx.newPage();
 await assertMeasurable(page, "probe-buildings-table-on-main");
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
-if (!FX) await page.evaluate((r) => { const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
+if (!FX) await page.evaluate((r) => { const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
 await page.goto(`${BASE}/#/project/${rec.id}/site`, { waitUntil: "load" });
 await page.reload({ waitUntil: "load" });
 await page.getByTestId("planner-canvas").waitFor({ state: "visible", timeout: 90000 });

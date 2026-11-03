@@ -80,7 +80,7 @@ async function drop(id) {
   await page.waitForTimeout(2500);
   const del = () => page.evaluate(async (i) => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[i]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete all[i]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
       await window.pfSupabase.from("site_elements").delete().eq("site_id", i);
       await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i);
       await window.pfSupabase.from("sites").delete().eq("id", i);
@@ -91,7 +91,7 @@ async function drop(id) {
   await page.waitForTimeout(4000); // let any in-flight autosave land, then verify — and delete again if it did
   const probe = () => page.evaluate(async (i) => {
     const q = await window.pfSupabase.from("sites").select("id").eq("id", i);
-    return { local: !JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[i], cloud: !(q.data && q.data.length) };
+    return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[i], cloud: !(q.data && q.data.length) };
   }, id).catch((e) => ({ error: String(e) }));
   let r = await probe();
   if (!r.cloud || !r.local) { await del(); await page.waitForTimeout(4000); r = await probe(); }
@@ -234,7 +234,7 @@ try {
       const q = await window.pfSupabase.from("sites").select("id").like("id", `zz-ga-%-${tag}`);
       const ids = (q.data || []).map((r) => r.id);
       for (const i of ids) { await window.pfSupabase.from("site_elements").delete().eq("site_id", i); await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i); await window.pfSupabase.from("sites").delete().eq("id", i); }
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); for (const k of Object.keys(all)) if (k.startsWith("zz-ga-") && k.endsWith("-" + tag)) delete all[k]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); for (const k of Object.keys(all)) if (k.startsWith("zz-ga-") && k.endsWith("-" + tag)) delete all[k]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
       const q2 = await window.pfSupabase.from("sites").select("id,deleted_at").like("id", `zz-ga-%-${tag}`);
       const rest = q2.data || []; // a trashed row is invisible to the app; the hard delete can lag (its guard trigger scans the whole table)
       return { found: ids, left: rest.filter((r) => !r.deleted_at).map((r) => r.id), trashedLeft: rest.filter((r) => r.deleted_at).length };

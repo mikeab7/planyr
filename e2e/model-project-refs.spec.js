@@ -43,7 +43,7 @@ async function openSheet(page, id) {
  *  production wiring, not a fixture-only convenience. */
 async function editSiteAndNotify(page, id, patch) {
   await page.evaluate(([siteId, p]) => {
-    const store = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const store = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
     store[siteId] = { ...store[siteId], ...p, updatedAt: Date.now() };
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
     window.dispatchEvent(new StorageEvent("storage", { key: `planarfit:siteContent:v1:${siteId}` }));

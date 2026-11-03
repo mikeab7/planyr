@@ -21,7 +21,7 @@ const SEED = {
   bin2: { id: "bin2", groupId: "bin-g2", site: "ZZ BIN TWO", name: "Plan 1", status: "active", lat: 29.79, lng: -95.81, els: [] },
 };
 
-const storedIds = (page) => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")));
+const storedIds = (page) => page.evaluate(() => Object.keys(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")));
 
 async function seed(page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });

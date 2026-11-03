@@ -73,7 +73,7 @@ async function caseUnsavedProject(browser) {
   const newId = m && m[1];
 
   // Confirm the lazy-write contract itself: nothing was written to the local sites store for it.
-  const storedIds = await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")));
+  const storedIds = await page.evaluate(() => Object.keys(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")));
   ok(newId && !storedIds.includes(newId), `the new project wrote NO local plan record (storedIds=${storedIds.join(",")}, newId=${newId})`);
 
   await page.locator('[data-testid="project-crumb"]:visible').first().click();

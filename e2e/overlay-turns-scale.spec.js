@@ -53,7 +53,7 @@ const canvasRotation = (page) => page.evaluate(() => {
 });
 const ratio = async (page) => (await T(page, "overlay-scale-ratio").innerText()).replace(/\s+/g, " ").trim();
 const ftPerInch = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   for (const k of Object.keys(map)) { const o = ((map[k] || {}).sheetOverlays || [])[0]; if (o) return o.ftPerPx * 72; }
   return null;
 });

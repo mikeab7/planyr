@@ -31,6 +31,7 @@ const fixture = {
       task({ id: 2, name: "Hearing B", start: "", end: "", duration: 0, durValue: 0, meetingBound: true, meetingBodyId: body.id, predecessors: FS(1) }),
       task({ id: 3, name: "Dated C", start: "2026-11-04", end: "2026-11-04", pinnedStart: true }),
       task({ id: 4, name: "Typed D", start: "", end: "", predecessors: FS(1) }),
+      task({ id: 5, name: "Follower G", start: "", end: "", duration: 0, durValue: 0, meetingBound: true, meetingBodyId: body.id, predecessors: FS(1) }),   // never typed into: follows A
     ] } },
 };
 const COL = { name: 1, start: 2, end: 3, meeting: 6 };
@@ -121,17 +122,20 @@ ok("6b. …and he is told, naming both", /"Typed D" is set to 11\/02\/26, earlie
 await typeInto(4, COL.start, "11/20/26"); t = await toastText();
 ok("6c. typing a date LATER than the predecessor allows raises no conflict notice", !/earlier than|now runs past/.test(t), t.slice(0, 120));
 await typeInto(1, COL.start, "12/01/26"); t = await toastText();
+ok("5. PREDECESSOR PUSH: A moved to 12/01 pushes the never-typed meeting row G past the 11/17 meeting to the NEXT one, 12/15/26", (await dateIn(5, COL.start)) === "12/15/26", await dateIn(5, COL.start));
+ok("5b. …and G (never typed into) is announced as moved to the next meeting", /Follower G moved to 12\/15\/26, the next Live Board meeting/.test(t), t.slice(0, 200));
 ok("6d. moving predecessor A past D's typed date: D holds at 11/20/26", (await dateIn(4, COL.start)) === "11/20/26", await dateIn(4, COL.start));
 ok("6e. …and he is told AT THAT EDIT, naming predecessor and task", /"Pred A" now runs past "Typed D"'s typed date 11\/20\/26/.test(t), t.slice(0, 220));
 await typeInto(1, COL.start, "11/02/26"); t = await toastText();
-ok("6f. fixing the predecessor clears the conflict and announces nothing", !/now runs past|earlier than/.test(t), t.slice(0, 120));
+ok("6f. fixing the predecessor clears the conflict and announces nothing about D", !/now runs past|earlier than/.test(t), t.slice(0, 120));
+ok("6g. …and G follows A back to the 11/17/26 meeting", (await dateIn(5, COL.start)) === "11/17/26", await dateIn(5, COL.start));
 
 // 9 — the LOAD path moves nothing and announces nothing. (A reload cannot be used: the throwaway is never persisted
 // to the account. Importing a fixture runs the SAME normalize + cascade a load does — applyLoadedDataRef.)
 const loadFx = JSON.parse(JSON.stringify(fixture));
 loadFx.projects[1].tasks.push(
-  task({ id: 5, name: "Stored off-calendar E", start: "2026-09-30", end: "2026-09-30", duration: 0, durValue: 0, meetingBound: true, meetingBodyId: body.id, pinnedStart: true }),
-  task({ id: 6, name: "Stored conflict F", start: "2026-11-02", end: "2026-11-02", predecessors: FS(1), pinnedStart: true }),
+  task({ id: 6, name: "Stored off-calendar E", start: "2026-09-30", end: "2026-09-30", duration: 0, durValue: 0, meetingBound: true, meetingBodyId: body.id, pinnedStart: true }),
+  task({ id: 7, name: "Stored conflict F", start: "2026-11-02", end: "2026-11-02", predecessors: FS(1), pinnedStart: true }),
 );
 loadFx.projects[1].tasks[0].start = loadFx.projects[1].tasks[0].end = "2026-11-10";   // so F (11/02) is ALREADY in conflict when loaded
 await page.locator('[data-testid="open-history-desktop"]').click(); await pacedWait(page, 250);
@@ -139,8 +143,8 @@ await page.evaluate(() => { document.querySelectorAll('[data-testid="schedule-to
 await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f2.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(loadFx)) });
 await pacedWait(page, 500); t = await toastText();
 await pacedWait(page, 900); await page.locator('[data-testid="history-panel"] button:has-text("Close")').click(); await pacedWait(page, 1200);
-await page.waitForSelector('[data-task-row="5"]', { timeout: 20000 });
-ok("9. loading a stored OFF-calendar bound date moves nothing (09/30/26 stays; Goose Creek task 168 shape)", (await dateIn(5, COL.start)) === "09/30/26", await dateIn(5, COL.start));
+await page.waitForSelector('[data-task-row="6"]', { timeout: 20000 });
+ok("9. loading a stored OFF-calendar bound date moves nothing (09/30/26 stays; Goose Creek task 168 shape)", (await dateIn(6, COL.start)) === "09/30/26", await dateIn(6, COL.start));
 ok("9b. …and a conflict already sitting in loaded data is not announced", !/earlier than|now runs past|moved to/.test(t.replace(/Imported[^|]*/, "")), t.slice(0, 160));
 
 // 10 — cleanup (constraint 15): delete the throwaway through the app's own project menu, then PROVE the account is empty again

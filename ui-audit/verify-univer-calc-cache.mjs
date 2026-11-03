@@ -43,8 +43,8 @@ try {
     const site = { id: pid, groupId: pid, site: "ZZ cc", name: "ZZ cc", origin: null, county: "harris", parcels: [], els: [], markups: [], measures: [] };
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const key = `planyr:model:sheet:v1:local:${pid}`;
-    // seeded ONCE (`!localStorage.getItem(k)`): a later open must see what the app, or this harness, stored since
-    await ctx.addInitScript(([sid, rec, k, w, first]) => { window.__PLANYR_E2E = true; try { if (first && !localStorage.getItem(k)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); localStorage.setItem(k, JSON.stringify(w)); } } catch (_) { /* */ } }, [pid, site, key, wb, true]);
+    // seeded ONCE (`!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)`): a later open must see what the app, or this harness, stored since
+    await ctx.addInitScript(([sid, rec, k, w, first]) => { window.__PLANYR_E2E = true; try { if (first && !(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); localStorage.setItem(k, JSON.stringify(w)); } } catch (_) { /* */ } }, [pid, site, key, wb, true]);
     const url = `${BASE}/#/project/${pid}/spreadsheet`;
     const open = async () => {
       const page = await ctx.newPage(); await page.goto("about:blank"); await assertMeasurable(page, "verify-univer-calc-cache");

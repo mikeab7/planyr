@@ -63,7 +63,7 @@ const demoSite = {
 // own state, not the app's.
 const seed = `(() => { try {
   window.__PLANYR_E2E = true;
-  if (!localStorage.getItem('planarfit:sites:v1')) {
+  if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [DEMO_ID]: demoSite })}));
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(DEMO_ID)});
   }
@@ -80,7 +80,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
 
 const readModel = async () => page.evaluate((demoId) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return all[demoId];
 }, DEMO_ID);
 

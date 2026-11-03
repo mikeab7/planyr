@@ -22,7 +22,7 @@ const B1 = "e1454615maruai";
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/fm359-concept-a.json", import.meta.url), "utf8"));
 
 const readEls = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).map((e) => ({ id: e.id, w: e.w, h: e.h }));
 });

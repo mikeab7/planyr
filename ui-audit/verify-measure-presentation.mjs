@@ -184,13 +184,13 @@ for (const theme of ["light", "dark"]) {
 
   // NEW-2 — "Set at current zoom" pins the threshold from the live view, no typing.
   const before = await page.evaluate(() => {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     return (Object.values(m)[0]?.measures || []).find((x) => x.id === "m-area")?.labelPpf ?? null;
   });
   await page.getByRole("button", { name: "Set at current zoom" }).first().click();
   await page.waitForTimeout(700);
   const after = await page.evaluate(() => {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     return (Object.values(m)[0]?.measures || []).find((x) => x.id === "m-area")?.labelPpf ?? null;
   });
   check(`[${theme}] "Set at current zoom" captures the live zoom onto the measurement`,
@@ -210,7 +210,7 @@ for (const theme of ["light", "dark"]) {
     await page.mouse.up();
     await page.waitForTimeout(600);
     const moved = await page.evaluate(() => {
-      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const off = (Object.values(m)[0]?.measures || []).find((x) => x.id === "m-area")?.labelOffset;
       const leader = !!document.querySelector('[data-measure-chip="m-area"] line');
       return { off, leader };

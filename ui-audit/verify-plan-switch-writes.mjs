@@ -74,7 +74,7 @@ const EDIT = {
 /* ---- in-page recorder: every on-device per-plan entry write, parsed down to the facts the verdicts read ---- */
 const RECORDER = () => {
   window.__PLANYR_E2E = true;                          // the read-only E2E hooks (the overlay hook is the Crop… dialog's own write)
-  window.__PLANYR_LEGACY_MIRROR = "idle";
+
   window.__lsw = [];
   const orig = Storage.prototype.setItem;
   Storage.prototype.setItem = function (k, v) {
@@ -235,7 +235,7 @@ await pacedWait(page, 6000);
 const afterReload = await page.evaluate((ids) => {
   const out = {};
   for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const m = /:p:([^:]+)$/.exec(k); if (!m || !ids.includes(m[1])) continue;
-    try { const r = JSON.parse(localStorage.getItem(k)); out[m[1]] = { key: k, name: r.name, layerOverrides: r.layerOverrides, ops: (r.sheetOverlays || []).map((o) => (o.opacity == null ? null : Math.round(o.opacity * 100))), els: Object.fromEntries((r.els || []).map((e) => [e.id, [e.cx, e.cy]])) }; } catch (_) {} }
+    try { const r = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); out[m[1]] = { key: k, name: r.name, layerOverrides: r.layerOverrides, ops: (r.sheetOverlays || []).map((o) => (o.opacity == null ? null : Math.round(o.opacity * 100))), els: Object.fromEntries((r.els || []).map((e) => [e.id, [e.cx, e.cy]])) }; } catch (_) {} }
   return out;
 }, [A.id, B.id]);
 

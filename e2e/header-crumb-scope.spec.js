@@ -19,7 +19,7 @@ const NAMES = { short1: "A", short2: "GC", mid: "Academy", long: LONG };
 
 async function seed(page, rows) {
   await page.addInitScript(([key, list]) => {
-    if (localStorage.getItem(key)) return;
+    if ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key)) return;
     const map = {};
     for (const p of list) map[p.id] = { schemaVersion: 12, updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {}, ...p };
     localStorage.setItem(key, JSON.stringify(map));

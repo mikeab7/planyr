@@ -69,7 +69,7 @@ if (isLive) {
 // Seed BEFORE the app boots.
 await page.addInitScript((s) => {
   try {
-    if (!localStorage.getItem("planarfit:sites:v1"))
+    if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))
       localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [s.id]: s }));
   } catch (e) {}
 }, site);

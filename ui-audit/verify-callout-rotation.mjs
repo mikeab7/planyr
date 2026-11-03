@@ -109,7 +109,7 @@ async function run() {
   await pacedWait(page, 400);
 
   const after = await page.evaluate(() => {
-    const site = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const c = Object.values(site).flatMap((s) => s.callouts || []).find((x) => x.id === "zzRotBox");
     const g = document.querySelector('g[data-feature="callout:zzRotBox"]');
     const rect = g.querySelector('[data-testid="callout-box-zzRotBox"]');
@@ -182,7 +182,7 @@ async function run() {
   await pacedWait(page, 300);
   const rGrip = page.locator('[data-testid="callout-handle-r"]').first();
   const before2 = await page.evaluate(() => {
-    const site = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const c = Object.values(site).flatMap((s) => s.callouts || []).find((x) => x.id === "zzRotBox");
     return c ? { boxW: c.boxW ?? null, box: c.box } : null;
   });
@@ -201,7 +201,7 @@ async function run() {
     await page.mouse.up();
     await pacedWait(page, 300);
     const after2 = await page.evaluate(() => {
-      const site = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const site = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const c = Object.values(site).flatMap((s) => s.callouts || []).find((x) => x.id === "zzRotBox");
       return c ? { boxW: c.boxW ?? null, box: c.box } : null;
     });

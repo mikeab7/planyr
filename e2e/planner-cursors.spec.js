@@ -171,11 +171,11 @@ test.describe("Site Planner cursors follow the convention", () => {
 
   test("a LOCKED callout cannot be dragged", async ({ page }) => {
     await load(page);
-    const before = await page.evaluate((id) => JSON.parse(localStorage.getItem("planarfit:sites:v1"))[id].callouts[0].box, SITE_ID);
+    const before = await page.evaluate((id) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))[id].callouts[0].box, SITE_ID);
     const c = await centre(page, '[data-testid="callout-box-cuCo"]');
     await page.mouse.move(c.x, c.y); await page.mouse.down(); await page.mouse.move(c.x + 120, c.y + 90, { steps: 8 }); await page.mouse.up();
     await page.waitForTimeout(1200);
-    const after = await page.evaluate((id) => JSON.parse(localStorage.getItem("planarfit:sites:v1"))[id].callouts[0].box, SITE_ID);
+    const after = await page.evaluate((id) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))[id].callouts[0].box, SITE_ID);
     expect(after).toEqual(before);
   });
 

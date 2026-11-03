@@ -33,9 +33,9 @@ const check = (ok, msg) => { console.log((ok ? "PASS " : "FAIL ") + msg); if (!o
 let s, browser, page, ctx;
 try {
   if (signedIn) { s = await openSignedIn({ base, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] }); page = s.page; console.log("served build:", JSON.stringify(s.build)); if (want && !JSON.stringify(s.build).includes(want)) throw new Error(`deployed build lacks ${want}`); }
-  else { browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] }); ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }); await ctx.addInitScript(() => { window.__PLANYR_E2E = true; window.__PLANYR_LEGACY_MIRROR = undefined; }); page = await ctx.newPage(); await page.goto(base, { waitUntil: "domcontentloaded" }); }
+  else { browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] }); ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }); await ctx.addInitScript(() => { window.__PLANYR_E2E = true; }); page = await ctx.newPage(); await page.goto(base, { waitUntil: "domcontentloaded" }); }
   await page.evaluate(async ([plans, signed]) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     for (const r of plans) {
       all[r.id] = r;
       if (signed) { const e = await window.pfSupabase.from("sites").upsert({ id: r.id, group_id: r.groupId, site: r.site, name: r.name, county: "harris", updated_at: new Date().toISOString(), data: r }); if (e.error) throw new Error("seed " + r.id + ": " + e.error.message); }
@@ -63,7 +63,7 @@ try {
     // Saved state: signed in → the cloud row (the device copy is per-plan keys now, with the whole-library key a lazy mirror — B2165120); signed out → that mirror, which is `sync` under automation.
     const saved = await page.evaluate(async ([i, signed]) => {
       if (signed) { const r = await window.pfSupabase.from("sites").select("o:data->sheetOverlays").eq("id", i).maybeSingle(); return ((r.data && r.data.o) || []).map((o) => o.id); }
-      const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return ((a[i] || {}).sheetOverlays || []).map((o) => o.id);
+      const a = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return ((a[i] || {}).sheetOverlays || []).map((o) => o.id);
     }, [id, signedIn]);
     // View ▾ menu rows
     let viewRows = [];
@@ -98,7 +98,7 @@ finally {
       const left = await page.evaluate(async (ids) => {
         await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids);
         await window.pfSupabase.from("sites").delete().in("id", ids);
-        const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); ids.forEach((i) => delete a[i]); localStorage.setItem("planarfit:sites:v1", JSON.stringify(a));
+        const a = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); ids.forEach((i) => delete a[i]); localStorage.setItem("planarfit:sites:v1", JSON.stringify(a));
         const x = await window.pfSupabase.from("sites").select("id").in("id", ids);
         return (x.data || []).length;
       }, PLANS.map((p) => p.id));

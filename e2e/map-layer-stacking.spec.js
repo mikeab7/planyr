@@ -342,7 +342,7 @@ test.describe("NEW-1 — show a layer above the plan", () => {
 
     // (f) IT IS REMEMBERED, because a lift is a decision about THIS plan.
     const saved = await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const site = raw["new1-stacking"] || {};
       return site.layerAbove || null;
     });

@@ -130,7 +130,7 @@ test.describe("the canvas clipboard survives a plan switch (logged out)", () => 
      * question the per-mount pointer ref raised: a fresh mount has no pointer history, and it does
      * not matter, because a cross-plan paste never consults the cursor. */
     const geom = await page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const recs = Object.values(map);
       const pts = (name, kind) => {
         const r = recs.find((x) => x && x.name === name) || {};

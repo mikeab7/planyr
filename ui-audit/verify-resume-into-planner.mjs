@@ -70,7 +70,7 @@ check("after reload: STILL in the planner (tool rail present, finder search hidd
 check("after reload: breadcrumb still names the project", s2.crumb === "named", `crumb=${s2.crumb}`);
 
 // 3) currentSite pointer preserved (the cleanup must NOT have nulled it).
-const cur = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const cur = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("currentSite pointer preserved across the deep-link + reload", cur === SID, `currentSite=${cur}`);
 
 check("no uncaught page errors", errs.length === 0, errs.slice(0, 2).join(" | "));

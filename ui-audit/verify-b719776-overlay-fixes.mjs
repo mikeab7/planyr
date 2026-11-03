@@ -49,7 +49,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.screenshot({ path: new URL("./screens/", import.meta.url).pathname + "aerial-hidden-stale.png" });
 
   const readAerialHidden = () => page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = raw.AER1;
     return s && s.settings ? s.settings.aerialHidden ?? null : "NO-SETTINGS";
   });
@@ -76,7 +76,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   });
   await page.waitForTimeout(800);
   const freshVisible = await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = raw.AER1;
     return { hasUnderlay: !!(s && s.underlay), aerialHidden: s && s.settings ? (s.settings.aerialHidden ?? null) : "NO-SETTINGS" };
   });
@@ -121,7 +121,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.screenshot({ path: new URL("./screens/", import.meta.url).pathname + "crop-applied.png" });
 
   const model = await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = raw.CROP1.sheetOverlays.find((x) => x.id === "ovCrop");
     return o ? o.crop : null;
   });
@@ -160,7 +160,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await clearCrop(page);
   await page.waitForTimeout(300);
   const afterReset = await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = raw.CROP1.sheetOverlays.find((x) => x.id === "ovCrop");
     return { crop: o ? o.crop : "MISSING", clipPathInDom: !!document.querySelector('clipPath[id="ov-crop-ovCrop"]') };
   });
@@ -190,10 +190,10 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   check('canvas shows the honest placeholder ("image not on this device")', bodyText.includes("Untitled picture.png") && bodyText.includes("not on this device"));
   check('canvas placeholder ALSO offers "remove this overlay" directly (not just the Overlays panel)', bodyText.includes("remove this overlay"));
 
-  const before = await page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").BROKEN1.sheetOverlays.length);
+  const before = await page.evaluate(() => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").BROKEN1.sheetOverlays.length);
   await page.locator("text=remove this reference").first().click({ timeout: 4000 });
   await page.waitForTimeout(400);
-  const after = await page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").BROKEN1.sheetOverlays.length);
+  const after = await page.evaluate(() => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").BROKEN1.sheetOverlays.length);
   check("clicking it removes the reference (persisted, not just a visual no-op)", before === 1 && after === 0, `before=${before} after=${after}`);
   await ctx.close();
 }

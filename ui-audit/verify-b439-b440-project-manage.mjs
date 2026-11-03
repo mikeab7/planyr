@@ -53,7 +53,7 @@ const openPicker = async () => {
   await page.waitForTimeout(150);
 };
 const closePicker = async () => { await page.keyboard.press("Escape").catch(() => {}); await page.waitForTimeout(150); };
-const lsSites = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem('planarfit:sites:v1') || '{}'); } catch { return {}; } });
+const lsSites = () => page.evaluate(() => { try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1') || '{}'); } catch { return {}; } });
 const lastNav = () => page.evaluate(() => (window.__navStates || []).slice(-1)[0] || null);
 const waitNav = async (pred, tries = 24) => {
   for (let i = 0; i < tries; i++) { const n = await lastNav(); if (n && pred(n)) return n; await page.waitForTimeout(300); }

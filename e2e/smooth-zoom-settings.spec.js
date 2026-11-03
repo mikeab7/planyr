@@ -83,7 +83,7 @@ test.describe("smooth zoom lives in Settings → Interface", () => {
     await toggle(page).click();
     await expect(toggle(page).locator('input[type="checkbox"]')).not.toBeChecked();
     // The localStorage key the owner said not to change, prefix included.
-    expect(await page.evaluate((k) => localStorage.getItem(k), KEY)).toBe("0");
+    expect(await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), KEY)).toBe("0");
 
     await page.reload();
     await openSettings(page);
@@ -92,6 +92,6 @@ test.describe("smooth zoom lives in Settings → Interface", () => {
     // …and back on, so the guard covers both directions rather than just the off switch.
     await toggle(page).click();
     await expect(toggle(page).locator('input[type="checkbox"]')).toBeChecked();
-    expect(await page.evaluate((k) => localStorage.getItem(k), KEY)).toBe("1");
+    expect(await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), KEY)).toBe("1");
   });
 });
