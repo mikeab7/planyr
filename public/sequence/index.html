@@ -18364,7 +18364,10 @@ function ReportMenu({id, openMenu, setOpenMenu, label, active, minWidth, footer,
       const r = b.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
       const w = p.offsetWidth;
       const left = Math.max(pad, Math.min(r.left, vw - pad - w));
-      const top = r.bottom + 4;
+      // Anchor below the WHOLE toolbar, not just this button: at phone width the buttons wrap onto a second row, and a panel hung
+      // under its own button would cover the other buttons, so a second dropdown could not be opened in one tap.
+      const bar = b.closest("[data-report-toolbar]");
+      const top = (bar ? bar.getBoundingClientRect().bottom : r.bottom) + 4;
       setPos({left, top, maxH: Math.max(140, vh - top - pad)});
     };
     place();

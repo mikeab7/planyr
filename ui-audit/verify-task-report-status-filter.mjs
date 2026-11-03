@@ -411,6 +411,14 @@ if (!voided) {
   await page.tap('[data-tr-btn="filter"]'); await page.waitForTimeout(250);
   const inside = await page.evaluate(() => { const r = document.querySelector('[data-tr-panel="filter"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5; });
   ok("phone width: the open Filter panel is inside the screen", inside);
+  // With a panel open, every OTHER button must still be tappable (they wrap onto a second row here) — one tap switches menus.
+  for (const id of ["show", "columns", "group", "filter"]) {
+    const cover = await page.evaluate((id) => { const b = document.querySelector(`[data-tr-btn="${id}"]`).getBoundingClientRect(); const el = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!el && !!el.closest(`[data-tr-btn="${id}"]`); }, id);
+    ok(`phone width: with the Filter open, the ${id} button is not covered by the panel (reachable in one tap)`, cover);
+  }
+  await page.tap('[data-tr-btn="columns"]'); await page.waitForTimeout(200);
+  ok("phone width: one tap on Columns with Filter open closes Filter and opens Columns", !(await menuOpen(page, "filter")) && await menuOpen(page, "columns"));
+  await page.tap('[data-tr-btn="filter"]'); await page.waitForTimeout(200);
   await page.tap('[data-filter-status="red"]'); await page.waitForTimeout(250);   // Needs Attention off → only In Progress remains checked
   await page.tap('[data-filter-status="yellow"]'); await page.waitForTimeout(250); // In Progress off → nothing checked
   await page.tap('[data-filter-status="red"]'); await page.waitForTimeout(250);    // only Needs Attention
@@ -418,6 +426,31 @@ if (!voided) {
   ok("phone width: taps on the checkboxes narrow the list the same way (only Needs Attention → 5 rows)", ph.rows.length === 5 && ph.rows.every(r => r.status === "Needs Attn.") && ph.headerPill === 5 && ph.badge === "1", `rows=${ph.rows.length} badge=${ph.badge}`);
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, "task-report-filter-phone.png") : "/tmp/task-report-filter-phone.png" });
   await ctx.close();
+}
+
+// ═══ 6. EVERY open dropdown against EVERY other button, at several phone widths (found live on WebKit: at phone width the buttons wrap
+//        onto a second row and a panel hung under its own button covered the others, so a second dropdown could not be opened in one tap) ═══
+if (!voided) {
+  const IDS = ["filter", "group", "show", "columns"];
+  for (const width of [390, 360, 320]) {
+    const ctx = await browser.newContext({ viewport: { width, height: 800 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    const page = await openReport(ctx);
+    const blocked = [];
+    for (const open of IDS) {
+      await closeAll(page); await openMenu(page, open);
+      for (const other of IDS.filter((x) => x !== open)) {
+        const hit = await page.evaluate((id) => { const b = document.querySelector(`[data-tr-btn="${id}"]`).getBoundingClientRect(); const pts = [[0.25, 0.5], [0.5, 0.5], [0.75, 0.5]];
+          return pts.every(([fx, fy]) => { const el = document.elementFromPoint(b.left + b.width * fx, b.top + b.height * fy); return !!el && !!el.closest(`[data-tr-btn="${id}"]`); }); }, other);
+        if (!hit) blocked.push(`${open}→${other}`);
+      }
+    }
+    ok(`phone ${width} wide: with any dropdown open, every other button is fully uncovered (one tap switches menus)`, blocked.length === 0, "covered: " + blocked.join(", "));
+    await openMenu(page, "show"); await page.tap('[data-tr-btn="columns"]'); await page.waitForTimeout(200);
+    ok(`phone ${width} wide: Show open → one tap on Columns closes Show and opens Columns`, !(await menuOpen(page, "show")) && await menuOpen(page, "columns"));
+    const inside = await page.evaluate(() => { const r = document.querySelector("[data-tr-panel]").getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5; });
+    ok(`phone ${width} wide: the open panel stays inside the screen`, inside);
+    await ctx.close();
+  }
 }
 
 await browser.close(); server.close();
