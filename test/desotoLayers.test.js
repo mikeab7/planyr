@@ -230,6 +230,7 @@ describe("NEW-2 / NEW-1 (B2507064 ×2, B2507063 ×2, 2026-11-03) — the Zoning 
   });
   it("prints the code on the polygons from the same zoom as Sugar Land's zoning (14)", () => {
     expect(z.lineLabel.minZoom).toBe(14);
+    expect(z.lineLabel.declutter).toBe(true);   // dense small polygons: codes never pile up (screen and PDF share the rule)
   });
   it("its viewLegend is HEADED by government, one code per row, never a suffix — and Southaven's rows carry Southaven's names", async () => {
     const { _setMunicipalities } = await import("../src/workspaces/site-planner/lib/desotoJurisdiction.js");
@@ -248,5 +249,15 @@ describe("NEW-2 / NEW-1 (B2507064 ×2, B2507063 ×2, 2026-11-03) — the Zoning 
       ]);
       expect(out.some((e) => /\((Olive Branch|Southaven|Unincorporated)/.test(e.label))).toBe(false);
     } finally { _setMunicipalities(null); }
+  });
+});
+
+describe("B2589346 — the printed sheet declutters zoning codes exactly like the screen (PDF-PARITY)", () => {
+  it("exportSheet's esriFeature branch runs `declutterBoxes` for a row whose lineLabel declutters, ranked by polygon area", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    expect(src).toMatch(/import \{[^}]*declutterBoxes[^}]*\} from "\.\/boundaryLabels\.js"/);
+    expect(src).toMatch(/cfg\.lineLabel\.declutter && labels\.length > 1/);
+    expect(src).toMatch(/rank = bb \? Math\.abs\(/);
   });
 });

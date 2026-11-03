@@ -240,7 +240,7 @@ Object.assign(DESOTO_LAYERS, {
   ms_desoto_zoning: county({
     path: "CountyWebMap/Zoning/MapServer/20", label: "Zoning", role: "area", group: "jurisdiction", order: 30, minZoom: 12, opacity: 0.4,
     source: "DeSoto County GIS — Zoning (incl. the City of Olive Branch's zoning)", hoverSource: "DeSoto County GIS",
-    styleFn: zoningStyle, lineLabel: { field: "ZONE", minZoom: 14, format: zoneLabelText },
+    styleFn: zoningStyle, lineLabel: { field: "ZONE", minZoom: 14, format: zoneLabelText, declutter: true }, // declutter (screen + PDF): the larger polygon keeps its code, a label on top of one already kept is dropped — measured on a branch preview, an undecluttered z14 view piled codes into unreadable clusters along Goodman Rd
     /* NEW-2 (B2507064 ×2, 2026-11-03) — MEASURED through planyr.io: 2,551 polygons, the first 2,000 alone 658,730 vertices at full precision (one polygon 21,623), against the 300 k per-layer draw
      * budget, so a zoomed-out view drew the early cells and REFUSED the later ones — a red "too detailed" line over a map that was mostly drawn. Asked simplified (server-side, ~1.5 px; the same
      * request at 0.00025° returns the same 2,000 polygons in 26,936 vertices) and with every page followed (`fetchAll`: the view can hold more than the service's first 2,000), the whole county

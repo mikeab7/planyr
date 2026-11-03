@@ -18,7 +18,18 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 let failed = 0, voided = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${name}${detail ? "  — " + detail : ""}`); if (!ok) failed++; };
 
-const s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
+/* --anon: an early look at a branch PREVIEW (no sign-in route there) — the Map and the zoning layer need no account. The merge-commit check on planyr.io is always signed in. */
+let s;
+if (args.includes("--anon")) {
+  const { chromium } = await import("@playwright/test");
+  const { existsSync } = await import("node:fs");
+  const browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+  const ctx = await browser.newContext();
+  const pg = await ctx.newPage();
+  await pg.addInitScript(() => { window.__PLANYR_E2E = true; });
+  await pg.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  s = { page: pg, proof: { email: "(anonymous preview)" }, close: () => browser.close() };
+} else s = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
 const page = s.page;
 await assertMeasurable(page, "verify-zoning-legend-live");
 await page.setViewportSize({ width: 1400, height: 900 });
