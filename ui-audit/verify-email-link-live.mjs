@@ -26,6 +26,9 @@ const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browser
 const results = [];
 const note = (name, verdict, detail = "") => { results.push({ name, verdict, detail }); console.log(`${verdict.padEnd(11)} ${name}${detail ? " — " + detail : ""}`); };
 const stamp = (page) => page.evaluate(async () => ({ build: await fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null) }));
+// WebKit reports a lazy chunk still in flight as FAILED when the page is torn down, which fires the app's own rescue
+// reload (`?_r=`) and interrupts the next goto. Letting a page settle before leaving it is the harness's job, not the app's.
+const settle = async (pg) => { await pg.waitForLoadState("load").catch(() => {}); await pg.waitForTimeout(3000); };
 const ghost = () => `nobody-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@planyr.test`;
 
 const browser = engine === "webkit" ? await webkit.launch() : await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
@@ -44,11 +47,15 @@ async function post(body) {
 }
 
 try {
+  await settle(page);
   await page.goto(`${base}/?app`, { waitUntil: "domcontentloaded" });
   await assertMeasurable(page, "verify-email-link-live");
   const s0 = await stamp(page);
   console.log("engine:", engine, "| build:", JSON.stringify(s0.build));
 
+  // SKIP_SEND=1 re-runs only the landing-page steps (9 onward): steps 1-8 make real send attempts, which the per-address and
+  // per-IP hourly caps rightly refuse on a quick re-run.
+  if (!process.env.SKIP_SEND) {
   // ── the route ────────────────────────────────────────────────────────────────────────────────────────────────
   const g1 = ghost();
   const unknown = await post({ email: g1, purpose: "signin" });
@@ -65,6 +72,7 @@ try {
 
   // ── the real panel with Cloudflare's script blocked ──────────────────────────────────────────────────────────
   await page.route("**/challenges.cloudflare.com/**", (r) => r.abort());
+  await settle(page);
   await page.goto(`${base}/?app&auth=signin`, { waitUntil: "domcontentloaded" });
   await dlg.waitFor({ state: "visible", timeout: 30000 });
   await assertMeasurable(page, "verify-email-link-live");
@@ -79,12 +87,17 @@ try {
     const ok = await inbox.waitFor({ state: "visible", timeout: 20000 }).then(() => true, () => false);
     const txt = ok ? await inbox.innerText() : await dlg.innerText();
     note("6 …and pressing it gets you to 'Check your inbox … comes from Planyr (no-reply@planyr.io)'", ok && /It comes from Planyr \(no-reply@planyr\.io\)/.test(txt) ? "PASS" : "FAIL", txt.slice(0, 120));
-    const disabled = await page.getByTestId("email-link-resend").isDisabled();
-    note("7 'Send again' is locked with a countdown, then spam + support lines are there", disabled && /Send again in 0:\d\d/.test(await page.getByTestId("email-link-resend").innerText()) && /spam/i.test(await dlg.innerText()) && /support@planyr\.io/.test(await dlg.innerText()) ? "PASS" : "FAIL");
+    const resend = page.getByTestId("email-link-resend");
+    const disabled = await resend.isDisabled();
+    const resendText = await resend.innerText();
+    const dlgText = await dlg.innerText();
+    const parts = { locked: disabled, countdown: /Send again in \d:\d\d/.test(resendText), spam: /spam/i.test(dlgText), support: /support@planyr\.io/.test(dlgText) };
+    note("7 'Send again' is locked with a countdown, then spam + support lines are there", Object.values(parts).every(Boolean) ? "PASS" : "FAIL", `${JSON.stringify(parts)} · button reads "${resendText}"`);
   }
   await page.unroute("**/challenges.cloudflare.com/**");
 
   // ── forgot password through the real panel (no Cloudflare involved at all) ───────────────────────────────────
+  await settle(page);
   await page.goto(`${base}/?app&auth=signin`, { waitUntil: "domcontentloaded" });
   await dlg.waitFor({ state: "visible", timeout: 30000 });
   await dlg.getByText("Forgot password?").click();
@@ -93,9 +106,11 @@ try {
   const ok8 = await page.getByTestId("email-link-inbox").waitFor({ state: "visible", timeout: 20000 }).then(() => true, () => false);
   note("8 Forgot password → the same sent view, no Turnstile on the page", ok8 && (await page.getByTestId("turnstile-widget").count()) === 0 ? "PASS" : "FAIL");
 
+  }
   // ── the landing page (no real token needed) ──────────────────────────────────────────────────────────────────
   const testHint = await accountHint(TEST_ACCOUNT_EMAIL);
   verifyCalls.length = 0;
+  await settle(page);
   await page.goto(`${base}/?app&authlink=${TOKEN}&kind=signin&h=${testHint}`, { waitUntil: "domcontentloaded" });
   const ready = await page.getByTestId("auth-link-state-ready").waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);
   await page.waitForTimeout(1500);
@@ -107,10 +122,12 @@ try {
     await page.getByTestId("auth-link-resend").click();
     note("11 …and the new-link form is there, address field empty on a device that never asked, the link carries no address", (await page.getByTestId("auth-link-email").count()) === 1 && !page.url().includes("@") ? "PASS" : "FAIL");
   }
+  await settle(page);
   await page.goto(`${base}/?app&authlink=short&kind=reset`, { waitUntil: "domcontentloaded" });
   const mal = await page.getByTestId("auth-link-state-malformed").waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);
   note("12 a malformed link says so and offers a new one + sign in", mal && (await page.getByTestId("auth-link-resend").count()) === 1 && (await page.getByTestId("auth-link-signin").count()) === 1 ? "PASS" : "FAIL");
   await page.route("**/auth/v1/verify", (r) => r.abort());
+  await settle(page);
   await page.goto(`${base}/?app&authlink=${TOKEN}&kind=signin`, { waitUntil: "domcontentloaded" });
   await page.getByTestId("auth-link-continue").waitFor({ timeout: 25000 });
   await page.getByTestId("auth-link-continue").click();
