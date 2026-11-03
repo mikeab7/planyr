@@ -66,8 +66,9 @@ await page.waitForSelector('[data-task-row="2"]', { timeout: 20000 });
 const cell = (id, col) => page.locator(`[data-task-row="${id}"] > div`).nth(col);
 const dateIn = async (id, col) => { const t = (await cell(id, col).innerText()).replace(/\s+/g, " "); const m = t.match(/\d\d\/\d\d\/\d\d/); return m ? m[0] : t.trim(); };
 const toastText = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="schedule-toast"]')].map(e => e.innerText).join(" | "));
-const clearToasts = async () => { await pacedWait(page, 150); };
+const clearToasts = async () => { await page.evaluate(() => document.querySelectorAll('[data-testid="schedule-toast"]').forEach(e => e.remove())); await pacedWait(page, 100); };   // each check reads ONLY its own edit's notice
 const typeInto = async (id, col, text) => {
+  await clearToasts();
   await cell(id, col).dblclick(); await pacedWait(page, 250);
   await page.keyboard.press("Control+a"); await pacedWait(page, 60);
   await page.keyboard.type(text, { delay: 20 }); await pacedWait(page, 120);
