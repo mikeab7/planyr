@@ -11,6 +11,7 @@
  * KNOWN-GOOD ARM: the harness is VOID unless the signed-in proof holds AND the fixture plan's crumb is on screen before anything is measured.
  * The served build is read from /version.json IN THE SAME CALL as each assertion (EXPECT_SHA=<merge sha prefix> must match).
  * Usage: E2E_LOGIN_KEY=… EXPECT_SHA=fdc5627 node ui-audit/verify-duplicate-refused-live.mjs [https://planyr.io] */
+import { execSync } from "node:child_process";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn, FIXTURE_SITE_ID } from "./lib/signedInSession.mjs";
 
@@ -19,7 +20,8 @@ const EXPECT_SHA = process.env.EXPECT_SHA || "";
 const results = [];
 const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ROUTE = `/?app#/project/${FIXTURE_SITE_ID}/site`;
+const FIXTURE_GROUP = "e2e-fixture";            // the fixture PROJECT; FIXTURE_SITE_ID is one plan inside it ("E2E Fixture — Markup Harness")
+const ROUTE = `/?app#/project/${FIXTURE_GROUP}/site`;
 
 const s = await openSignedIn({ base: BASE });
 const { page } = s;
@@ -28,10 +30,12 @@ try {
   await assertMeasurable(page, "verify-duplicate-refused-live");
   const buildNow = async () => (await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()))).build;
   const build0 = await buildNow();
-  ok("served build matches the merge commit", !EXPECT_SHA || String(build0).startsWith(EXPECT_SHA.slice(0, 7)), `build=${build0} expect=${EXPECT_SHA || "(unset)"}`);
+  const containsMerge = (b) => { if (!EXPECT_SHA) return true; if (String(b).startsWith(EXPECT_SHA.slice(0, 7))) return true; try { execSync(`git merge-base --is-ancestor ${EXPECT_SHA} ${b}`, { stdio: "ignore" }); return true; } catch (_) { return false; } };   // the merge commit itself, or a later main build that contains it
+  ok("served build is the merge commit or a later main build containing it", containsMerge(build0), `build=${build0} expect=${EXPECT_SHA || "(unset)"}`);
   ok("signed in as the test account", s.proof.email === "e2e@planyr.test" && s.proof.fixtureVisible, JSON.stringify(s.proof));
 
-  const open = async (cb) => {
+  const open = async (cb, pin = false) => {
+    if (pin) await page.evaluate((id) => localStorage.setItem("planarfit:currentSite:v1", id), FIXTURE_SITE_ID);   // open the fixture plan itself, not whichever plan was last current
     await page.goto(BASE + ROUTE.replace("/?app", `/?app${cb ? "&cb=" + cb : ""}`), { waitUntil: "domcontentloaded" });
     await page.getByTestId("plan-crumb").waitFor({ state: "visible", timeout: 60000 });
   };
@@ -43,10 +47,10 @@ try {
   }, where);
   const duplicate = async () => { await page.getByTestId("plan-crumb").click(); await page.getByRole("button", { name: /Duplicate/ }).click(); };
 
-  await open();
+  await open(null, true);
   const fixtureName = (await crumb()).replace("▾", "").trim();
   ok("KNOWN-GOOD: the fixture plan is open (crumb on screen)", fixtureName.length > 0, `"${fixtureName}"`);
-  const before = await rows({ group: FIXTURE_SITE_ID });
+  const before = await rows({ group: FIXTURE_GROUP });
   ok("fixture group readable", !before.error && before.rows.length >= 1, JSON.stringify(before).slice(0, 200));
   const idsBefore = new Set(before.rows.map((r) => r.id));
 
@@ -60,19 +64,17 @@ try {
   ok("step 1: the planner is on a NEW plan id", !!createdId && !idsBefore.has(createdId), createdId);
   let after1 = null;
   for (let i = 0; i < 30; i++) { after1 = await rows({ id: createdId }); if (after1.rows.length) break; await sleep(1000); }
-  ok("step 1: the copy's row exists in public.sites with the fixture's group_id", after1.rows.length === 1 && after1.rows[0].group_id === FIXTURE_SITE_ID && !after1.rows[0].deleted_at, JSON.stringify(after1.rows));
+  ok("step 1: the copy's row exists in public.sites with the fixture's group_id", after1.rows.length === 1 && after1.rows[0].group_id === FIXTURE_GROUP && !after1.rows[0].deleted_at, JSON.stringify(after1.rows));
   await open("r" + Date.now());
   ok("step 1: reload (cache-busted) lands on the copy", /\(copy\)/.test(await crumb()), await crumb());
   ok("step 1: no 'This project doesn't exist'", (await page.getByText(/This project doesn't exist/i).count()) === 0);
   const build1 = await buildNow();
 
   /* ---- step 2: a full device ---- */
-  await open("f" + Date.now());
-  await page.getByTestId("plan-crumb").click();
-  await page.getByRole("button", { name: new RegExp("^" + fixtureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).first().click().catch(() => {});
-  await page.waitForTimeout(1500);
+  const createdName = after1.rows[0].name;
+  await open("f" + Date.now(), true);
   const crumbOrig = (await crumb()).replace("▾", "").trim();
-  const groupBefore = await rows({ group: FIXTURE_SITE_ID });
+  const groupBefore = await rows({ group: FIXTURE_GROUP });
   const urlBefore = page.url();
   const filled = await page.evaluate(() => {
     let i = 0;
@@ -88,8 +90,17 @@ try {
   ok("step 2: banner never says 'saved on this device' or 'sync'", !/saved on this device/i.test(bText) && !/sync/i.test(bText));
   ok("step 2: crumb still names the ORIGINAL plan", (await crumb()).replace("▾", "").trim() === crumbOrig && !/\(copy\)/.test(await crumb()), await crumb());
   ok("step 2: URL did not move", page.url() === urlBefore, page.url());
+  /* The harness is an AUTOMATED browser, so the app deliberately does not SEND telemetry rows (navigator.webdriver, clientErrors.networkReportSuppression):
+   * client_errors cannot show these events from here. The page's own diagnostic ring (window.pfTelemetry.recent()) records every event the app raised. */
+  const ring = await page.evaluate(() => (window.pfTelemetry && window.pfTelemetry.recent ? window.pfTelemetry.recent() : []).map((r) => ({ s: String(r.source), m: String(r.message).slice(0, 400) })));
+  const evt = (name) => ring.filter((r) => r.s === "event:" + name);
+  ok("KNOWN-GOOD: the page's event ring is readable", ring.length > 0, `${ring.length} rows`);
+  ok("step 2: plan-store-write-refused fired with reason quota", evt("plan-store-write-refused").some((r) => /"reason":"quota"/.test(r.m)), (evt("plan-store-write-refused")[0] || {}).m || "none");
+  ok("step 2: site-save-refused fired", evt("site-save-refused").length >= 1, (evt("site-save-refused")[0] || {}).m || "none");
+  ok("step 2: site-mint-refused fired for 'The duplicated plan' (reason quota)", evt("site-mint-refused").some((r) => /The duplicated plan/.test(r.m) && /"reason":"quota"/.test(r.m)), (evt("site-mint-refused")[0] || {}).m || "none");
+  ok("step 2: NO cloud-push-failed 'missing' was raised", !evt("cloud-push-failed").some((r) => /missing/.test(r.m)) && evt("push-missing-local").length === 0);
   await sleep(4000);
-  const groupAfter = await rows({ group: FIXTURE_SITE_ID });
+  const groupAfter = await rows({ group: FIXTURE_GROUP });
   ok("step 2: no new row reached public.sites", groupAfter.rows.length === groupBefore.rows.length, `${groupBefore.rows.length} -> ${groupAfter.rows.length}`);
   await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("zz-filler-")) localStorage.removeItem(k); });
   await open("g" + Date.now());
@@ -98,14 +109,14 @@ try {
   ok("served build unchanged across the run (read in the same call as the assertions)", build0 === build1 && build1 === build2, `${build0} ${build1} ${build2}`);
 
   /* ---- step 4: cleanup — delete the copy AND purge it, then prove it is gone ---- */
-  await open("c" + Date.now());
-  await page.evaluate((id) => localStorage.setItem("planarfit:currentSite:v1", id), FIXTURE_SITE_ID);
+  await open("c" + Date.now(), true);
   await page.getByTestId("plan-crumb").click();
-  await page.getByRole("button", { name: /Delete plan .*\(copy\)/ }).first().click();
-  await page.getByRole("button", { name: "Delete", exact: true }).first().click();
+  await page.getByRole("button", { name: "Delete plan " + createdName, exact: true }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).first().click();      // 1) soft delete → the project's "Recently deleted"
   await sleep(2500);
-  await page.getByRole("button", { name: /Delete .*\(copy\)” forever|Delete plan .*forever|Delete this plan forever/i }).first().click({ timeout: 8000 }).catch(() => {});
-  await page.getByRole("button", { name: "Delete", exact: true }).first().click({ timeout: 8000 }).catch(() => {});
+  if (!(await page.getByRole("button", { name: "Delete plan " + createdName + " forever", exact: true }).count())) await page.getByTestId("plan-crumb").click();
+  await page.getByRole("button", { name: "Delete plan " + createdName + " forever", exact: true }).click({ timeout: 15000 });
+  await page.getByRole("button", { name: "Delete", exact: true }).first().click({ timeout: 15000 });   // 2) permanent purge (the confirm row's Delete)
   let gone = null;
   for (let i = 0; i < 20; i++) { gone = await rows({ id: createdId }); if (!gone.rows.length) break; await sleep(1000); }
   ok("step 4: the copy is gone from public.sites (purged, verified)", !!gone && !gone.error && gone.rows.length === 0, JSON.stringify(gone));
