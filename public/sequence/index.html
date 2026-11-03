@@ -3367,6 +3367,19 @@ let ROW_H = 24;
 const GRID_LINE = "1px solid var(--bd)";
 const GRID_LINE_RANGE = "1px solid #93c5fd";
 const PPD = 22, TL_H = 30, BUF = 6;
+// NEW-1 (2026-11-03) — "scrolling on the schedule module is kinda shakey vertically". The row window (which rows are
+// mounted) used to be re-derived from the RAW scrollTop on every scroll event: one React commit per 24px of travel, with
+// only ~100px of spare rows below the fold, so a wheel notch routinely out-ran the commit and the bottom row of each pane
+// was blank for a frame (measured: ~40% of frames during a notch scroll, ui-audit/verify-schedule-scroll-smooth.mjs).
+// Now the window moves in CHUNKS of whole rows and carries a generous overscan on both sides: the state only changes when
+// the scroll crosses a chunk boundary (so most scroll events re-render nothing), and the rows that will be needed next
+// are already mounted when it does.
+const WIN_CHUNK = 8, WIN_OVER = 12;
+const rowWindowTop = st => Math.floor(Math.max(0, st) / ROW_H / WIN_CHUNK) * WIN_CHUNK;
+const rowWindow = (winTop, viewH, total) => ({
+  startIdx: Math.max(0, winTop - WIN_OVER),
+  endIdx:   Math.min(total, winTop + WIN_CHUNK + Math.ceil(viewH / ROW_H) + 1 + WIN_OVER),
+});
 // NEW-1 (recurrence of B463922, ×3) — `<ErrorBoundary key={data.view}>` (App's render, well above
 // GridView/GanttView) remounts the whole Grid/Split/Gantt subtree fresh on every view switch, so
 // neither pane's own scroll position survives one. Two small per-project memories, restored on
@@ -10304,6 +10317,18 @@ function App() {
   const zoomRafRef = useRef(null);
   const zoomAccRef = useRef(0);
   useEffect(() => {
+    // NEW-1 (2026-11-03) — a NON-PASSIVE wheel listener on the window makes the browser hold EVERY wheel notch until the
+    // page's main thread has run it, so a busy frame (a row commit, a recompute) stalls the scroll itself — the grid
+    // "sticks" and then jumps. The handler only ever acts when Ctrl/Cmd is down, so it is registered ONLY while one is
+    // (keydown → add, keyup / blur → remove); a plain wheel never meets a blocking listener.
+    let armed = false;
+    const arm = on => {
+      if (on === armed) return; armed = on;
+      if (on) window.addEventListener("wheel", onWheel, {passive: false});
+      else window.removeEventListener("wheel", onWheel);
+    };
+    const onKey = e => arm(!!(e.ctrlKey || e.metaKey));
+    const onBlur = () => arm(false);
     const onWheel = e => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
@@ -10328,9 +10353,14 @@ function App() {
         }
       });
     };
-    window.addEventListener("wheel", onWheel, {passive: false});
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+      window.removeEventListener("blur", onBlur);
+      arm(false);
       if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
     };
   }, []);
@@ -13844,14 +13874,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // Predecessor lookup for the "a predecessor is late" health condition — memoized on the
   // project's own task array so it's built once per data change, not once per row.
   const taskById = useMemo(() => { const m = {}; (proj?.tasks||[]).forEach(t => m[t.id] = t); return m; }, [proj?.tasks]);
-  const [scrollTop, setScrollTop] = useState(0);
+  const [winTop, setWinTop] = useState(0);      // NEW-1 — first row of the CHUNK the scroll is in (not the raw scrollTop)
   const localRef = useRef(null);
   const ref = scrollRef || localRef;
   const vh = (ref.current?.clientHeight || window.innerHeight) - 80;
   const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
   const totalRows = tasks.length + emptyPad;
-  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
-  const endIdx   = Math.min(totalRows, startIdx + Math.ceil(vh / ROW_H) + BUF * 2);
+  const { startIdx, endIdx } = rowWindow(winTop, (ref.current?.clientHeight || window.innerHeight), totalRows);
 
   const isDraggingCells = useRef(false);
   const cellDragPin = useRef(null);   // release fn of the `cell` cursor pin while a range-select drag spans 2+ cells
@@ -14577,13 +14606,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const el = ref.current;
     if (!el || gridMemoKey == null) return;
     const saved = GRID_SCROLL_MEMO.get(gridMemoKey);
-    if (saved != null && !goToFocus) { el.scrollTop = saved; setScrollTop(el.scrollTop); }
+    if (saved != null && !goToFocus) { el.scrollTop = saved; setWinTop(rowWindowTop(el.scrollTop)); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridMemoKey]);
 
   const handleScroll = e => {
     if (gridMemoKey != null) GRID_SCROLL_MEMO.set(gridMemoKey, e.currentTarget.scrollTop);
-    setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e);
+    setWinTop(rowWindowTop(e.currentTarget.scrollTop)); if (onScroll) onScroll(e);
     const el = e.currentTarget, l = el.scrollLeft > 1, r = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
     setScrollSide(p => (p.l === l && p.r === r ? p : { l, r }));     // NEW-1 — only re-renders when a pin edge flips
   };
@@ -16330,7 +16359,7 @@ const depAnchors = ({ type, src, tgt, fanIndex = 0, fanCount = 1, tgtLabelRightX
 
 // ── GanttView ─────────────────────────────────────────────
 function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings, rowZoom=1}) {
-  const [scrollTop, setScrollTop] = useState(0);
+  const [winTop, setWinTop] = useState(0);      // NEW-1 — first row of the CHUNK the scroll is in (not the raw scrollTop)
   const localRef = useRef(null);
   const ref = scrollRef || localRef;
   const ppd = pxPerDay || 22;
@@ -16530,16 +16559,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     const el = ref.current;
     if (!el || ganttMemoKey == null) return;
     const saved = GANTT_SCROLL_MEMO.get(ganttMemoKey);
-    if (saved != null) { el.scrollTop = saved; setScrollTop(el.scrollTop); }
+    if (saved != null) { el.scrollTop = saved; setWinTop(rowWindowTop(el.scrollTop)); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ganttMemoKey]);
 
   const handleScroll = e => {
     if (ganttMemoKey != null) GANTT_SCROLL_MEMO.set(ganttMemoKey, e.currentTarget.scrollTop);
-    setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e);
+    setWinTop(rowWindowTop(e.currentTarget.scrollTop)); if (onScroll) onScroll(e);
   };
-  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
-  const endIdx   = Math.min(tasks.length, startIdx + Math.ceil(vh / ROW_H) + BUF * 2);
+  const { startIdx, endIdx } = rowWindow(winTop, (ref.current ? ref.current.clientHeight : window.innerHeight), tasks.length);
   // Fix #14: match GridView's bottom-padding formula so both panes have identical scroll heights
   const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
   const zoom = dir => { if (onZoomChange) onZoomChange(dir > 0 ? Math.min(80, Math.ceil(ppd*1.35)) : Math.max(1, Math.floor(ppd/1.35))); };
@@ -17979,7 +18007,6 @@ function DesktopSplitView(props) {
   const settings = props.data?.settings || DEFAULT_SETTINGS;
   const gridRef      = useRef(null);
   const ganttRef     = useRef(null);
-  const lock         = useRef(false);
   const [split, setSplit] = useState(() => settings.defaultSplit || 60);
   const containerRef = useRef(null);
   const divDragging  = useRef(false);
@@ -17995,11 +18022,25 @@ function DesktopSplitView(props) {
     snapModeRef.current = v;
   }, [settings.snapDefault]);
 
+  // NEW-1 (2026-11-03) — keep the two panes level WITHOUT ever writing a stale value back at the pane being scrolled.
+  // The old guard (`lock`, released on the next animation frame) ignored every second scroll event of the pane the
+  // person was actually driving, and — because the rAF fires in the same frame as the echo event it was meant to
+  // swallow — could let the OTHER pane's echo through, rewriting the driven pane to where it was a frame ago (which
+  // also cancels a smooth wheel scroll in flight). Now: each programmatic write remembers the exact value it wrote, and
+  // the scroll event that write causes is recognised by that value and dropped — nothing else is ever ignored.
+  const echo = useRef({ grid: null, gantt: null });
   const sync = src => e => {
-    if (lock.current) return; lock.current = true;
-    const other = src==="grid" ? ganttRef.current : gridRef.current;
-    if (other) other.scrollTop = e.currentTarget.scrollTop;
-    requestAnimationFrame(() => { lock.current = false; });
+    const st = e.currentTarget.scrollTop, dst = src === "grid" ? "gantt" : "grid";
+    if (echo.current[src] === st) { echo.current[src] = null; return; }          // our own write coming back
+    echo.current[src] = null;
+    const other = src === "grid" ? ganttRef.current : gridRef.current;
+    if (!other || other.scrollTop === st) return;
+    other.scrollTop = st;
+    const landed = other.scrollTop;
+    if (landed === st) {                                                          // a scroll event WILL follow — recognise it
+      echo.current[dst] = landed;
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (echo.current[dst] === landed) echo.current[dst] = null; }));
+    }
   };
 
   const liveColWidths = useRef(null); // updated by GridView via onColWidths
