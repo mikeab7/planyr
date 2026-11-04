@@ -52,7 +52,7 @@ const seedScript = (withCurrent) => `(() => { try {
 
 const results = [];
 const check = (name, pass, detail = "") => { results.push({ name, pass }); console.log(`  ${pass ? "✅ PASS" : "❌ FAIL"} — ${name}${detail ? "  · " + detail : ""}`); };
-const nameInStore = (page, id) => page.evaluate(([k, sid]) => { try { const o = JSON.parse(localStorage.getItem(k)) || {}; return (o[sid] || {}).site || ""; } catch (_) { return "<parse-error>"; } }, [SITES_KEY, id]);
+const nameInStore = (page, id) => page.evaluate(([k, sid]) => { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)) || {}; return (o[sid] || {}).site || ""; } catch (_) { return "<parse-error>"; } }, [SITES_KEY, id]);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const pageErrors = [];

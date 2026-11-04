@@ -49,7 +49,7 @@ export function wallRowPlan(b) {
 /* ------------------------------------------------------------------ chips */
 
 /** Layer kinds a wall's stack can carry. */
-export const KIND_LABEL = { court: "Court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
+export const KIND_LABEL = { court: "Court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Sidewalk", parking: "Parking", road: "Road" };
 /** The longer name used in the editor box and the "+" catalog. */
 export const KIND_NAME = { court: "Truck court", trailer: "Trailer parking", buffer: "Landscape buffer", sidewalk: "Sidewalk", parking: "Car parking", road: "Road" };
 /** The ZONE_CATALOG key behind a layer kind. */
@@ -74,8 +74,9 @@ export function bumpSummary(n, along, proj) {
 /* ------------------------------------------------------------------ strip (Building panel v3) */
 
 /** Every wall is ONE strip: a bar of pieces, building at the left, layers outward left → right. All
- *  widths are layout guidance in CSS px (never shown to the user). */
-export const STRIP = { FULL: 156, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
+ *  widths are layout guidance in CSS px (never shown to the user). FULL was 156 until the named add button (NEW-1, 2026-11-03)
+ *  took its place at the end of the row: head 58 + strip + the widest button ("+ Parking ▾") must fit the 290-wide panel (and the ~266-wide phone sheet) on ONE line. */
+export const STRIP = { FULL: 118, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
 /** Legend / kind order. */
 export const KIND_ORDER = ["court", "trailer", "buffer", "sidewalk", "parking", "road"];
 
@@ -140,7 +141,7 @@ export function stripPlan(rows) {
   return { maxTotal, rows: out };
 }
 
-/** The kinds present on this building, in legend order (Court, Trailer, Buffer, Walk, Parking, Road). */
+/** The kinds present on this building, in legend order (Court, Trailer, Buffer, Sidewalk, Parking, Road). */
 export function legendKinds(rows) {
   const present = new Set();
   rows.forEach((r) => (r.layers || []).forEach((l) => present.add(l.kind)));
@@ -170,11 +171,53 @@ export function addOptions(isDock, layers) {
     return out;
   }
   if (!kinds.includes("sidewalk")) out.push(opt("sidewalk"));
-  // Parking is placed just beyond the sidewalk, so it is offered only before a buffer / road sits there.
-  if (!kinds.includes("parking") && !kinds.some((k) => k === "buffer" || k === "road")) out.push(opt("parking"));
+  // Parking is ALWAYS on offer on a non-dock wall (NEW-1, 2026-11-04): first field, or one more row of the field already
+  // there (the same ladder as the on-map "+": growEmployeeSide). With a buffer already on the wall a new field is placed
+  // beyond it, as the new outermost layer (SitePlanner `addLayerOnSide`).
+  if (!kinds.includes("road")) out.push(opt("parking"));
   out.push(opt("trailer"));                                      // B2268801 — trailer rows on a rear / end wall too, repeating
   out.push(opt("buffer"), opt("road"));
   return out;
+}
+
+/** The order the likely NEXT layer follows on each kind of wall: a dock wall reads court → trailer → buffer → sidewalk (→ road);
+ *  any other wall reads sidewalk → parking → buffer (→ road → trailer). */
+const NEXT_ORDER_DOCK = ["court", "trailer", "buffer", "sidewalk", "road"];
+const NEXT_ORDER_OTHER = ["sidewalk", "parking", "buffer", "road", "trailer"];
+
+/**
+ * `addOptions`, ordered: the FIRST entry is the next layer the person most likely wants (the lead button on the wall's
+ * row); the rest are the ▾ menu's. Exactly the set `addOptions` allows — never anything it forbids, nothing added,
+ * nothing dropped — so a wall ending in a Road still offers nothing.
+ * Dock wall: the lead follows the OUTERMOST layer through court → trailer → buffer → sidewalk → road (a second trailer
+ * piece lands in the ▾), and a dock wall whose court was binned leads with the court.
+ * Any other wall (owner-required, 2026-11-04): empty → sidewalk · sidewalk → parking · parking, or sidewalk > parking →
+ * parking (one more row each press) · sidewalk > parking > buffer → road (parking waits in the ▾) · sidewalk > buffer
+ * with no parking yet → parking. Anything else follows the sequence after the outermost layer.
+ */
+export function orderedAddOptions(isDock, layers) {
+  const allowed = addOptions(isDock, layers);
+  if (allowed.length < 2) return allowed;
+  const order = isDock ? NEXT_ORDER_DOCK : NEXT_ORDER_OTHER;
+  const rank = (k) => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+  const kinds = (layers || []).map((l) => l.kind);
+  if (isDock && kinds.length && !kinds.includes("court")) return allowed;       // addOptions already leads with the court
+  const last = kinds.length ? rank(kinds[kinds.length - 1]) : -1;
+  const idx = new Map(allowed.map((o, i) => [o.key, i]));
+  const key = (o) => [rank(o.key) > last ? 0 : 1, rank(o.key), idx.get(o.key)];
+  const sorted = allowed.slice().sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+  if (!isDock) {
+    // Parking leads whenever the wall's parking is the outermost thing (more rows), or no parking exists yet and a sidewalk /
+    // buffer is the outermost layer. Once something sits beyond the parking (a buffer), the lead moves on to it.
+    const lastKind = kinds[kinds.length - 1];
+    const hasParking = kinds.includes("parking");
+    const lead = lastKind === "parking" ? "parking"
+      : !kinds.includes("sidewalk") ? "sidewalk"
+      : !hasParking && (lastKind === "sidewalk" || lastKind === "buffer") ? "parking"
+      : null;
+    if (lead) { const i = sorted.findIndex((o) => o.key === lead); if (i > 0) { const [o] = sorted.splice(i, 1); sorted.unshift(o); } }
+  }
+  return sorted;
 }
 
 /**

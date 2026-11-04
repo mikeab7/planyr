@@ -12,7 +12,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 import AdminPanel, { Card, Chip, PanelState, useAdminLoad } from "./AdminPanel.jsx";
 import { exactTime } from "./lib/adminFormat.js";
 import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago, digestStamp } from "./lib/adminPanels.js";
-import { snapshotHealth, CHECK_LABELS } from "../../shared/auth/signinHealth.js";
+import { snapshotHealth, CHECK_LABELS, SOURCES, SOURCE_LABELS, staleLimitMin } from "../../shared/auth/signinHealth.js";
 
 /* NEW-1 (2026-11-02, after B2619760) — the hourly outside-in sign-in check. "Stopped" is computed here from the clock:
  * a snapshot that says all-clear and has not been touched for hours is exactly the dead-man's-switch case. */
@@ -32,6 +32,19 @@ function SigninHealth({ snap }) {
             Last hour from browsers: {e.ok || 0} signed in · {e.wrongPassword || 0} wrong passwords · {e.refused || 0} refused by the bot check · {e.blocked || 0} blocked scripts · {e.widgetError || 0} widget errors · {e.timeout || 0} timeouts · {e.network || 0} network failures
             {snap.lastCheckAt ? <> · last outside check {ago(snap.lastCheckAt)}</> : null}
           </div>
+          {snap.sources && (
+            <div data-testid="signin-sources" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: 6 }}>
+              {SOURCES.map((src, i) => {
+                const at = snap.sources[src] && snap.sources[src].lastAt;
+                const late = at && (Date.now() - new Date(at).getTime()) / 60000 > staleLimitMin(src);
+                return (
+                  <span key={src} data-source={src} data-late={late ? "1" : "0"}>
+                    {i > 0 ? " · " : ""}{SOURCE_LABELS[src]}: {at ? `last ran ${ago(at)}` : "has not run yet"}{late ? " — STOPPED" : ""}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {h.gaps.length > 0 && (
             <div data-testid="signin-coverage-gap" style={{ fontSize: FONT_SIZE.control, marginTop: 6 }}>
               <Chip tone="warn">Coverage gap</Chip> {h.gaps.map((g) => g.text).join(" ")}

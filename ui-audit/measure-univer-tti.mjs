@@ -89,7 +89,7 @@ async function main() {
     const site = { id: pid, groupId: pid, site: "ZZ tti", name: "ZZ tti", origin: null, county: "harris", parcels: [], els: [], markups: [], measures: [] };
     const page = await ctx.newPage();
     await page.addInitScript(LONGTASK_INIT);
-    await page.addInitScript(([sid, rec, key, w]) => { try { if (!localStorage.getItem(key)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); localStorage.setItem(key, JSON.stringify(w)); } } catch (_) { /* private mode */ } }, [pid, site, `planyr:model:sheet:v1:local:${pid}`, wb]);
+    await page.addInitScript(([sid, rec, key, w]) => { try { if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [sid]: rec })); localStorage.setItem(key, JSON.stringify(w)); } } catch (_) { /* private mode */ } }, [pid, site, `planyr:model:sheet:v1:local:${pid}`, wb]);
     return page;
   };
   const ready = async (page, kind) => {

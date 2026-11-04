@@ -45,7 +45,7 @@ try {
   await drag(b0.x + 150, b0.y + 340, b0.x + 450, b0.y + 480);
   SITE_ID = await page.evaluate(() => localStorage.getItem("planarfit:currentSite:v1"));
   console.log("throwaway site id:", SITE_ID);
-  const ids = await page.evaluate(([uid, sid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); const els = (m[sid] || {}).els || []; return { hb1: (els.find((e) => e.type === "building") || {}).id, hp1: (els.find((e) => e.type === "parking") || {}).id }; }, [UID, SITE_ID]);
+  const ids = await page.evaluate(([uid, sid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); const els = (m[sid] || {}).els || []; return { hb1: (els.find((e) => e.type === "building") || {}).id, hp1: (els.find((e) => e.type === "parking") || {}).id }; }, [UID, SITE_ID]);
   console.log("element ids:", JSON.stringify(ids));
   if (!ids.hb1 || !ids.hp1) throw new Error("throwaway elements not created");
   const box = await T("planner-canvas").boundingBox();
@@ -81,7 +81,7 @@ finally {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [SITE_ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

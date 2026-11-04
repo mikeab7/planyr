@@ -107,7 +107,7 @@ async function openPlan(page, rec, seeded = false) {
     }, rec);
     check(!err, `throwaway plan "${rec.name}" written to the test account${err ? " — " + err : ""}`);
   } else if (!seeded) {
-    await page.evaluate((r) => { const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
+    await page.evaluate((r) => { const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
   }
   await page.goto(`${BASE}/#/project/${rec.id}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
@@ -254,7 +254,7 @@ try {
 } finally {
   if (LIVE && session) {
     const gone = await session.page.evaluate(async (id) => {
-      try { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); const q = await window.pfSupabase.from("sites").select("id").eq("id", id); const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); return !(q.data && q.data.length); } catch (e) { return String(e); }
+      try { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); const q = await window.pfSupabase.from("sites").select("id").eq("id", id); const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); return !(q.data && q.data.length); } catch (e) { return String(e); }
     }, bain.id).catch((e) => String(e));
     check(gone === true, "throwaway plan deleted and verified gone " + JSON.stringify(gone));
     await session.close().catch(() => {});

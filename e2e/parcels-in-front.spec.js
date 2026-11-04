@@ -139,7 +139,7 @@ test("the plan's own parcel answers above a building, a markup and a promoted re
   expect(await topAt(page, pts.north)).toBe("reference:ov1");
   expect(await page.locator("[data-parcel-tier]").count()).toBe(0);
   expect(await lineHostZ(page)).toBeGreaterThan(await planZ(page));
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"));
+  const saved = await page.evaluate(() => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"));
   const rec = saved["e2e-parcels-front"] || Object.values(saved)[0];
   expect(JSON.stringify(rec.els.map((e) => e.id)), "no element was reordered or rewritten").toBe(JSON.stringify(["b1"]));
 });
@@ -179,7 +179,7 @@ test("Pick county lots: a press on a lot covered by a building / markup / refere
     await expect.poll(keys, { message: `the lot under the ${e.label} was added`, timeout: 8000 }).toBeGreaterThan(before);
   }
   // the building was never grabbed by those presses: it is exactly where the plan put it
-  const rec = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return m["e2e-parcels-front"] || Object.values(m)[0]; });
+  const rec = await page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return m["e2e-parcels-front"] || Object.values(m)[0]; });
   const b1 = rec.els.find((e) => e.id === "b1");
   expect([b1.cx, b1.cy]).toEqual([2300, 0]);
 });

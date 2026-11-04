@@ -115,7 +115,7 @@ test.describe("NEW-1 — a bare tool-shortcut letter typed into a focused field 
     await page.keyboard.press("Control+c");
     await page.keyboard.press("Control+v");
     await expect.poll(() => page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       return (s.els || []).filter((e) => e.type === "building" && !e.attachedTo).length;
     }), { timeout: 6000 }).toBe(2);

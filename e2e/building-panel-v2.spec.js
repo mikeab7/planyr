@@ -4,11 +4,11 @@
  * "Line weight" with no unit. Measured on the canvas, not just the panel.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-v2.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 });
@@ -46,7 +46,7 @@ async function boot(page, bump = {}) {
   await openProps(page, b.id);
   return b;
 }
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 
 test.beforeEach(async ({ page }) => { await armPlannerHooks(page); });
 
@@ -75,7 +75,7 @@ test("single-load at 315°: rows dock · rear · ends · ends — rear and each 
   const rearSide = await rear.getAttribute("data-sides");
   expect((await park())[0].sideParkSide).toBe(rearSide);
   // the typed 8 really laid out 8 rows (8 stall rows + 4 aisles), not the one the "+" added
-  const std = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
+  const std = await page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * (std.stallDepth ?? 18) + 4 * (std.aisle ?? 24));
   // the two end walls carry nothing
   for (const r of [rows.nth(2), rows.nth(3)]) await expect(r.getByTestId("wall-piece")).toHaveCount(0);
@@ -126,7 +126,7 @@ test("a plan saved with the retired dockStacksLinked flag loads as two independe
   await addLayer(rowByRole(page, "dock").nth(0), "court");
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(1);
   await page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]];
     site.els = site.els.map((e) => (e.type === "building" && !e.dogEar ? { ...e, dockStacksLinked: true } : e));
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(map));

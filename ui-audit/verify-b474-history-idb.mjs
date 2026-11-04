@@ -62,7 +62,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const newId = await page.evaluate((k) => { try { return localStorage.getItem(k); } catch (_) { return null; } }, CUR_KEY);
+const newId = await page.evaluate((k) => { try { return (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k); } catch (_) { return null; } }, CUR_KEY);
 check("a new site was created", !!newId, `id=${newId}`);
 const box = await page.evaluate(() => { let z = null, a = 0; for (const s of document.querySelectorAll("svg")) { const r = s.getBoundingClientRect(); if (r.width * r.height > a) { a = r.width * r.height; z = r; } } return z ? { x: z.x, y: z.y, w: z.width, h: z.height } : null; });
 if (box) {

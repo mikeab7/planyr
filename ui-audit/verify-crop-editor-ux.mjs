@@ -42,7 +42,7 @@ await page.evaluate(() => { if (!document.querySelector('[data-testid="overlays-
 await page.waitForTimeout(700);
 await page.locator('[data-testid^="reference-open-"]', { hasText: "sheet-A.png" }).first().click().catch(() => {});
 await page.waitForTimeout(400);
-const stored = () => page.evaluate(() => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === "ovA"); return o ? { crop: o.crop ?? null, locked: !!o.locked } : null; });
+const stored = () => page.evaluate(() => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === "ovA"); return o ? { crop: o.crop ?? null, locked: !!o.locked } : null; });
 const waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 const openCrop = async () => { await openCropEditor(page); await dlg.waitFor({ timeout: 4000 }); await page.waitForTimeout(500); };

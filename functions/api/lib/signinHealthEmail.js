@@ -3,7 +3,7 @@
  * two named places (CLAUDE.md → Owner product constraints #34); this is a third, server-side one that is NEVER sent to a browser,
  * named in test/publicContactAddresses.test.js. SIGNIN_ALARM_TO (Cloudflare env) overrides the recipient.
  * Plain English, no jargon without its meaning (the owner is a developer of buildings, not software). */
-import { CHECK_LABELS } from "../../../src/shared/auth/signinHealth.js";
+import { CHECK_LABELS, SOURCE_LABELS, ageWords } from "../../../src/shared/auth/signinHealth.js";
 
 export const ALARM_TO = "michael@planyr.io";
 
@@ -47,6 +47,31 @@ export function buildRecoveryEmail({ kind, openedAt, synthetic, runUrl }) {
     "The outside check passed again.",
     runUrl ? `\nDetails: ${runUrl}` : "",
   ].join("\n");
+  const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827"><div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:24px">${esc(text).replace(/\n/g, "<br>")}</div></body></html>`;
+  return { subject, text, html };
+}
+
+/* The dead-man's switch email (NEW-1, 2026-11-04, B2650848): a sign-in CHECK has stopped reporting. One email per episode, no
+ * recovery note (the Ops card shows it running again). Says in plain words what stopped, how long, and the one place to look. */
+const STOP_HINT = {
+  edge: "This one runs on a timer inside Supabase (a scheduled job called planyr-signin-heartbeat) that calls a Planyr page every 15 minutes. To look: Supabase → Database → Cron Jobs, or ask a Claude Code session to read cron.job_run_details and net._http_response.",
+  runner: "This one runs on GitHub's own timer, which skips runs here (it has delivered one run every 5 to 8 hours). To look: GitHub → Actions → Sign-in health.",
+  drill: "This is the drill: it proves the 'a check stopped' email reaches you.",
+};
+export function buildStoppedEmail({ source, ageMin, limitMin, lastAt, synthetic }) {
+  const what = SOURCE_LABELS[source] || "A sign-in check";
+  const subject = `${synthetic ? "[TEST] " : ""}Planyr alarm: A sign-in check stopped running`;
+  const lines = [];
+  if (synthetic) lines.push("THIS IS A TEST. Nothing is wrong — this is the drill proving a 'check stopped' email reaches you.", "");
+  lines.push(
+    "A sign-in check has stopped reporting.", "",
+    `${what} has not reported for ${ageWords(ageMin)} (it is expected at least every ${ageWords(limitMin)}).`,
+    lastAt ? `Last report: ${lastAt}` : "",
+    "", "What this means: sign-in may be fine — but while this check is silent, nothing is watching that part of it.", "",
+    STOP_HINT[source] || "",
+    "", "You will get exactly one email for this stop. There is no all-clear note; the Ops page shows the check running again.",
+  );
+  const text = lines.join("\n");
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827"><div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:24px">${esc(text).replace(/\n/g, "<br>")}</div></body></html>`;
   return { subject, text, html };
 }

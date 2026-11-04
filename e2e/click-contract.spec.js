@@ -46,7 +46,7 @@ async function startBlank(page) {
 }
 
 const count = (page, pick) => page.evaluate((k) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   if (k === "parcel") return (site.parcels || []).length;
   if (k === "measure") return (site.measures || []).length;

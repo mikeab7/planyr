@@ -16,6 +16,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… [SHOTS_DIR=/path] node ui-audit/verify-dock-layer-panel.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -35,7 +36,7 @@ const { browser, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [ID, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [ID, UID]);
 const kids = async () => ((await model())?.els || []).filter((e) => e.attachedTo === "dlb1" && !e.dogEar);
 const T = (id) => page.getByTestId(id);
 const stepper = (id, which) => T(id).locator("xpath=ancestor::*[@data-numbox][1]").getByRole("button", { name: which });
@@ -65,7 +66,7 @@ try {
   await T("building-header").waitFor({ timeout: 10000 });
   const dockRows = page.locator('[data-testid="wall-row"][data-role="dock"]');
   if ((await dockRows.count()) !== 2) throw new Error("VOID run — expected two dock rows on the cross-dock building");
-  for (const row of [0, 1]) for (const key of ["court", "trailer", "buffer"]) { await dockRows.nth(row).getByTestId("wall-add").click(); await T(`wall-add-${key}`).click(); await sleep(450); }
+  for (const row of [0, 1]) for (const key of ["court", "trailer", "buffer"]) await addWallLayer(page, dockRows.nth(row), key);
   await waitFor(async () => { const k = await kids(); return k.filter((e) => e.truckCourt).length === 2 && k.filter((e) => e.forCourt).length === 2 && k.filter((e) => e.buffer).length === 2; });
   const k0 = await kids();
   const [court, court2] = k0.filter((e) => e.truckCourt);
@@ -154,7 +155,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && !(q.data || []).length;
   }, [ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

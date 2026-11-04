@@ -3,11 +3,11 @@
  * position at their own default depths → each layer's length is editable alone → survives a reload.
  * Run: BASE_URL=http://localhost:4173 npx playwright test e2e/trailer-row-repeat.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer, dragWallLayerEnd, reopenBuildingPanel } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 });
@@ -31,7 +31,7 @@ async function openProps(page, id) {
 }
 const rotate = async (page, deg) => { const f = page.getByLabel("Rotation in degrees"); await f.fill(String(deg)); await f.press("Enter"); };
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 async function boot(page, deg) {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
@@ -69,29 +69,33 @@ for (const deg of [0, 315]) {
     await expect(dock.getByTestId("wall-piece")).toHaveCount(2);
     const side = (await plan(page)).find((e) => e.attachedTo === b.id && e.truckCourt).truckCourt.side;
 
-    // a layer straight after the court runs the full court length, and the court has no length control
+    // NEW-1 (2026-11-03): the edit box carries NO length controls at all — length is changed by the handles on the map
     await dock.getByTestId("wall-piece").nth(0).click();
     await expect(page.getByTestId("wall-extent")).toHaveCount(0);
     await dock.getByTestId("wall-piece").nth(1).click();
-    await expect(page.getByTestId("wall-extent-full")).toBeDisabled();
-    const fullLen = Number(await page.getByTestId("wall-extent-len").inputValue());
+    await expect(page.getByTestId("wall-edit-box")).toBeVisible();
+    for (const id of ["wall-extent", "wall-extent-len", "wall-extent-full", "wall-align-start", "wall-align-centre", "wall-align-end"]) await expect(page.getByTestId(id)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // a layer straight after the court runs the full court length
+    const host0 = await hostOf(page);
+    const fullLen = alongOf(host0, side, sorted(host0, side, await trailersOf(page, b.id))[0]).len;
     expect(fullLen).toBeGreaterThan(100);
 
-    // shorten trailer row 1 to half and hold it from the start
-    const half = Math.round(fullLen / 2);
-    await page.getByTestId("wall-extent-len").fill(String(half)); await page.getByTestId("wall-extent-len").press("Enter");
-    await page.getByTestId("wall-align-start").click();
-    await expect(page.getByTestId("wall-extent-full")).toBeEnabled();
+    // shorten trailer row 1 by its handle: the dragged (far) end moves in, the near end holds
+    await dragWallLayerEnd(page, host0, side, sorted(host0, side, await trailersOf(page, b.id))[0], "plus", 40);
+    await expect.poll(async () => { const h = await hostOf(page); return Math.round(alongOf(h, side, sorted(h, side, await trailersOf(page, b.id))[0]).len); }).toBeLessThan(Math.round(fullLen) - 20);
+    await page.keyboard.press("Escape");
     const host = await hostOf(page);
     const t1 = sorted(host, side, await trailersOf(page, b.id))[0];
     const a1 = alongOf(host, side, t1);
-    expect(a1.len).toBeCloseTo(half, 0);
-    expect(a1.centre).toBeLessThan(-1);                          // pulled to the start end
-    await page.keyboard.press("Escape");
+    expect(a1.len).toBeGreaterThan(fullLen - 80);                 // (the drag snaps to the grid, so not exactly 40)
+    expect(a1.centre).toBeCloseTo(-(fullLen - a1.len) / 2, 0);    // the start end held, the far end pulled in
+    await reopenBuildingPanel(page, host);
 
-    // "+" still offers Trailer parking → a second row, then a buffer
-    await dock.getByTestId("wall-add").click();
-    await expect(page.getByTestId("wall-add-trailer")).toBeVisible();
+    // the named button is Buffer now; a second trailer row is in the ▾ list under its full name
+    await expect(dock.getByTestId("wall-add")).toHaveAttribute("data-kind", "buffer");
+    await dock.getByTestId("wall-add-more").click();
+    await expect(page.getByTestId("wall-add-trailer")).toContainText("Trailer parking");
     await page.getByTestId("wall-add-trailer").click();
     await addLayer(dock, "buffer");
     await expect(dock.getByTestId("wall-piece")).toHaveCount(4);
@@ -110,13 +114,14 @@ for (const deg of [0, 315]) {
     expect(ts[1].out - ts[0].out).toBeCloseTo(50, 0);           // adjacent rows
     await expect(dock.getByTestId("wall-piece").nth(2)).toContainText("50′");
 
-    // editing the new row's length leaves row 1 alone
-    await dock.getByTestId("wall-piece").nth(2).click();
-    await page.getByTestId("wall-extent-len").fill("80"); await page.getByTestId("wall-extent-len").press("Enter");
-    await expect.poll(async () => { const h = await hostOf(page); return Math.round(alongOf(h, side, sorted(h, side, await trailersOf(page, b.id))[1]).len); }).toBe(80);
+    // dragging the new row's handle leaves row 1 alone
+    const h2b = await hostOf(page);
+    await dragWallLayerEnd(page, h2b, side, sorted(h2b, side, await trailersOf(page, b.id))[1], "plus", 30);
+    await expect.poll(async () => { const h = await hostOf(page); return Math.round(alongOf(h, side, sorted(h, side, await trailersOf(page, b.id))[1]).len); }).toBeLessThan(Math.round(a1.len) - 10);
     const h3 = await hostOf(page);
     expect(alongOf(h3, side, sorted(h3, side, await trailersOf(page, b.id))[0]).len).toBeCloseTo(a1.len, 0);
     await page.keyboard.press("Escape");
+    await reopenBuildingPanel(page, h3);
 
     // still one line per wall; every row draws; survives a reload
     expect(await dock.getByTestId("wall-strip").evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(40);
@@ -124,7 +129,7 @@ for (const deg of [0, 315]) {
     await page.reload();
     await expect.poll(async () => (await trailersOf(page, b.id)).length).toBe(2);
     const h4 = await hostOf(page);
-    expect(alongOf(h4, side, sorted(h4, side, await trailersOf(page, b.id))[1]).len).toBeCloseTo(80, 0);
+    expect(alongOf(h4, side, sorted(h4, side, await trailersOf(page, b.id))[1]).len).toBeLessThan(a1.len - 10);
   });
 }
 

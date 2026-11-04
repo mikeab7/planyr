@@ -24,6 +24,13 @@ export function scanForSiteKey(text) {
   return { found: m ? m[0] : null, testKey: TEST_KEY_RE.test(t) && /turnstile|cloudflare|sitekey/i.test(t) && !m };
 }
 
+/** base64url → text with NO Node `Buffer` — this file also runs inside the Cloudflare route (the fast check). */
+function b64urlToText(b64url) {
+  const b64 = String(b64url).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+  return new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0)));
+}
+
 /** Supabase url + publishable key as the bundle ships them (env wins when given). */
 export function extractSupabaseConfig(texts, env = {}) {
   let url = env.VITE_SUPABASE_URL || null, anon = env.VITE_SUPABASE_ANON_KEY || null;
@@ -34,7 +41,7 @@ export function extractSupabaseConfig(texts, env = {}) {
       if (m) anon = m[0];
       else {
         for (const j of t.match(/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g) || []) {
-          try { if (JSON.parse(Buffer.from(j.split(".")[1], "base64url").toString()).role === "anon") { anon = j; break; } } catch (_) { /* not a JWT */ }
+          try { if (JSON.parse(b64urlToText(j.split(".")[1])).role === "anon") { anon = j; break; } } catch (_) { /* not a JWT */ }
         }
       }
     }
@@ -69,11 +76,11 @@ export async function fetchBundleTexts(base, fetchImpl = fetch, { maxFiles = 40,
   return [...seen.values()].filter(Boolean);
 }
 
-export async function checkSiteKey({ base, fetchImpl = fetch }) {
+export async function checkSiteKey({ base, fetchImpl = fetch, maxFiles }) {
   const name = "site-key-in-bundle";
   try {
     let hit = null, test = false;
-    const texts = await fetchBundleTexts(base, fetchImpl, { stopWhen: (ts) => ts.some((t) => scanForSiteKey(t).found) });
+    const texts = await fetchBundleTexts(base, fetchImpl, { ...(maxFiles ? { maxFiles } : {}), stopWhen: (ts) => ts.some((t) => scanForSiteKey(t).found) });
     for (const t of texts) { const s = scanForSiteKey(t); if (s.found) { hit = s.found; break; } if (s.testKey) test = true; }
     if (hit) return { check: { name, status: "pass", detail: `site key ${hit.slice(0, 10)}… is in the live bundle` }, siteKey: hit, texts };
     if (test) return { check: { name, status: "fail", detail: "the live bundle carries a Cloudflare TEST key (always passes) instead of the real site key" }, siteKey: null, texts };

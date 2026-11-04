@@ -43,7 +43,7 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 const SITE_KEY = "planarfit:sites:v1";
 
 const readEls = (page) => page.evaluate((key) => {
-  const map = JSON.parse(localStorage.getItem(key) || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 }, SITE_KEY);

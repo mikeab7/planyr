@@ -160,7 +160,7 @@ for (let round = 1; round <= ROUNDS; round++) {
   if (round % 2 === 1) {
     await page.locator('[data-testid="crop-done"]').click();
     await dlg().waitFor({ state: "detached", timeout: 8000 });
-    const saved = await page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o && o.crop ? o.crop.kind : null; }, id);
+    const saved = await page.evaluate((id) => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o && o.crop ? o.crop.kind : null; }, id);
     check(`round ${round}: Done saves the polygon and closes`, saved === "poly", String(saved));
   } else {
     await page.keyboard.press("Escape"); await page.waitForTimeout(200); // deselects / closes the menu first

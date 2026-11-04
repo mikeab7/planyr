@@ -117,3 +117,67 @@ describe("signin_health.sql", () => {
     expect(await count(d, "source = 'event:auth-network'")).toBe(1);
   });
 });
+
+/* ── NEW-1 (2026-11-04, B2650848) — the fast check's schema + the schedule that calls it ─────────────────────────────── */
+const EDGE_SQL = readFileSync(join(ROOT, "src/shared/auth/db/signin_health_edge.sql"), "utf8");
+const CRON_SQL = readFileSync(join(ROOT, "src/shared/auth/db/signin_health_edge_cron.sql"), "utf8");
+
+describe("signin_health_edge.sql — the source column and the per-source stop state", () => {
+  async function withEdge() {
+    const d = await freshDb();
+    // A row written by the OLD code (before this file ran) must read as the browser check's.
+    await d.exec("insert into public.signin_health_checks(overall) values ('pass');");
+    await d.exec(EDGE_SQL);
+    return d;
+  }
+  it("is additive: rows the existing runner path already wrote become source 'runner', and new inserts that name no source default to it", async () => {
+    const d = await withEdge();
+    await d.exec("insert into public.signin_health_checks(overall) values ('fail');");
+    expect((await d.query("select source, count(*)::int n from public.signin_health_checks group by 1")).rows).toEqual([{ source: "runner", n: 2 }]);
+  });
+  it("is idempotent", async () => {
+    const d = await withEdge();
+    await d.exec(EDGE_SQL);
+    expect((await d.query("select count(*)::int n from pg_constraint where conname = 'signin_health_checks_source_check'")).rows[0].n).toBe(1);
+  });
+  it("accepts only the two real sources", async () => {
+    const d = await withEdge();
+    await d.exec("insert into public.signin_health_checks(overall, source) values ('pass', 'edge');");
+    await expect(d.exec("insert into public.signin_health_checks(overall, source) values ('pass', 'cron');")).rejects.toThrow();
+  });
+  it("one stop row per source (edge / runner / the drill's own), nothing else", async () => {
+    const d = await withEdge();
+    await d.exec("insert into public.signin_stop_alerts(source, since) values ('edge', now());");
+    await expect(d.exec("insert into public.signin_stop_alerts(source) values ('edge');")).rejects.toThrow();
+    await d.exec("insert into public.signin_stop_alerts(source) values ('runner'), ('drill');");
+    await expect(d.exec("insert into public.signin_stop_alerts(source) values ('github');")).rejects.toThrow();
+  });
+  it("anon / authenticated can read or write neither the stop table nor the new column's table", async () => {
+    const d = await withEdge();
+    for (const role of ["anon", "authenticated"]) {
+      await d.exec(`set role ${role};`);
+      await expect(d.query("select * from public.signin_stop_alerts")).rejects.toThrow(/permission denied/);
+      await expect(d.exec("insert into public.signin_stop_alerts(source) values ('edge')")).rejects.toThrow(/permission denied/);
+      await expect(d.query("select source from public.signin_health_checks")).rejects.toThrow(/permission denied/);
+      await d.exec("reset role;");
+    }
+  });
+});
+
+describe("signin_health_edge_cron.sql — the schedule (text-checked: PGlite has no pg_cron)", () => {
+  const code = CRON_SQL.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  it("calls the production heartbeat route every 15 minutes, off the top of the hour, as an idempotent named job", () => {
+    expect(code).toMatch(/cron\.schedule\(\s*'planyr-signin-heartbeat'/);
+    expect(code).toMatch(/'7,22,37,52 \* \* \* \*'/);
+    expect(code).toContain("https://planyr.io/api/ops/signin-heartbeat");
+    expect(code).toMatch(/net\.http_post\(/);
+    expect(code).toMatch(/create extension if not exists pg_net/);
+  });
+  it("allows the route its in-request re-check wait (the pg_net default of 5 s would cut it off)", () => {
+    expect(Number(/timeout_milliseconds\s*:=\s*(\d+)/.exec(code)[1])).toBeGreaterThanOrEqual(30000);
+  });
+  it("carries NO secret: no authorization header, no key, no token, no password anywhere in the file", () => {
+    expect(code).not.toMatch(/authorization|bearer|apikey|secret|password|token|eyJ|sb_(secret|publishable)/i);
+    expect(code).not.toMatch(/vault\./i);
+  });
+});

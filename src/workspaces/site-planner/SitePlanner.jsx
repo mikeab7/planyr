@@ -386,7 +386,7 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, layerAlignOf, wallExtentAfter, flushKidBoxFor, sideParkStack } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, flushKidBoxFor, sideParkStack } from "./lib/dogEar.js";
 import { costRollup } from "./lib/costTakeoff.js";
 import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth } from "./lib/roadCrossSection.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
@@ -404,7 +404,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields, resolveLayerExtent, layerExtentPatch } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -11534,8 +11534,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // new corner / dock face and re-derives the host angle, while KEEPING its size — the
   // user's if it was resized (B362), else the 55′×60′ default.
   const fitDogEar = (nb, de) => dogEarGeom(nb, de);
-  // Commit a batch of building-attached elements in one history step.
-  const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
   // Remove a building feature (and anything that hangs off it — a court's trailer, a
   // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
   const removeFeature = (id) => {
@@ -11668,7 +11666,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const newEls = needsAisle
       ? [place(ai, inboard, idx0, "paving", {}), place(depth, inboard + ai, idx0 + 1, "parking", rowCfg)]
       : [place(depth, inboard, idx0, "parking", rowCfg)];
-    addBuildingEls(newEls, b.id);
+    // NEW-1 (2026-11-04) — a buffer / road already beyond the stack is pushed out by the new pieces (one history frame).
+    pushHistory(); setEls((a) => repackFlushBeyond([...a, ...newEls], b, side)); setSel({ kind: "el", id: b.id });
   };
   // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
   // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
@@ -11937,7 +11936,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (c.sides === "dock" && !isDock && key !== "trailer") return;   // B2268801 — trailer parking is offered on rear / end walls too
     if (c.sides === "nondock" && isDock) return;
     if (key === "sidewalk") { addSidewalkSide(b, side); return; }
-    if (key === "parking") { if (!sideParkingOn(b, side)) addParkingRowSide(b, side); return; }
+    // NEW-1 (2026-11-04) — parking on a non-dock wall: the first field, else ONE MORE ROW through the same ladder as the
+    // on-map "+" (growEmployeeSide: grow a single field, or append beyond an exploded stack) — never a second implementation.
+    if (key === "parking") { if (sideParkingOn(b, side)) growEmployeeSide(b, side, +1); else addParkingRowSide(b, side); return; }
     if (isDock) {
       pushHistory();
       setEls((a) => {
@@ -12174,6 +12175,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // A resize of the parking field's RUN is user intent, so the pin rule in relayoutWallKids
       // keeps it; only its distance out from the wall is re-resolved.
       const host = next.find((x) => x.id === resized.attachedTo);
+      // NEW-1 (2026-11-03) — a rear / end wall's Walk or Buffer is DERIVED from the wall span, so a handle drag that shortens it
+      // must RECORD the length and the end it was held from (the same three keys a typed length used to write, `extentFieldsFor`):
+      // otherwise the relayout below re-derives the full wall (or re-centres it) and the dragged end snaps back. Only a user
+      // resize that really changed the run along the wall stamps anything — a depth-only drag, a host refit, a heal never do.
+      if (host && host.type === "building" && !host.dogEar && opts.userResize && ownedWallStrip(resized, host)) {
+        const wside = swSideOn(host, resized);
+        const was = wallKidAlong(host, wside, resized), now = wallKidAlong(host, wside, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h });
+        if (Math.abs(was.run - now.run) > 0.5) {
+          const keys = extentFieldsFor({ run: now.run, alongShift: now.alongShift }, sidewalkSpanForBumps(host, wside, bumpsOfHost(next, host)));
+          next = next.map((x) => (x.id === resized.id ? applyZonePatch(x, keys) : x));
+        }
+      }
       // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
       if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
     } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
@@ -18940,7 +18953,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+    // A wall-bonded field grows OUTWARD, so a buffer / road beyond it is repacked in the same step (it stays outermost, no overlap).
+    const side = host && el.sideParkSide;
+    setEls((a) => { const grown = a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x); return side ? repackFlushBeyond(grown, host, side) : grown; });
   };
   // Per-field stall depth / drive-aisle override. Resizes the field's depth to
   // keep its rows consistent, growing on the outward (non-host) edge.
@@ -20909,9 +20924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dockSidesOf(b).dockSides.includes(side)) {
       return dockChainOnSide(els, b, side).map((z, i) => {
         const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
-        const ext = i > 0 ? (() => { const cx = wallExtentCtx(els, b, side), r = resolveLayerExtent(z, false, cx), an = Number(z.alongAnchor), full = !(z.alongLen > 0);
-          return { len: Math.round(r.along), max: Math.round(cx.fullAlong), full, start: !full && an === -1, end: !full && an === 1, centre: !full && an !== -1 && an !== 1 && Math.abs(r.shift - cx.chainShift) < 0.5 }; })() : null;
-        const base = { id: z.id, ids: [z.id], kind, index: i, extent: ext, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
+        const base = { id: z.id, ids: [z.id], kind, index: i, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
         if (kind !== "trailer") return base;
         const sp = trailerSpec(z, settings.trailerAisle);
         return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), rowDepths: sp.rowDepths.map((d) => Math.round(d)), depth: Math.round(sp.total) };
@@ -20923,19 +20936,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pads = sideParkPadsOn(b, side);
     const padIds = new Set(pads.map((p) => p.id));
     const out = [];
-    // B2268801 — what the edit box shows for a layer's length / position: read off its GEOMETRY against the wall's span
-    // (one answer for a strip, road, trailer and a parking field alike).
-    const wallSpan = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
-    const extentOf = (x) => { const a = layerAlignOf(wallKidAlong(b, side, x), wallSpan); return { len: Math.round(a.len), max: Math.round(a.max), full: a.full, start: a.start, end: a.end, centre: a.centre }; };
     els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
       const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : isWallTrailer(x) ? "trailer" : null;
       if (!kind) return;
       const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
-      out.push({ id: x.id, ids: [x.id], kind, wallKid: kind === "trailer" || undefined, fill: elStyle(x, settings).fill, depth: Math.round(depth), extent: extentOf(x), perp: perpOf(x) });
+      out.push({ id: x.id, ids: [x.id], kind, wallKid: kind === "trailer" || undefined, fill: elStyle(x, settings).fill, depth: Math.round(depth), perp: perpOf(x) });
     });
     if (pads.length) {
       out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", fill: elStyle(pads[0], settings).fill, split: pads.length > 1,
-        extent: pads.length === 1 ? extentOf(pads[0]) : null,
         rows: pads.reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0),
         depth: Math.round(pads.reduce((t, p) => t + depthOfKid(p), 0)), perp: Math.min(...pads.map(perpOf)) });
     }
@@ -21007,48 +21015,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
-  };
-  // A dock-wall layer's LENGTH / POSITION along the wall (edit box): `{ len }` types a length (the layer keeps the end it
-  // was held from), `{ align }` pins its start / centre / end to the court's span, `{ full: true }` hands it back to
-  // tracking the court. Touches ONLY that layer — its neighbours keep their own extents.
-  const setWallLayerExtent = (b, sides, layer, change) => {
-    if (!sidesAreDock(b, sides)) {
-      // B2268801 — a rear / end wall (one wall per row, never linked): the layer's length / position along the wall.
-      const side = sides[0];
-      const kidsOf = layer.ids.map((id) => els.find((x) => x.id === id)).filter(Boolean);
-      if (kidsOf.length !== 1) return;                                   // a split parking stack keeps its own per-piece runs
-      const el = kidsOf[0];
-      const span = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
-      const want = wallExtentAfter(wallKidAlong(b, side, el), change, span);
-      pushHistory();
-      setEls((a) => {
-        const cur = a.find((x) => x.id === el.id); if (!cur) return a;
-        const isVert = side === "left" || side === "right";
-        const { cross, dimBX, dimBY } = hostAxisExtents(b, cur);
-        const l = rot2(cur.cx - b.cx, cur.cy - b.cy, -b.rot);
-        const depth = isVert ? dimBX : dimBY;
-        const box = isVert ? { lx: l.x, ly: want.alongShift, dimBX: depth, dimBY: want.run } : { lx: want.alongShift, ly: l.y, dimBX: want.run, dimBY: depth };
-        const off = rot2(box.lx, box.ly, b.rot);
-        const placed = { ...cur, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
-        // A parking field keeps its own stored run (the refit below records the pin); every other layer stores the extent keys.
-        const moved = (cur.sideParkSide || SIDE_PARK_PAD_TYPES.has(cur.type)) ? placed : applyZonePatch(placed, extentFieldsFor(want, span));
-        return relayoutWallKids(a.map((x) => (x.id === el.id ? moved : x)), b, b, { pinFrom: el.id });
-      });
-      return;
-    }
-    if (layer.index < 1) return;
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      sides.forEach((side) => {
-        const z = dockChainOnSide(next, b, side)[layer.index];
-        if (!z) return;
-        const patch = layerExtentPatch(z, change, wallExtentCtx(next, b, side));
-        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
-        next = relayoutSide(next, b, side);
-      });
-      return next;
-    });
   };
   // Rows of trailer parking (1–4) on a dock wall. Adding a row copies the last row's depth; removing drops the last.
   const setTrailerRows = (b, sides, layer, rowsRaw) => {
@@ -28700,7 +28666,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const wallOps = {
                       footEdit: !!b.footEdit,
                       depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
-                      extent: (row, layer, change) => setWallLayerExtent(b, row.sides, layer, change),
                       trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
                       trailerRowDepth: (row, layer, i, n) => setTrailerRowDepth(b, row.sides, layer, i, n),
                       trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
@@ -28721,7 +28686,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
                           </div>
                         </div>
-                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} />
+                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} kindFills={Object.fromEntries(Object.keys(KIND_LABEL).map((k) => [k, elStyle({ type: (ZONE_CATALOG[k] || {}).elType }, settings).fill]))} />
                       </Collapse>
                     );
                     // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
@@ -32318,17 +32283,75 @@ function WallBinGlyph() {
     </svg>
   );
 }
-function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
+/* WallAddControl — the end of a wall row (NEW-1, owner-approved 2026-11-03): ONE named button for the likely next layer
+   ("+ Truck court" · "+ Trailer" · "+ Buffer" · "+ Walk" …, an accent outline) joined to a small ▾ holding the other layers the
+   wall may take under their FULL names. `opts` is `orderedAddOptions` — exactly the set `addOptions` allows, the first entry the
+   button. The ▾ list floats (AnchoredMenu: a portal at the body, so it never pushes the rows down and never clips in the panel's
+   scroll area); Escape and a press away close it. No ▾ when there is only one option; nothing at all after a Road. Module scope
+   on purpose (MODULE-SCOPE-COMPONENTS): it owns its open state. Pressing the button leaves it usable — the row re-renders with
+   the next layer's name and he can keep clicking. */
+function WallAddControl({ row, opts, onAdd, fillFor }) {
+  const [open, setOpen] = useState(false);
+  const moreRef = useRef(null);
+  const close = useCallback(() => setOpen(false), []);
+  useEffect(() => {
+    if (!open) return undefined;
+    // Escape closes the ▾ and NOTHING ELSE — the planner's own Escape (deselect the building, closing this panel) must not also fire.
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
+  useEffect(() => { if (open && opts.length < 2) setOpen(false); }, [open, opts.length]);
+  if (!opts.length) return null;
+  const next = opts[0], rest = opts.slice(1);
+  const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
+  // The layer's own icon in its legend swatch — the SAME fill as the strip piece (fillFor), the one icon set (WallKindIcon).
+  const chip = (kind, w = 18, h = 16) => (
+    <span aria-hidden="true" data-testid="wall-add-swatch" data-kind={kind} style={{ flex: "none", width: w, height: h, borderRadius: 3, background: fillFor(kind), display: "grid", placeItems: "center", boxShadow: kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
+      <WallKindIcon kind={kind} size={Math.round(Math.min(w, h) * 0.72)} />
+    </span>
+  );
+  const edge = "1px solid var(--accent)";
+  const btn = { height: CONTROL_H.sm, padding: 0, border: edge, background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, whiteSpace: "nowrap" };
+  return (
+    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "stretch" }}>
+      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label.toLowerCase()} to the ${wallName}`} title={`Add ${next.label.toLowerCase()} to this wall`}
+        style={{ ...btn, display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: "0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
+        onClick={() => { setOpen(false); onAdd(next.key); }}><span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1 }}>+</span>{chip(next.key)}</button>
+      {rest.length > 0 && (
+        <button ref={moreRef} type="button" data-testid="wall-add-more" data-wall-add="1" aria-label={`More layers for the ${row.badge} wall`} title="More layers" aria-haspopup="menu" aria-expanded={open}
+          style={{ ...btn, width: 20, fontSize: FONT_SIZE.micro, borderLeft: "none", borderRadius: `0 ${RADIUS.sm}px ${RADIUS.sm}px 0` }}
+          onClick={() => setOpen((o) => !o)}>▾</button>
+      )}
+      {rest.length > 0 && (
+        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={176}>
+          <div data-testid="wall-add-menu" data-wall-add="1" role="menu" style={{ display: "flex", flexDirection: "column" }}>
+            {rest.map((o) => (
+              <button key={o.key} type="button" role="menuitem" data-testid={`wall-add-${o.key}`} data-wall-add="1"
+                aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`}
+                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: SPACE.sm }}
+                onClick={() => { setOpen(false); onAdd(o.key); }}>{chip(o.key)}<span>{o.label}</span></button>
+            ))}
+          </div>
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
   const [open, setOpen] = useState(null);          // { rowKey, id } — the one piece whose edit box is open
-  const [menu, setMenu] = useState(null);          // rowKey whose "+" catalog is open
-  const [pending, setPending] = useState(null);    // { rowKey, kind } — open the layer a just-pressed "+" created
+  const [pending, setPending] = useState(null);    // { rowKey, kind, before } — open the layer a just-pressed add created
   const [bumpOpen, setBumpOpen] = useState(false); // the bump-outs editor under the "Bump-outs" line
   const boxRef = useRef(null);
   useEffect(() => {
     if (!pending) return;
     const row = rows.find((r) => r.key === pending.rowKey);
-    const layer = row && row.layers.find((l) => l.kind === pending.kind);
-    if (layer) { setOpen({ rowKey: row.key, id: layer.id }); setPending(null); }
+    // The NEW layer is the outermost of its kind (a second trailer piece must not reopen the first one).
+    const ofKind = row ? row.layers.filter((l) => l.kind === pending.kind) : [];
+    if (row && ofKind.length > pending.before) { setOpen({ rowKey: row.key, id: ofKind[ofKind.length - 1].id }); setPending(null); return; }
+    // NEW-1 (2026-11-04) — "+ parking" on a wall that already has parking adds ROWS, not a layer: the count of parking layers
+    // does not rise, the layer's row count does. Open its box (Rows ready) once the rows rise.
+    if (row && pending.kind === "parking" && pending.beforeRows != null && ofKind[0] && (ofKind[0].rows || 0) > pending.beforeRows) { setOpen({ rowKey: row.key, id: ofKind[0].id }); setPending(null); }
   }, [pending, rows]);
   // The open piece may vanish (removed, undone): close its box rather than leave it pointing at nothing.
   useEffect(() => {
@@ -32346,7 +32369,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
     if (!open) return undefined;
     const onDown = (e) => {
       const t = e.target;
-      if (t && t.closest && (t.closest('[data-testid="wall-edit-box"]') || t.closest('[data-testid="wall-piece"]') || t.closest('[data-testid="wall-add"]'))) return;
+      if (t && t.closest && (t.closest('[data-testid="wall-edit-box"]') || t.closest('[data-testid="wall-piece"]') || t.closest('[data-wall-add]'))) return;
       commitAndClose();
     };
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(null); } };
@@ -32358,7 +32381,6 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
   const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
   const toggleBtn = (on) => ({ minWidth: 30, height: CONTROL_H.md, padding: "0 8px", fontSize: FONT_SIZE.control, fontWeight: 700, borderRadius: RADIUS.sm, border: on ? "1px solid var(--accent)" : BORDER_1, background: on ? "var(--accent)" : SURF_RAISED, color: on ? "var(--on-accent)" : "var(--text-primary)", fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap" });
   const link = { padding: 0, border: "none", background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const addCatalogBtn = { fontSize: FONT_SIZE.label, lineHeight: 1.2, padding: "3px 7px", borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: SURF_RAISED, color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
   const badgeStyle = (row) => row.role === "dock"
     ? { background: "var(--accent)", color: "var(--on-accent)", border: "1px solid var(--accent)" }
     : row.role === "rear"
@@ -32408,43 +32430,28 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
       const en = !layer.split && !ops.footEdit;
       body = head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Parking rows" testid="wall-parking-rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => { if (en) ops.parkingRows(row, n); }} />));
     } else if (layer.kind === "trailer" && !layer.wallKid) {
+      // NEW-1 (2026-11-03): one row ⇒ ONE line — Rows and Depth. Two or more ⇒ Rows on the first line, then Row 1, Row 2 … and
+      // the Aisle together on a second. (The single row's depth is still stored as row 1 — `trailerRowDepth(…, 0, …)`.)
+      const rowsField = numField("Rows", <NumInput boxed boxWidth={56} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />);
+      // The Rows field keeps ONE position in both shapes (so changing 1 ↔ 2 rows never remounts it and drops focus).
       body = (
         <>
-          {head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />))}
-          <span style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
-            {layer.rowDepths.map((d, i) => numField(`Row ${i + 1}`, <NumInput key={i} boxed unit="ft" boxWidth={92} ariaLabel={`Trailer row ${i + 1} depth`} testid={`wall-trailer-row-${i + 1}`} value={d} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, i, n)} />))}
-          </span>
+          {head(<>{rowsField}{layer.rows < 2 && numField("Depth", <NumInput boxed unit="ft" boxWidth={84} ariaLabel="Trailer depth" testid="wall-trailer-row-1" value={layer.rowDepths[0]} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, 0, n)} />)}</>)}
           {layer.rows >= 2 && (
-            <span style={{ display: "flex", justifyContent: "flex-end" }}>
-              {numField("Aisle", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Aisle between trailer rows" testid="wall-trailer-aisle" value={layer.aisle} min={0} step={1} coarse={5} onCommit={(n) => ops.trailerAisle(row, layer, n)} />)}
+            <span data-testid="wall-trailer-rowline" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.sm, rowGap: SPACE.md }}>
+              {layer.rowDepths.map((d, i) => numField(`Row ${i + 1}`, <NumInput key={i} boxed boxWidth={46} ariaLabel={`Trailer row ${i + 1} depth`} testid={`wall-trailer-row-${i + 1}`} value={d} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, i, n)} />))}
+              {numField("Aisle", <NumInput boxed boxWidth={46} ariaLabel="Aisle between trailer rows" testid="wall-trailer-aisle" value={layer.aisle} min={0} step={1} coarse={5} onCommit={(n) => ops.trailerAisle(row, layer, n)} />)}
             </span>
           )}
         </>
       );
     } else {
-      body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
+      body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={84} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
     }
-    const ex = layer.extent;
-    const alignOn = (a) => !!ex && (a < 0 ? ex.start : a > 0 ? ex.end : ex.centre);
-    const alignBtn = (a, label) => (
-      <button key={a} type="button" data-testid={`wall-align-${a < 0 ? "start" : a > 0 ? "end" : "centre"}`} aria-pressed={alignOn(a)} style={toggleBtn(alignOn(a))}
-        title={a < 0 ? "Run from the start of the wall" : a > 0 ? "Run from the end of the wall" : "Centre on the wall"} onClick={() => ops.extent(row, layer, { align: a })}>{label}</button>
-    );
-    const extentRow = ex ? (
-      <span data-testid="wall-extent" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
-        {numField("Length", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Length along the wall" testid="wall-extent-len" value={ex.len} min={1} max={ex.max} step={1} coarse={10} onCommit={(n) => ops.extent(row, layer, { len: n })} />)}
-        <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}>
-          <span style={muted}>Align</span>
-          {alignBtn(-1, "Start")}{alignBtn(0, "Centre")}{alignBtn(1, "End")}
-        </span>
-        <button type="button" data-testid="wall-extent-full" style={{ ...link, opacity: ex.full ? 0.5 : 1 }} disabled={ex.full} title={row.isDock ? "Run the full length of the truck court" : "Run the full length of the wall"} onClick={() => ops.extent(row, layer, { full: true })}>Full length</button>
-      </span>
-    ) : null;
     return (
       <div ref={boxRef} data-testid="wall-edit-box" data-kind={layer.kind} style={boxStyle}>
         <span aria-hidden="true" data-testid="wall-edit-caret" style={{ position: "absolute", top: -5, left: caretX - 5, width: 8, height: 8, transform: "rotate(45deg)", background: "var(--surface-field)", borderTop: BORDER_1, borderLeft: BORDER_1 }} />
         {body}
-        {extentRow}
       </div>
     );
   };
@@ -32478,14 +32485,14 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
         <div data-testid="bump-line">
           <span style={{ display: "flex", alignItems: "baseline", gap: SPACE.md }}>
             <span data-testid="bump-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", fontVariantNumeric: TABULAR_NUMS }}>{bumpSummary(bumpN, bumpRef.bump.along, bumpRef.bump.proj)}</span>
-            <button type="button" data-testid="bump-edit" style={link} aria-expanded={bumpOpen} onClick={() => { setOpen(null); setMenu(null); setBumpOpen((o) => !o); }}>{bumpOpen ? "done" : "edit"}</button>
+            <button type="button" data-testid="bump-edit" style={link} aria-expanded={bumpOpen} onClick={() => { setOpen(null); setBumpOpen((o) => !o); }}>{bumpOpen ? "done" : "edit"}</button>
           </span>
           {bumpOpen && bumpEditor()}
         </div>
       )}
       {rows.map((row) => {
-        const opts = addOptions(row.isDock, row.layers);
-        const menuOpen = menu === row.key;
+        const opts = orderedAddOptions(row.isDock, row.layers);
+        const fillFor = (kind) => { const have = rows.flatMap((r) => r.layers).find((l) => l.kind === kind); return have ? have.fill : (kindFills || {})[kind]; };
         const shown = openLayer && openRow && openRow.key === row.key ? openLayer : null;
         const geo = plan.rows[row.key];
         const total = geo.total;
@@ -32504,7 +32511,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
                     const sel = !!shown && shown.id === l.id;
                     return (
                       <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
-                        onClick={() => { if (sel) commitAndClose(); else { setMenu(null); setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
+                        onClick={() => { if (sel) commitAndClose(); else { setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
                         style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
                           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
                           fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
@@ -32516,20 +32523,8 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
                   })}
                 </span>
               )}
-              {opts.length > 0 && (
-                <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall"
-                  style={{ flex: "none", width: CONTROL_H.sm, height: CONTROL_H.sm, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.emphasis, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit" }}
-                  onClick={() => { setOpen(null); setBumpOpen(false); setMenu(menuOpen ? null : row.key); }}>＋</button>
-              )}
+              <WallAddControl row={row} opts={opts} fillFor={fillFor} onAdd={(key) => { setOpen(null); setBumpOpen(false); ops.add(row, key); setPending({ rowKey: row.key, kind: key, before: row.layers.filter((l) => l.kind === key).length, beforeRows: key === "parking" ? ((row.layers.find((l) => l.kind === "parking") || {}).rows || 0) : null }); }} />
             </div>
-            {menuOpen && (
-              <div data-testid="wall-add-menu" style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `${SPACE.sm}px 0 ${SPACE.sm}px ${WALL_LEFT_W + SPACE.sm}px` }}>
-                {opts.map((o) => (
-                  <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} style={addCatalogBtn}
-                    onClick={() => { setMenu(null); ops.add(row, o.key); setPending({ rowKey: row.key, kind: o.key }); }}>＋ {o.label}</button>
-                ))}
-              </div>
-            )}
             {shown && editBox(row, shown, WALL_LEFT_W + SPACE.sm + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].x + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].w / 2)}
           </div>
         );

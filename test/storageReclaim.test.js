@@ -38,8 +38,14 @@ const walkerFor = (map) => async (prefix, fn) => {
 describe("storageCensus — classification", () => {
   it("puts the version ring in its own class, not with the plans (order matters)", () => {
     expect(classifyLocalKey("planarfit:sites:history:v1").id).toBe("history");
-    expect(classifyLocalKey("planarfit:sites:v1").id).toBe("plans");
-    expect(classifyLocalKey("planarfit:sites:cloud:u1").id).toBe("plans");
+    // B2200384 — each part of the device plan store is its own class, so a full-storage report says what is taking the room
+    expect(classifyLocalKey("planarfit:sites:v1").id).toBe("legacy-plans");
+    expect(classifyLocalKey("planarfit:sites:cloud:u1").id).toBe("legacy-plans");
+    expect(classifyLocalKey("planarfit:sites:cloud:u1:led").id).toBe("legacy-plans");
+    expect(classifyLocalKey("planarfit:sites:v1:p:smu1t5vcp73y").id).toBe("plan-entries");
+    expect(classifyLocalKey("planarfit:sites:cloud:u1:p:x").id).toBe("plan-entries");
+    expect(classifyLocalKey("planarfit:sites:cloud:u1:idx").id).toBe("plan-index");
+    expect(classifyLocalKey("planarfit:sites:deltomb:v1:u1").id).toBe("plans");
     expect(classifyLocalKey("planarfit:autosave:v1").id).toBe("plans");
   });
 
@@ -60,7 +66,7 @@ describe("storageCensus — classification", () => {
 describe("storageCensus — localStorage byte census", () => {
   it("totals by class, counts keys, and names the largest keys", () => {
     const store = makeStore({
-      "planarfit:sites:cloud:u1": "p".repeat(2000),
+      "planarfit:sites:cloud:u1:p:a": "p".repeat(2000),
       "planarfit:sites:history:v1": "h".repeat(1000),
       "planyr:giscache:v1:terrain:a": "t".repeat(500),
       "planyr:giscache:v1:terrain:b": "t".repeat(300),
@@ -70,11 +76,11 @@ describe("storageCensus — localStorage byte census", () => {
     expect(c.keyCount).toBe(5);
     expect(c.capBytes).toBe(LOCAL_CAP_BYTES);
     const byId = Object.fromEntries(c.classes.map((x) => [x.id, x.bytes]));
-    expect(byId.plans).toBeGreaterThan(2000);
+    expect(byId["plan-entries"]).toBeGreaterThan(2000);
     expect(byId.history).toBeGreaterThan(1000);
     expect(byId.mapdata).toBeGreaterThan(800);
-    expect(c.classes[0].id).toBe("plans");           // sorted biggest-first
-    expect(c.largest[0].key).toBe("planarfit:sites:cloud:u1");
+    expect(c.classes[0].id).toBe("plan-entries");    // sorted biggest-first
+    expect(c.largest[0].key).toBe("planarfit:sites:cloud:u1:p:a");
     expect(c.totalBytes).toBe(c.classes.reduce((n, x) => n + x.bytes, 0));
   });
 
@@ -103,13 +109,13 @@ describe("storageCensus — the two tiers are reported SEPARATELY and never summ
   });
 
   it("telemetryFacts labels every number with its tier and reports both percentages", async () => {
-    const store = makeStore({ "planarfit:sites:v1": "p".repeat(1024 * 1024) }); // ~1 MB of plans
+    const store = makeStore({ "planarfit:sites:v1:p:a": "p".repeat(1024 * 1024) }); // ~1 MB of plans
     const idb = new Map([["giscache:v1:a", "x".repeat(2000)]]);
     const nav = { storage: { estimate: async () => ({ usage: 35_900_000, quota: 10_275_900_000 }), persisted: async () => true } };
     const f = telemetryFacts(await storageSnapshot({ store, walk: walkerFor(idb), nav }));
     expect(f.local_pct).toBeGreaterThan(15);
     expect(f.idb_pct).toBe(0);           // the measured reality: 0.3% rounds to 0
-    expect(f.local_plans).toBeGreaterThan(1_000_000);
+    expect(f["local_plan-entries"]).toBeGreaterThan(1_000_000);
     expect(f.idb_mapdata).toBeGreaterThan(2000);
     expect(f.idb_persisted).toBe(true);
     // Tier-labelled: no bare key could be mistaken for a combined figure.

@@ -34,7 +34,7 @@ export async function seedProject(page, id, name = "ZZ Model e2e (throwaway)") {
   await page.addInitScript(([siteId, rec]) => {
     const KEY = "planarfit:sites:v1";
     let cur = {};
-    try { cur = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (_) { /* start clean */ }
+    try { cur = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(KEY) || "{}") || {}; } catch (_) { /* start clean */ }
     cur[siteId] = rec;
     localStorage.setItem(KEY, JSON.stringify(cur));
   }, [id, site]);

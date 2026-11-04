@@ -100,7 +100,7 @@ try {
   // owner constraint 15: test artifacts are always cleared, and the clear is verified.
   if (SIGNED && UID) {
     try {
-      await page.evaluate(([uid, id]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }, [UID, SITE_ID]);
+      await page.evaluate(([uid, id]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }, [UID, SITE_ID]);
       // The database refuses to PERMANENTLY delete a live site (sites_block_delete_live_group) — the sanctioned path is
       // trash first, then purge. A bare delete silently matched nothing and left a row per run (found 2026-10-08).
       await page.evaluate(async (id) => {

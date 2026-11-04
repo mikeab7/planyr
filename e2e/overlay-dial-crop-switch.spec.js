@@ -59,7 +59,7 @@ const canvasRotation = (page) => page.evaluate(() => {
 });
 const boxRotation = async (page) => Number(await page.locator('[data-testid="overlay-rotation"]').inputValue());
 const storedOverlay = (page, id) => page.evaluate((id) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const direct = map[id];
   if (direct) return (direct.sheetOverlays || [])[0] || null;
   for (const k of Object.keys(map)) if (map[k] && map[k].id === id) return (map[k].sheetOverlays || [])[0] || null;

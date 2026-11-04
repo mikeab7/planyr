@@ -1,13 +1,14 @@
-/* B2268801 — rear / end wall layers: per-layer Length / Align / Full length, a new layer takes the length + position of
+/* B2268801 (NEW-1 2026-11-03: the typed Length / Align / Full length are GONE from the edit box — a layer is shortened by dragging
+ * its end handle, see wall-layer-handles.spec.js; this spec keeps what is still true) — rear / end wall layers: a new layer takes the length + position of
  * the layer before it, Trailer parking is offered on rear and end walls (and repeats), end walls are separate rows.
  * Real inspector, logged out. Measured on the saved model in the HOST's frame (rotation-proof), plus painted nodes.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/wall-extent-rear-end.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer, dragWallLayerEnd, reopenBuildingPanel } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 });
@@ -25,7 +26,7 @@ async function openProps(page, id) {
 }
 const rotate = async (page, deg) => { const f = page.getByLabel("Rotation in degrees"); await f.fill(String(deg)); await f.press("Enter"); };
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 async function boot(page, deg) {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
@@ -58,31 +59,31 @@ const openPiece = async (page, row, i) => {
 test.beforeEach(async ({ page }) => { await armPlannerHooks(page); });
 
 for (const deg of [0, 315]) {
-  test(`rot ${deg} · rear wall: Walk shortened, then Trailer ×2 and a Buffer all take its length + position; trailer parking is on offer`, async ({ page }) => {
+  test(`rot ${deg} · rear wall: Walk shortened by its handle, then Trailer ×2 and a Buffer all take its length + position; trailer parking is on offer`, async ({ page }) => {
     const b = await boot(page, deg);
     const rear = rowByRole(page, "rear");
     const side = await rear.getAttribute("data-sides");
     await addLayer(rear, "sidewalk");
     await expect(rear.getByTestId("wall-piece")).toHaveCount(1);
-    // first layer against the wall = full length, no stored extent
+    // the edit box has NO length controls
     await openPiece(page, rear, 0);
-    await expect(page.getByTestId("wall-extent-full")).toBeDisabled();
-    const full = Number(await page.getByTestId("wall-extent-len").inputValue());
-    expect(full).toBeGreaterThan(100);
-    // shorten the Walk to a third, held from the start
-    const third = Math.round(full / 3);
-    await page.getByTestId("wall-extent-len").fill(String(third)); await page.getByTestId("wall-extent-len").press("Enter");
-    await page.getByTestId("wall-align-start").click();
-    await expect(page.getByTestId("wall-extent-full")).toBeEnabled();
+    for (const id of ["wall-extent", "wall-extent-len", "wall-extent-full", "wall-align-start", "wall-align-centre", "wall-align-end"]) await expect(page.getByTestId(id)).toHaveCount(0);
     await page.keyboard.press("Escape");
+    // first layer against the wall = full length; shorten the Walk from its far end with the handle
+    const host0 = await hostOf(page);
+    const walk0 = (await kidsOn(page, b.id, side)).find((k) => k.type === "sidewalk");
+    const full = along(host0, side, walk0).len;
+    expect(full).toBeGreaterThan(100);
+    await dragWallLayerEnd(page, host0, side, walk0, "plus", 60);
+    await expect.poll(async () => { const h = await hostOf(page); const w = (await kidsOn(page, b.id, side)).find((k) => k.type === "sidewalk"); return Math.round(along(h, side, w).len); }).toBeLessThan(Math.round(full) - 30);
     const host = await hostOf(page);
     const walk = (await kidsOn(page, b.id, side)).find((k) => k.type === "sidewalk");
     const wa = along(host, side, walk);
-    expect(wa.len).toBeCloseTo(third, 0);
-    expect(wa.centre).toBeLessThan(0 - (full - third) / 2 + 1);          // pulled to the start end
+    expect(wa.centre).toBeCloseTo(-(full - wa.len) / 2, 0);              // the start end held, the dragged end pulled in
+    await reopenBuildingPanel(page, host);
 
-    // Trailer parking is offered on a rear wall — twice — then a buffer
-    await rear.getByTestId("wall-add").click();
+    // Trailer parking is offered on a rear wall — in the ▾ list, twice — then a buffer
+    await rear.getByTestId("wall-add-more").click();
     await expect(page.getByTestId("wall-add-trailer")).toBeVisible();
     await page.getByTestId("wall-add-trailer").click();
     await addLayer(rear, "trailer");
@@ -97,20 +98,22 @@ for (const deg of [0, 315]) {
       expect(a.len).toBeCloseTo(wa.len, 0); expect(a.centre).toBeCloseTo(wa.centre, 0);
     }
     expect(ts.every((t) => t.wallTrailer && Math.round(along(h2, side, t).depth) === 50)).toBe(true);   // default trailer depth, nothing copied
-    // each layer's own length is editable alone
-    await openPiece(page, rear, 2);
-    await page.getByTestId("wall-extent-len").fill("60"); await page.getByTestId("wall-extent-len").press("Enter");
-    await expect.poll(async () => { const h = await hostOf(page); const t = (await kidsOn(page, b.id, side)).filter((k) => k.type === "trailer"); return t.map((x) => Math.round(along(h, side, x).len)).sort((p, q) => p - q); }).toEqual([60, Math.round(wa.len)]);
+    // each layer's own length changes alone: drag one trailer's end
+    const tFirst = ts[0];
+    await dragWallLayerEnd(page, h2, side, tFirst, "plus", 40);
+    await expect.poll(async () => { const h = await hostOf(page); const t = (await kidsOn(page, b.id, side)).filter((k) => k.type === "trailer"); return t.map((x) => Math.round(along(h, side, x).len)).sort((p, q) => p - q); }).not.toEqual(ts.map((x) => Math.round(wa.len)));
+    const h3 = await hostOf(page);
+    const after3 = (await kidsOn(page, b.id, side)).filter((k) => k.type === "trailer").map((x) => Math.round(along(h3, side, x).len)).sort((p, q) => p - q);
+    expect(after3[0]).toBeLessThan(Math.round(wa.len) - 10); expect(after3[1]).toBe(Math.round(wa.len));
     if (process.env.SHOTS) { await page.keyboard.press("Escape"); const f = page.getByTitle(/zoom to fit|fit to/i).first(); if (await f.count()) await f.click().catch(() => {}); await page.waitForTimeout(900); }
     if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/rear-wall-rot${deg}.png` });
-    // every layer paints; one strip line; survives a reload
+    // every layer paints; survives a reload
     for (const k of await kidsOn(page, b.id, side)) await expect(page.locator(`[data-el-id="${k.id}"]`)).toHaveCount(1);
-    expect(await rear.getByTestId("wall-strip").evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(40);
     await page.reload();
     await expect.poll(async () => (await kidsOn(page, b.id, side)).length).toBe(4);
-    const h3 = await hostOf(page);
-    const after = (await kidsOn(page, b.id, side)).filter((k) => k.type === "trailer").map((x) => Math.round(along(h3, side, x).len)).sort((p, q) => p - q);
-    expect(after).toEqual([60, Math.round(wa.len)]);
+    const h4 = await hostOf(page);
+    const after = (await kidsOn(page, b.id, side)).filter((k) => k.type === "trailer").map((x) => Math.round(along(h4, side, x).len)).sort((p, q) => p - q);
+    expect(after).toEqual(after3);
   });
 }
 
@@ -120,17 +123,19 @@ test("each end wall is separate: shortening one end's layer leaves the other end
   await expect(ends).toHaveCount(2);
   const sides = [await ends.nth(0).getAttribute("data-sides"), await ends.nth(1).getAttribute("data-sides")];
   await addLayer(ends.nth(0), "buffer"); await addLayer(ends.nth(1), "buffer");
-  await openPiece(page, ends.nth(0), 0);
-  const full = Number(await page.getByTestId("wall-extent-len").inputValue());
-  await page.getByTestId("wall-extent-len").fill(String(Math.round(full / 2))); await page.getByTestId("wall-extent-len").press("Enter");
-  await page.getByTestId("wall-align-end").click();
-  await page.keyboard.press("Escape");
-  await addLayer(ends.nth(0), "trailer");                                // inherits the half length at the end
+  const h0 = await hostOf(page);
+  const buf00 = (await kidsOn(page, b.id, sides[0])).find((k) => k.type === "landscape");
+  const full = along(h0, sides[0], buf00).len;
+  await dragWallLayerEnd(page, h0, sides[0], buf00, "minus", 60);          // pull the START end in; the END stays
+  await expect.poll(async () => { const h = await hostOf(page); const k = (await kidsOn(page, b.id, sides[0])).find((x) => x.type === "landscape"); return Math.round(along(h, sides[0], k).len); }).toBeLessThan(Math.round(full) - 30);
+  await reopenBuildingPanel(page, await hostOf(page));
+  await addLayer(ends.nth(0), "trailer");                                // inherits the shorter length, held at the end
   const h = await hostOf(page);
   const k0 = await kidsOn(page, b.id, sides[0]), k1 = await kidsOn(page, b.id, sides[1]);
   const buf0 = k0.find((k) => k.type === "landscape"), tr0 = k0.find((k) => k.type === "trailer"), buf1 = k1.find((k) => k.type === "landscape");
   const a0 = along(h, sides[0], buf0), at = along(h, sides[0], tr0), a1 = along(h, sides[1], buf1);
-  expect(a0.len).toBeCloseTo(Math.round(full / 2), 0);
+  expect(a0.len).toBeLessThan(full - 30);
+  expect(a0.centre + a0.len / 2).toBeCloseTo(full / 2, 0);                // the dragged-from end moved; the other end stayed on the wall's end
   expect(at.len).toBeCloseTo(a0.len, 0); expect(at.centre).toBeCloseTo(a0.centre, 0);
   expect(a1.len).toBeGreaterThan(a0.len + 10);                          // the other end is untouched (still the full wall)
   // a bump-out lengthens an end wall: the layers re-derive without losing their extents

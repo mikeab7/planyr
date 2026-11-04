@@ -1,45 +1,51 @@
-/* planStore.js — WHERE THE DEVICE COPY OF EVERY PLAN LIVES (B2165120).
+/* planStore.js — WHERE THE DEVICE COPY OF EVERY PLAN LIVES (B2165120; legacy entry retired by B2200384).
  *
- * ⛔ THE PROBLEM. The device store was ONE localStorage entry (`planarfit:sites:v1`, or `planarfit:sites:cloud:<uid>` when signed
+ * ⛔ THE PROBLEM. The device store used to be ONE localStorage entry (`planarfit:sites:v1`, or `planarfit:sites:cloud:<uid>` when signed
  * in) holding every plan on the device. An edit to one plan therefore rewrote ALL of them: the native `setItem` of a 3-4 MB blob
  * (30-60 ms, with ~290 ms flush spikes) was the floor under every paste / move / resize, and it grew with the LIBRARY, not with
- * the plan being edited. B217540 (x2, x3) removed every multiplier around that write; this removes the write.
+ * the plan being edited. B217540 (x2, x3) removed every multiplier around that write; B2165120 removed the write; B2200384 removed the
+ * whole-library copy that B2165120 kept beside the new entries.
  *
  * THE LAYOUT, per store key `K` (K = the old whole-library key, unchanged):
- *   K                one entry per plan  →  K:p:<planId>   (JSON of exactly the record the old blob held under that id)
- *   K:idx            a ~60-byte INDEX: { v:1, ok:true, gen, stale, mig }  — the layout marker, a unique change stamp (every write
- *                    gets a new `gen`, so a reader can tell "nothing changed" from ONE tiny read), and `stale` = "the legacy
- *                    entry K is behind the per-plan entries". The per-plan ENTRIES are the truth for which plans exist (enumerated
- *                    by key scan) — the index never lists ids, so it can never disagree with them.
- *   K:led            the LEGACY LEDGER { sig, len, ids, at }: what K held the last time this code and K agreed — its signature and
- *                    the ids in it. Written only at migration / mirror time, never per edit.
- *   K (itself)       KEPT, never deleted here. It is (a) the migration's untouched source, (b) the ROLLBACK COPY — an older build
- *                    reads only this — and (c) how a not-yet-reloaded older tab keeps working. See "THE MIRROR".
+ *   K:p:<planId>     one entry per plan  (JSON of exactly the record the old blob held under that id) — THE TRUTH for which plans exist
+ *                    (enumerated by key scan; the index never lists ids, so it can never disagree with them).
+ *   K:idx            a ~100-byte INDEX: { v:1, ok:true, gen, mig?, migrating?, del?, legacyRetired? } — the layout marker, a unique change
+ *                    stamp (every write gets a new `gen`, so a reader can tell "nothing changed" from ONE tiny read), and the two
+ *                    migration facts below.
+ *   K (itself)       the LEGACY whole-library entry. It exists only (a) on a device that has not yet been moved to per-plan entries, and
+ *                    (b) transiently, while a migration is in flight (the plans not yet moved), and (c) if an OLDER build's tab that was
+ *                    still open writes it after retirement. This build NEVER writes it as a mirror — a device never again writes the
+ *                    whole library. `K:led` (the old mirror's ledger) is deleted wherever it is found.
  *
- * MIGRATION IS COPY-THEN-VERIFY, NEVER MOVE. On the first read of a store with no index: every plan is copied into its own entry,
- * every entry is read back and compared with the source, and ONLY THEN is the index written (the index is the switch — before it
- * exists everything still reads K). Anything wrong — a quota error, a malformed record, a failed readback — and the entries this
- * attempt created are removed, no index is written, and the session keeps reading K exactly as before (reported as
- * `plan-store-migration-aborted`). A crash mid-way leaves entries without an index; the next load re-runs the migration, which
- * never deletes an entry it finds (it keeps the newer of entry/source per plan).
+ * MIGRATION IS PLAN BY PLAN (B2200384). The old all-at-once copy needed the library's size AGAIN in free localStorage next to the kept
+ * original, which a device near the ~5.2M-character cap does not have (the owner's: refused on every load; two team members' mirrors
+ * failing every load). Now, for each plan: write its entry → read it back and compare → only then drop it from the legacy entry (a
+ * rewrite of K with a SMALLER string needs no extra room). The peak extra room is ONE plan's entry. Roomy devices skip the blob rewrites
+ * and just delete K once every entry has been read back. The index is written FIRST in a `migrating` state, so a crash at any point
+ * resumes: a plan present in both places = the entry wins (it was verified, and may have been edited since); a plan only in the legacy
+ * entry = still to move. `readShared` during a migration is entries ∪ the plans still in K. `idx.del` records plans deleted while
+ * migrating, so a delete is never undone by the plan still sitting in K.
  *
- * THE MIRROR (rollback + older tabs). After a per-plan write, K is brought up to date OFF the edit path: on a quiet period, on
- * `pagehide` / tab-hidden, and at the latest every MIRROR_MAX_WAIT_MS — one coalesced write of the already-serialised entries (no
- * re-stringify), so an edit costs one small entry write plus a ~60-byte index write, flat in library size. COST OF ROLLBACK, stated:
- * the blob write has not gone away, it has moved from "every edit" to "once per quiet period / tab hide". A build reverted to the old
- * code sees everything up to the last mirror; an edit made in the last few seconds of a tab that was killed (not closed) is still in
- * the per-plan entries but not yet in K, and is picked up when the new code next loads. `index.stale` records that debt across a crash.
+ * RETIRING THE LEGACY ENTRY on a device the previous build had already split (B2165120 kept K as a mirror): on load, every per-plan
+ * entry is read back from disk and counted against the plans K holds — every plan in K must exist as an entry or be a known-deleted id
+ * (`idx.del`, or a tombstone via the injected `isDeleted`). A plan only K holds and nobody deleted is RECOVERED into an entry (never
+ * dropped); a plan K holds more recently than its entry is merged (`mergeSiteContent`, union). Only then are K and K:led removed and
+ * `idx.legacyRetired` written (`plan-store-legacy-retired {plans, freedChars}`). A device whose read-back fails or whose count still
+ * disagrees keeps K and says why (`plan-store-legacy-kept`). Nothing here ever DELETES an entry because K lacks it: the old ledger
+ * inference ("K held it before, K lacks it now, so an older tab deleted it") removed live plans on devices whose mirror write was
+ * failing — measured on production client_errors, 2026-11 — and is gone.
  *
- * MIXED BUILDS (the rule, in one paragraph). An older-build tab keeps writing K whole. We detect it by K's signature no longer
- * matching `led.sig` (on load, on focus / visibility, on a `storage` event for K, and before each mirror). Then, PER PLAN: a plan in
- * K that we never had and that was not in the ledger → ADOPTED (an older tab created it); a plan we have whose `updatedAt` is
- * strictly older than K's → MERGED with the injected `mergeSiteContent` (union of content, newest scalars — nothing of ours is
- * dropped); equal or newer here → KEPT; a plan the ledger says K held but K no longer does → the older tab DELETED it, so we delete it;
- * a plan the ledger never listed that K lacks → ours, not yet mirrored, KEPT. Then the mirror rewrites K from the merged result.
- * Delete wins over an edit made on the other side after it (the product's standing delete-vs-edit rule).
+ * ONE-WAY RE-ADOPT (the mixed-build safety net, kept for one release). If K REAPPEARS on a device whose index says `legacyRetired` (an old
+ * tab that was open during the deploy wrote it), each plan in it is folded in exactly as above (adopt what is new and not tombstoned, merge
+ * what both edited, keep what this build has) and K is deleted again (`plan-store-legacy-readopted`). It is its own follow-up to remove.
  *
- * If a store cannot be migrated (quota: the copy needs room next to the kept original) the store stays in "blob" mode for that page
- * load — the OLD behaviour, byte for byte — and the failure is reported; nothing is lost and nothing is half-switched.
+ * ⛔ A REVERT TO AN OLDER BUILD IS NO LONGER SUPPORTED once a device has retired its entry: an older build reads only K, which is gone.
+ * (B2165120 promised the opposite; B2200384 deliberately ends that one rule, with the owner's go, 2026-11-03.)
+ *
+ * NO KILL SWITCH. The `planarfit:planStore:layout = "blob"` switch is deleted: with the legacy entry retired there is no old layout to
+ * fall back to, and "rebuild the whole blob from entries" is exactly the whole-library write this item exists to end. The un-split
+ * ("blob") code path remains only as the state of a store whose index this code does not understand, and as the harness red-proof arm
+ * (`globalThis.__PLANYR_PLANSTORE_UNSPLIT = true`, set by test code only).
  *
  * ⛔ A LEAF. Imports only the telemetry reporter. The site model's persist/slim/merge rules are INJECTED by storage.js (`configure`),
  * so the light project-list reader can use this without pulling in the geometry engine.
@@ -68,19 +74,17 @@ function lsInventory(top = 8) {
   rows.sort((a, b) => b[1] - a[1]);
   return { keys: rows.length, top: rows.slice(0, top).map(([k, n]) => k + "=" + n).join(" · ") };
 }
-export const MIRROR_QUIET_MS = 15000;      // mirror once edits have been quiet this long…
-export const MIRROR_MAX_WAIT_MS = 120000;  // …and never let the older copy fall further behind than this
 const IDX = ":idx", LED = ":led", PFX = ":p:";
-export const LAYOUT_SWITCH = "planarfit:planStore:layout";   // = "blob" → run the un-split layout (kill switch / harness A-B lever)
 
-const cfg = { persistForm: (x) => x, slim: (x) => x, merge: null, onForeignMerge: null, makeRoom: null };
+const cfg = { persistForm: (x) => x, slim: (x) => x, merge: null, onForeignMerge: null, makeRoom: null, isDeleted: null };
 /** storage.js injects the model-aware pieces: `persistForm(rec)` (drop IndexedDB-backed rasters), `slim(rec)` (the over-quota
- *  retry: shed every inline raster), `merge(mine, theirs)` (mergeSiteContent), `onForeignMerge()` (announce on the sites channel) and
+ *  retry: shed every inline raster), `merge(mine, theirs)` (mergeSiteContent), `onForeignMerge()` (announce on the sites channel),
+ *  `isDeleted(base, id)` (a durable tombstone says this plan was deleted — a legacy entry may not resurrect it) and
  *  `makeRoom({ base, reason, shortBy })` (B2200385 — async: free localStorage that is PROVEN safe to free, resolve `{ freedChars }`; called at
- *  most once per store per page load when the split is refused for room, after which the split is retried). */
+ *  most once per store per page load when the move cannot proceed for room, after which it is resumed). */
 export function configure(c) {
   Object.assign(cfg, c || {});
-  if (cfg.merge) for (const [base, s] of states) if (s.reconcilePending) { s.reconcilePending = false; reconcileLegacy(base); }
+  if (cfg.merge) for (const [base, s] of states) if (s.legacyPending) { s.legacyPending = false; if (s.mode === "plan" && s.hasIdx) legacyWatch(base, s); }
 }
 
 const lsNow = () => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; } };
@@ -92,17 +96,6 @@ const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const uniq = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const pkey = (base, id) => base + PFX + id;
 
-/** A 53-bit string signature + length (cyrb53). Used only to tell "is the legacy entry still the one we wrote"; ~10 ms at 4 MB, so
- *  it runs on load / focus / a storage event / before a mirror — never on an edit. */
-export function sigOf(str) {
-  const n = str.length;
-  let h1 = 0xdeadbeef ^ n, h2 = 0x41c6ce57 ^ n;
-  for (let i = 0; i < n; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + ":" + n;
-}
-
 /* ---- per-store state, reset whenever the underlying localStorage instance changes (test isolation) ---- */
 const states = new Map();
 function stateOf(base) {
@@ -110,7 +103,7 @@ function stateOf(base) {
   let s = states.get(base);
   if (!s || s.ls !== l) {
     s = { ls: l, base, mode: null, hasIdx: false, booted: false, stamp: null, plans: new Map(), shared: null,
-      blobFails: 0, dirtySince: 0, quietTimer: null, maxTimer: null };
+      blobFails: 0, migrating: false, rest: null, migStuck: false, migTimer: null, legacyKept: false, folding: false };
     states.set(base, s);
     hookPageEvents();
   }
@@ -124,103 +117,172 @@ function listEntryIds(base) {
   return out;
 }
 
-/* ================================ migration (copy → verify → switch) ================================ */
-function migrate(base, s, legacyRaw) {
+/* ================================ migration (plan by plan; the legacy entry shrinks as entries are verified) ================================ */
+const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
+/** Parse the legacy entry into { raw, objs, frags } — `frags` are each plan's own JSON text (what its entry will hold, byte for byte). */
+function parseLegacy(raw) {
+  let src; try { src = JSON.parse(raw); } catch (_) { return { err: "unreadable" }; }
+  if (!isObj(src)) return { err: "unreadable" };
+  const objs = new Map(), frags = new Map();
+  for (const id of Object.keys(src)) { if (!isObj(src[id])) return { err: "malformed", id }; objs.set(id, src[id]); frags.set(id, JSON.stringify(src[id])); }
+  return { raw, objs, frags };
+}
+const readIdx = (base) => { const raw = get(idxKeyOf(base)); if (!raw) return null; try { const o = JSON.parse(raw); return o && o.v === 1 && o.ok ? o : null; } catch (_) { return null; } };
+const roomy = (legacyLen, plans, base, used0) => { const cap = Math.min(lsCapChars(), learnedCapHi); return cap === Infinity || used0 + legacyLen + plans * (base.length + 12) + 600 + HEADROOM_AFTER_CHARS <= cap; };
+
+/** First sight of a legacy entry with no index: validate it, write the index in its `migrating` state (the switch), then move the plans. */
+function beginMigration(base, s, legacyRaw) {
   const t0 = Date.now();
-  let src;
-  try { src = JSON.parse(legacyRaw); } catch (_) { src = undefined; }
-  if (!isObj(src)) { reportClientEvent("plan-store-migration-aborted", "the legacy store could not be read as a plan map — staying on it", { reason: "unreadable", len: legacyRaw.length }); return false; }
-  const ids = Object.keys(src);
-  for (const id of ids) if (!isObj(src[id])) { reportClientEvent("plan-store-migration-aborted", "a stored plan is not an object — staying on the legacy store", { reason: "malformed", id }); return false; }
-  /* HEADROOM FIRST. The copy sits NEXT TO the kept original, so it needs roughly the library's size again. The browser's per-origin cap is ~5.2M
-   * characters (measured), and a device that is already most of the way there (the owner's was 3.88 MB used) would "fit" the copy by a hair and then
-   * be one edit from "storage full". So the split is refused, before writing anything, unless it leaves real room afterwards. This is NOT an error:
-   * the store keeps the old layout, unchanged, and the numbers are reported so the next step is data-driven. */
-  const cap = Math.min(lsCapChars(), learnedCapHi);
-  const used0 = lsUsedChars(), need = legacyRaw.length + ids.length * (base.length + 12) + 600;
-  const inv = () => lsInventory();
-  if (cap !== Infinity && used0 + need + HEADROOM_AFTER_CHARS > cap) {
-    const shortBy = used0 + need + HEADROOM_AFTER_CHARS - cap;
-    s.lastAbort = { reason: "headroom", shortBy };
-    reportClientEvent("plan-store-migration-aborted", "not enough free room beside the original to split the store safely — staying on the original (nothing was changed)", { reason: "headroom", plans: ids.length, legacyLen: legacyRaw.length, usedChars: used0, needChars: need, capChars: cap, shortBy, ...(learnedCapHi !== Infinity ? { learnedCapHi } : {}), afterRoom: !!s.roomDone, ...inv() });
-    return false;
+  const p = parseLegacy(legacyRaw);
+  if (p.err) { s.lastAbort = { reason: p.err, shortBy: 0 }; reportClientEvent("plan-store-migration-aborted", p.err === "malformed" ? "a stored plan is not an object — staying on the legacy store" : "the legacy store could not be read as a plan map — staying on it", { reason: p.err, len: legacyRaw.length, ...(p.id ? { id: p.id } : {}) }); return false; }
+  const used0 = lsUsedChars();
+  /* An entry left by an interrupted B2165120 attempt that is OLDER than the legacy record is a stale partial copy: remove it so the move re-copies the newer one.
+   * (Never one that is newer or equal — that is the plan as last edited.) */
+  for (const id of listEntryIds(base)) {
+    const o = p.objs.get(id); if (!o) continue;
+    try { const e = JSON.parse(get(pkey(base, id))); if (isObj(e) && toMs(o.updatedAt) > toMs(e.updatedAt)) del(pkey(base, id)); } catch (_) { del(pkey(base, id)); }
   }
-  const created = [];               // keys THIS attempt created (so an abort removes only those)
-  const want = new Map();           // id → the text the entry must hold when we are done
-  let tried = 0;                    // size of the write in flight — if it is refused, the cap lies between "used so far" and "used so far + tried"
-  const put = (k, v) => { tried = k.length + v.length; set(k, v); };
-  const abort = (reason, extra) => {
-    for (const k of created) del(k);
-    s.lastAbort = { reason, shortBy: (extra && extra.shortBy) || 0, structural: !!(extra && extra.structural) };
-    reportClientEvent("plan-store-migration-aborted", "per-plan copy did not complete — staying on the legacy store (nothing was changed or lost)", { reason, plans: ids.length, legacyLen: legacyRaw.length, afterRoom: !!s.roomDone, ...(extra || {}) });
-    return false;
-  };
-  try {
-    for (const id of ids) {
-      const frag = JSON.stringify(src[id]);
-      const k = pkey(base, id);
-      const prior = get(k);
-      let text = frag;
-      if (prior != null && prior !== frag) {                    // an entry left by an interrupted attempt / another tab: keep the NEWER, never destroy
-        try { if (toMs(JSON.parse(prior).updatedAt) > toMs(src[id].updatedAt)) text = prior; } catch (_) {}
-      }
-      if (prior !== text) { put(k, text); if (prior == null) created.push(k); }
-      want.set(id, text);
-    }
-    for (const [id, text] of want) {                            // READ EVERY ONE BACK and compare with the source
-      const back = get(pkey(base, id));
-      if (back !== text) return abort("readback-mismatch", { id });
-      if (text === JSON.stringify(src[id]) && JSON.stringify(JSON.parse(back)) !== JSON.stringify(src[id])) return abort("roundtrip-mismatch", { id });
-    }
-    const led = { sig: sigOf(legacyRaw), len: legacyRaw.length, ids, at: Date.now() };
-    put(base + LED, JSON.stringify(led)); created.push(base + LED);
-    const idx = { v: 1, ok: true, gen: uniq(), stale: false, mig: { at: Date.now(), count: ids.length, len: legacyRaw.length, ms: Date.now() - t0 } };
-    put(idxKeyOf(base), JSON.stringify(idx));
-    if (get(idxKeyOf(base)) !== JSON.stringify(idx)) { del(idxKeyOf(base)); return abort("index-readback"); }
-  } catch (e) {
-    const isQuota = !!e && /quota/i.test(String(e.name || e.message));
-    if (isQuota) {
-      /* B2200385 — MEASURE the refusal before the cleanup changes the numbers. `usedAtFail` is exactly what the store held when this write was
-       * refused; the real cap is in (usedAtFail, usedAtFail + tried]. `structural` = even an EMPTY origin could not hold the original and a full
-       * copy — no amount of freeing other keys can help, only moving the original (a different decision, B2200384). */
-      const usedAtFail = lsUsedChars(), capHi = usedAtFail + tried;
-      learnedCapHi = Math.min(learnedCapHi, capHi);
-      const structural = 2 * legacyRaw.length + 600 > capHi;
-      const shortBy = used0 + need + HEADROOM_AFTER_CHARS - capHi;   // AT LEAST this short (capHi is the upper end of the bracket)
-      del(idxKeyOf(base));
-      return abort("quota", { error: String((e && e.message) || e).slice(0, 120), usedChars: used0, needChars: need, capChars: lsCapChars(), usedAtFail, capHiChars: capHi, shortByAtLeast: shortBy, structural, shortBy: Math.max(0, shortBy), ...inv() });
-    }
+  const idx = { v: 1, ok: true, gen: uniq(), migrating: { at: Date.now(), total: p.objs.size, len: legacyRaw.length, used0, roomy: roomy(legacyRaw.length, p.objs.size, base, used0) } };
+  try { set(idxKeyOf(base), JSON.stringify(idx)); if (get(idxKeyOf(base)) !== JSON.stringify(idx)) throw new Error("index read-back differs"); }
+  catch (e) {
     del(idxKeyOf(base));
-    return abort("error", { error: String((e && e.message) || e).slice(0, 120) });
+    const isQuota = !!e && /quota/i.test(String(e.name || e.message));
+    s.lastAbort = { reason: isQuota ? "quota" : "error", shortBy: 1000 };
+    reportClientEvent("plan-store-migration-aborted", "the per-plan index could not be written — staying on the legacy store (nothing was changed or lost)", { reason: s.lastAbort.reason, plans: p.objs.size, legacyLen: legacyRaw.length, usedChars: used0, capChars: lsCapChars(), error: String((e && e.message) || e).slice(0, 120), afterRoom: !!s.roomDone, ...lsInventory() });
+    return false;
   }
-  reportClientEvent("plan-store-migrated", "device store split into one entry per plan (the original entry was kept untouched)", { plans: ids.length, legacyLen: legacyRaw.length, ms: Date.now() - t0, usedChars: used0, afterRoom: !!s.roomDone, ...(s.roomFreed ? { freedChars: s.roomFreed } : {}) });
+  s.mode = "plan"; s.hasIdx = true; s.booted = true; s.plans = new Map(); s.stamp = null; s.shared = null; s.migrating = true; s.rest = p; s.migT0 = t0;
+  runMigration(base, s, idx.migrating.roomy ? Infinity : 150);
   return true;
+}
+
+function scheduleMigrationStep(base, s) {
+  if (s.migTimer || s.migStuck) return;
+  const go = () => { s.migTimer = null; if (states.get(base) === s && s.ls === lsNow() && s.migrating) runMigration(base, s, 150); };
+  try { if (typeof requestIdleCallback === "function") { s.migTimer = requestIdleCallback(go, { timeout: 1500 }); return; } } catch (_) {}
+  s.migTimer = setTimeout(go, 0);
+}
+
+/** Rewrite the legacy entry WITHOUT the plans already moved (a SMALLER string: it needs no extra room). A failure here is harmless — the entries win. */
+function shrinkLegacy(base, s, moved) {
+  const rest = s.rest; if (!rest) return false;
+  const keep = [...rest.objs.keys()].filter((id) => !moved.has(id));
+  const text = "{" + keep.map((id) => JSON.stringify(id) + ":" + rest.frags.get(id)).join(",") + "}";
+  try {
+    set(base, text);
+    if (get(base) !== text) return false;
+  } catch (_) { return false; }
+  for (const id of moved) { rest.objs.delete(id); rest.frags.delete(id); }
+  rest.raw = text; moved.clear();
+  return true;
+}
+
+/** Move plans from the legacy entry into entries until done or the time budget is spent. Safe to call again at any time (a reload, another tab). */
+function runMigration(base, s, budgetMs) {
+  if (s.migrunning) return { done: false };
+  s.migrunning = true;
+  const t0 = now();
+  try {
+    const idx0 = readIdx(base);
+    if (!idx0 || !idx0.migrating) { s.migrating = false; return { done: true }; }
+    const legacyRaw = get(base);
+    if (legacyRaw == null) return finishMigration(base, s, idx0);
+    if (!s.rest || s.rest.raw !== legacyRaw) {
+      const p = parseLegacy(legacyRaw);
+      if (p.err) { s.migStuck = true; reportClientEvent("plan-store-migration-aborted", "the legacy entry became unreadable mid-migration — the moved plans are safe in their entries; the rest stay where they are", { reason: p.err, moved: listEntryIds(base).length }); return { done: false, stuck: true }; }
+      s.rest = p;
+    }
+    const rest = s.rest, gone = new Set(idx0.del || []);
+    const moved = new Set();      // moved (entry verified) but still in the legacy text
+    /* A plan that already has an entry (moved before a reload, or edited since the move began) is a duplicate in the legacy text — the entry wins — so give that
+     * room back FIRST: on a tight device the room those duplicates hold is exactly what the next plan's entry needs. */
+    for (const id of rest.objs.keys()) if (get(pkey(base, id)) != null) moved.add(id);
+    if (moved.size) shrinkLegacy(base, s, moved);
+    let tried = 0;
+    const put = (k, v) => { tried = k.length + v.length; set(k, v); };
+    for (const id of [...rest.objs.keys()]) {
+      if (gone.has(id)) { moved.add(id); continue; }                          // deleted while migrating — drop it from the legacy text, never copy it
+      const frag = rest.frags.get(id), k = pkey(base, id);
+      if (get(k) == null) {
+        const cap = Math.min(lsCapChars(), learnedCapHi);
+        if (cap !== Infinity && moved.size && cap - lsUsedChars() < k.length + frag.length + 400) shrinkLegacy(base, s, moved);   // make the room BEFORE asking for it
+        try { put(k, frag); }
+        catch (e) {
+          if (!/quota/i.test(String((e && (e.name || e.message)) || ""))) return stuck(base, s, "error", e, rest, moved, tried);
+          if (!(moved.size && shrinkLegacy(base, s, moved))) return stuck(base, s, "quota", e, rest, moved, tried);
+          try { put(k, frag); } catch (e2) { return stuck(base, s, "quota", e2, rest, moved, tried); }
+        }
+        const back = get(k);
+        if (back !== frag) { del(k); return stuck(base, s, "readback-mismatch", null, rest, moved, tried, id); }
+        let rt; try { rt = JSON.stringify(JSON.parse(back)); } catch (_) { rt = null; }
+        if (rt !== frag) { del(k); return stuck(base, s, "roundtrip-mismatch", null, rest, moved, tried, id); }
+      }
+      moved.add(id);
+      if (now() - t0 > budgetMs && moved.size < rest.objs.size) {
+        if (moved.size) shrinkLegacy(base, s, moved);
+        touchIdx(base, s, {}); s.stamp = null; s.shared = null;
+        scheduleMigrationStep(base, s);
+        return { done: false };
+      }
+    }
+    return finishMigration(base, s, readIdx(base) || idx0);                    // K is deleted outright by the finish — no last rewrite
+  } finally { s.migrunning = false; }
+}
+
+function stuck(base, s, reason, e, rest, moved, tried, id) {
+  const isQuota = reason === "quota";
+  const usedAtFail = lsUsedChars();
+  if (isQuota) learnedCapHi = Math.min(learnedCapHi, usedAtFail + tried);
+  if (moved.size) shrinkLegacy(base, s, moved);
+  s.migStuck = true; s.lastAbort = { reason, shortBy: tried + 400 };
+  s.stamp = null; s.shared = null;
+  reportClientEvent("plan-store-migration-aborted", "the per-plan move could not finish — every plan is still readable (moved ones from their entries, the rest from the legacy entry); it resumes on the next load", { reason, remaining: rest.objs.size, entries: listEntryIds(base).length, needChars: tried, usedChars: usedAtFail, capChars: lsCapChars(), ...(isQuota ? { usedAtFail, capHiChars: usedAtFail + tried } : {}), ...(e ? { error: String((e && e.message) || e).slice(0, 120) } : {}), ...(id ? { id } : {}), afterRoom: !!s.roomDone, ...lsInventory() });
+  askForRoom(base, s);
+  return { done: false, stuck: true };
+}
+
+/** Every plan has a verified entry: read ALL of them back, count them, then (and only then) mark the store retired and delete the legacy entry. */
+function finishMigration(base, s, idx) {
+  const rest = s.rest || { objs: new Map() };
+  const gone = new Set(idx.del || []);
+  const expect = new Set(listEntryIds(base));
+  for (const id of rest.objs.keys()) if (!gone.has(id)) expect.add(id);
+  for (const id of expect) {
+    const raw = get(pkey(base, id)); let ok = false;
+    if (raw != null) { try { ok = isObj(JSON.parse(raw)); } catch (_) { ok = false; } }
+    if (!ok) { s.migStuck = true; reportClientEvent("plan-store-migration-aborted", "a moved plan could not be read back — the legacy entry is kept", { reason: "final-readback", id, plans: expect.size }); return { done: false, stuck: true }; }
+  }
+  const legacyRaw = get(base), ledRaw = get(base + LED);
+  const m = idx.migrating || {};
+  /* What the device gets back is the ORIGINAL entry (the shrinks along the way already returned part of it): report the whole of it. */
+  const freedChars = (legacyRaw != null || m.len ? base.length + Math.max(m.len || 0, legacyRaw ? legacyRaw.length : 0) : 0) + (ledRaw ? base.length + LED.length + ledRaw.length : 0);
+  const next = { ...idx }; delete next.migrating; delete next.del; delete next.stale;
+  next.v = 1; next.ok = true; next.gen = uniq(); next.legacyRetired = new Date().toISOString();
+  next.mig = { at: m.at || Date.now(), count: expect.size, len: m.len || 0, ms: Date.now() - (s.migT0 || Date.now()) };
+  try { set(idxKeyOf(base), JSON.stringify(next)); } catch (e) { s.migStuck = true; reportClientEvent("plan-store-migration-aborted", "the index could not be finalised — the legacy entry is kept", { reason: "index-final", error: String((e && e.message) || e).slice(0, 100) }); return { done: false, stuck: true }; }
+  del(base); del(base + LED);
+  s.migrating = false; s.rest = null; s.stamp = null; s.shared = null; s.plans = new Map();
+  reportClientEvent("plan-store-migrated", "device store moved to one entry per plan (the whole-library entry was removed after every plan was read back)", { plans: expect.size, legacyLen: m.len || 0, ms: next.mig.ms, usedChars: m.used0 || 0, incremental: !m.roomy, afterRoom: !!s.roomDone, ...(s.roomFreed ? { freedChars: s.roomFreed } : {}) });
+  reportClientEvent("plan-store-legacy-retired", "the whole-library device entry was removed", { plans: expect.size, freedChars, via: "migration" });
+  return { done: true };
 }
 
 /** Decide (once per page load, or until an index exists) which layout this store is in; migrate when needed. */
 function ensureMode(base) {
   const s = stateOf(base);
   if (s.mode === "blob") return s;
-  if (s.mode === null && get(LAYOUT_SWITCH) === "blob") {
-    /* THE KILL SWITCH (`localStorage["planarfit:planStore:layout"] = "blob"`): run the pre-B2165120 layout without a redeploy. It is also the
-     * harness's A/B lever ("same build, only the change toggled"). Honouring it never leaves the legacy entry BEHIND the per-plan entries:
-     * if a split store exists, the legacy entry is refreshed first, so the old layout opens on everything. Turning it off again folds
-     * whatever the blob layout wrote back in (the mixed-build rule). */
-    const idxRaw = get(idxKeyOf(base)); let idx = null; try { idx = idxRaw ? JSON.parse(idxRaw) : null; } catch (_) {}
-    if (idx && idx.v === 1 && idx.ok) { s.mode = "plan"; s.hasIdx = true; flushMirror(base); }
-    s.mode = "blob"; s.hasIdx = false;
-    return s;
-  }
-  if (s.mode === "plan" && s.hasIdx) {
-    if (mirrorPolicy() === "sync") reconcileLegacy(base);        // behaviour suites plant data in the raw legacy key mid-test: notice it (cheap — pointer-equal to what we wrote)
-    return s;
-  }
+  if (s.mode === null && typeof globalThis !== "undefined" && globalThis.__PLANYR_PLANSTORE_UNSPLIT === true) { s.mode = "blob"; s.hasIdx = false; return s; }   // harness red-proof arm only
+  if (s.mode === "plan" && s.hasIdx) { legacyWatch(base, s); return s; }
   const idxRaw = get(idxKeyOf(base));
   if (idxRaw) {
     let idx = null; try { idx = JSON.parse(idxRaw); } catch (_) {}
     if (idx && idx.v === 1 && idx.ok) {
-      s.mode = "plan"; s.hasIdx = true;
-      if (!s.booted) { s.booted = true; reconcileLegacy(base); if (idx.stale) scheduleMirror(base); }
+      s.mode = "plan"; s.hasIdx = true; s.migrating = !!idx.migrating;
+      if (!s.booted) {
+        s.booted = true;
+        if (idx.migrating) runMigration(base, s, idx.migrating.roomy ? Infinity : 150);
+        else legacyWatch(base, s);
+      }
       return s;
     }
     reportClientEvent("plan-store-index-unrecognised", "the per-plan index is not a version this code understands — reading the legacy store", { idx: idxRaw.slice(0, 80) });
@@ -229,38 +291,44 @@ function ensureMode(base) {
   const legacy = get(base);
   if (legacy == null && !listEntryIds(base).length) { s.mode = "plan"; s.hasIdx = false; return s; }   // nothing stored yet
   if (legacy == null) {                                          // entries but no legacy and no index: adopt them as the store
-    s.mode = "plan"; touchIdx(base, s, { stale: true }); s.hasIdx = !!get(idxKeyOf(base)); return s;
+    s.mode = "plan"; touchIdx(base, s, {}); s.hasIdx = !!get(idxKeyOf(base)); return s;
   }
-  if (migrate(base, s, legacy)) { s.mode = "plan"; s.hasIdx = true; s.booted = true; s.plans = new Map(); s.stamp = null; }
-  else { s.mode = "blob"; s.blobFails++; askForRoom(base, s); }
+  if (!beginMigration(base, s, legacy)) { s.mode = "blob"; s.blobFails++; askForRoom(base, s); }
   return s;
 }
 
-/* B2200385 — when the split is refused for ROOM (headroom, or the copy itself hit the browser's quota), ask storage.js to free localStorage that is
- * proven safe to free (the version-history mirror once IndexedDB holds a verified identical copy; re-fetchable caches), then run the split again
- * in the same page load. At most once per store per page load; every outcome is reported; the legacy entry and the per-plan entries are never
- * touched by this. A structurally impossible fit (even an empty origin could not hold two copies) is not retried — it is reported as such. */
+/* B2200385 — when the move cannot proceed for ROOM (a plan's entry will not fit even after the legacy text shrank, or the index could not be
+ * written), ask storage.js to free localStorage that is proven safe to free: first the legacy entry itself if one exists and the entries verify,
+ * then the version-history mirror (once IndexedDB holds a verified identical copy), then re-fetchable caches. Then resume, in the same page load.
+ * At most once per store per page load; every outcome is reported. */
 function askForRoom(base, s) {
   const a = s.lastAbort;
   if (!cfg.makeRoom || s.roomAsked || !a || (a.reason !== "headroom" && a.reason !== "quota")) return;
   s.roomAsked = true;
-  if (a.structural) { reportClientEvent("plan-store-room-none", "this device's storage cannot hold the original library and a full copy even if every other key were removed — only moving the original (B2200384) could change that", { reason: a.reason, structural: true, learnedCapHi }); return; }
   const ls = s.ls;
   Promise.resolve().then(() => cfg.makeRoom({ base, reason: a.reason, shortBy: a.shortBy })).then((res) => {
     if (states.get(base) !== s || s.ls !== ls) return;            // the store instance was replaced under us (test isolation / a reset)
     s.roomDone = true; s.roomFreed = (res && res.freedChars) || 0;
-    if (!res || !(res.freedChars > 0)) { reportClientEvent("plan-store-room-none", "no localStorage could be freed safely — the split stays refused", { base: base.slice(0, 40), reason: a.reason, shortBy: a.shortBy, ...(res || {}) }); return; }
+    if (!res || !(res.freedChars > 0)) { reportClientEvent("plan-store-room-none", "no localStorage could be freed safely — the move stays unfinished", { base: base.slice(0, 40), reason: a.reason, shortBy: a.shortBy, learnedCapHi: learnedCapHi === Infinity ? null : learnedCapHi, ...(res || {}) }); return; }
     retryMigration(base);
-  }).catch((e) => reportClientEvent("plan-store-room-failed", "making room for the per-plan split failed — nothing was changed", { error: String((e && e.message) || e).slice(0, 120) }));
+  }).catch((e) => reportClientEvent("plan-store-room-failed", "making room for the per-plan move failed — nothing was changed", { error: String((e && e.message) || e).slice(0, 120) }));
 }
-/** Run the split again for a store that was left on the legacy layout this page load (only if it is still on it and unchanged by anyone else). */
+/** Resume a move that stopped for room (or run the first move again for a store whose index could not be written). */
 export function retryMigration(base) {
   const s = states.get(base);
-  if (!s || s.mode !== "blob") return s ? s.mode : null;
+  if (!s) return null;
+  if (s.migrating && s.migStuck) { s.migStuck = false; runMigration(base, s, 150); return s.mode; }
+  if (s.mode !== "blob") return s.mode;
   s.mode = null; s.shared = null;
   const r = ensureMode(base);
   if (r.mode === "plan") { r.shared = null; r.plans = new Map(); r.stamp = null; }
   return r.mode;
+}
+/** For tests and the harness: run a started migration to completion synchronously. */
+export function _drainMigration(base, maxRounds = 10000) {
+  const s = states.get(base); if (!s) return false;
+  for (let i = 0; s.migrating && i < maxRounds; i++) { s.migStuck = false; runMigration(base, s, Infinity); if (s.migStuck) break; }
+  return !s.migrating;
 }
 
 /* ================================ plan-mode reads ================================ */
@@ -278,6 +346,17 @@ function loadPlans(base, s) {
     planJsonCache.set(obj, raw);   // B2236000 — the entry's own text IS this object's JSON (it was written by jsonOf): plainCopy / textOf reuse it
     next.set(id, { raw, obj });
   }
+  let idx = null; try { idx = idxRaw ? JSON.parse(idxRaw) : null; } catch (_) {}
+  s.migrating = !!(idx && idx.migrating);
+  if (s.migrating) {
+    /* A move is in flight: the plans not yet moved are still in the legacy entry. An entry (verified, maybe edited since) always wins over the legacy copy. */
+    const legacyRaw = get(base);
+    if (legacyRaw != null) {
+      if (!s.rest || s.rest.raw !== legacyRaw) { const pl = parseLegacy(legacyRaw); if (!pl.err) s.rest = pl; }
+      const gone = new Set(idx.del || []);
+      if (s.rest) for (const [id, o] of s.rest.objs) if (!next.has(id) && !gone.has(id)) { const frag = s.rest.frags.get(id); planJsonCache.set(o, frag); next.set(id, { raw: frag, obj: o }); }
+    }
+  } else s.rest = null;
   s.plans = next; s.stamp = idxRaw; s.shared = null;
 }
 
@@ -288,7 +367,10 @@ function touchIdx(base, s, patch) {
   const cur = get(key);
   let o = null; try { o = cur ? JSON.parse(cur) : null; } catch (_) {}
   const inSync = cur === s.stamp;
-  const next = { ...(o && o.v === 1 ? o : { v: 1, ok: true, mig: null }), v: 1, ok: true, gen: uniq(), stale: true, ...(patch || {}) };
+  /* A brand-new index on a device with no legacy entry: there is nothing to retire, so say so — a whole-library entry that appears later was written by an older tab. */
+  const fresh = !(o && o.v === 1);
+  const next = { ...(o && o.v === 1 ? o : { v: 1, ok: true, mig: null }), v: 1, ok: true, gen: uniq(), ...(fresh && get(base) == null ? { legacyRetired: new Date().toISOString() } : {}), ...(patch || {}) };
+  delete next.stale;
   const raw = JSON.stringify(next);
   try { set(key, raw); } catch (e) { reportClientEvent("plan-store-index-failed", "the per-plan index could not be written (the plan entry itself was)", { error: String((e && e.message) || e).slice(0, 100) }); s.stamp = null; return null; }
   s.hasIdx = true;
@@ -379,13 +461,16 @@ export function has(base, id) {
   if (!id) return false;
   const s = ensureMode(base);
   if (s.mode === "blob") { const w = currentSnapshot(); if (w && w.key === base && (() => { try { return lsNow().getItem(base) === w.str; } catch (_) { return false; } })()) return !!w.obj[id]; return !!blobShared(base)[id]; }
-  return get(pkey(base, id)) != null;
+  if (get(pkey(base, id)) != null) return true;
+  if (s.migrating) { loadPlans(base, s); return s.plans.has(id); }   // a move is in flight: the plan may still be in the legacy entry
+  return false;
 }
 /** What the persistence verifier reads back: in plan mode the plan's REAL entry (parsed from disk, not from a cache), else the blob's. */
 export function readBack(base, id) {
   const s = ensureMode(base);
   if (s.mode === "blob") { const w = currentSnapshot(); if (w && w.key === base && w.obj[id] && (() => { try { return lsNow().getItem(base) === w.str; } catch (_) { return false; } })()) return w.obj[id]; return blobShared(base)[id] || null; }
-  const raw = get(pkey(base, id));
+  let raw = get(pkey(base, id));
+  if (raw == null && s.migrating) { loadPlans(base, s); const e = s.plans.get(id); raw = e ? e.raw : null; }
   if (raw == null) return null;
   try { return JSON.parse(raw); } catch (_) { return null; }
 }
@@ -481,15 +566,13 @@ export function writeOne(base, id, rec) {
   loadPlans(base, s);
   if (!writeEntry(base, s, id, rec)) return false;
   touchIdx(base, s);
-  scheduleMirror(base);
   return true;
 }
 export function removeOne(base, id) {
   const s = ensureMode(base);
   if (s.mode === "blob") { const all = blobShared(base); if (!(id in all)) return true; delete all[id]; return blobWrite(base, all); }
   del(pkey(base, id)); s.plans.delete(id); s.shared = null;
-  touchIdx(base, s);
-  scheduleMirror(base);
+  touchIdx(base, s, s.migrating ? deletedWhileMigrating(base, [id]) : undefined);
   return true;
 }
 /** Make the store equal `next` (id → record): writes only the plans whose content changed, removes the ones absent from `next`. */
@@ -509,9 +592,15 @@ export function writeMap(base, next) {
     if (prev && prev.raw === frag) continue;
     if (!writeEntry(base, s, id, rec)) ok = false; else changed = true;
   }
-  for (const id of [...s.plans.keys()]) if (!(id in next)) { del(pkey(base, id)); s.plans.delete(id); s.shared = null; changed = true; }
-  if (changed) { touchIdx(base, s); scheduleMirror(base); }
+  const dropped = [];
+  for (const id of [...s.plans.keys()]) if (!(id in next)) { del(pkey(base, id)); s.plans.delete(id); s.shared = null; changed = true; dropped.push(id); }
+  if (changed) touchIdx(base, s, s.migrating && dropped.length ? deletedWhileMigrating(base, dropped) : undefined);
   return ok;
+}
+/** While a move is in flight a plan deleted here may still sit in the legacy entry: remember it in the index so it is never copied back. */
+function deletedWhileMigrating(base, ids) {
+  const idx = readIdx(base);
+  return { del: [...new Set([...((idx && idx.del) || []), ...ids])] };
 }
 /** Remove the whole store (every entry, the index, the ledger, the legacy entry). */
 export function clearStore(base) {
@@ -523,105 +612,115 @@ export function clearStore(base) {
 export function describe(base) {
   const s = ensureMode(base);
   let idx = null; try { idx = JSON.parse(get(idxKeyOf(base))); } catch (_) {}
-  return { mode: s.mode, hasIdx: s.hasIdx, idx, entries: listEntryIds(base).length };
+  return { mode: s.mode, hasIdx: s.hasIdx, idx, entries: listEntryIds(base).length, migrating: !!s.migrating };
 }
-export function _resetForTest() { for (const s of states.values()) { clearTimeout(s.quietTimer); clearTimeout(s.maxTimer); } states.clear(); clearSnapshot(); learnedCapHi = Infinity; }
+export function _resetForTest() { for (const s of states.values()) { try { clearTimeout(s.migTimer); if (typeof cancelIdleCallback === "function") cancelIdleCallback(s.migTimer); } catch (_) {} } states.clear(); clearSnapshot(); learnedCapHi = Infinity; }
 
-/* ================================ mixed builds: fold an older tab's whole-blob write back in ================================ */
-/** If the legacy entry no longer matches what we last wrote / agreed on, an older build (or a hand edit) wrote it: reconcile PER PLAN. */
-export function reconcileLegacy(base) {
-  const s = states.get(base);
-  if (!s || s.mode !== "plan" || !s.hasIdx) return { changed: 0 };
+/* ================================ the legacy entry on a device that has per-plan entries ================================ */
+const safe = (fn, dflt) => { try { return fn(); } catch (_) { return dflt; } };
+/** Write one plan's entry and prove it landed: the text on disk is exactly what the store now hands out. */
+function putVerified(base, s, id, rec) {
+  if (!writeEntry(base, s, id, rec)) return false;
+  const e = s.plans.get(id);
+  return !!e && get(pkey(base, id)) === e.raw;
+}
+/** Cheap, called from every entry point: is there a legacy entry on a store that has per-plan entries? (A missing key costs one failed lookup.) */
+function legacyWatch(base, s) {
+  if (s.migrating || s.legacyKept || s.folding) return;
+  if (!s.legacyCleaned) { s.legacyCleaned = true; if (get(base + LED) != null && get(base) == null) del(base + LED); }
   const cur = get(base);
-  if (cur == null) { return { changed: 0 }; }
-  if (s.mirrorStr !== undefined && cur === s.mirrorStr) return { changed: 0 };   // sync-policy fast path: still exactly what we wrote
-  let led = null; try { led = JSON.parse(get(base + LED)); } catch (_) {}
-  const sig = sigOf(cur);
-  if (led && led.sig === sig) { if (mirrorPolicy() === "sync") s.mirrorStr = cur; return { changed: 0 }; }
-  let obj; try { obj = JSON.parse(cur); } catch (_) { obj = undefined; }
-  if (!cfg.merge) { s.reconcilePending = true; return { changed: 0, deferred: true }; }   // the model's merge rule is not injected yet (a light route booted first) — redo it the moment it is
-  if (!isObj(obj)) { reportClientEvent("plan-store-legacy-unreadable", "the legacy entry was rewritten into something unreadable — left alone, per-plan entries unchanged", { len: cur.length }); return { changed: 0 }; }
-  loadPlans(base, s);
-  const prev = new Set((led && led.ids) || []);
-  let adopted = 0, merged = 0, removed = 0, kept = 0;
-  for (const [id, rec] of Object.entries(obj)) {
-    if (!isObj(rec)) continue;
-    const mine = s.plans.get(id);
-    if (!mine) { if (prev.has(id)) continue; if (writeEntry(base, s, id, rec)) adopted++; continue; }
-    if (JSON.stringify(rec) === mine.raw) continue;
-    const a = toMs(rec.updatedAt), b = toMs(mine.obj.updatedAt);
-    if (a > b || a === b) {
-      const m = cfg.merge ? cfg.merge(plainCopy(mine.obj), rec) : (a > b ? rec : null);
-      if (m && writeEntry(base, s, id, m)) merged++; else kept++;
-    } else kept++;
-  }
-  for (const id of [...s.plans.keys()]) if (!(id in obj) && prev.has(id)) { del(pkey(base, id)); s.plans.delete(id); s.shared = null; removed++; }
-  try { set(base + LED, JSON.stringify({ sig, len: cur.length, ids: Object.keys(obj), at: Date.now() })); } catch (_) {}
-  touchIdx(base, s);
-  if (adopted || merged || removed || kept) reportClientEvent("plan-store-legacy-merged", "an older-build write to the legacy entry was folded in per plan", { adopted, merged, removed, kept });
-  scheduleMirror(base);
-  if (adopted || merged || removed) { try { cfg.onForeignMerge && cfg.onForeignMerge(); } catch (_) {} }
-  return { changed: adopted + merged + removed, adopted, merged, removed, kept };
+  if (cur == null) return;
+  const idx = readIdx(base);
+  if (!idx || idx.migrating) return;
+  foldLegacy(base, s, cur, idx);
 }
-
-/* ================================ the mirror ================================ */
-export function mirrorPolicy() {
-  const g = typeof globalThis !== "undefined" ? globalThis : {};
-  if (g.__PLANYR_LEGACY_MIRROR === "sync" || g.__PLANYR_LEGACY_MIRROR === "idle") return g.__PLANYR_LEGACY_MIRROR;
-  if (typeof document === "undefined") return "sync";
-  /* Automation (Playwright / Puppeteer set navigator.webdriver) and the e2e flags default to "sync": ~160 behaviour suites and audit harnesses read the raw
-   * legacy key to check what was saved, and with "sync" that key is as current as it ever was. Real users are never webdriver, so production is "idle". The
-   * perf / verify harnesses that must measure the PRODUCTION policy opt in explicitly with `window.__PLANYR_LEGACY_MIRROR = "idle"`. */
-  if (g.__PLANYR_E2E || g.__E2E || (typeof navigator !== "undefined" && navigator.webdriver === true)) return "sync";
-  return "idle";
-}
-function scheduleMirror(base) {
-  const s = states.get(base);
-  if (!s || s.mode !== "plan") return;
-  if (mirrorPolicy() === "sync") { flushMirror(base); return; }
-  const now = Date.now();
-  if (!s.dirtySince) s.dirtySince = now;
-  clearTimeout(s.quietTimer);
-  const wait = Math.max(0, Math.min(MIRROR_QUIET_MS, s.dirtySince + MIRROR_MAX_WAIT_MS - now));
-  s.quietTimer = setTimeout(() => runIdle(() => flushMirror(base)), wait);
-}
-function runIdle(fn) {
-  try { if (typeof requestIdleCallback === "function") { requestIdleCallback(fn, { timeout: 4000 }); return; } } catch (_) {}
-  fn();
-}
-/** Bring the legacy entry up to date from the per-plan entries (already-serialised text, concatenated — no re-stringify). */
-export function flushMirror(base) {
-  const s = states.get(base);
-  if (!s || s.mode !== "plan" || !s.hasIdx) return false;
-  clearTimeout(s.quietTimer); s.quietTimer = null; s.dirtySince = 0;
-  reconcileLegacy(base);                                       // never overwrite an older tab's write we have not folded in
-  loadPlans(base, s);
-  const ids = [...s.plans.keys()];
-  const str = "{" + ids.map((id) => JSON.stringify(id) + ":" + s.plans.get(id).raw).join(",") + "}";
+/** Bring a legacy entry's content into the per-plan entries, then remove it. NEVER deletes an entry because the legacy entry lacks it.
+ *  RETIRE (idx has no `legacyRetired`: the entry is the previous build's mirror): the entry is removed only after every plan it holds is verified
+ *  as a readable per-plan entry (recovering any that are missing and not known-deleted). READ-ADOPT (`legacyRetired` is set: an older tab wrote it):
+ *  the same fold, reported as such. */
+function foldLegacy(base, s, cur, idx) {
+  const retire = !idx.legacyRetired;
+  if (!cfg.merge) { s.legacyPending = true; return { ok: false, reason: "merge-not-injected" }; }   // the model's merge rule is not injected yet (a light route booted first) — redone the moment it is
+  s.folding = true;
+  const keep = (reason, extra) => { s.legacyKept = true; reportClientEvent("plan-store-legacy-kept", retire ? "the whole-library entry was NOT removed — it is kept and will be retried on the next load" : "an older build's whole-library write could not be folded in — it is kept", { reason, retire, len: cur.length, ...(extra || {}) }); return { ok: false, reason }; };
   try {
-    set(base + LED, JSON.stringify({ sig: sigOf(str), len: str.length, ids, at: Date.now() }));   // ledger FIRST: a crash between leaves a signature that fails to match → a harmless equal-content merge
-    set(base, str);
-    s.mirrorStr = mirrorPolicy() === "sync" ? str : undefined;
-  } catch (e) {
-    reportClientEvent("plan-store-mirror-failed", "the legacy copy could not be refreshed (the per-plan entries are intact)", { error: String((e && e.message) || e).slice(0, 100), len: str.length });
-    return false;
-  }
-  touchIdx(base, s, { stale: false });
-  return true;
+    let obj; try { obj = JSON.parse(cur); } catch (_) { obj = undefined; }
+    if (!isObj(obj)) return keep("unreadable");
+    for (const id of Object.keys(obj)) if (!isObj(obj[id])) return keep("malformed", { id });
+    s.stamp = null; loadPlans(base, s);
+    const gone = new Set(idx.del || []);
+    const isGone = (id) => gone.has(id) || (cfg.isDeleted ? !!safe(() => cfg.isDeleted(base, id), false) : false);
+    let adopted = 0, merged = 0, keptN = 0, skipped = 0;
+    for (const [id, rec] of Object.entries(obj)) {
+      const mine = s.plans.get(id);
+      if (!mine) {
+        if (isGone(id)) { skipped++; continue; }                       // known-deleted: not resurrected
+        if (!putVerified(base, s, id, rec)) return keep("entry-write-failed", { id, adopted, merged });
+        adopted++; continue;                                           // RECOVERED / adopted — a plan is never dropped for being absent from its entries
+      }
+      if (JSON.stringify(rec) === mine.raw) continue;
+      if (toMs(rec.updatedAt) >= toMs(mine.obj.updatedAt)) {
+        const m = cfg.merge(plainCopy(mine.obj), rec);
+        if (!m) { keptN++; continue; }
+        if (!putVerified(base, s, id, m)) return keep("entry-write-failed", { id, adopted, merged });
+        merged++;
+      } else keptN++;
+    }
+    if (retire) {
+      /* THE COUNT: read every plan K holds back from disk, parsed — each must be an entry (or known-deleted). Only then may K go. */
+      let ok = 0, expected = 0;
+      for (const id of Object.keys(obj)) {
+        if (isGone(id)) continue;
+        expected++;
+        const raw = get(pkey(base, id)); let good = false;
+        if (raw != null) { try { good = isObj(JSON.parse(raw)); } catch (_) { good = false; } }
+        if (good) ok++; else return keep("entry-readback", { id, ok, expected });
+      }
+      if (ok !== expected) return keep("count-mismatch", { ok, expected });
+    }
+    const led = get(base + LED);
+    const freedChars = base.length + cur.length + (led != null ? base.length + LED.length + led.length : 0);
+    const stamp = new Date().toISOString();
+    const next = touchIdx(base, s, retire ? { legacyRetired: stamp } : {});
+    if (retire && !next) return keep("index-write-failed");
+    del(base); del(base + LED);
+    s.stamp = null; s.shared = null;
+    if (retire) reportClientEvent("plan-store-legacy-retired", "the whole-library device entry was removed after every plan was read back from its own entry", { plans: s.plans.size, freedChars, via: "mirror", recovered: adopted, merged });
+    else reportClientEvent("plan-store-legacy-readopted", "an older build's whole-library write was folded in per plan and removed", { adopted, merged, kept: keptN, skipped, freedChars });
+    if (adopted || merged) { try { cfg.onForeignMerge && cfg.onForeignMerge(); } catch (_) {} }
+    return { ok: true, adopted, merged, kept: keptN, skipped, freedChars };
+  } finally { s.folding = false; }
 }
-export function flushAllMirrors() { for (const base of [...states.keys()]) flushMirror(base); }
+/** For storage.makeRoomForPlanStore: retire the legacy entry NOW if one exists and the entries verify. Resolves what it freed and why not. */
+export function retireLegacy(base) {
+  const before = get(base);                                      // what is on the device NOW (loading the store may itself retire it)
+  const s = ensureMode(base);
+  if (s.mode !== "plan" || !s.hasIdx) return { ok: false, freedChars: 0, reason: "not-split" };
+  if (s.migrating) return { ok: false, freedChars: 0, reason: "migrating" };
+  const gone = () => (before != null && get(base) == null ? { ok: true, freedChars: base.length + before.length, reason: "retired" } : null);
+  const done = gone(); if (done) return done;
+  const cur = get(base);
+  if (cur == null) return { ok: true, freedChars: 0, reason: "none" };
+  const idx = readIdx(base);
+  if (!idx) return { ok: false, freedChars: 0, reason: "no-index" };
+  s.legacyKept = false;
+  const r = foldLegacy(base, s, cur, idx);
+  return { ok: !!r.ok, freedChars: r.ok ? r.freedChars : 0, reason: r.ok ? "retired" : r.reason };
+}
 
 let hooked = false;
 function hookPageEvents() {
   if (hooked || typeof window === "undefined") return;
   hooked = true;
   try {
-    window.addEventListener("pagehide", () => flushAllMirrors());
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flushAllMirrors();
-      else for (const base of [...states.keys()]) reconcileLegacy(base);
+      if (document.visibilityState === "visible") for (const [base, s] of [...states]) { s.legacyKept = false; if (s.mode === "plan" && s.hasIdx) legacyWatch(base, s); }
     });
-    /* Only REAL cross-tab events (storageArea is the localStorage) — the app's own synthetic same-tab "sites changed" events carry no storageArea and fire on every rename / list change; hashing a multi-MB entry for each of those would put the cost back on the UI path. */
-    window.addEventListener("storage", (e) => { if (e && e.key && e.storageArea === lsNow() && states.has(e.key)) reconcileLegacy(e.key); });
+    /* Only REAL cross-tab events (storageArea is the localStorage): an older tab writing the legacy entry is folded in. */
+    window.addEventListener("storage", (e) => {
+      if (!e || !e.key || e.storageArea !== lsNow()) return;
+      const s = states.get(e.key);
+      if (s && s.mode === "plan" && s.hasIdx) { s.legacyKept = false; legacyWatch(e.key, s); }
+    });
   } catch (_) {}
 }
