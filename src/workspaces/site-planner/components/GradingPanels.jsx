@@ -200,6 +200,7 @@ function InputsBlock({ c, model, floorVisible }) {
             ? <button type="button" data-limit-action="done" style={linkBtn} onClick={() => actions.doneEditLimit && actions.doneEditLimit()}>Done editing</button>
             : <button type="button" data-limit-action="edit" style={linkBtn} onClick={() => actions.editLimit && actions.editLimit(null)}>Edit outline</button>}
           {limit.source === "edited" && <button type="button" data-limit-action="reset" data-limit-grew={limit.grew && limit.grew.length ? "1" : "0"} title={limit.grew && limit.grew.length ? `The limit grew to include ${limit.grew.join(", ")}.` : undefined} style={linkBtn} onClick={() => actions.resetLimit && actions.resetLimit()}>Reset to auto</button>}
+          {limit.areaAc != null && Number.isFinite(limit.areaAc) && <span data-graded-acres="1" style={muted} title="The layout's outline plus its shoulder — the slope thrown beyond it is extra, and nothing past the Limits of disturbance fence is graded on purpose">{(Math.round(limit.areaAc * 10) / 10).toFixed(1)} AC graded</span>}
         </div>
       )}
       <Row label="Slopes">
