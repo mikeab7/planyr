@@ -1,4 +1,4 @@
-/* B2656160 / V2100832 — LIVE signed-in check that Gantt task names follow their LEVEL at every row height, on a deploy.
+/* B2656160 (×2: every level strictly larger than the one below) — LIVE signed-in check that Gantt task names follow their LEVEL at every row height, on a deploy.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-gantt-name-rank-live.mjs [https://planyr.io] [expectedBuildPrefix]
  *
  * Signs in as the test account (ONE browser, ui-audit/lib/signedInSession.mjs), reads /version.json AND the served
@@ -14,11 +14,14 @@
  * print sizes, level 0 larger than level 1. Known-good arms make a run VOID rather than green: the measured row
  * pitch must equal the requested row height, and arrows must exist. Saves screenshots under ui-audit/screens/.
  *
- * CLEANUP LIMIT (measured 2026-11-04): the test account has NO schedules visible to the app, so the only way to get a
- * Schedule page to import into is the empty state's "New schedule" button, which writes ONE empty `schedules` row. The
- * app cannot show that row again on a fresh load, and a client-side delete is a silent no-op under RLS (returns ok,
- * removes nothing). So the last step re-reads the account and FAILS LOUDLY naming any id this run created that still
- * exists — it must then be removed with a service-role/SQL delete (id + owner + created_at guarded), never left. */
+ * NO ROW IS CREATED (B2656160 ×2, 2026-11-04). The previous run reached the Schedule page via the empty state's "New schedule"
+ * button, which INSERTS a `schedules` row the app can only soft-delete (that is how rows 119 and 120 happened). The test account's
+ * rows are all soft-deleted (`deleted_at` set), so the app shows "No schedules yet". This run instead REUSES one existing empty
+ * "Project NNN" row: it un-hides it (clears `deleted_at`), runs the check, hides it again with the same soft-delete the app's own
+ * delete performs, then PROVES the account is back to what it was (same live-row list, that row's data byte-for-byte unchanged and
+ * deleted again). "New schedule" is never clicked; with no reusable row the run FAILS LOUDLY rather than create one.
+ * REUSE_ID=<id> picks the row (default: the highest-id empty soft-deleted "Project NNN" row). Never a real project. */
+
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
 import { mkdirSync } from "node:fs";
@@ -54,19 +57,35 @@ ok("signed in as the test account", /e2e@planyr\.test/.test(s.proof.email || "")
 const page = await s.page.context().newPage(); await page.setViewportSize({ width: 1600, height: 900 });
 const errs = []; page.on("pageerror", e => errs.push(String(e)));
 page.on("dialog", d => d.accept());
-// THE ACCOUNT'S OWN ROWS, snapshotted first: this check may create ONE throwaway schedule (the test account can have none, and the
-// empty page offers only "New schedule"); at the end it deletes exactly the ids that appeared during the run (plus any in
-// CLEAN_IDS — ids a previous aborted run of THIS script is known to have created) and proves they are gone. Nothing else is touched.
-const scheduleIds = () => s.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id"); return q.error ? null : q.data.map(r => r.id); });
-const idsBefore = await scheduleIds();
-ok("snapshot of the account's schedule ids taken before anything is created", Array.isArray(idsBefore), String(idsBefore && idsBefore.length));
+// THE ACCOUNT'S OWN ROWS, snapshotted first. This check creates NOTHING: it un-hides ONE existing empty soft-deleted "Project NNN" row,
+// and at the end hides it again and proves the account is exactly as it was.
+const liveIds = () => s.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id").is("deleted_at", null).order("id"); return q.error ? null : q.data.map(r => r.id); });
+const allIds = () => s.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id").order("id"); return q.error ? null : q.data.map(r => r.id); });
+const idsBefore = await liveIds(), allBefore = await allIds();
+ok("snapshot of the account's schedule rows taken before anything is touched", Array.isArray(idsBefore) && Array.isArray(allBefore), `${idsBefore && idsBefore.length} live / ${allBefore && allBefore.length} total`);
+const reuse = await s.page.evaluate(async (want) => {
+  const q = await window.pfSupabase.from("schedules").select("id,name,deleted_at,data").order("id", { ascending: false });
+  if (q.error) return { err: q.error.message };
+  const okRow = r => r.deleted_at && /^Project \d+$/.test(r.name) && r.data && Array.isArray(r.data.tasks) && r.data.tasks.length === 0;
+  const row = want ? q.data.find(r => r.id === want && okRow(r)) : q.data.find(okRow);
+  return row ? { id: row.id, name: row.name, deleted_at: row.deleted_at, dataJson: JSON.stringify(row.data) } : { none: true };
+}, Number(process.env.REUSE_ID) || 0);
+ok(`a reusable empty soft-deleted "Project NNN" row exists (id ${reuse.id}) — no row will be created`, !!reuse.id, JSON.stringify(reuse.err || reuse.none || ""));
+if (!reuse.id) { console.log("FATAL: nothing to reuse; refusing to create a schedule row."); await s.close(); process.exit(1); }
+const REUSE = reuse.id;
+const setDeleted = (v) => s.page.evaluate(async ([id, v]) => { const q = await window.pfSupabase.from("schedules").update({ deleted_at: v }).eq("id", id).select("id"); return q.error ? "err:" + q.error.message : (q.data || []).length; }, [REUSE, v]);
+const finish = async (code) => { await s.close(); process.exit(code); };
+// Whatever kills this run (Ctrl-C, a thrown error, a rejected promise), the reused row is hidden again before it exits.
+let rehidden = false;
+const rehide = async (why, code) => { if (!rehidden) { rehidden = true; console.log("re-hiding the reused row after:", why); await setDeleted(reuse.deleted_at).catch(() => {}); } process.exit(code); };
+process.on("SIGINT", () => rehide("SIGINT", 130));
+process.on("uncaughtException", e => { console.log(String(e && e.stack || e)); rehide("uncaught exception", 1); });
+process.on("unhandledRejection", e => { console.log(String(e && e.stack || e)); rehide("unhandled rejection", 1); });
+ok("un-hid the one reusable row", (await setDeleted(null)) === 1);
 await page.goto(base + "/sequence/?cb=" + Date.now(), { waitUntil: "domcontentloaded" });
 const HIST = '[data-testid="open-history-desktop"]';
-await Promise.race([page.locator(HIST).waitFor({ timeout: 40000 }), page.getByText("New schedule").first().waitFor({ timeout: 40000 })]).catch(() => {});
-if (!(await page.locator(HIST).count())) {                      // the empty state — create the one throwaway schedule
-  await page.getByText("New schedule").first().click();
-  await page.locator(HIST).waitFor({ timeout: 40000 });
-}
+await page.locator(HIST).waitFor({ timeout: 40000 }).catch(() => {});
+ok("the Schedule page opened on the reused row (no 'New schedule' pressed)", (await page.locator(HIST).count()) === 1 && (await page.getByText("No schedules yet").count()) === 0);
 await assertMeasurable(page, "verify-gantt-name-rank-live");
 
 const importFixture = async (fx) => {
@@ -154,17 +173,15 @@ console.log("\n── print exhibit (buildGanttSVG) on the live page ──");
 
 ok("no uncaught page errors", errs.length === 0, errs.slice(0, 3).join(" | "));
 
-// ── cleanup: delete exactly what this run created, then prove it is gone (owner rule: test artifacts are always cleared) ──
+// ── cleanup: hide the reused row again (the app's own soft-delete) and PROVE the account is as it was (owner rule: test artifacts are always cleared) ──
 {
-  const idsAfter = await scheduleIds();
-  const mine = [...new Set([...(idsAfter || []).filter(i => !idsBefore.includes(i)), ...(process.env.CLEAN_IDS || "").split(",").filter(Boolean).map(Number)])];
-  console.log("schedules created by this check:", JSON.stringify(mine));
-  ok("this check created at most ONE schedule", mine.filter(i => !(process.env.CLEAN_IDS || "").split(",").map(Number).includes(i)).length <= 1);
-  const del = await s.page.evaluate(async (ids) => { const out = []; for (const id of ids) { const q = await window.pfSupabase.from("schedules").delete().eq("id", id); out.push(q.error ? "err:" + q.error.message : "ok (a no-op under RLS removes nothing — verified below)"); } return out; }, mine);
-  const stillThere = await s.page.evaluate(async ([ids, name]) => { const q = await window.pfSupabase.from("schedules").select("id,name"); return q.error ? "err" : q.data.filter(r => ids.includes(r.id) || r.name === name).length; }, [mine, NAME]);
-  ok("cleanup: every schedule this check created is deleted and verified gone", stillThere === 0, JSON.stringify({ del, stillThere }));
-  const idsEnd = await scheduleIds();
-  ok("cleanup: the account's other rows are untouched", Array.isArray(idsEnd) && idsBefore.every(i => mine.includes(i) || idsEnd.includes(i)));
+  ok("hid the reused row again", (await setDeleted(reuse.deleted_at || new Date().toISOString())) === 1);
+  const after = await s.page.evaluate(async (id) => { const q = await window.pfSupabase.from("schedules").select("id,deleted_at,data").eq("id", id).maybeSingle(); return q.error ? { err: q.error.message } : { deleted: !!q.data.deleted_at, dataJson: JSON.stringify(q.data.data) }; }, REUSE);
+  ok("the reused row is hidden again", after.deleted === true, JSON.stringify(after.err || ""));
+  ok("the reused row's data is byte-for-byte what it was (the fixture import stayed local)", after.dataJson === reuse.dataJson);
+  const liveEnd = await liveIds(), allEnd = await allIds();
+  ok("the account's visible schedules are exactly as before", JSON.stringify(liveEnd) === JSON.stringify(idsBefore), JSON.stringify(liveEnd));
+  ok("NO row was created (total rows unchanged)", JSON.stringify(allEnd) === JSON.stringify(allBefore), `${allBefore.length} -> ${allEnd && allEnd.length}`);
 }
 await s.close();
 console.log(results.filter(Boolean).length + "/" + results.length + " passed");
