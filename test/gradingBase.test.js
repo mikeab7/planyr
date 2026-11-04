@@ -143,10 +143,12 @@ describe("panels render (static markup)", () => {
     expect(html.indexOf('data-tile="haul"')).toBeLessThan(html.indexOf('data-tile="cut"'));
     expect(html.indexOf('data-tile="cut"')).toBeLessThan(html.indexOf('data-tile="fill"'));
   });
-  it("the graded acres are SHOWN (V2100464 step 1 records them): '36.0 AC graded' beside Edit outline, absent while the limit has no area", () => {
+  it("the graded acres are SHOWN (V2100464 step 1 records them): '35.96 AC graded' beside Edit outline, absent while the limit has no area", () => {
     const withAc = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: 35.958 } });
     expect(withAc).toContain("data-graded-acres");
-    expect(withAc).toContain("36.0 AC graded");
+    expect(withAc).toContain("35.96 AC graded");
+    // a small outline edit (one dragged vertex moves the area by hundredths of an acre) must be VISIBLE in the number, and Reset must give the auto value back exactly
+    expect(group([card()], { limit: { mode: "layout", source: "edited", sig: "s2", areaAc: 36.03 } })).toContain("36.03 AC graded");
     const without = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: null } });
     expect(without).not.toContain("data-graded-acres");
   });
