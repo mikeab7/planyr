@@ -9,7 +9,7 @@
  * Who may call it: ONLY the signin-health workflow on this repo's main branch, proved by GitHub's signed OIDC token
  * (lib/githubOidc.js) — no shared secret to paste anywhere. Anything else is 401.
  *
- * Body: { attempts: [{ checks: [{ name, status, detail }] }, …1–3], runUrl, synthetic }
+ * Body: { attempts: [{ checks: [{ name, status, detail }] }, …1–3], runUrl, synthetic, stopDrill }
  *   `attempts` is 1–3 runs of the checks made a few minutes apart inside one workflow run (a failing first attempt is
  *   re-run), stored oldest-first so "two failures in a row" is reached in minutes, not hours. The overall verdict is
  *   computed HERE from the check statuses; a client-supplied verdict is ignored.
@@ -21,8 +21,8 @@
 import { verifyGithubOidc } from "./githubOidc.js";
 import { sendViaGmail } from "./gmailSend.js";
 import { INVITE_FROM_DEFAULT } from "./inviteEmail.js";
-import { STATUSES, overallOf, summariseEvents, decide, buildSnapshot } from "../../../src/shared/auth/signinHealth.js";
-import { ALARM_TO, buildAlertEmail, buildRecoveryEmail } from "./signinHealthEmail.js";
+import { STATUSES, SOURCES, THRESHOLDS, overallOf, summariseEvents, decide, buildSnapshot, effectiveHistory, mergeLatestChecks, evaluateStops, staleLimitMin, unknownStreak } from "../../../src/shared/auth/signinHealth.js";
+import { ALARM_TO, buildAlertEmail, buildRecoveryEmail, buildStoppedEmail } from "./signinHealthEmail.js";
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 
@@ -64,8 +64,19 @@ export function createPostgrestStore(env, fetchImpl = fetch) {
     return t ? JSON.parse(t) : null;
   }
   return {
-    async recentChecks({ synthetic, limit }) {
-      return call("history", `signin_health_checks?select=overall,at,checks,run_url&synthetic=eq.${!!synthetic}&order=at.desc,id.desc&limit=${limit}`) || [];
+    async recentChecks({ synthetic, limit, source }) {
+      return call("history", `signin_health_checks?select=overall,at,checks,run_url,source&synthetic=eq.${!!synthetic}${source ? `&source=eq.${encodeURIComponent(source)}` : ""}&order=at.desc,id.desc&limit=${limit}`) || [];
+    },
+    async lastCheckAt({ synthetic, source }) {
+      const r = await call("last-check", `signin_health_checks?select=at&synthetic=eq.${!!synthetic}&source=eq.${encodeURIComponent(source)}&order=at.desc&limit=1`);
+      return (r && r[0] && r[0].at) || null;
+    },
+    async stopStates() {
+      const r = await call("stops", "signin_stop_alerts?select=source,since,emailed_at") || [];
+      return Object.fromEntries(r.map((x) => [x.source, x]));
+    },
+    async setStop(source, patch) {
+      await call("stop-state", "signin_stop_alerts?on_conflict=source", { method: "POST", headers: { prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ source, ...patch, updated_at: new Date().toISOString() }) });
     },
     async insertChecks(rows) {
       await call("store-checks", "signin_health_checks", { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify(rows) });
@@ -114,36 +125,34 @@ async function sendMail({ env, mail, send, fetchImpl }) {
   return r.ok ? { delivery: "sent", messageId: r.id || null } : { delivery: "failed", error: r.error };
 }
 
-/* ── The handler ──────────────────────────────────────────────────────────────────────────────────────────────── */
-export async function handleSigninHealth({ request, env, store, verify = verifyGithubOidc, send = sendViaGmail, fetchImpl = fetch, now = () => new Date().toISOString() }) {
-  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST", "cache-control": "no-store" } });
-
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const v = await verify({ token, fetchImpl });
-  if (!v.ok) return json({ ok: false, error: "not authorized" }, 401);
-
-  let body;
-  try { body = await request.json(); } catch (_) { return json({ ok: false, error: "Expected a JSON body." }, 400); }
-  const norm = normaliseAttempts(body);
-  if (norm.error) return json({ ok: false, error: norm.error }, 400);
-  const synthetic = !!(body && body.synthetic);
-  const runUrl = typeof body.runUrl === "string" && /^https:\/\/github\.com\//.test(body.runUrl) ? body.runUrl.slice(0, 300) : null;
-
+/* ── The shared core: store → decide → (email) → snapshot ─────────────────────────────────────────────────────────────── */
+/* Both callers use it — the GitHub runner's OIDC-authenticated report (source "runner") and the fast check's own report
+ * (source "edge", /api/ops/signin-heartbeat). `stopDrill` ("stale" | "fresh") is the alarm drill's extra step for the
+ * dead-man's switch: it runs the identical stop-detector + email on a synthetic source so the stopped-check email can be proven. */
+export async function recordReport({ env, store, source = "runner", attempts, runUrl, synthetic = false, stopDrill = null, send = sendViaGmail, fetchImpl = fetch, now = () => new Date().toISOString() }) {
   let stage = "start";
   try {
     const db = store || createPostgrestStore(env, fetchImpl);
     const t0 = now();
     stage = "store-checks";
     // Oldest attempt first, 1 s apart, so history order is the order they ran.
-    const rows = norm.attempts.map((a, i) => ({
-      at: new Date(Date.parse(t0) - (norm.attempts.length - 1 - i) * 1000).toISOString(), overall: a.overall, checks: a.checks, run_url: runUrl, synthetic,
+    const rows = attempts.map((a, i) => ({
+      at: new Date(Date.parse(t0) - (attempts.length - 1 - i) * 1000).toISOString(), overall: a.overall, checks: a.checks, run_url: runUrl, synthetic, source,
     }));
     await db.insertChecks(rows);
 
     stage = "history";
-    const hist = await db.recentChecks({ synthetic, limit: 60 });
-    const history = hist.map((h) => h.overall);
-    const latest = hist[0] || { overall: norm.attempts[norm.attempts.length - 1].overall, checks: norm.attempts[norm.attempts.length - 1].checks, at: t0 };
+    // Each source is read on its OWN (a chatty fast check must never push the slower browser check out of the window).
+    const bySource = {};
+    for (const src of SOURCES) bySource[src] = (await db.recentChecks({ synthetic, limit: 60, source: src })) || [];
+    const hist = SOURCES.flatMap((src) => bySource[src]).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const history = effectiveHistory(hist);
+    // The 24-unknown "cannot confirm sign-in" rule follows whichever source is stuck on unknown (its own consecutive runs) — a pass from the
+    // OTHER source in between must neither reset it nor hide it (a fast check stuck on unknown for 6 hours is as blind as a browser check stuck for days).
+    const blindHistory = SOURCES.map((src) => bySource[src].map((h) => h.overall)).sort((a, b) => unknownStreak(b) - unknownStreak(a))[0];
+    const mergedChecks = mergeLatestChecks(hist);
+    const latestOverall = overallOf(mergedChecks);
+    const newest = hist[0] || { at: t0, run_url: runUrl };
 
     stage = "events";
     // A drill ignores real browsers' events: it must be repeatable whatever real users are doing.
@@ -152,7 +161,7 @@ export async function handleSigninHealth({ request, env, store, verify = verifyG
     let incident = await db.openIncident({ synthetic });
     const lastAlertAt = await db.lastAlertAt({ synthetic });
 
-    const decision = decide({ history, events, incident, lastAlertAt, now: t0 });
+    const decision = decide({ history, blindHistory, events, incident, lastAlertAt, now: t0 });
     let delivery = "not-needed";
     let mailInfo = { configured: mailConfigured(env), error: null, messageId: null };
 
@@ -161,7 +170,7 @@ export async function handleSigninHealth({ request, env, store, verify = verifyG
       incident = await db.createIncident({ kind: decision.kind, reason: decision.reason, synthetic });
     }
     if ((decision.action === "open" || decision.action === "retry-alert") && decision.email === "alert") {
-      const m = buildAlertEmail({ kind: decision.kind, reason: decision.reason || (incident && incident.reason), since: incident && incident.opened_at, checks: latest.checks, events, runUrl, synthetic });
+      const m = buildAlertEmail({ kind: decision.kind, reason: decision.reason || (incident && incident.reason), since: incident && incident.opened_at, checks: mergedChecks, events, runUrl, synthetic });
       const r = await sendMail({ env, mail: m, send, fetchImpl });
       delivery = r.delivery; mailInfo = { configured: mailConfigured(env), error: r.error || null, messageId: r.messageId || null };
       if (r.delivery === "sent" && incident) { await db.updateIncident(incident.id, { alert_emailed_at: t0 }); incident = { ...incident, alert_emailed_at: t0 }; }
@@ -178,8 +187,16 @@ export async function handleSigninHealth({ request, env, store, verify = verifyG
       delivery = "suppressed-" + decision.suppressed;
     }
 
+    // ── The dead-man's switch: every report, from either source, checks whether the OTHER one has gone quiet. ──
+    stage = "stops";
+    const stopOut = await watchStops({ db, env, source, synthetic, stopDrill, t0, send, fetchImpl });
+
     stage = "snapshot";
-    const snap = buildSnapshot({ now: t0, latestChecks: latest.checks, latestOverall: latest.overall, latestAt: latest.at, runUrl: latest.run_url || runUrl, history, events, incident, mail: mailInfo });
+    const lastAt = { edge: bySource.edge[0] ? bySource.edge[0].at : null, runner: bySource.runner[0] ? bySource.runner[0].at : null };
+    const snap = buildSnapshot({
+      now: t0, latestChecks: mergedChecks, latestOverall, latestAt: newest.at, runUrl: newest.run_url || runUrl, history, blindHistory, events, incident, mail: mailInfo,
+      sources: { edge: { lastAt: lastAt.edge }, runner: { lastAt: lastAt.runner } }, stops: stopOut.open,
+    });
     if (synthetic) await db.setSnapshot("signin_drill", { ...snap, drill: true }, t0);
     else {
       await db.setSnapshot("signin", snap, t0);
@@ -188,13 +205,63 @@ export async function handleSigninHealth({ request, env, store, verify = verifyG
     }
 
     return json({
-      ok: true, overall: latest.overall, failStreak: snap.failStreak, unknownStreak: snap.unknownStreak,
+      ok: true, overall: latestOverall, failStreak: snap.failStreak, unknownStreak: snap.unknownStreak, source,
       decision: { action: decision.action, kind: decision.kind || null, email: decision.email || null, suppressed: decision.suppressed || null },
       delivery, mail: mailInfo, incidentOpen: !!incident, events,
+      stops: stopOut.actions, stopDelivery: stopOut.delivery, stopMail: { messageId: stopOut.messageId, error: stopOut.error },
     });
   } catch (e) {
-    if (isNotMigrated(e)) return json({ ok: false, reason: "not_migrated", error: "The sign-in health tables are not in the database yet — run src/shared/auth/db/signin_health.sql." }, 503);
+    if (isNotMigrated(e)) return json({ ok: false, reason: "not_migrated", error: "The sign-in health tables are not in the database yet — run src/shared/auth/db/signin_health.sql and signin_health_edge.sql." }, 503);
     // LOUD-FAILURE: a store/DB failure is a 502 the workflow turns into a mail-independent alert — never a silent 200.
     return json({ ok: false, error: `store failure at ${stage}: ${(e && e.message) || e}`.slice(0, 300) }, 502);
   }
+}
+
+/* One pass of the per-source dead-man's switch. The source reporting RIGHT NOW is alive by definition, so it reads `now` (that is
+ * also what clears its own open stop). Returns { actions, delivery, messageId, error, open } — `delivery` is "not-needed" | "sent" | "failed" | "not-configured". */
+async function watchStops({ db, env, source, synthetic, stopDrill, t0, send, fetchImpl }) {
+  const state = (await db.stopStates()) || {};
+  let watch, lastAt;
+  if (synthetic) {
+    // The drill's own lane: never reads or touches the real sources' state.
+    if (!stopDrill) return { actions: [], delivery: "not-needed", open: [] };
+    watch = { drill: staleLimitMin("drill") };
+    lastAt = { drill: stopDrill === "fresh" ? t0 : new Date(Date.parse(t0) - 10 * 86400000).toISOString() };
+  } else {
+    watch = { edge: THRESHOLDS.staleEdgeMin, runner: THRESHOLDS.staleRunnerMin };
+    lastAt = {};
+    for (const src of SOURCES) lastAt[src] = src === source ? t0 : await db.lastCheckAt({ synthetic: false, source: src });
+  }
+  const actions = evaluateStops({ now: t0, lastAt, state, watch });
+  let delivery = "not-needed", messageId = null, error = null;
+  for (const a of actions) {
+    if (a.action === "clear") { await db.setStop(a.source, { since: null, emailed_at: null, cleared_at: t0 }); continue; }
+    if (a.action === "open") await db.setStop(a.source, { since: t0, emailed_at: null, cleared_at: null });
+    const m = buildStoppedEmail({ source: a.source, ageMin: a.ageMin, limitMin: a.limitMin, lastAt: lastAt[a.source], synthetic });
+    const r = await sendMail({ env, mail: m, send, fetchImpl });
+    delivery = r.delivery; messageId = r.messageId || messageId; error = r.error || error;
+    // "failed" | "not-configured" leaves emailed_at empty: the next report retries ("retry-alert") and the workflow raises the mail-independent issue.
+    if (r.delivery === "sent") await db.setStop(a.source, { emailed_at: t0 });
+  }
+  const after = await db.stopStates();
+  const open = Object.values(after || {}).filter((x) => x.since && (synthetic ? x.source === "drill" : x.source !== "drill")).map((x) => ({ source: x.source, since: x.since, emailedAt: x.emailed_at || null }));
+  return { actions: actions.map((a) => ({ source: a.source, action: a.action })), delivery, messageId, error, open };
+}
+
+/* ── The handler: the GitHub runner's report (OIDC-authenticated) ─────────────────────────────────────────────────── */
+export async function handleSigninHealth({ request, env, store, verify = verifyGithubOidc, send = sendViaGmail, fetchImpl = fetch, now = () => new Date().toISOString() }) {
+  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST", "cache-control": "no-store" } });
+
+  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  const v = await verify({ token, fetchImpl });
+  if (!v.ok) return json({ ok: false, error: "not authorized" }, 401);
+
+  let body;
+  try { body = await request.json(); } catch (_) { return json({ ok: false, error: "Expected a JSON body." }, 400); }
+  const norm = normaliseAttempts(body);
+  if (norm.error) return json({ ok: false, error: norm.error }, 400);
+  const synthetic = !!(body && body.synthetic);
+  const runUrl = typeof body.runUrl === "string" && /^https:\/\/github\.com\//.test(body.runUrl) ? body.runUrl.slice(0, 300) : null;
+  const stopDrill = synthetic && (body.stopDrill === "stale" || body.stopDrill === "fresh") ? body.stopDrill : null;
+  return recordReport({ env, store, source: "runner", attempts: norm.attempts, runUrl, synthetic, stopDrill, send, fetchImpl, now });
 }

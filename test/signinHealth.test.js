@@ -165,3 +165,100 @@ describe("coverage gaps — a step the runner cannot run is reported, never coun
     expect(sweepLine(snap, NOW)).not.toMatch(/Coverage gap/);
   });
 });
+
+/* ── NEW-1 (2026-11-04, B2650848) — two sources of reports + the per-source dead-man's switch ─────────────────────────── */
+import { SOURCES, effectiveHistory, mergeLatestChecks, evaluateStops, ageWords, staleLimitMin } from "../src/shared/auth/signinHealth.js";
+
+describe("thresholds — chosen from the measured gaps, written down", () => {
+  it("the fast check's limit is three missed 15-minute beats; the browser check's is longer than any GitHub gap measured (8.5 h)", () => {
+    expect(THRESHOLDS.staleEdgeMin).toBe(45);
+    expect(THRESHOLDS.staleRunnerMin).toBeGreaterThan(8.5 * 60);
+    expect(staleLimitMin("edge")).toBe(45); expect(staleLimitMin("runner")).toBe(THRESHOLDS.staleRunnerMin);
+    // The old single limit (150 min) would have fired on EVERY measured GitHub gap (5, 7, 7.5, 8.5 h).
+    for (const gapH of [5, 7, 7.5, 8.5]) expect(gapH * 60).toBeGreaterThan(THRESHOLDS.staleMin);
+  });
+});
+
+describe("effectiveHistory — each source keeps its own streak", () => {
+  const row = (source, overall) => ({ source, overall });
+  it("a fast-check PASS never ends the browser check's failure (the fast check does not look at the sign-in form)", () => {
+    const rows = [row("edge", "pass"), row("runner", "fail"), row("edge", "pass"), row("edge", "pass"), row("runner", "fail")];
+    expect(failStreak(effectiveHistory(rows))).toBe(2);
+  });
+  it("two fast-check failures between browser passes still alarm", () => {
+    expect(failStreak(effectiveHistory([row("edge", "fail"), row("runner", "pass"), row("edge", "fail")]))).toBe(2);
+  });
+  it("nothing failing → just the newest overall (recovery needs a fresh pass from the source that failed)", () => {
+    expect(effectiveHistory([row("edge", "pass"), row("runner", "fail")])[0]).toBe("fail");
+    expect(effectiveHistory([row("runner", "pass"), row("edge", "pass")])).toEqual(["pass"]);
+    expect(effectiveHistory([])).toEqual([]);
+  });
+  it("a single-source history reads exactly as it did before (rows default to the runner)", () => {
+    const old = ["fail", "unknown", "fail", "pass"];
+    expect(failStreak(effectiveHistory(old.map((o) => ({ overall: o }))))).toBe(failStreak(old));
+  });
+  it("an unknown in one source is stepped over, like before", () => {
+    expect(failStreak(effectiveHistory([row("runner", "fail"), row("runner", "unknown"), row("runner", "fail")]))).toBe(2);
+  });
+});
+
+describe("mergeLatestChecks — the newest observation of each check, across sources", () => {
+  it("takes the freshest result per check and never lets a newer 'skipped' hide a real one", () => {
+    const rows = [
+      { source: "edge", at: "T3", checks: [{ name: "server-gate", status: "pass" }, { name: "email-link", status: "pass" }] },
+      { source: "runner", at: "T2", checks: [{ name: "server-gate", status: "fail" }, { name: "panel-renders", status: "pass" }, { name: "email-link", status: "skipped" }] },
+    ];
+    const m = Object.fromEntries(mergeLatestChecks(rows).map((c) => [c.name, c]));
+    expect(m["server-gate"]).toMatchObject({ status: "pass", source: "edge" });
+    expect(m["panel-renders"]).toMatchObject({ status: "pass", source: "runner" });
+    expect(m["email-link"].status).toBe("pass");
+    const skipFirst = mergeLatestChecks([{ source: "runner", at: "T4", checks: [{ name: "email-link", status: "skipped" }] }, { source: "edge", at: "T3", checks: [{ name: "email-link", status: "pass" }] }]);
+    expect(skipFirst[0].status).toBe("pass");
+  });
+});
+
+describe("evaluateStops — a source that goes quiet is flagged ONCE", () => {
+  const watch = { edge: 45, runner: 720 };
+  const at = (m) => minsAgo(m);
+  it("a late beat (30 min) is a normal delayed run: nothing", () => {
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(30), runner: at(60) }, state: {} })).toEqual([]);
+  });
+  it("past the limit → open (email); a source that never reported is NOT stopped", () => {
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(46), runner: null }, state: {} })).toEqual([expect.objectContaining({ source: "edge", action: "open" })]);
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: null, runner: null }, state: {} })).toEqual([]);
+  });
+  it("the measured GitHub gaps (up to 8.5 h) are not a stop; 12 h+ is", () => {
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(5), runner: at(8.5 * 60) }, state: {} })).toEqual([]);
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(5), runner: at(13 * 60) }, state: {} })).toEqual([expect.objectContaining({ source: "runner", action: "open" })]);
+  });
+  it("already flagged and emailed → silent while it stays stopped (one email per episode)", () => {
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(300) }, state: { edge: { since: at(200), emailed_at: at(199) } } })).toEqual([]);
+  });
+  it("flagged but the email never went → retry; reports again → clear (no email)", () => {
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: at(300) }, state: { edge: { since: at(200), emailed_at: null } } })[0].action).toBe("retry-alert");
+    expect(evaluateStops({ now: NOW, watch, lastAt: { edge: NOW }, state: { edge: { since: at(200), emailed_at: at(199) } } })[0].action).toBe("clear");
+  });
+  it("ageWords speaks minutes then hours", () => { expect(ageWords(45)).toBe("45 minutes"); expect(ageWords(1)).toBe("1 minute"); expect(ageWords(8.5 * 60)).toMatch(/about (8|9) hours/); });
+});
+
+describe("snapshotHealth with two sources — each judged on its own clock", () => {
+  const snap = (edgeMin, runnerMin, over = {}) => ({ lastCheckAt: minsAgo(Math.min(edgeMin ?? 1e9, runnerMin ?? 1e9)), overall: "pass", failStreak: 0, events: ev(), incident: null, checks: [], sources: { edge: { lastAt: edgeMin == null ? null : minsAgo(edgeMin) }, runner: { lastAt: runnerMin == null ? null : minsAgo(runnerMin) } }, ...over });
+  it("both fresh enough → ok (the browser check at 6 h is normal here)", () => { expect(snapshotHealth(snap(5, 6 * 60), NOW).state).toBe("ok"); });
+  it("the fast check silent 46 min → STOPPED, naming it, even though the browser check just ran", () => {
+    const h = snapshotHealth(snap(46, 2), NOW);
+    expect(h.state).toBe("stale"); expect(h.line).toMatch(/fast sign-in check/); expect(h.line).toMatch(/stopped/);
+  });
+  it("the browser check silent 13 h → STOPPED, naming it", () => {
+    const h = snapshotHealth(snap(5, 13 * 60), NOW);
+    expect(h.state).toBe("stale"); expect(h.line).toMatch(/browser sign-in check/);
+  });
+  it("a source that has never reported is not 'stopped' (not armed yet)", () => { expect(snapshotHealth(snap(5, null), NOW).state).toBe("ok"); });
+  it("a snapshot written before 2026-11-04 (no `sources`) keeps the old single 150-minute rule", () => {
+    expect(snapshotHealth({ lastCheckAt: minsAgo(THRESHOLDS.staleMin + 1), overall: "pass", failStreak: 0, events: ev(), incident: null }, NOW).state).toBe("stale");
+  });
+  it("buildSnapshot records the sources and the open stops", () => {
+    const s = buildSnapshot({ now: NOW, latestChecks: [], latestOverall: "pass", latestAt: NOW, history: ["pass"], events: ev(), incident: null, sources: { edge: { lastAt: NOW }, runner: { lastAt: null } }, stops: [{ source: "runner", since: NOW, emailedAt: null }] });
+    expect(s.sources.edge.lastAt).toBe(NOW); expect(s.stops).toHaveLength(1);
+  });
+  it("SOURCES names exactly the two", () => { expect([...SOURCES]).toEqual(["edge", "runner"]); });
+});

@@ -135,7 +135,7 @@ export async function runSignin({ env = process.env, argv = process.argv, fetchI
     row = (await res.json())[0] || null;
   } else {
     log("-- READ-ONLY. Run this against the production database (Supabase SQL editor / MCP execute_sql), then pipe the row into `node scripts/ops-snapshot.mjs --signin --stdin`:\n" + SIGNIN_SQL);
-    log("-- STOPPED if updated_at / payload.lastCheckAt is older than 150 minutes; no row at all = the hourly check has never reported.");
+    log("-- STOPPED if payload.sources.edge.lastAt is older than 45 minutes or payload.sources.runner.lastAt is older than 12 hours (an older snapshot with no `sources`: payload.lastCheckAt older than 150 minutes); no row at all = the check has never reported.");
     return 0;
   }
   const v = signinVerdict(row, now);

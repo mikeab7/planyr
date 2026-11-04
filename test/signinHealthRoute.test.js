@@ -4,11 +4,14 @@ import { describe, it, expect, vi } from "vitest";
 import { handleSigninHealth, normaliseAttempts, createPostgrestStore, mailConfigured } from "../functions/api/lib/signinHealthRoute.js";
 
 function memStore({ events = [] } = {}) {
-  const s = { checks: [], incidents: [], snaps: {}, pruned: 0, eventsRows: events, failAt: null };
+  const s = { checks: [], incidents: [], snaps: {}, pruned: 0, eventsRows: events, failAt: null, stops: {} };
   const guard = (stage) => { if (s.failAt === stage) throw new Error("db down"); };
   return Object.assign(s, {
     async insertChecks(rows) { guard("store-checks"); rows.forEach((r) => s.checks.push({ ...r, id: s.checks.length + 1 })); },
-    async recentChecks({ synthetic, limit }) { return s.checks.filter((c) => !!c.synthetic === !!synthetic).sort((a, b) => b.at.localeCompare(a.at) || b.id - a.id).slice(0, limit); },
+    async recentChecks({ synthetic, limit, source }) { return s.checks.filter((c) => !!c.synthetic === !!synthetic && (!source || (c.source || "runner") === source)).sort((a, b) => b.at.localeCompare(a.at) || b.id - a.id).slice(0, limit); },
+    async lastCheckAt({ synthetic, source }) { const r = await s.recentChecks({ synthetic, limit: 1, source }); return r[0] ? r[0].at : null; },
+    async stopStates() { guard("stops"); return JSON.parse(JSON.stringify(s.stops)); },
+    async setStop(source, patch) { s.stops[source] = { ...(s.stops[source] || { source }), ...patch }; },
     async openIncident({ synthetic }) { return s.incidents.find((i) => !i.closed_at && !!i.synthetic === !!synthetic) || null; },
     async lastAlertAt({ synthetic }) { const t = s.incidents.filter((i) => i.alert_emailed_at && !!i.synthetic === !!synthetic).map((i) => i.alert_emailed_at).sort(); return t[t.length - 1] || null; },
     async eventCounts() { return s.eventsRows; },
@@ -220,7 +223,7 @@ describe("the PostgREST store speaks to the right tables with the service role",
     await s.updateIncident("abc", { closed_at: "T" });
     await s.prune("2026-08-01T00:00:00.000Z");
     expect(calls.map((c) => c.method + " " + c.url.replace("https://x.supabase.co/rest/v1/", ""))).toEqual([
-      "GET signin_health_checks?select=overall,at,checks,run_url&synthetic=eq.false&order=at.desc,id.desc&limit=60",
+      "GET signin_health_checks?select=overall,at,checks,run_url,source&synthetic=eq.false&order=at.desc,id.desc&limit=60",
       "GET signin_incidents?select=*&closed_at=is.null&synthetic=eq.true&limit=1",
       "POST rpc/signin_event_counts",
       "POST ops_snapshots?on_conflict=key",
@@ -233,5 +236,124 @@ describe("the PostgREST store speaks to the right tables with the service role",
   it("a refused request throws (so the route answers 502)", async () => {
     const s = createPostgrestStore(ENV, async () => new Response("denied", { status: 401 }));
     await expect(s.recentChecks({ synthetic: false, limit: 1 })).rejects.toThrow(/history: HTTP 401/);
+  });
+});
+
+/* ── NEW-1 (2026-11-04, B2650848) — two sources, and the dead-man's switch that emails once ─────────────────────────────── */
+import { recordReport } from "../functions/api/lib/signinHealthRoute.js";
+
+describe("two sources: the fast check and the browser check", () => {
+  const norm = (...checks) => normaliseAttempts({ attempts: [{ checks }] }).attempts;
+  const gate = (status) => ({ name: "server-gate", status, detail: status === "pass" ? "" : "no site key" });
+  const panel = (status) => ({ name: "panel-renders", status, detail: status === "pass" ? "" : "form missing its button" });
+  function two() {
+    const store = memStore(); const sent = []; let t = Date.parse("2026-11-04T08:00:00Z");
+    const send = async (m) => { sent.push(m); return { ok: true, id: "m" + sent.length }; };
+    const go = async (source, checks, { minutes = 15, synthetic = false, stopDrill = null } = {}) => {
+      t += minutes * 60000;
+      const res = await recordReport({ env: ENV, store, source, attempts: norm(...checks), runUrl: null, synthetic, stopDrill, send, now: () => new Date(t).toISOString() });
+      return res.json();
+    };
+    return { store, sent, go, at: () => new Date(t).toISOString() };
+  }
+  it("a fast-check PASS between two failing browser runs does NOT hide the break — it still alarms, once", async () => {
+    const x = two();
+    await x.go("runner", [gate("pass"), panel("fail")], { minutes: 0 });
+    for (let i = 0; i < 6; i++) await x.go("edge", [gate("pass")]);          // six fast passes in between
+    const r = await x.go("runner", [gate("pass"), panel("fail")]);
+    expect(r).toMatchObject({ delivery: "sent", decision: { action: "open", kind: "outside-in" } });
+    expect(x.sent).toHaveLength(1);
+    for (let i = 0; i < 5; i++) await x.go("edge", [gate("pass")]);
+    expect(x.sent).toHaveLength(1);                                           // and the fast passes do not close it either
+    expect((await x.go("runner", [gate("pass"), panel("pass")])).delivery).toBe("recovery-sent");
+    expect(x.sent).toHaveLength(2);
+  });
+  it("two fast-check failures in a row alarm by themselves — no GitHub run needed", async () => {
+    const x = two();
+    const r = await x.go("edge", [gate("fail")]);
+    expect(r.delivery).toBe("not-needed");
+    expect((await x.go("edge", [gate("fail")])).delivery).toBe("sent");
+    expect((await x.go("edge", [gate("pass")])).delivery).toBe("recovery-sent");
+  });
+  it("the snapshot keeps both clocks, and the card's checks come from whichever source saw each one last", async () => {
+    const x = two();
+    await x.go("runner", [panel("pass")], { minutes: 0 });
+    const r = await x.go("edge", [gate("pass")]);
+    expect(r.ok).toBe(true);
+    const s = x.store.snaps.signin;
+    expect(s.sources.edge.lastAt).toBeTruthy(); expect(s.sources.runner.lastAt).toBeTruthy();
+    expect(s.checks.map((c) => c.name).sort()).toEqual(["panel-renders", "server-gate"]);
+    expect(s.checks.find((c) => c.name === "panel-renders").source).toBe("runner");
+  });
+  it("the browser check's 24-unknown 'blind' rule is not reset by fast-check passes in between", async () => {
+    const x = two(); let last;
+    for (let i = 0; i < 24; i++) { await x.go("edge", [gate("pass")]); last = await x.go("runner", [{ name: "server-gate", status: "unknown", detail: "" }]); }
+    expect(last.decision).toMatchObject({ kind: "blind", action: "open" });
+  });
+});
+
+describe("the dead-man's switch: a check that goes silent emails the owner ONCE", () => {
+  const norm = (...checks) => normaliseAttempts({ attempts: [{ checks }] }).attempts;
+  const pass = { name: "server-gate", status: "pass", detail: "" };
+  function lab() {
+    const store = memStore(); const sent = []; let t = Date.parse("2026-11-04T00:00:00Z");
+    const send = async (m) => { sent.push(m); return { ok: true, id: "m" + sent.length }; };
+    const go = async (source, minutes, o = {}) => { t += minutes * 60000; return (await recordReport({ env: ENV, store, source, attempts: norm(pass), runUrl: null, send, now: () => new Date(t).toISOString(), ...o })).json(); };
+    return { store, sent, go };
+  }
+  it("the fast check goes quiet 46 min → the NEXT browser report emails once; later reports add none; it clearing sends nothing", async () => {
+    const x = lab();
+    await x.go("edge", 0);
+    const r = await x.go("runner", 46);
+    expect(r.stops).toEqual([{ source: "edge", action: "open" }]); expect(r.stopDelivery).toBe("sent");
+    expect(x.sent).toHaveLength(1); expect(x.sent[0].subject).toMatch(/^Planyr alarm: A sign-in check stopped running/);
+    expect(x.sent[0].text).toMatch(/fast sign-in check/); expect(x.sent[0].text).toMatch(/Cron Jobs/);
+    expect((await x.go("runner", 60)).stopDelivery).toBe("not-needed");
+    expect((await x.go("runner", 60)).stopDelivery).toBe("not-needed");
+    expect(x.sent).toHaveLength(1);
+    expect(x.store.snaps.signin.stops).toEqual([expect.objectContaining({ source: "edge" })]);
+    const back = await x.go("edge", 5);
+    expect(back.stops).toEqual([{ source: "edge", action: "clear" }]); expect(back.stopDelivery).toBe("not-needed");
+    expect(x.sent).toHaveLength(1);                                           // no all-clear note — the Ops card shows it running
+    expect(x.store.snaps.signin.stops).toEqual([]);
+  });
+  it("a late beat (30 min) and a normal GitHub gap (8 h) are NOT stops — no email, no noise", async () => {
+    const x = lab();
+    await x.go("edge", 0); await x.go("runner", 1);
+    expect((await x.go("edge", 30)).stops).toEqual([]);
+    for (let i = 0; i < 30; i++) await x.go("edge", 15);                       // 7.5 h of fast beats, no browser report
+    expect(x.sent).toHaveLength(0);
+  });
+  it("the fast check watches the browser check too: silent 13 h → one email naming GitHub", async () => {
+    const x = lab();
+    await x.go("runner", 0);
+    let stops = [];
+    for (let i = 0; i < 53 && !stops.length; i++) { const r = await x.go("edge", 15); stops = r.stops; }
+    expect(stops).toEqual([{ source: "runner", action: "open" }]);
+    expect(x.sent).toHaveLength(1); expect(x.sent[0].text).toMatch(/browser sign-in check/); expect(x.sent[0].text).toMatch(/GitHub/);
+    for (let i = 0; i < 20; i++) await x.go("edge", 15);
+    expect(x.sent).toHaveLength(1);
+  });
+  it("mail not configured: the stop is recorded, NOT marked emailed, reported loudly, and retried on the next report", async () => {
+    const store = memStore(); const sent = [];
+    const send = async (m) => { sent.push(m); return { ok: true, id: "m" }; };
+    let t = Date.parse("2026-11-04T00:00:00Z");
+    const go = async (source, minutes, env) => { t += minutes * 60000; return (await recordReport({ env, store, source, attempts: norm(pass), runUrl: null, send, now: () => new Date(t).toISOString() })).json(); };
+    await go("edge", 0, ENV);
+    const r = await go("runner", 60, { ...ENV, GMAIL_SERVICE_ACCOUNT_JSON: undefined });
+    expect(r.stopDelivery).toBe("not-configured"); expect(store.stops.edge.emailed_at).toBeFalsy(); expect(sent).toHaveLength(0);
+    const again = await go("runner", 5, ENV);
+    expect(again.stops).toEqual([{ source: "edge", action: "retry-alert" }]); expect(again.stopDelivery).toBe("sent");
+  });
+  it("the DRILL proves the stopped-check email without touching the real state", async () => {
+    const x = lab();
+    await x.go("edge", 0);
+    const a = await x.go("runner", 1, { synthetic: true, stopDrill: "stale" });
+    expect(a.stopDelivery).toBe("sent"); expect(x.sent[0].subject).toMatch(/^\[TEST\] Planyr alarm: A sign-in check stopped/);
+    expect((await x.go("runner", 1, { synthetic: true, stopDrill: "stale" })).stopDelivery).toBe("not-needed");
+    const c = await x.go("runner", 1, { synthetic: true, stopDrill: "fresh" });
+    expect(c.stops).toEqual([{ source: "drill", action: "clear" }]); expect(x.sent).toHaveLength(1);
+    expect(x.store.stops.edge).toBeUndefined();                                // the real sources were never touched
+    expect((await x.go("runner", 1, { synthetic: true })).stops).toEqual([]);  // a drill without stopDrill runs no stop step
   });
 });
