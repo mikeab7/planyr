@@ -187,7 +187,7 @@ describe("the Grand Port fixture is the owner's real schedule", () => {
   });
   it("contains leaf rows whose bar at 33% zoom is wider than their own name — the rows that plated", () => {
     const PPD = 2;                                    // 33% on the app's ppd/6 scale
-    const NAME_SIZE = (lvl) => [9.5, 8.5, 8.5, 8][Math.min(lvl, 3)];
+    const NAME_SIZE = (lvl) => GANTT_PROFILES.screen.names[Math.min(lvl, 3)];
     const estLabelWidth = (s, fs) => Math.max(1, String(s).length) * fs * 0.6 + 4;
     const isParent = (t) => proj.tasks.some((x) => x.parentId === t.id);
     const wide = visibleTasks(proj.tasks).filter((t) => {
@@ -249,8 +249,10 @@ const rankViolations = (m, rowHs) => {
         // 3) rank: a level is never smaller than the level below it
         if (lv < 3 && m.fs(kind, rowH, lv + 1) > fs + EPS) out.push(`${kind} @${rowH}: L${lv + 1} (${m.fs(kind, rowH, lv + 1).toFixed(2)}) > L${lv} (${fs.toFixed(2)})`);
       }
-      // 4) ...and the top level is STRICTLY the biggest
-      if (!(m.fs(kind, rowH, 0) > m.fs(kind, rowH, 1))) out.push(`${kind} @${rowH}: L0 not strictly > L1`);
+      // 4) ...and (NEW-1 amendment, B2656160 ×2) the chain is STRICT over ALL four depths: L0 > L1 > L2 > L3. B2656160's first
+      //    acceptance only demanded L0 > L1, so L1 and L2 both drew at 8.5 and only weight told them apart — the complaint.
+      const chain = LEVELS.map((l) => m.fs(kind, rowH, l));
+      if (!chain.every((v, i) => i === 0 || chain[i - 1] > v + EPS)) out.push(`TIE ${kind} @${rowH}: sizes by level ${chain.map((v) => v.toFixed(2)).join(" / ")} are not strictly decreasing`);
     }
     // 5) a milestone name is never smaller than a leaf name at the same level
     for (const lv of LEVELS) if (m.fs("milestone", rowH, lv) < m.fs("leaf", rowH, lv) - EPS)
@@ -277,7 +279,7 @@ describe("NEW-1 — name size follows RANK at every row height (screen)", () => 
   });
   it("level 0 is drawn at its FULL base size even at the shortest row (the owner's row height)", () => {
     const m = modelOf(GANTT_PROFILES.screen);
-    for (const kind of KINDS) expect(m.fs(kind, 20, 0), kind).toBe(9.5);
+    for (const kind of KINDS) expect(m.fs(kind, 20, 0), kind).toBe(10);
   });
   it("above the default row height the bracket is exactly today's ramp (nothing was thinned)", () => {
     for (const rowH of [24, 28, 34]) for (const lv of LEVELS) {
@@ -290,7 +292,16 @@ describe("NEW-1 — name size follows RANK at every row height (screen)", () => 
     const P = GANTT_PROFILES.screen;
     for (const rowH of SCREEN_ROWS) {
       expect(ganttMilestoneGeom(P, rowH, 1).bot).toBe(ganttLeafGeom(P, rowH).bot);
-      expect(ganttMilestoneGeom(P, rowH, 1).half).toBeCloseTo(3 * Math.SQRT2, 9);   // levels 1-3 keep the full 6-px diamond
+      // Levels 1-3 keep the full 6-px diamond — EXCEPT (NEW-1 amendment, B2656160 ×2): level 1's name grew 8.5 → 9.25, so at the
+      // single shortest row (20) its diamond gives up under half a pixel of vertex distance to keep the name clear of it.
+      // From row 21 up nothing changed; at no row does a diamond fall below the level-0 one or the legible floor.
+      for (const lv of [1, 2, 3]) {
+        const h = ganttMilestoneGeom(P, rowH, lv).half;
+        if (rowH >= 21) expect(h, `L${lv} @${rowH}`).toBeCloseTo(3 * Math.SQRT2, 9);
+        else expect(3 * Math.SQRT2 - h, `L${lv} @${rowH}`).toBeLessThan(0.5);
+        expect(h, `L${lv} @${rowH}`).toBeGreaterThanOrEqual(ganttMilestoneGeom(P, rowH, 0).half);
+        expect(h).toBeGreaterThanOrEqual(P.mileMin);
+      }
     }
   });
 });
@@ -311,7 +322,7 @@ describe("NEW-1 — the checker has teeth: main's OLD formulas fail it (red-proo
   // ROW_H-10.5). If this ever stops being RED the sweep above has gone blind.
   const old = {
     P: GANTT_PROFILES.screen, minSpan: () => 0, minLeg: () => 0,
-    base: (lv) => [9.5, 8.5, 8.5, 8][lv],
+    base: (lv) => [9.5, 8.5, 8.5, 8][lv],   // main's pre-NEW-1 sizes, frozen on purpose
     top: (kind, rowH, lv) => {
       if (kind === "summary") return rowH - 2 - [0.16, 0.12, 0.09, 0.07][lv] * rowH - [6, 5, 4, 4][lv];
       if (kind === "milestone") return rowH - 10.5;
@@ -327,7 +338,7 @@ describe("NEW-1 — the checker has teeth: main's OLD formulas fail it (red-proo
     expect(v.join("\n")).toMatch(/milestone/);
   });
   it("is clean on the old geometry only at a tall row", () => {
-    expect(rankViolations(old, [34]).filter((x) => /summary @34|bracket/.test(x))).toEqual([]);
+    expect(rankViolations(old, [34]).filter((x) => /summary @34|bracket/.test(x) && !/^TIE/.test(x))).toEqual([]);
   });
 });
 
@@ -346,5 +357,26 @@ describe("NEW-1 — one geometry source: the arrow anchors read the same helpers
   });
   it("print bands are thin wrappers over the shared helpers", () => {
     for (const fn of ["ganttSummaryGeom(PP", "ganttMilestoneGeom(PP", "ganttLeafGeom(PP"]) expect(SRC).toContain(fn);
+  });
+});
+
+describe("NEW-1 amendment (B2656160 ×2) — every level strictly larger than the one below, and the step is VISIBLE", () => {
+  it("screen.names is strictly decreasing, as declared", () => {
+    const n = GANTT_PROFILES.screen.names;
+    for (let i = 0; i < 3; i++) expect(n[i], `L${i} vs L${i + 1}`).toBeGreaterThan(n[i + 1]);
+  });
+  it("print.names stays strictly decreasing", () => {
+    const n = GANTT_PROFILES.print.names;
+    for (let i = 0; i < 3; i++) expect(n[i], `L${i} vs L${i + 1}`).toBeGreaterThan(n[i + 1]);
+  });
+  it("each step is at least half a point (visible at normal zoom, not just measurable)", () => {
+    const n = GANTT_PROFILES.screen.names;
+    for (let i = 0; i < 3; i++) expect(n[i] - n[i + 1], `L${i}→L${i + 1}`).toBeGreaterThanOrEqual(0.5);
+  });
+  it("RED-PROOF: the pre-amendment screen sizes (9.5 / 8.5 / 8.5 / 8) fail the strict chain", () => {
+    const old = { ...modelOf(GANTT_PROFILES.screen), base: (lv) => [9.5, 8.5, 8.5, 8][lv],
+      fs: (kind, rowH, lv) => [9.5, 8.5, 8.5, 8][lv] };
+    const v = rankViolations(old, [24]);
+    expect(v.join("\n")).toMatch(/TIE .*not strictly decreasing/);
   });
 });

@@ -233,9 +233,13 @@ const KIND_OF = new Map(), LEVEL_OF = new Map();
     LEVEL_OF.set(t.id, depthOf(GRAND_PORT.tasks, t.id));
   }
 }
-const RANKED = lv => [9.5, 8.5, 8.5, 8][Math.min(lv, 3)];
-const SHOT_IDS = ["Permitting/Entitlements", "Platting", "Baytown Platting", "Submit Preliminary Plat", "Determine Bonding Amount"]
-  .map(n => GRAND_PORT.tasks.find(t => t.name === n)?.id).filter(Boolean);
+// Expected sizes are deliberately a SECOND, independent statement of the ramp (not read from the app) — NEW-1 amendment (B2656160 ×2): strictly decreasing.
+const RANKED = lv => [10, 9.25, 8.5, 8][Math.min(lv, 3)];
+// The owner's live Grand Port has newer rows (Permits and Platting, Baytown ETJ Permit, Permit Review #3, Final Plat, Bond Acceptance)
+// than this checked-in fixture snapshot; these are the nearest rows covering every level AND kind: L0 summary, L1 summary, L2 summary,
+// L1 task, L2 task, L3 milestone. Ids are looked up by name+level so a duplicated name ("Submit Preliminary Plat" is under two parents) is unambiguous.
+const SHOT_ROWS = [["Permitting/Entitlements", 0], ["Platting", 1], ["Baytown Platting", 2], ["Determine Bonding Amount", 1], ["Draft Preliminary Plat", 2], ["Submit Preliminary Plat", 3]];
+const SHOT_IDS = SHOT_ROWS.map(([n, lv]) => GRAND_PORT.tasks.find(t => t.name === n && depthOf(GRAND_PORT.tasks, t.id) === lv)?.id).filter(Boolean);
 
 async function rankPass(rowH, tag = "after") {
   console.log(`\n── RANK · rowHeight ${rowH} · split view · 33% zoom (${tag}) ──────────────`);
@@ -266,7 +270,13 @@ async function rankPass(rowH, tag = "after") {
     const minAt = lv => Math.min(...rows.filter(n => n.level === lv).map(n => n.fs)), maxAt = lv => Math.max(...rows.filter(n => n.level === lv).map(n => n.fs));
     for (const lv of [0, 1, 2]) if (rows.some(n => n.level === lv) && rows.some(n => n.level === lv + 1))
       ok(minAt(lv) >= maxAt(lv + 1) - 0.01, `level ${lv} names (min ${minAt(lv)}) are not smaller than level ${lv + 1} names (max ${maxAt(lv + 1)})`);
-    ok(minAt(0) > maxAt(1), `level 0 (${minAt(0)}) is strictly larger than level 1 (${maxAt(1)})`);
+    // NEW-1 amendment (B2656160 ×2): STRICT at every depth — a level's smallest name is larger than the next level's largest.
+    for (const lv of [0, 1, 2]) if (rows.some(n => n.level === lv) && rows.some(n => n.level === lv + 1))
+      ok(minAt(lv) > maxAt(lv + 1), `level ${lv} (${minAt(lv)}) is STRICTLY larger than level ${lv + 1} (${maxAt(lv + 1)})`);
+    for (const kind of ["summary", "leaf", "milestone"]) {
+      const sz = [0, 1, 2, 3].map(lv => by(kind, lv)).map(a => a.length ? a[0] : null).filter(v => v != null);
+      ok(sz.every((v, i) => i === 0 || sz[i - 1] > v), `${kind}: sizes by level ${sz.join(" > ")} strictly decrease`);
+    }
     // (c) a milestone name is never smaller than a leaf name at its level
     for (const lv of [1, 2, 3]) { const m = by("milestone", lv), l = by("leaf", lv);
       if (m.length && l.length) ok(Math.min(...m) >= Math.max(...l) - 0.01, `milestone L${lv} name (${Math.min(...m)}) >= leaf L${lv} name (${Math.max(...l)})`); }
@@ -418,7 +428,7 @@ console.log(`\n── print path (buildGanttSVG) ──────────�
     }
     ok(host.caps.length > 100 && Object.keys(seenLv).length >= 4, `print rank check is not vacuous (${host.caps.length} captions, levels seen ${Object.keys(seenLv).join(",")})`);
     ok(bad.length === 0, `every print caption is drawn at its full ranked size (${bad.length} are not)${bad.length ? " e.g. " + bad.slice(0, 4).join(" | ") : ""}`);
-    ok(Math.min(...seenLv[0]) > Math.max(...seenLv[1]), `print: level 0 (${[...seenLv[0]]}) is larger than level 1 (${[...seenLv[1]]})`);
+    for (const lv of [0, 1, 2]) if (seenLv[lv] && seenLv[lv + 1]) ok(Math.min(...seenLv[lv]) > Math.max(...seenLv[lv + 1]), `print: level ${lv} (${[...seenLv[lv]]}) is STRICTLY larger than level ${lv + 1} (${[...seenLv[lv + 1]]})`);
     const tag = process.env.RANK_TAG || "after";
     const row = id => GRAND_PORT.tasks.findIndex(t => t.id === id);
     for (const id of SHOT_IDS) {

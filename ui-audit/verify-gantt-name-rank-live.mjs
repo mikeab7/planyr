@@ -8,7 +8,7 @@
  * refused for a fixture) and the last step proves nothing was stored on the account.
  *
  * Per row height, from the REAL computed font sizes off [data-gantt-name]: every name is drawn at its ranked size
- * (9.5 / 8.5 / 8.5 / 8), level 0 is strictly larger than level 1, a milestone name is never smaller than a task
+ * (10 / 9.25 / 8.5 / 8), level 0 is strictly larger than level 1, a milestone name is never smaller than a task
  * name at its level, no name touches its bar / bracket / diamond, every dependency-arrow endpoint sits on a glyph
  * edge. Then buildGanttSVG on the SAME live page (the exhibit the PDF export prints): captions at their ranked
  * print sizes, level 0 larger than level 1. Known-good arms make a run VOID rather than green: the measured row
@@ -43,7 +43,7 @@ const tasks = [
 ];
 const LEVEL = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1, 10: 0, 11: 0 };
 const KIND = { 1: "summary", 2: "summary", 3: "summary", 4: "leaf", 5: "milestone", 6: "leaf", 7: "milestone", 8: "leaf", 9: "milestone", 10: "milestone", 11: "leaf" };
-const RANKED = lv => [9.5, 8.5, 8.5, 8][Math.min(lv, 3)];
+const RANKED = lv => [10, 9.25, 8.5, 8][Math.min(lv, 3)];   // B2656160 ×2: every level strictly larger than the one below
 const RANKED_PRINT = lv => [9, 8.5, 8, 7.5][Math.min(lv, 3)];
 const fixtureFor = rowH => ({ aPid: 1, nPid: 2, nTid: 1000, view: "split", section: "projects", settings: { rowHeight: rowH },
   projects: { 1: { id: 1, name: NAME, labelAlign: "center", tasks, colConfig: { visible: ["id","name","start","end","duration","predecessors","successors","health","status","responsibleParty","cost","notes"], widths: {} } } } });
@@ -120,7 +120,10 @@ for (const rowH of [20, 24, 34]) {
   const fsOf = id => rows.find(n => n.id === id).fs;
   ok(`level 0 (${fsOf(1)}) is strictly larger than level 1 (${fsOf(2)}) — summary`, fsOf(1) > fsOf(2));
   ok(`level 0 task/milestone (${fsOf(11)} / ${fsOf(10)}) is larger than level 1 (${fsOf(8)} / ${fsOf(9)})`, fsOf(11) > fsOf(8) && fsOf(10) > fsOf(9));
-  ok("ranks descend through every level (summary 0 > 1 >= 2)", fsOf(1) > fsOf(2) && fsOf(2) >= fsOf(3));
+  // B2656160 ×2: STRICT at every depth, for each kind (summary 0>1>2, task 0>1>2>3, milestone 0>1>2>3)
+  const chain = ids => ids.map(fsOf), strict = a => a.every((v, i) => i === 0 || a[i - 1] > v);
+  for (const [kind, ids] of [["summary", [1, 2, 3]], ["task", [11, 8, 6, 4]], ["milestone", [10, 9, 7, 5]]])
+    ok(`${kind} sizes ${chain(ids).join(" > ")} are strictly decreasing with depth`, strict(chain(ids)));
   for (const [mid, tid, lv] of [[5, 4, 3], [7, 6, 2], [9, 8, 1], [10, 11, 0]]) ok(`milestone name L${lv} (${fsOf(mid)}) >= task name L${lv} (${fsOf(tid)})`, fsOf(mid) >= fsOf(tid) - 0.01);
   const onBar = rows.filter(n => n.barTop != null && n.nameBottom > n.barTop + 0.5);
   ok("no name touches its own bar / bracket / diamond", onBar.length === 0, onBar.map(n => `${n.text} ${n.nameBottom.toFixed(1)}>${n.barTop.toFixed(1)}`).join(" | "));
