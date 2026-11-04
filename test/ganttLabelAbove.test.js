@@ -40,7 +40,14 @@ const oneLiner = (name) => {
 };
 
 const placeGanttLabel = new Function(`${extract("placeGanttLabel")}\nreturn placeGanttLabel;`)();
-const fitCaptionFs = new Function(`${oneLiner("fitCaptionFs")}\nreturn fitCaptionFs;`)();
+
+// NEW-1 (name rank): the shared geometry block, evaluated straight out of the shipped file.
+const GEOM_SRC = SRC.slice(SRC.indexOf("// <gantt-geom>"), SRC.indexOf("// </gantt-geom>"));
+expect(GEOM_SRC.length, "the <gantt-geom> block is missing from public/sequence/index.html").toBeGreaterThan(500);
+const G = new Function(`${GEOM_SRC}
+return { GANTT_CAPTION_LH, ganttCaptionNeed, ganttCaptionHalf, fitCaptionFs, GANTT_PROFILES,
+         ganttNameSize, ganttLeafGeom, ganttSummaryGeom, ganttMilestoneGeom };`)();
+const { fitCaptionFs, GANTT_PROFILES, ganttNameSize, ganttLeafGeom, ganttSummaryGeom, ganttMilestoneGeom, ganttCaptionHalf } = G;
 
 const ALIGNS = ["left", "center", "right"];
 const KINDS = ["leaf", "summary", "milestone"];
@@ -159,7 +166,7 @@ describe("source guards — the on-bar plate is gone from BOTH render paths", ()
     expect(body).not.toMatch(/opacity="0\.85"/);
   });
   it("the print path bottom-aligns EVERY glyph on one baseline, and the arrow router reads the same bands", () => {
-    expect(SRC).toContain("const GLYPH_BASE=ROW_H-2;");
+    expect(SRC).toContain("const PP=GANTT_PROFILES.print;");
     for (const band of ["leafBand", "mileBand", "summaryBand"]) {
       // defined once, then read by the bar renderer, the name placement AND glyphEdges
       expect(SRC.split(`${band}(`).length - 1).toBeGreaterThanOrEqual(3);
@@ -194,5 +201,150 @@ describe("the Grand Port fixture is the owner's real schedule", () => {
     expect(wide).toContain("AHJ Review #2");
     expect(wide).toContain("Underground Terms & Conditions");
     expect(wide.length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// NEW-1 (2026-11-04) — a task NAME's size is its RANK: the higher in the hierarchy, the larger, at
+// EVERY row height — the owner, Grand Port, Split view: "why is the top level task have smaller than
+// the lower level task labels on the gantt chart". The text is the priority; the GLYPH (bracket /
+// diamond) gives way. These are pure-geometry sweeps over every integer row height the app allows
+// (settings.rowHeight 20…34) and over the fixed print row height, for every kind and depth.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const SCREEN_ROWS = Array.from({ length: 15 }, (_, i) => 20 + i);   // 20…34
+const PRINT_ROWS = [18];                                             // buildGanttSVG's fixed ROW_H
+const LEVELS = [0, 1, 2, 3];
+const EPS = 1e-9;
+
+// A "model" answers the only questions the rank rule asks, for ONE render path. `fs` is the size the
+// renderer actually draws (the ranked size passed through the last-resort headroom cap); `top` is the
+// y of the glyph's top edge the caption must clear; `bracket` is the bracket thickness triple.
+const modelOf = (P) => {
+  const glyph = (kind, rowH, level) => kind === "summary" ? ganttSummaryGeom(P, rowH, level)
+    : kind === "milestone" ? ganttMilestoneGeom(P, rowH, level) : ganttLeafGeom(P, rowH);
+  return {
+    P,
+    top: (kind, rowH, level) => glyph(kind, rowH, level).top,
+    fs: (kind, rowH, level) => fitCaptionFs(ganttNameSize(P, level), glyph(kind, rowH, level).top),
+    base: (level) => ganttNameSize(P, level),
+    bracket: (rowH, level) => { const g = ganttSummaryGeom(P, rowH, level); return { span: g.span, leg: g.leg, total: g.span + g.leg }; },
+    // the legible floor never exceeds a bracket's own nominal size (it only props a THINNED bracket up)
+    minSpan: (rowH, lv) => Math.min(P.minSpan, P.span[lv]), minLeg: (rowH, lv) => Math.min(P.minLeg, P.leg[lv] * rowH),
+  };
+};
+
+// The checker. Returns a list of human-readable violations (empty = the rule holds).
+const rankViolations = (m, rowHs) => {
+  const out = [];
+  for (const rowH of rowHs) {
+    for (const kind of KINDS) {
+      for (const lv of LEVELS) {
+        const fs = m.fs(kind, rowH, lv), top = m.top(kind, rowH, lv);
+        // 1) the name is drawn at its full ranked size — no row height may shrink it
+        if (fs < m.base(lv) - EPS) out.push(`${kind} L${lv} @${rowH}: ${fs.toFixed(2)} < ranked ${m.base(lv)}`);
+        // 2) the caption box never crosses the top of its own glyph
+        if (placeGanttLabel({ kind, align: "center", bx: 100, bw: kind === "milestone" ? 0 : 80, rowTop: 0, barTopY: top,
+          labelW: 40, chartL: 0, chartR: 1000, capHalf: ganttCaptionHalf(fs), rowH }).y + ganttCaptionHalf(fs) > top + 1e-6)
+          out.push(`${kind} L${lv} @${rowH}: name bottom crosses glyph top ${top.toFixed(2)}`);
+        // 3) rank: a level is never smaller than the level below it
+        if (lv < 3 && m.fs(kind, rowH, lv + 1) > fs + EPS) out.push(`${kind} @${rowH}: L${lv + 1} (${m.fs(kind, rowH, lv + 1).toFixed(2)}) > L${lv} (${fs.toFixed(2)})`);
+      }
+      // 4) ...and the top level is STRICTLY the biggest
+      if (!(m.fs(kind, rowH, 0) > m.fs(kind, rowH, 1))) out.push(`${kind} @${rowH}: L0 not strictly > L1`);
+    }
+    // 5) a milestone name is never smaller than a leaf name at the same level
+    for (const lv of LEVELS) if (m.fs("milestone", rowH, lv) < m.fs("leaf", rowH, lv) - EPS)
+      out.push(`@${rowH} L${lv}: milestone ${m.fs("milestone", rowH, lv).toFixed(2)} < leaf ${m.fs("leaf", rowH, lv).toFixed(2)}`);
+    // 6) across kinds: the top level outranks the next level whatever the glyph
+    const topMin = Math.min(...KINDS.map((k) => m.fs(k, rowH, 0))), nextMax = Math.max(...KINDS.map((k) => m.fs(k, rowH, 1)));
+    if (!(topMin > nextMax)) out.push(`@${rowH}: a level-0 name (${topMin.toFixed(2)}) is not larger than every level-1 name (${nextMax.toFixed(2)})`);
+    // 7) bracket rank survives, and it still reads as a bracket (span AND legs)
+    for (const lv of LEVELS) {
+      const b = m.bracket(rowH, lv);
+      if (b.span < m.minSpan(rowH, lv) - EPS || b.leg < m.minLeg(rowH, lv) - EPS) out.push(`bracket L${lv} @${rowH}: span ${b.span.toFixed(2)} / leg ${b.leg.toFixed(2)} below the legible floor`);
+      if (lv < 3) {
+        const n = m.bracket(rowH, lv + 1);
+        for (const f of ["span", "leg", "total"]) if (n[f] > b[f] + EPS) out.push(`bracket @${rowH}: L${lv + 1} ${f} ${n[f].toFixed(2)} > L${lv} ${b[f].toFixed(2)}`);
+      }
+    }
+  }
+  return out;
+};
+
+describe("NEW-1 — name size follows RANK at every row height (screen)", () => {
+  it("holds for every integer row height 20…34, every kind, every depth", () => {
+    expect(rankViolations(modelOf(GANTT_PROFILES.screen), SCREEN_ROWS)).toEqual([]);
+  });
+  it("level 0 is drawn at its FULL base size even at the shortest row (the owner's row height)", () => {
+    const m = modelOf(GANTT_PROFILES.screen);
+    for (const kind of KINDS) expect(m.fs(kind, 20, 0), kind).toBe(9.5);
+  });
+  it("above the default row height the bracket is exactly today's ramp (nothing was thinned)", () => {
+    for (const rowH of [24, 28, 34]) for (const lv of LEVELS) {
+      const g = ganttSummaryGeom(GANTT_PROFILES.screen, rowH, lv), P = GANTT_PROFILES.screen;
+      expect(g.span).toBeCloseTo(P.span[lv], 9);
+      expect(g.leg).toBeCloseTo(P.leg[lv] * rowH, 9);
+    }
+  });
+  it("a milestone diamond sits on the leaf bar's baseline and only the biggest name makes it shrink", () => {
+    const P = GANTT_PROFILES.screen;
+    for (const rowH of SCREEN_ROWS) {
+      expect(ganttMilestoneGeom(P, rowH, 1).bot).toBe(ganttLeafGeom(P, rowH).bot);
+      expect(ganttMilestoneGeom(P, rowH, 1).half).toBeCloseTo(3 * Math.SQRT2, 9);   // levels 1-3 keep the full 6-px diamond
+    }
+  });
+});
+
+describe("NEW-1 — the same rule on the PRINT geometry (PDF-PARITY)", () => {
+  it("holds at the fixed print row height", () => {
+    expect(rankViolations(modelOf(GANTT_PROFILES.print), PRINT_ROWS)).toEqual([]);
+  });
+  it("level 0 prints at its full base size, and the milestone name is not the 6.5 floor", () => {
+    const m = modelOf(GANTT_PROFILES.print);
+    for (const kind of KINDS) expect(m.fs(kind, 18, 0), kind).toBe(9);
+    for (const lv of LEVELS) expect(m.fs("milestone", 18, lv)).toBe(m.base(lv));
+  });
+});
+
+describe("NEW-1 — the checker has teeth: main's OLD formulas fail it (red-proof)", () => {
+  // A frozen copy of the pre-fix geometry (fitCaptionFs 1.3, name fitted to the bracket, diamond at
+  // ROW_H-10.5). If this ever stops being RED the sweep above has gone blind.
+  const old = {
+    P: GANTT_PROFILES.screen, minSpan: () => 0, minLeg: () => 0,
+    base: (lv) => [9.5, 8.5, 8.5, 8][lv],
+    top: (kind, rowH, lv) => {
+      if (kind === "summary") return rowH - 2 - [0.16, 0.12, 0.09, 0.07][lv] * rowH - [6, 5, 4, 4][lv];
+      if (kind === "milestone") return rowH - 10.5;
+      return rowH - rowH * 0.25 - 1;
+    },
+    fs(kind, rowH, lv) { return Math.max(6.5, Math.min(this.base(lv), this.top(kind, rowH, lv) / 1.3)); },
+    bracket: (rowH, lv) => { const span = [6, 5, 4, 4][lv], leg = [0.16, 0.12, 0.09, 0.07][lv] * rowH; return { span, leg, total: span + leg }; },
+  };
+  it("reports the inverted ranks the owner saw at the shortest row", () => {
+    const v = rankViolations(old, [20]);
+    expect(v.length).toBeGreaterThan(5);
+    expect(v.join("\n")).toMatch(/summary @20: L1 \(8\.15\) > L0 \(6\.77\)/);
+    expect(v.join("\n")).toMatch(/milestone/);
+  });
+  it("is clean on the old geometry only at a tall row", () => {
+    expect(rankViolations(old, [34]).filter((x) => /summary @34|bracket/.test(x))).toEqual([]);
+  });
+});
+
+describe("NEW-1 — one geometry source: the arrow anchors read the same helpers as the renderer", () => {
+  it("bracket / diamond literals live ONLY in the shared profile block", () => {
+    expect(SRC.split("[6,5,4,4]").length - 1).toBe(1);              // the screen ramp is declared once (the profile), nowhere inline
+    expect(SRC.split("[0.14,0.10,0.08,0.06]").length - 1).toBe(1);
+  });
+  it("screen glyphEdges and the renderer both call the shared helpers", () => {
+    const i = SRC.indexOf("const glyphEdges = (t, idx)");
+    const body = SRC.slice(i, SRC.indexOf("\n  };", i));
+    for (const fn of ["ganttSummaryGeom", "ganttMilestoneGeom", "ganttLeafGeom"]) {
+      expect(body, fn).toContain(fn);
+      expect(SRC.split(`${fn}(GANTT_PROFILES.screen`).length - 1, fn).toBeGreaterThanOrEqual(2);   // glyphEdges + the bar renderer
+    }
+  });
+  it("print bands are thin wrappers over the shared helpers", () => {
+    for (const fn of ["ganttSummaryGeom(PP", "ganttMilestoneGeom(PP", "ganttLeafGeom(PP"]) expect(SRC).toContain(fn);
   });
 });
