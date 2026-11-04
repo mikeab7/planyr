@@ -134,7 +134,15 @@ try {
 
   for (const [tag, rot] of ROTS) {
     console.log(`\n=== rot ${rot} ===`);
-    await openScenario(tag);
+    // The seed is a local cache write; the app's own cloud load can drop it before the plan opens — reseed and retry (as verify-wall-parking-buildup-live).
+    for (let attempt = 1; ; attempt++) {
+      try { await openScenario(tag); break; }
+      catch (e) {
+        if (attempt >= 4) throw e;
+        console.log(`(startup attempt ${attempt} lost the seed race: ${e.message.split("\n")[0]} — reseeding)`);
+        await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
+      }
+    }
     const roles = await page.locator('[data-testid="wall-row"]').evaluateAll((n) => n.map((r) => r.getAttribute("data-role")));
     ok(`[${tag}] known-good: the wall list holds dock · rear · ends · ends`, JSON.stringify(roles) === JSON.stringify(["dock", "rear", "ends", "ends"]), JSON.stringify(roles));
     const dock = rowByRole("dock").first(), rear = rowByRole("rear"), ends = rowByRole("ends");
