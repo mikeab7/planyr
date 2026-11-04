@@ -423,7 +423,7 @@ console.log(`\n── print path (buildGanttSVG) ──────────�
     const row = id => GRAND_PORT.tasks.findIndex(t => t.id === id);
     for (const id of SHOT_IDS) {
       const y0 = 30 + row(id) * 18 - 22;           // HEADER_H 30 + row pitch 18, a row of air above
-      await page.screenshot({ path: `${OUT}gantt-rank-print-${tag}-t${id}.png`, fullPage: true, clip: { x: 0, y: Math.max(0, y0), width: 520, height: 76 } }).catch(e => console.log("   (print crop failed: " + e.message.split("\n")[0] + ")"));
+      await page.screenshot({ path: `${OUT}gantt-rank-print-${tag}-t${id}.png`, fullPage: true, clip: { x: 360, y: Math.max(0, y0), width: 740, height: 76 } }).catch(e => console.log("   (print crop failed: " + e.message.split("\n")[0] + ")"));
     }
     await page.locator("#printHost").evaluate(e => e.remove());
   }
