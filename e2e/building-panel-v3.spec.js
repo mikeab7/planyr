@@ -159,8 +159,11 @@ for (const scheme of ["light", "dark"]) {
       const legend = page.getByTestId("wall-legend");
       expect(await legend.getByTestId("wall-legend-item").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))).toEqual(["court", "trailer", "buffer", "sidewalk", "road"]);
       await expect(legend).not.toContainText("Parking");
-      // an icon is drawn in a wide-enough piece
-      expect(await dock.getByTestId("wall-piece").first().locator("svg").count()).toBe(1);
+      // a piece draws its icon exactly when it is wide enough for icon + label (pieceShowsIcon: 16 + 6 per label character). The strip is
+      // 66 wide at its deepest (NEW-1, 2026-11-04: every add option became its own icon on the row), so on a five-layer stack the narrow
+      // pieces show their label only — the legend and the hover title still name every layer.
+      const iconRule = await dock.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => ({ w: x.getBoundingClientRect().width, label: x.querySelector("span").textContent.length, svg: x.querySelectorAll("svg").length })));
+      for (const p of iconRule) expect(p.svg, JSON.stringify(p)).toBe(p.w >= 16 + 6 * p.label ? 1 : 0);
       // tooltip names the layer and the wall total
       expect(await dock.getByTestId("wall-piece").first().getAttribute("title")).toMatch(/^Truck court 135′ · wall total \d+′$/);
       // open the trailer piece: a one-line box under the row — no wall name, no long title, no total, no ✕, no note
@@ -312,10 +315,10 @@ for (const scheme of ["light", "dark"]) {
       // the Add menu offers the court back at the head, buffer / walk / road — never trailer parking
       await page.keyboard.press("Escape");
       // NEW-1 (2026-11-03): the wall ends in a Road, so the court (inboard of everything) is the ONLY thing on offer: it is the named
-      // button, there is no ▾, and trailer parking is never offered.
-      await expect(dock.getByTestId("wall-add")).toHaveAttribute("data-kind", "court");
-      await expect(dock.getByTestId("wall-add-more")).toHaveCount(0);
-      await dock.getByTestId("wall-add").click();
+      // icon on the row, and trailer parking is never offered.
+      await expect(dock.getByTestId("wall-add-group").locator("button")).toHaveCount(1);
+      await expect(dock.getByTestId("wall-add-court")).toHaveAttribute("data-kind", "court");
+      await dock.getByTestId("wall-add-court").click();
       await expect(dock.getByTestId("wall-piece").first()).toHaveAttribute("data-kind", "court");
       // …and a reload keeps every layer in place (the load-time heal finds nothing to repair)
       const snap = async () => (await kidsOf(page, b.id)).map((k) => [k.id, Math.round(k.cx), Math.round(k.cy)]).sort();
@@ -362,7 +365,7 @@ for (const scheme of ["light", "dark"]) {
       await page.locator('[data-testid="loading-wall-picker"] [data-wall]').evaluateAll((n) => n.length);
       const rear = rowByRole(page, "rear");
       await expect(rear.getByTestId("wall-strip")).toHaveCount(0);
-      await expect(rear.getByTestId("wall-add")).toHaveCount(1);
+      await expect(rear.getByTestId("wall-add-group")).toHaveCount(1);
     });
   });
 }

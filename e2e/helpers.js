@@ -246,23 +246,43 @@ export const ringArea = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i +
 /* Add ONE layer to a wall row through the NEW-1 (2026-11-03) control: the named button adds the NEXT layer (its `data-kind`
  * says which); anything else is in the ▾ list under its full name. `row` is the `wall-row` locator. */
 export async function addWallLayer(row, key) {
-  const btn = row.getByTestId("wall-add");
-  if ((await btn.getAttribute("data-kind")) === key) { await btn.click(); return; }
-  await row.getByTestId("wall-add-more").click();
-  await row.page().getByTestId(`wall-add-${key}`).click();
+  await row.getByTestId(`wall-add-${key}`).click();     // every option is its own icon on the row (no ▾)
 }
+/* One row, measured (not eyeballed): one line, the strip and the add group never overlap, no icon squeezed below its size, none past the row's right edge. */
+export const rowFit = (row) => row.evaluate((r) => {
+  const line = r.firstElementChild, lr = line.getBoundingClientRect(), g = r.querySelector('[data-testid="wall-add-group"]'), strip = r.querySelector('[data-testid="wall-strip"]');
+  const out = [];
+  if (line.scrollWidth > line.clientWidth + 1) out.push(`row overflows (${line.scrollWidth} > ${line.clientWidth})`);
+  if (lr.height > 30) out.push(`row wrapped (height ${Math.round(lr.height)})`);
+  if (g) {
+    const gr = g.getBoundingClientRect(), bs = [...g.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
+    if (gr.right > lr.right + 0.5) out.push(`add group ends at ${Math.round(gr.right)}, past the row's ${Math.round(lr.right)}`);
+    bs.forEach((b, i) => {
+      if (b.width < 21.5 || b.height < 21.5) out.push(`icon ${i} squeezed to ${Math.round(b.width)}×${Math.round(b.height)}`);
+      if (b.left < lr.left - 0.5 || b.right > lr.right + 0.5) out.push(`icon ${i} clipped`);
+      if (i && b.left < bs[i - 1].right - 0.5) out.push(`icon ${i} overlaps icon ${i - 1}`);
+      if (Math.abs(b.top - bs[0].top) > 1) out.push(`icon ${i} is on another line`);
+    });
+    if (strip && strip.getBoundingClientRect().right > gr.left + 0.5) out.push("the strip runs into the add group");
+    const sw = strip ? strip.getBoundingClientRect().width : 0, planned = strip ? Number(strip.dataset.barW) : 0;
+    if (strip && sw < planned - 0.5 && !strip.dataset.grown) out.push(`strip squeezed from its planned ${Math.round(planned)} to ${Math.round(sw)}`);
+    if (strip && Math.abs(strip.getBoundingClientRect().top + strip.getBoundingClientRect().height / 2 - (gr.top + gr.height / 2)) > 6) out.push("strip and icons are not on one line");
+  }
+  return out;
+});
+
 export function panelPlus(page, label) {
   return {
     click: async () => {
       if (label === "Dock zones") {
         const row = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
-        await addWallLayer(row, (await row.getByTestId("wall-add").getAttribute("data-kind")) === "court" ? "court" : "trailer");
+        await addWallLayer(row, (await row.getByTestId("wall-add-court").count()) ? "court" : "trailer");
       } else if (label === "Car parking") {
         const rows = page.locator('[data-testid="wall-row"]:not([data-role="dock"])');
         for (let i = 0, n = await rows.count(); i < n; i++) {
           const row = rows.nth(i);
-          if (!(await row.getByTestId("wall-add").count())) continue;
-          await addWallLayer(row, (await row.getByTestId("wall-add").getAttribute("data-kind")) === "sidewalk" ? "sidewalk" : "parking");
+          if (!(await row.getByTestId("wall-add-group").count())) continue;
+          await addWallLayer(row, (await row.getByTestId("wall-add-sidewalk").count()) ? "sidewalk" : "parking");
         }
       } else if (label === "Bump-outs") {
         await page.getByTestId("picker-corner-add").first().click({ force: true });

@@ -11,7 +11,7 @@
  *
  * Run: BASE_URL=http://127.0.0.1:4173 npx playwright test e2e/wall-parking-buildup.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks, addWallLayer } from "./helpers.js";
+import { armPlannerHooks, addWallLayer, rowFit } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 import { carStalls } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 import { parkRowsForDepth } from "../src/workspaces/site-planner/lib/parking.js";
@@ -41,19 +41,13 @@ async function boot(page, deg) {
   return b;
 }
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const lead = (row) => row.getByTestId("wall-add");
-const leadKind = async (row) => ((await lead(row).count()) ? lead(row).getAttribute("data-kind") : null);
-const moreKinds = async (row) => {
-  if (!(await row.getByTestId("wall-add-more").count())) return [];
-  await row.getByTestId("wall-add-more").click();
-  const menu = row.page().getByTestId("wall-add-menu");
-  await expect(menu).toBeVisible();
-  const ks = await menu.getByRole("menuitem").evaluateAll((n) => n.map((x) => (x.getAttribute("data-testid") || "").replace("wall-add-", "")));
-  await row.page().keyboard.press("Escape");
-  await expect(menu).toHaveCount(0);
-  return ks;
-};
-const offered = async (row) => { const l = await leadKind(row); return l ? [l, ...(await moreKinds(row))] : []; };
+/* Every add option is its own icon on the wall's row (NEW-1, 2026-11-04 — no ▾): the leftmost is the likely next layer. */
+const icons = (row) => row.getByTestId("wall-add-group").locator("button");
+const lead = (row) => icons(row).first();
+const iconKinds = async (row) => ((await row.getByTestId("wall-add-group").count()) ? icons(row).evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))) : []);
+const leadKind = async (row) => (await iconKinds(row))[0] ?? null;
+const moreKinds = async (row) => (await iconKinds(row)).slice(1);
+const offered = iconKinds;
 const kinds = (row) => row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
 
 /* The stored layers on one wall, each as an interval along the wall's OUTWARD normal (feet from the wall face), read from the
@@ -144,15 +138,15 @@ for (const deg of [0, 315]) {
       const stalls8 = facts.stalls;
       // the map renders the field (node present with a real box)
       expect((await mapParkNodes(page, (await wallLayers(page, side)).filter((l) => l.type === "parking").map((l) => l.id))).every(Boolean)).toBe(true);
-      // 4) a buffer through the ▾ (parking leads, so the buffer is in the menu), then the lead moves on to the road
-      await expect(row.getByTestId("wall-add-more")).toBeVisible();
+      // 4) a buffer by its own icon (parking leads, the buffer is a later icon), then the lead moves on to the road
+      await expect(row.getByTestId("wall-add-buffer")).toBeVisible();
       await addWallLayer(row, "buffer");
       expect(await kinds(row)).toEqual(["sidewalk", "parking", "buffer"]);
       let layers = await wallLayers(page, side);
       assertNoOverlap(layers, "buffer added");
       const bufferBefore = layers.find((l) => l.buffer);
       await expect(lead(row)).toHaveAttribute("data-kind", "road");                 // sidewalk > parking > buffer → road
-      expect(await moreKinds(row)).toContain("parking");                            // …and parking waits in the ▾
+      expect(await moreKinds(row)).toContain("parking");                            // …and parking waits further along the icons
       // 5) MORE PARKING with the buffer outside it: the field grows, the buffer is pushed out by exactly the new depth, no overlap
       const parkHi0 = layers.filter((l) => l.type === "parking").reduce((m, l) => Math.max(m, l.hi), 0);
       await addWallLayer(row, "parking");
@@ -220,7 +214,7 @@ test("an EXPLODED (split) parking stack: the lead adds a row beyond the outermos
   expect(before.filter((l) => l.el.sideParkSide).length).toBeGreaterThan(1);                          // genuinely split
   const rowsBefore = await panelRows(row);
   await expect(lead(row)).toHaveAttribute("data-kind", "road");                       // sidewalk > parking > buffer leads with the road…
-  await addWallLayer(row, "parking");                                                  // …and parking waits in the ▾
+  await addWallLayer(row, "parking");                                                  // …and parking waits further along the icons
   const after = await wallLayers(page, side);
   assertNoOverlap(after, "exploded stack grown");
   expect(after.filter((l) => l.el.sideParkSide).length).toBeGreaterThan(before.filter((l) => l.el.sideParkSide).length);
@@ -229,10 +223,13 @@ test("an EXPLODED (split) parking stack: the lead adds a row beyond the outermos
 });
 
 /* ---- THE WALL-STATE MATRIX -------------------------------------------------------------------------------------------------
- * Each state a non-dock wall can be in, reached by REAL clicks; for each: the lead + the ▾ are compared with the layers that could
- * sensibly go there — written down here by hand from the product rules, NOT computed from the panel's own code:
+ * Each state a wall can be in, reached by REAL clicks, on a REAR wall and an END wall at rot 0 and 315 (and a dock wall below). For each:
+ * the icons on the row are compared with the layers that could sensibly go there — written down here by hand from the product rules,
+ * NOT computed from the panel's own code:
  *   sidewalk  only if the wall has none · parking while nothing is a road (a first field, or one more row) · trailer parking
- *   always (repeat rows) · landscape buffer · road · and NOTHING after a road. */
+ *   always (repeat rows) · landscape buffer · road · and NOTHING after a road.
+ * Then EVERY offered icon is pressed (a real click) and must change the wall without overlapping, and the row is MEASURED (not eyeballed)
+ * for one line / no clipped icon at desktop width and at phone width, before and after the presses. */
 const SENSIBLE = (have) => {
   if (have.includes("road")) return [];
   return [...(have.includes("sidewalk") ? [] : ["sidewalk"]), "parking", "trailer", "buffer", "road"];
@@ -248,89 +245,132 @@ const STATES = [
   { name: "sidewalk > buffer", build: ["sidewalk", "buffer"] },
   { name: "buffer only", build: ["buffer"] },
   { name: "sidewalk > parking > trailer", build: ["sidewalk", "parking", "trailer"] },
+  { name: "parking > trailer > buffer > trailer (no sidewalk: five icons beside four pieces)", build: ["parking", "trailer", "buffer", "trailer"] },
   { name: "sidewalk > parking > buffer > road", build: ["sidewalk", "parking", "buffer", "road"] },
   { name: "sidewalk > road", build: ["sidewalk", "road"] },
 ];
-for (const st of STATES) {
-  test(`wall-state matrix · end wall · ${st.name}: every sensible layer is offered, nothing impossible is, the lead is the required one`, async ({ page }) => {
-    await boot(page, 0);
-    const row = rowByRole(page, "ends").first();
-    const side = (await row.getAttribute("data-sides")).split(",")[0];
-    for (const k of st.build) { await addWallLayer(row, k); assertNoOverlap(await wallLayers(page, side), `${st.name}: after ${k}`); }
-    const have = (await kinds(row)).filter((k, i, a) => a.indexOf(k) === i);
-    const got = await offered(row);
-    const want = SENSIBLE(await kinds(row));
-    expect(got.slice().sort(), `${st.name}: offered ${JSON.stringify(got)}`).toEqual(want.slice().sort());
-    const key = have.join(",");
-    if (LEAD[key] !== undefined && want.length) expect(got[0], `${st.name}: lead`).toBe(LEAD[key]);
-    // every offered layer is REACHABLE: pressing it changes the wall (a new layer, or one more parking row) and never overlaps
-    for (const k of want) {
-      const before = JSON.stringify({ k: await kinds(row), r: await panelRows(row) });
-      await addWallLayer(row, k);
-      const after = JSON.stringify({ k: await kinds(row), r: await panelRows(row) });
-      expect(after, `${st.name}: adding ${k} changed nothing`).not.toBe(before);
-      assertNoOverlap(await wallLayers(page, side), `${st.name}: + ${k}`);
-      if (k === "road") break;                                                                    // terminal — nothing can follow it
+/* Measure the row at desktop width and at a phone width (the bottom sheet), then put the viewport back. */
+async function assertFits(page, row, label) {
+  const sz = page.viewportSize();
+  expect(await rowFit(row), `${label} · desktop`).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await rowFit(row)).length, { message: `${label} · phone row fit` }).toBe(0);
+  expect(await rowFit(row), `${label} · phone`).toEqual([]);
+  await page.setViewportSize(sz);
+  await expect(row.getByTestId("wall-row-badge")).toBeVisible();
+}
+for (const deg of [0, 315]) {
+  for (const role of ["ends", "rear"]) {
+    for (const st of STATES) {
+      test(`wall-state matrix · rot ${deg} · ${role} wall · ${st.name}: the offered icons are the sensible layers, each one works, the row fits`, async ({ page }) => {
+        test.setTimeout(180_000);
+        await boot(page, deg);
+        const row = rowByRole(page, role).first();
+        const side = (await row.getAttribute("data-sides")).split(",")[0];
+        for (const k of st.build) { await addWallLayer(row, k); assertNoOverlap(await wallLayers(page, side), `${st.name}: after ${k}`); }
+        const have = (await kinds(row)).filter((k, i, a) => a.indexOf(k) === i);
+        const got = await offered(row);
+        const want = SENSIBLE(await kinds(row));
+        expect(got.slice().sort(), `${st.name}: offered ${JSON.stringify(got)}`).toEqual(want.slice().sort());
+        expect(new Set(got).size, "each option is one icon").toBe(got.length);
+        const key = have.join(",");
+        if (LEAD[key] !== undefined && want.length) expect(got[0], `${st.name}: lead (leftmost)`).toBe(LEAD[key]);
+        await expect(row.getByTestId("wall-add-plus")).toHaveCount(want.length ? 1 : 0);
+        await assertFits(page, row, `${st.name}: as built`);
+        // every offered icon is REACHABLE: pressing it changes the wall (a new layer, or one more parking row) and never overlaps
+        for (const k of want) {
+          const before = JSON.stringify({ k: await kinds(row), r: await panelRows(row) });
+          await row.getByTestId(`wall-add-${k}`).click();
+          await expect.poll(async () => JSON.stringify({ k: await kinds(row), r: await panelRows(row) }), { message: `${st.name}: adding ${k} changed nothing` }).not.toBe(before);
+          assertNoOverlap(await wallLayers(page, side), `${st.name}: + ${k}`);
+          if (k === "road") break;                                                                    // terminal — nothing can follow it
+        }
+        await assertFits(page, row, `${st.name}: after pressing every icon`);
+      });
     }
+  }
+}
+
+/* the dock wall: each stage's icons against a hand-written list; then EVERY icon on offer is pressed; fit measured at both widths */
+for (const deg of [0, 315]) {
+  test(`dock wall states · rot ${deg}: empty → court; court → trailer lead; … → buffer → sidewalk; every offered icon works; a road is terminal; the row fits`, async ({ page }) => {
+    test.setTimeout(180_000);
+    await boot(page, deg);
+    const dock = rowByRole(page, "dock").first();
+    const seq = [[[], "court", ["court"]], [["court"], "trailer", ["trailer", "buffer", "sidewalk", "road"]],
+      [["court", "trailer"], "buffer", ["buffer", "sidewalk", "road", "trailer"]], [["court", "trailer", "buffer"], "sidewalk", ["sidewalk", "road", "trailer", "buffer"]]];
+    for (const [have, want, set] of seq) {
+      expect(await kinds(dock)).toEqual(have);
+      const got = await offered(dock);
+      expect(got[0], `dock ${have.join(">") || "empty"}: lead`).toBe(want);
+      expect(got.slice().sort()).toEqual(set.slice().sort());
+      await assertFits(page, dock, `dock ${have.join(">") || "empty"}`);
+      await lead(dock).click();
+      await expect.poll(async () => (await kinds(dock)).length).toBe(have.length + 1);
+    }
+    // five layers with four icons still on offer (court > trailer > buffer > sidewalk, now one more trailer): the row still fits both widths
+    await dock.getByTestId("wall-add-trailer").click();
+    await expect.poll(async () => (await kinds(dock)).length).toBe(5);
+    expect((await offered(dock)).slice().sort()).toEqual(["buffer", "road", "sidewalk", "trailer"]);
+    await assertFits(page, dock, "dock court>trailer>buffer>sidewalk>trailer");
+    // press EVERY offered icon, a road last (terminal)
+    const pressed = [];
+    for (;;) {
+      const left = (await offered(dock)).filter((k) => !pressed.includes(k));
+      if (!left.length) break;
+      const k = left.find((x) => x !== "road") ?? "road";
+      pressed.push(k);
+      const before = JSON.stringify(await kinds(dock));
+      await dock.getByTestId(`wall-add-${k}`).click();
+      await expect.poll(async () => JSON.stringify(await kinds(dock)), { message: `dock + ${k} changed nothing` }).not.toBe(before);
+    }
+    expect(pressed.slice().sort()).toEqual(["buffer", "road", "sidewalk", "trailer"]);
+    expect(await offered(dock)).toEqual([]);
+    await expect(dock.getByTestId("wall-add-group")).toHaveCount(0);
+    await assertFits(page, dock, "dock after a road");
   });
 }
 
-test("dock wall states: empty → court; court → trailer lead; … → buffer → sidewalk; road is terminal; the order is unchanged", async ({ page }) => {
-  await boot(page, 0);
-  const dock = rowByRole(page, "dock").first();
-  const seq = [[[], "court", ["court"]], [["court"], "trailer", ["trailer", "buffer", "sidewalk", "road"]],
-    [["court", "trailer"], "buffer", ["buffer", "sidewalk", "road", "trailer"]], [["court", "trailer", "buffer"], "sidewalk", ["sidewalk", "road", "trailer", "buffer"]]];
-  for (const [have, want, set] of seq) {
-    expect(await kinds(dock)).toEqual(have);
-    const got = await offered(dock);
-    expect(got[0], `dock ${have.join(">") || "empty"}: lead`).toBe(want);
-    expect(got.slice().sort()).toEqual(set.slice().sort());
-    await lead(dock).click();
-  }
-  await addWallLayer(dock, "road");
-  expect(await offered(dock)).toEqual([]);
-});
-
-/* ---- NEW-2: icons, not words ---- */
-test("the add control is a plus and the layer's own icon in its legend swatch (same fill as the strip piece), with the full name in aria-label/title; the ▾ rows show swatch + name; one line at desktop and phone width", async ({ page }) => {
+/* ---- NEW-2: icons, not words — and amended 2026-11-04: every option its own icon, no ▾ ---- */
+test("the add control is a plus then one icon per option, each the layer's own icon in its legend swatch (same fill as the strip piece), the full name in aria-label/title, no word, no ▾", async ({ page }) => {
   await boot(page, 0);
   const row = rowByRole(page, "ends").first();
+  // empty end wall: sidewalk, parking, buffer, road, trailer — five icons (the order orderedAddOptions gives), each its own button
+  expect(await iconKinds(row)).toEqual(["sidewalk", "parking", "buffer", "road", "trailer"]);
   const btn = lead(row);
-  await expect(btn).toHaveAttribute("aria-label", /^Add sidewalk to the End wall/);
+  await expect(btn).toHaveAttribute("aria-label", /^Add sidewalk to the End wall \(/);
   await expect(btn).toHaveAttribute("title", "Add sidewalk to this wall");
-  await expect(btn.getByTestId("wall-add-swatch")).toHaveAttribute("data-kind", "sidewalk");
-  expect((await btn.innerText()).replace(/\s/g, "")).toBe("+");                                    // no word on the button
-  expect(await btn.evaluate((n) => getComputedStyle(n).borderTopColor)).not.toBe("rgba(0, 0, 0, 0)");   // the accent outline stays
-  await addWallLayer(row, "sidewalk"); await addWallLayer(row, "parking");
-  // the swatch fill IS the strip piece's fill for that kind
-  await expect(btn.getByTestId("wall-add-swatch")).toHaveAttribute("data-kind", "parking");
-  const fill = (loc) => loc.evaluate((n) => getComputedStyle(n).backgroundColor);
-  expect(await fill(btn.getByTestId("wall-add-swatch"))).toBe(await fill(row.locator('[data-testid="wall-piece"][data-kind="parking"]')));
-  // the ▾: every row is swatch + full name; the lead button has its ▾ joined to it
-  await row.getByTestId("wall-add-more").click();
-  const items = page.getByTestId("wall-add-menu").getByRole("menuitem");
-  expect(await items.count()).toBeGreaterThan(1);
-  for (let i = 0; i < await items.count(); i++) {
-    const it = items.nth(i);
-    await expect(it.getByTestId("wall-add-swatch")).toBeVisible();
-    expect((await it.innerText()).trim().length).toBeGreaterThan(3);                              // its name
-    expect(await it.getAttribute("aria-label")).toMatch(/^Add .+ to the End wall/);
+  await expect(row.getByTestId("wall-add-parking")).toHaveAttribute("aria-label", /^Add car parking to the End wall \(/);
+  await expect(row.getByTestId("wall-add-parking")).toHaveAttribute("title", "Add car parking to this wall");
+  for (const k of await iconKinds(row)) {
+    const b = row.getByTestId(`wall-add-${k}`);
+    expect((await b.innerText()).trim(), `no word on the ${k} icon`).toBe("");
+    expect(await b.locator("svg").count(), `the ${k} icon draws an icon`).toBeGreaterThan(0);
+    const bb = await b.boundingBox();
+    expect(bb.width, `${k} is a usable click target`).toBeGreaterThanOrEqual(22 - 0.5);
+    expect(bb.height).toBeGreaterThanOrEqual(22 - 0.5);
   }
-  await page.keyboard.press("Escape");
-  // the row stays ONE line at desktop; the strip is not squeezed (a full-height row, the control to the right of the strip)
+  await expect(row.getByTestId("wall-add-plus")).toHaveText("+");
+  // the icon's fill IS the strip piece's fill for that kind: read each icon BEFORE its layer exists (the kind's default style), then the piece it adds
+  const fill = (loc) => loc.evaluate((n) => getComputedStyle(n).backgroundColor);
+  const before = { sidewalk: await fill(row.getByTestId("wall-add-sidewalk")), parking: await fill(row.getByTestId("wall-add-parking")) };
+  await addWallLayer(row, "sidewalk"); await addWallLayer(row, "parking");
+  for (const k of ["sidewalk", "parking"]) expect(before[k], `${k} icon fill = the strip piece's fill`).toBe(await fill(row.locator(`[data-testid="wall-piece"][data-kind="${k}"]`)));
+  expect(await fill(row.getByTestId("wall-add-parking")), "parking icon fill once the piece exists").toBe(before.parking);
+  // no ▾ and no menu anywhere
+  await expect(page.getByTestId("wall-add-more")).toHaveCount(0);
+  await expect(page.getByTestId("wall-add-menu")).toHaveCount(0);
+  await expect(page.locator("[data-wall-add][aria-haspopup]")).toHaveCount(0);
+  // the icons sit to the right of the strip on the same line
   const strip = await row.getByTestId("wall-strip").boundingBox(), grp = await row.getByTestId("wall-add-group").boundingBox();
   expect(Math.abs(strip.y + strip.height / 2 - (grp.y + grp.height / 2))).toBeLessThan(6);
   expect(grp.x).toBeGreaterThanOrEqual(strip.x + strip.width - 1);
   expect(grp.height).toBeLessThan(40);
-  // phone width
-  await page.setViewportSize({ width: 390, height: 800 });
-  const s2 = await row.getByTestId("wall-strip").boundingBox(), g2 = await row.getByTestId("wall-add-group").boundingBox();
-  expect(Math.abs(s2.y + s2.height / 2 - (g2.y + g2.height / 2))).toBeLessThan(6);
-  expect(g2.x + g2.width).toBeLessThanOrEqual(390);
+  await assertFits(page, row, "end wall sidewalk>parking");
 });
 
 /* ---- NEW-3: Sidewalk, never Walk ---- */
-test("no user-facing surface of Docks & walls says Walk: pieces, legend, edit box heading, bin, ▾ and add button all say Sidewalk", async ({ page }) => {
+test("no user-facing surface of Docks & walls says Walk: pieces, legend, edit box heading, bin and add icon all say Sidewalk", async ({ page }) => {
   await boot(page, 0);
   const row = rowByRole(page, "ends").first();
   await addWallLayer(row, "sidewalk");
@@ -351,12 +391,13 @@ test("no user-facing surface of Docks & walls says Walk: pieces, legend, edit bo
   for (const h of await page.getByTestId("wall-legend-item").evaluateAll((n) => n.map((x) => x.getBoundingClientRect().height))) expect(h).toBeLessThan(24);
 });
 
-test("Escape closes the ▾ and leaves the building selected with its panel open (even with no edit box open)", async ({ page }) => {
+test("there is no ▾ on any wall row, and Escape with nothing open does not open or leave behind a menu", async ({ page }) => {
   await boot(page, 0);
-  const row = rowByRole(page, "ends").first();
-  await row.getByTestId("wall-add-more").click();
-  await expect(page.getByTestId("wall-add-menu")).toBeVisible();
-  await page.keyboard.press("Escape");
+  for (const role of ["dock", "rear", "ends"]) {
+    const row = rowByRole(page, role).first();
+    await expect(row.getByTestId("wall-add-more")).toHaveCount(0);
+    await expect(row.locator("[data-wall-add][aria-haspopup]")).toHaveCount(0);
+    expect(await row.innerText()).not.toContain("▾");
+  }
   await expect(page.getByTestId("wall-add-menu")).toHaveCount(0);
-  await expect(page.getByTestId("building-header")).toBeVisible();
 });
