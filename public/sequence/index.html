@@ -16356,7 +16356,7 @@ const ganttCaptionHalf = fs => fs * GANTT_CAPTION_LH / 2;      // its half-heigh
 // floored so it stays legible.
 const fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, (headroom + 1e-6) / GANTT_CAPTION_LH));   // +1e-6: float dust must not turn 9 into 8.999999
 const GANTT_PROFILES = {
-  screen: { names:[9.5,8.5,8.5,8], span:[6,5,4,4], leg:[0.16,0.12,0.09,0.07], minSpan:2, minLeg:2,
+  screen: { names:[10,9.25,8.5,8], span:[6,5,4,4], leg:[0.16,0.12,0.09,0.07], minSpan:2, minLeg:2,
             leafFrac:0.25, mileHalf:3*Math.SQRT2, mileMin:2.5, leafBase:1, summaryBase:2, mileBase:1 },
   print:  { names:[9,8.5,8,7.5],   span:[4,3.5,3,3], leg:[0.14,0.10,0.08,0.06],  minSpan:2, minLeg:1.5,
             leafFrac:0.30, mileHalf:4,            mileMin:2.5, leafBase:2, summaryBase:2, mileBase:2 },
