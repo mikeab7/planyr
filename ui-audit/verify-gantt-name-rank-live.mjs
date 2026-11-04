@@ -12,7 +12,13 @@
  * name at its level, no name touches its bar / bracket / diamond, every dependency-arrow endpoint sits on a glyph
  * edge. Then buildGanttSVG on the SAME live page (the exhibit the PDF export prints): captions at their ranked
  * print sizes, level 0 larger than level 1. Known-good arms make a run VOID rather than green: the measured row
- * pitch must equal the requested row height, and arrows must exist. Saves screenshots under ui-audit/screens/. */
+ * pitch must equal the requested row height, and arrows must exist. Saves screenshots under ui-audit/screens/.
+ *
+ * CLEANUP LIMIT (measured 2026-11-04): the test account has NO schedules visible to the app, so the only way to get a
+ * Schedule page to import into is the empty state's "New schedule" button, which writes ONE empty `schedules` row. The
+ * app cannot show that row again on a fresh load, and a client-side delete is a silent no-op under RLS (returns ok,
+ * removes nothing). So the last step re-reads the account and FAILS LOUDLY naming any id this run created that still
+ * exists — it must then be removed with a service-role/SQL delete (id + owner + created_at guarded), never left. */
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
 import { mkdirSync } from "node:fs";
@@ -48,8 +54,19 @@ ok("signed in as the test account", /e2e@planyr\.test/.test(s.proof.email || "")
 const page = await s.page.context().newPage(); await page.setViewportSize({ width: 1600, height: 900 });
 const errs = []; page.on("pageerror", e => errs.push(String(e)));
 page.on("dialog", d => d.accept());
+// THE ACCOUNT'S OWN ROWS, snapshotted first: this check may create ONE throwaway schedule (the test account can have none, and the
+// empty page offers only "New schedule"); at the end it deletes exactly the ids that appeared during the run (plus any in
+// CLEAN_IDS — ids a previous aborted run of THIS script is known to have created) and proves they are gone. Nothing else is touched.
+const scheduleIds = () => s.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id"); return q.error ? null : q.data.map(r => r.id); });
+const idsBefore = await scheduleIds();
+ok("snapshot of the account's schedule ids taken before anything is created", Array.isArray(idsBefore), String(idsBefore && idsBefore.length));
 await page.goto(base + "/sequence/?cb=" + Date.now(), { waitUntil: "domcontentloaded" });
-await page.waitForSelector("[data-task-row]", { timeout: 40000 });
+const HIST = '[data-testid="open-history-desktop"]';
+await Promise.race([page.locator(HIST).waitFor({ timeout: 40000 }), page.getByText("New schedule").first().waitFor({ timeout: 40000 })]).catch(() => {});
+if (!(await page.locator(HIST).count())) {                      // the empty state — create the one throwaway schedule
+  await page.getByText("New schedule").first().click();
+  await page.locator(HIST).waitFor({ timeout: 40000 });
+}
 await assertMeasurable(page, "verify-gantt-name-rank-live");
 
 const importFixture = async (fx) => {
@@ -62,10 +79,10 @@ const importFixture = async (fx) => {
 const served = await page.evaluate(async () => {
   const v = await fetch("/version.json", { cache: "no-store" }).then(r => r.json());
   const html = await fetch("/sequence/", { cache: "no-store" }).then(r => r.text());
-  return { build: v.build, hasGeom: html.includes("<gantt-geom>") && html.includes("GANTT_PROFILES"), runsGeom: typeof window.buildGanttSVG === "function" };
+  return { build: v.build, hasGeom: html.includes("GANTT_PROFILES") && html.includes("ganttSummaryGeom") && html.includes("GANTT_CAPTION_LH")   /* identifiers survive the compiled page; the <gantt-geom> comment does not */, runsGeom: typeof window.buildGanttSVG === "function" };
 });
 console.log("build", JSON.stringify(served));
-ok("the deploy serves the new geometry block (literal this change introduced)", served.hasGeom);
+ok("the deploy serves the new geometry block (identifiers this change introduced)", served.hasGeom);
 if (want) ok(`served build matches ${want}`, String(served.build).startsWith(want), String(served.build));
 
 const gantt = async () => { // switch to Split (the owner's view) if the import did not land there
@@ -134,13 +151,17 @@ console.log("\n── print exhibit (buildGanttSVG) on the live page ──");
 
 ok("no uncaught page errors", errs.length === 0, errs.slice(0, 3).join(" | "));
 
-// ── cleanup proof: nothing from this check was stored on the test account ──
+// ── cleanup: delete exactly what this run created, then prove it is gone (owner rule: test artifacts are always cleared) ──
 {
-  const left = await s.page.evaluate(async (name) => {
-    const out = {};
-    for (const t of ["schedules"]) { const q = await window.pfSupabase.from(t).select("*").limit(200); out[t] = q.error ? "err:" + q.error.message : (q.data || []).filter(r => JSON.stringify(r).includes(name)).length; }
-    return out; }, NAME);
-  ok("cleanup: no stored schedule row from this check remains on the test account", left.schedules === 0, JSON.stringify(left));
+  const idsAfter = await scheduleIds();
+  const mine = [...new Set([...(idsAfter || []).filter(i => !idsBefore.includes(i)), ...(process.env.CLEAN_IDS || "").split(",").filter(Boolean).map(Number)])];
+  console.log("schedules created by this check:", JSON.stringify(mine));
+  ok("this check created at most ONE schedule", mine.filter(i => !(process.env.CLEAN_IDS || "").split(",").map(Number).includes(i)).length <= 1);
+  const del = await s.page.evaluate(async (ids) => { const out = []; for (const id of ids) { const q = await window.pfSupabase.from("schedules").delete().eq("id", id); out.push(q.error ? "err:" + q.error.message : "ok (a no-op under RLS removes nothing — verified below)"); } return out; }, mine);
+  const stillThere = await s.page.evaluate(async ([ids, name]) => { const q = await window.pfSupabase.from("schedules").select("id,name"); return q.error ? "err" : q.data.filter(r => ids.includes(r.id) || r.name === name).length; }, [mine, NAME]);
+  ok("cleanup: every schedule this check created is deleted and verified gone", stillThere === 0, JSON.stringify({ del, stillThere }));
+  const idsEnd = await scheduleIds();
+  ok("cleanup: the account's other rows are untouched", Array.isArray(idsEnd) && idsBefore.every(i => mine.includes(i) || idsEnd.includes(i)));
 }
 await s.close();
 console.log(results.filter(Boolean).length + "/" + results.length + " passed");
