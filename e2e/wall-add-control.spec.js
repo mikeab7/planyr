@@ -1,12 +1,12 @@
-/* NEW-1 (2026-11-03, owner approved the After board "Ship it") — Docks & walls: the add control NAMES the next layer, and the edit box is
- * one line with no length. Real inspector, logged out. Covers: one click adds court → trailer → buffer in turn on a dock wall; the ▾
- * floats over the rows (never pushes them, never lives inside the panel's scroll area) and adds a road; an end wall adds walk → parking;
- * Escape / click-away close the ▾; the trailer box is one line with "Depth", two rows show Row 1 / Row 2 / Aisle on a second line; no
- * Length / Align / Full length in the box on ANY wall; the row stays one line (the longest case fits without squeezing the strip); the
- * map-selected Properties panel still has its Length; a rotated building and a phone width behave the same.
+/* NEW-1 (2026-11-03, amended 2026-11-04 — owner: "Put every option on the row as its own icon, no ▾.") — Docks & walls: every add option is
+ * its OWN icon button on the wall's row (the layer's legend swatch with its icon, a plus glyph before them, the likely next layer leftmost),
+ * and the edit box is one line with no length. Real inspector, logged out. Covers: one click on an icon adds court → trailer → buffer in turn
+ * on a dock wall; there is no ▾ and no menu anywhere; an end wall adds sidewalk → parking; the trailer box is one line with "Depth", two rows
+ * show Row 1 / Row 2 / Aisle on a second line; no Length / Align / Full length in the box on ANY wall; the row stays ONE line with no icon
+ * clipped at desktop and phone width; the map-selected Properties panel still has its Length; a rotated building behaves the same.
  * Run: BASE_URL=http://127.0.0.1:4173 npx playwright test e2e/wall-add-control.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks, addWallLayer } from "./helpers.js";
+import { armPlannerHooks, addWallLayer, rowFit } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
@@ -32,7 +32,9 @@ async function boot(page, deg) {
   return b;
 }
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const named = (row) => row.getByTestId("wall-add");
+const icons = (row) => row.getByTestId("wall-add-group").locator("button");
+const named = (row) => icons(row).first();                       // the leftmost icon = the likely next layer
+const iconKinds = async (row) => ((await row.getByTestId("wall-add-group").count()) ? icons(row).evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))) : []);
 const kinds = (row) => row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
 const noLengthControls = async (page) => {
   for (const id of ["wall-extent", "wall-extent-len", "wall-extent-full", "wall-align-start", "wall-align-centre", "wall-align-end"]) await expect(page.getByTestId(id)).toHaveCount(0);
@@ -43,52 +45,49 @@ const noLengthControls = async (page) => {
 test.beforeEach(async ({ page }) => { await armPlannerHooks(page); });
 
 for (const deg of [0, 315]) {
-  test(`rot ${deg} · dock wall: the button names the next layer, one click each adds court → trailer → buffer; the ▾ floats and adds a road`, async ({ page }) => {
+  test(`rot ${deg} · dock wall: one icon per option, no ▾; the leftmost names the next layer, one click each adds court → trailer → buffer, then a road`, async ({ page }) => {
     await boot(page, deg);
     const dock = rowByRole(page, "dock").first();
-    await expect(named(dock)).toHaveAttribute("data-kind", "court");
-    await expect(dock.getByTestId("wall-add-more")).toHaveCount(0);                       // one option ⇒ no ▾
+    expect(await iconKinds(dock)).toEqual(["court"]);
+    await expect(dock.getByTestId("wall-add-plus")).toBeVisible();                          // the plus glyph leads the icons…
+    expect(await dock.getByTestId("wall-add-plus").evaluate((n) => n.tagName)).not.toBe("BUTTON");   // …and is not a button
     await named(dock).click();
     await expect(page.getByTestId("wall-edit-box")).toHaveAttribute("data-kind", "court");   // the new layer's box opens, as before
     await expect(named(dock)).toHaveAttribute("data-kind", "trailer");
     await named(dock).click();
     await expect(page.getByTestId("wall-edit-box")).toHaveAttribute("data-kind", "trailer");
-    await expect(named(dock)).toHaveAttribute("data-kind", "buffer");                                     // the button stays usable: keep clicking
+    await expect(named(dock)).toHaveAttribute("data-kind", "buffer");                                     // the icon stays usable: keep clicking
     await named(dock).click();
     await expect(named(dock)).toHaveAttribute("data-kind", "sidewalk");
     expect(await kinds(dock)).toEqual(["court", "trailer", "buffer"]);
 
-    // the ▾ holds the rest under their full names (a second trailer piece and a second buffer are always on offer), floats over the rows and does NOT push them down
-    const rear = rowByRole(page, "rear");
-    const topBefore = (await rear.boundingBox()).y;
-    await dock.getByTestId("wall-add-more").click();
-    const menu = page.getByTestId("wall-add-menu");
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole("menuitem")).toHaveText(["Road", "Trailer parking", "Landscape buffer"]);
-    expect((await rear.boundingBox()).y).toBe(topBefore);                                  // rows did not move
-    const where = await menu.evaluate((el) => { const p = el.closest(".menu") || el.parentElement; const cs = getComputedStyle(p); return { pos: cs.position, parentIsBody: p.parentElement === document.body }; });
-    expect(where).toEqual({ pos: "fixed", parentIsBody: true });                             // a portal: it cannot clip inside the scroll area
-    // Escape closes it; so does a press away
-    await page.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-    await dock.getByTestId("wall-add-more").click();
-    await expect(menu).toBeVisible();
-    await page.getByTestId("building-header").click({ force: true });
-    await expect(menu).toHaveCount(0);
-    // a Road through the ▾; nothing is offered after it
-    await addWallLayer(dock, "road");
+    // every other option is its own icon ON THE ROW, in order, with the full name in aria-label and title; nothing floats, nothing moves
+    expect(await iconKinds(dock)).toEqual(["sidewalk", "road", "trailer", "buffer"]);
+    const names = { sidewalk: "sidewalk", road: "road", trailer: "trailer parking", buffer: "landscape buffer" };
+    for (const k of await iconKinds(dock)) {
+      await expect(dock.getByTestId(`wall-add-${k}`)).toHaveAttribute("aria-label", new RegExp(`^Add ${names[k]} to the Dock wall \\(`));
+      await expect(dock.getByTestId(`wall-add-${k}`)).toHaveAttribute("title", `Add ${names[k]} to this wall`);
+      expect((await dock.getByTestId(`wall-add-${k}`).innerText()).trim(), "no word on the button").toBe("");
+    }
+    // no ▾ and no menu anywhere on any row
+    await expect(page.getByTestId("wall-add-more")).toHaveCount(0);
+    await expect(page.getByTestId("wall-add-menu")).toHaveCount(0);
+    await expect(page.locator('[data-wall-add][aria-haspopup]')).toHaveCount(0);
+    // a Road by its own icon; nothing is offered after it (no plus, no icons)
+    await dock.getByTestId("wall-add-road").click();
     await expect.poll(() => kinds(dock)).toEqual(["court", "trailer", "buffer", "road"]);
-    await expect(named(dock)).toHaveCount(0);
+    await expect(dock.getByTestId("wall-add-group")).toHaveCount(0);
+    await expect(dock.getByTestId("wall-add-plus")).toHaveCount(0);
   });
 
-  test(`rot ${deg} · end wall: sidewalk, then parking (and MORE parking on every further press), the buffer from the ▾`, async ({ page }) => {
+  test(`rot ${deg} · end wall: sidewalk, then parking (and MORE parking on every further press), the buffer by its own icon`, async ({ page }) => {
     await boot(page, deg);
     const end = rowByRole(page, "ends").first();
     await expect(named(end)).toHaveAttribute("data-kind", "sidewalk");
     await named(end).click();
     await expect(named(end)).toHaveAttribute("data-kind", "parking");
     await named(end).click();
-    await expect(named(end)).toHaveAttribute("data-kind", "parking");                      // NEW-1 (2026-11-04): parking leads until a layer sits beyond it
+    await expect(named(end)).toHaveAttribute("data-kind", "parking");                      // parking leads until a layer sits beyond it
     await addWallLayer(end, "buffer");
     expect(await kinds(end)).toEqual(["sidewalk", "parking", "buffer"]);
     await expect(named(end)).toHaveAttribute("data-kind", "road");
@@ -137,30 +136,23 @@ test("the edit box is one line (trailer: Rows + Depth), Row 1 / Row 2 / Aisle on
   }
 });
 
-test("each row stays ONE line with the named button on it, the strip is not squeezed, and the layout holds at a phone width", async ({ page }) => {
+test("each row stays ONE line with its icons on it, the strip is not squeezed at the deepest wall, and the layout holds at a phone width", async ({ page }) => {
   await boot(page, 0);
   for (const [row, ks] of [[rowByRole(page, "dock").first(), ["court", "trailer"]], [rowByRole(page, "rear"), ["sidewalk", "parking"]], [rowByRole(page, "ends").first(), ["sidewalk"]]]) for (const k of ks) await addWallLayer(row, k);
+  await expect(page.getByTestId("wall-edit-box")).toBeVisible();               // the last add opens its layer's box; Escape closes THAT (pressed earlier it would close the panel)
   await page.keyboard.press("Escape");
-  const measure = async () => page.evaluate(() => {
-    const rows = [...document.querySelectorAll('[data-testid="wall-row"]')].map((r) => {
-      const line = r.firstElementChild, add = r.querySelector('[data-testid="wall-add-group"]'), strip = r.querySelector('[data-testid="wall-strip"]');
-      const lr = line.getBoundingClientRect(), ar = add ? add.getBoundingClientRect() : null;
-      return { dbg: ar ? `line ${Math.round(lr.left)}-${Math.round(lr.right)} add ${Math.round(ar.left)}-${Math.round(ar.right)} strip ${strip ? Math.round(strip.getBoundingClientRect().right) : 0}` : "", h: Math.round(lr.height), addInside: ar ? ar.right <= lr.right + 0.5 && ar.left >= lr.left : true, stripW: strip ? Math.round(strip.getBoundingClientRect().width) : null, overflow: line.scrollWidth > line.clientWidth + 1, label: add ? add.textContent : "" };
-    });
-    const wr = document.querySelector('[data-testid="wall-rows"]');
-    return { rows, wrapOverflow: wr.scrollWidth > wr.clientWidth + 1, viewport: innerWidth };
-  });
-  const wide = await measure();
-  for (const r of wide.rows) { expect(r.h, r.label).toBeLessThan(36); expect(r.addInside, r.label).toBe(true); expect(r.overflow, r.label).toBe(false); }
-  expect(wide.wrapOverflow).toBe(false);
-  // the deepest wall's strip keeps its full planned width (STRIP.FULL = 118) — the button did not squeeze it
-  expect(Math.max(...wide.rows.map((r) => r.stripW || 0))).toBeGreaterThanOrEqual(118);
-  // phone width
+  await expect(page.getByTestId("wall-edit-box")).toHaveCount(0);
+  const rows = page.getByTestId("wall-row");
+  const check = async (label) => {
+    for (let i = 0, n = await rows.count(); i < n; i++) expect(await rowFit(rows.nth(i)), `${label} row ${i}`).toEqual([]);
+    expect(await page.getByTestId("wall-rows").evaluate((n) => n.scrollWidth > n.clientWidth + 1), `${label} wall-rows overflow`).toBe(false);
+  };
+  await check("desktop");
+  // the deepest wall's strip keeps its full planned width (STRIP.FULL = 66) — the icons did not squeeze it
+  const widest = Math.max(...(await page.getByTestId("wall-strip").evaluateAll((n) => n.map((x) => x.getBoundingClientRect().width))));
+  expect(widest).toBeGreaterThanOrEqual(66 - 0.5);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(500);
-  if (await page.getByTestId("wall-rows").count()) {
-    const narrow = await measure();
-    for (const r of narrow.rows) { expect(r.h, r.label).toBeLessThan(36); expect(r.addInside, r.label + " " + r.dbg).toBe(true); }
-    expect(narrow.wrapOverflow).toBe(false);
-  }
+  await expect(page.getByTestId("wall-rows")).toHaveCount(1);
+  await check("phone");
 });

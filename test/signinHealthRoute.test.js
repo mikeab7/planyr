@@ -357,3 +357,43 @@ describe("the dead-man's switch: a check that goes silent emails the owner ONCE"
     expect((await x.go("runner", 1, { synthetic: true })).stops).toEqual([]);  // a drill without stopDrill runs no stop step
   });
 });
+
+/* Found live 2026-11-04 (drill run 41863740549): the route back-dated a report's first attempt by a whole second, so a report that
+ * arrived less than a second after the previous one (the drill's steps) put its first failing attempt BEFORE the previous report in
+ * history — [fail, pass, fail] — and "two failures in a row" read as one. Attempts are now spaced 1 millisecond apart. */
+describe("back-dated attempts never interleave with the previous report (found live, drill 41863740549)", () => {
+  const stepOf = (name, status) => ({ checks: [{ name, status, detail: "x" }] });
+  it("a pass followed 0.4 s later by a failing PAIR is still two failures in a row → one alert, on the first pair", async () => {
+    const store = memStore(); const sent = [];
+    const send = async (m) => { sent.push(m); return { ok: true, id: "m" + sent.length }; };
+    let t = Date.parse("2026-11-04T16:03:57.870Z");
+    const go = async (statuses) => {
+      const r = await recordReport({ env: ENV, store, source: "runner", synthetic: true, attempts: normaliseAttempts({ attempts: statuses.map((s) => stepOf("server-gate", s)) }).attempts, runUrl: null, send, now: () => new Date(t).toISOString() });
+      t += 730;                                                     // the drill's real pace: well under a second between reports
+      return r.json();
+    };
+    expect((await go(["pass"])).delivery).toBe("not-needed");
+    expect((await go(["fail", "fail"])).delivery).toBe("sent");     // red before the fix: "not-needed" (history read [fail, pass, fail])
+    expect((await go(["fail"])).delivery).toBe("not-needed");
+    expect(sent).toHaveLength(1);
+  });
+  it("attempt timestamps are strictly ordered and sit within a few milliseconds of the report", async () => {
+    const store = memStore();
+    await recordReport({ env: ENV, store, source: "edge", attempts: normaliseAttempts({ attempts: [stepOf("server-gate", "fail"), stepOf("server-gate", "fail"), stepOf("server-gate", "pass")] }).attempts, runUrl: null, send: async () => ({ ok: true }), now: () => "2026-11-04T12:00:00.000Z" });
+    const ats = store.checks.map((c) => Date.parse(c.at));
+    expect(ats[0]).toBeLessThan(ats[1]); expect(ats[1]).toBeLessThan(ats[2]);
+    expect(Date.parse("2026-11-04T12:00:00.000Z") - ats[0]).toBeLessThan(10);
+  });
+});
+
+describe("the workflow's second channel (the GitHub issue that @-mentions the owner)", () => {
+  it("is raised for a broken ALARM CHANNEL only — never for a drill that could not run (5) or whose assertions failed (1)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const yml = readFileSync(new URL("../.github/workflows/signin-health.yml", import.meta.url), "utf8");
+    const step = yml.split("- name: Raise the alarm another way")[1].split("- name:")[0];
+    const cond = /if:\s*(always\(\)[^\n]*)/.exec(step)[1];
+    for (const code of ["0", "1", "5"]) expect(cond, `code ${code} must not raise the issue`).toContain(`steps.check.outputs.code != '${code}'`);
+    // …and the codes that mean "nobody could be told" (3 unreachable, 4 mail not sent, empty = died before reporting) are not excluded.
+    for (const code of ["3", "4"]) expect(cond).not.toContain(`!= '${code}'`);
+  });
+});

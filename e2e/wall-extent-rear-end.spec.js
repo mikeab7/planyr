@@ -82,10 +82,9 @@ for (const deg of [0, 315]) {
     expect(wa.centre).toBeCloseTo(-(full - wa.len) / 2, 0);              // the start end held, the dragged end pulled in
     await reopenBuildingPanel(page, host);
 
-    // Trailer parking is offered on a rear wall — in the ▾ list, twice — then a buffer
-    await rear.getByTestId("wall-add-more").click();
-    await expect(page.getByTestId("wall-add-trailer")).toBeVisible();
-    await page.getByTestId("wall-add-trailer").click();
+    // Trailer parking is offered on a rear wall — its own icon on the row, twice — then a buffer
+    await expect(rear.getByTestId("wall-add-trailer")).toBeVisible();
+    await rear.getByTestId("wall-add-trailer").click();
     await addLayer(rear, "trailer");
     await addLayer(rear, "buffer");
     expect(await rear.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))).toEqual(["sidewalk", "trailer", "trailer", "buffer"]);

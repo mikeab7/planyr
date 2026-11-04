@@ -39,11 +39,13 @@ export function boxInsideQuad(box, quad, margin = 0) {
  * @param {{x:number,y:number}[]} quad the pad's four corners in screen px (ring order)
  * @param {number} idx which corner this tag is for
  * @param {string} text the tag's words
+ * @param {(box:{x:number,y:number,w:number,h:number})=>boolean} [avoid] NEW-1 (2026-11-04): true when a candidate box meets something it must clear — the selected
+ *   building's corner / wall-middle grips, which reach a few px INSIDE the walls. The walk toward the centre simply continues past such a spot.
  * @returns {{x:number,y:number,leader:null|{x1:number,y1:number,x2:number,y2:number}, w:number, h:number, inside:boolean}} the tag's centre and
  *   box size, the leader tying a tag that sits away from its corner to the EXACT corner point (null where the tag is at the corner), and whether the
  *   box lies wholly inside the footprint (false only for a building too small on screen to hold the tag at all — which is not labelled that small)
  */
-export function placeCornerTag(quad, idx, text) {
+export function placeCornerTag(quad, idx, text, avoid = null) {
   const P = quad[idx], w = pillWidth(text), h = CORNER_TAG_PILL_H;
   const C = centroid(quad);
   const toC = { x: C.x - P.x, y: C.y - P.y }, d = Math.hypot(toC.x, toC.y) || 1, u = { x: toC.x / d, y: toC.y / d };
@@ -54,7 +56,7 @@ export function placeCornerTag(quad, idx, text) {
   // from the long-standing spot, walk toward the centre until the whole box is inside; the first spot that fits is the nearest the corner it can be
   for (let s = Math.min(USUAL_INSET_PX, d * 0.3); s <= d; s += STEP_PX) {
     const c = { x: P.x + u.x * s, y: P.y + u.y * s };
-    if (boxInsideQuad({ x: c.x, y: c.y, w, h }, quad, TAG_MARGIN_PX)) return { x: c.x, y: c.y, leader: lead(c), w, h, inside: true };
+    if (boxInsideQuad({ x: c.x, y: c.y, w, h }, quad, TAG_MARGIN_PX) && !(avoid && avoid({ x: c.x, y: c.y, w, h }))) return { x: c.x, y: c.y, leader: lead(c), w, h, inside: true };
   }
   // too small to hold it: the building's centre, the one place that is as far from every wall as it gets
   return { x: C.x, y: C.y, leader: lead(C), w, h, inside: boxInsideQuad({ x: C.x, y: C.y, w, h }, quad, 0) };

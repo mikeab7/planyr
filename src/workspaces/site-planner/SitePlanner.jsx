@@ -394,7 +394,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
-import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
+import { layoutBuildingButtons, buildingButtonWalls, BUTTON_WALL_MIN_PX, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -404,7 +404,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, ADD_GROUP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -624,7 +624,7 @@ const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to se
 // armed with the whole site in the viewport, at full size, over the two largest objects on the
 // drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
 // feet per pixel. Both must pass; read that module's header before changing either.
-const FEAT_BTN_MIN_PX = 72;
+const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;   // one number, in lib/buildingButtons.js (the grading label placer reads the same wall filter)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
@@ -2064,6 +2064,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)
     : null;
   const cullRect = cullRectRef.current;
+  // NEW-1 (2026-11-04): the canvas's own box in px, one stable object per size — the grading labels stay inside it (lib/spotLabelPlacement)
+  const canvasBoxPx = useMemo(() => ({ w: size.w, h: size.h }), [size.w, size.h]);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -18816,9 +18818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
     const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
     const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-    const roomy = Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX;   // the purple corner "+" needs room on BOTH axes (B225)
-    const walls = wallsFromQuad(quad, dockSides).filter((w) => ((w.name === "top" || w.name === "bottom") ? hpx : wpx) >= FEAT_BTN_MIN_PX)
-      .map((w) => ({ ...w, dock: w.dock && !el.footEdit, corners: w.dock && roomy ? w.corners : [] }));
+    const walls = buildingButtonWalls(quad, dockSides, { wpx, hpx, footEdit: !!el.footEdit });   // the filter the grading label placer reads too
     const layout = layoutBuildingButtons(walls);
     return (
       /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
@@ -25490,7 +25490,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} /></Suspense>
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} viewPx={canvasBoxPx} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
@@ -32115,58 +32115,29 @@ function WallBinGlyph() {
     </svg>
   );
 }
-/* WallAddControl — the end of a wall row (NEW-1, owner-approved 2026-11-03): ONE named button for the likely next layer
-   ("+ Truck court" · "+ Trailer" · "+ Buffer" · "+ Walk" …, an accent outline) joined to a small ▾ holding the other layers the
-   wall may take under their FULL names. `opts` is `orderedAddOptions` — exactly the set `addOptions` allows, the first entry the
-   button. The ▾ list floats (AnchoredMenu: a portal at the body, so it never pushes the rows down and never clips in the panel's
-   scroll area); Escape and a press away close it. No ▾ when there is only one option; nothing at all after a Road. Module scope
-   on purpose (MODULE-SCOPE-COMPONENTS): it owns its open state. Pressing the button leaves it usable — the row re-renders with
-   the next layer's name and he can keep clicking. */
+/* WallAddControl — the end of a wall row (NEW-1 amendment of B2651024, owner 2026-11-04: "Put every option on the row as its own
+   icon, no ▾."): a small plus glyph (NOT a button) followed by ONE icon button per entry of `opts` (`orderedAddOptions`, exactly the
+   set `addOptions` allows, in that order, so the likely next layer is the leftmost icon). Each button is the layer's legend swatch —
+   the SAME fill as the strip piece (`fillFor`) — with `WallKindIcon` inside; no word on it, the full name is in its aria-label and
+   title ("Add car parking to the End wall (N)" / "Add car parking to this wall"). One press adds that layer through `onAdd` (the same
+   `addWallLayer` / `addLayerOnSide` path as before). Nothing at all when `opts` is empty (after a Road). No menu, no open state, so
+   it is a plain module-scope component (MODULE-SCOPE-COMPONENTS) and its buttons stay usable after every press. */
 function WallAddControl({ row, opts, onAdd, fillFor }) {
-  const [open, setOpen] = useState(false);
-  const moreRef = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useEffect(() => {
-    if (!open) return undefined;
-    // Escape closes the ▾ and NOTHING ELSE — the planner's own Escape (deselect the building, closing this panel) must not also fire.
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [open]);
-  useEffect(() => { if (open && opts.length < 2) setOpen(false); }, [open, opts.length]);
   if (!opts.length) return null;
-  const next = opts[0], rest = opts.slice(1);
   const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
-  // The layer's own icon in its legend swatch — the SAME fill as the strip piece (fillFor), the one icon set (WallKindIcon).
-  const chip = (kind, w = 18, h = 16) => (
-    <span aria-hidden="true" data-testid="wall-add-swatch" data-kind={kind} style={{ flex: "none", width: w, height: h, borderRadius: 3, background: fillFor(kind), display: "grid", placeItems: "center", boxShadow: kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
-      <WallKindIcon kind={kind} size={Math.round(Math.min(w, h) * 0.72)} />
-    </span>
-  );
-  const edge = "1px solid var(--accent)";
-  const btn = { height: CONTROL_H.sm, padding: 0, border: edge, background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, whiteSpace: "nowrap" };
   return (
-    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "stretch" }}>
-      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label.toLowerCase()} to the ${wallName}`} title={`Add ${next.label.toLowerCase()} to this wall`}
-        style={{ ...btn, display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: "0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
-        onClick={() => { setOpen(false); onAdd(next.key); }}><span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1 }}>+</span>{chip(next.key)}</button>
-      {rest.length > 0 && (
-        <button ref={moreRef} type="button" data-testid="wall-add-more" data-wall-add="1" aria-label={`More layers for the ${row.badge} wall`} title="More layers" aria-haspopup="menu" aria-expanded={open}
-          style={{ ...btn, width: 20, fontSize: FONT_SIZE.micro, borderLeft: "none", borderRadius: `0 ${RADIUS.sm}px ${RADIUS.sm}px 0` }}
-          onClick={() => setOpen((o) => !o)}>▾</button>
-      )}
-      {rest.length > 0 && (
-        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={176}>
-          <div data-testid="wall-add-menu" data-wall-add="1" role="menu" style={{ display: "flex", flexDirection: "column" }}>
-            {rest.map((o) => (
-              <button key={o.key} type="button" role="menuitem" data-testid={`wall-add-${o.key}`} data-wall-add="1"
-                aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`}
-                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: SPACE.sm }}
-                onClick={() => { setOpen(false); onAdd(o.key); }}>{chip(o.key)}<span>{o.label}</span></button>
-            ))}
-          </div>
-        </AnchoredMenu>
-      )}
+    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: ADD_GROUP.GAP }}>
+      <span aria-hidden="true" data-testid="wall-add-plus" style={{ flex: "none", width: ADD_GROUP.PLUS_W, textAlign: "center", fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1, color: "var(--accent-text, var(--accent))" }}>+</span>
+      {opts.map((o) => (
+        <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} data-kind={o.key} data-wall-add="1"
+          aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`} title={`Add ${o.label.toLowerCase()} to this wall`}
+          style={{ flex: "none", boxSizing: "border-box", width: ADD_GROUP.ICON, height: ADD_GROUP.ICON, padding: 0, display: "grid", placeItems: "center", cursor: "pointer",
+            border: "1px solid var(--accent)", borderRadius: RADIUS.sm, background: fillFor(o.key),
+            boxShadow: o.key === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}
+          onClick={() => onAdd(o.key)}>
+          <WallKindIcon kind={o.key} size={14} />
+        </button>
+      ))}
     </span>
   );
 }
@@ -32336,7 +32307,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                 <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
               {row.layers.length > 0 && (
-                <span data-testid="wall-strip" data-total={total} style={{ flex: "none", width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
+                <span data-testid="wall-strip" data-total={total} data-bar-w={geo.barW} data-grown={geo.barW > STRIP.FULL + 0.01 ? "1" : undefined} style={{ flex: "0 1 auto", minWidth: 0, width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
                   {row.layers.map((l, i) => {
                     const label = pieceLabel(l);
                     const w = geo.pieces[i].w;
@@ -32344,7 +32315,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                     return (
                       <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
                         onClick={() => { if (sel) commitAndClose(); else { setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
-                        style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
+                        style={{ flex: "0 1 auto", minWidth: 0, width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
                           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
                           fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
                           boxShadow: sel ? "inset 0 0 0 2px var(--accent)" : (l.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>

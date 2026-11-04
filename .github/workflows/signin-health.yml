@@ -87,8 +87,10 @@ jobs:
       # time: it is not re-posted every hour, so it cannot become noise.
       - name: Raise the alarm another way when the alarm channel failed
         # Code 5 = a manual drill that could not run because the SQL has not been applied: a SETUP state, not a broken alarm
-        # channel — the job still ends red (below) but no "not delivering" issue is raised for it.
-        if: always() && steps.check.outputs.code != '0' && steps.check.outputs.code != '5'
+        # channel — the job still ends red (below) but no "not delivering" issue is raised for it. Code 1 = a drill ASSERTION
+        # failed (the rules misbehaved; the channel itself delivered) — also red, but "not delivering" would be false and it
+        # @-mentions the owner (it did exactly that on the first live drill of B2650848, issue #2843).
+        if: always() && steps.check.outputs.code != '0' && steps.check.outputs.code != '5' && steps.check.outputs.code != '1'
         uses: actions/github-script@v7
         with:
           script: |
