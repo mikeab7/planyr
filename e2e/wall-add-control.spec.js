@@ -46,16 +46,16 @@ for (const deg of [0, 315]) {
   test(`rot ${deg} · dock wall: the button names the next layer, one click each adds court → trailer → buffer; the ▾ floats and adds a road`, async ({ page }) => {
     await boot(page, deg);
     const dock = rowByRole(page, "dock").first();
-    await expect(named(dock)).toHaveText("+ Truck court");
+    await expect(named(dock)).toHaveAttribute("data-kind", "court");
     await expect(dock.getByTestId("wall-add-more")).toHaveCount(0);                       // one option ⇒ no ▾
     await named(dock).click();
     await expect(page.getByTestId("wall-edit-box")).toHaveAttribute("data-kind", "court");   // the new layer's box opens, as before
-    await expect(named(dock)).toHaveText("+ Trailer");
+    await expect(named(dock)).toHaveAttribute("data-kind", "trailer");
     await named(dock).click();
     await expect(page.getByTestId("wall-edit-box")).toHaveAttribute("data-kind", "trailer");
-    await expect(named(dock)).toHaveText("+ Buffer");                                     // the button stays usable: keep clicking
+    await expect(named(dock)).toHaveAttribute("data-kind", "buffer");                                     // the button stays usable: keep clicking
     await named(dock).click();
-    await expect(named(dock)).toHaveText("+ Walk");
+    await expect(named(dock)).toHaveAttribute("data-kind", "sidewalk");
     expect(await kinds(dock)).toEqual(["court", "trailer", "buffer"]);
 
     // the ▾ holds the rest under their full names (a second trailer piece and a second buffer are always on offer), floats over the rows and does NOT push them down
@@ -81,16 +81,17 @@ for (const deg of [0, 315]) {
     await expect(named(dock)).toHaveCount(0);
   });
 
-  test(`rot ${deg} · end wall: Walk, then Parking, then Buffer by the named button`, async ({ page }) => {
+  test(`rot ${deg} · end wall: sidewalk, then parking (and MORE parking on every further press), the buffer from the ▾`, async ({ page }) => {
     await boot(page, deg);
     const end = rowByRole(page, "ends").first();
-    await expect(named(end)).toHaveText("+ Walk");
+    await expect(named(end)).toHaveAttribute("data-kind", "sidewalk");
     await named(end).click();
-    await expect(named(end)).toHaveText("+ Parking");
+    await expect(named(end)).toHaveAttribute("data-kind", "parking");
     await named(end).click();
-    await expect(named(end)).toHaveText("+ Buffer");
-    await named(end).click();
+    await expect(named(end)).toHaveAttribute("data-kind", "parking");                      // NEW-1 (2026-11-04): parking leads until a layer sits beyond it
+    await addWallLayer(end, "buffer");
     expect(await kinds(end)).toEqual(["sidewalk", "parking", "buffer"]);
+    await expect(named(end)).toHaveAttribute("data-kind", "road");
   });
 }
 
