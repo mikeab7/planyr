@@ -14583,7 +14583,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setGrLimitEdit({ highlight: span || null });
   };
   const grDoneEditLimit = () => setGrLimitEdit(null);
-  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null, limitMode: "boundary" }); };   // NEW-1: "Reset to auto" is the property-line limit again
+  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null, limitMode: "layout" }); };   // NEW-1 (2026-11-04): "Reset to auto" is the automatic outline around what the layout needs
   const grSetLimitMode = (m) => { if (m !== "layout") setGrLimitEdit(null); grSetCfg({ limitMode: m }); };
   const grStartLimitVertex = (e, index) => {
     if (tool !== "select" || e.button !== 0) return;

@@ -28,7 +28,7 @@ try {
     const page = await (await browser.newContext({ viewport: { width: 1500, height: 1500 } })).newPage();
     page.on("pageerror", (e) => errs.push(String(e)));
     page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errs.push(m.text()); });   // the sandbox proxy refuses off-origin fetches (map tiles, fonts) — not an app error
-    await page.goto(`${BASE}/ui-audit/harness/grading-harness.html?owner=2&buildable=0&zoom=site&mode=boundary${qs}`);
+    await page.goto(`${BASE}/ui-audit/harness/grading-harness.html?owner=2&buildable=0&zoom=site&app=1${qs}`);
     await assertMeasurable(page, "verify-grading-panel-layout");
     await page.waitForFunction(() => window.__ready, null, { timeout: 60000 });
     return page;
@@ -50,7 +50,11 @@ try {
     const ground = document.querySelector('[data-section="ground"]').innerText;
     return document.querySelectorAll("[data-ffe-value]").length === 1 && inputs.length === 1 && !ground.includes(String(f));
   }, ffe0));
-  check("the pill reads AUTO · NO HAUL", (await page.textContent('[data-ffe-source="auto"]')) === "AUTO · NO HAUL");
+  {
+    const pill = await page.textContent('[data-ffe-source="auto"]'), haulSub = await page.textContent('[data-tile-sub="haul"]');
+    // NEW-2: "NO HAUL" only while the haul tile itself says balanced; otherwise the pill says NEAR NO HAUL (never "no haul" beside an amber haul)
+    check("the pill reads AUTO · NO HAUL while the haul is balanced, AUTO · NEAR NO HAUL when it is not", pill === (/^balanced$/.test(haulSub) ? "AUTO · NO HAUL" : "AUTO · NEAR NO HAUL"), `${pill} / ${haulSub}`);
+  }
   for (const w of ["Around the layout", "To the boundary", "daylight inside", "faces uphill", "uphill", "steeper than", "Slopes daylight", "Grading margin", "Balanced", "Level ground", "Least cut"]) check(`panel does not say "${w}"`, !panel.includes(w));
   check("no 'clear' flag line", (await page.locator('[data-grading-flag="clear"]').count()) === 0);
   check("HAUL precedes CUT and FILL in DOM order", await page.evaluate(() => {
@@ -78,12 +82,15 @@ try {
     const out = { x: mx + sgn * nx * 15, y: my + sgn * ny * 15 }, inn = { x: mx - sgn * nx * 5, y: my - sgn * ny * 5 };
     return { out, inn, outsideParcel: !inside(out), insideParcel: inside(inn), outInLimit: window.__harness.pointInLimit(out), innInLimit: window.__harness.pointInLimit(inn) };
   });
-  check("probe: 15 ft outside the parcel is outside the limit at -10; 5 ft inside is in the margin (outside the limit)", probe.outsideParcel && !probe.outInLimit && probe.insideParcel && !probe.innInLimit, JSON.stringify({ o: probe.outInLimit, i: probe.innInLimit }));
+  check("probe: 15 ft outside the parcel is outside the limit at -10; 5 ft inside is in the margin (outside the graded area)", probe.outsideParcel && !probe.outInLimit && probe.insideParcel && !probe.innInLimit, JSON.stringify({ o: probe.outInLimit, i: probe.innInLimit }));
+  const acres0 = +(await page.getAttribute("[data-graded-area]", "data-limit-ac"));
+  check("the graded area is the layout's outline (the app path), not the fenced parcel", (await page.getAttribute("[data-graded-area]", "data-limit-mode")) === "layout" && acres0 > 5 && acres0 < 0.7 * (await page.evaluate(() => { const r = window.__harness.ring; let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2 / 43560; })), `${acres0} AC`);
   await page.fill('[data-testid="grading-limit-offset"]', "+20");
   await page.keyboard.press("Enter");
   await page.waitForFunction((s) => document.querySelector("[data-graded-area]").getAttribute("data-limit-sig") !== s, sig0, { timeout: 120000 });
   const probe2 = await page.evaluate((p) => ({ out: window.__harness.pointInLimit(p.out), inn: window.__harness.pointInLimit(p.inn) }), probe);
-  check("typing +20 moves the limit outward: the band's limit signature changes and the point 15 ft outside the parcel is now INSIDE the limit", probe2.out && probe2.inn, JSON.stringify(probe2));
+  check("typing +20 moves the FENCE, not the graded area: the signature changes, yet neither the point 15 ft outside nor the margin strip is graded", !probe2.out && !probe2.inn, JSON.stringify(probe2));
+  check("…and the graded acreage is unchanged by the fence", Math.abs(+(await page.getAttribute("[data-graded-area]", "data-limit-ac")) - acres0) < 1e-6);
   check("the field reads +20 and the stored margin is -20", (await page.inputValue('[data-testid="grading-limit-offset"]')) === "+20" && (await page.evaluate(() => window.__harness.settings.grading.gradingMarginFt)) === -20);
   await page.fill('[data-testid="grading-limit-offset"]', "90"); await page.keyboard.press("Enter");
   await page.waitForTimeout(400);
@@ -100,7 +107,7 @@ try {
   const rows = await page.evaluate(() => [...document.querySelectorAll("[data-floor-row]")].map((r) => ({ k: r.dataset.floorRow, e: +r.dataset.floorE, cur: r.dataset.floorCurrent, t: r.innerText.replace(/\s+/g, " ") })));
   check("rows are no haul · least digging · shortest slopes, no duplicate floor", rows.map((r) => r.k).join() === "nohaul,digging,slopes" && new Set(rows.map((r) => r.e)).size === 3, JSON.stringify(rows.map((r) => [r.k, r.e])));
   check("the current floor's row is the highlighted one", rows[0].cur === "1" && rows.slice(1).every((r) => r.cur === "0"));
-  check("each row carries haul, deepest cut and tallest fill", rows.every((r) => /(^|\s)[+−]?[\d,]+k? \d+ ft \d+ ft/.test(r.t)), rows[0].t);
+  check("each row carries haul IN WORDS (never a sign), deepest cut and tallest fill", rows.every((r) => /(balanced|[\d,]+k? (import|export)) \d+ ft \d+ ft/.test(r.t) && !/[+−]\d/.test(r.t)), rows[0].t);
   check("HAUL BY FLOOR curve: zero line, a mark per row, the current floor as a dot, a half-foot curve", await page.evaluate(() => {
     const c = document.querySelector("[data-haul-curve]"); if (!c) return false;
     const pl = c.querySelector("polyline").getAttribute("points").trim().split(/\s+/).length;
@@ -160,7 +167,8 @@ try {
   check("clicking 'Second pad' either moves the building or says no move within 240 ft clears it", moved || (await page.locator('[data-fix-state="none"]').count()) >= 1, moved ? "moved" : "none found");
   await page.evaluate(() => window.__harness.setSettings((s) => ({ grading: { ...s.grading, terraceDepthFt: 200, maxCutFillFt: 200 } })));
   await page.waitForFunction(() => document.querySelectorAll('[data-flag-kind^="depth"]').length === 0, null, { timeout: 60000 });
-  check("raise the thresholds past the ground and the flags are gone — and nothing says 'clear'", (await page.locator('[data-grading-flag="clear"]').count()) === 0 && (await page.locator('[data-section="flags"]').count()) === 0);
+  const leftFlags = await page.evaluate(() => [...document.querySelectorAll("[data-grading-flag]")].map((e) => `${e.getAttribute("data-flag-kind")}: ${e.querySelector("[data-flag-text]")?.textContent || e.textContent}`));
+  check("raise the thresholds past the ground and the flags are gone — and nothing says 'clear'; 'Second pad' did not trade its depth flag for a fence flag (NEW-1, 2026-11-04)", (await page.locator('[data-grading-flag="clear"]').count()) === 0 && (await page.locator('[data-section="flags"]').count()) === 0 && leftFlags.length === 0, JSON.stringify(leftFlags));
   await page.evaluate(() => window.__harness.setSettings((s) => ({ grading: { ...s.grading, terraceDepthFt: 12, maxCutFillFt: 12 } })));
   await settled(page);
   await page.screenshot({ path: `${SHOTS}panel-layout-light.png`, clip: { x: 0, y: 0, width: 340, height: 1500 } });
@@ -189,7 +197,7 @@ try {
       return r;
     };
     const saved = await limitOfPage("&mode=layout"), onLine = await limitOfPage("&mode=boundary");
-    check("a plan saved on 'layout' with no outline draws the PROPERTY-LINE limit (known-good arm: the same plan saved on the property line)", saved.stored === "layout" && saved.mode === "boundary" && onLine.mode === "boundary" && JSON.stringify(saved.bbox) === JSON.stringify(onLine.bbox), JSON.stringify({ saved, onLine }));
+    check("a plan saved on 'layout' and one saved on 'boundary' (PR 2775's conversion) draw the SAME layout-outline limit, no re-save (NEW-1, 2026-11-04)", saved.stored === "layout" && saved.mode === "layout" && onLine.stored === "boundary" && onLine.mode === "layout" && JSON.stringify(saved.bbox) === JSON.stringify(onLine.bbox), JSON.stringify({ saved, onLine }));
     check("…and its panel reads -10 with no mode control", saved.field === "-10" && saved.modeCtl === 0);
   }
 

@@ -28,7 +28,7 @@ function conceptA() {
   const setback = gradingSetback([{ id: "pc", points: ring, active: true }], 25);
   const gsEls = (FFE) => els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) }));
   const build = (FFE, mode) => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true, engineBoundary: true });
     return buildProposedSurface({ els: gsEls(FFE), ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],
       opts: { existKey: `r9:${mode}:${FFE}` }, grading: gradingPack(cfg, setback) });
   };
@@ -60,7 +60,7 @@ describe("NEW-1 — a synthetic flat-ground site: the band is concentric offsets
   const FFE2 = 800;
   const els = [{ id: "b", type: "building", ring: [{ x: 300, y: 150 }, { x: 500, y: 150 }, { x: 500, y: 250 }, { x: 300, y: 250 }], dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: FFE2 }];
   const setback = gradingSetback([{ id: "pc", points: parcel, active: true }], 25);
-  const cfg = gradingCfg({ enabled: true, limitMode: "boundary", layers: { cutfill: true, contours: true } });
+  const cfg = gradingCfg({ enabled: true, limitMode: "boundary", layers: { cutfill: true, contours: true } }, { engineBoundary: true });
   const sf = buildProposedSurface({ els, ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "r10-flat" }, grading: gradingPack(cfg, setback) });
   const T = trace(sf, { existAt });
   const pieces = piecesOf(T.feet);

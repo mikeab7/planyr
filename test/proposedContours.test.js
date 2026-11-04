@@ -39,7 +39,7 @@ function chehaw(mode, FFE = 794.8) {
   let minY = Infinity; for (const p of ring) minY = Math.min(minY, p.y);
   const sb = ring.map((a, i) => { const c = ring[(i + 1) % ring.length]; return (a.y + c.y) / 2 < minY + 400 ? 50 : 25; });
   const setback = gradingSetback([{ id: "pc", points: ring, setbacks: sb, active: true }], 25);
-  const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true });
+  const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true, engineBoundary: true });
   const s = buildProposedSurface({ els: gsEls, ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "t" }, grading: gradingPack(cfg, setback) });
   const L = contourLattice(s.grid, { existAt });
   const mask = new Uint8Array(L.nx * L.ny), work = new Float32Array(L.nx * L.ny);
