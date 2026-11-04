@@ -13,7 +13,8 @@ import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { ensureVendored, rewriteCdn, serveVendored, CDN_ASSETS } from "./lib/vendorCdn.mjs";
 
 const arg = process.argv[2] || "";
