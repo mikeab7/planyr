@@ -85,6 +85,8 @@ async function reopenBuildingPanel() {
 const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
 const rot2 = (x, y, deg) => { const a = (deg * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a); return { x: x * c - y * sn, y: x * sn + y * c }; };
 const lead = (row) => row.getByTestId("wall-add");
+// Close an open edit box — and ONLY that: an Escape with nothing open deselects the building (the panel under test goes with it).
+const closeBox = async () => { if (await T("wall-edit-box").count()) { await page.keyboard.press("Escape"); await sleep(250); } };
 const leadKind = async (row) => ((await lead(row).count()) ? lead(row).getAttribute("data-kind") : null);
 async function moreKinds(row) {
   if (!(await row.getByTestId("wall-add-more").count())) return [];
@@ -101,7 +103,7 @@ async function wallLayers(side) {
     if (x.attachedTo !== b.id || x.dogEar || x.points || !["sidewalk", "landscape", "parking", "paving", "road", "trailer"].includes(x.type) || x.truckCourt || x.forCourt || x.forTrailer) continue;
     const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot), rel = ((((x.rot || 0) - b.rot) % 360) + 360) % 360, cross = Math.min(Math.abs(rel - 90), Math.abs(rel - 270)) < 45;
     const dx = cross ? x.h : x.w, dy = cross ? x.w : x.h, depth = isH ? dy : dx, mid = sg * (isH ? l.y : l.x) - face;
-    if (mid + face < 0 || Math.abs(isH ? l.x : l.y) > ((isH ? b.w : b.h) / 2 + (isH ? dx : dy))) continue;
+    if (mid - depth / 2 < -0.5 || Math.abs(isH ? l.x : l.y) > ((isH ? b.w : b.h) / 2 + (isH ? dx : dy))) continue;   // outward of THIS wall's face (the other walls' layers project to lo < 0)
     out.push({ id: x.id, type: x.type, buffer: x.type === "landscape" && !x.sidewalkSide, lo: mid - depth / 2, hi: mid + depth / 2, depth, el: x });
   }
   return out.sort((a, c) => a.lo - c.lo);
@@ -124,7 +126,15 @@ try {
   await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
   for (const [tag, rot] of ROTS) {
     console.log(`\n=== rot ${rot} ===`);
-    await openScenario(tag);
+    // The seed is a local cache write; the app's own cloud load can drop it before the plan opens (the "project doesn't exist" card) — reseed and retry.
+    for (let attempt = 1; ; attempt++) {
+      try { await openScenario(tag); break; }
+      catch (e) {
+        if (attempt >= 4) throw e;
+        console.log(`(startup attempt ${attempt} lost the seed race: ${e.message.split("\n")[0]} — reseeding)`);
+        await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
+      }
+    }
     const roles = await page.locator('[data-testid="wall-row"]').evaluateAll((n) => n.map((r) => r.getAttribute("data-role")));
     ok(`[${tag}] known-good: the wall list holds dock · rear · ends · ends`, JSON.stringify(roles) === JSON.stringify(["dock", "rear", "ends", "ends"]), JSON.stringify(roles));
     const dock = rowByRole("dock").first(), rear = rowByRole("rear").first(), end0 = rowByRole("ends").nth(0), end1 = rowByRole("ends").nth(1);
@@ -156,20 +166,22 @@ try {
     const buf1 = ls.find((l) => l.buffer), parkHi1 = Math.max(...ls.filter((l) => l.type === "parking").map((l) => l.hi));
     ok(`[${tag}] more parking beside a buffer: 9 rows, the buffer pushed out by exactly what the field grew (${(buf1.lo - buf0.lo).toFixed(1)} vs ${(parkHi1 - parkHi0).toFixed(1)}), no overlap, still outermost`,
       f.rows === 9 && overlapFree(ls) && flushOutside(ls) && Math.abs((buf1.lo - buf0.lo) - (parkHi1 - parkHi0)) < 1 && Math.abs(buf1.depth - buf0.depth) < 0.5 && (await panelRows(end0)) === 9, JSON.stringify(f));
-    await page.keyboard.press("Escape");
+    await closeBox();
     // ---- a buffer between the walk and the lot (rear wall): parking offered, leads, buffer stays outermost
     const sideR = (await rear.getAttribute("data-sides")).split(",")[0];
     await addWallLayer(page, rear, "sidewalk"); await addWallLayer(page, rear, "buffer"); await sleep(400);
     ok(`[${tag}] rear: sidewalk > buffer → parking leads`, (await leadKind(rear)) === "parking" && (await moreKinds(rear)).includes("trailer"));
-    await lead(rear).click(); await sleep(500);
+    await lead(rear).click();
+    const rearKinds = () => rear.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))).then(JSON.stringify);
+    await waitFor(async () => (await rearKinds()) === '["sidewalk","parking","buffer"]' && (await wallLayers(sideR)).filter((l) => l.type === "parking").length === 1, 8000);
     ls = await wallLayers(sideR);
-    ok(`[${tag}] rear: parking added to sidewalk > buffer, no overlap, buffer outermost`, overlapFree(ls) && flushOutside(ls) && ls.filter((l) => l.type === "parking").length === 1 && JSON.stringify(await rear.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))) === '["sidewalk","parking","buffer"]');
-    await page.keyboard.press("Escape");
+    ok(`[${tag}] rear: parking added to sidewalk > buffer, no overlap, buffer outermost`, overlapFree(ls) && flushOutside(ls) && ls.filter((l) => l.type === "parking").length === 1 && (await rearKinds()) === '["sidewalk","parking","buffer"]', await rearKinds() + " " + JSON.stringify(ls.map((l) => [l.type, +l.lo.toFixed(1), +l.hi.toFixed(1)])));
+    await closeBox();
     // ---- wall-state offers vs the independent list (states reached by real clicks on the other end wall, then the dock wall)
     const sideE1 = (await end1.getAttribute("data-sides")).split(",")[0];
     const stateOffer = async (name, row, build) => {
       for (const k of build) await addWallLayer(page, row, k);
-      await page.keyboard.press("Escape");
+      await closeBox();
       const have = await row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
       const got = await offered(row), want = SENSIBLE(have);
       ok(`[${tag}] state "${name}" [${have.join(" > ") || "empty"}] offers ${JSON.stringify(got)}`, JSON.stringify(got.slice().sort()) === JSON.stringify(want.slice().sort()) && overlapFree(await wallLayers(sideE1)));
