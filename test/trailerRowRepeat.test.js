@@ -74,7 +74,7 @@ describe("NEW-1 — the second row: strip pieces, depth, derived geometry (the o
     const plan = stripPlan([{ key: "dock", layers }]).rows.dock;
     expect(plan.pieces).toHaveLength(5);
     plan.pieces.forEach((p) => expect(p.w).toBeGreaterThanOrEqual(STRIP.MIN_PIECE));
-    expect(plan.barW).toBeLessThanOrEqual(STRIP.FULL);
+    expect(plan.barW).toBe(5 * STRIP.MIN_PIECE + 4 * STRIP.GAP);       // past FULL (66, since the add options became icons): the bar grows to hold five minimum pieces
     expect(wallTotalDepth(layers)).toBe(300);
   });
 });

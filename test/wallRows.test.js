@@ -3,7 +3,7 @@
  * canvas are driven for real by e2e/building-panel-v2.spec.js. */
 import { describe, it, expect } from "vitest";
 import {
-  wallRowPlan, chipLabel, bumpSummary, addOptions, orderedAddOptions, removalCount, trailerTotalDepth, trailerRowDepth, trailerSpec, trailerCfg,
+  wallRowPlan, chipLabel, bumpSummary, addOptions, orderedAddOptions, ADD_GROUP, addGroupWidth, KIND_ORDER, removalCount, trailerTotalDepth, trailerRowDepth, trailerSpec, trailerCfg,
   zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, clampTrailerRows, bumpEndLabel, bumpEnds, areaWithBumps, TRAILER_MAX_ROWS,
 } from "../src/workspaces/site-planner/lib/wallRows.js";
 import { wallPickerLayout } from "../src/workspaces/site-planner/lib/loadingWalls.js";
@@ -87,11 +87,11 @@ describe("chips and the + catalog", () => {
     expect(next(false, ["sidewalk", "parking"])[0]).toBe("parking");
     expect(next(false, ["parking"])[0]).toBe("parking");
     expect(next(false, ["sidewalk", "parking", "buffer"])[0]).toBe("road");
-    expect(next(false, ["sidewalk", "parking", "buffer"])).toContain("parking");                 // parking waits in the ▾
+    expect(next(false, ["sidewalk", "parking", "buffer"])).toContain("parking");                 // parking waits further along the icons
     expect(next(false, ["sidewalk", "buffer"])[0]).toBe("parking");
     expect(next(false, ["sidewalk"])).toEqual(["parking", "buffer", "road", "trailer"]);
   });
-  it("NEW-1: a second trailer piece, Road, Sidewalk etc. sit in the ▾ under their own names; a binned court leads", () => {
+  it("NEW-1: a second trailer piece, Road, Sidewalk etc. are each their own icon on the row, under their own full names; a binned court leads", () => {
     expect(next(true, ["court"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
     expect(next(true, ["court", "trailer"])).toEqual(["buffer", "sidewalk", "road", "trailer"]);
     expect(next(true, ["buffer", "sidewalk"])).toEqual(["court", "buffer", "sidewalk", "road"]);
@@ -108,6 +108,25 @@ describe("chips and the + catalog", () => {
     walk(true, dockKinds, [], 5); walk(false, otherKinds, [], 5);
     expect(next(true, ["court", "trailer", "road"])).toEqual([]);                   // a wall ending in a Road offers nothing
     expect(next(false, ["sidewalk", "road"])).toEqual([]);
+  });
+  it("NEW-1 (2026-11-04): every add option is its own icon on the row — the row (head + strip + plus + icons) fits the 266-wide phone sheet for EVERY stack up to three layers, at the deepest-wall strip width", () => {
+    const dockKinds = ["court", "trailer", "buffer", "sidewalk", "road"], otherKinds = ["sidewalk", "parking", "trailer", "buffer", "road"];
+    const widths = []; let widest = 0, most = 0;
+    const walk = (isDock, kinds, prefix, depth) => {
+      const layers = prefix.map((kind) => ({ kind, depth: 20, rows: 1 }));
+      const n = orderedAddOptions(isDock, layers).length;
+      const bar = layers.length ? stripPlan([{ key: "w", layers }]).rows.w.barW : 0;
+      const row = ADD_GROUP.HEAD + (bar ? ADD_GROUP.ROW_GAP + bar : 0) + (n ? ADD_GROUP.ROW_GAP + addGroupWidth(n) : 0);
+      widths.push(row); widest = Math.max(widest, row); most = Math.max(most, n);
+      expect(row, `${isDock ? "dock" : "wall"} ${prefix.join(">") || "empty"}: ${n} icons`).toBeLessThanOrEqual(ADD_GROUP.PHONE_PANEL);
+      if (depth) kinds.forEach((k) => walk(isDock, kinds, [...prefix, k], depth - 1));
+    };
+    walk(true, dockKinds, [], 3); walk(false, otherKinds, [], 3);
+    expect(most).toBe(5);                                                            // the worst case really is five icons
+    expect(widest).toBeLessThanOrEqual(266);
+    expect(addGroupWidth(5)).toBe(130); expect(addGroupWidth(0)).toBe(0);
+    expect(STRIP.FULL + ADD_GROUP.HEAD + 2 * ADD_GROUP.ROW_GAP + addGroupWidth(5)).toBeLessThanOrEqual(ADD_GROUP.PHONE_PANEL);   // the budget STRIP.FULL was set from
+    expect(KIND_ORDER.length).toBe(6);
   });
   it("v3: Remove takes ONLY the piece, on a dock wall as on any other (the court's trailer is planDockPieceRemoval's)", () => {
     expect(removalCount(true, [{ kind: "court" }, { kind: "trailer" }, { kind: "buffer" }], 0)).toBe(1);
@@ -353,15 +372,15 @@ describe("v3 · the strip — labels, scale, legend", () => {
   });
   it("one scale for the whole building: the deepest wall is full width, a shallow one never under the floor, pieces never under the minimum", () => {
     const rows = [
-      { key: "dock", layers: [L("court", 135), L("trailer", 123, 2), L("buffer", 15), L("sidewalk", 5), L("road", 24)] },   // 302
-      { key: "rear", layers: [L("sidewalk", 5), L("parking", 130, 4)] },                                                   // 135 (proportional share stays above the FLOOR at STRIP.FULL 118)
+      { key: "dock", layers: [L("court", 135), L("trailer", 123, 2), L("buffer", 15)] },   // 273
+      { key: "rear", layers: [L("sidewalk", 5), L("parking", 195, 4)] },                                                   // 200 (proportional share stays above the FLOOR at STRIP.FULL 66)
       { key: "endA", layers: [L("buffer", 15)] },                                                                            // 15
       { key: "endB", layers: [] },
     ];
     const plan = stripPlan(rows);
-    expect(plan.maxTotal).toBe(302);
+    expect(plan.maxTotal).toBe(273);
     expect(plan.rows.dock.barW).toBe(STRIP.FULL);
-    expect(plan.rows.rear.barW).toBeCloseTo(STRIP.FULL * 135 / 302, 1);
+    expect(plan.rows.rear.barW).toBeCloseTo(STRIP.FULL * 200 / 273, 1);
     expect(plan.rows.endA.barW).toBe(STRIP.FLOOR);                       // shallow, but still clickable
     expect(plan.rows.endB).toEqual({ total: 0, barW: 0, pieces: [] });  // empty wall: just the +
     for (const key of ["dock", "rear", "endA"]) {
@@ -379,7 +398,7 @@ describe("v3 · the strip — labels, scale, legend", () => {
   it("a wall with many thin layers grows its bar rather than squeezing a piece under the minimum", () => {
     const r = stripPlan([{ key: "w", layers: [L("court", 400), L("trailer", 5, 1), L("buffer", 5), L("sidewalk", 5), L("road", 5)] }]).rows.w;
     r.pieces.forEach((p) => expect(p.w).toBeGreaterThanOrEqual(STRIP.MIN_PIECE - 1e-9));
-    expect(r.barW).toBeLessThanOrEqual(STRIP.FULL);
+    expect(r.barW).toBe(5 * STRIP.MIN_PIECE + 4 * STRIP.GAP);                       // past FULL: the bar grows to hold five minimum pieces
   });
   it("the legend lists only the kinds present, in Court · Trailer · Buffer · Walk · Parking · Road order", () => {
     const rows = [{ layers: [L("road", 24), L("court", 135)] }, { layers: [L("sidewalk", 5), L("parking", 20, 1)] }];

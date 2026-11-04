@@ -404,7 +404,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, ADD_GROUP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -32283,58 +32283,29 @@ function WallBinGlyph() {
     </svg>
   );
 }
-/* WallAddControl — the end of a wall row (NEW-1, owner-approved 2026-11-03): ONE named button for the likely next layer
-   ("+ Truck court" · "+ Trailer" · "+ Buffer" · "+ Walk" …, an accent outline) joined to a small ▾ holding the other layers the
-   wall may take under their FULL names. `opts` is `orderedAddOptions` — exactly the set `addOptions` allows, the first entry the
-   button. The ▾ list floats (AnchoredMenu: a portal at the body, so it never pushes the rows down and never clips in the panel's
-   scroll area); Escape and a press away close it. No ▾ when there is only one option; nothing at all after a Road. Module scope
-   on purpose (MODULE-SCOPE-COMPONENTS): it owns its open state. Pressing the button leaves it usable — the row re-renders with
-   the next layer's name and he can keep clicking. */
+/* WallAddControl — the end of a wall row (NEW-1 amendment of B2651024, owner 2026-11-04: "Put every option on the row as its own
+   icon, no ▾."): a small plus glyph (NOT a button) followed by ONE icon button per entry of `opts` (`orderedAddOptions`, exactly the
+   set `addOptions` allows, in that order, so the likely next layer is the leftmost icon). Each button is the layer's legend swatch —
+   the SAME fill as the strip piece (`fillFor`) — with `WallKindIcon` inside; no word on it, the full name is in its aria-label and
+   title ("Add car parking to the End wall (N)" / "Add car parking to this wall"). One press adds that layer through `onAdd` (the same
+   `addWallLayer` / `addLayerOnSide` path as before). Nothing at all when `opts` is empty (after a Road). No menu, no open state, so
+   it is a plain module-scope component (MODULE-SCOPE-COMPONENTS) and its buttons stay usable after every press. */
 function WallAddControl({ row, opts, onAdd, fillFor }) {
-  const [open, setOpen] = useState(false);
-  const moreRef = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useEffect(() => {
-    if (!open) return undefined;
-    // Escape closes the ▾ and NOTHING ELSE — the planner's own Escape (deselect the building, closing this panel) must not also fire.
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [open]);
-  useEffect(() => { if (open && opts.length < 2) setOpen(false); }, [open, opts.length]);
   if (!opts.length) return null;
-  const next = opts[0], rest = opts.slice(1);
   const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
-  // The layer's own icon in its legend swatch — the SAME fill as the strip piece (fillFor), the one icon set (WallKindIcon).
-  const chip = (kind, w = 18, h = 16) => (
-    <span aria-hidden="true" data-testid="wall-add-swatch" data-kind={kind} style={{ flex: "none", width: w, height: h, borderRadius: 3, background: fillFor(kind), display: "grid", placeItems: "center", boxShadow: kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
-      <WallKindIcon kind={kind} size={Math.round(Math.min(w, h) * 0.72)} />
-    </span>
-  );
-  const edge = "1px solid var(--accent)";
-  const btn = { height: CONTROL_H.sm, padding: 0, border: edge, background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, whiteSpace: "nowrap" };
   return (
-    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "stretch" }}>
-      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label.toLowerCase()} to the ${wallName}`} title={`Add ${next.label.toLowerCase()} to this wall`}
-        style={{ ...btn, display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: "0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
-        onClick={() => { setOpen(false); onAdd(next.key); }}><span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1 }}>+</span>{chip(next.key)}</button>
-      {rest.length > 0 && (
-        <button ref={moreRef} type="button" data-testid="wall-add-more" data-wall-add="1" aria-label={`More layers for the ${row.badge} wall`} title="More layers" aria-haspopup="menu" aria-expanded={open}
-          style={{ ...btn, width: 20, fontSize: FONT_SIZE.micro, borderLeft: "none", borderRadius: `0 ${RADIUS.sm}px ${RADIUS.sm}px 0` }}
-          onClick={() => setOpen((o) => !o)}>▾</button>
-      )}
-      {rest.length > 0 && (
-        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={176}>
-          <div data-testid="wall-add-menu" data-wall-add="1" role="menu" style={{ display: "flex", flexDirection: "column" }}>
-            {rest.map((o) => (
-              <button key={o.key} type="button" role="menuitem" data-testid={`wall-add-${o.key}`} data-wall-add="1"
-                aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`}
-                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: SPACE.sm }}
-                onClick={() => { setOpen(false); onAdd(o.key); }}>{chip(o.key)}<span>{o.label}</span></button>
-            ))}
-          </div>
-        </AnchoredMenu>
-      )}
+    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: ADD_GROUP.GAP }}>
+      <span aria-hidden="true" data-testid="wall-add-plus" style={{ flex: "none", width: ADD_GROUP.PLUS_W, textAlign: "center", fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1, color: "var(--accent-text, var(--accent))" }}>+</span>
+      {opts.map((o) => (
+        <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} data-kind={o.key} data-wall-add="1"
+          aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`} title={`Add ${o.label.toLowerCase()} to this wall`}
+          style={{ flex: "none", boxSizing: "border-box", width: ADD_GROUP.ICON, height: ADD_GROUP.ICON, padding: 0, display: "grid", placeItems: "center", cursor: "pointer",
+            border: "1px solid var(--accent)", borderRadius: RADIUS.sm, background: fillFor(o.key),
+            boxShadow: o.key === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}
+          onClick={() => onAdd(o.key)}>
+          <WallKindIcon kind={o.key} size={14} />
+        </button>
+      ))}
     </span>
   );
 }
@@ -32504,7 +32475,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                 <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
               {row.layers.length > 0 && (
-                <span data-testid="wall-strip" data-total={total} style={{ flex: "none", width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
+                <span data-testid="wall-strip" data-total={total} data-bar-w={geo.barW} data-grown={geo.barW > STRIP.FULL + 0.01 ? "1" : undefined} style={{ flex: "0 1 auto", minWidth: 0, width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
                   {row.layers.map((l, i) => {
                     const label = pieceLabel(l);
                     const w = geo.pieces[i].w;
@@ -32512,7 +32483,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                     return (
                       <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
                         onClick={() => { if (sel) commitAndClose(); else { setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
-                        style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
+                        style={{ flex: "0 1 auto", minWidth: 0, width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
                           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
                           fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
                           boxShadow: sel ? "inset 0 0 0 2px var(--accent)" : (l.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>
