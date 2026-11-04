@@ -433,7 +433,7 @@ export default function GradingController({ input, onModel }) {
           const owner = grid.owners.find((o) => o.el.id === id), el = els.find((e) => e.id === id);
           if (!owner || !el) continue;
           const sp = spotElevationsFor(plane, el.ring, (pt) => grid.zOf(owner, pt));
-          if (sp) return courtDropReadout(sp);
+          if (sp && sp.face.atWall) return courtDropReadout(sp);   // NEW-2: the court that TOUCHES the wall, never a trailer row out along its fall
         }
         return null;
       })() : null;
@@ -471,7 +471,7 @@ export default function GradingController({ input, onModel }) {
         // NEW-1 (2026-11-04): the real building element (cx, cy, w, h, rot, dock…) — the label placer (lib/spotLabelPlacement) derives every edit button and grip the planner can
         // draw for it from this, so no court / lot label is drawn under one
         ctrl: (inRef.current.rawBuildings && inRef.current.rawBuildings.get(id)) || null,
-        flagDot: F.flag ? { pt: F.flag.centroid, text: `${F.flag.over} ft past the setback` } : null,
+        flagDot: F.flag ? { pt: F.flag.centroid, text: `${F.flag.over} ft ${F.flag.place || "past the line"}` } : null,   // B2655792: the fence is the property line ± N ft, not the setback
       });
     }
     return out;
@@ -681,8 +681,17 @@ export default function GradingController({ input, onModel }) {
       if (flag.scope === "pad") { const pd = padDepths(g2, id)[flag.depthKind]; return !pd || pd.ft <= flag.thresholdFt; }
       const st = gridDepthStats(g2)[flag.depthKind]; return !st || st.ft <= flag.thresholdFt;
     };
+    // NEW-1 (2026-11-04): the graded area is the layout, so a move can push a slope past the FENCE (the property line ± N ft). A fix for a
+    // depth flag must not trade it for a fence flag: the moved layout may not put more cells past the line than the plan has now.
+    let out0 = null;
+    function* fenceBase() { if (out0 == null) { const s0 = yield* buildProposedSurfaceSteps(gi); out0 = s0 && s0.grid && s0.grid.outside ? s0.grid.outside.count : 0; } return out0; }
     const r = await runChunked(findMoveFix(
-      function* (dx, dy) { const s2 = yield* buildProposedSurfaceSteps({ ...gi, els: shiftAssembly(gi.els, aIds, dx, dy) }); return depthOk(s2 && s2.grid); },
+      function* (dx, dy) {
+        const base = yield* fenceBase();
+        const s2 = yield* buildProposedSurfaceSteps({ ...gi, els: shiftAssembly(gi.els, aIds, dx, dy) });
+        const g2 = s2 && s2.grid;
+        return depthOk(g2) && (!g2.outside || g2.outside.count <= base);
+      },
       { buildingCentre: centreOf(b.ring), offendCentroid: flag.at },
     ), { isStale: () => my !== secondPadSeq.current });
     return r && !r.stale ? r : null;

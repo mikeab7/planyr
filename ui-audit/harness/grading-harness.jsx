@@ -100,9 +100,10 @@ function Harness({ data }) {
   const [headEl, setHeadEl] = useState(null);
   const [sel, setSel] = useState(QS.get("sel") === "none" ? null : QS.get("owner") ? CHEHAW_CROSS_DOCK_ROWS[0].id : "b1");   // ?sel=none — nothing selected (NEW-2: the corner tags go home)
   const parcels = useMemo(() => [{ id: "pc", points: ring, setbacks: sb, active: true }], [ring, sb]);
-  // `?app=1` loads the plan through the APP's own path (a stored limitMode "layout" with no hand-edited outline reads as the property-line limit);
-  // without it the harness keeps the engine's layout mode reachable (`engineLayout`) — the older sections of verify-grading-harness measure it
-  const cfg = gradingCfg(settings.grading, { engineLayout: new URLSearchParams(location.search).get("app") !== "1" });
+  // `?app=1` loads the plan through the APP's own path (every stored mode reads as the layout limit — NEW-1, 2026-11-04 — fenced by the
+  // property line); without it the harness keeps the engine's retired "boundary" mode reachable (`engineBoundary`) — the older
+  // sections of verify-grading-harness measure it
+  const cfg = gradingCfg(settings.grading, { engineBoundary: new URLSearchParams(location.search).get("app") !== "1" });
   const planOn = cfg.enabled;
   const setback = useMemo(() => gradingSetback(parcels, 25), [parcels]);
   const existAt = useMemo(() => demSampler(dem, origin), [dem, origin]);

@@ -27,7 +27,7 @@ export function chehawInputs({ owner = 2 } = {}) {
   const hosts = hostIdMap(els);
   const setback = gradingSetback([{ id: "pc", points: ring, setbacks: sb, active: true }], 25);
   const inputs = (FFE, mode, tag = "x") => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineBoundary: true });
     return {
       els: els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) })),
       ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],

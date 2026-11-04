@@ -14,17 +14,19 @@ import { sampleAtLatLng } from "./demGrid.js";
 import { feetToLatLngPair } from "./mapLock.js";
 import { offsetPolygon } from "./parcelOffset.js";
 import { hostBuildingIdOf } from "./gradingMembership.js";
-import { LIMIT_DEFAULTS, LIMIT_MODES, PROPERTY_LIMIT_DEFAULTS, propertyLimit } from "./gradingLimit.js";
+import { LIMIT_DEFAULTS, PROPERTY_LIMIT_DEFAULTS, propertyLimit } from "./gradingLimit.js";
 
 export const GRADING_DEFAULTS = Object.freeze({
   pavementSlopePct: 1.5, minPavementSlopePct: 0.5, maxCutFillFt: 12, slopeRatio: 2, lotDropFt: 0.5, shoulderFt: 5,
   // ROUND 4 (B2349120): the grading limit's own settings — the shoulder past the pavement, the rounding radius of the
   // limit's outside corners, the max pavement slope a seam may bend a plane to, and the limit MODE.
   cornerRadiusFt: LIMIT_DEFAULTS.cornerRadiusFt, maxPavementSlopePct: 5,
-  // NEW-1 (Grading panel layout, owner 2026-10-31): the panel no longer offers "Around the layout / To the boundary" — the limit of
-  // disturbance is ONE signed number off the property line, i.e. the boundary limit. "layout" survives only as the vehicle for a
-  // hand-edited outline (Edit outline) and for callers/tests that name it.
-  limitMode: "boundary",
+  // NEW-1 (2026-11-04, owner: "grading only what you need"): the graded area is the LAYOUT's outline (building + courts + parking
+  // + lots + shoulder), the slope thrown OUTWARD from it. The panel's "Limits of disturbance" number is the FENCE that grading may
+  // not cross (the property line ± N ft) — a slope that would cross it raises the "past the line" flag — never the area that gets
+  // graded. The earlier reading (owner 2026-10-31: one number off the property line = the old "To the boundary" mode) graded the
+  // whole parcel inside the fence; that mode survives in the engine for tests and the harness only (`opts.engineBoundary`).
+  limitMode: "layout",
   // Fill or cut past which a terrace or wall is usual — the panel's depth flag anywhere in the slopes (a threshold, not a limit).
   terraceDepthFt: 12,
   // ROUND 6 (NEW-3): the slope the open ground inside the limit falls at, away from the pavement / pad edges it touches.
@@ -42,11 +44,11 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
  * existing B826 ones): pavement slope %, max cut-or-fill under a pad (ft), grading slope ratio (H:V), and
  * whether grading is on for the plan (default OFF) and which of the two map layers are shown (both default OFF). Pavement
  * slope is never below 0.5%. */
-/* `opts.engineLayout` — ENGINE TESTS AND THE UI HARNESS ONLY: keep a bare `limitMode: "layout"` as named so the retired "around the layout"
- * limit can still be exercised. The APP never passes it (useGradingBase), so there a stored "layout" with NO hand-edited outline reads as
- * the property-line limit at the stored margin (NEW-1 follow-up, V2034896 step 2: the owner's Concept A was saved on the old layout mode, so
- * its panel read −10 while the map still drew the old layout limit, with no control left to change it). "layout" survives in the app only
- * as the vehicle for a hand-edited outline (`limitRing`). */
+/* LIMIT MODE (NEW-1, 2026-11-04): in the APP the limit is always "layout" — the auto outline around what the plan needs, or the owner's
+ * hand-edited `limitRing` — whatever a plan stored (a plan PR 2775 rewrote to "boundary" computes under the new rule WITHOUT being re-saved),
+ * and the property line ± N ft is the fence (`gradingPack` → `setbackRings`). `opts.engineBoundary` — ENGINE TESTS AND THE UI HARNESS
+ * ONLY: keep a stored `limitMode: "boundary"` as named so the retired "grade to the boundary" limit (the whole fenced parcel) can still
+ * be exercised. The APP never passes it (useGradingBase). `opts.engineLayout` is accepted and ignored (layout is the default now). */
 export function gradingCfg(g, opts) {
   const src = g || {};
   const p = num(src.pavementSlopePct);
@@ -70,8 +72,7 @@ export function gradingCfg(g, opts) {
       spots: !(src.layers && src.layers.spots === false) },
     // ROUND 4 — the grading limit: its mode ("layout" = around the graded elements, "boundary" = the setback itself),
     // the owner's edited outline (layout mode only; null = auto), the shoulder, the corner radius, the max pavement slope.
-    limitMode: !LIMIT_MODES.includes(src.limitMode) ? GRADING_DEFAULTS.limitMode
-      : src.limitMode === "layout" && !ring && !(opts && opts.engineLayout) ? "boundary" : src.limitMode,
+    limitMode: src.limitMode === "boundary" && opts && opts.engineBoundary ? "boundary" : "layout",
     limitRing: ring,
     shoulderFt: sh == null || sh < 0 ? GRADING_DEFAULTS.shoulderFt : sh,
     cornerRadiusFt: cr == null || cr < 0 ? GRADING_DEFAULTS.cornerRadiusFt : cr,

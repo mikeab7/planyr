@@ -166,7 +166,7 @@ export function rockFlag(v, where) {
 export const FLOOR_SAME_FT = 0.25;     // two suggested floors this close are ONE row
 export const HAUL_SPAN_FT = 6;          // the curve runs ±6 ft of the balanced floor
 export const HAUL_STEP_FT = 0.5;        // drawn every half foot (sampled coarser and interpolated when the full sweep is too slow)
-export const FLOOR_NAMES = Object.freeze({ nohaul: "no haul", digging: "least digging", slopes: "shortest slopes" });
+export const FLOOR_NAMES = Object.freeze({ nohaul: "no haul", digging: "least digging", slopes: "shortest slopes", nearhaul: "nearest no haul", other: "another floor" });
 
 /* The floors to BUILD for the sweep: `count` evenly spaced samples across ±span of the balanced floor (7 → every 2 ft). */
 export function sweepFloors(balancedE, { span = HAUL_SPAN_FT, count = 7 } = {}) {
@@ -226,9 +226,24 @@ export function haulZeroFloor(curve) {
   }
   return curve.length && curve[curve.length - 1].haulCy === 0 ? curve[curve.length - 1].E : null;
 }
+/* The haul as WORDS, never a sign (NEW-2, 2026-11-04): "2,200 import" (fill > cut, dirt trucked in), "1,200 export" (cut > fill, dirt
+ * trucked off), "balanced" under the tolerance — the same rounding as the Haul tile. Large numbers are abbreviated ("885k import") so
+ * the narrow table column never wraps. Used by the Other-floors table; the tile has its own big number. */
+export function haulWords(haulCy, tolCy = BALANCE_TOL_CY_PANEL) {
+  if (haulCy == null || !Number.isFinite(haulCy)) return "…";
+  if (Math.abs(haulCy) < tolCy) return "balanced";
+  const r = round100(haulCy), n = r >= 10000 ? `${Math.round(r / 1000)}k` : nfmt(r);
+  return `${n} ${haulCy > 0 ? "import" : "export"}`;
+}
 /* The table. `picks` = { nohaul: {E, stats}, digging: {E, stats, areaAc}|null, slopes: {E, stats}|null }; `currentE` highlights its row.
  * Two picks within FLOOR_SAME_FT are ONE row carrying both names (never a duplicate row). Order: no haul, least digging,
- * shortest slopes. Each row: { key, E, names[], label, sub, stats, current }. */
+ * shortest slopes. Each row: { key, E, names[], label, sub, stats, current }.
+ * A ROW'S NAME MUST BE TRUE OF ITS NUMBERS (NEW-2): once the rows carry their stats each claim is checked against them —
+ *   "no haul"         only when that row's haul is under the balance tolerance, else "nearest no haul" (or the name moves to a row
+ *                     that really is balanced);
+ *   "least digging"   only on the row with the smallest cut of the listed rows (else the name moves there);
+ *   "shortest slopes" only on the row with the smallest slope footprint (else the name moves there).
+ * A row left with no name is "another floor". */
 export function floorRows(picks, currentE) {
   const order = ["nohaul", "digging", "slopes"];
   const rows = [];
@@ -239,14 +254,41 @@ export function floorRows(picks, currentE) {
     if (same) { same.names.push(k); if (!same.stats && p.stats) same.stats = p.stats; if (k === "digging" && p.areaAc != null) same.areaAc = p.areaAc; continue; }
     rows.push({ key: k, E: p.E, names: [k], stats: p.stats || null, areaAc: k === "digging" ? p.areaAc ?? null : null });
   }
-  return rows.map((r) => ({
-    ...r, label: r.names.map((n) => FLOOR_NAMES[n]).join(" · "),
-    sub: r.names.includes("digging") && r.areaAc != null ? `${Math.round(r.areaAc)} AC stays on natural grade` : "",
-    current: Number.isFinite(currentE) && Math.abs(r.E - currentE) < 0.05,
-  }));
+  const WITH = rows.filter((r) => r.stats);
+  const tol = BALANCE_TOL_CY_PANEL;
+  const best = (val) => { let b = null; for (const r of WITH) { const v = val(r.stats); if (Number.isFinite(v) && (!b || v < val(b.stats))) b = r; } return b; };
+  // a stat the row does not carry cannot contradict its name; one the best row does not carry leaves the claim standing
+  const within = (r, b, val) => { const v = val(r.stats); return !Number.isFinite(v) || !b || v <= val(b.stats) * 1.01 + 1e-9; };
+  const claims = {
+    nohaul: { val: (st) => Math.abs(st.haulCy), ok: (r, b) => Math.abs(r.stats.haulCy) < tol },
+    digging: { val: (st) => st.cutCy, ok: (r, b) => within(r, b, (st) => st.cutCy) },
+    slopes: { val: (st) => st.slopeSf, ok: (r, b) => within(r, b, (st) => st.slopeSf) },
+  };
+  const near = new Set();   // rows whose "no haul" had to be softened
+  for (const k of order) {
+    const c = claims[k], holders = rows.filter((r) => r.names.includes(k));
+    for (const r of holders) {
+      if (!r.stats) continue;                                // numbers not in yet: nothing to contradict
+      const b = best(c.val);
+      if (c.ok(r, b)) continue;
+      r.names = r.names.filter((n) => n !== k);
+      if (b && b !== r && c.ok(b, b)) { if (!b.names.includes(k)) b.names.push(k); }
+      else if (k === "nohaul") { near.add(r); r.names.push("nearhaul"); }
+    }
+  }
+  return rows.map((r) => {
+    const names = r.names.length ? r.names : ["other"];
+    return {
+      ...r, names, label: names.map((n) => FLOOR_NAMES[n]).join(" · "),
+      sub: r.areaAc != null ? `${Math.round(r.areaAc)} AC stays on natural grade` : "",
+      current: Number.isFinite(currentE) && Math.abs(r.E - currentE) < 0.05,
+    };
+  });
 }
 /* "AUTO · NO HAUL" while the floor is the suggested balanced one, "TYPED" once the owner typed one. */
-export const ffePillText = (isAuto) => (isAuto ? "AUTO · NO HAUL" : "TYPED");
+/* NEW-2: the suggested floor is the NEAREST the 0.1-ft grid gets to no haul — one step moves thousands of CY on a big graded area — so when the
+ * card's own haul is past the balance tolerance the pill says "NEAR NO HAUL", never "NO HAUL" beside an amber haul tile. */
+export const ffePillText = (isAuto, haulCy = null) => (!isAuto ? "TYPED" : Number.isFinite(haulCy) && Math.abs(haulCy) >= BALANCE_TOL_CY_PANEL ? "AUTO · NEAR NO HAUL" : "AUTO · NO HAUL");
 
 /* ---- the GROUND block: two numbers only ---- */
 export function groundNumbers(sum, cfg) {

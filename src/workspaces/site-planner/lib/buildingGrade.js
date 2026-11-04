@@ -271,6 +271,7 @@ export const GRADE_TAG_MIN_DEPTH_FT = 90;
  *   { elId, kind, depthFt, widthFt, face: { a, b, z, label }, stations: [{ b, far: { a, z }, from, to }],
  *     tag: { a, b, text } | null, slopePct, world }
  * Returns null when the element has no wall frame (not a graded layer of a building). */
+export const DOCK_FACE_TOUCH_FT = 3;   // a court's near edge within this of the dock wall IS the dock face
 export function spotElevationsFor(plane, ring, zAt) {
   if (!plane || !plane.wall || !ring || ring.length < 3) return null;
   const { A, n, t } = plane.wall;
@@ -286,7 +287,11 @@ export function spotElevationsFor(plane, ring, zAt) {
   const m = isCourt ? (width > STATION_COURT_WIDE_FT ? 3 : 2) : (width > LOT_WIDE_FT ? 2 : 1);
   const bMid = (b0 + b1) / 2;
   const zFace = zAt(world(a0, bMid));
-  const face = { a: a0, b: bMid, z: zFace, label: `${isCourt ? "dock" : "curb"} ${f1(zFace)}` };
+  // NEW-2 (2026-11-04): only a court whose near edge TOUCHES the dock wall has a dock face (FFE − the dock drop). A trailer row sits a
+  // court's depth out along the same fall, so its near edge reads lower; it is labelled "row", never "dock" — the owner read the row's
+  // 784.5 as a 6 ft dock drop on a plan whose drop is 4 ft (the court itself read 786.5).
+  const atWall = !isCourt || a0 <= ((plane.wall && Number.isFinite(plane.wall.d0) ? plane.wall.d0 : 0) + DOCK_FACE_TOUCH_FT);
+  const face = { a: a0, b: bMid, z: zFace, atWall, label: `${isCourt ? (atWall ? "dock" : "row") : "curb"} ${f1(zFace)}` };
   const stations = [];
   for (let i = 0; i < m; i++) {
     const b = b0 + ((i + 0.5) / m) * width;

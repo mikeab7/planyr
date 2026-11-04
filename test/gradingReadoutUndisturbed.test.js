@@ -37,7 +37,7 @@ const setback = gradingSetback([{ id: "pc", points: ring, active: true }], 25);
 const cache = new Map();
 const build = (FFE, mode) => {
   const k = `${FFE}|${mode}`; if (cache.has(k)) return cache.get(k);
-  const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true });
+  const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true, engineBoundary: true });
   const sf = buildProposedSurface({ els: els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) })),
     ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: `u:${mode}:${FFE}` }, grading: gradingPack(cfg, setback) });
   cache.set(k, sf); return sf;

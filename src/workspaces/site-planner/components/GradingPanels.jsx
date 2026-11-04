@@ -25,11 +25,10 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { CUT_RGB, FILL_RGB, CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
 import { planAllContourLabels, pathToPieces, CONTOUR_LABEL_ALL } from "../lib/contourLabelPlan.js";
-import { fmtCyShort } from "../lib/ffeSuggest.js";
 import { pillWidth, CORNER_TAG_PILL_H } from "../lib/padCornerTag.js";
 import { layoutLabelSet } from "../lib/spotLabelPlacement.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
-import { gradingPanelView, limitOffsetFt, marginFromOffset, LIMIT_PAST_MAX_FT, ffePillText, groundNumbers, BALANCE_TOL_CY_PANEL } from "../lib/gradingPanelModel.js";
+import { gradingPanelView, limitOffsetFt, marginFromOffset, LIMIT_PAST_MAX_FT, ffePillText, groundNumbers, haulWords } from "../lib/gradingPanelModel.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 const sectionLabel = {
@@ -182,7 +181,7 @@ function InputsBlock({ c, model, floorVisible }) {
             attrs={{ "data-ffe-value": c.isAuto ? "auto" : "typed" }}
             onCommit={(v) => (v == null ? actions.resetFfe(c.id) : actions.typeFfe(c.id, v))} />
           {c.isAuto
-            ? <span data-ffe-source="auto" style={{ ...pillStyle, color: "var(--success-text)", borderColor: "var(--success-text)" }}>{ffePillText(true)}</span>
+            ? <span data-ffe-source="auto" style={{ ...pillStyle, color: "var(--success-text)", borderColor: "var(--success-text)" }}>{ffePillText(true, c.haulCy)}</span>
             : <button type="button" data-ffe-source="typed" data-ffe-reset="1" title="Back to the suggested floor" onClick={() => actions.resetFfe(c.id)}
                 style={{ ...pillStyle, cursor: "pointer", fontFamily: "inherit", background: "transparent", color: "var(--text-secondary)", borderColor: "var(--border-strong)" }}>{ffePillText(false)}</button>}
         </Row>
@@ -282,13 +281,9 @@ function FlagList({ c, model, onApplyFfeFix, onApplyMoveFix, onPullLimit }) {
 }
 
 /* 5 — OTHER FLOORS TO TRY: the table, then the HAUL BY FLOOR curve. */
-const fmtHaul = (cy) => {
-  if (cy == null || !Number.isFinite(cy)) return "…";
-  if (Math.abs(cy) < BALANCE_TOL_CY_PANEL) return "0";
-  return `${cy > 0 ? "+" : "−"}${fmtCyShort(cy)}`;
-};
+const fmtHaul = haulWords;   // NEW-2: "2,200 import" / "1,200 export" / "balanced" — words, never a sign
 const fmtFt = (v) => (v == null || !Number.isFinite(v) ? "…" : `${Math.round(v)} ft`);
-const COLS = "minmax(0, 1.7fr) minmax(0, 0.75fr) minmax(0, 0.75fr) minmax(0, 0.75fr)";
+const COLS = "minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 0.7fr)";
 function HaulCurve({ floors, currentE, currentHaul }) {
   const pts = floors.curve || [];
   if (pts.length < 2) return null;
@@ -324,7 +319,7 @@ function FloorsTable({ c, onTypeFloor }) {
       <span style={sectionLabel}>Other floors to try</span>
       <div role="table" aria-label="Other floors to try" style={{ display: "flex", flexDirection: "column", fontVariantNumeric: "tabular-nums" }}>
         <div role="row" style={{ display: "grid", gridTemplateColumns: COLS, gap: 6, ...muted, fontWeight: 650, paddingBottom: 3 }}>
-          <span role="columnheader">Floor</span><span role="columnheader" style={{ textAlign: "right" }}>Haul CY</span><span role="columnheader" style={{ textAlign: "right" }}>Deepest cut</span><span role="columnheader" style={{ textAlign: "right" }}>Tallest fill</span>
+          <span role="columnheader">Floor</span><span role="columnheader" style={{ textAlign: "right" }}>Haul</span><span role="columnheader" style={{ textAlign: "right" }}>Deepest cut</span><span role="columnheader" style={{ textAlign: "right" }}>Tallest fill</span>
         </div>
         {fl.rows.length === 0 && <div style={muted}>{fl.pending ? "…" : "—"}</div>}
         {fl.rows.map((r) => (

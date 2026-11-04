@@ -115,7 +115,7 @@ describe("panels render (static markup)", () => {
   const stats = (haulCy, cut, fill) => ({ haulCy, deepestCutFt: cut, tallestFillFt: fill, cutCy: 0, fillCy: 0, netCy: haulCy, slopeSf: 0 });
   const card = (over = {}) => ({
     id: "b1", name: "Building 1", sf: 217500, ffe: 799.8, isAuto: true, solving: false, failed: false, focus: true,
-    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 615, balanced: false, dirtCy: 107881 }, haulCy: 615,
+    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 120, balanced: false, dirtCy: 107881 }, haulCy: 120,
     tiles: { haul: { big: "0", sub: "balanced", tone: "green", dir: "none" }, cut: { big: "53,600", sub: "deepest 14 ft" }, fill: { big: "54,200", sub: "tallest 19 ft" } },
     flags: [], flagged: false, flag: null, fixes: { id: "b1", status: "idle", ffe: null, move: null },
     floors: { pending: false, balancedE: 799.8, curve: [{ E: 794, haulCy: -9000 }, { E: 799.8, haulCy: 0 }, { E: 806, haulCy: 9000 }], rows: [
