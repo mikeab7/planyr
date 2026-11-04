@@ -84,9 +84,10 @@ function seed() {
     const planLabel = await page.$eval('[title="Switch or rename plan"]', (el) => el.textContent.trim());
     ok("plan-switcher-label", new RegExp(PLAN).test(planLabel), `plan crumb reads "${planLabel}" (want "${PLAN}")`);
     await page.click('[title="Switch or rename plan"]');
-    const menuShown = await page.waitForSelector("text=＋ New plan", { timeout: 8000 }).then(() => true).catch(() => false);
-    const saveNow = await page.$('[data-testid="save-now"]');
-    ok("plan-menu-opens", menuShown && !!saveNow, menuShown ? "plan menu opens with New plan + Save now (fully functional)" : "plan menu did not open");
+    // NEW-1 (2026-11-04): the menu's footer is New plan | Duplicate, Version history… (Save now and Storage left the menu).
+    const menuShown = await page.waitForSelector('[data-testid="plan-new"]', { timeout: 8000 }).then(() => true).catch(() => false);
+    const versions = await page.$('[data-testid="plan-version-history"]');
+    ok("plan-menu-opens", menuShown && !!versions, menuShown ? "plan menu opens with New plan + Version history (fully functional)" : "plan menu did not open");
     // Close the menu before reading layout.
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(150);

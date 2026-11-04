@@ -85,7 +85,8 @@ describe("NEW-1 — the breadcrumb's project-privacy padlock is gone", () => {
     expect(planner).toMatch(/const toggleLock = /);
     // The plan-level "shared with teammates, view-only" share-lock — a different feature on a
     // different row (a plan row in the plan switcher, not the top breadcrumb).
-    expect(planner).toContain("View-only for teammates");
+    // NEW-1 (2026-11-04): the plan menu moved out of the planner file into its own component — the padlock row lives there now.
+    expect(planner + readFileSync(resolve(here, "../src/workspaces/site-planner/components/PlanMenu.jsx"), "utf8")).toContain("View-only for teammates");
     expect(planner).toMatch(/const togglePlanLock = /);
 
     // A placed overlay's own Lock/Unlock ("prevent moving/resizing", owner-only) — also a
