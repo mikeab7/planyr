@@ -394,7 +394,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
-import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
+import { layoutBuildingButtons, buildingButtonWalls, BUTTON_WALL_MIN_PX, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -632,7 +632,7 @@ const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to se
 // armed with the whole site in the viewport, at full size, over the two largest objects on the
 // drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
 // feet per pixel. Both must pass; read that module's header before changing either.
-const FEAT_BTN_MIN_PX = 72;
+const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;   // one number, in lib/buildingButtons.js (the grading label placer reads the same wall filter)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
@@ -2074,6 +2074,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)
     : null;
   const cullRect = cullRectRef.current;
+  // NEW-1 (2026-11-04): the canvas's own box in px, one stable object per size — the grading labels stay inside it (lib/spotLabelPlacement)
+  const canvasBoxPx = useMemo(() => ({ w: size.w, h: size.h }), [size.w, size.h]);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -18822,9 +18824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
     const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
     const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-    const roomy = Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX;   // the purple corner "+" needs room on BOTH axes (B225)
-    const walls = wallsFromQuad(quad, dockSides).filter((w) => ((w.name === "top" || w.name === "bottom") ? hpx : wpx) >= FEAT_BTN_MIN_PX)
-      .map((w) => ({ ...w, dock: w.dock && !el.footEdit, corners: w.dock && roomy ? w.corners : [] }));
+    const walls = buildingButtonWalls(quad, dockSides, { wpx, hpx, footEdit: !!el.footEdit });   // the filter the grading label placer reads too
     const layout = layoutBuildingButtons(walls);
     return (
       /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
@@ -25645,7 +25645,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} /></Suspense>
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} viewPx={canvasBoxPx} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;

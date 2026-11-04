@@ -237,7 +237,8 @@ describe("both clusters are wired to it, and to the RENDER view AND the canvas w
   });
 
   it("B225's container gate is still there — this ADDS a question, it does not replace one", () => {
-    expect(body).toContain("const FEAT_BTN_MIN_PX = 72;");
+    // NEW-1 (2026-11-04): the number (72) now lives in lib/buildingButtons.js as BUTTON_WALL_MIN_PX — the grading label placer reads the same wall filter; test/spotLabelPlacement pins it at 72
+    expect(body).toContain("const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;");
     expect(body).toContain("< FEAT_BTN_MIN_PX) return null;");
   });
 
