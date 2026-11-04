@@ -330,7 +330,7 @@ export const resolveMeetingForward = (body, iso) => {
 // meeting-bound task (typed Start/Finish, range fill-down, Delete-then-retype, suggestion approval,
 // the task editor, and binding an already-dated task to a calendar). PURE; updateTask and
 // previewProject both call it, so the preview can never disagree with the apply (B585-S1).
-// Returns { updates, startOverride, notice, rebinding }:
+// Returns { updates, startOverride, notice, rebinding, asked }:
 //  · a typed Start OR Finish on a bound row becomes a Start at the first meeting on/after it (a
 //    bound row is a 0-day milestone: start == end), so a Finish can never lock the row out of its
 //    calendar (pinnedEnd would drop it out of bound mode) — `updates` is the rewritten patch;
@@ -340,9 +340,17 @@ export const resolveMeetingForward = (body, iso) => {
 //    agenda-deadline rule;
 //  · a finished row (its actual dates), a parent row, an unbound row, and a clear ("") are untouched;
 //  · no calendar / no meeting ahead → the date is left AS TYPED and `notice` says why (never silent).
+//  · B2642096 ×2 — A PERSON'S DATE EDIT REPLACES AN EARLIER STEPPED PIN. Right-click Next/Previous meeting sets
+//    `pinnedMeetingDate`, and applyMeetingBinding reads it BEFORE the row's own start, so a typed date on a
+//    stepped row used to be undone by the cascade while the toast announced the move. Every path that lets a
+//    date through on a bound row (moved · already a meeting · no meeting ahead · no calendar · a clear) therefore
+//    carries `pinnedMeetingDate: undefined` (dropStep) — the pattern the app uses everywhere else. An explicit
+//    step in the same patch is never stripped. `asked` = the date this edit asked the row to hold, so the caller
+//    can compare it with the row AFTER the cascade (settleBoundNotice) and never announce a move that didn't happen.
 // It acts on an EDIT only — stored dates are never revisited, so it cannot ratchet on load (B1701360).
+export const dropStep = (t, patch) => ((t && t.pinnedMeetingDate && !('pinnedMeetingDate' in patch)) ? { ...patch, pinnedMeetingDate: undefined } : patch);
 export const resolveBoundEdit = (tasks, taskId, updates, bodyOf) => {
-  const none = { updates, startOverride: null, notice: null, rebinding: false };
+  const none = { updates, startOverride: null, notice: null, rebinding: false, asked: "" };
   const list = Array.isArray(tasks) ? tasks : [];
   const t = list.find(x => x.id === taskId);
   if (!t || !updates) return none;
@@ -350,16 +358,16 @@ export const resolveBoundEdit = (tasks, taskId, updates, bodyOf) => {
   if (!merged.meetingBound || isCompleteTask(merged) || list.some(x => x.parentId === taskId)) return none;
   const typed = (('start' in updates) && updates.start) ? updates.start : ((('end' in updates) && updates.end) ? updates.end : "");
   const rebinding = !!(('meetingBound' in updates || 'meetingBodyId' in updates) && !(t.meetingBound && t.meetingBodyId === merged.meetingBodyId));
-  if (!typed && !rebinding) return none;
+  if (!typed && !rebinding) return (('start' in updates) || ('end' in updates)) ? { ...none, updates: dropStep(t, updates) } : none;   // a clear drops the stepped pin too
   const body = bodyOf ? bodyOf(merged.meetingBodyId) : null;
   if (typed) {
-    if (!body) return { ...none, notice: { kind: "nobody", typed } };
+    if (!body) return { ...none, updates: dropStep(t, updates), asked: typed, notice: { kind: "nobody", typed } };
     const m = resolveMeetingForward(body, typed);
-    if (!m) return { ...none, notice: { kind: "none-ahead", typed, bodyName: body.name || "" } };
-    const patched = { ...updates, start: m };
+    if (!m) return { ...none, updates: dropStep(t, updates), asked: typed, notice: { kind: "none-ahead", typed, bodyName: body.name || "" } };
+    const patched = dropStep(t, { ...updates, start: m });
     delete patched.end;
     if (t.pinnedEnd) patched.pinnedEnd = false;   // a stale finish-lock would take the row out of bound mode
-    return { updates: patched, startOverride: null, notice: m !== typed ? { kind: "moved", typed, date: m, bodyName: body.name || "" } : null, rebinding };
+    return { updates: patched, startOverride: null, asked: m, notice: m !== typed ? { kind: "moved", typed, date: m, bodyName: body.name || "" } : null, rebinding };
   }
   if (!body || !merged.start || merged.pinnedMeetingDate) return { ...none, rebinding };
   const liveId = new Set(list.filter(x => x.id !== taskId).map(x => x.id));
@@ -375,9 +383,27 @@ export const boundEditNotice = (notice, taskName, fmt) => {
   if (!notice) return "";
   const n = taskName || "Task";
   if (notice.kind === "moved") return `${n} moved to ${fmt(notice.date)}, the next ${notice.bodyName || "meeting"} meeting — ${fmt(notice.typed)} isn't one of its meeting dates.`;
+  if (notice.kind === "held") return `${n} stays on ${fmt(notice.date)} — it couldn't be placed on ${fmt(notice.typed)}${notice.bodyName ? ` (a ${notice.bodyName} meeting)` : ""}; something else on the schedule is holding that date.`;
   if (notice.kind === "none-ahead") return `${notice.bodyName || "That calendar"} has no meeting on or after ${fmt(notice.typed)} — ${n} keeps ${fmt(notice.typed)} as typed and is flagged.`;
   return `${n}'s meeting calendar no longer exists — ${fmt(notice.typed)} was kept as typed. Re-select or re-create the calendar.`;
 };
+// settleBoundNotice — B2642096 ×2: the toast is built from what the row HOLDS AFTER the cascade, not from what the
+// edit asked for. resolveBoundEdit's notice describes the REQUEST; if the cascaded row is somewhere else (a pin, a
+// predecessor, anything), the request was not honoured and announcing it is a lie — say what actually happened
+// ("held"). `actualStart` is the edited row's start in the recomputed list. PURE; null when nothing needs saying.
+export const settleBoundNotice = (boundEdit, actualStart) => {
+  const asked = boundEdit && boundEdit.asked;
+  if (asked && (actualStart || "") !== asked) {
+    const prior = boundEdit.notice;
+    return { kind: "held", typed: asked, date: actualStart || "", bodyName: (prior && prior.bodyName) || "" };
+  }
+  return (boundEdit && boundEdit.notice) || null;
+};
+// unpinStartPatch / startIsPinned — B2642096 ×2: the Start pin has TWO sources, `pinnedStart` (a typed/dragged date)
+// and, on a bound row, `pinnedMeetingDate` (right-click Next/Previous meeting). Unpin clears BOTH, and the padlock
+// shows when EITHER is set — otherwise a stepped row looked unpinned and stayed pinned after the click.
+export const unpinStartPatch = task => ({ pinnedStart: false, predecessors: task.predecessors, pinnedMeetingDate: undefined });
+export const startIsPinned = task => !!(task && (task.pinnedStart || (task.meetingBound && task.pinnedMeetingDate)));
 // ── NEW-1 (2026-11-03, owner decision) — a typed date HOLDS, and he is TOLD when it can't be met ────────
 // A typed Start (pin, B615/B621) or Finish (lock, B616) never follows its predecessor — the owner is fine
 // with that, as long as he is told, and then he edits the predecessor. THE THREE CASES:
@@ -953,9 +979,10 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
     t.start = t.end = pinnedDate;
     t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
     // NEW-1 — a pinned date can be infeasible TWO different ways, and only one of them was ever
-    // checked. `pinnedDate` here is almost always `pinnedStart` (updateTask sets that on ANY direct
-    // date-cell edit — see its own comment — `pinnedMeetingDate` is a distinct deliberate-pin field
-    // that nothing in this app ever sets), so a plain typed/dragged date on a meeting-bound row was
+    // checked. `pinnedDate` here is usually `pinnedStart` (updateTask sets that on ANY direct
+    // date-cell edit — see its own comment); `pinnedMeetingDate` is a distinct deliberate-pin field that
+    // right-click Next/Previous meeting DOES set (onStepMeeting) and that a person's date edit now clears
+    // (resolveBoundEdit/dropStep, B2642096 ×2), so a plain typed/dragged date on a meeting-bound row was
     // silently accepted even when it doesn't fall on one of the body's actual meeting days at all —
     // reading as "feasible" while the row isn't parked on a real hearing. Owner repro: Goose Creek
     // task 168 sat on 2026-09-30 (not a 3rd-Tuesday P&Z date; the real September meeting was
