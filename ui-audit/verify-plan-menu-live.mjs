@@ -24,7 +24,7 @@ import { openSignedIn } from "./lib/signedInSession.mjs";
 
 const BASE = (process.argv.find((a) => /^https?:/.test(a)) || "https://planyr.io").replace(/\/$/, "");
 const EXPECT_SHA = process.env.EXPECT_SHA || "";
-const OUT = process.env.SHOTS_DIR || new URL("./screens/", import.meta.url).pathname;
+const OUT = (process.env.SHOTS_DIR ? process.env.SHOTS_DIR.replace(/\/?$/, "/") : new URL("./screens/", import.meta.url).pathname);
 mkdirSync(OUT, { recursive: true });
 const stamp = Date.now().toString(36);
 const PROJ = `zz-planmenu-check-${stamp}`;
@@ -46,7 +46,8 @@ async function openProject(id) {
     if (attempt) await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     if (await page.getByTestId("planner-canvas").waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false)) return;
   }
-  throw new Error(`project ${id} never opened in the planner`);
+  await page.screenshot({ path: OUT + "plan-menu-open-failed.png" }).catch(() => {});
+  throw new Error(`project ${id} never opened in the planner (url ${page.url()})`);
 }
 const openMenu = async () => {
   if (!(await page.getByTestId("plan-footer").isVisible().catch(() => false)) && !(await page.getByTestId("plan-bin-back").isVisible().catch(() => false))) await page.getByTestId("plan-crumb").click();
@@ -152,8 +153,11 @@ try {
   await openProject(gid); await openMenu();
   const toggle = page.getByTestId("plan-bin-toggle");
   await toggle.waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
+  // The count is refreshed from the cloud each time the menu opens, so the row can read the PREVIOUS count for an instant: wait for it to settle.
+  await waitFor(async () => /Recently deleted \(2\)/.test(await toggle.innerText().catch(() => "")), 15000, 300);
   ok("4c a 'Recently deleted (2)' row shows in the footer", /Recently deleted \(2\)/.test(await toggle.innerText().catch(() => "")), await toggle.innerText().catch(() => ""));
   await toggle.click();
+  await waitFor(async () => (await page.locator('[data-testid="deleted-at"]').count()) >= 2, 15000, 300);
   const lines = await page.locator('[data-testid="deleted-at"]').allInnerTexts();
   ok("4d each deleted entry has an exact 'Deleted <date>, <time>' line, newest first", lines.length === 2 && lines.every((l) => /^Deleted [A-Z][a-z]{2} \d{1,2}(, \d{4})?, \d{1,2}:\d{2} [AP]M$/.test(l)), JSON.stringify(lines));
   ok("4e no old '2w ago' text; Delete forever is not next to Restore", (await page.getByText(/\d+[mhdw] ago/).count()) === 0 && (await page.getByTestId("plan-bin-scroll").getByRole("button", { name: /forever/i }).count()) === 0);
