@@ -143,6 +143,13 @@ describe("panels render (static markup)", () => {
     expect(html.indexOf('data-tile="haul"')).toBeLessThan(html.indexOf('data-tile="cut"'));
     expect(html.indexOf('data-tile="cut"')).toBeLessThan(html.indexOf('data-tile="fill"'));
   });
+  it("the graded acres are SHOWN (V2100464 step 1 records them): '36.0 AC graded' beside Edit outline, absent while the limit has no area", () => {
+    const withAc = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: 35.958 } });
+    expect(withAc).toContain("data-graded-acres");
+    expect(withAc).toContain("36.0 AC graded");
+    const without = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: null } });
+    expect(without).not.toContain("data-graded-acres");
+  });
   it("one building: no card chrome, no selector; the floor is shown in ONE place with the AUTO · NO HAUL pill", () => {
     const html = group([card()]);
     expect(html).not.toContain('data-section="buildings"');
