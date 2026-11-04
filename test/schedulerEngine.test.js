@@ -1546,7 +1546,7 @@ describe("cascade fixed point — a task naming its OWN ANCESTOR (summary row) a
 });
 
 // ── NEW-1 — a pinned date on a meeting-bound row that ISN'T a real meeting day must flag LOUDLY.
-// `pinnedStart` (not the never-set `pinnedMeetingDate`) is what a plain grid date-cell edit sets on
+// `pinnedStart` (not the stepped-pin field, which only right-click Next/Previous meeting sets — B2642096 ×2) is what a plain grid date-cell edit sets on
 // ANY task, so this is the owner's exact repro shape: type a date directly into a meeting-bound
 // row's Start cell and it used to hold silently with meetingInfeasible reading false even when the
 // date is nowhere on the body's calendar. Owner repro: Goose Creek task 168, P&Z body recurrence
@@ -5302,6 +5302,175 @@ describe("NEW-1 — meeting-bound tasks jump FORWARD to the next real meeting", 
       for (const needle of ['const kind = t.finishConflict ? "finish" : t.startConflict ? "start"', "return [...now.values()].filter(c => !was.has(c.id) || always.has(c.id));"]) {
         expect(src).toContain(needle); expect(mjs).toContain(needle);
       }
+    });
+  });
+});
+
+// ── B2642096 ×2 — a STEPPED row (right-click Next/Previous meeting sets `pinnedMeetingDate`) must obey a typed date ──
+// Owner repro, his real schedule 'MUD v PID' task 11 'P&Z Public Hearing & Consideration': Start typed 11/05/26,
+// toast said "moved to 11/17/26", the row stayed on 10/20/26. Cause: applyMeetingBinding reads
+// `t.pinnedMeetingDate || (pinnedStart ? start : "")`, so a leftover pinnedMeetingDate BEATS the new start, and
+// resolveBoundEdit never touched it. B2642096's first pass (and its live check) only used rows that had never
+// been stepped — the comment that `pinnedMeetingDate` is "never set" was false (onStepMeeting sets it).
+describe("B2642096 ×2 — a person's date edit replaces an earlier stepped meeting pin", () => {
+  // Baytown P&Z: 3rd Tuesday → Oct 20, Nov 17, Dec 15 2026.
+  const pz = { id: "mb_pz", name: "Baytown P&Z Commission", recurrence: [{ positions: [3], weekday: 2, months: "all", anchor: null }] };
+  const pzLead = { ...pz, agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  const stepped = (id, o = {}) => mk(id, { name: "P&Z Public Hearing & Consideration", meetingBound: true, meetingBodyId: "mb_pz", start: "2026-10-20", end: "2026-10-20", duration: 0, durValue: 0, pinnedStart: true, pinnedMeetingDate: "2026-10-20", ...o });
+  // the same lines updateTask runs, in order: gate → merge → pin rules → cascade → settle the toast against the cascaded row
+  const apply = (tasks, id, patch, bodies = [pz]) => {
+    const bodyOf = bid => bodies.find(b => b.id === bid);
+    const res = E.resolveBoundEdit(tasks, id, patch, bodyOf);
+    const up = res.updates;
+    const ts = tasks.map(t => {
+      if (t.id !== id) return t;
+      const u = { ...t, ...up };
+      if ("predecessors" in up) delete u.pinnedStart;
+      if ("end" in up && !("start" in up)) u.pinnedEnd = !!u.end;
+      if ("start" in up && !("predecessors" in up)) u.pinnedStart = true;
+      if (res.startOverride) { u.start = res.startOverride; u.end = res.startOverride; }
+      return u;
+    });
+    const out = E.cascadeDates(ts, bodies);
+    const row = out.find(t => t.id === id);
+    const notice = E.settleBoundNotice(res, row && row.start);
+    return { res, tasks: out, row, notice };
+  };
+  const f = s => s.split("-").slice(1).join("/") + "/" + s.slice(2, 4);
+
+  it("THE OWNER'S FIXTURE (red on main): stepped to 10/20, typed 11/05 → the row lands on 11/17", () => {
+    const { row, notice } = apply([stepped(11)], 11, { start: "2026-11-05" });
+    expect(row.start).toBe("2026-11-17");
+    expect(row.end).toBe("2026-11-17");
+    expect(row.pinnedMeetingDate).toBeUndefined();
+    expect(notice).toEqual({ kind: "moved", typed: "2026-11-05", date: "2026-11-17", bodyName: "Baytown P&Z Commission" });
+  });
+  it("a typed date that is ALREADY a real meeting also lands (on main it snapped back with NO toast)", () => {
+    const { row, notice } = apply([stepped(11)], 11, { start: "2026-11-17" });
+    expect(row.start).toBe("2026-11-17");
+    expect(notice).toBeNull();
+  });
+  it("a typed FINISH on a stepped row becomes a Start at the next meeting and lands", () => {
+    const { row, res } = apply([stepped(11)], 11, { end: "2026-11-05" });
+    expect(row.start).toBe("2026-11-17");
+    expect(res.updates.pinnedMeetingDate).toBeUndefined();
+    expect("pinnedMeetingDate" in res.updates).toBe(true);
+  });
+  it("range fill-down: every stepped row in the fill lands on its own typed meeting", () => {
+    let ts = [stepped(1), stepped(2, { pinnedMeetingDate: "2026-11-17", start: "2026-11-17", end: "2026-11-17" })];
+    ts = apply(ts, 1, { start: "2026-12-01" }).tasks;
+    ts = apply(ts, 2, { start: "2026-12-01" }).tasks;
+    expect(ts.map(t => t.start)).toEqual(["2026-12-15", "2026-12-15"]);
+  });
+  it("clearing the date on a stepped row really clears it (the pin does not hold the old date)", () => {
+    const { res, row } = apply([stepped(11)], 11, { start: "" });
+    expect("pinnedMeetingDate" in res.updates).toBe(true);
+    expect(res.updates.pinnedMeetingDate).toBeUndefined();
+    expect(row.start || "").not.toBe("2026-10-20");
+  });
+  it("no calendar / nothing ahead: the typed date is kept as typed AND the old pin is gone", () => {
+    const none = apply([stepped(11)], 11, { start: "2026-11-05" }, [{ ...pz, recurrence: [], extraDates: [] }]);
+    expect(none.res.notice.kind).toBe("none-ahead");
+    expect(none.res.updates.pinnedMeetingDate).toBeUndefined();
+    expect(none.row.start).toBe("2026-11-05");
+    const nobody = apply([stepped(11)], 11, { start: "2026-11-05" }, []);
+    expect(nobody.res.notice.kind).toBe("nobody");
+    expect(nobody.row.start).toBe("2026-11-05");
+  });
+  it("an explicit step in the same patch is never stripped (Next/Previous meeting still pins)", () => {
+    const r = E.resolveBoundEdit([stepped(11)], 11, { pinnedMeetingDate: "2026-11-17" }, () => pz);
+    expect(r.updates).toEqual({ pinnedMeetingDate: "2026-11-17" });
+    const { row } = apply([stepped(11)], 11, { pinnedMeetingDate: "2026-11-17" });
+    expect(row.start).toBe("2026-11-17");
+  });
+  it("an unstepped row's patch is returned untouched (no stray key, same object)", () => {
+    const row = stepped(11, { pinnedMeetingDate: undefined });
+    const patch = { start: "2026-11-17" };
+    expect(E.resolveBoundEdit([row], 11, patch, () => pz).updates).toEqual({ start: "2026-11-17" });
+    expect("pinnedMeetingDate" in E.resolveBoundEdit([row], 11, patch, () => pz).updates).toBe(false);
+  });
+  it("type a date, then step: Next/Previous read the NEW date, and stepping pins it again", () => {
+    let ts = apply([stepped(11)], 11, { start: "2026-11-05" }).tasks;
+    const row = ts.find(t => t.id === 11);
+    expect(E.adjacentMeetingDate(pz, row.start, "next")).toBe("2026-12-15");
+    expect(E.adjacentMeetingDate(pz, row.start, "prev")).toBe("2026-10-20");
+    ts = apply(ts, 11, { pinnedMeetingDate: "2026-12-15" }).tasks;
+    expect(ts.find(t => t.id === 11).start).toBe("2026-12-15");
+    expect(ts.find(t => t.id === 11).pinnedMeetingDate).toBe("2026-12-15");
+  });
+  it("a row with a predecessor (9FS+10d): the typed date still lands, and the pin-conflict notice fires for the meeting it can't make", () => {
+    // 9 ends Nov 9 → +10 calendar days → packet ready Nov 19; 10 business-day lead → the Nov 17 agenda closed ~Nov 3.
+    const p9 = mk(9, { name: "Prelim plat", start: "2026-11-02", end: "2026-11-09", duration: 6, pinnedStart: true });
+    const row11 = stepped(11, { predecessors: [{ id: 9, type: "FS", lag: 10, lagUnit: "calendar" }] });
+    const before = [p9, row11];
+    const { row, tasks } = apply(before, 11, { start: "2026-11-05" }, [pzLead]);
+    expect(row.start).toBe("2026-11-17");
+    const c = E.newPinConflicts(before, tasks, [11]);
+    expect(c.length).toBe(1);
+    expect(c[0].kind).toBe("meeting");
+    expect(E.pinConflictNotice(c, 11, f)).toMatch(/11\/17\/26/);
+  });
+  it("UNPIN really unpins: the patch clears BOTH pins, and the row goes back to its predecessor", () => {
+    const p9 = mk(9, { name: "Prelim plat", start: "2026-09-01", end: "2026-09-08", duration: 6, pinnedStart: true });
+    const row11 = stepped(11, { predecessors: [{ id: 9, type: "FS", lag: 0 }] });
+    const patch = E.unpinStartPatch(row11);
+    expect(patch.pinnedStart).toBe(false);
+    expect(patch.predecessors).toEqual(row11.predecessors);
+    expect("pinnedMeetingDate" in patch).toBe(true);
+    expect(patch.pinnedMeetingDate).toBeUndefined();
+    const { row } = apply([p9, row11], 11, patch, [pz]);
+    expect(row.pinnedMeetingDate).toBeUndefined();
+    expect(row.pinnedStart).toBeFalsy();
+    expect(row.start).toBe("2026-09-15");                 // the predecessor drives it to the next September meeting
+  });
+  it("the pin icon reads BOTH pins on a bound row, and ignores a stale pinnedMeetingDate on an unbound one", () => {
+    expect(E.startIsPinned({ meetingBound: true, pinnedMeetingDate: "2026-10-20" })).toBe(true);
+    expect(E.startIsPinned({ meetingBound: true, pinnedStart: true })).toBe(true);
+    expect(E.startIsPinned({ meetingBound: true })).toBe(false);
+    expect(E.startIsPinned({ meetingBound: false, pinnedMeetingDate: "2026-10-20" })).toBe(false);
+    expect(E.startIsPinned({ pinnedStart: true })).toBe(true);
+  });
+
+  describe("the toast can never announce a move the row did not make", () => {
+    const moved = { kind: "moved", typed: "2026-11-05", date: "2026-11-17", bodyName: "P&Z" };
+    it("row holds the asked date → the original notice stands", () => {
+      expect(E.settleBoundNotice({ notice: moved, asked: "2026-11-17" }, "2026-11-17")).toEqual(moved);
+    });
+    it("row sits somewhere else → says what happened instead of the requested date", () => {
+      const n = E.settleBoundNotice({ notice: moved, asked: "2026-11-17" }, "2026-10-20");
+      expect(n.kind).toBe("held");
+      const msg = E.boundEditNotice(n, "Hearing", f);
+      expect(msg).toMatch(/10\/20\/26/);
+      expect(msg).toMatch(/11\/17\/26/);
+      expect(msg).not.toMatch(/moved to 11\/17\/26/);
+    });
+    it("no notice at all but the row did not take the asked date → still announced", () => {
+      expect(E.settleBoundNotice({ notice: null, asked: "2026-11-17" }, "2026-10-20").kind).toBe("held");
+    });
+    it("nothing was asked (not a bound date edit) → no notice invented", () => {
+      expect(E.settleBoundNotice({ notice: null, asked: "" }, "2026-10-20")).toBeNull();
+    });
+  });
+
+  describe("anti-drift: the fix exists VERBATIM in src + mirror, and the false comments are gone", () => {
+    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    it("the pure helpers match", () => {
+      for (const needle of ["const settleBoundNotice = ", "const unpinStartPatch = ", "const startIsPinned = ", "const dropStep = "]) {
+        expect(src.replace("export ", "")).toContain(needle); expect(mjs.replace(/export const/g, "const")).toContain(needle);
+      }
+    });
+    it("updateTask settles the toast against the cascaded row; unpin and the pin icon use the shared helpers", () => {
+      expect(src).toContain("settleBoundNotice(boundEdit, editedT && editedT.start)");
+      expect(src).toContain("updateTask(task.id, unpinStartPatch(task), projId)");
+      expect(src).toContain("startIsPinned(task)");
+    });
+    it("no source still claims pinnedMeetingDate is never set", () => {
+      expect(src).not.toMatch(/nothing in this app ever sets/);
+      expect(mjs).not.toMatch(/nothing in this app ever sets/);
+      const falseBelief = ["never-set `pinned", "MeetingDate`"].join("");   // built in two halves so this file does not match itself
+      expect(readFileSync(fileURLToPath(new URL("./schedulerEngine.test.js", import.meta.url)), "utf8")).not.toContain(falseBelief);
     });
   });
 });
