@@ -85,7 +85,22 @@ try {
   check("probe: 15 ft outside the parcel is outside the limit at -10; 5 ft inside is in the margin (outside the graded area)", probe.outsideParcel && !probe.outInLimit && probe.insideParcel && !probe.innInLimit, JSON.stringify({ o: probe.outInLimit, i: probe.innInLimit }));
   const acres0 = +(await page.getAttribute("[data-graded-area]", "data-limit-ac"));
   check("the graded area is the layout's outline (the app path), not the fenced parcel", (await page.getAttribute("[data-graded-area]", "data-limit-mode")) === "layout" && acres0 > 5 && acres0 < 0.7 * (await page.evaluate(() => { const r = window.__harness.ring; let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2 / 43560; })), `${acres0} AC`);
-  check("the panel SHOWS the graded acres ('<n> AC graded') and they are the limit's own area", await page.evaluate(() => { const e = document.querySelector("[data-graded-acres]"), a = +document.querySelector("[data-graded-area]").getAttribute("data-limit-ac"); return !!e && e.textContent === `${(Math.round(a * 10) / 10).toFixed(1)} AC graded`; }), await page.textContent("[data-graded-acres]").catch(() => "missing"));
+  check("the panel SHOWS the graded acres ('<n> AC graded') and they are the limit's own area", await page.evaluate(() => { const e = document.querySelector("[data-graded-acres]"), a = +document.querySelector("[data-graded-area]").getAttribute("data-limit-ac"); return !!e && e.textContent === `${a.toFixed(2)} AC graded`; }), await page.textContent("[data-graded-acres]").catch(() => "missing"));
+  // Edit outline: the acres follow the edited outline and Reset to auto returns the auto value EXACTLY (live review 2026-11-04)
+  {
+    const acresTxt = () => page.textContent("[data-graded-acres]");
+    const auto0 = await acresTxt();
+    await page.click('[data-limit-action="edit"]');
+    await page.waitForFunction(() => Array.isArray(window.__harness.settings.grading.limitRing), null, { timeout: 60000 });
+    await page.evaluate(() => window.__harness.setSettings((s) => { const g = s.grading, r = g.limitRing; let k = 0; r.forEach((p, i) => { if (p.x + p.y > r[k].x + r[k].y) k = i; }); return { ...s, grading: { ...g, limitRing: r.map((p, i) => (i === k ? { x: p.x + 60, y: p.y + 60 } : p)) } }; }));
+    await page.waitForFunction((t) => document.querySelector("[data-graded-acres]") && document.querySelector("[data-graded-acres]").textContent !== t, auto0, { timeout: 120000 });
+    const edited = await acresTxt();
+    check("while Edit outline is on, dragging a vertex out changes the shown acres", edited !== auto0, `${auto0} → ${edited}`);
+    await page.click('[data-limit-action="reset"]');
+    await page.waitForFunction((t) => document.querySelector("[data-graded-acres]") && document.querySelector("[data-graded-acres]").textContent === t, auto0, { timeout: 120000 });
+    check("Reset to auto returns the auto acres exactly", (await acresTxt()) === auto0, await acresTxt());
+    check("no limit-mode control anywhere after Edit / Reset", (await page.locator("[data-limit-mode-control], [data-testid=\"grading-limit-mode\"]").count()) === 0);
+  }
   await page.fill('[data-testid="grading-limit-offset"]', "+20");
   await page.keyboard.press("Enter");
   await page.waitForFunction((s) => document.querySelector("[data-graded-area]").getAttribute("data-limit-sig") !== s, sig0, { timeout: 120000 });
