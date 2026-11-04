@@ -137,6 +137,7 @@ import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX,
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
+import RegradeBanner from "./components/RegradeBanner.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
@@ -26798,6 +26799,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
               style={{ bottom: MAP_CORNER_PX, left: paneInset + MAP_CORNER_PX, maxWidth: cursorFit.maxWidth }} />
           )}
+          {/* NEW-1 (owner 2026-11-04) — the "Regrading…" banner: a small pill centred at the bottom of the VISIBLE map (left edge =
+              the docked panel's painted edge), clear of the cursor chip / north arrow row and the bottom-right scale-bar group.
+              Owner-only: it exists only while the grading gate is on, so no other account ever mounts it. It takes no presses and
+              draws nothing over the land. Rules: components/RegradeBanner.jsx, lib/regradeProgress.js. */}
+          {grOn && <RegradeBanner left={paneInset} bottom={FURNITURE_ROW + (narrow ? 56 : 12)} />}
         </div>
 
         {/* ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — phone-only EDGE TAB to summon the

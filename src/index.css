@@ -1205,3 +1205,8 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
   width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%; box-sizing: border-box;
   background: var(--surface-page); border: 3px solid var(--rs-color);
 }
+
+/* NEW-1 (2026-11-04) — the "Regrading…" banner's indeterminate step (a worker trace that cannot say how far along it is):
+   a short bar slides across the track. transform-only, so it runs on the compositor — no JavaScript, no rAF. */
+@keyframes regrade-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+@media (prefers-reduced-motion: reduce) { .regrade-indeterminate { animation: none !important; transform: translateX(0) !important; opacity: .5; } }

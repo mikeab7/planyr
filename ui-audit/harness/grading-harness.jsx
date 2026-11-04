@@ -10,6 +10,8 @@ import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/c
 import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R } from "../../src/workspaces/site-planner/lib/buildingButtons.js";
 import { FEAT_CTRL_R, FEAT_CTRL_STROKE } from "../../src/workspaces/site-planner/lib/featureEditZoom.js";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
+import RegradeBanner from "../../src/workspaces/site-planner/components/RegradeBanner.jsx";
+import { installPlannerPerf } from "../../src/workspaces/site-planner/lib/plannerPerf.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
 import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
@@ -41,6 +43,13 @@ async function load() {
 const ringOf = (e) => e.ring;
 // the query string, read ONCE (it was re-parsed dozens of times per render — bench overhead the planner does not have)
 const QS = new URLSearchParams(location.search);
+// the banner's host: the visible map area = everything right of the panel (measured, like SitePlanner's `paneInset`)
+function RegradeHost() {
+  const [left, setLeft] = useState(0);
+  React.useLayoutEffect(() => { const p = document.getElementById("panel"); if (p) setLeft(Math.round(p.getBoundingClientRect().right)); }, []);
+  return <div id="regrade-host" style={{ position: "fixed", left, right: 0, top: 0, bottom: 0, pointerEvents: "none" }}><RegradeBanner left={0} bottom={52} /></div>;
+}
+if (QS.get("banner") !== null) installPlannerPerf(window);   // `?banner=1&planyrDiag=1` — window.__plannerPerf(), the same call the planner has, so a banner run can read it
 // one object for the whole session, like SitePlanner's memoised PAL (a fresh one per render would defeat GradingCanvas's memo)
 const HARNESS_PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
 function Harness({ data }) {
@@ -279,6 +288,10 @@ function Harness({ data }) {
           onApplyFfeFix={(id, fx) => patchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" })}
           onApplyMoveFix={(id, mv) => model.actions.applyMoveFix(id, mv)} />
       </div>
+      {/* NEW-1 (the "Regrading…" banner, `?banner=1`): the REAL banner, hosted the way SitePlanner hosts it (centred at the bottom of the
+          visible map). position: fixed + pointer-events: none, so it moves nothing and covers no press. Off by default so no other harness
+          picture ever carries it. verify-regrade-banner drives it. */}
+      {QS.get("banner") === "1" && planOn && <RegradeHost />}
       <svg id="canvas" width={CW} height={CH} style={{ background: "#9aa88f" }}>
       <g data-pan-group="1" transform={panD ? `translate(${panD.x} ${panD.y})` : undefined}>
         {/* the paper background — the very bottom of the drawing, exactly as SitePlanner paints it */}
