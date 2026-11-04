@@ -15,8 +15,15 @@ name: Sign-in health
 # AUTH TO THE ROUTE: GitHub's OIDC token (permissions: id-token: write) — verified by the route against GitHub's published
 # keys and pinned to THIS workflow file on main. No stored secret, so there is nothing for a person to paste anywhere.
 #
-# DEAD-MAN'S SWITCH: every report refreshes the `signin` snapshot on the admin Ops page; the daily data-risk sweep reads it
-# and says "the check itself has stopped" when it is older than ~2.5 hours.
+# THIS WORKFLOW IS NOW THE BROWSER CHECK, BEST-EFFORT (NEW-1, 2026-11-04, B2650848). Measured: GitHub started only 5 scheduled runs
+# in 33 hours (5–8.5 h apart; the build sweep scheduled every 10 minutes ran 50 times in 10 days, median gap 5.1 h; the daily and
+# weekly workflows run fine) — every report here was green, none was lost; the scheduler just does not start the frequent ones. The hourly duty for the network checks moved to a Supabase pg_cron job that calls
+# /api/ops/signin-heartbeat every 15 minutes (docs/SIGNIN-HEALTH.md). This job still adds what needs a real browser, and every
+# report it makes also checks that the fast check is alive.
+#
+# DEAD-MAN'S SWITCH: each report (from this job or the fast check) checks that the OTHER source has not gone quiet — fast check
+# silent > 45 min, this job silent > 12 h — and emails the owner ONCE per stop. The Ops page and the daily sweep read each
+# source's clock too.
 #
 # Optional secrets (the check SKIPS the step cleanly when absent): E2E_EMAIL / E2E_PASSWORD (the real sign-in step).
 # Manual run: Actions → Sign-in health → Run workflow. Tick "drill" to send the [TEST] alarm sequence through the real

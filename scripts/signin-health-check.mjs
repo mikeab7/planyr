@@ -136,8 +136,9 @@ export function channelVerdict(resp) {
   // Setup not finished (the SQL has not been run): say so loudly, but do not go red every hour for it.
   if (!resp.ok && resp.status === 503 && resp.body && resp.body.reason === "not_migrated") return { status: "not-armed", code: 0, detail: resp.body.error };
   if (!resp.ok) return { status: "unreachable", code: 3, detail: `the alarm route refused or failed: ${resp.error} (HTTP ${resp.status})` };
-  const d = resp.body.delivery;
-  if (d === "failed" || d === "not-configured") return { status: d === "failed" ? "mail-failed" : "not-configured", code: 4, detail: `an alert was due but the email did not go out (${d}): ${(resp.body.mail && resp.body.mail.error) || ""}`.trim() };
+  // An alert (outside-in) OR a "a check stopped" email (the dead-man's switch) that was due but did not go out is a broken alarm channel.
+  const d = [resp.body.delivery, resp.body.stopDelivery].find((x) => x === "failed" || x === "not-configured");
+  if (d) return { status: d === "failed" ? "mail-failed" : "not-configured", code: 4, detail: `an alert was due but the email did not go out (${d}): ${(resp.body.mail && resp.body.mail.error) || (resp.body.stopMail && resp.body.stopMail.error) || ""}`.trim() };
   return { status: "ok", code: 0, detail: `delivery: ${d}` };
 }
 
@@ -147,10 +148,11 @@ export function channelVerdict(resp) {
 export const DRILL_NOT_ARMED = 5;
 export const drillExitCode = (v) => (v && v.status === "not-armed" ? DRILL_NOT_ARMED : (v && v.code) || 1);
 
-/* ── The alarm drill: proves, live, "one incident sends ONE email, and a recovery note when it clears" ───────────── */
+/* ── The alarm drill: proves, live, "one incident sends ONE email, and a recovery note when it clears" — and that a check which
+ *    goes silent sends ONE "a check stopped" email (steps 6–8, NEW-1 2026-11-04) ───────────────────────────────────────────── */
 async function drill() {
   const step = (name, status) => ({ checks: [{ name, status, detail: "alarm drill (synthetic)" }] });
-  const send = (attempts) => post({ synthetic: true, attempts, runUrl: runUrl() });
+  const send = (attempts, extra = {}) => post({ synthetic: true, attempts, runUrl: runUrl(), ...extra });
   const log = [];
   const expect = (label, got, want) => { const ok = want.includes(got); log.push({ label, got, want, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${label}: delivery=${got} (expected ${want.join(" or ")})`); return ok; };
   let bad = false;
@@ -169,7 +171,14 @@ async function drill() {
   bad = !expect("4 a passing check → one recovery note", d.body && d.body.delivery, ["recovery-sent"]) || bad;
   const e = await send([step("server-gate", "pass")]);
   bad = !expect("5 still passing → nothing more", e.body && e.body.delivery, ["not-needed"]) || bad;
-  const ids = [a, d].map((r) => r.body && r.body.mail && r.body.mail.messageId).filter(Boolean);
+  // 6–8: the dead-man's switch — "a check stopped" reaches the owner ONCE, not again while it stays stopped, and clears quietly.
+  const g = await send([step("server-gate", "pass")], { stopDrill: "stale" });
+  bad = !expect("6 a check goes silent → one 'check stopped' email", g.body && g.body.stopDelivery, ["sent"]) || bad;
+  const h = await send([step("server-gate", "pass")], { stopDrill: "stale" });
+  bad = !expect("7 still silent → no second email", h.body && h.body.stopDelivery, ["not-needed"]) || bad;
+  const i = await send([step("server-gate", "pass")], { stopDrill: "fresh" });
+  bad = !expect("8 it reports again → cleared, no email", i.body && i.body.stopDelivery, ["not-needed"]) || bad;
+  const ids = [a.body && a.body.mail, d.body && d.body.mail, g.body && g.body.stopMail].map((m) => m && m.messageId).filter(Boolean);
   console.log("Gmail message ids:", ids.join(", ") || "(none)");
   summary(`### Sign-in alarm drill\n${log.map((l) => `- ${l.ok ? "✅" : "❌"} ${l.label} → \`${l.got}\``).join("\n")}\n\nGmail message ids: ${ids.join(", ") || "none"}`);
   writeFileSync(OUT, JSON.stringify({ drill: true, ok: !bad, log, messageIds: ids, channel: { status: "ok", code: 0 } }, null, 1));
