@@ -49,7 +49,7 @@ export function wallRowPlan(b) {
 /* ------------------------------------------------------------------ chips */
 
 /** Layer kinds a wall's stack can carry. */
-export const KIND_LABEL = { court: "Court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
+export const KIND_LABEL = { court: "Court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Sidewalk", parking: "Parking", road: "Road" };
 /** The longer name used in the editor box and the "+" catalog. */
 export const KIND_NAME = { court: "Truck court", trailer: "Trailer parking", buffer: "Landscape buffer", sidewalk: "Sidewalk", parking: "Car parking", road: "Road" };
 /** The ZONE_CATALOG key behind a layer kind. */
@@ -141,7 +141,7 @@ export function stripPlan(rows) {
   return { maxTotal, rows: out };
 }
 
-/** The kinds present on this building, in legend order (Court, Trailer, Buffer, Walk, Parking, Road). */
+/** The kinds present on this building, in legend order (Court, Trailer, Buffer, Sidewalk, Parking, Road). */
 export function legendKinds(rows) {
   const present = new Set();
   rows.forEach((r) => (r.layers || []).forEach((l) => present.add(l.kind)));
@@ -171,28 +171,29 @@ export function addOptions(isDock, layers) {
     return out;
   }
   if (!kinds.includes("sidewalk")) out.push(opt("sidewalk"));
-  // Parking is placed just beyond the sidewalk, so it is offered only before a buffer / road sits there.
-  if (!kinds.includes("parking") && !kinds.some((k) => k === "buffer" || k === "road")) out.push(opt("parking"));
+  // Parking is ALWAYS on offer on a non-dock wall (NEW-1, 2026-11-04): first field, or one more row of the field already
+  // there (the same ladder as the on-map "+": growEmployeeSide). With a buffer already on the wall a new field is placed
+  // beyond it, as the new outermost layer (SitePlanner `addLayerOnSide`).
+  if (!kinds.includes("road")) out.push(opt("parking"));
   out.push(opt("trailer"));                                      // B2268801 — trailer rows on a rear / end wall too, repeating
   out.push(opt("buffer"), opt("road"));
   return out;
 }
 
-/** The order the likely NEXT layer follows on each kind of wall (NEW-1, owner-approved 2026-11-03): a dock wall reads
- *  court → trailer → buffer → walk (→ road); any other wall reads walk → parking → buffer (→ trailer → road). */
+/** The order the likely NEXT layer follows on each kind of wall: a dock wall reads court → trailer → buffer → sidewalk (→ road);
+ *  any other wall reads sidewalk → parking → buffer (→ road → trailer). */
 const NEXT_ORDER_DOCK = ["court", "trailer", "buffer", "sidewalk", "road"];
 const NEXT_ORDER_OTHER = ["sidewalk", "parking", "buffer", "road", "trailer"];
 
 /**
- * `addOptions`, ordered: the FIRST entry is the next layer the person most likely wants (the named button on the
- * wall's row); the rest are the ▾ menu's. Exactly the set `addOptions` allows — never anything it forbids, nothing
- * added, nothing dropped — so a wall ending in a Road still offers nothing.
- * The "next" layer follows the wall's OUTERMOST layer through a fixed sequence: dock wall court → trailer → buffer →
- * walk → road; any other wall walk → parking → buffer → road → trailer. So an empty dock wall leads with Truck
- * court, after a court Trailer, after a trailer Buffer, after a buffer Walk; off a dock wall Walk, then Parking,
- * then Buffer. Kinds ranked AFTER the outermost layer come first (in sequence order), the rest follow — which is how
- * a second trailer piece lands in the ▾ rather than on the button. A dock wall whose court was binned leads with the
- * court (it goes back inboard of everything).
+ * `addOptions`, ordered: the FIRST entry is the next layer the person most likely wants (the lead button on the wall's
+ * row); the rest are the ▾ menu's. Exactly the set `addOptions` allows — never anything it forbids, nothing added,
+ * nothing dropped — so a wall ending in a Road still offers nothing.
+ * Dock wall: the lead follows the OUTERMOST layer through court → trailer → buffer → sidewalk → road (a second trailer
+ * piece lands in the ▾), and a dock wall whose court was binned leads with the court.
+ * Any other wall (owner-required, 2026-11-04): empty → sidewalk · sidewalk → parking · parking, or sidewalk > parking →
+ * parking (one more row each press) · sidewalk > parking > buffer → road (parking waits in the ▾) · sidewalk > buffer
+ * with no parking yet → parking. Anything else follows the sequence after the outermost layer.
  */
 export function orderedAddOptions(isDock, layers) {
   const allowed = addOptions(isDock, layers);
@@ -204,11 +205,20 @@ export function orderedAddOptions(isDock, layers) {
   const last = kinds.length ? rank(kinds[kinds.length - 1]) : -1;
   const idx = new Map(allowed.map((o, i) => [o.key, i]));
   const key = (o) => [rank(o.key) > last ? 0 : 1, rank(o.key), idx.get(o.key)];
-  return allowed.slice().sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+  const sorted = allowed.slice().sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+  if (!isDock) {
+    // Parking leads whenever the wall's parking is the outermost thing (more rows), or no parking exists yet and a sidewalk /
+    // buffer is the outermost layer. Once something sits beyond the parking (a buffer), the lead moves on to it.
+    const lastKind = kinds[kinds.length - 1];
+    const hasParking = kinds.includes("parking");
+    const lead = lastKind === "parking" ? "parking"
+      : !kinds.includes("sidewalk") ? "sidewalk"
+      : !hasParking && (lastKind === "sidewalk" || lastKind === "buffer") ? "parking"
+      : null;
+    if (lead) { const i = sorted.findIndex((o) => o.key === lead); if (i > 0) { const [o] = sorted.splice(i, 1); sorted.unshift(o); } }
+  }
+  return sorted;
 }
-
-/** The short name on the named add button (`+ Truck court`, `+ Trailer`, `+ Buffer`, `+ Walk`, `+ Parking`, `+ Road`). */
-export const ADD_BUTTON_NAME = { court: "Truck court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
 
 /**
  * How many layers a Remove takes. v3: ONLY the piece itself on every wall — dock walls included — and the

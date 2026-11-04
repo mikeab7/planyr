@@ -404,7 +404,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, ADD_BUTTON_NAME, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -11668,7 +11668,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const newEls = needsAisle
       ? [place(ai, inboard, idx0, "paving", {}), place(depth, inboard + ai, idx0 + 1, "parking", rowCfg)]
       : [place(depth, inboard, idx0, "parking", rowCfg)];
-    addBuildingEls(newEls, b.id);
+    // NEW-1 (2026-11-04) — a buffer / road already beyond the stack is pushed out by the new pieces (one history frame).
+    pushHistory(); setEls((a) => repackFlushBeyond([...a, ...newEls], b, side)); setSel({ kind: "el", id: b.id });
   };
   // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
   // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
@@ -11937,7 +11938,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (c.sides === "dock" && !isDock && key !== "trailer") return;   // B2268801 — trailer parking is offered on rear / end walls too
     if (c.sides === "nondock" && isDock) return;
     if (key === "sidewalk") { addSidewalkSide(b, side); return; }
-    if (key === "parking") { if (!sideParkingOn(b, side)) addParkingRowSide(b, side); return; }
+    // NEW-1 (2026-11-04) — parking on a non-dock wall: the first field, else ONE MORE ROW through the same ladder as the
+    // on-map "+" (growEmployeeSide: grow a single field, or append beyond an exploded stack) — never a second implementation.
+    if (key === "parking") { if (sideParkingOn(b, side)) growEmployeeSide(b, side, +1); else addParkingRowSide(b, side); return; }
     if (isDock) {
       pushHistory();
       setEls((a) => {
@@ -18952,7 +18955,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+    // A wall-bonded field grows OUTWARD, so a buffer / road beyond it is repacked in the same step (it stays outermost, no overlap).
+    const side = host && el.sideParkSide;
+    setEls((a) => { const grown = a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x); return side ? repackFlushBeyond(grown, host, side) : grown; });
   };
   // Per-field stall depth / drive-aisle override. Resizes the field's depth to
   // keep its rows consistent, growing on the outward (non-host) edge.
@@ -28683,7 +28688,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
                           </div>
                         </div>
-                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} />
+                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} kindFills={Object.fromEntries(Object.keys(KIND_LABEL).map((k) => [k, elStyle({ type: (ZONE_CATALOG[k] || {}).elType }, settings).fill]))} />
                       </Collapse>
                     );
                     // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
@@ -32287,39 +32292,47 @@ function WallBinGlyph() {
    scroll area); Escape and a press away close it. No ▾ when there is only one option; nothing at all after a Road. Module scope
    on purpose (MODULE-SCOPE-COMPONENTS): it owns its open state. Pressing the button leaves it usable — the row re-renders with
    the next layer's name and he can keep clicking. */
-function WallAddControl({ row, opts, onAdd }) {
+function WallAddControl({ row, opts, onAdd, fillFor }) {
   const [open, setOpen] = useState(false);
   const moreRef = useRef(null);
   const close = useCallback(() => setOpen(false), []);
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    // Escape closes the ▾ and NOTHING ELSE — the planner's own Escape (deselect the building, closing this panel) must not also fire.
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open]);
   useEffect(() => { if (open && opts.length < 2) setOpen(false); }, [open, opts.length]);
   if (!opts.length) return null;
   const next = opts[0], rest = opts.slice(1);
-  const nameOf = (o) => ADD_BUTTON_NAME[o.key] || o.label;
+  const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
+  // The layer's own icon in its legend swatch — the SAME fill as the strip piece (fillFor), the one icon set (WallKindIcon).
+  const chip = (kind, w = 18, h = 16) => (
+    <span aria-hidden="true" data-testid="wall-add-swatch" data-kind={kind} style={{ flex: "none", width: w, height: h, borderRadius: 3, background: fillFor(kind), display: "grid", placeItems: "center", boxShadow: kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
+      <WallKindIcon kind={kind} size={Math.round(Math.min(w, h) * 0.72)} />
+    </span>
+  );
   const edge = "1px solid var(--accent)";
   const btn = { height: CONTROL_H.sm, padding: 0, border: edge, background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, whiteSpace: "nowrap" };
   return (
     <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "stretch" }}>
-      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label} to the ${row.badge} wall`} title={`Add ${next.label.toLowerCase()} to this wall`}
-        style={{ ...btn, padding: "0 8px 0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
-        onClick={() => { setOpen(false); onAdd(next.key); }}>+ {nameOf(next)}</button>
+      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label.toLowerCase()} to the ${wallName}`} title={`Add ${next.label.toLowerCase()} to this wall`}
+        style={{ ...btn, display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: "0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
+        onClick={() => { setOpen(false); onAdd(next.key); }}><span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1 }}>+</span>{chip(next.key)}</button>
       {rest.length > 0 && (
         <button ref={moreRef} type="button" data-testid="wall-add-more" data-wall-add="1" aria-label={`More layers for the ${row.badge} wall`} title="More layers" aria-haspopup="menu" aria-expanded={open}
           style={{ ...btn, width: 20, fontSize: FONT_SIZE.micro, borderLeft: "none", borderRadius: `0 ${RADIUS.sm}px ${RADIUS.sm}px 0` }}
           onClick={() => setOpen((o) => !o)}>▾</button>
       )}
       {rest.length > 0 && (
-        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={168}>
+        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={176}>
           <div data-testid="wall-add-menu" data-wall-add="1" role="menu" style={{ display: "flex", flexDirection: "column" }}>
             {rest.map((o) => (
               <button key={o.key} type="button" role="menuitem" data-testid={`wall-add-${o.key}`} data-wall-add="1"
-                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap" }}
-                onClick={() => { setOpen(false); onAdd(o.key); }}>{o.label}</button>
+                aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`}
+                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: SPACE.sm }}
+                onClick={() => { setOpen(false); onAdd(o.key); }}>{chip(o.key)}<span>{o.label}</span></button>
             ))}
           </div>
         </AnchoredMenu>
@@ -32327,7 +32340,7 @@ function WallAddControl({ row, opts, onAdd }) {
     </span>
   );
 }
-function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
+function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
   const [open, setOpen] = useState(null);          // { rowKey, id } — the one piece whose edit box is open
   const [pending, setPending] = useState(null);    // { rowKey, kind, before } — open the layer a just-pressed add created
   const [bumpOpen, setBumpOpen] = useState(false); // the bump-outs editor under the "Bump-outs" line
@@ -32337,7 +32350,10 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
     const row = rows.find((r) => r.key === pending.rowKey);
     // The NEW layer is the outermost of its kind (a second trailer piece must not reopen the first one).
     const ofKind = row ? row.layers.filter((l) => l.kind === pending.kind) : [];
-    if (row && ofKind.length > pending.before) { setOpen({ rowKey: row.key, id: ofKind[ofKind.length - 1].id }); setPending(null); }
+    if (row && ofKind.length > pending.before) { setOpen({ rowKey: row.key, id: ofKind[ofKind.length - 1].id }); setPending(null); return; }
+    // NEW-1 (2026-11-04) — "+ parking" on a wall that already has parking adds ROWS, not a layer: the count of parking layers
+    // does not rise, the layer's row count does. Open its box (Rows ready) once the rows rise.
+    if (row && pending.kind === "parking" && pending.beforeRows != null && ofKind[0] && (ofKind[0].rows || 0) > pending.beforeRows) { setOpen({ rowKey: row.key, id: ofKind[0].id }); setPending(null); }
   }, [pending, rows]);
   // The open piece may vanish (removed, undone): close its box rather than leave it pointing at nothing.
   useEffect(() => {
@@ -32478,6 +32494,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
       )}
       {rows.map((row) => {
         const opts = orderedAddOptions(row.isDock, row.layers);
+        const fillFor = (kind) => { const have = rows.flatMap((r) => r.layers).find((l) => l.kind === kind); return have ? have.fill : (kindFills || {})[kind]; };
         const shown = openLayer && openRow && openRow.key === row.key ? openLayer : null;
         const geo = plan.rows[row.key];
         const total = geo.total;
@@ -32508,7 +32525,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
                   })}
                 </span>
               )}
-              <WallAddControl row={row} opts={opts} onAdd={(key) => { setOpen(null); setBumpOpen(false); ops.add(row, key); setPending({ rowKey: row.key, kind: key, before: row.layers.filter((l) => l.kind === key).length }); }} />
+              <WallAddControl row={row} opts={opts} fillFor={fillFor} onAdd={(key) => { setOpen(null); setBumpOpen(false); ops.add(row, key); setPending({ rowKey: row.key, kind: key, before: row.layers.filter((l) => l.kind === key).length, beforeRows: key === "parking" ? ((row.layers.find((l) => l.kind === "parking") || {}).rows || 0) : null }); }} />
             </div>
             {shown && editBox(row, shown, WALL_LEFT_W + SPACE.sm + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].x + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].w / 2)}
           </div>

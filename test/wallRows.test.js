@@ -51,7 +51,7 @@ describe("chips and the + catalog", () => {
     expect(chipLabel({ kind: "trailer", depth: 50, rows: 1 })).toBe("Trailer 50′");
     expect(chipLabel({ kind: "trailer", depth: 160, rows: 2 })).toBe("Trailer ×2");
     expect(chipLabel({ kind: "buffer", depth: 15 })).toBe("Buffer 15′");
-    expect(chipLabel({ kind: "sidewalk", depth: 5 })).toBe("Walk 5′");
+    expect(chipLabel({ kind: "sidewalk", depth: 5 })).toBe("Sidewalk 5′");
     expect(chipLabel({ kind: "parking", rows: 8 })).toBe("Parking 8 rows");
     expect(chipLabel({ kind: "parking", rows: 1 })).toBe("Parking 1 row");
     expect(chipLabel({ kind: "road", depth: 24 })).toBe("Road 24′");
@@ -66,23 +66,30 @@ describe("chips and the + catalog", () => {
     expect(keys(true, ["court", "trailer", "trailer"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
     expect(keys(true, ["court", "trailer", "road"])).toEqual([]);
   });
-  it("any other wall offers sidewalk / car parking only when it has none, trailer parking always (B2268801), plus buffer and road; nothing after a road", () => {
+  it("any other wall offers a sidewalk only when it has none, PARKING WHILE NOTHING IS A ROAD (one more row when it already has some — NEW-1 2026-11-04), trailer parking always (B2268801), plus buffer and road; nothing after a road", () => {
     expect(keys(false, [])).toEqual(["sidewalk", "parking", "trailer", "buffer", "road"]);
     expect(keys(false, ["sidewalk"])).toEqual(["parking", "trailer", "buffer", "road"]);
-    expect(keys(false, ["sidewalk", "parking"])).toEqual(["trailer", "buffer", "road"]);
+    expect(keys(false, ["sidewalk", "parking"])).toEqual(["parking", "trailer", "buffer", "road"]);                 // more rows
+    expect(keys(false, ["sidewalk", "parking", "buffer"])).toEqual(["parking", "trailer", "buffer", "road"]);       // parking stays on offer behind a buffer
     expect(keys(false, ["sidewalk", "trailer"])).toEqual(["parking", "trailer", "buffer", "road"]);   // trailer rows repeat on a rear / end wall too
-    expect(keys(false, ["buffer"])).toEqual(["sidewalk", "trailer", "buffer", "road"]);          // parking sits beyond the sidewalk: not behind a buffer
+    expect(keys(false, ["sidewalk", "buffer"])).toEqual(["parking", "trailer", "buffer", "road"]);   // a strip between walk and lot: parking is on offer
+    expect(keys(false, ["buffer"])).toEqual(["sidewalk", "parking", "trailer", "buffer", "road"]);
     expect(keys(false, ["sidewalk", "road"])).toEqual([]);
   });
   const next = (isDock, kinds) => orderedAddOptions(isDock, kinds.map((kind) => ({ kind }))).map((o) => o.key);
-  it("NEW-1: the named button is the NEXT layer — dock wall court → trailer → buffer → walk, any other wall walk → parking → buffer", () => {
+  it("NEW-1: the lead button is the NEXT layer — dock wall court → trailer → buffer → sidewalk; any other wall: empty → sidewalk · sidewalk → parking · parking (or sidewalk > parking) → parking · sidewalk > parking > buffer → road · sidewalk > buffer → parking", () => {
     expect(next(true, [])[0]).toBe("court");
     expect(next(true, ["court"])[0]).toBe("trailer");
     expect(next(true, ["court", "trailer"])[0]).toBe("buffer");
     expect(next(true, ["court", "trailer", "buffer"])[0]).toBe("sidewalk");
     expect(next(false, [])[0]).toBe("sidewalk");
     expect(next(false, ["sidewalk"])[0]).toBe("parking");
-    expect(next(false, ["sidewalk", "parking"])[0]).toBe("buffer");
+    expect(next(false, ["sidewalk", "parking"])[0]).toBe("parking");
+    expect(next(false, ["parking"])[0]).toBe("parking");
+    expect(next(false, ["sidewalk", "parking", "buffer"])[0]).toBe("road");
+    expect(next(false, ["sidewalk", "parking", "buffer"])).toContain("parking");                 // parking waits in the ▾
+    expect(next(false, ["sidewalk", "buffer"])[0]).toBe("parking");
+    expect(next(false, ["sidewalk"])).toEqual(["parking", "buffer", "road", "trailer"]);
   });
   it("NEW-1: a second trailer piece, Road, Sidewalk etc. sit in the ▾ under their own names; a binned court leads", () => {
     expect(next(true, ["court"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
@@ -377,7 +384,7 @@ describe("v3 · the strip — labels, scale, legend", () => {
   it("the legend lists only the kinds present, in Court · Trailer · Buffer · Walk · Parking · Road order", () => {
     const rows = [{ layers: [L("road", 24), L("court", 135)] }, { layers: [L("sidewalk", 5), L("parking", 20, 1)] }];
     expect(legendKinds(rows)).toEqual([
-      { kind: "court", name: "Court" }, { kind: "sidewalk", name: "Walk" }, { kind: "parking", name: "Parking" }, { kind: "road", name: "Road" },
+      { kind: "court", name: "Court" }, { kind: "sidewalk", name: "Sidewalk" }, { kind: "parking", name: "Parking" }, { kind: "road", name: "Road" },
     ]);
     expect(legendKinds([{ layers: [] }])).toEqual([]);
     expect(wallTotalDepth([L("court", 135), L("buffer", 15)])).toBe(150);

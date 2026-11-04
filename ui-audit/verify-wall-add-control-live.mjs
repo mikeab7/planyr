@@ -44,7 +44,9 @@ const bldg = async () => (await els()).find((e) => e.id === "bz1");
 const T = (id) => page.getByTestId(id);
 const rowByRole = (role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
 const named = (row) => row.getByTestId("wall-add");
-const nameText = async (row) => (await named(row).innerText()).replace(/\s+/g, " ").trim();
+// NEW-2 (2026-11-04): the lead button is a plus + the layer's icon, no word — read its kind (data-kind) and spell the old words from it.
+const KIND_WORD = { court: "Truck court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
+const nameText = async (row) => "+ " + (KIND_WORD[await named(row).getAttribute("data-kind")] || "?");
 const kinds = (row) => row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
 async function waitFor(fn, ms = 10000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) return v; await sleep(150); } }
 
@@ -170,8 +172,10 @@ try {
     const end0 = ends.nth(0), end1 = ends.nth(1);
     const sEnd0 = await end0.getAttribute("data-sides"), sEnd1 = await end1.getAttribute("data-sides"), sRear = await rear.getAttribute("data-sides");
     const nameSeq = [];
-    for (let i = 0; i < 3; i++) { nameSeq.push(await nameText(end0)); await named(end0).click(); await sleep(450); }
-    ok(`[${tag}] an end wall offers "+ Walk", then "+ Parking", then "+ Buffer"`, JSON.stringify(nameSeq) === '["+ Walk","+ Parking","+ Buffer"]', JSON.stringify(nameSeq));
+    for (let i = 0; i < 2; i++) { nameSeq.push(await nameText(end0)); await named(end0).click(); await sleep(450); }
+    nameSeq.push(await nameText(end0));                                                       // parking leads until a layer sits beyond it (NEW-1, 2026-11-04)
+    await addWallLayer(page, end0, "buffer");
+    ok(`[${tag}] an end wall offers sidewalk, then parking, then parking again (more rows); the buffer is in the ▾`, JSON.stringify(nameSeq) === '["+ Walk","+ Parking","+ Parking"]' && JSON.stringify(await kinds(end0)) === '["sidewalk","parking","buffer"]', JSON.stringify(nameSeq));
     await addWallLayer(page, end0, "trailer"); await addWallLayer(page, end0, "road");
     for (const k of ["sidewalk", "parking", "trailer", "buffer", "road"]) await addWallLayer(page, rear, k);
     await page.keyboard.press("Escape");
