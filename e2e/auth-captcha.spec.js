@@ -196,7 +196,8 @@ test.describe("auth panel — captcha on sign in, forgot password and sign up", 
     await mock(page, { calls, scriptOk: false });
     await page.goto("/?app&auth=signin");
     await expect(page.getByTestId("captcha-unavailable")).toBeVisible();
-    await expect(page.getByTestId("captcha-unavailable")).toContainText("We couldn't run the browser check");
+    await expect(page.getByTestId("captcha-unavailable")).toContainText("security check");
+    await expect(page.getByTestId("captcha-unavailable")).not.toContainText("We couldn't run the browser check"); // one message only
     await fillSignIn(page, "right-password");
     await submit(page).click();                                // fails fast, does not wait forever
     await expect(submit(page)).not.toHaveText("Verifying…");

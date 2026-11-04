@@ -107,7 +107,9 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
   test("3 blocked Turnstile script: the network line, the sign-in link is the main action, and it gets you to the sent view", async ({ page }) => {
     const w = { blockTurnstile: true }; await mock(page, w);
     await page.goto("/?app&auth=signin");
-    await expect(page.getByTestId("captcha-blocked-note")).toContainText("network blocked");
+    await expect(page.getByTestId("captcha-unavailable")).toContainText("network blocked");
+    await expect(page.getByTestId("captcha-unavailable")).not.toContainText("couldn't run the browser check"); // ONE message, not two (V2070224)
+    await expect(page.getByTestId("captcha-retry")).toBeVisible();
     const btn = page.getByTestId("email-link-signin");
     await expect(btn).toBeVisible();
     await dlg(page).getByLabel("Email").fill("me@example.com");
@@ -124,7 +126,7 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
     await mock(page, {});
     await page.goto("/?app&auth=signin");
     await expect(page.getByTestId("email-link-signin")).toBeVisible();
-    await expect(page.getByTestId("captcha-blocked-note")).toHaveCount(0);
+    await expect(page.getByTestId("captcha-unavailable")).toHaveCount(0);
   });
 
   test("4 opening the link spends nothing; the one button signs in on THIS device, on the route they started from", async ({ page }) => {

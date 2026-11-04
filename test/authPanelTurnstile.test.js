@@ -62,6 +62,11 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
     expect(panelSrc).toContain("key={widgetKey}");
   });
 
+  it("blocked network shows ONE message (the network line) with Try again — never both lines (V2070224)", () => {
+    expect(panelSrc).toContain("captchaBlocked ? BLOCKED_CHECK_COPY : CAPTCHA_UNAVAILABLE_COPY");
+    expect(panelSrc).not.toContain("captcha-blocked-note");
+  });
+
   it("the old 'Loading verification…' dead-end copy is gone", () => {
     expect(panelSrc).not.toMatch(/Loading verification/);
     expect(panelSrc).not.toMatch(/Couldn't load verification/);
