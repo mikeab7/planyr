@@ -191,11 +191,13 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   facts. **⛔ The two tiers are NEVER summed** (~5 MB hard cap vs a gigabyte quota; conflating them is what
   mis-diagnosed the crisis). `storageReclaim.js` acts on those declarations and nothing else — it refuses
   the whole pass if a class claims to be reclaimable with no way back, so a reference image with no cloud
-  copy survives any pressure (B474). `originStore.js` is a dependency-free IndexedDB accessor and
-  `StoragePanel.jsx` the (now **RETIRED, unmounted**) UI — NEW-1 (2026-11-04, owner decision) removed its one door, the Site
-  planner plan menu's "Storage on this device…" row, together with the dialog mount and the lazy import; the file stays only
-  because the repo-root `test/` suite **perfRecorder** guards that the stored perf recordings are surfaced/clearable there (see its header).
-  It was never mountable from `AuthPanel` or the header gear: those land in the entry chunk every route downloads, and even a
+  copy survives any pressure (B474). `originStore.js` is a dependency-free IndexedDB accessor.
+  **The StoragePanel component (the "Storage on this device" screen) is DELETED** — NEW-1 (2026-11-04, owner decision: retire) removed
+  its one door (the Site planner plan menu's row), then the file and the perfRecorder guard that kept it. The "that felt slow"
+  recordings have no screen; `telemetry/perfCaptureStore.js` is KEPT, bounded to three by its own writer, because the ui-audit
+  harnesses verify-help-report-control / verify-perf-recorder / verify-capture-pipe read the full capture from it (its header
+  names them) — remove it only together with a replacement source for those. Nothing in `src/` but the recorder imports it
+  (repo-root `test/` **planMenuChrome**). The panel was never mountable from `AuthPanel` or the header gear: those land in the entry chunk every route downloads, and even a
   lazy stub there cost +0.8 KB on all four routes and breached the Notes route's ceiling in CI. **⛔ Nothing here may import a workspace module** — this is chrome on every
   route, so a module shared with the planner's boot path gets hoisted into a chunk every route downloads
   (measured: importing `gisCache` put 11.3 KB on a plain Site load and breached three bundle budgets).

@@ -3,7 +3,7 @@
  * ⛔ WHY THIS IS ITS OWN MODULE — the same tier split `perfSampling.js` records, for the same
  * measured reason. `main.jsx` and `AppHeader` are on the critical path of EVERY route, so a
  * static edge from either into the recorder would hoist the whole diagnostic into the chunk that
- * every route downloads. (`StoragePanel`'s header records the last time that was tried by
+ * every route downloads. (The retired Storage panel's header recorded the last time that was tried by
  * accident: an 11.3 KB chunk landed on a plain Site load and breached three bundle budgets.) The
  * recorder proper is fetched by a dynamic `import()` from `main.jsx`, so it is its own lazy chunk
  * and counts against no route budget — the bundle audit's route closure is over STATIC imports.

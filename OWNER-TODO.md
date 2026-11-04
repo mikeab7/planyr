@@ -8,7 +8,7 @@
 _Last updated: 2026-11-04._
 
 ## 🗂 A decision: your "that felt slow just now" recordings no longer have a screen (B2660320)
-- [ ] **Decide (one word is enough): "re-home" or "retire".** The plan menu redesign took out "Storage on this device…", and that dialog was the only place you could see and clear the slowness recordings the app saves on your computer. They still save, and there is a cap on how many are kept, but nothing shows them or clears them now. **"Re-home"** = I move the recordings list and its Clear button somewhere you can reach (for example Settings). **"Retire"** = I delete the old dialog file and the test that guards it, and the recordings simply stay capped and invisible. The leftover file is `StoragePanel.jsx`, kept unmounted until you choose.
+- [x] **Decided 2026-11-04: RETIRE.** The old Storage dialog file and the test that guarded it are deleted (B2666224). The recordings still save on your computer, capped at three, and still go to the server when you press "Something was slow just now" — nothing visible changed.
 
 ## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
 - [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
