@@ -135,9 +135,11 @@ export async function recordReport({ env, store, source = "runner", attempts, ru
     const db = store || createPostgrestStore(env, fetchImpl);
     const t0 = now();
     stage = "store-checks";
-    // Oldest attempt first, 1 s apart, so history order is the order they ran.
+    // Oldest attempt first, so history order is the order they ran. Spaced 1 MILLISECOND apart, not a second: a whole second of
+    // back-dating let a report that arrived <1 s after the previous one (the drill's steps) put its first attempt BEFORE that report in
+    // history — [fail, pass, fail] — and "two failures in a row" read as one (found live, drill run 41863740549, 2026-11-04).
     const rows = attempts.map((a, i) => ({
-      at: new Date(Date.parse(t0) - (attempts.length - 1 - i) * 1000).toISOString(), overall: a.overall, checks: a.checks, run_url: runUrl, synthetic, source,
+      at: new Date(Date.parse(t0) - (attempts.length - 1 - i)).toISOString(), overall: a.overall, checks: a.checks, run_url: runUrl, synthetic, source,
     }));
     await db.insertChecks(rows);
 
