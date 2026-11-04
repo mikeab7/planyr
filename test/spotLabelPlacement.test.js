@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { layoutLabelSet, placeLabels, buildingControlObstacles, boxHitsDisc, boxHitsRect, boxHitsBox } from "../src/workspaces/site-planner/lib/spotLabelPlacement.js";
+import { layoutLabelSet, placeLabels, buildingControlObstacles, boxHitsDisc, boxHitsRect, boxHitsBox, segHitsBox } from "../src/workspaces/site-planner/lib/spotLabelPlacement.js";
 import { layoutBuildingButtons, layoutDiscs, buildingButtonWalls, ROTATE_GRIP_OFFSET_PX, ROTATE_GRIP_R_PX, BUTTON_WALL_MIN_PX } from "../src/workspaces/site-planner/lib/buildingButtons.js";
 import { dockSidesFor } from "../src/workspaces/site-planner/lib/dockZones.js";
 import { pillWidth, CORNER_TAG_PILL_H } from "../src/workspaces/site-planner/lib/padCornerTag.js";
@@ -83,6 +83,8 @@ const collisions = (c) => {
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (boxHitsBox(boxes[i], boxes[j], 0)) out.push(`${boxes[i].key} ✕ ${boxes[j].key}`);
   return out;
 };
+const segHits = (g, b) => { for (let i = 0; i <= 80; i++) { const t = i / 80, x = g.x1 + (g.x2 - g.x1) * t, y = g.y1 + (g.y2 - g.y1) * t; if (x > b.x - b.w / 2 + 0.5 && x < b.x + b.w / 2 - 0.5 && y > b.y - b.h / 2 + 0.5 && y < b.y + b.h / 2 - 0.5) return true; } return false; };
+const leaderCrossings = (c) => { const bx = drawn(c.lay); const out = []; for (const a of bx) if (a.leader) for (const o of [...bx, ...cornersOf(c.lay).filter((t) => !t.hidden)]) if (o !== a && o.key !== a.key && segHits(a.leader, o)) out.push(`${a.key} leader ✕ ${o.key || "corner"}`); return out; };
 const cutByEdge = (c) => drawn(c.lay).filter((b) => b.x - b.w / 2 < 0 || b.y - b.h / 2 < 0 || b.x + b.w / 2 > VIEW.w || b.y + b.h / 2 > VIEW.h).map((b) => b.key);
 describe("grading labels clear every control, every other label and the map's edge", () => {
   const cases = runMatrix((L, f2p, ppf) => layoutLabelSet(L, f2p, ppf, VIEW));
@@ -93,6 +95,11 @@ describe("grading labels clear every control, every other label and the map's ed
   it("ZERO label boxes touch a button disc, a grip square, the rotate grip / stem, or another label", () => {
     const bad = cases.map((c) => [c.name, collisions(c)]).filter(([, x]) => x.length);
     expect(bad.slice(0, 5)).toEqual([]);
+  });
+  it("NO leader line runs through another label (the owner's second finding, 2026-11-04) — in all but the rare map-edge squeeze", () => {
+    const bad = cases.map((c) => [c.name, leaderCrossings(c)]).filter(([, x]) => x.length);
+    expect(bad.length).toBeLessThan(cases.length * 0.003);
+    expect(bad.filter(([n]) => /@\(700,500\)/.test(n))).toEqual([]);           // with the building in the middle of the map there is always a clean place
   });
   it("no drawn label is cut by the map's edge", () => {
     const bad = cases.map((c) => [c.name, cutByEdge(c)]).filter(([, x]) => x.length);
@@ -118,6 +125,22 @@ describe("grading labels clear every control, every other label and the map's ed
     const lay = layoutLabelSet(L, f2pAt(1, 700, -5000), 1, VIEW);   // the whole building is far above the map
     expect(drawn(lay).length).toBe(0);
     expect(lay.hiddenCount).toBe(0);
+  });
+  it("a label never covers the point ANOTHER label measures, and no leader starts under a label (V2102896 finding, 2026-11-04)", () => {
+    // B's measured point sits where A's natural box would land: A must move off it, and B's leader must cross nothing
+    const items = [{ key: "A", text: "784.5", x: 300, y: 300, anchor: { x: 300, y: 330 } }, { key: "B", text: "dock 786.5", x: 300, y: 360, anchor: { x: 300, y: 300 } }];
+    const r = placeLabels(items, { discs: [], rects: [] }, VIEW);
+    const a = r.get("A"), b = r.get("B");
+    expect(boxHitsBox(a, b, 0)).toBe(false);
+    for (const [it, p] of [[items[0], a], [items[1], b]]) { const other = it.key === "A" ? b : a; expect(Math.abs(it.anchor.x - other.x) < other.w / 2 && Math.abs(it.anchor.y - other.y) < other.h / 2).toBe(false); }
+    for (const p of [a, b]) if (p.leader) for (const q of [a, b]) if (q !== p) expect(segHitsBox(p.leader, q, 0)).toBe(false);
+  });
+  it("segHitsBox is exact: a segment through a box hits, one grazing past it does not", () => {
+    const box = { x: 100, y: 100, w: 40, h: 20 };
+    expect(segHitsBox({ x1: 0, y1: 100, x2: 200, y2: 100 }, box)).toBe(true);
+    expect(segHitsBox({ x1: 0, y1: 80, x2: 200, y2: 80 }, box)).toBe(false);
+    expect(segHitsBox({ x1: 100, y1: 0, x2: 100, y2: 89 }, box)).toBe(false);
+    expect(segHitsBox({ x1: 100, y1: 0, x2: 100, y2: 95 }, box)).toBe(true);
   });
   it("a label with no clear place within reach is hidden, never drawn under a control", () => {
     const wall = { discs: [], rects: [{ x: 700, y: 500, hw: 400, hh: 400 }] };            // a control the size of the whole neighbourhood
