@@ -57,6 +57,18 @@ export const boxHitsDisc = (b, d, pad = 0) => Math.hypot(d.x - Math.max(b.x - b.
 export const boxHitsRect = (b, r, pad = 0) => Math.abs(b.x - r.x) < b.w / 2 + r.hw + pad && Math.abs(b.y - r.y) < b.h / 2 + r.hh + pad;
 export const boxHitsBox = (a, b, pad = 0) => Math.abs(a.x - b.x) < (a.w + b.w) / 2 + pad && Math.abs(a.y - b.y) < (a.h + b.h) / 2 + pad;
 export const pointInView = (p, view) => !view || (p.x >= 0 && p.y >= 0 && p.x <= view.w && p.y <= view.h);
+/** Does the segment {x1,y1,x2,y2} pass through the box (x, y = centre) grown by `pad`? (Liang–Barsky clip.) */
+export function segHitsBox(g, b, pad = 0) {
+  const x0 = b.x - b.w / 2 - pad, x1 = b.x + b.w / 2 + pad, y0 = b.y - b.h / 2 - pad, y1 = b.y + b.h / 2 + pad;
+  const dx = g.x2 - g.x1, dy = g.y2 - g.y1;
+  let t0 = 0, t1 = 1;
+  for (const [p, q] of [[-dx, g.x1 - x0], [dx, x1 - g.x1], [-dy, g.y1 - y0], [dy, y1 - g.y1]]) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return t0 <= t1;
+}
 export const boxInView = (b, view, margin = VIEW_MARGIN_PX) => !view || (b.x - b.w / 2 >= margin && b.y - b.h / 2 >= margin && b.x + b.w / 2 <= view.w - margin && b.y + b.h / 2 <= view.h - margin);
 
 /* Candidate offsets, nearest first (ties: the larger forward step first). In a label's own frame: `f` along the court's fall (away from the wall), `s` along the wall. */
@@ -80,31 +92,45 @@ const OFFSETS = (() => {
  */
 export function placeLabels(items, obstacles, view) {
   const placed = [...(obstacles.boxes || [])];
+  const leaders = [];                                         // the leader lines of the labels placed so far — a later label must not sit on one
   const res = new Map();
-  const clear = (b) => boxInView(b, view)
+  // a moved label's leader: from the point it measures to the nearest point of its box (null when the box is right against it)
+  const leaderFor = (box, anchor, from) => {
+    const nx = Math.max(box.x - box.w / 2, Math.min(anchor.x, box.x + box.w / 2)), ny = Math.max(box.y - box.h / 2, Math.min(anchor.y, box.y + box.h / 2));
+    const gap = Math.hypot(anchor.x - nx, anchor.y - ny), moved = Math.hypot(box.x - from.x, box.y - from.y) > LEADER_FROM_PX;
+    return { gap, moved, line: moved && gap > 4 ? { x1: anchor.x, y1: anchor.y, x2: nx, y2: ny } : null };
+  };
+  // the measured points themselves: a label never covers the point another label measures (its leader would start under this one)
+  const anchors = items.map((it) => it.anchor || { x: it.x, y: it.y });
+  const coversAnchor = (b, self) => anchors.some((a, i) => i !== self && Math.abs(a.x - b.x) < b.w / 2 + 1 && Math.abs(a.y - b.y) < b.h / 2 + 1);
+  const clear = (b, line, strict = true, self = -1) => boxInView(b, view)
     && !obstacles.discs.some((d) => boxHitsDisc(b, d, LABEL_PAD_PX))
     && !obstacles.rects.some((r) => boxHitsRect(b, r, LABEL_PAD_PX))
-    && !placed.some((p) => boxHitsBox(b, p, LABEL_PAD_PX));
-  for (const it of items) {
+    && !placed.some((p) => boxHitsBox(b, p, LABEL_PAD_PX))
+    && (!strict || (!coversAnchor(b, self) && !leaders.some((g) => segHitsBox(g, b, 1))                   // nobody sits on an earlier label's leader …
+      && !(line && placed.some((p) => segHitsBox(line, p, 0)))));                // … and this label's own leader crosses no one else's box
+  for (let ii = 0; ii < items.length; ii++) {
+    const it = items[ii];
     const w = pillWidth(it.text, it.size || 11), h = CORNER_TAG_PILL_H;
     const F = it.axes ? it.axes.f : { x: 0, y: 1 }, S = it.axes ? it.axes.s : { x: 1, y: 0 };
-    const anchor = it.anchor || { x: it.x, y: it.y };
+    const anchor = it.anchor || { x: it.x, y: it.y }, from = { x: it.x, y: it.y };
     // a label whose measured point is off the map is not on screen at all — it is left alone, never dragged in to stand in the picture without its subject
     if (!pointInView(anchor, view)) { res.set(it.key, { x: it.x, y: it.y, w, h, moved: false, hidden: false, skip: true, leader: null }); continue; }
-    let box = null;
+    let box = null, info = null;
     const natural = { x: it.x, y: it.y, w, h };
-    if (clear(natural)) box = natural;
-    else for (const o of OFFSETS) {
-      const b = { x: it.x + F.x * o.f + S.x * o.s, y: it.y + F.y * o.f + S.y * o.s, w, h };
-      if (clear(b)) { box = b; break; }
+    if (clear(natural, null, true, ii)) { box = natural; info = leaderFor(natural, anchor, from); }
+    else for (const strict of [true, false]) {                  // the clean search first; only when the map's edge leaves no clean spot, one whose leader has to cross something
+      for (const o of OFFSETS) {
+        const b = { x: it.x + F.x * o.f + S.x * o.s, y: it.y + F.y * o.f + S.y * o.s, w, h };
+        const li = leaderFor(b, anchor, from);
+        if (clear(b, li.line, strict, ii)) { box = b; info = li; break; }
+      }
+      if (box) break;
     }
     if (!box) { res.set(it.key, { x: it.x, y: it.y, w, h, moved: false, hidden: true, leader: null }); continue; }
     placed.push(box);
-    const moved = box !== natural && Math.hypot(box.x - it.x, box.y - it.y) > LEADER_FROM_PX;   // a nudge of a few px is still "in place"
-    const nx = Math.max(box.x - w / 2, Math.min(anchor.x, box.x + w / 2)), ny = Math.max(box.y - h / 2, Math.min(anchor.y, box.y + h / 2));
-    const gap = Math.hypot(anchor.x - nx, anchor.y - ny);                               // how far the box is from the point it measures
-    const tied = moved && gap > 4;
-    res.set(it.key, { x: box.x, y: box.y, w, h, moved, gap, hidden: false, leader: tied ? { x1: anchor.x, y1: anchor.y, x2: nx, y2: ny } : null });
+    if (info.line) leaders.push(info.line);
+    res.set(it.key, { x: box.x, y: box.y, w, h, moved: box !== natural && info.moved, gap: info.gap, hidden: false, leader: info.line });
   }
   return res;
 }
