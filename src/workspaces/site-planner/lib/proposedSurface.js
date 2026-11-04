@@ -425,7 +425,7 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
   let wedgeFillCf = 0, wedgeCutCf = 0, wedgeSf = 0, wedgeEasementSf = 0;
   const perEl = {};
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.1 + 0.85 * (i / nx);   // NEW-1: how far through the whole build (the "Regrading…" banner reads it; drainSteps ignores it)
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
       let hit = null;
@@ -986,7 +986,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const fillGeo = !!geo && !geo.ready;
   const preO = { a: geo ? geo.near : null, o: 0 }, preL = { d: 0, gq: NaN, td: NaN, tgq: NaN };
   for (let i = 0; i < dnx; i++) {
-    yield;
+    yield 0.05 + 0.5 * (i / dnx);
     for (let j = 0; j < dny; j++) {
       // B2319137 ×2: a checkpoint every few dozen nodes — one bare-surface read is a cone search, and a whole column of them
       // ran past a frame (a yield is free when the slice has time left; runChunked decides whether it really pauses)
@@ -1283,7 +1283,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     else { cutCf += A * -dz; pe.cutCf += A * -dz; if (isWedge) wedgeCutCf += A * -dz; }
   };
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.6 + 0.35 * (i / nx);
     for (let j = 0; j < ny; j++) {
       if ((j & 15) === 15) yield;
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
@@ -1461,7 +1461,7 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
   const inside = new Float32Array(nx * ny).fill(-1);
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.95 * (i / nx);
     const x = x0 + (i + 0.5) * cellFt;
     for (let j = 0; j < ny; j++) {
       if ((j & 15) === 15) yield;
