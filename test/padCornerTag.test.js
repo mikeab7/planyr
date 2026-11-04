@@ -177,9 +177,9 @@ describe("the tag keeps a leader to its exact corner when it sits away from it",
 
 describe("the planner draws what the layout hands it", () => {
   const src = code(read("../src/workspaces/site-planner/SitePlanner.jsx"));
-  it("sideAddNodes places every button THROUGH layoutBuildingButtons / wallsFromQuad (no inline offsets)", () => {
+  it("sideAddNodes places every button THROUGH layoutBuildingButtons / buildingButtonWalls (no inline offsets)", () => {
     expect(src).toMatch(/const layout = layoutBuildingButtons\(walls\)/);
-    expect(src).toMatch(/wallsFromQuad\(quad, dockSides\)/);
+    expect(src).toMatch(/buildingButtonWalls\(quad, dockSides,/);   // NEW-1 (2026-11-04): the wall filter moved into lib/buildingButtons so the grading label placer reads the same one
     expect(src).not.toMatch(/sideButtonAnchor|bumpButtonAnchor/);
     expect(src).not.toMatch(/ms\.x - ux \* 24/);
     expect(src).not.toMatch(/cs\.x - dx \* 20/);

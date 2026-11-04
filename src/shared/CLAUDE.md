@@ -152,7 +152,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   ONE entry per picking SESSION (`notePick`/`commitPick`) — the live wheel fires per shade, so
   recording each one used to fill the row with intermediates.
   `ui/listboxNav.js` (pure rules) + `useListboxNav` in `ui/controls.jsx` (B2499520 — defined IN controls.jsx on purpose: a separate module shared by Site + Food becomes a new Site-route chunk and fails the allowlist) — **THE one behaviour of every typeahead suggestion list** (map address search, comp party names, Food restaurant search): Down enters at row 1 / Up at the last, both wrap, Enter commits a highlighted row, Escape closes, scroll-into-view, hover and keyboard share ONE highlight, `aria-activedescendant`. The highlight is a SOLID `--accent` fill + `--on-accent` ink (`listboxRowStyle`) — never a surface token on a surface (the owner's "I can't see it": white on white). A new suggestion list uses the hook; it never rolls its own arrows or highlight (repo-root `test/` **listboxNav**; e2e **address-suggest-keyboard**, red on the old highlight). Suggestions belong only where they obviously belong (addresses, contact info) — never on unique-value fields.
-  `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout (placement math is pure, unit-tested
+  `ui/menuBin.jsx` (NEW-1, 2026-11-04) — the shared skeleton of a switcher-with-a-bin dropdown: `MenuScroll` (THE one scrolling element, `minHeight: 0`), `MenuFooter` (never pushed out), `BinBackRow` ("‹ Back"); the project switcher AND the Site Planner plan menu (the Site Planner's PlanMenu component) both use it — a third dropdown of that shape uses it too, never a third copy. `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout (placement math is pure, unit-tested
   `ui/anchoredMenuPlacement.js` — `placeMenu`, which hides rather than corner-pins a
   zero-sized/`display:none` anchor, B734). `ui/FloatingPanel.jsx` +
   `ui/PanelChrome.jsx` + pure `ui/floatingPanel.js` — the NEW-1 poppable-panel primitive (a
@@ -192,9 +192,11 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   mis-diagnosed the crisis). `storageReclaim.js` acts on those declarations and nothing else — it refuses
   the whole pass if a class claims to be reclaimable with no way back, so a reference image with no cloud
   copy survives any pressure (B474). `originStore.js` is a dependency-free IndexedDB accessor and
-  `StoragePanel.jsx` the UI — **mounted from the Site route's plan menu, NOT from `AuthPanel` or the
-  header gear**: those land in the entry chunk every route downloads, and even a lazy stub there cost
-  +0.8 KB on all four routes and breached the Notes route's ceiling in CI. **⛔ Nothing here may import a workspace module** — this is chrome on every
+  `StoragePanel.jsx` the (now **RETIRED, unmounted**) UI — NEW-1 (2026-11-04, owner decision) removed its one door, the Site
+  planner plan menu's "Storage on this device…" row, together with the dialog mount and the lazy import; the file stays only
+  because the repo-root `test/` suite **perfRecorder** guards that the stored perf recordings are surfaced/clearable there (see its header).
+  It was never mountable from `AuthPanel` or the header gear: those land in the entry chunk every route downloads, and even a
+  lazy stub there cost +0.8 KB on all four routes and breached the Notes route's ceiling in CI. **⛔ Nothing here may import a workspace module** — this is chrome on every
   route, so a module shared with the planner's boot path gets hoisted into a chunk every route downloads
   (measured: importing `gisCache` put 11.3 KB on a plain Site load and breached three bundle budgets).
   That is why the cache is cleared by NAMESPACE and told about it through a window event.

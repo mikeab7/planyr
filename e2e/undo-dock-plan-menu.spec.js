@@ -282,45 +282,48 @@ test.describe("B385041 — a resize never moves a building's dock walls", () => 
   });
 });
 
-/* ─────────── B385042 + B366389(×2) — the plan menu: contents and icons ─────────── */
+/* ─────────── B385042 + B366389(×2) — the plan menu: contents and icons ───────────
+ * NEW-1 (2026-11-04) redrew the menu: the separate "Plan name" field is gone; the CURRENT ROW is the rename control. The B385042
+ * guarantee (the name is not repeated as a pointless read-only copy) now reads: the name appears exactly TWICE — the crumb and
+ * the current row. The full flow is driven by plan-menu-redesign.spec.js; this block keeps B385042's / B366389's own claims. */
 
 test.describe("B385042 — the plan switcher on a single-plan site", () => {
-  test("the current plan's name appears exactly TWICE, and there is no 'Plans in this site'", async ({ page }) => {
+  test("the current plan's name appears exactly TWICE (crumb + current row), and there is no 'Plans in this site'", async ({ page }) => {
     await startBlank(page);
     await page.getByTestId("plan-crumb").click();
-    const input = page.getByTestId("plan-name-input");
-    await expect(input).toBeVisible();
+    const row = page.getByTestId("plan-current-row");
+    await expect(row).toBeVisible();
+    // The old separate field is gone.
+    await expect(page.getByTestId("plan-name-input")).toHaveCount(0);
 
-    const name = await input.inputValue();
+    const name = (await page.getByTestId("plan-current-name").innerText()).trim();
     expect(name.length).toBeGreaterThan(0);
 
     // The heading is gone…
     await expect(page.getByText("Plans in this site", { exact: true })).toHaveCount(0);
-    // …and so is the one-row list, so the name is on screen twice: the crumb and the field.
+    // …and so is the one-row list, so the name is on screen twice: the crumb and the current row.
     const occurrences = await page.evaluate((n) => {
       const crumb = document.querySelector('[data-testid="plan-crumb"]');
-      const field = document.querySelector('[data-testid="plan-name-input"]');
-      let count = 0;
-      if (crumb && crumb.textContent.includes(n)) count += 1;
-      if (field && field.value === n) count += 1;
-      // Anything ELSE on screen carrying it as read-only text is the third copy this item removed.
+      const current = document.querySelector('[data-testid="plan-current-row"]');
+      let inCrumb = crumb && crumb.textContent.includes(n) ? 1 : 0;
+      // Anything ELSE on screen carrying it as read-only text (outside the crumb and the current row) is the third copy B385042 removed.
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let extra = 0, node;
+      let inRow = 0, extra = 0, node;
       while ((node = walker.nextNode())) {
         if (!node.nodeValue.includes(n)) continue;
         if (crumb && crumb.contains(node)) continue;
+        if (current && current.contains(node)) { inRow += 1; continue; }
         extra += 1;
       }
-      return { count, extra };
+      return { count: inCrumb + inRow, extra };
     }, name);
     expect(occurrences.count).toBe(2);
     expect(occurrences.extra).toBe(0);
   });
 
   test("on a MULTI-plan site the switcher is back, and switching still works", async ({ page }) => {
-    /* The deliberate other half of B385042: at ≥2 plans the list earns its place (it is the
-       switcher AND the per-plan delete AND the you-are-here marker), so it renders in full,
-       CURRENT PLAN INCLUDED — the same shape the sibling project switcher uses. */
+    /* The other half of B385042: at ≥2 plans the list earns its place. NEW-1 (2026-11-04): the CURRENT plan is the highlighted row
+       at the top, the OTHER plans are the list under it (it no longer repeats the current plan inside the list). */
     await armPlannerHooks(page);
     await page.addInitScript(() => {
       const mk = (id, name) => ({ id, groupId: "g1", site: "Multi", name, origin: null, county: "harris",
@@ -333,12 +336,13 @@ test.describe("B385042 — the plan switcher on a single-plan site", () => {
     await expect(canvas(page)).toBeVisible();
     await page.waitForTimeout(700);
     await page.getByTestId("plan-crumb").click();
-    await expect(page.getByText("Plans in this site", { exact: true })).toBeVisible();
-    for (const n of ["Concept A", "Concept B", "Concept C"]) {
-      await expect(page.getByRole("button", { name: new RegExp(n) }).first()).toBeVisible();
+    await expect(page.getByText("Plans in this site", { exact: true })).toHaveCount(0);   // no section headings any more
+    await expect(page.getByTestId("plan-current-row")).toContainText("Concept A");
+    for (const n of ["Concept B", "Concept C"]) {
+      await expect(page.getByTestId("plan-list-scroll").getByRole("button", { name: new RegExp(n) }).first()).toBeVisible();
     }
     await expect(page.getByText("current", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /Concept C/ }).first().click();
+    await page.getByTestId("plan-list-scroll").getByRole("button", { name: /Concept C/ }).first().click();
     await expect(page.getByTestId("plan-crumb")).toContainText("Concept C", { timeout: 15_000 });
   });
 });
@@ -347,12 +351,12 @@ test.describe("B366389 (×2) — the plan menu's icons are one family", () => {
   test("every menu row's icon is a drawn SVG inheriting its row colour — no emoji, no text glyphs", async ({ page }) => {
     await startBlank(page);
     await page.getByTestId("plan-crumb").click();
-    await expect(page.getByTestId("save-now")).toBeVisible();
+    await expect(page.getByTestId("plan-footer")).toBeVisible();
 
     const report = await page.evaluate(() => {
-      // The menu PANEL is the smallest ancestor holding both the name field and Save now.
-      let panel = document.querySelector('[data-testid="save-now"]');
-      while (panel && !panel.querySelector('[data-testid="plan-name-input"]')) panel = panel.parentElement;
+      // The menu PANEL is the smallest ancestor holding both the current row and the footer.
+      let panel = document.querySelector('[data-testid="plan-footer"]');
+      while (panel && !panel.querySelector('[data-testid="plan-current-row"]')) panel = panel.parentElement;
       const text = panel ? panel.innerText : "";
       const svgs = panel ? panel.querySelectorAll("svg") : [];
       const strokes = [...svgs].map((s) => s.getAttribute("stroke"));
@@ -365,7 +369,7 @@ test.describe("B366389 (×2) — the plan menu's icons are one family", () => {
     });
     expect(report.glyphs).toEqual([]);
     expect(report.emoji).toBe(false);
-    expect(report.svgCount).toBeGreaterThanOrEqual(3); // Save now · Version history · Storage
+    expect(report.svgCount).toBeGreaterThanOrEqual(4); // ⋯ · New plan · Duplicate · Version history
     expect(report.allCurrentColor).toBe(true);
   });
 });

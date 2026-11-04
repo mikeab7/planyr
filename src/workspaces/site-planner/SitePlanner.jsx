@@ -10,7 +10,6 @@ import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
 import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
-import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
@@ -141,7 +140,8 @@ import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
 import { propsPanelTitle } from "./lib/propsPanelTitle.js";
-import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import { UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import PlanMenu from "./components/PlanMenu.jsx";
 import { GRADING_GLYPH } from "./components/railGlyphs.js";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
@@ -394,7 +394,7 @@ import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, sh
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
-import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
+import { layoutBuildingButtons, buildingButtonWalls, BUTTON_WALL_MIN_PX, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -404,7 +404,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, ADD_GROUP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -434,14 +434,6 @@ import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea } from "./lib/pondOffset.js";
 import { gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
-/* Storage on this device (NEW-3/B1429) — the two-tier census + the safe clear-map-data action.
- * It lives on the SITE ROUTE, not in the shared account panel or the header gear: both of those
- * land in the entry chunk that EVERY route downloads, and even a lazy stub there measured +0.5 KB
- * on all four routes and pushed `bundle.notesRouteJsBytes` past its ceiling in CI. Here it costs
- * the other three routes nothing, it is reachable SIGNED OUT (which the account panel is not, and
- * a signed-out user shares the same ~5 MB ceiling with no cloud copy to fall back on), and it sits
- * next to Save now and Version history — the two things it explains when a save fails. */
-const StoragePanel = lazy(() => import("../../shared/storage/StoragePanel.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -632,7 +624,7 @@ const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to se
 // armed with the whole site in the viewport, at full size, over the two largest objects on the
 // drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
 // feet per pixel. Both must pass; read that module's header before changing either.
-const FEAT_BTN_MIN_PX = 72;
+const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;   // one number, in lib/buildingButtons.js (the grading label placer reads the same wall filter)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
@@ -1485,7 +1477,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const composePreviewUrlRef = useRef(null);
   const preCanvasDisplayRef = useRef(null); // showDims/showAreas as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
-  const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   /* B1469872 — this project's own "Recently deleted" plans: siblings soft-deleted from THIS group
    * while it still has a live plan (this menu is only reachable while that's true), which the
    * account-wide bin deliberately never lists (see storage.js's listDeletedProjects /
@@ -1494,9 +1485,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deletedPlansBusy, setDeletedPlansBusy] = useState(null);   // id currently being restored/purged
   /* NEW-1 (2026-10-20) — the same project's deleted SITE-PLAN FILES (uploaded drawings, `site_plan_overlays`),
    * moved here from the Site page's All comps list. Listed in the same "Recently deleted" group, below the
-   * plans; `deletedPlansBusy` / `planPurgeArm` carry their ids too (overlay ids and plan ids never collide). */
+   * plans; `deletedPlansBusy` carries their ids too (overlay ids and plan ids never collide). The inline confirm arms live in `components/PlanMenu.jsx`. */
   const [deletedFilesHere, setDeletedFilesHere] = useState([]);
-  const [planPurgeArm, setPlanPurgeArm] = useState(null);           // id whose "Delete forever" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
@@ -2074,6 +2064,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)
     : null;
   const cullRect = cullRectRef.current;
+  // NEW-1 (2026-11-04): the canvas's own box in px, one stable object per size — the grading labels stay inside it (lib/spotLabelPlacement)
+  const canvasBoxPx = useMemo(() => ({ w: size.w, h: size.h }), [size.w, size.h]);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -3932,7 +3924,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
-  const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
   // B672 — the doc-level cloudConflict state + its blocking "changed in another session … Take
   // over editing" banner are RETIRED BY ARCHITECTURE (the B455/B460/B558/B596 false-conflict
   // class). Elements are per-row rev-guarded in site_elements (a real collision surfaces per
@@ -17269,11 +17260,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const siteLabel = useProjectName(groupId, restored?.site || restored?.name || "Untitled site");
   // A brand-new blank site is the first plan of its own group → "Concept A" (lettered default).
   const planLabel = usePlanName(siteId, restored?.name || "Concept A");
-  // In-flight typing buffer for the plan-name field ONLY (null = not editing → show the store's name).
-  const [planDraft, setPlanDraft] = useState(null);
   // Validation + visible rejection live in the shared rename functions; an empty name is refused
   // with a notice and the old name stays (it used to be silently saved as "Untitled site").
-  const commitPlanLabel = (v) => { setPlanDraft(null); renamePlanChecked(siteId, v, async (id, n) => onRenamePlan?.(id, n)); };
+  // NEW-1 (2026-11-04) — the ONE plan rename the plan menu calls, for the current plan AND for any other plan in the site (it always went through renamePlanChecked).
+  const renamePlanFromMenu = (id, v) => renamePlanChecked(id, v, async (pid, n) => onRenamePlan?.(pid, n));
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   /* Keep the save metadata current (so the first non-blank save is fully formed).
    * NEW-1 — assigned during RENDER, not in a passive effect, and `origin` reads the live STATE
@@ -17374,7 +17364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
-  const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
+  const closeHdrMenus = () => { setPlanMenu(false); };
   /* NEW-3(b)/B1429 — every storage-failure report carries the storage FACTS: usage vs quota for
    * BOTH tiers, kept separate and labelled (`local_*` / `idb_*`), plus the per-class byte
    * breakdown. So the next occurrence answers "which store was full, and what was in it" instead
@@ -17557,7 +17547,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
-  const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
+  // NEW-1 (2026-11-04) — Duplicate for ANY plan of the site: the footer's button passes the current plan, a plan's ⋯ / right-click passes that plan.
+  // Both end in the one `duplicatePlan` (SitePlannerApp), which keeps its loud refusal (planMint.js, B2639168).
+  const handleDuplicatePlan = (id) => { closeHdrMenus(); flushSite(); onDuplicateSite?.(id || siteId); };
   const handleNewPlan = () => { closeHdrMenus(); flushSite(); onNewPlanSameParcel?.(siteId); };
   // Delete a single plan (B264). Never the last plan in a site (that's the whole-site delete
   // from the map). If we're deleting the current plan, suppress its flush so the delete sticks.
@@ -17571,6 +17563,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * listDeletedPlansInGroup header): siblings soft-deleted from THIS still-live group, which the
    * account-wide bin deliberately never lists. Fetched fresh whenever the plan menu opens. */
   const refreshDeletedPlansHere = () => {
+    /* E2E seam (NEW-1, 2026-11-04) — the same CALL-TIME `window.__PLANYR_E2E` gate as the hooks above; production never sets it. A signed-out run has no cloud bin, so
+     * the plan-menu spec seeds what the bin would list; Restore / Delete forever then run the REAL handlers (which refuse loudly when not signed in). */
+    const seeded = typeof window !== "undefined" && window.__PLANYR_E2E ? window.__planyrE2eBin : null;
+    if (seeded) { setDeletedPlansHere(seeded.plans || []); setDeletedFilesHere(seeded.files || []); return; }
     Promise.resolve(listDeletedPlansInGroup(groupId)).then((r) => setDeletedPlansHere((r && r.ok && r.plans) || []));
     // Site-plan FILES: dynamic import — the overlay store must not ride the Site route's critical path.
     import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
@@ -17592,7 +17588,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .finally(() => { refreshDeletedPlansHere(); setDeletedPlansBusy(null); });
   };
   const handlePurgeDeletedFile = (f) => {
-    setDeletedPlansBusy(f.id); setPlanPurgeArm(null);
+    setDeletedPlansBusy(f.id);
     import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
       .then((m) => m.purgeSitePlanFile(f))
       .then((res) => { if (!res.ok) flashWarn(`“${f.name}” couldn't be permanently deleted — ${res.error}`); })
@@ -17602,7 +17598,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const handleRestoreDeletedPlan = (p) => {
     setDeletedPlansBusy(p.id);
     Promise.resolve(restoreDeletedProject(p.id)).then((res) => {
-      if (!res || res.ok === false) flashWarn((res && res.error) || `“${p.name}” couldn't be restored — check your connection and try again.`);
+      if (!res || res.ok === false) flashWarn(`“${p.name}” couldn't be restored — ${(res && res.error) || "check your connection and try again."}`);   // NEW-1: always names the plan, like the files path does
       refreshDeletedPlansHere();
       onSiteSaved?.(); // the sites list is device-cached elsewhere; this is the same "something changed server-side" refresh the plan-lock toggle above already uses
     }).catch(() => flashWarn(`“${p.name}” couldn't be restored — check your connection and try again.`))
@@ -17616,9 +17612,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * unlike `purgeDeletedProject`, it must NEVER run the whole-project folder/Drive/Doc-Review
    * cleanup, because the project it belongs to isn't gone. */
   const handlePurgeDeletedPlan = (p) => {
-    setDeletedPlansBusy(p.id); setPlanPurgeArm(null);
+    setDeletedPlansBusy(p.id);
     Promise.resolve(purgeOnePlanFromLiveGroup(p.id)).then((res) => {
-      if (!res || res.ok === false) flashWarn((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
+      if (!res || res.ok === false) flashWarn(`“${p.name}” couldn't be permanently deleted — ${(res && res.error) || "check your connection and try again."}`);
       refreshDeletedPlansHere();
     }).catch(() => flashWarn(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
       .finally(() => setDeletedPlansBusy(null));
@@ -18822,9 +18818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
     const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
     const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-    const roomy = Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX;   // the purple corner "+" needs room on BOTH axes (B225)
-    const walls = wallsFromQuad(quad, dockSides).filter((w) => ((w.name === "top" || w.name === "bottom") ? hpx : wpx) >= FEAT_BTN_MIN_PX)
-      .map((w) => ({ ...w, dock: w.dock && !el.footEdit, corners: w.dock && roomy ? w.corners : [] }));
+    const walls = buildingButtonWalls(quad, dockSides, { wpx, hpx, footEdit: !!el.footEdit });   // the filter the grading label placer reads too
     const layout = layoutBuildingButtons(walls);
     return (
       /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
@@ -22268,177 +22262,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       >
         <span title={planLabel} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
-        <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
-          <input value={planDraft ?? planLabel} onChange={(e) => setPlanDraft(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" />
-          {/* ⛔ NEW-3 (B385042) — THE CURRENT PLAN'S NAME APPEARED THREE TIMES AT ONCE.
-              Owner: *"it says Concept A three times here. Let's fix that. That seems like a waste."*
-              The crumb button, the PLAN NAME field, and a row in this list all carried it — and on a
-              single-plan site (his case) this list is a ONE-ROW list whose only row is the plan being
-              renamed in the field directly above it. It carries no information at all.
-
-              The three are NOT equivalent, so two were not simply deleted. The crumb is the TRIGGER
-              and must stay. The PLAN NAME input is the EDITOR — it is the rename affordance, not a
-              label. The list is a SWITCHER, and a switcher with nowhere to switch to is the one that
-              earns nothing. Rule enforced: the current plan's name may appear as the crumb and as the
-              editable field; it may NOT additionally appear as a read-only label.
-
-              THE MULTI-PLAN CALL, argued rather than picked silently: the current plan STAYS in the
-              list at ≥2 plans. Dropping it would make the list a switcher only — but this list is
-              also where a plan is DELETED, and the current plan is the one most likely to be deleted
-              right after you look at it; and among five siblings the `current` marker is what tells
-              you where you are. It is also the shape the sibling project switcher already uses (its
-              row list includes the current project, highlighted), so the two breadcrumbs stay
-              consistent. At ≥2 the row is informative; at 1 it is an echo. Only the echo goes. */}
-          {plansHere.length > 1 && <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>}
-          {plansHere.length > 1 && plansHere.map((s) => {
-            const cur = s.id === siteId;
-            if (planDelArm === s.id) return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
-                {/* B1469872 — this used to say nothing about recoverability at all. It moves to this
-                    project's own "Recently deleted" below (never the whole-site 30-day bin, which
-                    only ever lists a project once EVERY plan in it is gone) and is never auto-purged
-                    while a sibling plan here stays live — restore it any time, or delete it forever
-                    from that same list. */}
-                <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Delete “${s.name || "Untitled plan"}”? It moves to this project's Recently deleted below — restore it any time.`}>→ Recently deleted “{s.name || "Untitled plan"}”?</span>
-                <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} onClick={() => { setPlanDelArm(null); handleDeletePlan(s.id); }}>Delete</button>
-                <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanDelArm(null)}>Cancel</button>
-              </div>
-            );
-            return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
-                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4, display: "inline-flex", verticalAlign: "-2px" }}><PadlockIcon size={11} /></span>}
-                      {s.name || "Untitled plan"}
-                    </span>
-                    {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                  </span>
-                </button>
-                {plansHere.length > 1 && (
-                  <button title="Delete this plan" aria-label={`Delete plan ${s.name || "Untitled plan"}`} onClick={(e) => { e.stopPropagation(); setPlanDelArm(s.id); }}
-                    style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                )}
-              </div>
-            );
-          })}
-          {/* B1469872 — this PROJECT's own plan trash: siblings soft-deleted from this still-live
-              group, which the whole-site "Recently deleted" bin (ProjectBreadcrumb) never lists —
-              that one only shows a project once EVERY plan in it is gone. Before this section
-              existed a plan deleted from here was invisible everywhere and, past 30 days, silently
-              hard-deleted with no restore ever having been offered (see storage.js's
-              purgeExpiredDeletedProjects header) — it is now exempt from that auto-purge for as
-              long as this group stays live, and restorable/purgeable only from right here. */}
-          {(deletedPlansHere.length > 0 || deletedFilesHere.length > 0) && (
-            <>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Recently deleted</div>
-              {deletedPlansHere.map((p) => {
-                if (planPurgeArm === p.id) return (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
-                    {/* B1767168 — this is a permanent, no-restore removal of the plan AND its elements
-                        (site_elements cascades) — say so plainly, never just "forever". */}
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete “${p.name}” and everything drawn on it? This can't be undone — there's no restoring it after this.`}>Permanently delete “{p.name}” and everything on it? No restore after this.</span>
-                    <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === p.id} onClick={() => handlePurgeDeletedPlan(p)}>Delete</button>
-                    <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
-                  </div>
-                );
-                return (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                    {/* B1482000 (follow-on to B1469872) — the name alone can't always tell two rows
-                        apart (two plans in one project can share a name, e.g. "Concept A PRINT"
-                        duplicated then both discarded), so every row also carries when it was
-                        deleted — same layout + relative-time phrasing ProjectBreadcrumb's own
-                        account-wide bin already uses ("4w ago") — and the list is already sorted
-                        newest-deleted-first. */}
-                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
-                    <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(p.deletedAt)}</span>
-                    <button title="Restore this plan" aria-label={`Restore plan ${p.name}`} disabled={deletedPlansBusy === p.id} onClick={() => handleRestoreDeletedPlan(p)}
-                      style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
-                    <button title="Delete this plan forever" aria-label={`Delete plan ${p.name} forever`} disabled={deletedPlansBusy === p.id} onClick={() => setPlanPurgeArm(p.id)}
-                      style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                  </div>
-                );
-              })}
-              {/* NEW-1 — deleted site-plan FILES for this project (the uploaded drawings), same row shape as the
-                  plans above; moved here from the Site page's All comps list, whose "Recently deleted site plans"
-                  section is gone. Restore puts the drawing back on the site exactly as the old list did. */}
-              {deletedFilesHere.map((f) => {
-                if (planPurgeArm === f.id) return (
-                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: `color-mix(in srgb, ${PAL.danger} 8%, transparent)` }}>
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete the site plan “${f.name}”? This can't be undone — there's no restoring it after this.`}>Permanently delete site plan “{f.name}”? No restore after this.</span>
-                    <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === f.id} onClick={() => handlePurgeDeletedFile(f)}>Delete</button>
-                    <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
-                  </div>
-                );
-                return (
-                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 2 }} data-testid="deleted-site-plan-file">
-                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${f.fileName || f.name}${f.page ? ` — page ${f.page}` : ""}`}>{f.name}</span>
-                    {/* The kind tag never shrinks: in the narrow menu the name truncates first, so a deleted FILE can never read as a deleted plan. */}
-                    <span style={{ flex: "none", fontSize: 11, color: PAL.disabled }}>site plan</span>
-                    {f.deletedAt ? <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(f.deletedAt)}</span> : null}
-                    <button title="Restore this site plan" aria-label={`Restore site plan ${f.name}`} disabled={deletedPlansBusy === f.id} onClick={() => handleRestoreDeletedFile(f)}
-                      style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
-                    <button title="Delete this site plan forever" aria-label={`Delete site plan ${f.name} forever`} disabled={deletedPlansBusy === f.id} onClick={() => setPlanPurgeArm(f.id)}
-                      style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = PAL.danger; e.currentTarget.style.background = `color-mix(in srgb, ${PAL.danger} 10%, transparent)`; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                  </div>
-                );
-              })}
-            </>
-          )}
-          <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button>
-            <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DuplicateIcon size={12} />Duplicate</span></button>
-          </div>
-          <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={saveNow}
-            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><SaveIcon /></span><span>Save now</span>
-          </button>
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
-            title="Restore an earlier automatically-saved version of this plan">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><HistoryIcon /></span><span>Version history…</span>
-          </button>
-          {/* B326417 — the per-plan view-only lock. Plan-scoped, so it belongs in the plan menu
-              (everything above this line is plan-scoped too; see the B286000 caption below).
-              Shown only for a SHARED plan you OWN: on a private plan there is nobody to lock out,
-              and on a teammate's plan the control would be a lie — RLS and the guard trigger both
-              refuse it. The row also states the current state rather than only offering the verb,
-              so a locked plan is visibly locked without opening anything. */}
-          {planShareState.canLock && (
-            <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
-              disabled={lockBusy} onClick={togglePlanLock}
-              title={planShareState.locked
-                ? "Teammates can view this plan but not change it. Click to let them edit again."
-                : "Teammates can edit this plan. Click to make it view-only for them."}>
-              <span aria-hidden style={{ flex: "none", display: "flex" }}><PadlockIcon open={!planShareState.locked} /></span>
-              <span>{planShareState.locked ? "Locked — teammates can view only" : "Lock to view-only for teammates"}</span>
-            </button>
-          )}
-          {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
-              is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
-              (plan name, plans in this site, New plan, Duplicate, Save now, Version history);
-              Storage is device-scoped, which is the same structural defect that made Smooth zoom
-              unfindable in here. Smooth zoom MOVED (it is a rendering preference, and the canvas
-              View menu already owns those — B286000). Storage did NOT, and the reason is measured
-              and on the record in `src/shared/CLAUDE.md`: `StoragePanel` is mounted from THIS menu
-              precisely because the header gear and `AuthPanel` land in the entry chunk every route
-              downloads — even a lazy stub there cost +0.8 KB on all four routes and breached the
-              Notes route's bundle ceiling in CI. So the honest fix for a device-scoped row inside a
-              plan-scoped menu is to SAY it is device-scoped, which costs one muted caption instead
-              of a bundle breach. If the gear ever stops being on the entry chunk, move it. */}
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 3px" }}>This device</div>
-          <button style={{ ...menuItem(false), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
-            title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><StorageIcon /></span><span>Storage on this device…</span>
-          </button>
-        </AnchoredMenu>
+        {/* NEW-1 (2026-11-04) — the plan menu, redrawn to the owner-approved mockup: see components/PlanMenu.jsx's header for the shape and
+            the rule that replaces B385042 / NEW-3 (the name appears as the crumb and as the current row — which is also the rename control). */}
+        <PlanMenu
+          open={planMenu}
+          onClose={() => setPlanMenu(false)}
+          anchorRef={planAnchor}
+          plans={plansHere}
+          currentId={siteId}
+          currentName={planLabel}
+          onOpenPlan={handleOpenSite}
+          onNewPlan={handleNewPlan}
+          onDuplicate={handleDuplicatePlan}
+          onVersionHistory={openVersionHistory}
+          onRename={renamePlanFromMenu}
+          onDeletePlan={handleDeletePlan}
+          lock={{ canLock: planShareState.canLock, locked: planShareState.locked, busy: lockBusy, onToggle: togglePlanLock }}
+          bin={{
+            plans: deletedPlansHere, files: deletedFilesHere, busyId: deletedPlansBusy,
+            onRestorePlan: handleRestoreDeletedPlan, onPurgePlan: handlePurgeDeletedPlan,
+            onRestoreFile: handleRestoreDeletedFile, onPurgeFile: handlePurgeDeletedFile,
+          }}
+        />
     </div>
   );
 
@@ -25645,7 +25490,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
               {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} /></Suspense>
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} viewPx={canvasBoxPx} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
@@ -30601,19 +30446,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           moved into the app-wide Keyboard Shortcuts page (shared/keyboard/shortcutsData.js's
           "site" section), reachable via "?" from anywhere, not just this workspace. */}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
-      {storageOpen && (
-        <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 420, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
-              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Storage</h2>
-              <button className="gbtn" onClick={() => setStorageOpen(false)} style={{ ...chip }}>Close ✕</button>
-            </div>
-            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted, padding: "18px 0" }}>Checking storage…</div>}>
-              <StoragePanel />
-            </Suspense>
-          </div>
-        </div>
-      )}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
@@ -32283,58 +32115,29 @@ function WallBinGlyph() {
     </svg>
   );
 }
-/* WallAddControl — the end of a wall row (NEW-1, owner-approved 2026-11-03): ONE named button for the likely next layer
-   ("+ Truck court" · "+ Trailer" · "+ Buffer" · "+ Walk" …, an accent outline) joined to a small ▾ holding the other layers the
-   wall may take under their FULL names. `opts` is `orderedAddOptions` — exactly the set `addOptions` allows, the first entry the
-   button. The ▾ list floats (AnchoredMenu: a portal at the body, so it never pushes the rows down and never clips in the panel's
-   scroll area); Escape and a press away close it. No ▾ when there is only one option; nothing at all after a Road. Module scope
-   on purpose (MODULE-SCOPE-COMPONENTS): it owns its open state. Pressing the button leaves it usable — the row re-renders with
-   the next layer's name and he can keep clicking. */
+/* WallAddControl — the end of a wall row (NEW-1 amendment of B2651024, owner 2026-11-04: "Put every option on the row as its own
+   icon, no ▾."): a small plus glyph (NOT a button) followed by ONE icon button per entry of `opts` (`orderedAddOptions`, exactly the
+   set `addOptions` allows, in that order, so the likely next layer is the leftmost icon). Each button is the layer's legend swatch —
+   the SAME fill as the strip piece (`fillFor`) — with `WallKindIcon` inside; no word on it, the full name is in its aria-label and
+   title ("Add car parking to the End wall (N)" / "Add car parking to this wall"). One press adds that layer through `onAdd` (the same
+   `addWallLayer` / `addLayerOnSide` path as before). Nothing at all when `opts` is empty (after a Road). No menu, no open state, so
+   it is a plain module-scope component (MODULE-SCOPE-COMPONENTS) and its buttons stay usable after every press. */
 function WallAddControl({ row, opts, onAdd, fillFor }) {
-  const [open, setOpen] = useState(false);
-  const moreRef = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useEffect(() => {
-    if (!open) return undefined;
-    // Escape closes the ▾ and NOTHING ELSE — the planner's own Escape (deselect the building, closing this panel) must not also fire.
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [open]);
-  useEffect(() => { if (open && opts.length < 2) setOpen(false); }, [open, opts.length]);
   if (!opts.length) return null;
-  const next = opts[0], rest = opts.slice(1);
   const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
-  // The layer's own icon in its legend swatch — the SAME fill as the strip piece (fillFor), the one icon set (WallKindIcon).
-  const chip = (kind, w = 18, h = 16) => (
-    <span aria-hidden="true" data-testid="wall-add-swatch" data-kind={kind} style={{ flex: "none", width: w, height: h, borderRadius: 3, background: fillFor(kind), display: "grid", placeItems: "center", boxShadow: kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
-      <WallKindIcon kind={kind} size={Math.round(Math.min(w, h) * 0.72)} />
-    </span>
-  );
-  const edge = "1px solid var(--accent)";
-  const btn = { height: CONTROL_H.sm, padding: 0, border: edge, background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, whiteSpace: "nowrap" };
   return (
-    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "stretch" }}>
-      <button type="button" data-testid="wall-add" data-kind={next.key} data-wall-add="1" aria-label={`Add ${next.label.toLowerCase()} to the ${wallName}`} title={`Add ${next.label.toLowerCase()} to this wall`}
-        style={{ ...btn, display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: "0 6px", borderRadius: rest.length ? `${RADIUS.sm}px 0 0 ${RADIUS.sm}px` : RADIUS.sm }}
-        onClick={() => { setOpen(false); onAdd(next.key); }}><span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1 }}>+</span>{chip(next.key)}</button>
-      {rest.length > 0 && (
-        <button ref={moreRef} type="button" data-testid="wall-add-more" data-wall-add="1" aria-label={`More layers for the ${row.badge} wall`} title="More layers" aria-haspopup="menu" aria-expanded={open}
-          style={{ ...btn, width: 20, fontSize: FONT_SIZE.micro, borderLeft: "none", borderRadius: `0 ${RADIUS.sm}px ${RADIUS.sm}px 0` }}
-          onClick={() => setOpen((o) => !o)}>▾</button>
-      )}
-      {rest.length > 0 && (
-        <AnchoredMenu open={open} onClose={close} anchorRef={moreRef} placement="below-right" gap={4} width={176}>
-          <div data-testid="wall-add-menu" data-wall-add="1" role="menu" style={{ display: "flex", flexDirection: "column" }}>
-            {rest.map((o) => (
-              <button key={o.key} type="button" role="menuitem" data-testid={`wall-add-${o.key}`} data-wall-add="1"
-                aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`}
-                style={{ height: 30, padding: "0 8px", border: "none", borderRadius: RADIUS.sm, background: "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, textAlign: "left", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: SPACE.sm }}
-                onClick={() => { setOpen(false); onAdd(o.key); }}>{chip(o.key)}<span>{o.label}</span></button>
-            ))}
-          </div>
-        </AnchoredMenu>
-      )}
+    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: ADD_GROUP.GAP }}>
+      <span aria-hidden="true" data-testid="wall-add-plus" style={{ flex: "none", width: ADD_GROUP.PLUS_W, textAlign: "center", fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1, color: "var(--accent-text, var(--accent))" }}>+</span>
+      {opts.map((o) => (
+        <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} data-kind={o.key} data-wall-add="1"
+          aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`} title={`Add ${o.label.toLowerCase()} to this wall`}
+          style={{ flex: "none", boxSizing: "border-box", width: ADD_GROUP.ICON, height: ADD_GROUP.ICON, padding: 0, display: "grid", placeItems: "center", cursor: "pointer",
+            border: "1px solid var(--accent)", borderRadius: RADIUS.sm, background: fillFor(o.key),
+            boxShadow: o.key === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}
+          onClick={() => onAdd(o.key)}>
+          <WallKindIcon kind={o.key} size={14} />
+        </button>
+      ))}
     </span>
   );
 }
@@ -32504,7 +32307,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                 <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
               {row.layers.length > 0 && (
-                <span data-testid="wall-strip" data-total={total} style={{ flex: "none", width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
+                <span data-testid="wall-strip" data-total={total} data-bar-w={geo.barW} data-grown={geo.barW > STRIP.FULL + 0.01 ? "1" : undefined} style={{ flex: "0 1 auto", minWidth: 0, width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
                   {row.layers.map((l, i) => {
                     const label = pieceLabel(l);
                     const w = geo.pieces[i].w;
@@ -32512,7 +32315,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
                     return (
                       <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
                         onClick={() => { if (sel) commitAndClose(); else { setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
-                        style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
+                        style={{ flex: "0 1 auto", minWidth: 0, width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
                           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
                           fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
                           boxShadow: sel ? "inset 0 0 0 2px var(--accent)" : (l.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>

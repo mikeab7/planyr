@@ -693,7 +693,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
             {cv.widget === "interactive" && !cv.failure && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Finish the quick check to continue.</div>}
             {(cv.widget === "error" || cv.failure) && (
               <div role="alert" data-testid="captcha-unavailable" style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>
-                {CAPTCHA_UNAVAILABLE_COPY}{" "}
+                {captchaBlocked ? BLOCKED_CHECK_COPY : CAPTCHA_UNAVAILABLE_COPY}{" "}
                 <button type="button" data-testid="captcha-retry" style={linkBtn} onClick={() => gate.retry()}>Try again</button>
               </div>
             )}
@@ -705,7 +705,6 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         >{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
         {mode === "signin" && (
           <>
-            {captchaBlocked && <div data-testid="captcha-blocked-note" style={{ fontSize: FONT_SIZE.label, color: PAL.ink, marginTop: 10, lineHeight: 1.45 }}>{BLOCKED_CHECK_COPY}</div>}
             <button type="button" data-testid="email-link-signin" disabled={busy} onClick={onEmailLink}
               style={{ ...btn(captchaBlocked), width: "100%", marginTop: 8, opacity: busy ? 0.6 : 1 }}>
               {busy ? "…" : "Email me a sign-in link"}

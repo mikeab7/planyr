@@ -7,7 +7,7 @@ import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import GradingController from "../../src/workspaces/site-planner/components/GradingController.jsx";
 import { GradingPanel, GradingCanvas } from "../../src/workspaces/site-planner/components/GradingPanels.jsx";
-import { layoutBuildingButtons, wallsFromQuad, RAMP_BTN_R } from "../../src/workspaces/site-planner/lib/buildingButtons.js";
+import { layoutBuildingButtons, buildingButtonWalls, RAMP_BTN_R, ROTATE_GRIP_OFFSET_PX } from "../../src/workspaces/site-planner/lib/buildingButtons.js";
 import { FEAT_CTRL_R, FEAT_CTRL_STROKE } from "../../src/workspaces/site-planner/lib/featureEditZoom.js";
 import { useGradeSurface } from "../../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { decodeGrid } from "../../src/workspaces/site-planner/lib/lercGrid.js";
@@ -15,6 +15,7 @@ import { lngLatToFeet } from "../../src/workspaces/site-planner/lib/mapLock.js";
 import { offsetPolygon } from "../../src/workspaces/site-planner/lib/parcelOffset.js";
 import { pointInRegions } from "../../src/workspaces/site-planner/lib/gradingLimit.js";
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
+import { dockSidesFor } from "../../src/workspaces/site-planner/lib/dockZones.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
 import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 // ROUND 5 (NEW-4) — the picture arms: the EXISTING contours the app's Leaflet layer would draw (traced here off the same
@@ -43,6 +44,7 @@ const ringOf = (e) => e.ring;
 const QS = new URLSearchParams(location.search);
 // one object for the whole session, like SitePlanner's memoised PAL (a fresh one per render would defeat GradingCanvas's memo)
 const HARNESS_PAL = { ink: "#1b1e26", accent: "#0e7a52", danger: "#c62828", paper: "#fff", panelBg: "#fff", panelLine: "#999" };
+const VIEW_PX = Object.freeze({ w: 1400, h: 1000 });   // the harness canvas box (CW × CH), one object like SitePlanner's `canvasBoxPx`
 function Harness({ data }) {
   const { dem, origin, ring, sb } = data;
   const [els, setEls] = useState(() => {
@@ -57,12 +59,14 @@ function Harness({ data }) {
       const hc = { x: host.cx + o.x, y: host.cy + o.y };
       return ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
         id: e.id, type: e.type, attachedTo: e.attachedTo, truckCourt: !!e.truckCourt, ring: rowRing(e).map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
+        // NEW-1 (2026-11-04): the building's real geometry — the label placer derives its edit buttons / grips from the element (SitePlanner passes `rawBuildings`)
+        ...(e.type === "building" ? { cx: e.cx + o.x, cy: e.cy + o.y, w: e.w, h: e.h, rot: e.rot, dock: QS.get("single") === "1" ? "single" : e.dock, dockAxis: e.dockAxis, dockSide: e.dockSide } : {}),
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
     }
     if (QS.get("none") === "1") return [];     // no building on the plan: the panel's empty state
     const one = [
-      { id: "b1", type: "building", ring: rect(bx, by, 520, 300) },
+      { id: "b1", type: "building", ring: rect(bx, by, 520, 300), cx: bx + 260, cy: by + 150, w: 520, h: 300, rot: 0, dock: QS.get("single") === "1" ? "single" : "cross", dockAxis: "x", dockSide: "bottom" },
       { id: "c1", type: "paving", truckCourt: true, attachedTo: "b1", ring: rect(bx, by + 300, 520, 130), dockStack: { x: bx + 260, y: by + 150 } },
       { id: "p1", type: "parking", attachedTo: "b1", ring: rect(bx, by - 62, 520, 62) },
       { id: "p2", type: "parking", attachedTo: "p1", ring: rect(bx, by - 124, 520, 62) },
@@ -77,7 +81,7 @@ function Harness({ data }) {
     // a second, smaller building well to the east, with its own court
     const x2 = bx + 900;
     return one.concat([
-      { id: "b2", type: "building", ring: rect(x2, by, 300, 200) },
+      { id: "b2", type: "building", ring: rect(x2, by, 300, 200), cx: x2 + 150, cy: by + 100, w: 300, h: 200, rot: 0, dock: "cross", dockAxis: "x", dockSide: "bottom" },
       { id: "c2", type: "paving", truckCourt: true, attachedTo: "b2", ring: rect(x2, by + 200, 300, 110), dockStack: { x: x2 + 150, y: by + 100 } },
     ]);
   });
@@ -200,6 +204,13 @@ function Harness({ data }) {
     // NEW-5 (2026-10-30): `sw250` / `sw50` — a 250-ft / 50-ft wide window on the building's south-west corner (the owner's two review scales), a little of
     // the building inside it and the court outside it, so both sides of the wall — tags in, buttons out — are in the picture
     if (zoom === "sw250" || zoom === "sw50") { const half = zoom === "sw250" ? 125 : 25, cx = Math.min(...bx), cy = Math.max(...by); return fitBox(cx - half * 0.7, cy - half * 1.1, cx + half * 1.3, cy + half * 0.7, 0); }
+    // NEW-1 (2026-11-04): `dockb` / `dockt` — centred on the middle of the building's bottom / top (dock) wall, `?span=` feet across (default 420):
+    // the owner's "building zoom" with the truck court, the wall-middle grip, the button row and the rotate grip all in one picture
+    if (zoom === "dockb" || zoom === "dockt") {
+      const span = +(qs.get("span") || 420), i = zoom === "dockb" ? [2, 3] : [0, 1];
+      const mx = (b[i[0]].x + b[i[1]].x) / 2, my = (b[i[0]].y + b[i[1]].y) / 2, hh = (span * CH) / CW / 2;
+      return fitBox(mx - span / 2, my - hh, mx + span / 2, my + hh, 0);
+    }
     if (zoom === "ne") { const cx = Math.max(...bx), cy = Math.min(...by); return fitBox(cx - 180, cy - 180, cx + 180, cy + 180, 0); }
     // ROUND 8 (NEW-3): the owner's view — the NW corner of the whole layout (the north car lot's west end) out to the limit
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
@@ -212,7 +223,7 @@ function Harness({ data }) {
   // PERF (NEW-1): a pan the way SitePlanner pans (B1440's anchor) — while the pointer is down the drawing is NOT re-emitted, one
   // group carries the translate (`panD`); the release folds the travel into the view in ONE commit (`panOff`).
   const [panD, setPanD] = useState(null);
-  const [panOff, setPanOff] = useState({ x: 0, y: 0 });
+  const [panOff, setPanOff] = useState({ x: +(qs.get("sx") || 0), y: +(qs.get("sy") || 0) });   // `?sx=` / `?sy=` — start the view this many px off-centre (a label near the map's edge)
   const ox = CW / 2 - (CW / 2 - frame.ox) * zoomMul + panOff.x, oy = CH / 2 - (CH / 2 - frame.oy) * zoomMul + panOff.y;
   window.__harnessPan = {
     start: () => setPanD({ x: 0, y: 0 }),
@@ -295,7 +306,7 @@ function Harness({ data }) {
                       {existingLabels.map((lb, i) => { const q = f2p(lb.pt); return <text key={"l" + i} data-existing-label={lb.level} data-label-key={lb.key} transform={`translate(${q.x} ${q.y}) rotate(${lb.deg})`} y={3.5} textAnchor="middle" fontSize={10} fontWeight={700} fill="#5B2E0D" stroke="#FFFFFF" strokeWidth={2.5} paintOrder="stroke" style={{ fontFamily: "ui-monospace, monospace" }}>{lb.text}</text>; })}
           </g>
         )}
-        {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} viewRect={viewRectFt} />}
+        {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} viewRect={viewRectFt} viewPx={VIEW_PX} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
         {/* NEW-2 / NEW-5: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME layout
             (lib/buildingButtons.js: every button OUTSIDE its wall, in one row; the grading corner tags are INSIDE the footprint) — on top of the
@@ -305,7 +316,9 @@ function Harness({ data }) {
           const q = e.ring.slice(0, 4).map((p) => f2p(p));
           // `?buttons=inside` is the KNOWN-BAD arm: the pre-fix shape, every button pushed to the INSIDE of its wall, where the corner tags are
           const flip = qs.get("buttons") === "inside";
-          const layout = layoutBuildingButtons(wallsFromQuad(q, ["top", "bottom"]).map((w) => (flip ? { ...w, out: { x: -w.out.x, y: -w.out.y } } : w)));
+          const wpx = Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y), hpx = Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y);
+          const dockSides = e.cx != null ? dockSidesFor(e).dockSides : ["top", "bottom"];
+          const layout = layoutBuildingButtons(buildingButtonWalls(q, dockSides, { wpx, hpx }).map((w) => (flip ? { ...w, out: { x: -w.out.x, y: -w.out.y } } : w)));
           const R = FEAT_CTRL_R, glyph = (k, pos, color, plus, r = R) => (
             <g key={k} data-harness-button={k}>
               <circle cx={pos.x} cy={pos.y} r={r} fill={color} stroke="#fff" strokeWidth={FEAT_CTRL_STROKE} />
@@ -321,7 +334,15 @@ function Harness({ data }) {
             } else if (id.startsWith("corner:")) out.push(glyph(id, en, "#7c3aed", true));
             else out.push(glyph(id, en, "#475569", true, RAMP_BTN_R));
           }
-          return <g data-harness-buttons="1">{out}</g>;
+          // the selection grips, drawn the way SitePlanner's handleNodes draws them: four wall-middle squares, four corner squares, the rotate grip on its stem
+          const cc = { x: (q[0].x + q[2].x) / 2, y: (q[0].y + q[2].y) / 2 };
+          const grips = [];
+          [[q[0], q[1]], [q[1], q[2]], [q[2], q[3]], [q[3], q[0]]].forEach(([a, b], i) => grips.push(<rect key={`eg${i}`} data-harness-handle={`edge${i}`} x={(a.x + b.x) / 2 - 4.5} y={(a.y + b.y) / 2 - 4.5} width={9} height={9} rx={2} fill="#fff" stroke="#2563eb" strokeWidth={1.5} />));
+          q.forEach((c, i) => grips.push(<rect key={`cg${i}`} data-harness-handle={`corner${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} fill="#fff" stroke="#2563eb" strokeWidth={1.5} />));
+          const tm = { x: (q[0].x + q[1].x) / 2, y: (q[0].y + q[1].y) / 2 }, ul = Math.hypot(tm.x - cc.x, tm.y - cc.y) || 1;
+          const rp = { x: tm.x + ((tm.x - cc.x) / ul) * ROTATE_GRIP_OFFSET_PX, y: tm.y + ((tm.y - cc.y) / ul) * ROTATE_GRIP_OFFSET_PX };
+          grips.push(<line key="rs" x1={tm.x} y1={tm.y} x2={rp.x} y2={rp.y} stroke="#2563eb" strokeWidth={1.25} />, <circle key="rg" data-harness-handle="rotate" cx={rp.x} cy={rp.y} r={6} fill="#fff" stroke="#2563eb" strokeWidth={1.5} />);
+          return <g data-harness-buttons="1">{out}{!flip && grips}</g>;
         })()}
         {limitEdit && Array.isArray(settings.grading.limitRing) && <polygon data-grading-limit-edit="1" points={settings.grading.limitRing.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#1d4ed8" strokeWidth="1.5" strokeDasharray="6 4" />}
         <polygon points={ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#0a0" strokeWidth="1.5" />

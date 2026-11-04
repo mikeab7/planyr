@@ -2,9 +2,11 @@
  * it asserted the DESIGNED sequence). Driven LIVE as the test account (`Verify: live`) on THROWAWAY sites (deleted and confirmed gone):
  * a REAL BUILD-UP on an end wall — sidewalk, parking, rows to eight, a buffer, more parking — reading, after EVERY click, each layer's
  * interval along the wall's outward normal from the stored plan (no overlap; the buffer stays outermost and moves out by exactly what
- * the field grew), the stored row + stall count against the pure carStalls, and the panel's own row count; the lead button + the ▾ for
- * each wall state vs an INDEPENDENT list of the sensible layers; the icon control (a plus + the layer's swatch, no word; aria-label
- * carries the full name); and that no Docks & walls surface says "Walk".
+ * the field grew), the stored row + stall count against the pure carStalls, and the panel's own row count; the icons on the row for
+ * each wall state vs an INDEPENDENT list of the sensible layers, then EVERY offered icon pressed on a rear, an end and a dock wall
+ * (NEW-1 amendment, 2026-11-04: every option is its own icon on the row, no ▾ — a plus glyph then one swatch+icon button per option, no
+ * word, the full name in aria-label / title); every row MEASURED one line with no icon clipped at desktop and phone width; and that no
+ * Docks & walls surface says "Walk".
  * KNOWN-GOOD ARM: VOID unless the wall list is dock - rear - ends - ends and the header reads "Building 1".
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=... [ROT=0|315] node ui-audit/verify-wall-parking-buildup-live.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -84,18 +86,35 @@ async function reopenBuildingPanel() {
 
 const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
 const rot2 = (x, y, deg) => { const a = (deg * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a); return { x: x * c - y * sn, y: x * sn + y * c }; };
-const lead = (row) => row.getByTestId("wall-add");
+const icons = (row) => row.getByTestId("wall-add-group").locator("button");
+const lead = (row) => icons(row).first();                                              // the leftmost icon = the likely next layer
+const iconKinds = async (row) => ((await row.getByTestId("wall-add-group").count()) ? icons(row).evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))) : []);
 // Close an open edit box — and ONLY that: an Escape with nothing open deselects the building (the panel under test goes with it).
 const closeBox = async () => { if (await T("wall-edit-box").count()) { await page.keyboard.press("Escape"); await sleep(250); } };
-const leadKind = async (row) => ((await lead(row).count()) ? lead(row).getAttribute("data-kind") : null);
-async function moreKinds(row) {
-  if (!(await row.getByTestId("wall-add-more").count())) return [];
-  await row.getByTestId("wall-add-more").click(); await sleep(250);
-  const ks = await page.getByTestId("wall-add-menu").getByRole("menuitem").evaluateAll((n) => n.map((x) => (x.getAttribute("data-testid") || "").replace("wall-add-", "")));
-  await page.keyboard.press("Escape"); await sleep(250);
-  return ks;
+const leadKind = async (row) => (await iconKinds(row))[0] ?? null;
+const moreKinds = async (row) => (await iconKinds(row)).slice(1);
+const offered = iconKinds;
+/* One row, MEASURED: one line, no overflow, no icon clipped / squeezed / overlapping, the strip clear of the icons. */
+const fitProblems = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="wall-row"]')].flatMap((r, ri) => {
+  const line = r.firstElementChild, lr = line.getBoundingClientRect(), g = r.querySelector('[data-testid="wall-add-group"]'), strip = r.querySelector('[data-testid="wall-strip"]'), out = [];
+  if (line.scrollWidth > line.clientWidth + 1) out.push(`row ${ri} overflows`);
+  if (lr.height > 30) out.push(`row ${ri} wrapped`);
+  if (g) {
+    const gr = g.getBoundingClientRect(), bs = [...g.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
+    if (gr.right > lr.right + 0.5) out.push(`row ${ri} add group past the row edge`);
+    bs.forEach((b, i) => { if (b.width < 21.5 || b.height < 21.5) out.push(`row ${ri} icon ${i} squeezed`); if (b.left < lr.left - 0.5 || b.right > lr.right + 0.5) out.push(`row ${ri} icon ${i} clipped`); if (i && b.left < bs[i - 1].right - 0.5) out.push(`row ${ri} icon ${i} overlaps`); if (Math.abs(b.top - bs[0].top) > 1) out.push(`row ${ri} icon ${i} on another line`); });
+    if (strip && strip.getBoundingClientRect().right > gr.left + 0.5) out.push(`row ${ri} strip runs into the icons`);
+    if (strip && strip.getBoundingClientRect().width < Number(strip.dataset.barW) - 0.5 && !strip.dataset.grown) out.push(`row ${ri} strip squeezed from its planned ${Math.round(Number(strip.dataset.barW))}`);
+  }
+  return out;
+}));
+async function fitAtBothWidths(label, tag) {
+  const wide = await fitProblems();
+  await page.setViewportSize({ width: 390, height: 900 }); await sleep(600);
+  const narrow = (await T("wall-rows").count()) ? await fitProblems() : ["wall rows missing at phone width"];
+  await page.setViewportSize({ width: 1440, height: 900 }); await sleep(600);
+  ok(`[${tag}] ${label}: every row one line, no icon clipped — desktop and phone, measured`, wide.length === 0 && narrow.length === 0, JSON.stringify({ wide, narrow }));
 }
-const offered = async (row) => { const l = await leadKind(row); return l ? [l, ...(await moreKinds(row))] : []; };
 async function wallLayers(side) {
   const all = await els(), b = all.find((e) => e.id === "bz1");
   const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx, face = (isH ? b.h : b.w) / 2, out = [];
@@ -140,9 +159,10 @@ try {
     const dock = rowByRole("dock").first(), rear = rowByRole("rear").first(), end0 = rowByRole("ends").nth(0), end1 = rowByRole("ends").nth(1);
     const side0 = (await end0.getAttribute("data-sides")).split(",")[0];
     // ---- NEW-2: icons, not words — before anything is added
-    { const b = lead(end0);
-      ok(`[${tag}] the add control is a plus and the layer's own swatch, no word`, (await b.innerText()).replace(/\s/g, "") === "+" && (await b.getByTestId("wall-add-swatch").getAttribute("data-kind")) === "sidewalk");
-      ok(`[${tag}] the full name is in aria-label and title`, /^Add sidewalk to the End wall/.test(await b.getAttribute("aria-label")) && (await b.getAttribute("title")) === "Add sidewalk to this wall", await b.getAttribute("aria-label")); }
+    { const ks = await iconKinds(end0), b = lead(end0);
+      ok(`[${tag}] an empty end wall: a plus glyph (not a button) then five icons — sidewalk · parking · buffer · road · trailer, each a swatch + icon with no word`, JSON.stringify(ks) === '["sidewalk","parking","buffer","road","trailer"]' && (await end0.getByTestId("wall-add-plus").evaluate((n) => n.tagName)) !== "BUTTON" && (await Promise.all(ks.map(async (k) => (await end0.getByTestId(`wall-add-${k}`).innerText()).trim() === "" && (await end0.getByTestId(`wall-add-${k}`).locator("svg").count()) > 0))).every(Boolean), JSON.stringify(ks));
+      ok(`[${tag}] the full name is in aria-label and title`, /^Add sidewalk to the End wall/.test(await b.getAttribute("aria-label")) && (await b.getAttribute("title")) === "Add sidewalk to this wall" && /^Add car parking to the End wall/.test(await end0.getByTestId("wall-add-parking").getAttribute("aria-label")) && (await end0.getByTestId("wall-add-parking").getAttribute("title")) === "Add car parking to this wall", await b.getAttribute("aria-label"));
+      ok(`[${tag}] no ▾ and no menu anywhere on any wall row`, (await T("wall-add-more").count()) === 0 && (await T("wall-add-menu").count()) === 0 && (await page.locator("[data-wall-add][aria-haspopup]").count()) === 0); }
     // ---- the REAL BUILD-UP on end wall 0
     await addWallLayer(page, end0, "sidewalk");
     ok(`[${tag}] after the sidewalk the lead is parking`, (await leadKind(end0)) === "parking");
@@ -160,7 +180,7 @@ try {
     ok(`[${tag}] the lead adds ONE row per click up to eight (stored + panel agree, no overlap, Rows box opens ready)`, good, detail);
     await addWallLayer(page, end0, "buffer"); await sleep(500);
     let ls = await wallLayers(side0); const buf0 = ls.find((l) => l.buffer), parkHi0 = Math.max(...ls.filter((l) => l.type === "parking").map((l) => l.hi));
-    ok(`[${tag}] buffer added beyond the parking; the lead moves on to Road and parking waits in the ▾`, overlapFree(ls) && flushOutside(ls) && (await leadKind(end0)) === "road" && (await moreKinds(end0)).includes("parking"));
+    ok(`[${tag}] buffer added beyond the parking; the lead moves on to Road and parking waits further along the icons`, overlapFree(ls) && flushOutside(ls) && (await leadKind(end0)) === "road" && (await moreKinds(end0)).includes("parking"));
     await addWallLayer(page, end0, "parking"); await sleep(600);
     ls = await wallLayers(side0); f = await facts(side0);
     const buf1 = ls.find((l) => l.buffer), parkHi1 = Math.max(...ls.filter((l) => l.type === "parking").map((l) => l.hi));
@@ -185,6 +205,26 @@ try {
       const have = await row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
       const got = await offered(row), want = SENSIBLE(have);
       ok(`[${tag}] state "${name}" [${have.join(" > ") || "empty"}] offers ${JSON.stringify(got)}`, JSON.stringify(got.slice().sort()) === JSON.stringify(want.slice().sort()) && overlapFree(await wallLayers(sideE1)));
+      await fitAtBothWidths(`state "${name}"`, tag);
+    };
+    // EVERY offered icon, pressed by a real click on a wall: it changes the wall (a new layer, or one more parking row), never overlaps; a road ends it
+    const pressAll = async (name, row, side) => {
+      const pressed = []; let good = true, detail = "";
+      for (let guard = 0; guard < 12; guard++) {
+        const left = (await offered(row)).filter((k) => !pressed.includes(k));
+        if (!left.length) break;
+        const k = left.find((x) => x !== "road") ?? "road";
+        pressed.push(k);
+        const keyOf = async () => JSON.stringify({ k: await row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))), r: await panelRows(row) });
+        const before = await keyOf();
+        await row.getByTestId(`wall-add-${k}`).click();
+        const changed = await waitFor(async () => (await keyOf()) !== before, 6000);
+        if (side && !overlapFree(await wallLayers(side))) { good = false; detail = `overlap after ${k}`; }
+        if (!changed) { good = false; detail = `${k} changed nothing`; break; }
+        await closeBox();
+      }
+      ok(`[${tag}] ${name}: every offered icon works (${pressed.join(", ")}) and nothing is offered after a road`, good && pressed.length >= 3 && (await offered(row)).length === 0, detail || JSON.stringify(await offered(row)));
+      await fitAtBothWidths(`${name} after pressing every icon`, tag);
     };
     await stateOffer("empty", end1, []);
     await stateOffer("sidewalk", end1, ["sidewalk"]);
@@ -197,16 +237,15 @@ try {
       ok(`[${tag}] dock wall [${have.join(" > ") || "empty"}] leads with ${want}`, got[0] === want && JSON.stringify(await dock.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))) === JSON.stringify(have), JSON.stringify(got));
       await lead(dock).click(); await sleep(400);
     }
+    await pressAll("end wall", end0, side0);
+    await pressAll("rear wall", rear, sideR);
+    await pressAll("dock wall", dock, null);
     // ---- NEW-3: no Walk anywhere in Docks & walls
     const text = await page.evaluate(() => { const h = document.querySelector('[data-testid="building-header"]'); let n = h; for (let i = 0; i < 6 && n && !n.querySelector('[data-testid="wall-legend"]'); i++) n = n.parentElement; return n ? n.innerText : ""; });
     const labels = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="wall-"]')].map((n) => (n.getAttribute("aria-label") || "") + " " + (n.getAttribute("title") || "")).join(" | "));
     ok(`[${tag}] no Docks & walls surface says "Walk"`, !/\bWalk\b/.test(text) && !/\bWalk\b/.test(labels) && /Sidewalk/.test(text));
-    // ---- one line at desktop and phone width
-    for (const [label, w] of [["desktop", 1440], ["phone", 390]]) {
-      await page.setViewportSize({ width: w, height: 900 }); await sleep(500);
-      const m = await page.evaluate(() => [...document.querySelectorAll('[data-testid="wall-row"]')].map((r) => { const line = r.firstElementChild, add = r.querySelector('[data-testid="wall-add-group"]'); const lr = line.getBoundingClientRect(), ar = add && add.getBoundingClientRect(); return { h: Math.round(lr.height), inside: ar ? ar.right <= lr.right + 0.5 : true }; }));
-      ok(`[${tag}] every row stays one line and the control fits at ${label} width`, m.every((r) => r.h <= 34 && r.inside), JSON.stringify(m));
-    }
+    // ---- one line at desktop and phone width, with the wall rows in their final state
+    await fitAtBothWidths("final state", tag);
     await page.setViewportSize({ width: 1440, height: 900 });
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/wall-parking-buildup-${tag}.png` }).catch(() => {});
   }

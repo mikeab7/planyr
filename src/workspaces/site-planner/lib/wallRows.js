@@ -74,9 +74,15 @@ export function bumpSummary(n, along, proj) {
 /* ------------------------------------------------------------------ strip (Building panel v3) */
 
 /** Every wall is ONE strip: a bar of pieces, building at the left, layers outward left → right. All
- *  widths are layout guidance in CSS px (never shown to the user). FULL was 156 until the named add button (NEW-1, 2026-11-03)
- *  took its place at the end of the row: head 58 + strip + the widest button ("+ Parking ▾") must fit the 290-wide panel (and the ~266-wide phone sheet) on ONE line. */
-export const STRIP = { FULL: 118, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
+ *  widths are layout guidance in CSS px (never shown to the user). FULL was 156, then 118 (the named add button, 2026-11-03), and is
+ *  66 since every add option became its own 22-wide icon on the row (NEW-1, 2026-11-04): head 58 + two 6-gaps + strip + the widest
+ *  add group (a plus + FIVE icons = 130) must fit the ~266-wide phone sheet (the 290-wide desktop panel has room to spare) on ONE
+ *  line — 58 + 12 + 66 + 130 = 266. FLOOR came down with it (48 → 32) so the shared scale stays proportional below the deepest wall. */
+export const STRIP = { FULL: 66, FLOOR: 32, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
+/** The add group at the end of a wall row (NEW-1, 2026-11-04): a plus glyph, then one icon button per offered layer. Widths in CSS px,
+ *  layout guidance only; the component and the fit tests read these, so there is one number. */
+export const ADD_GROUP = { PLUS_W: 10, ICON: 22, GAP: 2, HEAD: 58, ROW_GAP: 6, PHONE_PANEL: 266 };
+export const addGroupWidth = (n) => (n > 0 ? ADD_GROUP.PLUS_W + n * ADD_GROUP.ICON + n * ADD_GROUP.GAP : 0);
 /** Legend / kind order. */
 export const KIND_ORDER = ["court", "trailer", "buffer", "sidewalk", "parking", "road"];
 

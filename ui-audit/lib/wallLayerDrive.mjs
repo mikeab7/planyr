@@ -18,9 +18,7 @@ export const alongOf = (host, side, k) => {
 };
 
 export async function addWallLayer(page, row, key, settleMs = 450) {
-  const btn = row.getByTestId("wall-add");
-  if ((await btn.getAttribute("data-kind")) === key) await btn.click();
-  else { await row.getByTestId("wall-add-more").click(); await page.getByTestId(`wall-add-${key}`).click(); }
+  await row.getByTestId(`wall-add-${key}`).click();   // every option is its own icon on the row (no ▾)
   await new Promise((r) => setTimeout(r, settleMs));
 }
 

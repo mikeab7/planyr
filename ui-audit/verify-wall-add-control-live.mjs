@@ -2,9 +2,10 @@
  * Docks & walls: the add control names the next layer; the edit box is one line with no length; every layer shortens by its HANDLE.
  * Two THROWAWAY sites (one building, docks S; rot 0 and rot 315) are seeded through the app's own cloud-cache path and deleted
  * (and confirmed gone) at the end. Through the real panel:
- *   dock wall  — "+ Truck court" → "+ Trailer" → "+ Buffer" by one click each (the new layer's box opens each time); the ▾ is a
- *                FLOATING portal that does not move the rows, closes on Escape and on a press away, and adds a Road;
- *   end wall   — "+ Walk" → "+ Parking" → "+ Buffer";
+ *   dock wall  — the leftmost icon is the next layer (court → trailer → buffer), one click each (the new layer's box opens each time); every
+ *                other option is its OWN icon on the row (NEW-1 amendment 2026-11-04: no ▾ and no menu), full name in aria-label / title,
+ *                nothing floats or moves; a Road by its icon, then nothing is offered;
+ *   end wall   — sidewalk → parking → buffer;
  *   edit box   — trailer with one row is ONE line (Rows + Depth, "Depth" not "Row 1"); two rows show Row 1 · Row 2 · Aisle on a
  *                second line; NO Length / Align / Full length on any wall;
  *   map        — the selected court's own Properties panel still has its Length;
@@ -43,9 +44,11 @@ const els = async () => (await model())?.els || [];
 const bldg = async () => (await els()).find((e) => e.id === "bz1");
 const T = (id) => page.getByTestId(id);
 const rowByRole = (role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const named = (row) => row.getByTestId("wall-add");
-// NEW-2 (2026-11-04): the lead button is a plus + the layer's icon, no word — read its kind (data-kind) and spell the old words from it.
-const KIND_WORD = { court: "Truck court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Walk", parking: "Parking", road: "Road" };
+const icons = (row) => row.getByTestId("wall-add-group").locator("button");
+const named = (row) => icons(row).first();                                    // the leftmost icon = the likely next layer
+const iconKinds = async (row) => ((await row.getByTestId("wall-add-group").count()) ? icons(row).evaluateAll((n) => n.map((x) => x.getAttribute("data-kind"))) : []);
+// every option is its own icon, no word — read the leftmost one's kind (data-kind) and spell the old words from it.
+const KIND_WORD = { court: "Truck court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Sidewalk", parking: "Parking", road: "Road" };
 const nameText = async (row) => "+ " + (KIND_WORD[await named(row).getAttribute("data-kind")] || "?");
 const kinds = (row) => row.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")));
 async function waitFor(fn, ms = 10000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) return v; await sleep(150); } }
@@ -97,7 +100,14 @@ const measureRows = () => page.evaluate(() => {
   const rows = [...document.querySelectorAll('[data-testid="wall-row"]')].map((r) => {
     const line = r.firstElementChild, add = r.querySelector('[data-testid="wall-add-group"]'), strip = r.querySelector('[data-testid="wall-strip"]');
     const lr = line.getBoundingClientRect(), ar = add ? add.getBoundingClientRect() : null;
-    return { h: Math.round(lr.height), inside: ar ? ar.right <= lr.right + 0.5 : true, stripW: strip ? Math.round(strip.getBoundingClientRect().width) : 0, label: add ? add.textContent : "" };
+    const bs = add ? [...add.querySelectorAll("button")].map((b) => b.getBoundingClientRect()) : [];
+    // MEASURED, not eyeballed: one line, no overflow, no icon clipped / squeezed / overlapping, the strip clear of the icons
+    const bad = [];
+    if (line.scrollWidth > line.clientWidth + 1) bad.push("row overflows");
+    bs.forEach((b, i) => { if (b.width < 21.5 || b.height < 21.5) bad.push(`icon ${i} squeezed`); if (b.left < lr.left - 0.5 || b.right > lr.right + 0.5) bad.push(`icon ${i} clipped`); if (i && b.left < bs[i - 1].right - 0.5) bad.push(`icon ${i} overlaps`); if (Math.abs(b.top - bs[0].top) > 1) bad.push(`icon ${i} on another line`); });
+    if (strip && ar && strip.getBoundingClientRect().right > ar.left + 0.5) bad.push("strip runs into the icons");
+    if (strip && strip.getBoundingClientRect().width < Number(strip.dataset.barW) - 0.5 && !strip.dataset.grown) bad.push("strip squeezed from its planned width");
+    return { h: Math.round(lr.height), inside: ar ? ar.right <= lr.right + 0.5 : true, stripW: strip ? Math.round(strip.getBoundingClientRect().width) : 0, label: bad.join("; "), bad: bad.length };
   });
   return rows;
 });
@@ -124,15 +134,23 @@ try {
 
   for (const [tag, rot] of ROTS) {
     console.log(`\n=== rot ${rot} ===`);
-    await openScenario(tag);
+    // The seed is a local cache write; the app's own cloud load can drop it before the plan opens — reseed and retry (as verify-wall-parking-buildup-live).
+    for (let attempt = 1; ; attempt++) {
+      try { await openScenario(tag); break; }
+      catch (e) {
+        if (attempt >= 4) throw e;
+        console.log(`(startup attempt ${attempt} lost the seed race: ${e.message.split("\n")[0]} — reseeding)`);
+        await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
+      }
+    }
     const roles = await page.locator('[data-testid="wall-row"]').evaluateAll((n) => n.map((r) => r.getAttribute("data-role")));
     ok(`[${tag}] known-good: the wall list holds dock · rear · ends · ends`, JSON.stringify(roles) === JSON.stringify(["dock", "rear", "ends", "ends"]), JSON.stringify(roles));
     const dock = rowByRole("dock").first(), rear = rowByRole("rear"), ends = rowByRole("ends");
     const side = "bottom";
 
     // ---- dock wall: the button names the next layer; one click each
-    ok(`[${tag}] an empty dock wall's button reads "+ Truck court"`, (await nameText(dock)) === "+ Truck court", await nameText(dock));
-    ok(`[${tag}] one option ⇒ no ▾`, (await dock.getByTestId("wall-add-more").count()) === 0);
+    ok(`[${tag}] an empty dock wall offers ONE icon, the truck court, after a plus glyph that is not a button`, JSON.stringify(await iconKinds(dock)) === '["court"]' && (await dock.getByTestId("wall-add-plus").evaluate((n) => n.tagName)) !== "BUTTON", JSON.stringify(await iconKinds(dock)));
+    ok(`[${tag}] no ▾ anywhere on any wall row`, (await T("wall-add-more").count()) === 0 && (await T("wall-add-menu").count()) === 0 && (await page.locator("[data-wall-add][aria-haspopup]").count()) === 0);
     await named(dock).click(); await sleep(450);
     ok(`[${tag}] the new court's box opens; the button now reads "+ Trailer"`, (await T("wall-edit-box").getAttribute("data-kind")) === "court" && (await nameText(dock)) === "+ Trailer");
     await named(dock).click(); await sleep(450);
@@ -150,23 +168,24 @@ try {
       await page.keyboard.press("Escape");
     }
     await named(dock).click(); await sleep(450);
-    ok(`[${tag}] the button stays usable: court · trailer · buffer after three clicks, now "+ Walk"`, JSON.stringify(await kinds(dock)) === '["court","trailer","buffer"]' && (await nameText(dock)) === "+ Walk", JSON.stringify(await kinds(dock)));
+    ok(`[${tag}] the icon stays usable: court · trailer · buffer after three clicks, now "+ Sidewalk"`, JSON.stringify(await kinds(dock)) === '["court","trailer","buffer"]' && (await nameText(dock)) === "+ Sidewalk", JSON.stringify(await kinds(dock)));
 
-    // ---- the ▾: floats, does not push rows, closes on Escape / press away, adds a Road
+    // ---- every other option is its own icon ON THE ROW: full names, nothing floats, nothing moves, a Road ends it
     const topBefore = (await rear.boundingBox()).y;
-    await dock.getByTestId("wall-add-more").click(); await sleep(250);
-    const menu = T("wall-add-menu");
-    ok(`[${tag}] the ▾ opens a menu holding Road · Trailer parking · Landscape buffer`, JSON.stringify(await menu.getByRole("menuitem").allInnerTexts()) === '["Road","Trailer parking","Landscape buffer"]', JSON.stringify(await menu.getByRole("menuitem").allInnerTexts()));
-    ok(`[${tag}] the rows below did not move`, (await rear.boundingBox()).y === topBefore);
-    const where = await menu.evaluate((el) => { const p = el.closest(".menu") || el.parentElement; return { pos: getComputedStyle(p).position, body: p.parentElement === document.body }; });
-    ok(`[${tag}] the menu is a fixed portal at the page root (it cannot clip inside the panel's scroll area)`, where.pos === "fixed" && where.body, JSON.stringify(where));
-    await page.keyboard.press("Escape"); await sleep(200);
-    ok(`[${tag}] Escape closes the ▾`, (await menu.count()) === 0);
-    await dock.getByTestId("wall-add-more").click(); await sleep(200);
-    await T("building-header").click({ force: true }); await sleep(250);
-    ok(`[${tag}] a press away closes the ▾`, (await menu.count()) === 0);
+    const offeredNow = await iconKinds(dock);
+    ok(`[${tag}] the dock wall offers sidewalk · road · trailer · buffer as four icons on the row`, JSON.stringify(offeredNow) === '["sidewalk","road","trailer","buffer"]', JSON.stringify(offeredNow));
+    const FULL_NAME = { sidewalk: "sidewalk", road: "road", trailer: "trailer parking", buffer: "landscape buffer" };
+    let named_ok = true;
+    for (const k of offeredNow) {
+      const b = dock.getByTestId(`wall-add-${k}`);
+      const al = (await b.getAttribute("aria-label")) || "", ti = (await b.getAttribute("title")) || "", txt = (await b.innerText()).trim();
+      if (!al.startsWith(`Add ${FULL_NAME[k]} to the Dock wall (`) || ti !== `Add ${FULL_NAME[k]} to this wall` || txt !== "") named_ok = false;
+    }
+    ok(`[${tag}] each icon carries the full name in aria-label and title and no word`, named_ok);
+    await dock.getByTestId("wall-add-trailer").hover(); await sleep(200);
+    ok(`[${tag}] hovering an icon opens nothing and the rows below did not move`, (await rear.boundingBox()).y === topBefore && (await T("wall-add-menu").count()) === 0);
     await addWallLayer(page, dock, "road");
-    ok(`[${tag}] Road added through the ▾; nothing is offered after it`, JSON.stringify(await kinds(dock)) === '["court","trailer","buffer","road"]' && (await named(dock).count()) === 0, JSON.stringify(await kinds(dock)));
+    ok(`[${tag}] Road added by its own icon; nothing is offered after it (no plus, no icons)`, JSON.stringify(await kinds(dock)) === '["court","trailer","buffer","road"]' && (await dock.getByTestId("wall-add-group").count()) === 0 && (await dock.getByTestId("wall-add-plus").count()) === 0, JSON.stringify(await kinds(dock)));
 
     // ---- end wall: Walk, Parking, Buffer by the named button; then the rest of the chain for the handle checks
     const end0 = ends.nth(0), end1 = ends.nth(1);
@@ -175,7 +194,7 @@ try {
     for (let i = 0; i < 2; i++) { nameSeq.push(await nameText(end0)); await named(end0).click(); await sleep(450); }
     nameSeq.push(await nameText(end0));                                                       // parking leads until a layer sits beyond it (NEW-1, 2026-11-04)
     await addWallLayer(page, end0, "buffer");
-    ok(`[${tag}] an end wall offers sidewalk, then parking, then parking again (more rows); the buffer is in the ▾`, JSON.stringify(nameSeq) === '["+ Walk","+ Parking","+ Parking"]' && JSON.stringify(await kinds(end0)) === '["sidewalk","parking","buffer"]', JSON.stringify(nameSeq));
+    ok(`[${tag}] an end wall offers sidewalk, then parking, then parking again (more rows); the buffer is its own icon`, JSON.stringify(nameSeq) === '["+ Sidewalk","+ Parking","+ Parking"]' && JSON.stringify(await kinds(end0)) === '["sidewalk","parking","buffer"]', JSON.stringify(nameSeq));
     await addWallLayer(page, end0, "trailer"); await addWallLayer(page, end0, "road");
     for (const k of ["sidewalk", "parking", "trailer", "buffer", "road"]) await addWallLayer(page, rear, k);
     await page.keyboard.press("Escape");
@@ -198,11 +217,11 @@ try {
     // ---- one line per row, at the desktop width and a phone width
     {
       const wide = await measureRows();
-      ok(`[${tag}] every row is ONE line with its button inside it (desktop); the deepest strip keeps its width`, wide.every((r) => r.h < 36 && r.inside) && Math.max(...wide.map((r) => r.stripW)) >= 118, JSON.stringify(wide.map((r) => [r.h, r.inside, r.stripW])));
+      ok(`[${tag}] every row is ONE line with its icons inside it, none clipped or squeezed (desktop, measured); the deepest strip keeps its width`, wide.every((r) => r.h < 36 && r.inside && !r.bad) && Math.max(...wide.map((r) => r.stripW)) >= 66, JSON.stringify(wide.map((r) => [r.h, r.inside, r.stripW, r.label])));
       await page.setViewportSize({ width: 390, height: 844 }); await sleep(700);
       if (await T("wall-rows").count()) {
         const narrow = await measureRows();
-        ok(`[${tag}] ...and at a phone width`, narrow.every((r) => r.h < 36 && r.inside), JSON.stringify(narrow.map((r) => [r.h, r.inside, r.label])));
+        ok(`[${tag}] ...and at a phone width`, narrow.every((r) => r.h < 36 && r.inside && !r.bad), JSON.stringify(narrow.map((r) => [r.h, r.inside, r.label])));
       } else ok(`[${tag}] phone width: the panel closed on resize (not measured)`, true);
       await page.setViewportSize({ width: 1440, height: 900 }); await sleep(700);
       if (!(await T("wall-rows").count())) await reopenBuildingPanel();

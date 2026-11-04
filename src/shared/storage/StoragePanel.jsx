@@ -5,8 +5,13 @@
  * the mistake that mis-diagnosed the B1427 crisis — a combined "4 MB of 10 GB" reads as empty
  * while the store that matters is nearly full.
  *
- * Lazily loaded from both hosts (the account Settings tab and the signed-out ⚙ popover), so its
- * census code and its byte formatting never ride the boot bundle.
+ * ⛔ RETIRED FROM THE UI (NEW-1, 2026-11-04, owner decision): its only door was the Site Planner's plan menu row "Storage on
+ * this device…", and that row — with the dialog mount and the lazy import in `SitePlanner.jsx` — is gone, so NOTHING MOUNTS
+ * THIS COMPONENT NOW. It is kept (unmounted) on purpose and for one stated reason: `test/perfRecorder.test.js` guards that the
+ * stored "that felt slow" recordings are surfaced and clearable here ("so the class cannot grow unseen"), and deleting the file
+ * would delete that guarantee without a decision about it. Whoever next touches that guard: either re-home the recordings list
+ * and the Clear button somewhere reachable, or retire both together — do not mount this back by accident. The automatic
+ * room-making (`makeRoomForPlanStore`, `planStore`) and the census modules it read (`storageCensus`, `storageReclaim`) are unchanged.
  *
  * ⛔ IMPORTS ONLY FROM `shared/` — never from a workspace. This panel is chrome on every route,
  * so a module it shares with the planner's boot path gets hoisted into a common chunk: the first

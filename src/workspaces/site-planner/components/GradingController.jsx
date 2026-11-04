@@ -468,7 +468,10 @@ export default function GradingController({ input, onModel }) {
         // NEW-2 (2026-10-30): the pad's four corners + whether this building is the SELECTED one (its edit buttons are on screen), so the
         // canvas can slide a corner tag clear of them (lib/padCornerTag.js)
         quad: cs, selected: selBuildingId === id,
-        flagDot: F.flag ? { pt: F.flag.centroid, text: `${F.flag.over} ft ${F.flag.place || "past the line"}` } : null,   // NEW-1: the fence is the property line ± N ft, not the setback
+        // NEW-1 (2026-11-04): the real building element (cx, cy, w, h, rot, dock…) — the label placer (lib/spotLabelPlacement) derives every edit button and grip the planner can
+        // draw for it from this, so no court / lot label is drawn under one
+        ctrl: (inRef.current.rawBuildings && inRef.current.rawBuildings.get(id)) || null,
+        flagDot: F.flag ? { pt: F.flag.centroid, text: `${F.flag.over} ft ${F.flag.place || "past the line"}` } : null,   // B2655792: the fence is the property line ± N ft, not the setback
       });
     }
     return out;

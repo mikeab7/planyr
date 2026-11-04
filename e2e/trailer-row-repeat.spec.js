@@ -92,11 +92,10 @@ for (const deg of [0, 315]) {
     expect(a1.centre).toBeCloseTo(-(fullLen - a1.len) / 2, 0);    // the start end held, the far end pulled in
     await reopenBuildingPanel(page, host);
 
-    // the named button is Buffer now; a second trailer row is in the ▾ list under its full name
-    await expect(dock.getByTestId("wall-add")).toHaveAttribute("data-kind", "buffer");
-    await dock.getByTestId("wall-add-more").click();
-    await expect(page.getByTestId("wall-add-trailer")).toContainText("Trailer parking");
-    await page.getByTestId("wall-add-trailer").click();
+    // the leftmost icon is Buffer now; a second trailer row is its own icon on the row, named in full
+    await expect(dock.getByTestId("wall-add-group").locator("button").first()).toHaveAttribute("data-kind", "buffer");
+    await expect(dock.getByTestId("wall-add-trailer")).toHaveAttribute("aria-label", /^Add trailer parking to the Dock wall/);
+    await dock.getByTestId("wall-add-trailer").click();
     await addLayer(dock, "buffer");
     await expect(dock.getByTestId("wall-piece")).toHaveCount(4);
     expect(await dock.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))).toEqual(["court", "trailer", "trailer", "buffer"]);
