@@ -24,6 +24,7 @@
  * The surface itself is NOT built here: it is SitePlanner's `gradeSurface` (the B826 engine with the
  * grading model on), passed in. Cards, picture and earthwork rows therefore cannot disagree. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as regrade from "../lib/regradeProgress.js";
 import { buildProposedSurfaceSteps, contourLatticeSteps } from "../lib/proposedSurface.js";
 import {
   assemblyIds, cardEarthwork, scopeIds, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
@@ -237,8 +238,11 @@ export default function GradingController({ input, onModel }) {
         // a drag is in flight: the ground under the building is still moving — wait for the release
         for (let k = 0; k < 60 && inRef.current.isDragging && inRef.current.isDragging(); k++) { await sleep(150); if (stale()) return; }
         setSolvingId(b.id);
+        // NEW-1 (the "Regrading…" banner): the floor search is part of a regrade; it is many surface builds, so its bar is indeterminate
+        const rgTok = regrade.begin("ffe"); regrade.progress("ffe", rgTok, null);
         let r = null, err = null;
         try { r = await solveAuto(b.id, my); } catch (e) { err = String((e && e.message) || e); }
+        regrade.end("ffe", rgTok, { ok: !stale() && !err });
         if (stale() || (r && r.stale)) return;
         into.set(b.id, r && Number.isFinite(r.ffe) ? { sig, ffe: r.ffe, info: r } : { sig, failed: true, error: err });
         bump();
@@ -521,16 +525,20 @@ export default function GradingController({ input, onModel }) {
   const cSeq = useRef(0);
   const wantContours = cfg.layers.contours && !!grid && grid.cells.length > 0;
   const contourKey = wantContours && gradeSurface ? gradeSurface.surfaceKey : "";
+  const rgTokRef = useRef({ contours: null, band: null });   // NEW-1: the "Regrading…" banner's handles on the newest contour / band run
   useEffect(() => {
-    if (!contourKey) { if (!wantContours) setContoursRes(null); return undefined; }
+    if (!contourKey) { if (rgTokRef.current.contours != null) { regrade.cancel("contours", rgTokRef.current.contours); rgTokRef.current.contours = null; } if (!wantContours) setContoursRes(null); return undefined; }
     const my = ++cSeq.current;
+    const rgTok = regrade.begin("contours"); rgTokRef.current.contours = rgTok;
     const g = grid;
     const existAt = inRef.current.gsInputs.existAt;
     const t = setTimeout(async () => {
       try {
-        const L = await runChunked(contourLatticeSteps(g, { existAt }), { isStale: () => my !== cSeq.current });
+        // the lattice reports its own column fraction (the first 60% of this job); the worker trace cannot say how far it is
+        const L = await runChunked(contourLatticeSteps(g, { existAt }), { isStale: () => my !== cSeq.current, onProgress: (f) => regrade.progress("contours", rgTok, 0.6 * f) });
         if (my !== cSeq.current) return;
-        if (!L || L.stale) { if (!L) setContoursRes(null); return; }
+        if (!L || L.stale) { if (!L) { setContoursRes(null); regrade.end("contours", rgTok, { ok: false }); } return; }
+        regrade.progress("contours", rgTok, null);
         const terrain = await loadTerrain();
         // the existing Contour-lines rule: 1 ft, coarsening only when the range would drown the picture
         const r = await terrain.runProposedContoursJob({
@@ -546,8 +554,10 @@ export default function GradingController({ input, onModel }) {
         // plan thins the band with ONE multiple from this spacing (gradingPaint.planContourDraw), never piece by piece
         const bandSpacingFt = r.interval * ((g.grading && g.grading.slopeRatio) || 2);
         setContoursRes({ key: contourKey, limitSig: limitSigOf(g), interval: r.interval, bandSpacingFt, cellFt: L.cellFt, lattice: { x0: L.x0, y0: L.y0, dx: L.dx, dy: L.dy, nx: L.nx, ny: L.ny }, ...feet });
+        regrade.end("contours", rgTok, { ok: true });
       } catch (e) {
         if (my === cSeq.current) setContoursRes({ key: contourKey, limitSig: limitSigOf(g), error: String((e && e.message) || e), levels: [], labels: [] });
+        regrade.end("contours", rgTok, { ok: false });
       }
     }, 80);
     return () => { clearTimeout(t); };
@@ -574,24 +584,32 @@ export default function GradingController({ input, onModel }) {
   const bSeq = useRef(0);
   const bandKey = cfg.layers.cutfill && grid && grid.limit && grid.cells.length > 0 && gradeSurface ? gradeSurface.surfaceKey : "";
   useEffect(() => {
-    if (!bandKey) { if (!cfg.layers.cutfill) { setBandRes(null); setBandShapes(null); } return undefined; }
+    if (!bandKey) { if (rgTokRef.current.band != null) { regrade.cancel("band", rgTokRef.current.band); rgTokRef.current.band = null; } if (!cfg.layers.cutfill) { setBandRes(null); setBandShapes(null); } return undefined; }
     const my = ++bSeq.current;
+    const rgTok = regrade.begin("band"); rgTokRef.current.band = rgTok; regrade.progress("band", rgTok, null);   // the worker trace cannot say how far it is
     const g = grid;
     const t = setTimeout(async () => {
       try {
         const F = bandField(g, { pointInRegions });
-        if (!F) { if (my === bSeq.current) setBandRes(null); return; }
+        if (!F) { if (my === bSeq.current) setBandRes(null); regrade.end("band", rgTok, { ok: false }); return; }
         const terrain = await loadTerrain();
         if (my !== bSeq.current) return;
         const r = await terrain.runBandOutlineJob({ values: F.values, nx: F.nx, ny: F.ny });
         if (my !== bSeq.current) return;
         setBandRes({ key: bandKey, limitSig: limitSigOf(g), mode: F.mode, traced: bandRingsToFeet(r, F) });
+        regrade.end("band", rgTok, { ok: true });
       } catch (e) {
         if (my === bSeq.current) setBandRes({ key: bandKey, error: String((e && e.message) || e) });
+        regrade.end("band", rgTok, { ok: false });
       }
     }, 60);
     return () => { clearTimeout(t); };
   }, [bandKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // NEW-1 (the "Regrading…" banner): which pictures this rebuild will also trace (the bar weighs the stages it expects), and a
+  // clean exit — leaving the grading layer drops any job still counted
+  const wantBand = !!(cfg.layers.cutfill && grid && grid.limit && grid.cells.length > 0);
+  useEffect(() => { regrade.expectStages({ contours: wantContours, band: wantBand }); }, [wantContours, wantBand]);
+  useEffect(() => () => { const t = rgTokRef.current; if (t.contours != null) regrade.cancel("contours", t.contours); if (t.band != null) regrade.cancel("band", t.band); }, []);
   const contourDaylightKey = contoursResKeyOf(bandRes, contoursRes);
   const curLimitSig = limitSigOf(grid);
   useEffect(() => {
