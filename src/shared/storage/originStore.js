@@ -1,9 +1,9 @@
 /* Read-and-reclaim access to this origin's IndexedDB kv store, with NO workspace dependency (NEW-3).
  *
- * ⛔ WHY THIS EXISTS RATHER THAN JUST IMPORTING localDb.js. The storage panel is shared chrome — it
- * mounts from the account Settings tab AND the signed-out ⚙ popover, on every route. `localDb.js`
- * and `gisCache.js` live in the Site Planner workspace and are statically imported by the planner,
- * so a module reachable from BOTH the boot path and this lazy panel gets hoisted into their common
+ * ⛔ WHY THIS EXISTS RATHER THAN JUST IMPORTING localDb.js. This module is shared chrome — it
+ * is imported from code that ships on every route (written for the Storage panel, retired 2026-11-04).
+ * `localDb.js` and `gisCache.js` live in the Site Planner workspace and are statically imported by the planner,
+ * so a module reachable from BOTH the boot path and a lazy consumer gets hoisted into their common
  * ancestor: the first attempt at this shipped an 11.3 KB `gisCache` chunk onto a plain Site load and
  * broke three bundle budgets (the site-route allowlist, the route chunk count, and the Notes route).
  * Split by tier, don't hope for tree-shaking — the same rule the export-path split records.
@@ -69,8 +69,8 @@ export async function walkOriginStore(prefix, fn) {
 /* Write one record. ⛔ CALLERS: this store is the LARGE tier (TIER-BY-REBUILDABILITY) and it is
  * PERSISTENT for this origin — the browser will never evict for us — so anything written here
  * must carry its own bound. The one writer today is the performance recorder's bounded capture
- * ring (perfCaptureStore.js), which prunes to a fixed count on every write and is surfaced in the
- * storage panel so it can never grow without being visible. Resolves true/false; never throws.
+ * ring (perfCaptureStore.js), which prunes to a fixed count on every write, so it can never grow
+ * without bound. Resolves true/false; never throws.
  *
  * If the `kv` store does not exist yet (a route that has never opened the planner), this resolves
  * FALSE rather than creating it: `localDb.js` owns that schema, and a second creator racing it is

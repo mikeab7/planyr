@@ -16,7 +16,7 @@
  * `storage-menu-item`, a ✕ delete button on every plan row) — they were written to go red on main first.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { plannerSource } from "./helpers/plannerSource.js";
 
 const src = plannerSource();
@@ -72,15 +72,27 @@ describe("NEW-1 — the old controls are GONE", () => {
     expect(src).not.toContain("relTime(p.deletedAt)");
   });
 
-  it("nothing in src/ mounts or imports StoragePanel any more (the file stays only for test/perfRecorder's recordings guard — see its header)", () => {
+  it("StoragePanel is gone: the file no longer exists and nothing in src/ imports it (NEW-1, 2026-11-04 — the recordings screen was retired)", () => {
+    expect(existsSync("src/shared/storage/StoragePanel.jsx")).toBe(false);
     const walk = (dir) => readdirSync(dir).flatMap((n) => {
       const f = `${dir}/${n}`;
       return statSync(f).isDirectory() ? walk(f) : [f];
     });
     const importers = walk("src")
-      .filter((f) => /\.(jsx?|mjs)$/.test(f) && !f.endsWith("storage/StoragePanel.jsx"))
+      .filter((f) => /\.(jsx?|mjs)$/.test(f))
       .filter((f) => /StoragePanel(\.jsx)?["']/.test(stripComments(readFileSync(f, "utf8"))));
     expect(importers).toEqual([]);
+  });
+
+  it("the on-device capture store has ONE writer (the recorder) and no UI reader — only ui-audit harnesses read it, straight from IndexedDB", () => {
+    const walk = (dir) => readdirSync(dir).flatMap((n) => {
+      const f = `${dir}/${n}`;
+      return statSync(f).isDirectory() ? walk(f) : [f];
+    });
+    const users = walk("src")
+      .filter((f) => /\.(jsx?|mjs)$/.test(f) && !f.endsWith("telemetry/perfCaptureStore.js"))
+      .filter((f) => /perfCaptureStore(\.js)?["']/.test(stripComments(readFileSync(f, "utf8"))));
+    expect(users).toEqual(["src/shared/telemetry/perfRecorder.js"]);
   });
 });
 

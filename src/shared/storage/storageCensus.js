@@ -55,7 +55,7 @@ export const LOCAL_CLASSES = [
   },
   {
     /* B2200384 — the device copy of the plans is one entry per plan (`<store>:p:<planId>`), a tiny index (`<store>:idx`) and — only on a device not yet
-     * moved, or transiently while an older tab is open — the old whole-library entry. Each is its own class so the storage panel and the abort events say
+     * moved, or transiently while an older tab is open — the old whole-library entry. Each is its own class so the abort events say
      * what is taking the room. The per-plan entries are the only copy of the work: never reclaimable. The old entry is a DUPLICATE of them once they verify,
      * but it is removed only by `planStore.retireLegacy` (read back and counted first), never by the bulk reclaim — so it is `reclaimable: false` too. */
     id: "plan-entries", label: "Saved plans (one slot per plan)", rebuild: REBUILD.NONE, reclaimable: false,
@@ -104,7 +104,7 @@ export const IDB_CLASSES = [
     /* The Spreadsheet's calculation cache (NEW-1, B2604xxx): formula results remembered per workbook so a reload paints complete (lib/univerCalcCache.js).
      * Entirely derived — an entry is used only when its hash equals the workbook about to load, and losing it costs one recalculation.
      * NOT in the bulk-reclaim set on purpose: the shared reclaim path (storageReclaim.js) only knows the GIS namespaces, and this class is
-     * small (one entry per workbook, capped at ~2 MB) — it is classified so the storage panel names it instead of calling it "Other". */
+     * small (one entry per workbook, capped at ~2 MB) — it is classified so the census names it instead of calling it "Other". */
     id: "calccache", label: "Spreadsheet results", rebuild: REBUILD.RECOMPUTE, reclaimable: false,
     match: (k) => has(k, "model:calc:"),
   },
@@ -112,8 +112,8 @@ export const IDB_CLASSES = [
     /* Performance recordings (NEW-1). In the LARGE tier deliberately — TIER-BY-REBUILDABILITY:
      * a diagnostic must never compete with saved plans for the ~5 MB small store. NOT reclaimable,
      * because nothing can rebuild one: the moment it describes is gone. It is kept small by its
-     * own writer instead (perfCaptureStore.js prunes to three on every write) and it is shown in
-     * the storage panel with its own clear control, so it can never grow without being visible. */
+     * own writer instead (perfCaptureStore.js prunes to three on every write), so it can never grow
+     * without bound. (The Storage screen that listed it was retired 2026-11-04, NEW-1.) */
     id: "perfcaptures", label: "Performance recordings", rebuild: REBUILD.NONE, reclaimable: false,
     match: (k) => has(k, "perfcap:"),
   },

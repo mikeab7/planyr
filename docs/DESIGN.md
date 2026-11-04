@@ -523,8 +523,7 @@ notice sits is shared.
 **The boundary — read this before moving anything:** this rule governs **floating, app-level**
 notifications only. An **inline** message that belongs to one panel, row, or form field **stays
 exactly where it is** — floating it to the bottom would divorce the message from the thing it
-describes. Examples that must NOT move: `src/shared/storage/StoragePanel.jsx`'s `msg` (inside the
-panel), `src/workspaces/library/components/FolderTree.jsx`'s inline tree error row, and the inline
+describes. Examples that must NOT move: `src/workspaces/library/components/FolderTree.jsx`'s inline tree error row, and the inline
 `role="alert"` blocks in `src/workspaces/notes/` (`Notes.jsx`, `NotesTree.jsx`,
 `components/IntegrityBanner.jsx`). **`role="status"`/`role="alert"` is NOT the test —
 floating-and-app-level is.** A component can carry either role and still be correctly inline.
