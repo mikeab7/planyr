@@ -17,6 +17,12 @@ import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
 import { MAP_CHROME_Z } from "../lib/mapChromeStack.js";
 
 const OFF = { phase: "idle", frac: 0, indeterminate: false };
+/* A fixed-dark HUD chip: it floats over ANY basemap or aerial in either theme, so it does not theme (same reasoning as CursorChip and
+ * overlayPlacementHandles' readout — no token models "readable over a photo"). */
+const PILL_BG = "rgba(17, 19, 25, 0.88)"; // design-exempt: fixed-dark HUD chip legible over any basemap/theme — no token models "readable over a photo"
+const PILL_INK = "#fff"; // design-exempt: ink on the fixed-dark HUD chip — does not theme
+const TRACK_BG = "rgba(255, 255, 255, 0.22)"; // design-exempt: the bar's track on the fixed-dark HUD chip — does not theme
+const PILL_SHADOW = "0 4px 16px rgba(0, 0, 0, 0.28)"; // design-exempt: lifts the HUD chip off any imagery — does not theme
 
 /* The machine, driven by the store (regrade.createBannerDriver owns the rules; this is only the React seam). */
 export function useRegradeBanner() {
@@ -39,16 +45,16 @@ export default function RegradeBanner({ left = 0, bottom = 52 }) {
       <div style={{
         pointerEvents: "none", display: "flex", flexDirection: "column", alignItems: "stretch", gap: SPACE.sm, minWidth: 132,
         padding: `${SPACE.md}px ${SPACE.xl}px`, borderRadius: RADIUS.lg, boxSizing: "border-box",
-        background: "rgba(17, 19, 25, 0.88)", color: "#fff", boxShadow: "0 4px 16px rgba(0, 0, 0, 0.28)",
+        background: PILL_BG, color: PILL_INK, boxShadow: PILL_SHADOW,
         fontSize: FONT_SIZE.control, fontWeight: 600, lineHeight: 1.2, textAlign: "center", whiteSpace: "nowrap",
         opacity: leaving ? 0 : 1, transition: `opacity ${regrade.FADE_MS}ms ease`,
       }}>
         <span>Regrading…</span>
-        <div style={{ position: "relative", height: 3, borderRadius: RADIUS.pill, background: "rgba(255, 255, 255, 0.22)", overflow: "hidden" }}>
+        <div style={{ position: "relative", height: 3, borderRadius: RADIUS.pill, background: TRACK_BG, overflow: "hidden" }}>
           {v.indeterminate ? (
-            <div className="regrade-indeterminate" data-testid="regrade-bar" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "40%", borderRadius: RADIUS.pill, background: "#fff", animation: "regrade-slide 1.1s ease-in-out infinite" }} />
+            <div className="regrade-indeterminate" data-testid="regrade-bar" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "40%", borderRadius: RADIUS.pill, background: PILL_INK, animation: "regrade-slide 1.1s ease-in-out infinite" }} />
           ) : (
-            <div data-testid="regrade-bar" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "100%", borderRadius: RADIUS.pill, background: "#fff", transformOrigin: "left center", transform: `scaleX(${v.frac})`, transition: "transform 120ms linear" }} />
+            <div data-testid="regrade-bar" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "100%", borderRadius: RADIUS.pill, background: PILL_INK, transformOrigin: "left center", transform: `scaleX(${v.frac})`, transition: "transform 120ms linear" }} />
           )}
         </div>
       </div>
