@@ -11534,8 +11534,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // new corner / dock face and re-derives the host angle, while KEEPING its size — the
   // user's if it was resized (B362), else the 55′×60′ default.
   const fitDogEar = (nb, de) => dogEarGeom(nb, de);
-  // Commit a batch of building-attached elements in one history step.
-  const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
   // Remove a building feature (and anything that hangs off it — a court's trailer, a
   // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
   const removeFeature = (id) => {
