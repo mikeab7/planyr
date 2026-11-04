@@ -31,7 +31,8 @@ const projectCrumb = (page) => page.locator('[data-mode-active="true"]').getByTe
 
 async function renamePlan(page, next) {
   await planCrumb(page).click();
-  const input = page.getByTestId("plan-name-input");
+  await page.getByTestId("plan-current-name").dblclick();   // NEW-1 (2026-11-04): the current row is the rename control
+  const input = page.getByTestId("plan-rename-input");
   await input.fill(next);
   await input.press("Enter");
   await page.keyboard.press("Escape");
@@ -61,7 +62,8 @@ test.describe("instant cross-tab sync (same browser)", () => {
     // 3 · B has an edit in flight (typing a plan name) → A changes something → B's draft is untouched
     await b.bringToFront();
     await planCrumb(b).click();
-    const draft = b.getByTestId("plan-name-input");
+    await b.getByTestId("plan-current-name").dblclick();
+    const draft = b.getByTestId("plan-rename-input");
     await draft.fill("Half typed in B");
     await a.bringToFront();
     await renamePlan(a, "Second Rename In A");

@@ -76,6 +76,24 @@ export function layoutBuildingButtons(walls) {
   return out;
 }
 
+/** B225 — a building's walls need this much room on screen (px) before they carry buttons; the purple corner "+" needs it on BOTH axes. */
+export const BUTTON_WALL_MIN_PX = 72;
+
+/**
+ * The walls `layoutBuildingButtons` is handed for one building — the ONE filter, read by the planner's `sideAddNodes` (which draws them) and by the grading
+ * label placer (which keeps its labels clear of them): a wall too short on screen carries nothing, a dock wall keeps its purple corner "+" only on a building
+ * roomy on both axes, and a footprint being edited has no dock walls.
+ * @param {{x:number,y:number}[]} quad the building's four screen corners, ring order [TL, TR, BR, BL]
+ * @param {string[]} dockSides
+ * @param {{wpx:number,hpx:number,footEdit?:boolean}} o the footprint's on-screen width / height
+ */
+export function buildingButtonWalls(quad, dockSides, { wpx, hpx, footEdit = false }) {
+  const roomy = Math.min(wpx, hpx) >= BUTTON_WALL_MIN_PX;
+  return wallsFromQuad(quad, dockSides)
+    .filter((w) => ((w.name === "top" || w.name === "bottom") ? hpx : wpx) >= BUTTON_WALL_MIN_PX)
+    .map((w) => ({ ...w, dock: w.dock && !footEdit, corners: w.dock && roomy ? w.corners : [] }));
+}
+
 /** Every painted disc of a layout, flat (the pair's two halves included) — what a test intersects a tag box with. */
 export function layoutDiscs(layout) {
   const all = [];

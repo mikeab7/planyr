@@ -77,7 +77,7 @@ try {
   await dlg.waitFor({ state: "visible", timeout: 30000 });
   await assertMeasurable(page, "verify-email-link-live");
   await dlg.getByLabel("Email").fill(ghost());
-  const blockedNote = page.getByTestId("captcha-blocked-note");
+  const blockedNote = page.getByTestId("captcha-unavailable");
   const shown = await blockedNote.waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);
   const promoted = shown && /network blocked/i.test(await blockedNote.innerText());
   note("5 Cloudflare's script blocked → the network line shows and 'Email me a sign-in link' is the main action", promoted ? "PASS" : "FAIL", shown ? "" : "the line never appeared within 25 s");

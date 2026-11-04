@@ -119,6 +119,7 @@ describe("SitePlansSection — the Documents block", () => {
     const sp = plannerSource();
     expect(sp).toContain("listDeletedSitePlanFiles");
     expect(sp).toContain("restoreSitePlanFile");
-    expect(sp).toContain("deleted-site-plan-file");
+    // NEW-1 (2026-11-04): the plan menu is its own component now — the deleted-file row (with its "site plan" tag) is drawn there.
+    expect(readFileSync("src/workspaces/site-planner/components/PlanMenu.jsx", "utf8")).toContain("deleted-site-plan-file");
   });
 });

@@ -39,7 +39,7 @@ function chehawScene() {
   const setback = gradingSetback([{ id: "pc", points: ring, setbacks: sb, active: true }], 25);
   const gsEls = (FFE) => els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) }));
   const build = (FFE, { mode = "boundary", maxCells, g = {} } = {}) => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true }, ...g }, { engineLayout: true });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true }, ...g }, { engineLayout: true, engineBoundary: true });
     return buildProposedSurface({ els: gsEls(FFE), ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],
       opts: { existKey: `r8:${mode}:${FFE}:${maxCells || ""}:${JSON.stringify(g)}`, ...(maxCells ? { maxCells } : {}) }, grading: gradingPack(cfg, setback) });
   };
@@ -218,7 +218,7 @@ describe("NEW-2 — the boundary limit is the property line less a grading margi
   it("the pack ignores the setback: boundary mode grades to 10 ft inside the property line even with a 50 ft setback drawn", () => {
     const setback = gradingSetback([{ id: "pc", points: parcel, setbacks: [50, 50, 50, 50], active: true }], 0);
     expect(ringAreaSf(setback.rings[0])).toBeCloseTo(900 * 500, -1);       // the setback still exists (buildings)
-    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "boundary" }), setback);
+    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "boundary" }, { engineBoundary: true }), setback);
     const r = resolveGradingLimit({ els: [{ id: "b", ring: rect(300, 200, 300, 150) }], spec: { mode: "boundary", setbackRings: pack.setbackRings, setbackHoles: pack.limit.setbackHoles } });
     expect(r.areaSf).toBeCloseTo(980 * 580, -1);
     expect(pointInRegions({ x: 20, y: 300 }, r.regions)).toBe(true);        // inside the setback band, inside the limit
@@ -246,7 +246,7 @@ describe("NEW-2 — the boundary limit is the property line less a grading margi
     // a building pushed 30 ft from the west property line, deep cut: the 2:1 slope runs into the margin / past the line
     const els = [{ id: "b", type: "building", ring: rect(30, 200, 300, 200), padElevFt: 780 }];
     const sb = gradingSetback([{ id: "pc", points: parcel, setbacks: [25, 25, 25, 25], active: true }], 0);
-    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "layout", shoulderFt: 0 }, { engineLayout: true }), sb);
+    const pack = gradingPack(gradingCfg({ enabled: true, limitMode: "layout", shoulderFt: 0 }, { engineLayout: true, engineBoundary: true }), sb);
     const r = buildProposedSurface({ els, ffeFt: 780, existAt: () => 800, parcelRings: sb.parcelRings, grading: pack, opts: { existKey: "r8-flag" } });
     const f = describeFlag(r, new Set(["b"]), { buildingCentre: { x: 180, y: 300 }, elements: els, slopeRatio: 2 });
     expect(f).not.toBeNull();

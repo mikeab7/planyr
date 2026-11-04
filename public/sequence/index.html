@@ -3985,7 +3985,7 @@ const resolveMeetingForward = (body, iso) => {
 // meeting-bound task (typed Start/Finish, range fill-down, Delete-then-retype, suggestion approval,
 // the task editor, and binding an already-dated task to a calendar). PURE; updateTask and
 // previewProject both call it, so the preview can never disagree with the apply (B585-S1).
-// Returns { updates, startOverride, notice, rebinding }:
+// Returns { updates, startOverride, notice, rebinding, asked }:
 //  · a typed Start OR Finish on a bound row becomes a Start at the first meeting on/after it (a
 //    bound row is a 0-day milestone: start == end), so a Finish can never lock the row out of its
 //    calendar (pinnedEnd would drop it out of bound mode) — `updates` is the rewritten patch;
@@ -3995,9 +3995,17 @@ const resolveMeetingForward = (body, iso) => {
 //    agenda-deadline rule;
 //  · a finished row (its actual dates), a parent row, an unbound row, and a clear ("") are untouched;
 //  · no calendar / no meeting ahead → the date is left AS TYPED and `notice` says why (never silent).
+//  · B2642096 ×2 — A PERSON'S DATE EDIT REPLACES AN EARLIER STEPPED PIN. Right-click Next/Previous meeting sets
+//    `pinnedMeetingDate`, and applyMeetingBinding reads it BEFORE the row's own start, so a typed date on a
+//    stepped row used to be undone by the cascade while the toast announced the move. Every path that lets a
+//    date through on a bound row (moved · already a meeting · no meeting ahead · no calendar · a clear) therefore
+//    carries `pinnedMeetingDate: undefined` (dropStep) — the pattern the app uses everywhere else. An explicit
+//    step in the same patch is never stripped. `asked` = the date this edit asked the row to hold, so the caller
+//    can compare it with the row AFTER the cascade (settleBoundNotice) and never announce a move that didn't happen.
 // It acts on an EDIT only — stored dates are never revisited, so it cannot ratchet on load (B1701360).
+const dropStep = (t, patch) => ((t && t.pinnedMeetingDate && !('pinnedMeetingDate' in patch)) ? { ...patch, pinnedMeetingDate: undefined } : patch);
 const resolveBoundEdit = (tasks, taskId, updates, bodyOf) => {
-  const none = { updates, startOverride: null, notice: null, rebinding: false };
+  const none = { updates, startOverride: null, notice: null, rebinding: false, asked: "" };
   const list = Array.isArray(tasks) ? tasks : [];
   const t = list.find(x => x.id === taskId);
   if (!t || !updates) return none;
@@ -4005,16 +4013,16 @@ const resolveBoundEdit = (tasks, taskId, updates, bodyOf) => {
   if (!merged.meetingBound || isCompleteTask(merged) || list.some(x => x.parentId === taskId)) return none;
   const typed = (('start' in updates) && updates.start) ? updates.start : ((('end' in updates) && updates.end) ? updates.end : "");
   const rebinding = !!(('meetingBound' in updates || 'meetingBodyId' in updates) && !(t.meetingBound && t.meetingBodyId === merged.meetingBodyId));
-  if (!typed && !rebinding) return none;
+  if (!typed && !rebinding) return (('start' in updates) || ('end' in updates)) ? { ...none, updates: dropStep(t, updates) } : none;   // a clear drops the stepped pin too
   const body = bodyOf ? bodyOf(merged.meetingBodyId) : null;
   if (typed) {
-    if (!body) return { ...none, notice: { kind: "nobody", typed } };
+    if (!body) return { ...none, updates: dropStep(t, updates), asked: typed, notice: { kind: "nobody", typed } };
     const m = resolveMeetingForward(body, typed);
-    if (!m) return { ...none, notice: { kind: "none-ahead", typed, bodyName: body.name || "" } };
-    const patched = { ...updates, start: m };
+    if (!m) return { ...none, updates: dropStep(t, updates), asked: typed, notice: { kind: "none-ahead", typed, bodyName: body.name || "" } };
+    const patched = dropStep(t, { ...updates, start: m });
     delete patched.end;
     if (t.pinnedEnd) patched.pinnedEnd = false;   // a stale finish-lock would take the row out of bound mode
-    return { updates: patched, startOverride: null, notice: m !== typed ? { kind: "moved", typed, date: m, bodyName: body.name || "" } : null, rebinding };
+    return { updates: patched, startOverride: null, asked: m, notice: m !== typed ? { kind: "moved", typed, date: m, bodyName: body.name || "" } : null, rebinding };
   }
   if (!body || !merged.start || merged.pinnedMeetingDate) return { ...none, rebinding };
   const liveId = new Set(list.filter(x => x.id !== taskId).map(x => x.id));
@@ -4030,9 +4038,27 @@ const boundEditNotice = (notice, taskName, fmt) => {
   if (!notice) return "";
   const n = taskName || "Task";
   if (notice.kind === "moved") return `${n} moved to ${fmt(notice.date)}, the next ${notice.bodyName || "meeting"} meeting — ${fmt(notice.typed)} isn't one of its meeting dates.`;
+  if (notice.kind === "held") return `${n} stays on ${fmt(notice.date)} — it couldn't be placed on ${fmt(notice.typed)}${notice.bodyName ? ` (a ${notice.bodyName} meeting)` : ""}; something else on the schedule is holding that date.`;
   if (notice.kind === "none-ahead") return `${notice.bodyName || "That calendar"} has no meeting on or after ${fmt(notice.typed)} — ${n} keeps ${fmt(notice.typed)} as typed and is flagged.`;
   return `${n}'s meeting calendar no longer exists — ${fmt(notice.typed)} was kept as typed. Re-select or re-create the calendar.`;
 };
+// settleBoundNotice — B2642096 ×2: the toast is built from what the row HOLDS AFTER the cascade, not from what the
+// edit asked for. resolveBoundEdit's notice describes the REQUEST; if the cascaded row is somewhere else (a pin, a
+// predecessor, anything), the request was not honoured and announcing it is a lie — say what actually happened
+// ("held"). `actualStart` is the edited row's start in the recomputed list. PURE; null when nothing needs saying.
+const settleBoundNotice = (boundEdit, actualStart) => {
+  const asked = boundEdit && boundEdit.asked;
+  if (asked && (actualStart || "") !== asked) {
+    const prior = boundEdit.notice;
+    return { kind: "held", typed: asked, date: actualStart || "", bodyName: (prior && prior.bodyName) || "" };
+  }
+  return (boundEdit && boundEdit.notice) || null;
+};
+// unpinStartPatch / startIsPinned — B2642096 ×2: the Start pin has TWO sources, `pinnedStart` (a typed/dragged date)
+// and, on a bound row, `pinnedMeetingDate` (right-click Next/Previous meeting). Unpin clears BOTH, and the padlock
+// shows when EITHER is set — otherwise a stepped row looked unpinned and stayed pinned after the click.
+const unpinStartPatch = task => ({ pinnedStart: false, predecessors: task.predecessors, pinnedMeetingDate: undefined });
+const startIsPinned = task => !!(task && (task.pinnedStart || (task.meetingBound && task.pinnedMeetingDate)));
 // ── NEW-1 (2026-11-03, owner decision) — a typed date HOLDS, and he is TOLD when it can't be met ────────
 // A typed Start (pin, B615/B621) or Finish (lock, B616) never follows its predecessor — the owner is fine
 // with that, as long as he is told, and then he edits the predecessor. THE THREE CASES:
@@ -4522,9 +4548,10 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     t.start = t.end = pinnedDate;
     t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
     // NEW-1 — a pinned date can be infeasible TWO different ways, and only one of them was ever
-    // checked. `pinnedDate` here is almost always `pinnedStart` (updateTask sets that on ANY direct
-    // date-cell edit — see its own comment — `pinnedMeetingDate` is a distinct deliberate-pin field
-    // that nothing in this app ever sets), so a plain typed/dragged date on a meeting-bound row was
+    // checked. `pinnedDate` here is usually `pinnedStart` (updateTask sets that on ANY direct
+    // date-cell edit — see its own comment); `pinnedMeetingDate` is a distinct deliberate-pin field that
+    // right-click Next/Previous meeting DOES set (onStepMeeting) and that a person's date edit now clears
+    // (resolveBoundEdit/dropStep, B2642096 ×2), so a plain typed/dragged date on a meeting-bound row was
     // silently accepted even when it doesn't fall on one of the body's actual meeting days at all —
     // reading as "feasible" while the row isn't parked on a real hearing. Owner repro: Goose Creek
     // task 168 sat on 2026-09-30 (not a 3rd-Tuesday P&Z date; the real September meeting was
@@ -10451,7 +10478,9 @@ function App() {
         // both timings (B1539585).
         const editedT = tasks.find(t => t.id === taskId);
         // NEW-1 — the row the person edited announces ITS OWN move (below), never as an "agenda closed" roll.
-        if (boundEdit.notice && !rollToastRef.current) rollToastRef.current = boundEditNotice(boundEdit.notice, editedT && editedT.name, fmtD);
+        // B2642096 ×2 — settled against the CASCADED row: never announce a move the row didn't make.
+        const _settled = settleBoundNotice(boundEdit, editedT && editedT.start);
+        if (_settled && !rollToastRef.current) rollToastRef.current = boundEditNotice(_settled, editedT && editedT.name, fmtD);
         for (const t of tasks) {
           const prev = _prevBoundStart[t.id];
           if (t.id === taskId && ('start' in updates || 'end' in updates || boundEdit.rebinding)) continue;
@@ -15906,14 +15935,14 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       const dateStr = String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2);
       // Start pin (existing) + Finish lock (B616) — one padlock, identical icon + interaction.
       const isStart = col.k === "start";
-      const isPinned = !task.hasChildren && (isStart ? task.pinnedStart : task.pinnedEnd);
+      const isPinned = !task.hasChildren && (isStart ? startIsPinned(task) : task.pinnedEnd);
       // B443250 — the start cell carries its own conflict: a pinned start EARLIER than the predecessor
       // chain allows. The pin still wins (that is the contract); this makes the override visible instead
       // of silently resolved, reusing B616's locked-finish treatment exactly.
       const isConflict = !task.hasChildren && (isStart ? !!task.startConflict : !!task.finishConflict);
       const unpin = e => {
         e.stopPropagation();
-        if (isStart) updateTask(task.id, {pinnedStart: false, predecessors: task.predecessors}, projId);
+        if (isStart) updateTask(task.id, unpinStartPatch(task), projId);   // B2642096 ×2 — clears the stepped pin as well
         else         updateTask(task.id, {pinnedEnd: false, durValue: taskDurValue(task), durUnit: taskDurUnit(task)}, projId);  // unlock → finish flows from start + duration
       };
       return (
@@ -16297,13 +16326,76 @@ const placeGanttLabel = ({align, bx, bw, rowTop, barTopY, labelW,
        :                     above(barStart + bw / 2, "middle");
 };
 
-// Cap a caption's font size so the whole caption fits in the HEADROOM above its own glyph (the gap
-// between the row top and the bar / bracket / diamond). At compressed row heights the default
-// caption is taller than that gap and would sit on the thing it names — originally the "Utilities
-// label touches its summary bracket" bug (B629), and since NEW-1 made EVERY name a caption above
-// its bar, the same cap now applies to leaves and milestones too. Shrink to fit, floored so it
-// stays legible.
-const fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, headroom / 1.3));
+// <gantt-geom> — NEW-1 (2026-11-04, owner: "why is the top level task have smaller than the lower
+// level task labels on the gantt chart") — ONE SOURCE OF TRUTH for how big a task NAME is and where
+// the GLYPH under it (leaf bar / summary bracket / milestone diamond) sits, on BOTH render paths.
+//
+// THE RULE: a name's size is its RANK (higher in the hierarchy = larger), at EVERY row height. The
+// text is the priority; the GLYPH gives way. Before this, the name was derived from the bracket
+// (fitCaptionFs(base, spanTop)), and the bracket gets THICKER with rank — so at a short row the top
+// level had the least headroom and its name was shrunk hardest (level 0 ≈ 6.8 vs level 2 = 8.5 at
+// the owner's row height 20). The rank was inverted by the very thing that was supposed to sit
+// under it. Now: reserve the name's full ranked size FIRST, hand the glyph whatever is left, and
+// compute that ONE geometry here so the renderer, the name placer AND the dependency-arrow anchors
+// (glyphEdges, on both paths) all read the same numbers — an arrow can never attach to where a
+// glyph used to be (B396/B402 class).
+//
+// Pure and self-contained ON PURPOSE: test/ganttLabelAbove.test.js evaluates this block straight
+// out of the shipped file (the page is an in-browser Babel app with no bundler), so it can never
+// drift from what the owner runs.
+//
+//   GANTT_CAPTION_LH   GanttName's CSS lineHeight; the caption box is LH × fs tall (was a 1.3 factor
+//                      in fitCaptionFs — wider than the box it was protecting; 1.2 is the real box)
+//   profile            "screen" | "print": base name sizes by level, the NOMINAL bracket ramp, the
+//                      baselines each glyph is seated on, floors that keep a squeezed bracket legible
+const GANTT_CAPTION_LH = 1.2;
+const ganttCaptionNeed = fs => fs * GANTT_CAPTION_LH;          // headroom a caption of size fs needs above its glyph
+const ganttCaptionHalf = fs => fs * GANTT_CAPTION_LH / 2;      // its half-height (placeGanttLabel's capHalf)
+// Cap a caption's font size so the whole caption fits in the HEADROOM above its own glyph — now only
+// the LAST-RESORT safety (the glyph helpers below already leave every ranked size its full room);
+// floored so it stays legible.
+const fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, (headroom + 1e-6) / GANTT_CAPTION_LH));   // +1e-6: float dust must not turn 9 into 8.999999
+const GANTT_PROFILES = {
+  screen: { names:[10,9.25,8.5,8], span:[6,5,4,4], leg:[0.16,0.12,0.09,0.07], minSpan:2, minLeg:2,
+            leafFrac:0.25, mileHalf:3*Math.SQRT2, mileMin:2.5, leafBase:1, summaryBase:2, mileBase:1 },
+  print:  { names:[9,8.5,8,7.5],   span:[4,3.5,3,3], leg:[0.14,0.10,0.08,0.06],  minSpan:2, minLeg:1.5,
+            leafFrac:0.30, mileHalf:4,            mileMin:2.5, leafBase:2, summaryBase:2, mileBase:2 },
+};
+const ganttNameSize = (P, level) => P.names[Math.min(Math.max(level || 0, 0), 3)];
+// Leaf bar: bottom-aligned; as tall as the profile asks unless that would crowd the LARGEST leaf
+// name (level 0) — a bar's height never depends on depth, so it is bounded by the biggest name.
+const ganttLeafGeom = (P, rowH) => {
+  const bot = rowH - P.leafBase;
+  const h = Math.max(3, Math.min(P.leafFrac * rowH, bot - ganttCaptionNeed(P.names[0])));
+  return { top: bot - h, bot, h };
+};
+// Summary bracket (span + legs). Nominal thickness steps down with depth (darkest/thickest on top —
+// B210). The room above it is whatever the level's FULL-SIZE name leaves; the binding level is 0
+// (biggest name, thickest bracket), so ONE scale factor — taken from level 0 — shrinks every level
+// together. That keeps the ramp strictly ordered (a level is never thinner than the level below it)
+// while a short row makes the whole bracket family slimmer, never the text smaller.
+const ganttSummaryGeom = (P, rowH, level) => {
+  const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.summaryBase;
+  const nom0 = P.span[0] + P.leg[0] * rowH;
+  const s = Math.min(1, Math.max(0, bot - ganttCaptionNeed(P.names[0])) / nom0);
+  // The legible floor only ever PROPS UP a thinned bracket — it never grows one past its own nominal size,
+  // so at any row height where the bracket already fits, it is exactly the ramp above (today's look).
+  const nomLeg = P.leg[d] * rowH;
+  let span = Math.max(Math.min(P.minSpan, P.span[d]), P.span[d] * s), leg = Math.max(Math.min(P.minLeg, nomLeg), nomLeg * s);
+  const room = Math.max(0, bot - ganttCaptionNeed(P.names[d]));        // the floors must never eat this level's own name
+  if (span + leg > room) { const k = room / (span + leg); span *= k; leg *= k; }
+  const top = bot - leg - span;
+  return { span, leg, top, bot, mid: top + span / 2 };
+};
+// Milestone diamond, seated on its baseline; `half` is the distance from the centre to each vertex.
+// It shrinks (never moves up) only as far as its own level's full-size name needs.
+const ganttMilestoneGeom = (P, rowH, level) => {
+  const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.mileBase;
+  const half = Math.max(P.mileMin, Math.min(P.mileHalf, rowH * 0.25, (bot - ganttCaptionNeed(P.names[d])) / 2));
+  const cy = bot - half;
+  return { half, cy, top: cy - half, bot };
+};
+// </gantt-geom>
 
 // Dependency connectors are CURVED (cubic bézier) — owner preference (B396, reverting the
 // B395 orthogonal experiment). WHERE a curve attaches to each bar is decided by the ONE shared
@@ -16455,17 +16547,18 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   const glyphEdges = (t, idx) => {
     const rowTop = idx * ROW_H;
     const sX = xOf(t.start), eX = xOf(t.end);
+    // NEW-1 — every glyph's geometry comes from the ONE shared helpers the bar renderer reads (ganttSummaryGeom /
+    // ganttMilestoneGeom / ganttLeafGeom), so an arrow can never attach to where a glyph used to be.
     if (childParentIds.has(t.id)) {                                     // summary bracket (test before milestone — a duration-0 parent is a bracket, matches the bar renderer)
-      const dd = Math.min(t.level||0, 3), SPAN = [6,5,4,4][dd], LEG = [0.16,0.12,0.09,0.07][dd]*ROW_H;
-      const spanTop = rowTop + (ROW_H - 2 - LEG - SPAN);
-      return { startX:sX, endX:eX, topY:spanTop, botY:rowTop + ROW_H - 2, rowTop };
+      const g = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, t.level);
+      return { startX:sX, endX:eX, topY:rowTop + g.top, botY:rowTop + g.bot, rowTop };
     }
-    if (t.duration === 0) {                                             // milestone diamond: a 6×6 box rotated 45°, so its top/bottom VERTICES reach ±(3·√2)≈4.24 from center — anchor to the vertex tip, not the un-rotated half-height
-      const cy = rowTop + ROW_H - 7.5, mv = 4.24;
-      return { startX:sX, endX:sX, topY:cy - mv, botY:cy + mv, rowTop };
+    if (t.duration === 0) {                                             // milestone diamond — anchor to the VERTEX tips (the box is rotated 45°)
+      const g = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, t.level);
+      return { startX:sX, endX:sX, topY:rowTop + g.top, botY:rowTop + g.bot, rowTop };
     }
-    const LEAF_H = ROW_H*0.25, top = rowTop + (ROW_H - LEAF_H - 1);     // leaf pill (bottom-aligned, min visible width 9)
-    return { startX:sX, endX:sX + Math.max(9, eX - sX), topY:top, botY:top + LEAF_H, rowTop };
+    const lg = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H);             // leaf pill (bottom-aligned, min visible width 9)
+    return { startX:sX, endX:sX + Math.max(9, eX - sX), topY:rowTop + lg.top, botY:rowTop + lg.bot, rowTop };
   };
 
   // Right edge x of a task's start-date bar-label (the "8/7" at 9 o'clock, just LEFT of the bar)
@@ -16536,7 +16629,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   // would add horizontal scroll — the gotcha — so the helper flips/lifts instead).
   const labelAlign = resolveLabelAlign(proj);
   const chartL = 0, chartR = Math.max(totalW, 400);
-  const NAME_SIZE = lvl => [9.5, 8.5, 8.5, 8][Math.min(lvl || 0, 3)];
+  const NAME_SIZE = lvl => ganttNameSize(GANTT_PROFILES.screen, lvl);          // NEW-1: the RANKED size — never derived from the glyph beneath it
   // One name renderer for all three kinds: uniform near-black ink, weight-by-level, an
   // optional contrast plate for the centered-on-bar case. (x,y) is the alignment anchor +
   // vertical center, in the row's local space; the transform seats the box on it.
@@ -16754,7 +16847,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             const isGanttSel = selectedId === task.id;
             // Leaf bars: slim enough to sit just under the deepest parent bracket (monotonic
             // by depth), bottom-aligned with the brackets so baselines line up across the chart.
-            const LEAF_H = ROW_H*0.25;
+            const LEAF_H = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).h;
 
             // Blank-date task (an unscheduled stub): no bar/diamond, and — by design — no
             // dependency arrows are drawn to it (the depLines guard skips it). Show an explicit,
@@ -16789,11 +16882,11 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                 {/* a duration-0 PARENT renders as a summary bracket, not a diamond (B2) — so gate milestone on !isSummary */}
                 {(isMilestone && !isSummary) ? (<>
                   {(() => {                                    // milestone name: ALWAYS above the diamond; align anchors it L/C/R (NEW-1)
-                    const mileTopY = ROW_H-10.5;
-                    const fs = fitCaptionFs(NAME_SIZE(task.level), mileTopY);
+                    const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level);   // vertex top, not the un-rotated box top
+                    const fs = fitCaptionFs(NAME_SIZE(task.level), mg.top);
                     const place = placeGanttLabel({kind:"milestone", align:labelAlign, bx, bw:0, rowTop:0,
-                      barTopY:mileTopY, labelW:estLabelWidth(task.name, fs),
-                      chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
+                      barTopY:mg.top, labelW:estLabelWidth(task.name, fs),
+                      chartL, chartR, capHalf:ganttCaptionHalf(fs), rowH:ROW_H});
                     return <GanttName task={task} kind="milestone" place={place} fs={fs} />;
                   })()}
                   {(() => {
@@ -16803,13 +16896,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // than the fill so the diamond reads even if a fill matches its gray.
                     const hue = "#94a3b8";
                     const done = displayHealth === "green" || isCompleteTask(task);
-                    return <div data-gantt-bar={task.id} style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:done?hue:"#fff",border:"1.25px solid #475569",boxSizing:"border-box",zIndex:5}} />;
+                    const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level), side = mg.half*Math.SQRT2;   // a square rotated 45°: vertex distance = side·√2/2
+                    return <div data-gantt-bar={task.id} style={{position:"absolute",left:bx-side/2,top:mg.cy-side/2,width:side,height:side,transform:"rotate(45deg)",background:done?hue:"#fff",border:"1.25px solid #475569",boxSizing:"border-box",zIndex:5}} />;
                   })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
+                    const mlTop = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level).cy - 4.8;   // the date labels stay centred on the diamond
                     return (<>
-                      {L && <span style={{position:"absolute",left:bx-8,transform:"translateX(-100%)",top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{L}</span>}
-                      {R && <span style={{position:"absolute",left:bx+8,top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{R}</span>}
+                      {L && <span style={{position:"absolute",left:bx-8,transform:"translateX(-100%)",top:mlTop,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{L}</span>}
+                      {R && <span style={{position:"absolute",left:bx+8,top:mlTop,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{R}</span>}
                     </>); })()}
                 </>) : isSummary ? (
                   (() => {
@@ -16823,19 +16918,18 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // so the always-above caption has clear air within the row.
                     const d    = Math.min(task.level||0, 3);
                     const col  = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
-                    const SPAN = [6,5,4,4][d];                    // horizontal span thickness, px
-                    const LEG  = [0.16,0.12,0.09,0.07][d]*ROW_H;  // downward leg length, steps by depth
+                    // NEW-1: geometry from the ONE shared helper (also read by the arrow anchors). The name
+                    // keeps its full RANKED size; the bracket slims at short rows to leave it the room
+                    // (rank was inverted when the name was fitted to the bracket — B629's direction).
+                    const sg = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, task.level);
+                    const SPAN = sg.span, LEG = sg.leg, spanTop = sg.top;
                     const legW = 1.5;                             // vertical leg stroke width
-                    const botY = ROW_H - 2;                       // baseline shared with leaf bars
-                    const spanTop = botY - LEG - SPAN;            // span sits above its legs
-                    // Caption font auto-fits the headroom above the bracket so it can't sit on its
-                    // own span at compressed row heights (the "Utilities touches its bracket" bug, B629).
                     const fs = fitCaptionFs(NAME_SIZE(task.level), spanTop);
                     // Summary caption ALWAYS above the thin span (a near-full-width top summary
                     // has no side room); alignment anchors it L/center/R (B393 — the top-summary fix).
                     const place = placeGanttLabel({kind:"summary", align:labelAlign, bx, bw, rowTop:0,
                       barTopY:spanTop, labelW:estLabelWidth(task.name, fs),
-                      chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
+                      chartL, chartR, capHalf:ganttCaptionHalf(fs), rowH:ROW_H});
                     return (<>
                       <GanttName task={task} kind="summary" place={place} fs={fs} />
                       <div data-gantt-bar={task.id} data-gantt-kind="summary" style={{position:"absolute",left:bx,width:bw,top:spanTop,height:SPAN+LEG,zIndex:5,pointerEvents:"none"}}>
@@ -16847,11 +16941,11 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                   })()
                 ) : (<>
                   {(() => {                                    // leaf name: ALWAYS above the bar; align anchors it L/C/R (NEW-1, amending B393's on-bar plate)
-                    const barTopY = ROW_H-LEAF_H-1;
+                    const barTopY = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
                     const fs = fitCaptionFs(NAME_SIZE(task.level), barTopY);
                     const place = placeGanttLabel({kind:"leaf", align:labelAlign, bx, bw, rowTop:0,
                       barTopY, labelW:estLabelWidth(task.name, fs),
-                      chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
+                      chartL, chartR, capHalf:ganttCaptionHalf(fs), rowH:ROW_H});
                     return <GanttName task={task} kind="leaf" place={place} fs={fs} />;
                   })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
@@ -16873,7 +16967,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     const hue  = "#94a3b8";   // neutral identity, independent of task.rowColor (B222)
                     const EDGE = "#475569";   // hairline edge, darker than the fill → legible on any fill
                     const pct = displayHealth === "green" ? 100 : leafPercent(task);
-                    const top = ROW_H - LEAF_H - 1;
+                    const top = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
                     const barW = Math.max(bw, 9);   // min-width floor: a 0% bar can't collapse to a sliver
                     const base = {position:"absolute",left:bx,top,height:LEAF_H,width:barW,zIndex:5,borderRadius:LEAF_H/2,boxSizing:"border-box"};
                     if (pct >= 100)
@@ -19291,12 +19385,14 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   // CENTRED (an old screen↔print drift), which left a 9px-tall caption nowhere to go but on top of
   // the glyph it names. The bar renderer AND the dependency router both read these helpers, so the
   // two can no longer disagree about where a glyph is.
-  const GLYPH_BASE=ROW_H-2;                       // shared bottom baseline, px below the row top
-  const MILE_HALF=Math.min(4, ROW_H*0.25);        // diamond half-height (was a fixed 5, centred)
-  const leafBand=yTop=>{const h=ROW_H*0.30, top=yTop+GLYPH_BASE-h; return {top,bot:top+h,mid:top+h/2,h};};
-  const mileBand=yTop=>{const c=yTop+GLYPH_BASE-MILE_HALF; return {top:c-MILE_HALF,bot:c+MILE_HALF,mid:c,half:MILE_HALF};};
-  const summaryBand=(yTop,depth)=>{const dd=Math.min(depth,3), SPAN=[4,3.5,3,3][dd], LEG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
-    const top=yTop+GLYPH_BASE-LEG-SPAN; return {top,bot:top+SPAN+LEG,mid:top+SPAN/2,SPAN,LEG};};
+  // NEW-1 (name rank) — the numbers come from the ONE shared geometry block (GANTT_PROFILES.print), the
+  // same helpers the on-screen chart reads: a name keeps its full ranked size and the glyph (bar /
+  // bracket / diamond) gives way, so the top level can never print smaller than the level below it.
+  const PP=GANTT_PROFILES.print;
+  const leafBand=yTop=>{const g=ganttLeafGeom(PP,ROW_H), top=yTop+g.top; return {top,bot:top+g.h,mid:top+g.h/2,h:g.h};};
+  const mileBand=(yTop,depth)=>{const g=ganttMilestoneGeom(PP,ROW_H,depth); return {top:yTop+g.top,bot:yTop+g.bot,mid:yTop+g.cy,half:g.half};};
+  const summaryBand=(yTop,depth)=>{const g=ganttSummaryGeom(PP,ROW_H,depth);
+    return {top:yTop+g.top,bot:yTop+g.bot,mid:yTop+g.mid,SPAN:g.span,LEG:g.leg};};
   const pd=s=>new Date(s+"T12:00:00"), fd=d=>d.toISOString().slice(0,10);
   const allTasks=projects.flatMap(p=>p.tasks);
   if(!allTasks.length) return "";
@@ -19329,10 +19425,10 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         const bx=xo0(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/DAY*ppd0));
         const kind=isMile?"milestone":isParent?"summary":"leaf";
         const align=opts.labelAlign||resolveLabelAlign(proj);
-        const fs=[9,8.5,8,7.5][Math.min(depth,3)];
+        const fs=ganttNameSize(GANTT_PROFILES.print,depth);
         const nm=t.name==null?"":String(t.name), lw=estLabelWidth(nm,fs);
         const place=placeGanttLabel({kind,align,bx,bw:isMile?0:bw,rowTop:0,barTopY:0,labelW:lw,
-          chartL:-1e9,chartR:1e9,capHalf:Math.round(fs*0.6)});
+          chartL:-1e9,chartR:1e9,capHalf:ganttCaptionHalf(fs)});
         const x0=place.anchor==="start"?place.x:place.anchor==="middle"?place.x-lw/2:place.x-lw, x1=x0+lw;
         if(LABEL_W-x0>leadPx) leadPx=LABEL_W-x0;
         if(x1-svgWidth>trailPx) trailPx=x1-svgWidth;
@@ -19435,7 +19531,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
         +`<rect x="${bx+bw-legW}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`;
     }else if(isMilestone){
-      const done = pct>=100, mb=mileBand(y), h=mb.half;
+      const done = pct>=100, mb=mileBand(y,depth), h=mb.half;
       barSvg=`<polygon points="${bx},${mb.top} ${bx+h},${mb.mid} ${bx},${mb.bot} ${bx-h},${mb.mid}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else{
       const lb=leafBand(y), LH=lb.h, by=lb.top, bw2=Math.max(bw,5), r=LH/2;
@@ -19461,15 +19557,15 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     if(opts.barNames!==false && nameInView){
       const kind = isMilestone?"milestone":isParent?"summary":"leaf";
       const align = opts.labelAlign || resolveLabelAlign(proj);
-      const band = isMilestone ? mileBand(y) : isParent ? summaryBand(y,depth) : leafBand(y);
+      const band = isMilestone ? mileBand(y,depth) : isParent ? summaryBand(y,depth) : leafBand(y);
       const barTopY = band.top, bwN = isMilestone ? 0 : bw;
       // EVERY caption auto-fits the headroom above its own glyph so it clears it at this row
       // height (B629's summary rule, now uniform — NEW-1 made every name a caption above its bar).
-      const fs = fitCaptionFs([9,8.5,8,7.5][Math.min(depth,3)], barTopY-y);
+      const fs = fitCaptionFs(ganttNameSize(PP,depth), barTopY-y);
       const nm = t.name==null?"":String(t.name);
       const lw = estLabelWidth(nm, fs);
       const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barTopY,
-        labelW:lw, chartL:LABEL_W, chartR:svgWidth, capHalf:Math.round(fs*0.6), rowH:ROW_H});
+        labelW:lw, chartL:LABEL_W, chartR:svgWidth, capHalf:ganttCaptionHalf(fs), rowH:ROW_H});
       // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
       // co-dated labels never overprint each other (B402), then drawn on the top layer.
       nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
@@ -19502,7 +19598,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         if(isParentTask(task)){                                                          // summary bracket (before milestone — a duration-0 parent draws as a bracket)
           const b=summaryBand(yTop,getDepth(p.tasks,task.id)); return {startX:sX,endX:eX,topY:b.top,botY:b.bot,rowTop:yTop};
         }
-        if(task.duration===0){ const b=mileBand(yTop); return {startX:sX,endX:sX,topY:b.top,botY:b.bot,rowTop:yTop}; }  // diamond vertices
+        if(task.duration===0){ const b=mileBand(yTop,getDepth(p.tasks,task.id)); return {startX:sX,endX:sX,topY:b.top,botY:b.bot,rowTop:yTop}; }  // diamond vertices
         const b=leafBand(yTop); return {startX:sX,endX:Math.max(eX,sX+5),topY:b.top,botY:b.bot,rowTop:yTop};            // leaf bar
       };
       // Right edge x of a target's start-date bar-label (text-anchor:end at bx-3 / bx-8 for a

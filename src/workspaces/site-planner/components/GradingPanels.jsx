@@ -25,10 +25,10 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { SLOPE_RATIOS } from "../lib/gradingBase.js";
 import { CUT_RGB, FILL_RGB, CONTOUR_PROPOSED_RGB, CONTOUR_PROPOSED_INDEX_RGB, LIMIT_LINE_DASH, GRADING_PAPER_RGB, placeContourLabels, planContourDraw } from "../lib/gradingPaint.js";
 import { planAllContourLabels, pathToPieces, CONTOUR_LABEL_ALL } from "../lib/contourLabelPlan.js";
-import { fmtCyShort } from "../lib/ffeSuggest.js";
-import { placeCornerTag, pillWidth, CORNER_TAG_PILL_H } from "../lib/padCornerTag.js";
+import { pillWidth, CORNER_TAG_PILL_H } from "../lib/padCornerTag.js";
+import { layoutLabelSet } from "../lib/spotLabelPlacement.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
-import { gradingPanelView, limitOffsetFt, marginFromOffset, LIMIT_PAST_MAX_FT, ffePillText, groundNumbers, BALANCE_TOL_CY_PANEL } from "../lib/gradingPanelModel.js";
+import { gradingPanelView, limitOffsetFt, marginFromOffset, LIMIT_PAST_MAX_FT, ffePillText, groundNumbers, haulWords } from "../lib/gradingPanelModel.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 const sectionLabel = {
@@ -181,7 +181,7 @@ function InputsBlock({ c, model, floorVisible }) {
             attrs={{ "data-ffe-value": c.isAuto ? "auto" : "typed" }}
             onCommit={(v) => (v == null ? actions.resetFfe(c.id) : actions.typeFfe(c.id, v))} />
           {c.isAuto
-            ? <span data-ffe-source="auto" style={{ ...pillStyle, color: "var(--success-text)", borderColor: "var(--success-text)" }}>{ffePillText(true)}</span>
+            ? <span data-ffe-source="auto" style={{ ...pillStyle, color: "var(--success-text)", borderColor: "var(--success-text)" }}>{ffePillText(true, c.haulCy)}</span>
             : <button type="button" data-ffe-source="typed" data-ffe-reset="1" title="Back to the suggested floor" onClick={() => actions.resetFfe(c.id)}
                 style={{ ...pillStyle, cursor: "pointer", fontFamily: "inherit", background: "transparent", color: "var(--text-secondary)", borderColor: "var(--border-strong)" }}>{ffePillText(false)}</button>}
         </Row>
@@ -200,6 +200,7 @@ function InputsBlock({ c, model, floorVisible }) {
             ? <button type="button" data-limit-action="done" style={linkBtn} onClick={() => actions.doneEditLimit && actions.doneEditLimit()}>Done editing</button>
             : <button type="button" data-limit-action="edit" style={linkBtn} onClick={() => actions.editLimit && actions.editLimit(null)}>Edit outline</button>}
           {limit.source === "edited" && <button type="button" data-limit-action="reset" data-limit-grew={limit.grew && limit.grew.length ? "1" : "0"} title={limit.grew && limit.grew.length ? `The limit grew to include ${limit.grew.join(", ")}.` : undefined} style={linkBtn} onClick={() => actions.resetLimit && actions.resetLimit()}>Reset to auto</button>}
+          {limit.areaAc != null && Number.isFinite(limit.areaAc) && <span data-graded-acres="1" style={muted} title="The layout's outline plus its shoulder — the slope thrown beyond it is extra, and nothing past the Limits of disturbance fence is graded on purpose">{limit.areaAc.toFixed(2)} AC graded</span>}
         </div>
       )}
       <Row label="Slopes">
@@ -281,13 +282,9 @@ function FlagList({ c, model, onApplyFfeFix, onApplyMoveFix, onPullLimit }) {
 }
 
 /* 5 — OTHER FLOORS TO TRY: the table, then the HAUL BY FLOOR curve. */
-const fmtHaul = (cy) => {
-  if (cy == null || !Number.isFinite(cy)) return "…";
-  if (Math.abs(cy) < BALANCE_TOL_CY_PANEL) return "0";
-  return `${cy > 0 ? "+" : "−"}${fmtCyShort(cy)}`;
-};
+const fmtHaul = haulWords;   // NEW-2: "2,200 import" / "1,200 export" / "balanced" — words, never a sign
 const fmtFt = (v) => (v == null || !Number.isFinite(v) ? "…" : `${Math.round(v)} ft`);
-const COLS = "minmax(0, 1.7fr) minmax(0, 0.75fr) minmax(0, 0.75fr) minmax(0, 0.75fr)";
+const COLS = "minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 0.7fr)";
 function HaulCurve({ floors, currentE, currentHaul }) {
   const pts = floors.curve || [];
   if (pts.length < 2) return null;
@@ -323,7 +320,7 @@ function FloorsTable({ c, onTypeFloor }) {
       <span style={sectionLabel}>Other floors to try</span>
       <div role="table" aria-label="Other floors to try" style={{ display: "flex", flexDirection: "column", fontVariantNumeric: "tabular-nums" }}>
         <div role="row" style={{ display: "grid", gridTemplateColumns: COLS, gap: 6, ...muted, fontWeight: 650, paddingBottom: 3 }}>
-          <span role="columnheader">Floor</span><span role="columnheader" style={{ textAlign: "right" }}>Haul CY</span><span role="columnheader" style={{ textAlign: "right" }}>Deepest cut</span><span role="columnheader" style={{ textAlign: "right" }}>Tallest fill</span>
+          <span role="columnheader">Floor</span><span role="columnheader" style={{ textAlign: "right" }}>Haul</span><span role="columnheader" style={{ textAlign: "right" }}>Deepest cut</span><span role="columnheader" style={{ textAlign: "right" }}>Tallest fill</span>
         </div>
         {fl.rows.length === 0 && <div style={muted}>{fl.pending ? "…" : "—"}</div>}
         {fl.rows.map((r) => (
@@ -547,7 +544,7 @@ function Pill2({ x, y, text, PAL, fill = null, stroke = null, size = 11 }) {
  * component re-reconciled every contour path, label and image on each of those renders although none of its inputs moved — during
  * a pan `f2p` is stable (B1440's anchor keeps the render view), `rppf` and `model` are unchanged, `PAL` is memoised and `viewRect`
  * is the planner's LATCHED cull rect (the same object until the view nears its edge). */
-export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null }) {
+export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rppf, PAL, viewRect = null, viewPx = null }) {
   const { buildable, cutfill, labels, cfg, contours, limit } = model;
   const bandClipId = `grading-band-${useId().replace(/:/g, "")}`;
   // ROUND 6 (NEW-1): what is drawn at this zoom — index only with the parcel filling the map, every level with the building
@@ -574,6 +571,13 @@ export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rpp
     return <image key={key} href={L.dataUrl} x={tl.x} y={tl.y} width={L.bboxFt.w * rppf} height={L.bboxFt.h * rppf} preserveAspectRatio="none" style={{ imageRendering: smooth ? "auto" : "pixelated" }} pointerEvents="none" />;
   };
   const px = (ft) => ft * rppf;
+  // NEW-1 (2026-11-04): where every court / lot label, corner tag and flag pill sits — clear of the building's edit buttons, its grips, each other and the
+  // map's edge (lib/spotLabelPlacement). A function of the model, the render transform, the zoom and the canvas box — never of the pointer.
+  const labelLayouts = useMemo(() => {
+    const m = new Map();
+    for (const L of labels || []) if (px(L.minSideFt) >= LABELS_MIN_PX || L.flagDot) m.set(L.id, layoutLabelSet(L, f2p, rppf, viewPx));
+    return m;
+  }, [labels, f2p, rppf, viewPx]); // eslint-disable-line react-hooks/exhaustive-deps
   const showCutfillLabels = !!cfg.layers.cutfill && cfg.layers.spots !== false;   // NEW-1: the "Spot elevations" pill hides the labels, not the picture
   return (
     <g data-grading-layers="1" pointerEvents="none">
@@ -637,74 +641,85 @@ export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rpp
       })()}
       {showCutfillLabels && (labels || []).map((L) => {
         if (px(L.minSideFt) < LABELS_MIN_PX) return null;      // below the working zoom: bands and the daylight line only
-        const c0 = f2p(L.centre);
+        const lay = labelLayouts.get(L.id);
+        if (!lay) return null;
+        // a label the placer moved is tied back to the point it measures by a short leader; one that found no clear place is not drawn at all
+        const spotPill = (key, kind, text) => {
+          const p = lay.spots.get(key);
+          if (!p || p.hidden || p.skip) return null;
+          return (
+            <g key={key} data-spot-label={kind} data-spot-moved={p.leader ? "1" : "0"}>
+              {p.leader && (
+                <g data-spot-leader="1">
+                  <line x1={p.leader.x1} y1={p.leader.y1} x2={p.leader.x2} y2={p.leader.y2} stroke={PAL.ink} strokeWidth={1} />
+                  <circle cx={p.leader.x1} cy={p.leader.y1} r={2.2} fill={PAL.ink} />
+                </g>
+              )}
+              <Pill2 x={p.x} y={p.y} text={text} PAL={PAL} />
+            </g>
+          );
+        };
         return (
-          <g key={L.id} data-label-set={L.id}>
+          <g key={L.id} data-label-set={L.id} data-label-hidden={lay.hiddenCount}>
             {L.spots.map((sp) => {
               const depthPx = px(sp.depthFt);
               if (depthPx < 46) return null;                    // too small to carry a label legibly
-              const inset = Math.min(sp.depthFt * 0.22, 15 / rppf);
               const at = (a, b) => f2p(sp.world(a, b));
-              const fp = at(sp.face.a + inset, sp.face.b);
               return (
                 <g key={sp.elId} data-spot-set={sp.elId}>
-                  <Pill2 x={fp.x} y={fp.y} text={sp.face.label} PAL={PAL} />
+                  {spotPill(`${sp.elId}:face`, "face", sp.face.label)}
                   {sp.stations.map((st, i) => {
                     const a = at(st.from, st.b), z = at(st.to, st.b);
                     const ang = Math.atan2(z.y - a.y, z.x - a.x), h = 6;
                     const head = `${z.x},${z.y} ${z.x - h * Math.cos(ang - 0.45)},${z.y - h * Math.sin(ang - 0.45)} ${z.x - h * Math.cos(ang + 0.45)},${z.y - h * Math.sin(ang + 0.45)}`;
-                    const far = at(sp.stations[i].far.a - inset, st.b);
                     return (
                       <g key={i} data-station={i}>
                         <line x1={a.x} y1={a.y} x2={z.x} y2={z.y} stroke={PAL.ink} strokeWidth={1.6} />
                         <polygon points={head} fill={PAL.ink} />
-                        <Pill2 x={far.x} y={far.y} text={st.far.label} PAL={PAL} />
+                        {spotPill(`${sp.elId}:far${i}`, "far", st.far.label)}
                       </g>
                     );
                   })}
-                  {sp.tag && (() => {
-                    // beside the middle arrow: nudged along the wall so it never sits on the arrow itself
-                    const t = at(sp.tag.a, sp.tag.b + Math.min(26 / rppf, sp.widthFt * 0.12));
-                    return <Pill2 x={t.x} y={t.y} text={sp.tag.text} PAL={PAL} />;
-                  })()}
+                  {sp.tag && spotPill(`${sp.elId}:tag`, "fall", sp.tag.text)}
                 </g>
               );
             })}
             {L.corners.map((k, i) => {
               // NEW-2 / NEW-5 (2026-10-30): the tag is placed by lib/padCornerTag — ALWAYS wholly inside the footprint, with a leader to the exact
               // corner when it sits away from it; every edit button lies outside the walls (lib/buildingButtons), so the two cannot meet. Non-interactive.
-              const quad = L.quad ? L.quad.map((q) => f2p(q)) : null;
-              const t = quad ? placeCornerTag(quad, k.idx, k.text) : null;
-              const p = f2p(k.pt);
-              let x, y;
-              if (t) { x = t.x; y = t.y; } else {
-                const dx = c0.x - p.x, dy = c0.y - p.y, d = Math.hypot(dx, dy) || 1, inset = Math.min(26, d * 0.3);
-                x = p.x + (dx / d) * inset; y = p.y + (dy / d) * inset;
-              }
+              // NEW-1 (2026-11-04): and past the selection grips that reach a few px inside the walls (spotLabelPlacement passes them as `avoid`).
+              const t = lay.corners.get(k.idx);
+              if (!t || t.hidden) return null;
               return (
-                <g key={i} data-pad-corner={k.kind} data-pad-corner-idx={k.idx} data-pad-corner-moved={t && t.leader ? "1" : "0"} pointerEvents="none">
-                  {t && t.leader && (
+                <g key={i} data-pad-corner={k.kind} data-pad-corner-idx={k.idx} data-pad-corner-moved={t.leader ? "1" : "0"} pointerEvents="none">
+                  {t.leader && (
                     <g data-pad-corner-leader="1">
                       <line x1={t.leader.x1} y1={t.leader.y1} x2={t.leader.x2} y2={t.leader.y2} stroke={PAL.ink} strokeWidth={1} />
                       <circle cx={t.leader.x1} cy={t.leader.y1} r={2.2} fill={PAL.ink} />
                     </g>
                   )}
-                  <Pill2 x={x} y={y} text={k.text} PAL={PAL} />
+                  <Pill2 x={t.x} y={t.y} text={k.text} PAL={PAL} />
                 </g>
               );
             })}
           </g>
         );
       })}
-      {showCutfillLabels && (labels || []).map((L) => L.flagDot && (() => {
-        const d = f2p(L.flagDot.pt);
+      {showCutfillLabels && (labels || []).map((L) => {
+        if (!L.flagDot) return null;
+        const d = f2p(L.flagDot.pt), lay = labelLayouts.get(L.id), p = lay && lay.spots.get("flag");
         return (
           <g key={`fd${L.id}`} data-flag-dot="1">
             <circle cx={d.x} cy={d.y} r={5} fill={PAL.danger} stroke={PAL.paper} strokeWidth={1.2} />
-            <Pill2 x={d.x} y={d.y - 16} text={L.flagDot.text} PAL={PAL} stroke={PAL.danger} />
+            {p && !p.hidden && !p.skip && (
+              <g data-spot-label="flag" data-spot-moved={p.leader ? "1" : "0"}>
+                {p.leader && <line data-spot-leader="1" x1={p.leader.x1} y1={p.leader.y1} x2={p.leader.x2} y2={p.leader.y2} stroke={PAL.danger} strokeWidth={1} />}
+                <Pill2 x={p.x} y={p.y} text={L.flagDot.text} PAL={PAL} stroke={PAL.danger} />
+              </g>
+            )}
           </g>
         );
-      })())}
+      })}
     </g>
   );
 });

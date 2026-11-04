@@ -56,7 +56,7 @@ try {
     const here = await page.evaluate(() => (window.__plannerView && 1) || 0);
     void here;
     const crumb = page.getByTestId("plan-crumb").first();
-    if (!(await crumb.innerText().catch(() => "")).includes(label)) { await crumb.click(); await page.getByText(label, { exact: true }).last().click(); await pacedWait(page, 2000); }
+    if (!(await crumb.innerText().catch(() => "")).includes(label)) { await crumb.click(); await page.getByTestId("plan-list-scroll").getByText(label, { exact: true }).last().click(); await pacedWait(page, 2000); }
     await page.locator('[data-rail-tab="references"]').first().click();
     await pacedWait(page, 800);
     const rows = await page.locator('[data-testid^="reference-row-"]').evaluateAll((n) => n.map((e) => ({ id: e.getAttribute("data-testid").replace("reference-row-", ""), name: e.innerText.split("\n")[0] })));

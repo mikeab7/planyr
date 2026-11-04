@@ -110,13 +110,19 @@ try {
 
   /* ---- step 4: cleanup — delete the copy AND purge it, then prove it is gone ---- */
   await open("c" + Date.now(), true);
+  // NEW-1 (2026-11-04): the plan menu was redrawn — Delete plan is the row's ⋯ menu item, and Recently deleted is a row that opens the bin view.
   await page.getByTestId("plan-crumb").click();
-  await page.getByRole("button", { name: "Delete plan " + createdName, exact: true }).click();
-  await page.getByRole("button", { name: "Delete", exact: true }).first().click();      // 1) soft delete → the project's "Recently deleted"
+  const copyRow = page.locator('[data-testid^="plan-row-"]', { hasText: createdName }).first();
+  await copyRow.locator('[data-testid^="plan-more-"]').click();
+  await page.getByTestId("plan-ctx-delete").click();
+  await page.getByTestId("plan-delete-go").click();                                     // 1) soft delete → the project's "Recently deleted"
   await sleep(2500);
-  if (!(await page.getByRole("button", { name: "Delete plan " + createdName + " forever", exact: true }).count())) await page.getByTestId("plan-crumb").click();
-  await page.getByRole("button", { name: "Delete plan " + createdName + " forever", exact: true }).click({ timeout: 15000 });
-  await page.getByRole("button", { name: "Delete", exact: true }).first().click({ timeout: 15000 });   // 2) permanent purge (the confirm row's Delete)
+  if (!(await page.getByTestId("plan-bin-toggle").count())) await page.getByTestId("plan-crumb").click();
+  await page.getByTestId("plan-bin-toggle").click({ timeout: 15000 });
+  const binRow = page.locator('[data-testid="deleted-plan"]', { hasText: createdName }).first();
+  await binRow.locator('[data-testid^="deleted-more-"]').click({ timeout: 15000 });
+  await page.getByTestId("deleted-ctx-purge").click();
+  await page.getByTestId("deleted-purge-go").click({ timeout: 15000 });                 // 2) permanent purge (the confirm row's Delete)
   let gone = null;
   for (let i = 0; i < 20; i++) { gone = await rows({ id: createdId }); if (!gone.rows.length) break; await sleep(1000); }
   ok("step 4: the copy is gone from public.sites (purged, verified)", !!gone && !gone.error && gone.rows.length === 0, JSON.stringify(gone));

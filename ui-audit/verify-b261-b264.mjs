@@ -170,19 +170,23 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   const rows0 = await planRows();
   log(rows0 >= 2, `B264 two plans listed in the Plan menu (${rows0})`);
 
-  // click the ✕ delete on a plan row → inline confirm appears, then click Delete
-  const armed = await page.evaluate(() => { const x = [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").startsWith("Delete plan")); if (x) { x.click(); return true; } return false; });
+  // NEW-1 (2026-11-04): the ✕ on a plan row is gone — Delete plan is in the row's ⋯ menu. Open the ⋯ of a plan in the list → Delete plan → inline confirm appears, then click Delete
+  const armed = await page.evaluate(() => { const m = document.querySelector('[data-testid="plan-list-scroll"] [data-testid^="plan-more-"]'); if (m) { m.click(); return true; } return false; });
+  await page.waitForTimeout(250);
+  const armed2 = await page.evaluate(() => { const d = document.querySelector('[data-testid="plan-ctx-delete"]'); if (d) { d.click(); return true; } return false; });
   await page.waitForTimeout(250);
   const hasConfirm = await page.evaluate(() => [...document.querySelectorAll("*")].some((n) => /Delete .“|Delete “/.test(n.textContent || "") && n.children.length < 6));
-  log(armed && hasConfirm, `B264 ✕ shows an inline "Delete …?" confirm (no browser dialog)`);
+  log(armed && armed2 && hasConfirm, `B264 ⋯ → Delete plan shows an inline "Delete …?" confirm (no browser dialog)`);
   await page.evaluate(() => { const d = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Delete"); if (d) d.click(); });
   await page.waitForTimeout(700);
   await openPlanMenu();
   const rows1 = await planRows();
   log(rows1 === rows0 - 1, `B264 a single plan was deleted (rows ${rows0} → ${rows1}); the app stayed alive`);
-  // the only remaining plan must have NO ✕ (can't delete the last plan)
-  const lastHasX = await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => (b.getAttribute("aria-label") || "").startsWith("Delete plan")));
-  log(!lastHasX, "B264 the last remaining plan has no delete affordance (can't delete the only plan)");
+  // the only remaining plan's ⋯ must NOT offer Delete plan (can't delete the last plan)
+  await page.evaluate(() => { const m = document.querySelector('[data-testid^="plan-more-"]'); if (m) m.click(); });
+  await page.waitForTimeout(250);
+  const lastHasDelete = await page.evaluate(() => !!document.querySelector('[data-testid="plan-ctx-delete"]'));
+  log(!lastHasDelete, "B264 the last remaining plan has no delete affordance (can't delete the only plan)");
 
   await page.screenshot({ path: OUT + "b264-plan-delete.png" });
   console.log(errors.length ? `PHASE2 page errors:\n${errors.slice(0, 6).join("\n")}` : "(phase2: no page errors)");

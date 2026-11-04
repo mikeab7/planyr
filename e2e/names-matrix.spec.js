@@ -50,7 +50,8 @@ async function renameViaRowMenu(page, next) {
 }
 async function renamePlan(page, next) {
   await page.locator('[data-testid="plan-crumb"]:visible').click();
-  const input = page.getByTestId("plan-name-input");
+  await page.getByTestId("plan-current-name").dblclick();   // NEW-1 (2026-11-04): the current row is the rename control
+  const input = page.getByTestId("plan-rename-input");
   await input.fill(next);
   await input.press("Enter");
   await page.keyboard.press("Escape");

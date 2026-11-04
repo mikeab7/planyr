@@ -115,7 +115,7 @@ describe("panels render (static markup)", () => {
   const stats = (haulCy, cut, fill) => ({ haulCy, deepestCutFt: cut, tallestFillFt: fill, cutCy: 0, fillCy: 0, netCy: haulCy, slopeSf: 0 });
   const card = (over = {}) => ({
     id: "b1", name: "Building 1", sf: 217500, ffe: 799.8, isAuto: true, solving: false, failed: false, focus: true,
-    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 615, balanced: false, dirtCy: 107881 }, haulCy: 615,
+    earthwork: { cutCy: 53633, fillCy: 54248, netCy: 120, balanced: false, dirtCy: 107881 }, haulCy: 120,
     tiles: { haul: { big: "0", sub: "balanced", tone: "green", dir: "none" }, cut: { big: "53,600", sub: "deepest 14 ft" }, fill: { big: "54,200", sub: "tallest 19 ft" } },
     flags: [], flagged: false, flag: null, fixes: { id: "b1", status: "idle", ffe: null, move: null },
     floors: { pending: false, balancedE: 799.8, curve: [{ E: 794, haulCy: -9000 }, { E: 799.8, haulCy: 0 }, { E: 806, haulCy: 9000 }], rows: [
@@ -142,6 +142,15 @@ describe("panels render (static markup)", () => {
     expect(at("floors")).toBeLessThan(at("on-the-map")); expect(at("on-the-map")).toBeLessThan(at("ground"));
     expect(html.indexOf('data-tile="haul"')).toBeLessThan(html.indexOf('data-tile="cut"'));
     expect(html.indexOf('data-tile="cut"')).toBeLessThan(html.indexOf('data-tile="fill"'));
+  });
+  it("the graded acres are SHOWN (V2100464 step 1 records them): '35.96 AC graded' beside Edit outline, absent while the limit has no area", () => {
+    const withAc = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: 35.958 } });
+    expect(withAc).toContain("data-graded-acres");
+    expect(withAc).toContain("35.96 AC graded");
+    // a small outline edit (one dragged vertex moves the area by hundredths of an acre) must be VISIBLE in the number, and Reset must give the auto value back exactly
+    expect(group([card()], { limit: { mode: "layout", source: "edited", sig: "s2", areaAc: 36.03 } })).toContain("36.03 AC graded");
+    const without = group([card()], { limit: { mode: "layout", source: "auto", sig: "s", areaAc: null } });
+    expect(without).not.toContain("data-graded-acres");
   });
   it("one building: no card chrome, no selector; the floor is shown in ONE place with the AUTO · NO HAUL pill", () => {
     const html = group([card()]);

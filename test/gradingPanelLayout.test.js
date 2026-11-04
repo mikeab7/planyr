@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   limitOffsetFt, marginFromOffset, limitOffsetWord, LIMIT_PAST_MAX_FT, BALANCE_TOL_CY_PANEL, FLOOR_SAME_FT,
   gridDepthStats, floorStatsOf, haulTile, cutTile, fillTile, depthFlags, depthSentence, limitFlagSentence, seamFlags, rockFlag,
-  sweepFloors, shortestSlopesFloor, interpolateHaul, haulCurve, haulZeroFloor, sweepFloorStats, floorRows, groundNumbers, ffePillText,
+  sweepFloors, shortestSlopesFloor, interpolateHaul, haulCurve, haulZeroFloor, sweepFloorStats, floorRows, groundNumbers, ffePillText, haulWords,
 } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
 import { gradingCfg, gradingSetback, gradingPack, hostIdMap, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { propertyLimit, pointInRegions, resolveGradingLimit } from "../src/workspaces/site-planner/lib/gradingLimit.js";
@@ -34,23 +34,28 @@ describe("Limits of disturbance — ONE signed number off the property line (neg
     expect(gradingCfg({ gradingMarginFt: -51 }).gradingMarginFt).toBe(10);   // beyond the cap falls back, like any bad value
     expect([-10, 0, 20].map(limitOffsetWord)).toEqual(["−10", "0", "+20"]);
   });
-  it("the default mode is the property-line limit; 'layout' survives only when named (the hand-edited outline)", () => {
-    expect(gradingCfg({}).limitMode).toBe("boundary");
-    // a hand-edited outline keeps the layout vehicle; a bare stored "layout" does not (V2034896 step 2, the owner's Concept A)
+  it("the limit is ALWAYS the layout's outline in the app, whatever a plan stored — the property line is only the fence (NEW-1, 2026-11-04)", () => {
+    expect(gradingCfg({}).limitMode).toBe("layout");
     const ringPts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
     expect(gradingCfg({ limitMode: "layout", limitRing: ringPts }).limitMode).toBe("layout");
-    expect(gradingCfg({ limitMode: "layout" }).limitMode).toBe("boundary");
-    expect(gradingCfg({ limitMode: "layout", gradingMarginFt: 25 })).toMatchObject({ limitMode: "boundary", gradingMarginFt: 25 });
-    expect(gradingCfg({ limitMode: "layout" }, { engineLayout: true }).limitMode).toBe("layout");   // engine tests / the harness only
-    expect(gradingCfg({ limitMode: "boundary" }).limitMode).toBe("boundary");
+    expect(gradingCfg({ limitMode: "layout" }).limitMode).toBe("layout");
+    expect(gradingCfg({ limitMode: "layout", gradingMarginFt: 25 })).toMatchObject({ limitMode: "layout", gradingMarginFt: 25 });
+    // a plan #2775 converted to "boundary" (and a plan that stored it by default) computes under the new rule WITHOUT being re-saved
+    expect(gradingCfg({ limitMode: "boundary" }).limitMode).toBe("layout");
+    expect(gradingCfg({ limitMode: "boundary", limitRing: ringPts }).limitMode).toBe("layout");
+    expect(gradingCfg({ limitMode: "boundary", gradingMarginFt: 5 })).toMatchObject({ limitMode: "layout", gradingMarginFt: 5 });
+    expect(gradingCfg({ limitMode: "bogus" }).limitMode).toBe("layout");
+    // the retired whole-parcel limit stays reachable for engine tests and the harness only
+    expect(gradingCfg({ limitMode: "boundary" }, { engineBoundary: true }).limitMode).toBe("boundary");
+    expect(gradingCfg({ limitMode: "layout" }, { engineBoundary: true }).limitMode).toBe("layout");
   });
-  it("a plan SAVED on 'layout' (no outline) builds the SAME limit as one saved on the property line — the panel number and the map agree", () => {
+  it("a plan saved on 'layout' and one #2775 converted to 'boundary' build the SAME limit — the panel number and the map agree", () => {
     const parcel = rect(0, 0, 1200, 900);
     const setback = gradingSetback([{ id: "pc", points: parcel, setbacks: parcel.map(() => 25), active: true }], 25);
     const limitOf = (saved) => gradingPack(gradingCfg(saved), setback).limit;
     const a = limitOf({ limitMode: "layout" }), b = limitOf({ limitMode: "boundary" });
-    expect(a.mode).toBe("boundary"); expect(a.edited).toBeNull();
-    expect(a.mode).toBe(b.mode);
+    expect(a.mode).toBe("layout"); expect(a.edited).toBeNull();
+    expect(a.mode).toBe(b.mode); expect(b.edited).toBeNull();
     const specOf = (pk) => ({ mode: pk.limit.mode, setbackRings: pk.setbackRings, setbackHoles: pk.limit.setbackHoles });
     const sigA = resolveGradingLimit({ els: [], spec: specOf(gradingPack(gradingCfg({ limitMode: "layout" }), setback)) }).sig;
     const sigB = resolveGradingLimit({ els: [], spec: specOf(gradingPack(gradingCfg({ limitMode: "boundary" }), setback)) }).sig;
@@ -119,7 +124,45 @@ describe("OTHER FLOORS TO TRY — the table", () => {
     expect(FLOOR_SAME_FT).toBe(0.25);
     expect(floorRows({ nohaul: { E: 800, stats: st(0) }, digging: { E: 800.2, areaAc: 4, stats: st(0) }, slopes: { E: 800.1, stats: st(0) } }, 800)).toHaveLength(1);
   });
-  it("the pill words", () => { expect(ffePillText(true)).toBe("AUTO · NO HAUL"); expect(ffePillText(false)).toBe("TYPED"); });
+  it("the pill words — and 'NO HAUL' only while the card's own haul is under the tolerance (NEW-2)", () => {
+    expect(ffePillText(true)).toBe("AUTO · NO HAUL"); expect(ffePillText(false)).toBe("TYPED");
+    expect(ffePillText(true, 120)).toBe("AUTO · NO HAUL"); expect(ffePillText(true, -499)).toBe("AUTO · NO HAUL");
+    expect(ffePillText(true, 3100)).toBe("AUTO · NEAR NO HAUL"); expect(ffePillText(true, -2200)).toBe("AUTO · NEAR NO HAUL");
+    expect(ffePillText(false, 3100)).toBe("TYPED");
+  });
+
+  // NEW-2 (2026-11-04) — the owner's screenshot: "790.5 · no haul" beside +2,200, "799.0 · least digging" beside the LARGEST haul.
+  const full = (haulCy, cutCy, slopeSf) => ({ haulCy, cutCy, fillCy: cutCy + haulCy, deepestCutFt: 5, tallestFillFt: 6, slopeSf });
+  it("the haul is WORDS, never a sign: '2,200 import' / '1,200 export' / 'balanced'; big numbers are abbreviated", () => {
+    expect(haulWords(2200)).toBe("2,200 import");
+    expect(haulWords(-1200)).toBe("1,200 export");
+    expect(haulWords(120)).toBe("balanced"); expect(haulWords(-499)).toBe("balanced");
+    expect(haulWords(885300)).toBe("885k import"); expect(haulWords(-639000)).toBe("639k export");
+    expect(haulWords(null)).toBe("…"); expect(haulWords(NaN)).toBe("…");
+    for (const v of [2200, -1200, 885300, -639000, 0, 499]) expect(haulWords(v)).not.toMatch(/[+−-]/);
+  });
+  it("a 'no haul' row that carries a haul is renamed 'nearest no haul' — its name may not contradict its number", () => {
+    const rows = floorRows({ nohaul: { E: 790.5, stats: full(2200, 300000, 900) }, digging: { E: 799, areaAc: 20, stats: full(885000, 200000, 950) }, slopes: { E: 796.5, stats: full(639000, 250000, 800) } }, 790.5);
+    expect(rows.find((r) => r.key === "nohaul").label).toBe("nearest no haul");
+    expect(rows.every((r) => !(r.names.includes("nohaul")) || Math.abs(r.stats.haulCy) < 500)).toBe(true);
+  });
+  it("'least digging' lives on the row with the smallest cut, 'shortest slopes' on the smallest slope footprint — a name moves to the row it is true of", () => {
+    // the level-ground alternative (799) is NOT the least digging here: the shortest-slopes sample cuts less
+    const rows = floorRows({ nohaul: { E: 790.5, stats: full(100, 300000, 900) }, digging: { E: 799, areaAc: 20, stats: full(885000, 280000, 950) }, slopes: { E: 796.5, stats: full(639000, 190000, 800) } }, 790.5);
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(byKey.slopes.names).toEqual(expect.arrayContaining(["slopes", "digging"]));
+    expect(byKey.digging.label).toBe("another floor");
+    expect(byKey.nohaul.label).toBe("no haul");
+    // every name on every row is true of the numbers
+    const cuts = rows.map((r) => r.stats.cutCy), slopes = rows.map((r) => r.stats.slopeSf);
+    for (const r of rows) {
+      if (r.names.includes("digging")) expect(r.stats.cutCy).toBe(Math.min(...cuts));
+      if (r.names.includes("slopes")) expect(r.stats.slopeSf).toBe(Math.min(...slopes));
+      if (r.names.includes("nohaul")) expect(Math.abs(r.stats.haulCy)).toBeLessThan(500);
+    }
+    // a row with no stats yet (numbers still coming in) keeps its name — nothing to contradict
+    expect(floorRows({ nohaul: { E: 790.5, stats: null } }, 790.5)[0].label).toBe("no haul");
+  });
 });
 
 describe("the haul-by-floor sampler", () => {
@@ -186,7 +229,7 @@ describe("the three suggested floors on a synthetic RIDGE (the real surface engi
   });
 });
 
-describe("the cursor readout's 'On grade' (undisturbed) path under the default property-line limit (B2585313 ×2 meets NEW-1)", () => {
+describe("the cursor readout's 'On grade' (undisturbed) path — grading only what the layout needs (NEW-1, 2026-11-04)", () => {
   const ring = rect(0, 0, 1200, 900);
   const existAt = (p) => 100 + 0.01 * p.x;
   const hosts0 = hostIdMap([{ id: "b1", type: "building" }]);
@@ -198,20 +241,25 @@ describe("the cursor readout's 'On grade' (undisturbed) path under the default p
       ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: `ro${JSON.stringify(g || {})}` }, grading: gradingPack(cfg, setback) });
     return { cfg, grid: s.grid };
   };
-  it("the default limit is the property line: the 10 ft margin strip INSIDE the property reads 'On grade'; the limit and the neighbour's land do not", () => {
+  it("the default limit is the layout's outline: the building and its slope are graded; the ground the layout does not need — including the margin strip — reads 'On grade'; the neighbour's land does not", () => {
     const { cfg, grid } = build({});
-    expect(cfg.limitMode).toBe("boundary");
-    const margin = sampleProposedAt(grid, { x: 5, y: 450 }, existAt);       // inside the property, inside the 10 ft margin → off the limit
+    expect(cfg.limitMode).toBe("layout");
+    expect(grid.limit.mode).toBe("layout");
+    const pad = sampleProposedAt(grid, { x: 550, y: 450 }, existAt);
+    expect(pad.status).toBe("value"); expect(pad.undisturbed).toBeFalsy(); expect(pad.ft).toBeCloseTo(103, 6);
+    const margin = sampleProposedAt(grid, { x: 5, y: 450 }, existAt);       // inside the property, inside the 10 ft margin, nowhere near the layout
     expect(margin).toMatchObject({ status: "value", undisturbed: true }); expect(margin.ft).toBeCloseTo(existAt({ x: 5, y: 450 }), 6);
-    const inLimit = sampleProposedAt(grid, { x: 100, y: 450 }, existAt);
-    expect(inLimit.status).toBe("value"); expect(inLimit.undisturbed).toBeFalsy();
+    const midway = sampleProposedAt(grid, { x: 120, y: 450 }, existAt);     // open ground the layout does not need: NOT graded up to the fence
+    expect(midway).toMatchObject({ status: "value", undisturbed: true });
     const neighbour = sampleProposedAt(grid, { x: -15, y: 450 }, existAt);  // off the property: keeps its honest dash
     expect(neighbour.status).toBe("none");
   });
-  it("Limits of disturbance +20 (stored −20) puts that margin strip INSIDE the limit — it is graded, no longer 'On grade'", () => {
+  it("Limits of disturbance +20 (stored −20) moves the FENCE out, not the graded area: the margin strip is still 'On grade'", () => {
     const { grid } = build({ gradingMarginFt: marginFromOffset(20) });
     const strip = sampleProposedAt(grid, { x: 5, y: 450 }, existAt);
-    expect(strip.status).toBe("value"); expect(strip.undisturbed).toBeFalsy();
+    expect(strip).toMatchObject({ status: "value", undisturbed: true });
+    // and the graded area is the same acreage as at −10: the number is a fence, never a target
+    expect(grid.limit.areaAc).toBeCloseTo(build({}).grid.limit.areaAc, 6);
   });
 });
 

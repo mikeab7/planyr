@@ -30,7 +30,7 @@ function chehaw() {
   const hosts = hostIdMap(els);
   const setback = gradingSetback([{ id: "pc", points: ring, active: true }], 25);
   const build = (FFE, mode, tag) => {
-    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true });
+    const cfg = gradingCfg({ enabled: true, limitMode: mode, layers: { cutfill: true, contours: true } }, { engineLayout: true, engineBoundary: true });
     return buildProposedSurface({
       els: els.map((e) => ({ id: e.id, type: e.type, ring: e.ring, dockStack: e.dockStack || null, accessible: false, slopeOverridePct: null, padElevFt: e.type === "building" ? FFE : null, ...(e.type !== "building" ? { hostId: hosts.get(e.id) ?? null } : {}) })),
       ffeFt: null, dockDropFt: 4, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [],

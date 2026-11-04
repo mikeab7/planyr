@@ -236,12 +236,14 @@ test.describe("the canvas clipboard survives a plan switch (logged out)", () => 
     await page.waitForTimeout(150);
 
     // Rename this plan from the same dropdown the switch lives in, then switch and paste.
+    // NEW-1 (2026-11-04): the current plan's row IS the rename control — double-click its name, type, Enter.
     await planCrumb(page).click();
-    const nameField = page.getByTestId("plan-name-input");
+    await page.getByTestId("plan-current-name").dblclick();
+    const nameField = page.getByTestId("plan-rename-input");
     await nameField.fill("Print concept");
     await nameField.press("Enter");
     await expect(planCrumb(page)).toContainText("Print concept", { timeout: 15_000 });
-    await page.locator('body > div[data-menu-owner="app-header"]').first().click(); // click away to close
+    await canvas(page).click({ position: { x: 600, y: 380 } }); // click away to close the menu (a bare Escape does not close it in this harness — the project switcher behaves the same)
 
     await switchToPlan(page, "Concept B");
     await canvas(page).click({ position: { x: 700, y: 420 } });
