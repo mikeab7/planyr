@@ -158,7 +158,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > them exactly as they are in your diff, however stale they look.** They are kept fresh
 > automatically instead, by `.github/workflows/regen-derived-docs.yml` (a nightly scheduled job
 > that opens its own small PR when either has drifted — that PR needs a human or a Claude Code
-> session to merge it, since the workflow's own token can't arm auto-merge). Being briefly stale
+> session to merge it, since the workflow's own token can't arm auto-merge). **⚠ AS OF 2026-11-05 THE JOB CANNOT OPEN ITS PR** (GitHub: "Actions is not permitted to create or approve pull requests" — every run since at least Nov 1, B2671188): it pushes `chore/regen-derived-docs-<stamp>` and stops, so until the owner flips that setting a session opens the PR from the newest such branch (the touch guard exempts that branch name) and arms auto-merge. Being briefly stale
 > between refreshes is fine — neither is a runtime source of truth.
 > - **`MAP.md`** (repo root) — every source file → its module owner, one-line responsibility, and
 >   exported symbols. **Grep `MAP.md` to find a path or symbol** instead of sweeping `src/`, but
