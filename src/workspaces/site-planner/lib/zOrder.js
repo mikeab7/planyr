@@ -10,6 +10,8 @@
 // TYPE relative to each other.
 //
 // Pure — no I/O, no globals. Operates on any collection of objects that may carry a numeric `z`.
+// NEW-1 (2026-11-05): `z` is still the whole stored story — the one render-time exception (trailer parking over roads) lives in
+// lib/trailerOverRoads.js and never writes a z. See root /CLAUDE.md constraint 10.
 
 import { Z_GAP } from "./elementRows.js";
 

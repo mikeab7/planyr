@@ -22,6 +22,7 @@
  */
 
 import { elStyle, elToRingFeet, byZ, TYPE, toHex6 } from "./planStyle.js";
+import { sortElsForPaint } from "./trailerOverRoads.js"; // NEW-1 (2026-11-05) — trailer parking always draws above roads, same as the canvas
 import { isBuilding, buildingNumbers } from "./siteModel.js";
 import { effectiveBuildingProps, normalizeRules } from "./buildingProps.js";
 import { dockSidesFor } from "./dockZones.js";
@@ -242,7 +243,7 @@ export function siteToFeatures(model, project, opts = {}) {
 
   // Drawn elements — buildings, parking, trailer, paving, road, pond, sidewalk, landscape.
   const bNums = buildingNumbers(els);
-  [...els].sort(byZ).forEach((el) => {
+  sortElsForPaint(els, byZ).forEach((el) => {
     if (!el || !el.type) return;
     const ring = elToRingFeet(el);
     if (!ring || ring.length < 3) return;
