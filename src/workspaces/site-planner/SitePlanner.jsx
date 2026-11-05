@@ -274,6 +274,7 @@ import { createTrailingWriter } from "./lib/trailingWrite.js";
 import { persistLookBatch } from "./lib/parcelLookPersist.js";
 import ParcelStylePanel from "./components/ParcelStylePanel.jsx";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
+import { liftTrailersOverRoads, arrangeRuleNote } from "./lib/trailerOverRoads.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
@@ -5371,7 +5372,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // item (nothing to reorder) so we don't cry "already at back" when there's no stack at all.
       const af = arrangeFlags(peers, s.id);
       const front = !(mode === "back" || mode === "backward");
-      if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
+      const ruleWhy = arrangeRuleNote(els.find((e) => e.id === s.id), mode, els); // NEW-1 (2026-11-05) — already first/last by z, but the trailer-over-road rule is the reason it can't go further
+      if (ruleWhy) flashWarn(ruleWhy, 3500);
+      else if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
       // NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
       // at all" actually looked like: the object is the only one on the plan, so there is nothing
       // to reorder it against and the op is a no-op for a reason the user cannot see. Say it.
@@ -5380,6 +5383,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     pushHistory();
     setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
+    // NEW-1 (2026-11-05) — trailer parking always draws above roads (lib/trailerOverRoads.js), so a Bring-to-Front on a road / Send-to-Back on a
+    // trailer still reorders it against everything ELSE but cannot change that pair. Say so at the moment it would otherwise look dead.
+    { const tt = els.find((e) => e.id === s.id); const why = arrangeRuleNote(tt, mode, els); if (why) flashWarn(why, 3500); }
   };
   /* NEW-2 — the peer set an Arrange op would act on, for the CURRENT selection. The menus need it
      to answer two different questions with one fact: is the object at an end of its stack (grey the
@@ -23909,9 +23915,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       lifted: r.ids.some((id) => liftedElIds.has(id)),
     }));
     const merged = [...elItems, ...roadItems];
+    /* NEW-1 (2026-11-05, owner-ordered exception to constraint 10) — TRAILER PARKING ALWAYS DRAWS ABOVE ROADS. One linear pass over the
+       already-sorted lists (lib/trailerOverRoads.js): a render-order rule only, no z written, no extra sort. Applied to each list so a
+       selected trailer + selected road keep trailer-over-road inside the lift too. The DOM order this produces is also the hit-test
+       order, the print clone's order and the editable PDF's annotation order. */
     return {
-      normal: merged.filter((it) => !it.lifted).sort((a, b) => a.z - b.z),
-      lifted: merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z),
+      normal: liftTrailersOverRoads(merged.filter((it) => !it.lifted).sort((a, b) => a.z - b.z)),
+      lifted: liftTrailersOverRoads(merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z)),
     };
   }, [drawEls, roadRegionPaths, roadNet, liftedElIds]);
   /* One item of the unified stack. A road cluster paints its dissolved fill, THEN its member roads'
@@ -31157,7 +31167,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
               const arrRow = (icon, text, mode, dis, hint) => miRow({
                 icon, text, hint, dis,
-                title: dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : "",
+                title: dis ? (arrWhy || arrangeRuleNote(t, mode, els) || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : "", // NEW-1 (2026-11-05) — a road already first by z next to a trailer: the real reason is the trailer-over-road rule
                 onClick: () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); },
               });
               return (

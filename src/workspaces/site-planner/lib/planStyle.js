@@ -278,6 +278,10 @@ export const toHex6 = (c) => {
  * is migrated on load (see `siteModel.js`) rather than read here — `zOrder` no longer looks at it.
  */
 
+/* ⛔ NEW-1 (2026-11-05) — ONE OWNER-ORDERED EXCEPTION TO CREATION ORDER: TRAILER PARKING ALWAYS DRAWS ABOVE ROADS
+ * (root /CLAUDE.md constraint 10, "EXCEPTION"). `zOrder`/`byZ` below are UNCHANGED and still return the stored z — the exception is
+ * applied AFTER the sort, by `lib/trailerOverRoads.js` (`liftTrailersOverRoads` / `sortElsForPaint`), in the canvas's `elPaintItems`,
+ * the thumbnail and the KMZ. Never write a changed z onto a saved element for it, and never widen it to another type pair. */
 // Paint order = the element's own `z` (B671 — a monotonic creation-order key; Arrange/NEW-2's
 // selection-lift adjust it, never anything else), with id as the final deterministic tiebreak for
 // the rare exact tie (two elements sharing a z — legacy data, or a batch stamped in one commit that
