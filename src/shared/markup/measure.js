@@ -12,6 +12,7 @@
  */
 import { ftToAcres } from "../coordinates/index.js";
 import { dist, pathLength, polyArea } from "./geometry.js";
+import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../units/numberFormat.js";
 
 /* Minimum points needed to COMMIT each measurement kind. Area + perimeter describe a
  * polygon, so they need ≥3 distinct points — a 2-point "area" is 0 sf (shoelace) and a
@@ -52,11 +53,8 @@ export function measureValue(m, ftPerUnit) {
   return { kind: m.kind, calibrated: cal };
 }
 
-const f0 = (n) => Math.round(n).toLocaleString();
 // One-decimal feet for LINEAR measures: whole-foot rounding hid sub-foot precision (a 150.6
 // ft line read "151 ft") and clashed with the 2-dp acres shown for area. (B296)
-const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* Human label for a measurement, e.g. "150.6 ft", "1.83 ac · 79,715 sf", "42". `opts` is
  * reserved for future formatting overrides (precision, unit suffix) — defaults match the

@@ -59,7 +59,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
-const parcelsLS = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
+const parcelsLS = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
 const box = async (loc) => { const b = await loc.boundingBox(); return b ? { cx: b.x + b.width / 2, cy: b.y + b.height / 2, w: b.width, h: b.height, x: b.x, y: b.y } : null; };
 // A press point on the FIRST parcel's right edge, proven (not assumed) to land on a parcel — the left edge sits under the panel.
 async function parcelEdgePoint() {
@@ -97,28 +97,28 @@ try {
   ok("no project/phase subtitle in the Parcels header", (await chrome.locator('[data-panel-subtitle]').count()) === 0);
   ok("no pop-out/detach icon beside the ✕", (await T("panel-chrome-parcel-detach").count()) === 0);
   const sum = (await T("parcels-active-count").innerText()).trim();
-  ok("summary says '4 of 4 parcels active'", /^4 of 4 parcels active$/.test(sum), sum);
+  ok("summary says '4 of 4 active'", /^4 of 4 active$/.test(sum), sum);
   ok("no Locked stat and no Lock all", (await page.getByText(/^locked$/i).count()) === 0 && (await page.getByText(/lock all/i).count()) === 0);
   ok("filter box hidden on a short list", (await T("parcels-filter").count()) === 0);
   ok("the old 'Draw, split, combine… Parcel tools' line is gone", (await T("land-to-parcel-tools").count()) === 0);
   ok("Add parcels ▾ and Edit parcels buttons", (await T("land-add-btn").count()) === 1 && (await T("parcels-edit-btn").count()) === 1);
 
   // ---- alignment
-  const head = await box(T("parcels-active-head"));
+  // The TABLE (owner 2026-10-16): ONE column-heading row sits above the whole list — "Acres" over the figures, a lock icon and an eye icon over their columns.
   const eye = await box(T("parcel-row-eye-p1"));
-  ok("the eye is centred directly under 'Active'", head && eye && Math.abs(head.cx - eye.cx) <= 2, `head ${head && head.cx.toFixed(1)} eye ${eye && eye.cx.toFixed(1)}`);
+  ok("one column-heading row: Acres + a lock icon + an eye icon (and no old 'Active' heading)", (await T("parcels-active-head").count()) === 0 && (await T("parcels-columns").count()) === 1 && (await T("parcels-col-acres").count()) === 1 && (await T("parcels-col-lock").count()) === 1 && (await T("parcels-col-eye").count()) === 1);
   const chk = await box(T("parcel-row-check-p1")), nm = await box(T("parcel-row-p1")), ac = await box(T("parcel-row-acres-p1"));
-  ok("checkbox, name, acres and eye share one centre line", chk && nm && ac && eye && [chk, nm, ac].every((b) => Math.abs(b.cy - eye.cy) <= 3), `${[chk, nm, ac, eye].map((b) => b && b.cy.toFixed(1))}`);
+  ok("checkbox, acres and eye share one centre line (the name block may be taller: it carries the source line)", chk && nm && ac && eye && [chk, ac].every((b) => Math.abs(b.cy - eye.cy) <= 3), `${[chk, nm, ac, eye].map((b) => b && b.cy.toFixed(1))}`);
   const l1 = await T("parcel-row-p1").innerText(), l3 = await T("parcel-row-p3").innerText();
   ok("county row's second line reads '<CAD> · <account>'", /Harris CAD · 1001/.test(l1), JSON.stringify(l1));
-  ok("drawn row's second line reads 'Drawn'", /Drawn/.test(l3), JSON.stringify(l3));
+  ok("drawn row has no second line (its group header says Drawn)", (await T("parcel-row-source-p3").count()) === 0 && (await T("parcels-group-drawn").count()) === 1, JSON.stringify(l3));
   await shot("list");
 
   // ---- eye → inactive row greyed, acres struck
   await T("parcel-row-eye-p3").click();
   const struck = await T("parcel-row-acres-p3").evaluate((e) => getComputedStyle(e).textDecorationLine);
   ok("an inactive parcel stays listed with acres struck through", /line-through/.test(struck), struck);
-  ok("summary follows: 3 of 4", /3 of 4 parcels active/.test(await T("parcels-active-count").innerText()));
+  ok("summary follows: 3 of 4", /3 of 4 active/.test(await T("parcels-active-count").innerText()));
   await T("parcel-row-eye-p3").click();
 
   // ---- combine bar

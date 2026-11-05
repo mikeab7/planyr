@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isDiagArmed, latchDiagArm, DIAG_KEY, DIAG_PARAM } from "../src/workspaces/site-planner/lib/diagArm.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const win = (over = {}) => ({ location: { search: "", hash: "" }, ...over });
 const store = (init = {}) => {
@@ -68,7 +69,7 @@ describe("arming the read-only diagnostic surface", () => {
 });
 
 describe("source guard — the hooks must not go back to a mount-time gate", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
 
   it("both diagnostic hooks read the gate at CALL time", () => {
     expect(SP).toMatch(/const hook = \(x, y\) => \(isDiagArmed\(window\) && dblResolveRef\.current/);

@@ -38,37 +38,44 @@ export default function Collapse({
     try { localStorage.setItem(collapseStorageKey(sectionId), open ? "1" : "0"); } catch (_) { /* quota/unavailable — UI state only */ }
   }, [open, sectionId, persist]);
 
+  const toggle = (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={() => setOpen((o) => !o)}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 2px",
+        background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+        // NEW-2 (B915536) — the header itself carries no visible text of its own (every child
+        // span below sets its own explicit size), so this was inert scaffolding falling
+        // through to the browser's UA default. On-scale value, zero visual change.
+        fontSize: FONT_SIZE.control,
+      }}
+    >
+      <span aria-hidden="true" style={{ flex: "none", width: 10, fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .16s ease" }}>▶</span>
+      <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", flex: "none" }}>{title}</span>
+      {count != null ? (
+        // NEW-2 (B915536) — was 9.5 (off-scale under the OLD scale too); a single-digit/short
+        // count numeral in a pill, same rationale as the Sites-panel group-header count badge.
+        <span style={{ flex: "none", fontSize: FONT_SIZE.micro, fontWeight: 700, color: "var(--text-tertiary)", background: "var(--planner-panel)", borderRadius: 999, padding: "0 6px", fontVariantNumeric: TABULAR_NUMS }}>{count}</span>
+      ) : null}
+      {!open && summary ? (
+        // No-truncation rule (FINAL UI SPEC): the summary shrinks and WRAPS rather than
+        // ellipsizing, so it's never cut off with "…" next to a long group title.
+        <span style={{ marginLeft: "auto", minWidth: 0, flexShrink: 1, textAlign: "right", fontSize: 10.5, color: "var(--text-tertiary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.3 }}>{summary}</span>
+      ) : null}
+    </button>
+  );
   return (
     <div style={{ borderTop: "1px solid var(--planner-border)", ...style }}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 2px",
-          background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
-          // NEW-2 (B915536) — the header itself carries no visible text of its own (every child
-          // span below sets its own explicit size), so this was inert scaffolding falling
-          // through to the browser's UA default. On-scale value, zero visual change.
-          fontSize: FONT_SIZE.control,
-        }}
-      >
-        <span aria-hidden="true" style={{ flex: "none", width: 10, fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .16s ease" }}>▶</span>
-        <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", flex: "none" }}>{title}</span>
-        {count != null ? (
-          // NEW-2 (B915536) — was 9.5 (off-scale under the OLD scale too); a single-digit/short
-          // count numeral in a pill, same rationale as the Sites-panel group-header count badge.
-          <span style={{ flex: "none", fontSize: FONT_SIZE.micro, fontWeight: 700, color: "var(--text-tertiary)", background: "var(--planner-panel)", borderRadius: 999, padding: "0 6px", fontVariantNumeric: TABULAR_NUMS }}>{count}</span>
-        ) : null}
-        {!open && summary ? (
-          // No-truncation rule (FINAL UI SPEC): the summary shrinks and WRAPS rather than
-          // ellipsizing, so it's never cut off with "…" next to a long group title.
-          <span style={{ marginLeft: "auto", minWidth: 0, flexShrink: 1, textAlign: "right", fontSize: 10.5, color: "var(--text-tertiary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.3 }}>{summary}</span>
-        ) : null}
-        {headerRight != null ? (
-          <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: open || !summary ? "auto" : 8, flex: "none" }}>{headerRight}</span>
-        ) : null}
-      </button>
+      {/* `headerRight` (Building panel v3) sits BESIDE the toggle button, never inside it — a button nested in a
+          button is invalid, and a click on the slot must not open / close the section. */}
+      {headerRight != null ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>{toggle}</div>
+          <span style={{ flex: "none" }}>{headerRight}</span>
+        </div>
+      ) : toggle}
       {open ? <div style={{ padding: "0 2px 9px" }}>{children}</div> : null}
     </div>
   );

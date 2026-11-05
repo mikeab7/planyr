@@ -1,0 +1,3 @@
+Property Address	City	State	Zip	Property Type	Tenant Name	Landlord Name	SF Leased	Sign Date	Start Date	Expiration Date	Lease Term	Starting Rent ($/SF/Yr)	Effective Rent	Rent Type	Lease Type	Escalations	Free Rent	Building SF	Year Built	Ceiling Height	Latitude	Longitude
+500 Sample St	Houston	TX	77032	Industrial	Example Tenant Inc	Sample Owner LP	45,000	3/15/2026	5/1/2026	4/30/2031	5 Years	$8.40	$7.95	NNN	Direct	3.5%	3 Months	120,000	2019	32 ft	29.951000	-95.355000
+900 Demo Ave	Katy	TX	77493	Industrial	Fictional Movers	Imaginary REIT	18,250	1/10/2026	2/1/2026	1/31/2029	36 Months	$11.25	$11.25	Modified Gross	Direct	3%	0	18,250	2001	24'	29.786000	-95.824000

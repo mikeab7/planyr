@@ -28,8 +28,13 @@ import { decodeGrid } from "./lercGrid.js";
 // The marching-squares tracer is worker-only and is the only `d3-contour` consumer, so
 // it lives in its own module (B1095) — same reasoning as lercGrid.js above. Static here:
 // the worker is its own bundle, so it costs the page nothing.
-import { buildContours } from "./contourTrace.js";
+import { buildContours, buildProposedContours, traceBandOutline } from "./contourTrace.js";
 import { flowArrows } from "./flowField.js";
+// NEW-1 (owner-only grading layer): the buildable-ground sweep rides this same worker. Both modules
+// are pure (no DOM, no Leaflet) — buildableLattice resamples the site DEM onto the 10-ft feet lattice
+// so even the resample stays off the main thread.
+import { latticeFromDem, sweepBBox } from "./buildableLattice.js";
+import { prepareSweep, summarizeCtx, cachedMaskAt } from "./buildableGround.js";
 
 // Smoothing sigmas are spec'd in GROUND METERS (same terrain detail at every zoom)
 // then converted to cells per grid — but CAPPED in cells so the kernel radius
@@ -43,8 +48,68 @@ const FLOW_SIGMA_M = 12;
 
 const round6 = (v) => Math.round(v * 1e6) / 1e6;
 
+/* NEW-1 — buildable-ground jobs. A prepared context (lattice + setback raster + boundary samples) is
+ * cached by the caller's key so a mask request for a new finish elevation does not re-ship the 4 MB DEM:
+ * the reply to an unknown key is the LOUD "no-context" and the caller re-sends the full payload. */
+const ctxCache = new Map();
+const CTX_MAX = 3;
+function buildableJob(id, d) {
+  let entry = ctxCache.get(d.key);
+  if (!entry) {
+    if (!d.dem) { self.postMessage({ id, ok: false, error: "no-context" }); return; }
+    const bbox = sweepBBox(d.parcelRings, d.marginFt ?? 200);
+    const lattice = latticeFromDem({ grid: d.dem.grid, req: d.dem.req, origin: d.origin, bbox, cell: d.cell });
+    const ctx = prepareSweep({ lattice, rings: d.rings, holes: d.holes || [] });
+    entry = { ctx };
+    ctxCache.set(d.key, entry);
+    while (ctxCache.size > CTX_MAX) ctxCache.delete(ctxCache.keys().next().value);
+  }
+  const { ctx } = entry;
+  if (d.op === "mask") {
+    const r = cachedMaskAt(ctx, d.E, d.s, d.D);
+    const mask = r.mask.slice();   // the cached copy stays; this one transfers
+    const { x0, y0, nx, ny, cell } = ctx.lattice;
+    self.postMessage({ id, ok: true, mask, x0, y0, nx, ny, cell, cells: r.cells, areaSf: r.areaSf, areaAc: r.areaAc }, [mask.buffer]);
+    return;
+  }
+  const sum = summarizeCtx(ctx, { parcelRings: d.parcelRings, holes: d.holes || [], s: d.s, D: d.D });
+  self.postMessage({ id, ok: true, summary: sum, lattice: { x0: ctx.lattice.x0, y0: ctx.lattice.y0, nx: ctx.lattice.nx, ny: ctx.lattice.ny, cell: ctx.lattice.cell }, zMin: ctx.zMin, zMax: ctx.zMax });
+}
+
+/* ROUND 4 (B2349122) / ROUND 5 — PROPOSED contours: marching squares (interpolated) over the proposed-surface CONTOUR
+ * LATTICE (proposedSurface.contourLatticeSteps: one value per cell — proposed inside the daylight line, existing ground
+ * outside it, NaN over a pond / a DEM void), clipped to the daylight line, cut out of the building pads, smoothed and
+ * labelled along the line (contourTrace.buildProposedContours) — in the worker, never in a render. Lines come back in
+ * LATTICE PIXEL coordinates (the caller maps them to feet: x = x0 + px·dx, y = y0 + py·dy); `clipRings` / `clipHoles` /
+ * `cutRings` arrive already in that frame. `interval` is the caller's (the existing layer's rule). */
+function proposedContoursJob(id, d) {
+  const { values, nx, ny, interval } = d;
+  const mask = new Uint8Array(nx * ny);
+  const work = new Float32Array(nx * ny);
+  for (let k = 0; k < mask.length; k++) { const v = values[k]; if (v === v) { mask[k] = 1; work[k] = v; } }
+  const c = buildProposedContours({ values: work, mask, width: nx, height: ny }, {
+    interval: interval > 0 ? interval : 1, inside: d.inside || null, clipRings: d.clipRings || null, clipHoles: d.clipHoles || null, cutRings: d.cutRings || [],
+    smoothPasses: d.smoothPasses ?? 2, minPieceCells: d.minPieceCells ?? 1, labelMinCells: d.labelMinCells ?? 8,
+  });
+  self.postMessage({ id, ok: true, interval: c.interval, levels: c.levels, labels: c.labels, daylight: c.daylight });
+}
+
 self.onmessage = (e) => {
   const { id, req, buffer, opts = {} } = e.data || {};
+  if (e.data && e.data.kind === "buildable") {
+    try { buildableJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
+  if (e.data && e.data.kind === "band-outline") {
+    // ROUND 7 (NEW-1) — the slope band's outline, traced and smoothed like the contours (contourTrace.traceBandOutline)
+    try { const r = traceBandOutline(e.data.values, e.data.nx, e.data.ny); self.postMessage({ id, ok: true, rings: r.rings, holes: r.holes }); }
+    catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
+  if (e.data && e.data.kind === "contours-proposed") {
+    try { proposedContoursJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+    return;
+  }
   try {
     const grid = decodeGrid(buffer, req);
     const { values, mask, width, height } = grid;
@@ -64,7 +129,7 @@ self.onmessage = (e) => {
     const c = buildContours({
       values: maskedSmooth(values, mask, width, height, sigmaC),
       mask, width, height,
-    }, { clip });
+    }, { clip, minInterval: opts.contourInterval > 0 ? opts.contourInterval : null });
     const contours = {
       interval: c.interval,
       levels: c.levels.map((l) => ({

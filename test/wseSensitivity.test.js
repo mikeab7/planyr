@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { wseSensitivity, normalizeSteps, DEFAULT_STEPS_FT } from "../src/workspaces/site-planner/lib/wseSensitivity.js";
 import { criteriaFor, CRITERIA_JUR_KEYS } from "../src/workspaces/site-planner/lib/detentionCriteria.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const AF = 43560;
 /* A stand-in for the real engine: fill volume grows with the flood level over a flat site, which
@@ -121,7 +122,7 @@ describe("the steps are criteria-configurable, never hardcoded at the call site"
 });
 
 describe("the SitePlanner wiring feeds it the SAME evaluator as the live panel", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
 
   it("evalAtWse is hoisted and shared — one derivation, not two", () => {
     expect(src).toContain("const fmEvalAtWse = useCallback((wse) => {");

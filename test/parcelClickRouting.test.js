@@ -12,9 +12,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 
 // The in-planner parcel-identify region: from the outline/candidate refs through the end of
 // `quickAddAt`, i.e. everything this fix touched.
@@ -52,7 +53,7 @@ describe("NEW-1: in-planner parcel identify routes by the CLICKED POINT, never a
   it("the click's \"no parcel\" message distinguishes real causes instead of always blaming aim", () => {
     // NEW-2 — a healthy source answering honestly, an unconfigured county, and an unreachable
     // server must not all collapse to "click directly on a lot."
-    expect(region.includes("noParcelSourceNote")).toBe(true);
+    expect(region.includes("parcelGapNotice")).toBe(true);
     expect(region.includes("res.responded === 0")).toBe(true);
   });
 });

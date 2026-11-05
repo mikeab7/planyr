@@ -71,3 +71,18 @@ export function placementPlan(o) {
 export function scaledPatch(o) {
   return overlayKind(o) === OV_KIND.DXF ? { unscaled: false, unitsAssumed: false } : { unscaled: false };
 }
+
+/* Set scale: which segment (Preset | Custom) opens first, and what the Preset dropdown shows. Preset when the current scale
+ * matches a preset (or is the sheet's own suggested read) or there is no scale yet; Custom when the scale came from Trace /
+ * Match / typing and matches no preset. `selected` is a SCALE_PRESETS id, "sheet", or "" (the "Choose a scale" placeholder —
+ * the dropdown never flips to Custom by itself). */
+export function scaleEntryPlan(o) {
+  const cur = scaleForFtPerPoint(o.ftPerPx);
+  const matched = matchScalePreset(cur);
+  const detected = o.detectedScale > 0 ? o.detectedScale : null;
+  const isSheet = !!detected && Math.abs(detected - cur) < 1e-6;
+  const hasScale = o.unscaled !== true && cur > 0;
+  const selected = matched ? matched.id : (isSheet ? "sheet" : "");
+  const mode = !hasScale || selected ? "preset" : "custom";
+  return { mode, selected, curFpi: cur, detected };
+}

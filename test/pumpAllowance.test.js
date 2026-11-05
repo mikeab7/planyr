@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { criteriaFor, pumpAllowance, problems, DETENTION_CRITERIA, CRITERIA_JUR_KEYS } from "../src/workspaces/site-planner/lib/detentionCriteria.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 describe("pumpAllowance — the DERIVED pump rate (no user CFS required)", () => {
   it("derives allowedPumpCfs = pumpedShare% × the allowable release", () => {
@@ -71,7 +72,7 @@ describe("pumpAllowance — the DERIVED pump rate (no user CFS required)", () =>
 });
 
 describe("NEW-27 — SitePlanner wiring (source scan)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const src = plannerSource();
 
   it("imports pumpAllowance and computes it from the criteria + allowable release", () => {
     expect(src).toContain("pumpAllowance");

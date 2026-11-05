@@ -38,7 +38,7 @@ export const BASEMAPS = {
  * state (no backdrop — the drafting paper shows); the map finder always has a base. */
 export const PLANNER_BASEMAP_CHOICES = [
   { key: "off", label: "Off", title: "No aerial — plain drafting background" },
-  { key: "esri", label: "Aerial", title: "Esri World Imagery — sharpest at deep zoom (native to z19)" },
+  { key: "esri", label: "Esri", title: "Esri World Imagery — sharpest at deep zoom (native to z19)" },
   { key: "usgs", label: "USGS", title: "USGS imagery — federal source; tops out around neighborhood zoom (native to z16)" },
 ];
 

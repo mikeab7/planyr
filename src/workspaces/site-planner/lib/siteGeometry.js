@@ -18,8 +18,9 @@ import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiamet
 import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
 import { roadSurfaceRing } from "./roadNetwork.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { SQFT_PER_ACRE };
 
-export const SQFT_PER_ACRE = 43560;
 
 /* ----------------------------- geometry ---------------------------- */
 export const rot2 = (x, y, deg) => {
@@ -96,6 +97,33 @@ export function trailerStalls(w, h, s) {
   if (s.single) {
     const bands = perRow > 0 ? [{ y: 0, depth: h, n: perRow }] : [];
     return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
+  }
+  // Building panel v3 (NEW-5) — each row may carry its OWN depth (`trailerRowDepths`, row 1 nearest the court).
+  // Same band · aisle · band pattern (one aisle per facing PAIR), each band at its own depth; the stall count
+  // per band does not depend on depth. Absent / fewer than two entries ⇒ the uniform path below, untouched.
+  const rd = Array.isArray(s.trailerRowDepths) ? s.trailerRowDepths.map(Number).filter((d) => Number.isFinite(d) && d > 0) : [];
+  if (rd.length >= 2) {
+    const EPS = 1e-6;
+    const bandsV = [], aislesV = [];
+    let y = 0, countV = 0;
+    for (let i = 0; i < rd.length; i++) {
+      if (y + rd[i] > h + EPS) break;
+      bandsV.push({ y, depth: rd[i], n: perRow });
+      countV += perRow;
+      y += rd[i];
+      if (i % 2 === 0 && i + 1 < rd.length) {          // the aisle between a facing pair — only if the second row fits too
+        if (y + ai + rd[i + 1] > h + EPS) break;
+        aislesV.push({ y0: y, y1: y + ai });
+        y += ai;
+      }
+    }
+    // `trailerFlip`: on a TOP / RIGHT wall the element's local y=0 edge is the OUTER one, so mirror the bands —
+    // row 1 is always the row nearest the truck court.
+    if (s.trailerFlip) {
+      bandsV.forEach((b) => { b.y = h - b.y - b.depth; });
+      aislesV.forEach((a) => { const y0 = h - a.y1, y1 = h - a.y0; a.y0 = y0; a.y1 = y1; });
+    }
+    return { count: countV, bands: bandsV, aisles: aislesV, cols: perRow, tw, tl };
   }
   const mod = tl * 2 + ai;
   // Same freeze guard as carStalls: 0 trailer-length + 0 aisle would loop forever.
@@ -262,46 +290,97 @@ export function insetArcTowardCenter(arc, dist) {
   if (!b || b.length < 2) return a;
   return polylineLenFt(a) <= polylineLenFt(b) ? a : b;
 }
-/* The inset arc above is one independent polyline and the road's own straight-segment stripe
- * (clipped by clipPolylineOutside against the whole wedge polygon, in roadNetwork.js's stripe
- * loop) is another; the two are only APPROXIMATELY tangent-point-to-tangent-point (the clip lands
- * wherever the straight line crosses the wedge's outline, which reaches past the bare arc by the
- * wedge's own backing depth), so butting them exactly can leave a hairline gap or a small jog right
- * at the junction — the very case this fix exists to remove. Extending the inset arc's SIDE-ROAD
- * end (the one nearest the road's own tangent point, `sideTan`) a few feet further along its own
- * local tangent guarantees the two lines overlap inside already-painted pavement regardless of
- * exactly where the straight line's clip landed. The THROUGH end (against the pad/target edge) is
- * left alone: there is no competing straight line there to misalign with, so nothing to bridge. */
-export const STRIPE_OVERLAP_FT = 3;
-export function extendInsetTowardSideTangent(pts, sideTan) {
-  if (!Array.isArray(pts) || pts.length < 2 || !sideTan) return pts;
-  const dStart = Math.hypot(pts[0].x - sideTan.x, pts[0].y - sideTan.y);
-  const dEnd = Math.hypot(pts[pts.length - 1].x - sideTan.x, pts[pts.length - 1].y - sideTan.y);
-  const out = pts.slice();
-  if (dStart <= dEnd) {
-    const [p0, p1] = out;
-    const L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-    out.unshift({ x: p0.x - (p1.x - p0.x) / L * STRIPE_OVERLAP_FT, y: p0.y - (p1.y - p0.y) / L * STRIPE_OVERLAP_FT });
-  } else {
-    const p0 = out[out.length - 2], p1 = out[out.length - 1];
-    const L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-    out.push({ x: p1.x + (p1.x - p0.x) / L * STRIPE_OVERLAP_FT, y: p1.y + (p1.y - p0.y) / L * STRIPE_OVERLAP_FT });
+/* NEW-1 (B1783376 ×3) — THE FACE-OF-CURB LINE AROUND A CURB RETURN, built so it can be JOINED to the straight stripe either side of it.
+ *
+ * The first cut inset the junction's own tessellated arc and lengthened it 3 ft (drive) / 6.5 ft (tee) along the arc's LAST CHORD to "overlap" the straight
+ * stripe. That chord tilts half a tessellation step (3°) off the straight edge's heading, so the overlap lay on a slightly different line from the stripe it
+ * was meant to continue — the jog the owner kept seeing at the tangent — and the pad-face end of a drive's arc was not trimmed at all, so one curb-width of it
+ * ran on INTO the pad (the tick). Both ends are now EXACT instead:
+ *   • `returnArcStripe` re-derives the return as the TRUE circle it is (rayFillet builds every return from a centre + radius; the three-point circumcircle
+ *     recovers it to ~1e-12) and tessellates the stripe at `RETURN_STRIPE_STEP_DEG`, so its end chords sit within half of that — under a degree — of the
+ *     straight edges' own headings. It starts EXACTLY on the straight stripe's line, at the tangent point's own along-position (the radial offset at a tangent
+ *     point is perpendicular to the straight edge, so the inset point is the straight stripe's own point).
+ *   • both exported builders return each arc ORIENTED side-road end first (`line[0]` = the point on the side road's straight stripe), far end last (the
+ *     through road's stripe for a tee, the pad face for a drive — roadNetBuild trims that against the pad, and joins the ends, see its stripe pass).
+ * A non-circular arc (never produced today) falls back to the chord offset, unrefined. */
+export const RETURN_STRIPE_STEP_DEG = 1.5;
+function circleThrough(a, b, c) {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y;
+  const x = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+  const y = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+  return { x, y, r: Math.hypot(a.x - x, a.y - y) };
+}
+export function returnArcStripe(arc, corner, cw, stepDeg = RETURN_STRIPE_STEP_DEG) {
+  if (!Array.isArray(arc) || arc.length < 2 || !(cw > 0) || !corner) return null;
+  const circle = arc.length >= 3 ? circleThrough(arc[0], arc[Math.floor(arc.length / 2)], arc[arc.length - 1]) : null;
+  const fits = circle && circle.r > 1e-6 && arc.every((p) => Math.abs(Math.hypot(p.x - circle.x, p.y - circle.y) - circle.r) <= 0.01 + circle.r * 1e-4);
+  if (!fits) return insetArcTowardCorner(arc, corner, cw);
+  // the pavement side of a return is the corner's side; the corner of a fillet is always OUTSIDE its circle
+  const rs = Math.hypot(corner.x - circle.x, corner.y - circle.y) > circle.r ? circle.r + cw : circle.r - cw;
+  if (!(rs > 1e-6)) return insetArcTowardCorner(arc, corner, cw);
+  const ang = (p) => Math.atan2(p.y - circle.y, p.x - circle.x);
+  let sweep = 0;
+  for (let i = 1; i < arc.length; i++) {
+    let d = ang(arc[i]) - ang(arc[i - 1]);
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    sweep += d;
   }
+  const a0 = ang(arc[0]);
+  const n = Math.max(2, Math.ceil((Math.abs(sweep) * 180) / Math.PI / stepDeg));
+  const out = [];
+  for (let k = 0; k <= n; k++) { const a = a0 + (sweep * k) / n; out.push({ x: circle.x + rs * Math.cos(a), y: circle.y + rs * Math.sin(a) }); }
   return out;
 }
-/* Every curb-stripe continuation for a road's drive junctions, ready to append to its stripe
- * polyline list. One call site (roadNetwork stripe loop in SitePlanner.jsx); pure function so it
- * can be driven and asserted directly in a unit test rather than only through the render. */
+/* Every curb-return stripe for a road's drive junctions, each ORIENTED side-road end first (`line[0]` is the point on the side road's own straight stripe). One
+ * call site (roadNetBuild's stripe pass); pure, so it is driven and asserted directly in a unit test. */
 export function driveJunctionCurbStripes(driveJunctionsForRoad, curbWidth) {
   const out = [];
   for (const dj of driveJunctionsForRoad || []) {
     const sideTans = (dj.geom && dj.geom.sideTangents) || [];
     const returns = (dj.geom && dj.geom.returns) || [];
+    const corners = (dj.geom && dj.geom.corners) || [];
     for (let k = 0; k < returns.length; k++) {
-      const inset = insetArcTowardCenter(returns[k], curbWidth);
-      if (!inset) continue;
-      const extended = extendInsetTowardSideTangent(inset, sideTans[k]);
-      if (extended && extended.length >= 2) out.push(extended);
+      // the face-of-curb stripe sits INSIDE the pavement. On a curb RETURN the arc's centre is out in the grass, so "toward the centre" (the shorter offset) put it a
+      // curb-width OUTSIDE the pavement; the corner (where the two straight edges would meet) is on the PAVEMENT side of the arc, so offset toward it.
+      const inset = corners[k] ? returnArcStripe(returns[k], corners[k], curbWidth) : insetArcTowardCenter(returns[k], curbWidth);
+      if (!inset || inset.length < 2) continue;
+      const st = sideTans[k];
+      const first = inset[0], last = inset[inset.length - 1];
+      const flip = st && Math.hypot(last.x - st.x, last.y - st.y) < Math.hypot(first.x - st.x, first.y - st.y);
+      out.push(flip ? inset.slice().reverse() : inset);
+    }
+  }
+  return out;
+}
+/* The curb return's inset toward the PAVEMENT: whichever of the two ±`dist` offsets of `arc` has its middle point
+ * nearer `corner` (the point where the two straight curb lines the fillet joins would meet — always on the pavement
+ * side of a return, whatever the winding). Chord offset — the fallback when an arc is not a circle. */
+export function insetArcTowardCorner(arc, corner, dist) {
+  if (!Array.isArray(arc) || arc.length < 2 || !(dist > 0) || !corner) return null;
+  const a = offsetPolyline(arc, dist), b = offsetPolyline(arc, -dist);
+  const ok = (l) => Array.isArray(l) && l.length >= 2;
+  if (!ok(a)) return ok(b) ? b : null;
+  if (!ok(b)) return a;
+  const mid = (l) => l[Math.floor(l.length / 2)];
+  const da = Math.hypot(mid(a).x - corner.x, mid(a).y - corner.y), db = Math.hypot(mid(b).x - corner.x, mid(b).y - corner.y);
+  return da <= db ? a : b;
+}
+/* The same for a road-to-ROAD tee. `nodeJunction`'s corners next to the SIDE arm (`gaps` whose `a` or `b` is arm 2) each get a return; the side road's
+ * face-of-curb stripe and the through road's near stripe each end at their own tangent point, and this arc joins the two — oriented side-road end first. */
+export function teeJunctionCurbStripes(teeJunctionsForSide, curbWidth) {
+  const out = [];
+  for (const tj of teeJunctionsForSide || []) {
+    for (const g of (tj.geom && tj.geom.gaps) || []) {
+      if (!(g.a === 2 || g.b === 2) || !(g.R > 0) || !Array.isArray(g.arc) || g.arc.length < 2) continue;
+      const inset = returnArcStripe(g.arc, g.corner, curbWidth);
+      if (!inset || inset.length < 2) continue;
+      const sideTan = g.a === 2 ? g.tanA : g.tanB;
+      const first = inset[0], last = inset[inset.length - 1];
+      const flip = Math.hypot(last.x - sideTan.x, last.y - sideTan.y) < Math.hypot(first.x - sideTan.x, first.y - sideTan.y);
+      out.push(flip ? inset.slice().reverse() : inset);
     }
   }
   return out;

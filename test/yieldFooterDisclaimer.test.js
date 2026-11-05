@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const DISCLAIMER = "Screening estimates for deal-stage decisions, not a substitute for your engineer or the reviewing agency.";
 
@@ -15,10 +16,7 @@ const componentSrc = readFileSync(
   fileURLToPath(new URL("../src/workspaces/site-planner/components/YieldFooterDisclaimer.jsx", import.meta.url)),
   "utf8",
 );
-const plannerSrc = readFileSync(
-  fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
-  "utf8",
-);
+const plannerSrc = plannerSource();
 
 function countOccurrences(haystack, needle) {
   let count = 0, idx = 0;

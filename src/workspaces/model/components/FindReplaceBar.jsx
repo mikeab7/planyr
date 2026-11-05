@@ -17,6 +17,7 @@
  * renders earlier in the same column. That's a structural guarantee (DOM order + static
  * positioning), not a measurement that a future header change can silently invalidate again.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findMatches } from "../lib/sheetOps.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -76,6 +77,7 @@ export default function FindReplaceBar({ open, showReplace, sheet, onClose, onGo
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <input
+            {...NO_AUTOFILL}
             ref={findRef}
             data-testid="model-find-input"
             value={findText}
@@ -93,6 +95,7 @@ export default function FindReplaceBar({ open, showReplace, sheet, onClose, onGo
         {showReplace && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input
+              {...NO_AUTOFILL}
               data-testid="model-replace-input"
               value={replaceText}
               onChange={(e) => setReplaceText(e.target.value)}

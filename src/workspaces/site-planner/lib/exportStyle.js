@@ -54,6 +54,13 @@ export const OVERLAY_PRINT = { ptPerPx: 0.8, minPt: 1.0, maxPt: 2.4, casingExtra
 
 const unitsPerPt = (sheetScale) => 1 / (sheetScale * PT_PER_CENTI_INCH);
 
+/* B2589346 — a GIS overlay LABEL (zone code, pipe size, county name) prints at a PHYSICAL size, like its lines. The label is authored at 11 clone units, and a clone unit is "one foot × the live
+ * zoom", so on paper its size followed the zoom the sheet was framed at: measured live 2026-11-03 on a tight frame, a zone code "C-5" printed ~20% of the sheet's height. 7 pt text with a ~1.8 pt
+ * white halo is what the legend-sized labels read as on paper at any frame. */
+export const OVERLAY_LABEL_PT = 7, OVERLAY_LABEL_HALO_PT = 1.8;
+export const overlayLabelFontSize = (sheetScale) => (Number(sheetScale) > 0 ? OVERLAY_LABEL_PT * unitsPerPt(Number(sheetScale)) : 11);
+export const overlayLabelHalo = (sheetScale) => (Number(sheetScale) > 0 ? OVERLAY_LABEL_HALO_PT * unitsPerPt(Number(sheetScale)) : 3);
+
 // Printed line weight (pt) for a GIS overlay stroke authored at `sw` screen px.
 export function overlayLinePt(sw) {
   const w = Number(sw);

@@ -1,0 +1,44 @@
+name: Ledger forward
+
+# Catches a STRAGGLER (NEW-1, 2026-11-05): a pull request opened before the ledger moved to its own branch can still add
+# or edit files under ledger/. The touch guard lets it merge (failing it would strand its records); when it lands on main
+# this copies those edits onto the `ledger` branch — adds, edits and moves; a colliding new id is renumbered and reported;
+# a diverged edit is reported, never overwritten; a bare deletion is never forwarded. After the move this should be
+# quiet: sessions file records with `npm run ledger -- add|move|put`, not in a PR.
+
+on:
+  push:
+    branches: [main]
+    paths: ["ledger/**"]
+  # Manual run (also how the live check exercises it): forward the ledger/ edits between two commits.
+  workflow_dispatch:
+    inputs:
+      base: { description: "base commit (older)", required: true }
+      tip: { description: "tip commit (newer)", required: true }
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ledger-forward
+  cancel-in-progress: false
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Checkout the ledger branch
+        uses: actions/checkout@v7
+        with:
+          ref: ledger
+          path: .ledger
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Forward ledger/ edits onto the ledger branch
+        run: node scripts/ledger.mjs forward-main --base "${{ inputs.base || github.event.before }}" --tip "${{ inputs.tip || github.sha }}"

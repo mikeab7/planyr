@@ -8,6 +8,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { saveSite, loadSite, siteExistsLocally, readBackSite, sitesWriteStamp, sitesWriteStillCurrent } from "../src/workspaces/site-planner/lib/storage.js";
 import { loadSiteSummaries } from "../src/workspaces/site-planner/lib/siteListLight.js";
+import * as planStore from "../src/workspaces/site-planner/lib/planStore.js";
+import { sitesObject } from "./helpers/sitesView.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const KEY = "planarfit:sites:v1";
 const bld = (id, cx = 0) => ({ id, type: "building", cx, cy: 0, w: 100, h: 100, rot: 0 });
@@ -32,21 +35,18 @@ function seed(n = 6) {
 describe("shared reads are read-only — proven against a deep-frozen store", () => {
   it("saveSite, loadSite, siteExistsLocally and readBackSite do not mutate what they read", () => {
     seed();
-    // Reach the very objects the cache holds: a read right after a write returns the cached map; freeze THROUGH it.
-    const stored = JSON.parse(localStorage.getItem(KEY));
-    // Re-seat the store so the next shared read is a PARSE (the object graph the cache will hold), then freeze that graph via the reader itself.
-    localStorage.setItem(KEY, JSON.stringify(stored));
-    expect(siteExistsLocally("p1")).toBe(true);                       // parses + remembers
+    // Reach the very objects the store holds and hands out: freeze THROUGH the shared reader (B2200384: the per-plan store's own shared objects).
+    expect(siteExistsLocally("p1")).toBe(true);
     const w = sitesWriteStamp();
     expect(w).toBeTruthy();
-    deep(w.obj);                                                      // every plan object the cache will now hand out is frozen
+    deep(planStore.readShared(KEY));                                  // every plan object the store will now hand out is frozen
     // none of these may throw (strict-mode ESM: a write to a frozen object throws)
     expect(() => loadSite("p1")).not.toThrow();
     expect(() => readBackSite("p2")).not.toThrow();
     expect(() => saveSite({ id: "p1", els: [bld("b1a"), bld("b1b", 200), bld("new", 400)] })).not.toThrow();
     expect(loadSite("p1").els.map((e) => e.id)).toEqual(["b1a", "b1b", "new"]);
     expect(() => saveSite({ id: "p9", groupId: "g1", site: "Site 1", name: "Plan 9", els: [bld("z")] })).not.toThrow();   // a brand-new plan beside frozen ones
-    expect(JSON.parse(localStorage.getItem(KEY)).p0.els.length).toBe(2);   // the untouched plans are intact
+    expect(sitesObject(KEY).p0.els.length).toBe(2);   // the untouched plans are intact
   });
   it("loadSite hands back a PRIVATE copy — mutating it cannot reach the store or the next read", () => {
     seed();
@@ -55,16 +55,16 @@ describe("shared reads are read-only — proven against a deep-frozen store", ()
     const b = loadSite("p0");
     expect(b.els.map((e) => e.id)).toEqual(["b0a", "b0b"]);
     expect(b.name).toBe("Plan 0");
-    expect(JSON.parse(localStorage.getItem(KEY)).p0.name).toBe("Plan 0");
+    expect(sitesObject(KEY).p0.name).toBe("Plan 0");
   });
 });
 
 describe("the incremental serialiser is byte-identical to JSON.stringify", () => {
-  it("the string written to the device is exactly JSON.stringify of the stored map, across edits to one plan", () => {
+  it("the string written to the device for a plan is exactly JSON.stringify of that stored record, across edits to one plan", () => {
     seed(8);
     for (let k = 0; k < 4; k++) {
       saveSite({ id: "p3", els: [bld("b3a", k * 30), bld("b3b", 200), ...(k % 2 ? [bld("x")] : [])] });
-      const s = localStorage.getItem(KEY);
+      const s = localStorage.getItem(KEY + ":p:p3");
       expect(s).toBe(JSON.stringify(JSON.parse(s)));
     }
   });
@@ -81,7 +81,7 @@ describe("what one edit costs the store", () => {
     expect(big.length).toBe(0);
   });
   it("an edit serialises about ONE plan's worth of text — and the amount does NOT grow with the library (B2165120)", () => {
-    globalThis.__PLANYR_LEGACY_MIRROR = "idle";   // production policy: the legacy-copy refresh is NOT on the edit path
+
     const cost = (n) => {
       localStorage.clear();
       seed(n);
@@ -93,7 +93,6 @@ describe("what one edit costs the store", () => {
       return chars;
     };
     const small = cost(8), big = cost(80);
-    delete globalThis.__PLANYR_LEGACY_MIRROR;
     // the ledger's id list and the history ring are the only things that can scale, and neither is the library's text
     expect(big).toBeLessThan(small * 1.6);
   });
@@ -112,12 +111,12 @@ describe("what one edit costs the store", () => {
   it("a foreign writer's change is SEEN by the next save, never overwritten from a stale cache (B127 cross-tab union)", () => {
     seed(3);
     saveSite({ id: "p1", els: [bld("mine")] });
-    const stored = JSON.parse(localStorage.getItem(KEY));
+    const stored = sitesObject(KEY);
     stored.p0.name = "renamed elsewhere";
     stored.p0.updatedAt = Date.now() + 5000;
     localStorage.setItem(KEY, JSON.stringify(stored));
     saveSite({ id: "p1", els: [bld("mine2")] });
-    expect(JSON.parse(localStorage.getItem(KEY)).p0.name).toBe("renamed elsewhere");
+    expect(sitesObject(KEY).p0.name).toBe("renamed elsewhere");
   });
 });
 
@@ -145,7 +144,7 @@ describe("the light summary read is memoised on the store's exact bytes", () => 
     const bigParses = parse.mock.calls.filter((c) => typeof c[0] === "string" && c[0].length > 2000).length;
     parse.mockRestore();
     expect(bigParses).toBe(0);
-    const truth = JSON.parse(localStorage.getItem(KEY));                           // what a from-scratch read would have seen
+    const truth = sitesObject(KEY);                                                // what a from-scratch read would have seen
     expect(got.length).toBe(Object.keys(truth).length);
     for (const m of got) {
       expect(m.name).toBe(truth[m.id].name);
@@ -154,12 +153,13 @@ describe("the light summary read is memoised on the store's exact bytes", () => 
     }
     expect(got[0].id).toBe("p3");                                                  // newest first, as before
   });
-  it("agrees with the unmemoised read on a store another writer replaced wholesale", () => {
+  it("agrees with the unmemoised read when an older build's tab writes a plan into the whole-library entry", () => {
     seed(4);
     loadSiteSummaries();
     localStorage.setItem(KEY, JSON.stringify({ solo: { id: "solo", groupId: "solo", site: "Only", name: "One", updatedAt: 5 } }));
-    const got = loadSiteSummaries();   // an older build rewrote the legacy entry whole: the plans it no longer holds were deleted there, "solo" was created there
-    expect(got.map((m) => m.id)).toEqual(["solo"]);
+    const got = loadSiteSummaries();   // B2200384: "solo" was created there and is ADOPTED; nothing the entry lacks is ever deleted
+    expect(got.map((m) => m.id).sort()).toEqual(["p0", "p1", "p2", "p3", "solo"]);
+    expect(localStorage.getItem(KEY)).toBe(null);                  // folded in, then removed again
   });
 });
 
@@ -167,8 +167,10 @@ describe("wiring", () => {
   it("the autosave settle tick skips a write the mirror already made, and still writes when it cannot prove that", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     expect(src).toContain("mirrorStamp = ok ? sitesWriteStamp() : null;");
-    expect(src).toContain("const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });");
+    // B2233521 — the same skip, with the verdict named so the duplicate-flush skip (lib/saveDedupe.js) can record the write it made
+    expect(src).toContain("const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));");
+    expect(src).toContain("const okSave = mirrorHeld ? true : saveSite(payload, { skipHistory: true });");
   });
 });

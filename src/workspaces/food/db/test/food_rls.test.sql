@@ -14,6 +14,9 @@
 --      2026-08-23) has the identical owner-only shape, PLUS an update policy
 --      (striking a dish done is an in-place update, not delete+reinsert), and
 --      the (user, place, dish) uniqueness is enforced at the database.
+--   6. food_place_prefs (the owner's PRICE LEVEL per restaurant, NEW-1 2026-10-20) has the
+--      identical owner-only shape (select/insert/update/delete own rows only), the 1-4
+--      check constraint and one row per (user, place).
 --   5. food_lists + food_list_items (named restaurant lists, NEW-1 / B2088288) have the
 --      identical owner-only shape: invisible to anon, invisible to another signed-in user,
 --      not renameable/deletable/extendable by another user (the composite (list_id, user_id)
@@ -449,6 +452,55 @@ begin
   select count(*) into n from public.food_places where id = test_place_id;
   if n = 1 then passed := passed + 1; rep := rep || 'PASS 39d: the place itself survived deleting the list. ' || E'\n';
   else failed := failed + 1; rep := rep || 'FAIL 39d: deleting a list removed a place.' || E'\n'; end if;
+
+  -- ---------- Tests 40-43: food_place_prefs (the PRICE LEVEL, NEW-1 2026-10-20) — the same owner-only shape ----
+  -- 40: the owner writes a level and reads it back; 41: anon sees nothing; 42: user B sees nothing and cannot
+  -- update it; 43: a level outside 1-4 is refused by the check constraint, and a second row for the same place by the index.
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  insert into public.food_place_prefs (user_id, place_id, price_level) values (ua, test_place_id, 3);
+  select count(*) into n from public.food_place_prefs where place_id = test_place_id and price_level = 3;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 40: the owner sets a price level (three dollar signs) and reads it back. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 40: owner read back %s price-level rows, expected 1.', n) || E'\n'; end if;
+
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_place_prefs where place_id = test_place_id;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 41: anon (signed out) sees ZERO food_place_prefs rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 41: anon food_place_prefs read returned %s rows, expected 0.', n) || E'\n'; end if;
+
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_place_prefs where user_id = ua;
+  update public.food_place_prefs set price_level = 1 where user_id = ua and place_id = test_place_id;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 42a: a DIFFERENT signed-in user (B) sees ZERO of A''s price levels. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 42a: user B saw %s of user A''s price-level rows, expected 0.', n) || E'\n'; end if;
+  select count(*) into n from public.food_place_prefs where user_id = ua and place_id = test_place_id and price_level = 3;
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 42b: user B''s update of A''s price level matched nothing (still level 3). ' || E'\n';
+  else failed := failed + 1; rep := rep || 'FAIL 42b: user B changed A''s price level.' || E'\n'; end if;
+
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    update public.food_place_prefs set price_level = 5 where user_id = ua and place_id = test_place_id;
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 43a: a price level of 5 was accepted (should violate the 1-4 check). ' || E'\n';
+  exception when check_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 43a: a price level outside 1-4 is refused by the check constraint. ' || E'\n';
+  end;
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_place_prefs (user_id, place_id, price_level) values (ua, test_place_id, 2);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 43b: a second prefs row for the SAME (user, place) was accepted. ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 43b: one prefs row per (user, place) — a second is refused by the unique index. ' || E'\n';
+  end;
 
   -- ---------- cleanup + report (rollback via exception) ---------------------
   raise exception E'\n==== FOOD RLS TEST REPORT: % passed, % failed ====\n%', passed, failed, rep;

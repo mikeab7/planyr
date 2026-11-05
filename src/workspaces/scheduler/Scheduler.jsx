@@ -12,7 +12,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import { menuPanelStyle } from "../../shared/ui/controls.jsx";
 import {
-  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
+  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, needsArrivalSelect,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports, isPickShowing,
   isGridMismatched, newProjectAction, resolveReportRowNavigation, scheduleListState, parseLoadState,
 } from "./lib/navState.js";
@@ -22,6 +22,10 @@ import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.js
 import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
 import { publishLiveSchedules } from "../../shared/schedule/liveScheduleIndex.js";
 import { allProjectNames } from "../../shared/names/names.js";
+import { orderedIds, byNameToday, planProjectMove } from "../../shared/projects/projectOrder.js";
+import { loadProjectOrder, saveProjectOrder, onProjectOrderChanged } from "../dashboard/lib/dashboardProjectOrderPrefs.js";
+import { fetchSiteSummaries } from "../dashboard/lib/dashboardSitesFetch.js";
+import { groupProjectsByGroupId } from "../dashboard/lib/dashboardPipeline.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
@@ -30,6 +34,10 @@ import ScheduleOwnerList from "./components/ScheduleOwnerList.jsx";
 import ScheduleCrumb from "./components/ScheduleCrumb.jsx";
 import AgendaView from "./components/AgendaView.jsx";
 import ScheduleLoadState from "./components/ScheduleLoadState.jsx";
+import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
+import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
+import { RADIUS } from "../../shared/ui/radius.js";
+import { DELETE_VERIFY_MS, deleteStillPresent, deleteFailureMessage } from "./lib/scheduleDeleteVerify.js";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -65,6 +73,15 @@ export default function Scheduler({
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const pendingDeleteRef = useRef(null);          // B2429233 — { id, name, timer } of the delete being verified
+  const [deleteNotice, setDeleteNotice] = useState(null);
+  useEffect(() => {
+    const cur = pendingDeleteRef.current;
+    if (cur && !deleteStillPresent(projects, cur.id)) { clearTimeout(cur.timer); pendingDeleteRef.current = null; }
+  }, [projects]);
+  useEffect(() => () => { const cur = pendingDeleteRef.current; if (cur && cur.timer) clearTimeout(cur.timer); }, []);
   const [activeId, setActiveId] = useState(null);  // its active project id (aPid)
   const [section, setSection] = useState("projects"); // "projects" | "reports" (Dashboard)
   // B224 — the iframe loads the heavy standalone Gantt app; show the "assembling
@@ -128,6 +145,7 @@ export default function Scheduler({
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
   // very next nav-state (see the message handler), so it can never wedge the route permanently.
   const dashboardIntentRef = useRef(false);
+  const arrivalSelectRef = useRef(null);          // NEW-1 (V934064) — site id this mount already asked the embed to resolve (once per arrival)
   // NEW-1 — the boot-resume privilege (Shell's `resumeAllowed`), FROZEN at this component's own
   // first render via `useRef`'s initial-value argument (React ignores it on every later render).
   // Reading Shell's live `resumeAllowed` prop instead would reopen the exact bug this closes:
@@ -434,6 +452,77 @@ export default function Scheduler({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, navConfirmed, siteProjects]);
 
+  // NEW-1 (2026-10-08, amends B2210992) — the Task Report's project groups follow the SAME saved order the
+  // Dashboard's Pursuits card uses (shared/projects/projectOrder.js + profiles.prefs.dashboardProjectOrder).
+  // The shell owns it — it has the account, the saved order and the project list — and the embedded page
+  // only DISPLAYS it: the shell pushes `planar:project-order` (every project's group id in his order), and
+  // the page asks for a move with `planar:project-order-move`; the shell does the move through the one
+  // shared `planProjectMove`, saves it, and pushes the result back. No second order store, no second move.
+  const orderRef = useRef(null);       // the loaded { ids, at } or null (never positioned anything)
+  const groupsRef = useRef([]);        // every project that exists: { groupId, name, createdAt }
+  const orderLoadedAtRef = useRef(0);
+  const [orderView, setOrderView] = useState({ ids: null, error: null });
+  const publishOrder = useCallback((error = null) => {
+    const groups = groupsRef.current;
+    setOrderView({ ids: groups.length ? orderedIds(byNameToday(groups), orderRef.current) : null, error });
+  }, []);
+  const loadOrder = useCallback(async () => {
+    try {
+      const [{ order }, rows] = await Promise.all([loadProjectOrder(userId), fetchSiteSummaries()]);
+      orderRef.current = order;
+      groupsRef.current = groupProjectsByGroupId(rows, {});
+      orderLoadedAtRef.current = Date.now();
+      publishOrder(null);
+    } catch (e) {
+      reportClientEvent("task-report-order-load-failed", e?.message || "project order load failed", {});
+    }
+  }, [userId, publishOrder]);
+  // Load on mount, and again (at most once a minute) whenever the tab comes back to the front, so a project
+  // created elsewhere is placed by the same "new project on top" rule.
+  useEffect(() => {
+    if (!isActive || Date.now() - orderLoadedAtRef.current < 60000) return;
+    loadOrder();
+  }, [isActive, loadOrder]);
+  // A reorder made on the Dashboard (or here) on this device — adopt it live.
+  useEffect(() => onProjectOrderChanged((next) => {
+    if (!next) return;
+    orderRef.current = next;
+    publishOrder(null);
+  }), [publishOrder]);
+  const pushProjectOrder = useCallback(() => {
+    post({ type: "planar:project-order", ids: orderView.ids, canOrder: !!(orderView.ids && orderView.ids.length), error: orderView.error });
+  }, [orderView]);
+  useEffect(() => {
+    if (!ready && !navConfirmed) return;
+    pushProjectOrder();
+  }, [ready, navConfirmed, pushProjectOrder]);
+  const applyReportOrder = useCallback((next) => {
+    orderRef.current = next;
+    publishOrder(null);
+    saveProjectOrder(userId, next).then((res) => {
+      if (!res.ok) publishOrder(res.error || "save failed"); // kept on screen, shown with a Retry — never silent
+    });
+  }, [userId, publishOrder]);
+  useEffect(() => {
+    const onOrderMsg = (e) => {
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-seq") return;
+      if (m.type === "planar:project-order-request") { pushProjectOrder(); return; }
+      if (m.type === "planar:project-order-retry") { if (orderRef.current) applyReportOrder(orderRef.current); return; }
+      if (m.type !== "planar:project-order-move" || typeof m.groupId !== "string") return;
+      if (!orderLoadedAtRef.current) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
+      const dest = m.dest && m.dest.to ? { to: m.dest.to === "bottom" ? "bottom" : "top" }
+        : (m.dest && Number.isInteger(m.dest.index) ? { index: m.dest.index } : null);
+      if (!dest) return;
+      const visible = Array.isArray(m.visibleIds) ? m.visibleIds.filter((x) => typeof x === "string") : [];
+      const next = planProjectMove(groupsRef.current, orderRef.current, m.groupId, dest, visible);
+      if (next) applyReportOrder(next);
+    };
+    window.addEventListener("message", onOrderMsg);
+    return () => window.removeEventListener("message", onOrderMsg);
+  }, [pushProjectOrder, applyReportOrder]);
+
   // B1161792 (NEW-1) — apply a pending "jump to this task" request once the iframe is ready.
   // `scheduleTaskIntent.token` makes a repeat click on the SAME task re-fire (Shell stamps a
   // fresh token every call, same convention as `docIntent`); the ref below is what stops this
@@ -512,6 +601,18 @@ export default function Scheduler({
     }, 2500);
     return () => clearTimeout(t);
   }, [ready, projectId, projects, activeId, section, pickShowing]);
+
+  // NEW-1 (B1080547 ×3, V934064 FAIL 2026-10-29) — ONCE per arrival at a routed site with SEVERAL linked schedules, ask
+  // the embed to resolve the one it last had active (`lastActiveBySite`). The carry-in above is silent when ANY
+  // linked schedule is already active, and a FRESH tab boots on the oldest one — so the remembered preference was
+  // saved correctly and then never consulted. A separate effect (not folded into the one above) so that effect's
+  // single suppression, a deliberate pick, stays the only thing that can stop the carry-in.
+  useEffect(() => {
+    if (!ready || projectId == null || pickShowing) return;
+    if (!needsArrivalSelect(projects, projectId, arrivalSelectRef.current)) return;
+    arrivalSelectRef.current = projectId;
+    post({ type: "planar:nav-select-by-site", siteId: projectId });
+  }, [ready, projectId, projects, pickShowing]);
 
   // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
   // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
@@ -631,7 +732,24 @@ export default function Scheduler({
   // needed — post it to the embedded app exactly as the breadcrumb already does for the one
   // schedule it can reach.
   const renameSchedule = (id, name) => post({ type: "planar:nav-rename", id, name });
-  const deleteSchedule = (id) => post({ type: "planar:nav-delete", id });
+  // B2429233 — a delete verifies its own result: the embedded app's next nav-state either no longer
+  // lists the schedule (done) or still does after DELETE_VERIFY_MS (say so — never a silent no-op).
+  const deleteSchedule = (id) => {
+    const sch = projects.find((p) => p && p.id === id);
+    const prev = pendingDeleteRef.current;
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    setDeleteNotice(null);
+    pendingDeleteRef.current = {
+      id, name: sch ? sch.name : "",
+      timer: setTimeout(() => {
+        const cur = pendingDeleteRef.current;
+        if (!cur || cur.id !== id) return;
+        pendingDeleteRef.current = null;
+        if (deleteStillPresent(projectsRef.current, id)) setDeleteNotice(deleteFailureMessage(cur.name));
+      }, DELETE_VERIFY_MS),
+    };
+    post({ type: "planar:nav-delete", id });
+  };
 
   // Pressing Dashboard is a USER action that has to move BOTH halves (B1050). Posting to the iframe
   // alone left the outer route pointing at the project, so the route-derived resolution panel stayed
@@ -933,6 +1051,7 @@ export default function Scheduler({
               opacity: (ready && !gridMismatched) ? 0 : 1,
               transition: "opacity 0.45s ease",
               pointerEvents: (ready && !gridMismatched) ? "none" : "auto",
+              cursor: (ready && !gridMismatched) ? "default" : "progress",
             }}
           >
             <ModuleLoader module="scheduler" />
@@ -1030,6 +1149,21 @@ export default function Scheduler({
           />
         )}
       </div>
+      {deleteNotice && (
+        <FloatingNotice testId="schedule-delete-failed">
+          <div role="alert" style={{
+            display: "flex", alignItems: "center", gap: SPACE.md, padding: `${SPACE.sm}px ${SPACE.md}px`, borderRadius: RADIUS.md,
+            background: "var(--bg)", color: "var(--text-primary)",
+            border: "1px solid var(--danger)", fontSize: FONT_SIZE.control, lineHeight: 1.4,
+          }}>
+            <span style={{ flex: 1 }}>{deleteNotice}</span>
+            <button type="button" onClick={() => setDeleteNotice(null)} aria-label="Dismiss"
+              style={{ cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, background: "none", color: "var(--text-primary)", border: "none", padding: `${SPACE.xxs}px ${SPACE.xs}px` }}>
+              Dismiss
+            </button>
+          </div>
+        </FloatingNotice>
+      )}
     </div>
   );
 }

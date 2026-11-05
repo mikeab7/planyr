@@ -654,6 +654,23 @@ describe("B589 — adversarial-debug fixes", () => {
   it("YEARFRAC is non-negative regardless of argument order", () => {
     expect(num("YEARFRAC([a],[b])", { a: D("2026-01-01"), b: D("2025-01-01") })).toBeGreaterThan(0);
   });
+  // NEW-5 — YEARFRAC basis 0 (the default) is US/NASD 30/360 and must apply the last-day-of-February
+  // rules, or it disagrees with Excel at every Feb month-end.
+  it("YEARFRAC basis 0 applies the NASD last-day-of-February rules", () => {
+    const yf = (a, b, basis) => num(basis === undefined ? "YEARFRAC([a],[b])" : `YEARFRAC([a],[b],${basis})`, { a: D(a), b: D(b) });
+    expect(yf("2023-02-28", "2023-03-31", 0)).toBeCloseTo(1 / 12, 6);      // 0.083333, was 0.091667
+    expect(yf("2023-02-28", "2023-03-31")).toBeCloseTo(1 / 12, 6);         // basis omitted = 0
+    expect(yf("2024-02-29", "2025-02-28", 0)).toBe(1);                      // both last-of-Feb, was 0.997222
+    expect(yf("2023-02-28", "2024-02-29", 0)).toBe(1);
+    expect(yf("2012-01-01", "2012-07-30", 0)).toBeCloseTo(0.58055556, 7);   // Excel's documented example
+    expect(yf("2023-01-31", "2023-03-31", 0)).toBeCloseTo(2 / 12, 6);       // the ordinary 31-day clamps unchanged
+    expect(yf("2023-03-31", "2023-02-28", 0)).toBeCloseTo(1 / 12, 6);       // argument order still ignored
+  });
+  it("YEARFRAC basis 4 (European) keeps its own rule — no February special case", () => {
+    const yf = (a, b) => num("YEARFRAC([a],[b],4)", { a: D(a), b: D(b) });
+    expect(yf("2023-02-28", "2023-03-31")).toBeCloseTo((30 + 2) / 360, 6);  // d1=28, d2→30
+    expect(yf("2024-02-29", "2025-02-28")).toBeCloseTo((360 - 1) / 360, 6);
+  });
   it("a column present on only some rows isn't #REF! when row 0 lacks it", () => {
     const T = [{ Task: "a" }, { Task: "b", Cost: 250 }, { Task: "c", Cost: 50 }];
     expect(valTable("SUM([Cost])", T)).toBe(300);

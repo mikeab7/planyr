@@ -82,7 +82,27 @@ export const TOKEN_LAYER_FILES = [
  * ------------------------------------------------------------------------------------------- */
 export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/SitePlanner.jsx",
+  // B1064 — code extracted from SitePlanner.jsx keeps the file's standing exemption, so a pure move cannot change what this
+  // audit counts (the Yield/Drainage panels and NumInput were exempt as part of it; holding them to the chrome standard is a
+  // separate decision, not a side effect of a refactor).
+  "src/workspaces/site-planner/components/elementRender.jsx",
+  "src/workspaces/site-planner/components/NumInput.jsx",
+  "src/workspaces/site-planner/components/YieldDrainagePanels.jsx",
+  "src/workspaces/site-planner/lib/planRenderHelpers.jsx",
+  "src/workspaces/site-planner/lib/plannerShared.js",
   "src/workspaces/site-planner/lib/layers.js",
+  "src/workspaces/site-planner/lib/desotoLayers.js", // B2507057 — registry rows of the same kind as layers.js: map ink for drawn utility lines
+  "src/workspaces/site-planner/lib/floridaLayers.js", // B2452976 — registry rows of the same kind as layers.js: map ink for drawn hazard / jurisdiction layers
+  "src/workspaces/site-planner/lib/oklahomaLayers.js", // NEW-1 (Oklahoma screening) — registry rows of the same kind as layers.js: map ink for drawn wells, cleanup sites, dams, tribal areas and protected waters
+  "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
+  "src/workspaces/site-planner/lib/sugarLandLayers.js", // NEW-1 (City of Sugar Land) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn washes, lines and points (the legend colours), not chrome
+  "src/workspaces/site-planner/lib/sugarLandZoning.js", // NEW-1 (City of Sugar Land) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js
+  "src/workspaces/site-planner/lib/sugarLandThoroughfare.js", // NEW-1 (City of Sugar Land) — the thoroughfare-class line ink (map ink and legend read one table), not chrome
+  "src/workspaces/site-planner/lib/mississippiLayers.js", // B2539744 — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn points, lines and washes (the legend colours), not chrome
+  "src/workspaces/site-planner/lib/tennesseeLayers.js", // B2521584 — registry rows of the same kind as layers.js: map ink for drawn Tennessee layers
+  "src/workspaces/site-planner/lib/tennesseeStreamBuffers.js", // B2521584 — the drawn buffer-band ink, not chrome
+  "src/workspaces/site-planner/lib/coloradoLayers.js", // B2528688 — registry rows of the same kind as layers.js: map ink (well status, flowline, zoning washes), and the legend swatches built from the SAME tables — not chrome
+  "src/workspaces/site-planner/lib/georgiaLayers.js", // NEW-1 (Georgia due-diligence gaps) — registry rows of the same kind as layers.js: map ink for drawn layers
   "src/workspaces/site-planner/lib/vectorLayers.js",
   "src/workspaces/site-planner/lib/planStyle.js",
   "src/workspaces/site-planner/lib/easements.js",
@@ -90,6 +110,13 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/jurisdiction.js",
   "src/workspaces/site-planner/lib/printSheet.js",
   "src/workspaces/notes/lib/notesPrint.js",
+  // NEW-1 (2026-10-29) — the Notes paste-options drawings and the table-as-picture renderer. The first is OUR
+  // illustration of Word's/Excel's Paste Options icons (a clipboard plus a mark; fixed art, owner-approved from a
+  // mockup, with a dark-theme twin for the few ink colours via custom properties); the second rasterises a table
+  // onto PAPER (light page, dark ink) for a picture that must read the same in either theme — an export surface,
+  // the same reasoning as notesPrint.js above. Neither is app chrome.
+  "src/workspaces/notes/components/PasteIcons.jsx",
+  "src/workspaces/notes/lib/notesTablePicture.js",
   "src/workspaces/food/lib/ratingColor.js",
   "src/shared/theme/familyInk.js",
   // B711329 — a KML/KMZ export renders in GOOGLE EARTH, a third-party app with no access to our

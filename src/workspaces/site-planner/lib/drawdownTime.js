@@ -25,7 +25,7 @@
  * Pure: cubic feet + cfs in, hours out. No React, no DOM, Node-testable.
  */
 
-const CF_PER_ACFT = 43560;
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 const SEC_PER_HR = 3600;
 // The screening threshold a drawdown is flagged against. 72 hr is the default the panel ships with
 // (a common criteria-manual maximum); a jurisdiction record's own `drawdownMaxHr` overrides it.

@@ -11,10 +11,17 @@
  *   · no horizontal overflow — the panel's scroll box and the panel root never scroll sideways
  *   · nothing pokes out — every descendant's box sits inside the panel root's box
  *   · no clipped text — no element's content is wider than its own box (buttons, labels, inputs, sub-lines)
- *   · EXACTLY TWO text sizes — the set of computed font sizes on text-bearing elements is ⊆ {12px, 10.5px}
+ *   · THE TYPE SPEC — every visible text-bearing element's computed (font-size, font-weight) is one of
+ *     (control,400) · (control,500 — the row NAME only) · (label,600 — uppercase section labels only) · (label,400);
+ *     anything else (a 700, a 600 button, a third size) fails
+ *   · ONE ACCENT — no text colour, fill, border or accent-color in the panel resolves to the orange `--accent`
+ *   · THE SCALE GROUP is ONE row of equal buttons or ONE column of equal full-width buttons — never 2 + 1 —
+ *     at 240 / 300 / 400 / 520 / 620, docked and floating
+ *   · THE OPEN ROW FITS — at a 1366×768 laptop, docked, the open PDF row through "Knock out white paper"
+ *     is on screen without scrolling
  *   · every control is reachable — each button / input / select has a box, and a hit test at its centre (after
  *     scrolling it into its scroll box) lands on it
- *   · the three scale buttons are the SAME size (the owner: "same size, same weight, no primary styling")
+ *   · the scale buttons are the SAME size, weight and fill
  *   · the control census — every control the spec names is present for the variant (PDF · image-unscaled ·
  *     DXF-assumed · map capture)
  *
@@ -51,17 +58,21 @@ const overlays = [
   { ...base, id: "pdf1", name: LONG, sheet: { std: true, label: "ARCH D (24×36)" }, detectedScale: 40, pageCount: 3, page: 2, storageKey: "x/pdf1.pdf", src: svg("#c8a06e") },
   { ...base, id: "img1", name: "Aerial.png", unscaled: true, src: svg("#69c"), imgW: 800, imgH: 600, ftPerPx: 1 },
   { ...base, id: "dxf1", name: "Civil.dxf", kind: "dxf", unitsAssumed: true, unitsLabel: "feet", src: svg("#999") },
+  // NEW-2 (2026-10-21): a polygon-cropped image — the Crop switch ON with its picture + Adjust
+  { ...base, id: "crop1", name: "Cropped.png", src: svg("#9a6"), imgW: 800, imgH: 600, ftPerPx: 1, crop: { kind: "poly", pts: [[120, 90], [700, 140], [640, 520], [160, 470]] } },
 ];
 const VARIANTS = [
-  { id: "pdf1", label: "PDF (multi-page, scaled)", must: ["overlay-scale-ratio", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match", "overlay-page", "overlay-rotation", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-crop-open", "overlay-crop-reset", "overlay-opacity-pct", "reference-below-pdf1", "reference-above-pdf1"], text: ["Knock out white paper"] },
-  { id: "img1", label: "Image (not scaled)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-rotation", "overlay-crop-open", "overlay-opacity-pct"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
-  { id: "dxf1", label: "DXF (units assumed)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-crop-open"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
-  { id: "map1", label: "Map capture", must: ["overlay-opacity-pct"], mustNot: ["overlay-placement", "overlay-crop-open", "overlay-scale-trace", "overlay-rot-plus"] },
+  { id: "pdf1", label: "PDF (multi-page, scaled)", must: ["overlay-scale-ratio", "overlay-scale-set", "overlay-scale-trace", "overlay-scale-match", "overlay-page", "overlay-rotation", "overlay-rot-minus", "overlay-rot-plus", "overlay-rot-ccw90", "overlay-rot-cw90", "overlay-rot-dial", "overlay-crop-switch-pdf1", "overlay-opacity-pct", "reference-below-pdf1", "reference-above-pdf1"], text: ["Knock out white paper"] },
+  { id: "img1", label: "Image (not scaled)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-rotation", "overlay-rot-dial", "overlay-crop-switch-img1", "overlay-opacity-pct"], mustNot: ["overlay-scale-set", "overlay-scale-ratio", "overlay-crop-open", "overlay-crop-reset"] },
+  { id: "crop1", label: "Image (crop ON: picture + Adjust)", must: ["overlay-rot-dial", "overlay-crop-switch-crop1", "overlay-crop-picture-crop1", "overlay-crop-outline", "overlay-crop-open", "overlay-opacity-pct"], mustNot: ["overlay-crop-reset", "overlay-crop-shape"] },
+  { id: "dxf1", label: "DXF (units assumed)", must: ["overlay-not-scaled", "overlay-scale-trace", "overlay-scale-match", "overlay-crop-switch-dxf1"], mustNot: ["overlay-scale-set", "overlay-scale-ratio"] },
+  { id: "map1", label: "Map capture", must: ["overlay-opacity-pct"], mustNot: ["overlay-placement", "overlay-crop-switch-map1", "overlay-crop-open", "overlay-scale-trace", "overlay-rot-plus", "overlay-rot-dial"] },
 ];
 const site = { id: "S", groupId: "S", site: "Scaleyard", name: "Plan 1", origin: { lat: 29.7836, lon: -95.8244 }, county: "harris",
   parcels: [{ id: "pc1", locked: false, points: [{ x: -500, y: -500 }, { x: 500, y: -500 }, { x: 500, y: 500 }, { x: -500, y: 500 }] }],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, sheetOverlays: overlays, parcelDrawings: [], updatedAt: Date.now() };
-const seedFor = (w, sel) => `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ S: site })}));localStorage.setItem('planarfit:currentSite:v1','S');localStorage.setItem('planarfit:leftWidth','${w}');sessionStorage.setItem('planyr:selOverlay:S','${sel}');}catch(e){}})();`;
+// the pinned map capture is only a ROW on a plan with no map origin (visibleReferenceRows, B2217648) — that variant seeds one
+const seedFor = (w, sel) => `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ S: sel === "map1" ? { ...site, origin: null } : site })}));localStorage.setItem('planarfit:currentSite:v1','S');localStorage.setItem('planarfit:leftWidth','${w}');sessionStorage.setItem('planyr:selOverlay:S','${sel}');}catch(e){}})();`;
 
 /* Runs in the page. Returns plain facts; the verdicts are made outside. */
 const measure = (floating) => {
@@ -70,7 +81,10 @@ const measure = (floating) => {
   const rr = root.getBoundingClientRect();
   const scroller = root.closest("[data-panel-body]") || (floating ? root.closest('[data-testid="floating-panel-references"]') : null) || root.parentElement;
   const facts = { rootW: Math.round(rr.width), scrollerOverflow: scroller ? scroller.scrollWidth - scroller.clientWidth : 0, rootOverflow: root.scrollWidth - root.clientWidth,
-    poke: [], clipped: [], unreachable: [], sizes: {}, scaleBtns: [], scaleRows: 0 };
+    poke: [], clipped: [], unreachable: [], sizes: {}, scaleBtns: [], scaleRows: 0, badPairs: [], orange: [] };
+  const probe = document.createElement("i"); probe.style.cssText = "position:absolute;color:var(--accent);background:var(--accent)"; root.appendChild(probe);
+  const orange = getComputedStyle(probe).color; probe.remove();
+  facts.orangeRef = orange;
   const all = [root, ...root.querySelectorAll("*")];
   const sizes = {};
   for (const el of all) {
@@ -83,7 +97,7 @@ const measure = (floating) => {
     // nothing pokes out of the root's box (a 1px border / focus ring tolerance)
     if (r.left < rr.left - 1 || r.right > rr.right + 1) facts.poke.push(`${name} [${Math.round(r.left - rr.left)}..${Math.round(r.right - rr.left)}] of ${Math.round(rr.width)}`);
     // clipped text: content wider than the box that holds it
-    if (el.scrollWidth > el.clientWidth + 1 && !["INPUT", "SELECT", "svg"].includes(el.tagName) && cs.display !== "inline" && el.clientWidth > 0) facts.clipped.push(`${name} content ${el.scrollWidth} > box ${el.clientWidth}`);
+    if (el.scrollWidth > el.clientWidth + 1 && cs.textOverflow !== "ellipsis" && !["INPUT", "SELECT", "svg"].includes(el.tagName) && cs.display !== "inline" && el.clientWidth > 0) facts.clipped.push(`${name} content ${el.scrollWidth} > box ${el.clientWidth}`);
     if (el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "range" && el.type !== "file") {
       // an input whose own text is wider than its box is clipped too
       if (el.scrollWidth > el.clientWidth + 1) facts.clipped.push(`${name} input text ${el.scrollWidth} > ${el.clientWidth}`);
@@ -91,7 +105,18 @@ const measure = (floating) => {
     // font sizes of anything that directly holds text
     const own = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent.trim());
     const textInput = (el.tagName === "INPUT" && !["checkbox", "range", "file", "radio"].includes(el.type)) || el.tagName === "SELECT";
-    if (own || textInput) { const k = cs.fontSize; sizes[k] = (sizes[k] || 0) + 1; (facts.sizeWho = facts.sizeWho || {})[k] = ((facts.sizeWho || {})[k] || []).concat(name).slice(0, 4); }
+    if (own || textInput) {
+      const k = cs.fontSize; sizes[k] = (sizes[k] || 0) + 1; (facts.sizeWho = facts.sizeWho || {})[k] = ((facts.sizeWho || {})[k] || []).concat(name).slice(0, 4);
+      const pair = `${cs.fontSize}/${cs.fontWeight}`;
+      const isName = el.getAttribute("data-testid") === "overlay-row-name";
+      const isSection = cs.textTransform === "uppercase";
+      const ok = pair === "12px/400" || (pair === "12px/500" && isName) || (pair === "10.5px/600" && isSection) || (pair === "10.5px/400" && !isSection);
+      if (!ok) facts.badPairs.push(`${name} ${pair}${isSection ? " (section label)" : ""}`);
+    }
+    // ONE ACCENT: nothing may resolve to the orange --accent (text colour, fill, border, accent-color)
+    for (const [prop, val] of [["color", own || textInput ? cs.color : null], ["background", cs.backgroundColor], ["border", cs.borderTopColor !== "rgba(0, 0, 0, 0)" && parseFloat(cs.borderTopWidth) > 0 ? cs.borderTopColor : null], ["accent-color", cs.accentColor]]) {
+      if (val && val === orange) facts.orange.push(`${name} ${prop}`);
+    }
     if (["BUTTON", "INPUT", "SELECT"].includes(el.tagName) && el.type !== "file") {
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
       const q = el.getBoundingClientRect();
@@ -105,7 +130,29 @@ const measure = (floating) => {
     const bs = Array.from(g.children).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), fw: getComputedStyle(b).fontWeight, bg: getComputedStyle(b).backgroundColor, fs: getComputedStyle(b).fontSize }; });
     facts.scaleBtns = bs;
     facts.scaleRows = new Set(bs.map((b) => b.top)).size;
+    const per = {}; for (const b of bs) per[b.top] = (per[b.top] || 0) + 1;
+    facts.scaleRowCounts = Object.values(per);
+    facts.scaleLayout = g.getAttribute("data-layout");
+    facts.groupW = Math.round(g.getBoundingClientRect().width);
   }
+  // NEW-1: the rotation top line is ONE line (label · dial · number box on one centre line), and the quarter-turn
+  // buttons are ONE compact left-aligned row (2026-10-22, B2382048) — never stacked, never stretched.
+  const row = root.querySelector('[data-testid="overlay-rotation-row"]');
+  if (row) {
+    const top = row.firstElementChild;
+    const kids = top ? Array.from(top.children).map((c) => { const q = c.getBoundingClientRect(); return { cy: Math.round((q.top + q.height / 2) * 10) / 10, top: q.top, bottom: q.bottom, left: q.left, right: q.right }; }) : [];
+    facts.rotTop = kids;
+    const qg = root.querySelector('[data-testid="overlay-quarter-group"]');
+    if (qg) {
+      const gq = qg.getBoundingClientRect();
+      const bs = Array.from(qg.querySelectorAll("button")).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), left: q.left - gq.left, right: q.right - gq.right, fw: getComputedStyle(b).fontWeight, fs: getComputedStyle(b).fontSize, clip: b.scrollWidth > b.clientWidth + 1 }; });
+      facts.quarterBtns = bs; facts.quarterGroupW = Math.round(gq.width); facts.quarterLabel = qg.getAttribute("data-label");
+    }
+    const dial = root.querySelector('[data-testid="overlay-rot-dial"]'), box = root.querySelector('[data-testid="overlay-rot-box"]');
+    if (dial && box) { const a = dial.getBoundingClientRect(), b = box.getBoundingClientRect(); facts.dialBox = { dial: [Math.round(a.width), Math.round(a.height)], box: [Math.round(b.width), Math.round(b.height)], gap: Math.round(b.left - a.right) }; }
+  }
+  const pic = root.querySelector('[data-testid^="overlay-crop-picture-"]');
+  if (pic) { const q = pic.getBoundingClientRect(), a = root.querySelector('[data-testid="overlay-crop-open"]').getBoundingClientRect(); facts.cropBody = { picW: Math.round(q.width), picH: Math.round(q.height), adjW: Math.round(a.width), sameLine: Math.abs(q.top - a.top) < 4 }; }
   facts.testids = Array.from(root.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
   facts.text = root.innerText;
   return facts;
@@ -113,10 +160,13 @@ const measure = (floating) => {
 
 const BREAK_CSS = `
   [data-testid="overlay-scale-group"]{grid-template-columns:repeat(3,160px)!important}
-  [data-testid="overlay-rotation-row"]{flex-wrap:nowrap!important}
+  [data-testid="overlay-quarter-group"]{flex-direction:column!important}
+  [data-testid="overlay-rot-box"]{width:260px!important}
   [data-testid="overlay-opacity-pct"]{width:300px!important}
-  [data-testid="overlay-crop-shape"]{font-size:14px!important}
-  [data-testid="overlay-scale-trace"]{white-space:nowrap!important;overflow:hidden!important;width:46px!important}`;
+  [data-testid^="overlay-crop-picture-"]{width:400px!important;flex:none!important}
+  [data-testid="overlay-scale-trace"]{white-space:nowrap!important;overflow:hidden!important;width:46px!important}
+  [data-testid="overlay-row-name"]{font-weight:700!important}
+  [data-testid="overlay-scale-match"]{color:var(--accent)!important}`;
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 let fail = 0, void_ = false;
@@ -149,7 +199,25 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     }
     if (BROKEN) await page.addStyleTag({ content: BREAK_CSS });
     await page.waitForTimeout(300);
+    // FOCUS must be green too: focus each control in turn and read its ring / border
+    const focusOrange = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="overlays-panel"]');
+      if (!root) return [];
+      const probe = document.createElement("i"); probe.style.cssText = "color:var(--accent)"; root.appendChild(probe);
+      const o = getComputedStyle(probe).color; probe.remove();
+      const bad = [];
+      for (const el of root.querySelectorAll("button,input:not([type=file]),select")) {
+        if (el.disabled || !el.getBoundingClientRect().width) continue;
+        el.focus({ focusVisible: true });
+        const cs = getComputedStyle(el);
+        const seen = [cs.outlineColor, cs.borderTopColor, cs.boxShadow].join(" ");
+        if (seen.includes(o) || /rgba\(194, 65, 12/.test(seen)) bad.push(el.getAttribute("data-testid") || el.getAttribute("aria-label") || el.tagName);
+        el.blur();
+      }
+      return bad;
+    });
     const m = await page.evaluate(measure, floating);
+    m.focusOrange = focusOrange;
     const tag = `${surface} · ${v.label}`;
     if (m.missing) { log(false, `${tag}: Overlays panel not found`); await ctx.close(); continue; }
     if (errs.length) log(false, `${tag}: page error ${errs[0].slice(0, 90)}`);
@@ -160,6 +228,9 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     log(m.clipped.length === 0, `${tag}: no clipped text${m.clipped.length ? " — " + m.clipped.slice(0, 3).join("; ") : ""}`);
     const sz = Object.keys(m.sizes).sort();
     log(sz.length <= 2 && sz.every((s) => s === "12px" || s === "10.5px"), `${tag}: only two text sizes (${sz.join(", ")}${sz.length > 2 || sz.some((x) => x !== "12px" && x !== "10.5px") ? " — " + JSON.stringify(m.sizeWho) : ""})`);
+    log(m.badPairs.length === 0, `${tag}: every text is an allowed (size, weight) pair${m.badPairs.length ? " — " + m.badPairs.slice(0, 4).join("; ") : ""}`);
+    log(m.focusOrange.length === 0, `${tag}: focus ring / border is never orange${m.focusOrange.length ? " — " + m.focusOrange.slice(0, 4).join("; ") : ""}`);
+    log(m.orange.length === 0 && !!m.orangeRef, `${tag}: no orange accent anywhere (ref ${m.orangeRef})${m.orange.length ? " — " + m.orange.slice(0, 4).join("; ") : ""}`);
     log(m.unreachable.length === 0, `${tag}: every control reachable${m.unreachable.length ? " — " + m.unreachable.slice(0, 3).join("; ") : ""}`);
     for (const id of v.must) log(m.testids.includes(id), `${tag}: has ${id}`);
     for (const id of v.mustNot || []) log(!m.testids.includes(id), `${tag}: correctly has NO ${id}`);
@@ -169,18 +240,70 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
       log(m.scaleBtns.every((b) => Math.abs(b.w - s0.w) <= 1 && Math.abs(b.h - s0.h) <= 1 && b.fw === s0.fw && b.bg === s0.bg && b.fs === s0.fs),
         `${tag}: the scale buttons are identical in size, weight and fill (${m.scaleBtns.length} × ${s0.w}×${s0.h}, ${m.scaleBtns.length === 3 ? m.scaleRows + " row(s)" : ""})`);
     }
+    if (m.scaleBtns.length >= 2) {
+      const counts = m.scaleRowCounts, n = m.scaleBtns.length;
+      const oneRow = counts.length === 1 && counts[0] === n;
+      const oneCol = counts.length === n && counts.every((c) => c === 1) && m.scaleBtns.every((b) => Math.abs(b.w - m.groupW) <= 1);
+      log(oneRow || oneCol, `${tag}: scale group is ${oneRow ? "one row" : oneCol ? "one full-width column" : "NEITHER (" + counts.join("+") + ")"} — never ${n === 3 ? "2 + 1" : "a split"}`);
+    }
+    if (m.rotTop && m.rotTop.length) {
+      const cys = m.rotTop.map((k) => k.cy);
+      log(m.rotTop.length === 3 && Math.max(...cys) - Math.min(...cys) <= 2, `${tag}: Rotation label · dial · number box sit on ONE line (${m.rotTop.length} items, centre-line spread ${(Math.max(...cys) - Math.min(...cys)).toFixed(1)})`);
+      log(m.dialBox && m.dialBox.dial[0] === m.dialBox.dial[1] && m.dialBox.dial[0] >= 28 && m.dialBox.gap >= 0, `${tag}: the dial is a round ${m.dialBox ? m.dialBox.dial.join("×") : "?"} target, number box ${m.dialBox ? m.dialBox.box.join("×") : "?"}`);
+    }
+    if (m.quarterBtns && m.quarterBtns.length === 2) {
+      const [a, b] = m.quarterBtns, oneRow = a.top === b.top && b.left > a.left + a.w - 1, leftAligned = a.left < 2, sized = a.w < m.quarterGroupW * 0.75 || m.quarterLabel === "compact" || m.quarterLabel === "icons";
+      log(oneRow && leftAligned && sized, `${tag}: the two 90° buttons are ${oneRow ? "ONE row, " + (leftAligned ? "left-aligned" : "NOT left-aligned") + ", sized to their text (" + a.w + " / " + b.w + ", label " + m.quarterLabel + ")" : "NOT on one row (" + a.top + " / " + b.top + ")"}`);
+      // When even the compact words exceed the row the buttons stay on ONE row (never stacked) as the two turn arrows — never cut off.
+      const over = Math.round(Math.max(b.right, a.right));
+      log(over <= 1, `${tag}: the 90° row fits its box (label tier ${m.quarterLabel}${over > 1 ? ", over by " + over : ""})`);
+      log(!a.clip && !b.clip && a.fs === b.fs && a.fw === b.fw, `${tag}: neither 90° label is clipped or wrapped`);
+    }
+    if (m.cropBody) log(m.cropBody.picW >= 80 && m.cropBody.picH >= 80 && m.cropBody.sameLine, `${tag}: crop picture ${m.cropBody.picW}×${m.cropBody.picH} beside Adjust (${m.cropBody.adjW} wide)`);
     if (!/^(Width|ft wide)/m.test(m.text)) log(!/\bWidth\b/.test(m.text), `${tag}: no Width box and no sheet-width readout`);
     if (surface === "docked 620" && v.id === "pdf1") {
       // the known-good arm: this reading is clean on ANY build, or the instrument is void
       if (fail > before) void_ = true;
     }
-    if (process.env.SHOTS) await page.screenshot({ path: `${OUT}overlays-panel-${surface.replace(/\W+/g, "-")}-${v.id}.png` });
+    if (process.env.SHOTS) {
+      await page.screenshot({ path: `${OUT}overlays-panel-${surface.replace(/\W+/g, "-")}-${v.id}.png` });
+      await page.locator('[data-testid="overlays-panel"]').screenshot({ path: `${OUT}overlays-panel-only-${surface.replace(/\W+/g, "-")}-${v.id}.png` }).catch(() => {});
+    }
     await ctx.close();
   }
 }
 
-for (const w of [240, 400, 620]) await run(`docked ${w}`, { w });
-for (const w of [240, 400, 620]) await run(`floating ${w}`, { w, floating: true });
+
+/* THE OPEN ROW FITS: on a laptop-sized window, docked, the open PDF row — through "Knock out white paper" —
+ * is on screen with no scrolling. Read BEFORE anything scrolls it into view. */
+async function fitCheck() {
+  for (const w of [300, 400]) {
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
+    await ctx.addInitScript(seedFor(w, "pdf1"));
+    const page = await ctx.newPage();
+    await assertMeasurable(page, "verify-overlays-panel-layout");
+    await page.goto(`${BASE}#/project/S/site`, { waitUntil: "load" });
+    await page.waitForTimeout(3200);
+    await openPanel(page, { phone: false });
+    if (BROKEN) await page.addStyleTag({ content: BREAK_CSS });
+    await page.waitForTimeout(300);
+    const f = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="overlays-panel"]');
+      const lab = Array.from(root.querySelectorAll("label")).find((l) => /Knock out white paper/.test(l.textContent));
+      const sc = root.closest("[data-panel-body]") || root.parentElement;
+      const sr = sc.getBoundingClientRect();
+      return { bottom: lab ? lab.getBoundingClientRect().bottom : null, viewBottom: Math.min(innerHeight, sr.bottom), scrolled: sc.scrollTop };
+    });
+    log(f.bottom != null && f.scrolled === 0 && f.bottom <= f.viewBottom, `fit 1366×768 docked ${w}: open row ends at ${f.bottom == null ? "?" : Math.round(f.bottom)} within the visible panel (${Math.round(f.viewBottom)}), unscrolled`);
+    if (process.env.SHOTS) await page.screenshot({ path: `${OUT}overlays-panel-fit-${w}.png` });
+    await ctx.close();
+  }
+}
+
+const WIDTHS = process.env.WIDTHS ? process.env.WIDTHS.split(",").map(Number) : [240, 300, 400, 520, 620];
+for (const w of WIDTHS) await run(`docked ${w}`, { w });
+for (const w of WIDTHS) await run(`floating ${w}`, { w, floating: true });
+await fitCheck();
 await run("phone 390×844", { w: 320, vw: 390, vh: 844, phone: true });
 await run("phone 360×640", { w: 320, vw: 360, vh: 640, phone: true });
 await browser.close();

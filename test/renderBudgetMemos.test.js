@@ -16,9 +16,10 @@ import { coalesceRequest, clearCoalesced, COALESCE_TTL_MS } from "../src/workspa
 import { releaseCanvas } from "../src/workspaces/site-planner/lib/releaseCanvas.js";
 import { releaseCanvas as reviewReleaseCanvas } from "../src/workspaces/doc-review/lib/releaseCanvas.js";
 import { snapshotFootprint, _resetSnapshots } from "../src/workspaces/site-planner/lib/parcelSnapshot.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const srcOf = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const src = srcOf("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const header = srcOf("../src/shared/ui/AppHeader.jsx");
 const anchored = srcOf("../src/shared/ui/AnchoredMenu.jsx");
 const rect = (w, h) => [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
@@ -286,7 +287,7 @@ describe("NEW-6 — the Map view's Leaflet map is capped like the planner's", ()
 
   it("the 45s overlay re-probe does not run for a hidden map", () => {
     expect(finder).toContain("if (!visible) return undefined;");
-    expect(finder).toContain("}, [overlays, visible]);");
+    expect(finder).toContain("}, [overlaysDrawn, visible]);");
   });
 
   it("nothing here downgrades what is DRAWN — retina is untouched", () => {

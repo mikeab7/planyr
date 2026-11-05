@@ -2,7 +2,7 @@
  "harvestedAt": "2026-10-08",
  "rows": {
   "fortbend": {
-   "label": "Fort Bend · FBCAD",
+   "label": "Fort Bend \u00b7 FBCAD",
    "state": "TX",
    "layerUrl": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
    "attrs": {
@@ -53,7 +53,7 @@
    }
   },
   "harris": {
-   "label": "Harris County · HCAD",
+   "label": "Harris County \u00b7 HCAD",
    "state": "TX",
    "layerUrl": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
    "attrs": {
@@ -120,7 +120,7 @@
    }
   },
   "liberty": {
-   "label": "Liberty County · LCAD",
+   "label": "Liberty County \u00b7 LCAD",
    "state": "TX",
    "layerUrl": "https://services3.arcgis.com/LbQai106UcFy2LlR/arcgis/rest/services/LibertyCADWebService/FeatureServer/0",
    "attrs": {
@@ -171,7 +171,7 @@
    }
   },
   "brazoria": {
-   "label": "Brazoria County · BCAD",
+   "label": "Brazoria County \u00b7 BCAD",
    "state": "TX",
    "layerUrl": "https://services6.arcgis.com/j94FvPaik4etwHFk/arcgis/rest/services/BrazoriaCADWebService/FeatureServer/0",
    "attrs": {
@@ -222,7 +222,7 @@
    }
   },
   "galveston": {
-   "label": "Galveston County · GCAD",
+   "label": "Galveston County \u00b7 GCAD",
    "state": "TX",
    "layerUrl": "https://services2.arcgis.com/uGo7PKALPg93ZiO2/arcgis/rest/services/Galveston_County_Appraisal_District_Parcels_and_Lot_Lines/FeatureServer/2",
    "attrs": {
@@ -338,7 +338,7 @@
    }
   },
   "montgomery": {
-   "label": "Montgomery County · MCAD",
+   "label": "Montgomery County \u00b7 MCAD",
    "state": "TX",
    "layerUrl": "https://services1.arcgis.com/PRoAPGnMSUqvTrzq/arcgis/rest/services/Tax_Parcel_view/FeatureServer/0",
    "attrs": {
@@ -405,7 +405,7 @@
    }
   },
   "austintx": {
-   "label": "Austin County · ACAD",
+   "label": "Austin County \u00b7 ACAD",
    "state": "TX",
    "layerUrl": "https://services7.arcgis.com/rNakmFefTO1XjYg4/arcgis/rest/services/AustinCADWebService/FeatureServer/0",
    "attrs": {
@@ -3169,64 +3169,47 @@
   "ms_desoto": {
    "label": "DeSoto County, MS",
    "state": "MS",
-   "layerUrl": "https://services5.arcgis.com/nbwtrV1EDhKfIQhm/arcgis/rest/services/DESOTO_PARCELS/FeatureServer/0",
+   "layerUrl": "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/1",
    "attrs": {
-    "FID": 1,
-    "OBJECTID": 1201,
-    "CAMA": "DATA SYSTEMS MANAGEMENT",
-    "PARNO": "105930030      0003200",
-    "ALTPARNO": " ",
-    "PPIN": 0,
-    "OWNNAME": "KIMBLE CLAY ETUX",
-    "MAILADD1": "KIMBLE LINDA D",
-    "MCITY1": "OLIVE BRANCH",
-    "MSTATE1": "MS",
-    "MZIP1": "386540000",
-    "MAILADD2": "7015 STANLEY DR",
-    "MCITY2": "OLIVE BRANCH",
-    "MSTATE2": "MS",
-    "MZIP2": "386540000",
-    "SITEADD": "7015 STANLEY",
-    "SCITY": " ",
-    "SSTATE": "MS",
-    "SZIP": "38654",
-    "SUBNAME": "OLIVE BRANCH",
-    "SUBDIVNO": "105930030",
-    "TAXACRES": 0,
-    "GISACRES": 0.959136891919,
-    "DEEDREF": "401 - 713",
-    "DEEDDATE": 1003881600000,
-    "PLATREF": " ",
-    "PLATDATE": null,
-    "TAXMAP": "105930",
-    "SECTION": "30",
-    "TWSP": "01",
-    "RANGE": " 05",
-    "TAXSTATUS": " ",
-    "STNAME": "MS",
-    "CNTYNAME": "DESOTO",
-    "CNTYFIPS": "033",
-    "STFIPS": "28",
-    "STCNTYFIPS": "28033",
-    "LANDVAL": 35000,
-    "IMPVAL1": 119683,
-    "IMPVAL2": 0,
-    "TOTVAL": 154683,
-    "CULT_AC1": 0,
-    "CULT_AC2": 0,
-    "UNCULT_AC1": 0,
-    "UNCULT_AC2": 0,
-    "TOTAL_AC": 0,
-    "LATDEC": 34.9667458795,
-    "LONGDEC": -89.7734218549,
-    "ZONING": " ",
-    "LEGLDESC": "30-1-5 PLEASANT GROVE S-D SEC                               LOT 32",
-    "TAXYEAR": "2022",
-    "INSIDE_X": -9993531.60761,
-    "INSIDE_Y": 4159362.95975,
-    "Shape_Area": 41780.003012,
-    "Shape__Area": 5793.47265625,
-    "Shape__Length": 325.1354111182784
+    "OBJECTID": 2346,
+    "PIN": "106834002      0003800",
+    "ACREAGE": 0.85688548,
+    "FULL_ADDR": "6973 HWY 305",
+    "OWNER_NAME": "GIANT OIL CO",
+    "SECOND_OWNER": null,
+    "OWNER_ADDRESS": "P O BOX 1688",
+    "CITY": "TUPELO",
+    "STATE": "MS",
+    "ZIP_CODE": "38802",
+    "DEED_BOOK1": "186",
+    "DEED_PAGE1": "159",
+    "WD_Link": "https://landrecords.desotocountyms.gov/AcclaimWeb/Details/GetDocumentbyBookPage/W/186/159",
+    "Tax_Info": "http://records.desotocountyms.gov/Webpgms/APDSPREC.pgm?TASK=disp&GetParcel=106834002%20%20%20%20%20%200003800",
+    "Tax_Map": "http://records.desotocountyms.gov/WEBPAGES/TM/16834002.pdf",
+    "FEMA_Link": "http://msc.fema.gov/portal/search?AddressQuery=-89.8298842%2C%2034.96147632",
+    "REZONING": "",
+    "COVENANT": null,
+    "Plat_Link": null,
+    "SUBD_NAME": null,
+    "LOT": "",
+    "LANDVALUE": 217800,
+    "IMPCLS1": 0,
+    "IMPCLS2": 1132537,
+    "TOT_APVAL": 1350337,
+    "TOT_ASVAL": 202551,
+    "EXEMPT": null,
+    "X": -89.8298842,
+    "Y": 34.96147632,
+    "Zoning": "C-5",
+    "Supervisor_District": "1",
+    "Flowage_Easement": null,
+    "Elementary_District": "Olive Branch",
+    "Middle_High_District": "Olive Branch",
+    "Discover_DeSoto": null,
+    "Tax_District": "1300",
+    "County": "DESOTO",
+    "Shape.STArea()": 37325.78694768303,
+    "Shape.STLength()": 742.6583371738978
    }
   },
   "la_assumption": {
@@ -3243,7 +3226,7 @@
     "Notes": " ",
     "Shape_Leng": 409.969065842,
     "PIN": "100000051",
-    "SHAPE__Area": 9.121981747739483e-8,
+    "SHAPE__Area": 9.121981747739483e-08,
     "SHAPE__Length": 0.001212908639802007
    }
   },
@@ -4015,7 +3998,7 @@
     "AssessSear": "279730",
     "OwnerSearc": "BOGGS, CLINT M. & LACIE MILLER BOGGS",
     "STREET_N_1": "  BROOKEWOOD DR",
-    "SHAPE__Area": 1.9106391846435145e-7,
+    "SHAPE__Area": 1.9106391846435145e-07,
     "SHAPE__Length": 0.0018928544274227298
    }
   },
@@ -6155,7 +6138,7 @@
     "ParcelType": "0",
     "NEIGHBHOOD": "2010",
     "F_REALKEY": "1",
-    "Shape__Area": 0.000023907224203867372,
+    "Shape__Area": 2.3907224203867372e-05,
     "Shape__Length": 0.02677137182864683
    }
   },

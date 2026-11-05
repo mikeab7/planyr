@@ -30,11 +30,13 @@ describe("finishGroundAction — the ONE way a decide-bar verb returns the map t
     expect(verbsAt).toBeGreaterThan(helperAt);
   });
 
-  it("the \"note\" verb's parcel-target branch calls it, not a bare clearSel()", () => {
-    const noteRun = finder.slice(finder.indexOf('key: "note"'), finder.indexOf('key: "note"') + 1400);
+  it("the \"note\" verb HOLDS the ground while the composer is open, and Save releases it through the shared helper (NEW-1, 2026-10-08)", () => {
+    const noteRun = finder.slice(finder.indexOf('key: "note"'), finder.indexOf('key: "note"') + 1900);
     const parcelBranch = noteRun.slice(noteRun.indexOf('if (target === "parcels")'), noteRun.indexOf("const pin = droppedPin"));
-    expect(parcelBranch, "must call the shared helper").toMatch(/finishGroundAction\(\)/);
-    expect(parcelBranch, "must not have regressed to a bare clearSel()").not.toMatch(/\bclearSel\(\);/);
+    expect(parcelBranch, "the verb must not clear the selection the note is about").not.toMatch(/finishGroundAction\(\)|\bclearSel\(\)/);
+    const save = finder.slice(finder.indexOf("const saveMapNote ="), finder.indexOf("const removeMapNote ="));
+    expect(save, "a successful NEW note releases the ground via the shared helper").toMatch(/finishGroundAction\(\)/);
+    expect(save, "...and not through a bare clearSel()").not.toMatch(/\bclearSel\(\);/);
   });
 
   it("placeCompOnSelectedParcel (\"Log a comp\" from a parcel selection) calls it too — the same defect, the same fix", () => {
@@ -42,8 +44,11 @@ describe("finishGroundAction — the ONE way a decide-bar verb returns the map t
     expect(body).toMatch(/finishGroundAction\(\)/);
   });
 
-  it("the decide bar's own ✕ 'Clear selection' button keeps calling clearSel() directly — clearing to reselect must NOT exit select mode", () => {
+  it("the decide bar's own ✕ 'Clear selection' button keeps clearing via clearSel() directly — clearing to reselect must NOT exit select mode (B2451472: now the shared clearDecide, which Escape calls too)", () => {
+    const helper = finder.slice(finder.indexOf("const clearDecide ="), finder.indexOf("const clearDecide =") + 300);
+    expect(helper).toMatch(/=== "parcels"\) clearSel\(\); else clearDecidePin\(\);/);
+    expect(helper).not.toMatch(/finishGroundAction/);
     const clearBtn = finder.slice(finder.indexOf('data-testid="map-decide-clear"') - 300, finder.indexOf('data-testid="map-decide-clear"'));
-    expect(clearBtn).toMatch(/if \(decideTarget === "parcels"\) clearSel\(\); else clearDecidePin\(\);/);
+    expect(clearBtn).toMatch(/onClick=\{clearDecide\}/);
   });
 });

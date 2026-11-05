@@ -21,17 +21,21 @@
  */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { OK_VECTOR_SOURCES } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county";
-export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county" || id === "nj_county" || id === "ny_county" || id === "tn_county" || id === "ms_county" || id === "ms_county_state" || id === "fl_county" || id === "ok_county";
+export const isCityLimitsId = (id) => id === "jur_city" || id === "ok_city" || id === "ga_city" || id === "ca_city"
+  || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village" // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
+  || id === "tn_city" || id === "fl_city"; // B2521584 (Tennessee)
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
 import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";
+import { cityPolysFromGeoJson, netEtjFeatures } from "./etjNet.js";   // B2472945
 import { etjNamesOf } from "./etjNames.js";
 
 // ---------------------------------------------------------------------------
@@ -198,11 +202,12 @@ export const VECTOR_SOURCES = {
    * the exact columns jurisdiction.js already reads. */
   jur_county: {
     id: "jur_county",
+    stateAbbr: "TX", // the county label adds ", TX" only when the view is centred in a different state (B2507065)
     label: "County boundaries",
     labelField: "CNTY_NM",
     // County-name labels on the map (B695): on at region zoom, off at parcel zoom
     // (you're inside one county there — the label is noise).
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     // Click-identify popover (B695): name line + the has-jurisdiction wording the
     // Layers panel already teaches (one disclaimer, reused — never a new claim).
     nameTemplate: "{name} County",
@@ -268,9 +273,10 @@ export const VECTOR_SOURCES = {
    * 512 KB entry cap); Adairsville answers at parcel zoom. Georgia has no ETJ, so there is no ETJ source. */
   ga_county: {
     id: "ga_county",
+    stateAbbr: "GA", // the county label adds ", GA" only when the view is centred in a different state (B2507065)
     label: "County boundaries (Georgia)",
     labelField: "NAME",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
     sourceName: "Georgia DCA",
@@ -291,6 +297,138 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia county lines (DCA).",
+  },
+  /* NEW-1 (Florida, B2452976) — THE FLORIDA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.js rows (the Georgia lesson). Endpoints come from the GIS_SOURCES rows
+   * (floridaLayers.js reads the same ones). Probed live 2026-10-29: 67 counties in ONE statewide pull; the city limits (411 polygons, UF GeoPlan / FDOR 2021 tax rolls) tile in bbox cells. */
+  fl_county: {
+    id: "fl_county",
+    stateAbbr: "FL",
+    titleCaseLabel: true, // FDEM publishes ALL-CAPS names
+    label: "County boundaries (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "Florida Division of Emergency Management",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyFl.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida county lines (FDEM).",
+  },
+  fl_city: {
+    id: "fl_city",
+    titleCaseLabel: true, // UF GeoPlan publishes ALL-CAPS names
+    label: "City limits (Florida)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. Compiled from the 2021 tax rolls — a later annexation is not in it. NOT proof of utility service. Screening only.",
+    sourceName: "UF GeoPlan / Florida Department of Revenue",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityFl.serviceUrl + "/query",
+      outFields: ["NAME", "COUNTY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Florida city limits (UF GeoPlan from the 2021 tax rolls).",
+  },
+  tn_county: {
+    id: "tn_county",
+    stateAbbr: "TN",
+    label: "County boundaries (Tennessee)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "State of Tennessee (STS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyTn.serviceUrl + "/query",
+      outFields: ["NAME", "GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Tennessee county lines (State of Tennessee).",
+  },
+  ms_county: {
+    id: "ms_county",
+    stateAbbr: "MS",
+    label: "County boundary (DeSoto County, MS)",
+    labelField: "COUNTY",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "DeSoto County GIS — County Outline",
+    liveFallback: true,
+    query: {
+      url: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/8/query",
+      outFields: ["COUNTY"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 5 }],
+    },
+    note: "DeSoto County's own outline (county server).",
+  },
+  /* NEW-1 (Mississippi) — MDEQ's statewide county layer, DeSoto left out (its own row draws the county server's outline). 82 polygons, one statewide pull at the wide tiers. */
+  ms_county_state: {
+    id: "ms_county_state",
+    stateAbbr: "MS",
+    label: "County boundaries (Mississippi)",
+    labelField: "CONAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate). A boundary is not a utility service area. Screening only.",
+    sourceName: "MDEQ — Office of Land and Water Resources",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.msCounty.serviceUrl.replace("https://", "/gis-proxy/") + "/query",
+      outFields: ["CONAME"],
+      where: "UPPER(CONAME) <> 'DESOTO'", // MDEQ stores the name as "Desoto" — a plain <> 'DeSoto' excluded nothing and drew DeSoto's outline twice
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "all", offsetDeg: 0.0002, precision: 5 },
+      ],
+    },
+    note: "Mississippi county lines (MDEQ).",
   },
   ga_city: {
     id: "ga_city",
@@ -319,6 +457,37 @@ export const VECTOR_SOURCES = {
     },
     note: "Georgia city limits (DCA).",
   },
+  /* B2521584 (Tennessee) — THE TENNESSEE ROWS' VECTOR SOURCES, registered in the SAME commit as their layers rows (the Georgia lesson;
+   * `vectorLayerRegistered` fails the build otherwise). Endpoints come from the GIS_SOURCES rows the jurisdiction identify uses (B176).
+   * Probed live 2026-10-29 with the loader's exact query: 95 counties in ONE statewide pull (250 KB at the statewide tier's tolerance — under
+   * the 512 KB entry cap); the 345-city roster is 474 KB statewide, too close to the cap for one entry, so cities take the same bbox-only
+   * tiering as the Texas / Georgia rows. Tennessee has no ETJ, so there is no ETJ source. */
+  tn_city: {
+    id: "tn_city",
+    label: "City limits (Tennessee)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "State of Tennessee (STS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityTn.serviceUrl + "/query",
+      outFields: ["NAME"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Tennessee city limits (State of Tennessee).",
+  },
   /* NEW-1 (California) — THE CALIFORNIA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.rows
    * (the Georgia rows shipped without this and drew nothing — B1990960 recurrence; `vectorLayerRegistered`
    * now fails the build on that). Same B176 invariant: endpoints come from the GIS_SOURCES rows the
@@ -327,9 +496,10 @@ export const VECTOR_SOURCES = {
    * ~82 KB (under the 512 KB entry cap). California has no ETJ, so there is no ETJ source. */
   ca_county: {
     id: "ca_county",
+    stateAbbr: "CA", // the county label adds ", CA" only when the view is centred in a different state (B2507065)
     label: "County boundaries (California)",
     labelField: "CDT_NAME_SHORT",
-    labelZoom: { min: 6, max: 11 },
+    labelZoom: { min: 6, max: 14 },
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
     sourceName: "California CDT State Geoportal",
@@ -379,6 +549,166 @@ export const VECTOR_SOURCES = {
     },
     note: "California city limits (CDT State Geoportal).",
   },
+  /* NEW-1 (New Jersey + New York) — THE NJ / NY ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.js rows (the Georgia
+   * lesson: a `kind:"vector"` row with no entry here draws NOTHING — `vectorLayerRegistered` fails the build on it). Endpoints come from the
+   * GIS_SOURCES rows the jurisdiction identify uses (B176). Counties: ONE statewide pull serves every low / mid zoom; municipal tiers use the
+   * same bbox-only tiering as the Texas / Georgia / California city rows (a statewide pull of 564 / 933 / 532 polygons is too heavy for one entry). */
+  nj_county: {
+    id: "nj_county",
+    stateAbbr: "NJ", // the county label adds ", NJ" only when the view is centred in a different state (B2507065)
+    label: "County boundaries (New Jersey)",
+    labelField: "COUNTY",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New Jersey the municipality, not the county, is the zoning and site-plan authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "NJ Office of GIS (NJOGIS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyNj.serviceUrl + "/query",
+      outFields: ["COUNTY", "FIPSSTCO"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New Jersey county lines (NJOGIS).",
+  },
+  nj_city: {
+    id: "nj_city",
+    label: "Municipal limits (New Jersey)",
+    labelField: "MUN_LABEL",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — municipal boundary",
+    identifyNote: "Inside this line is in the municipality (it has jurisdiction — it zones and approves site plans). Every acre of New Jersey is in one. NOT proof of utility service. Screening only.",
+    sourceName: "NJ Office of GIS (NJOGIS)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityNj.serviceUrl + "/query",
+      outFields: ["MUN_LABEL", "NAME", "MUN_TYPE", "CENSUS2020"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New Jersey municipal boundaries (NJOGIS).",
+  },
+  ny_county: {
+    id: "ny_county",
+    stateAbbr: "NY", // the county label adds ", NY" only when the view is centred in a different state (B2507065)
+    label: "County boundaries (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 14 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — but in New York the town, village or city, not the county, approves zoning and site plans. A boundary is not a utility service area. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE", "NYC"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York county lines (NYS ITS Civil Boundaries).",
+  },
+  ny_city: {
+    id: "ny_city",
+    label: "City limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 9, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — it zones and approves site plans). New York City is one city across five counties. NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York city limits (NYS ITS Civil Boundaries).",
+  },
+  ny_town: {
+    id: "ny_town",
+    label: "Town limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 9, max: 13 },
+    nameTemplate: "{name} — town limits",
+    identifyNote: "Inside this line is in the town (it has jurisdiction — it zones and approves site plans unless a village inside it does). Towns cover all land outside the 62 cities. NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.townNy.serviceUrl + "/query",
+      outFields: ["NAME", "FIPS_CODE", "COUNTY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York town limits (NYS ITS Civil Boundaries).",
+  },
+  ny_village: {
+    id: "ny_village",
+    label: "Village limits (New York)",
+    labelField: "NAME",
+    labelZoom: { min: 10, max: 14 },
+    nameTemplate: "{name} — village limits",
+    identifyNote: "Inside this line is in the village (its own board approves zoning and site plans over the town that holds it). NOT proof of utility service. Screening only.",
+    sourceName: "NYS ITS Geospatial Services",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.villageNy.serviceUrl + "/query",
+      outFields: ["NAME", "TOWN", "FIPS_CODE"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000,
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "New York village limits (NYS ITS Civil Boundaries).",
+  },
   jur_etj: {
     id: "jur_etj",
     label: "City ETJ (Houston & Dallas–Fort Worth)",
@@ -400,7 +730,11 @@ export const VECTOR_SOURCES = {
         id: r.id, url: r.url + "/query", bbox: r.bbox,
         nameCol: (r.fields && r.fields.name) || null, row: r,
       })),
-      keyRev: 2, // the list of sources changed — bust every earlier single-source entry
+      keyRev: 3, // 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
+      /* ⛔ B2472945 — THE DRAWN ETJ IS NET OF CITY LIMITS, the same rule the header applies (B2472944): an ETJ is the ground OUTSIDE every
+       * city's limits, so a published ETJ polygon is cut by the city layer's own limits (the `jur_city` source below — one source of
+       * truth for what a city's limits ARE, read through its own cache) before it is cached and drawn. `fetchCached` does the cut. */
+      netAgainst: "jur_city",
       outFields: ["CITY"],
       where: "1=1",
       pageSize: 1000,
@@ -517,6 +851,49 @@ export const VECTOR_SOURCES = {
     },
     note: "Georgia DNR trout streams — compute-only source for the stream-buffer layer.",
   },
+  /* NEW-1 (Georgia due-diligence gaps) — DCA's PROTECTED RIVERS (257 segments statewide), the fourth compute-only source of the stream-buffer layer: a
+   * protected river carries a 100-ft river corridor each side, measured from the top of the bank (O.C.G.A. 12-2-8, Rule 391-3-16-.04). The drawn "Protected Rivers" row is a plain
+   * `esriFeature` line layer (georgiaLayers.js) over the same GIS_SOURCES row. */
+  ga_protected_rivers: {
+    id: "ga_protected_rivers",
+    label: "Protected rivers (Georgia DCA)",
+    style: "river",
+    geometryType: "line",
+    sourceName: GIS_SOURCES.gaProtectedRiver.provider,
+    query: {
+      url: GIS_SOURCES.gaProtectedRiver.serviceUrl + "/query",
+      outFields: Object.values(GIS_SOURCES.gaProtectedRiver.fields), // FENAME
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 90 * 24 * 3600 * 1000, // DCA's map is a 2003 compilation; it changes by rulemaking, not weekly
+      minVectorZoom: 10,
+      maxAreaDeg: 0.35,
+    },
+    note: "Georgia DCA protected rivers — compute-only source for the stream-buffer layer.",
+  },
+  /* NEW-1 (B2535200 review) — ARC's Chattahoochee MRPA corridor polygon (the 2,000-ft river corridor, Buford Dam → the Fulton/Douglas line), the fifth compute-only source of the stream-buffer layer:
+   * a protected river does NOT include a segment covered by the Metropolitan River Protection Act (Rule 391-3-16-.04), so the 100-ft protected-river tier is cut out of it. */
+  ga_mrpa_corridor: {
+    id: "ga_mrpa_corridor",
+    label: "Chattahoochee MRPA corridor (ARC)",
+    style: "district",
+    geometryType: "polygon",
+    sourceName: GIS_SOURCES.gaMrpaCorridor.provider,
+    query: {
+      url: GIS_SOURCES.gaMrpaCorridor.serviceUrl + "/query",
+      outFields: ["*"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 90 * 24 * 3600 * 1000, // the corridor changes by statute
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // one outline, answered the same way at every pan (like the District); ≈50 m generalisation — the river runs well inside a 2,000-ft corridor
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 4 }],
+    },
+    note: "Chattahoochee River Corridor (Metropolitan River Protection Act) — compute-only source for the stream-buffer layer.",
+  },
   ga_mngwpd: {
     id: "ga_mngwpd",
     label: "Metro North Georgia Water Planning District",
@@ -583,6 +960,7 @@ export const VECTOR_SOURCES = {
     },
     note: "Brookshire–Katy Drainage District recorded drainage easements.",
   },
+  ...OK_VECTOR_SOURCES, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
 };
 
 // ---------------------------------------------------------------------------
@@ -651,7 +1029,7 @@ export function buildVectorQuery(source, bbox, { offset = 0, tier = null } = {})
 /* Compose a full /query URL from a base + params (skips null/undefined). Mirrors
  * jurisdiction.js's buildQueryUrl; `f` is carried in the params here. Pure. */
 export function buildQueryUrl(baseUrl, params) {
-  const u = new URL(baseUrl);
+  const u = new URL(baseUrl, typeof location !== "undefined" && location.origin ? location.origin : "http://localhost"); // a relative /gis-proxy/… URL resolves against the page's origin
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
   return u.toString();
 }
@@ -745,14 +1123,22 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
     const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? null });
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
-    if (!batch.length) break; // empty page → nothing left (also guards a server that wrongly keeps flagging more)
+    if (!batch.length) {
+      // Empty page → nothing left. One that STILL claims more is a server lying about its own data:
+      // stop (never loop) and say the set may be incomplete.
+      if (j && j.exceededTransferLimit === true) truncated = true;
+      break;
+    }
     for (const f of batch) {
       if (features.length >= cap) { truncated = true; break; }
       features.push(f);
     }
     if (features.length >= cap) { truncated = true; break; }
     if (!(j && j.exceededTransferLimit === true)) break; // server says: that's all
-    offset += q.pageSize;
+    // Advance by what ARRIVED, not by the page size we asked for: a server whose record cap is below
+    // pageSize returns short pages with exceededTransferLimit still set, and jumping a full page
+    // would skip the rows in between (NEW-2; the B629 parcel-snapshot builder had the same bug).
+    offset += batch.length;
   }
   return { features, truncated };
 }
@@ -925,6 +1311,10 @@ export function styleFor(source, props) {
     const engineered = ft === 336 || ft === 420 || ft === 428;
     return { color: "#0e7490", weight: engineered ? 2.4 : 1.8, dashArray: ft === 420 ? "5 4" : null, fillOpacity: 0 };
   }
+  if (style === "river") {
+    // A protected river (DCA) — the deeper river blue of the 100 ft buffer tier (georgiaStreamBuffers.js).
+    return { color: "#0369a1", weight: 2.4, fillOpacity: 0 };
+  }
   if (style === "trout") {
     // Designated trout water — the cold-water teal the buffer tier uses (georgiaStreamBuffers.js).
     return { color: "#0f766e", weight: 2, fillOpacity: 0 };
@@ -970,10 +1360,18 @@ function inRing(ring, lng, lat) {
   }
   return inside;
 }
-// A polygon = outer ring minus holes.
-const inPolygon = (rings, lng, lat) =>
-  Array.isArray(rings) && rings.length > 0 && inRing(rings[0], lng, lat)
-  && !rings.slice(1).some((h) => inRing(h, lng, lat));
+/* A polygon's rings, EVEN-ODD: a point is inside when an ODD number of rings contain it. This is the rule the map DRAWS by (Leaflet fills a
+ * polygon's ring list even-odd) and the rule the Esri flat ring list is written for — `featuresToGeoJson` stores an Esri feature's rings as
+ * ONE `Polygon` whether it has one part or twelve, so "ring 0 is the outer, the rest are holes" misreads every multi-part feature (the
+ * second PART was treated as a hole). B2472945 made that visible: cutting city limits out of an ETJ turns one polygon into parts + holes,
+ * and the click on plain ETJ ground answered nothing. For a well-formed outer + holes the two rules agree exactly, so nothing that hit
+ * before stops hitting; a hit-test must agree with the picture. */
+const inPolygon = (rings, lng, lat) => {
+  if (!Array.isArray(rings) || !rings.length) return false;
+  let n = 0;
+  for (const r of rings) if (inRing(r, lng, lat)) n++;
+  return n % 2 === 1;
+};
 
 // Squared distance from a point to a segment, in degrees (small-area planar is fine at
 // screening tolerances — a few feet across one tract).
@@ -1125,7 +1523,28 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features, truncated, sourceMs } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const pulled = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    let { features, truncated } = pulled;
+    const { sourceMs } = pulled;
+    let netNote = null;
+    if (source.query.netAgainst && features.length) {
+      /* B2472945 — cut the ETJ by the city layer's limits, read THROUGH ITS OWN CACHE ENTRY (`fetchCached` on the city source: the same
+       * simplified polygons the City limits line is drawn from). A city layer that cannot answer FAILS this pull — a partial answer
+       * would be cached for the full TTL as an ETJ drawn over a city, the very picture this item removes (LOUD-FAILURE). */
+      const citySource = VECTOR_SOURCES[source.query.netAgainst];
+      if (!citySource) throw new Error(`ETJ netting: no "${source.query.netAgainst}" source registered`);
+      let city;
+      try { city = await fetchCached(citySource, effBbox, { cache, fetchJson, now, zoom }); }
+      catch (e) { throw new Error(`ETJ could not be netted against city limits — the city layer did not answer (${(e && e.message) || e})`); }
+      const cityPolys = cityPolysFromGeoJson((city.data && city.data.features) || []);
+      const ref = effBbox ? [(effBbox.w + effBbox.e) / 2, (effBbox.s + effBbox.n) / 2] : [-95.4, 29.8];
+      // The two layers are generalised independently at this tier; a ribbon narrower than that mismatch is not ETJ ground.
+      const minWidthM = tier && tier.offsetDeg ? (tier.offsetDeg * 111320) / 2 : 1.5;
+      const net = netEtjFeatures(features, cityPolys, { ref, minWidthM });
+      features = net.features;
+      netNote = { touched: net.touched, dropped: net.dropped, cityFeatures: cityPolys.length };
+      if (city.data && city.data.truncated) truncated = true;   // an undercounted city layer means an incompletely netted ETJ
+    }
     const fc = featuresToGeoJson(features, { source });
     const out = tier ? fc : simplifyGeoJson(fc);
     // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
@@ -1133,6 +1552,7 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
     if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
+    if (netNote) out.netted = netNote;        // B2472945: what the city-limits cut did, so it is reportable and testable
     return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });

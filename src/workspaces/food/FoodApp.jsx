@@ -24,11 +24,13 @@ import {
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
   manualWishlistFromRows, manualGroupKey, manualPinKey,
-  fetchAllDishes, insertDish, updateDish, deleteDish,
+  fetchAllDishes, insertDish, updateDish, updateDishes, deleteDish,
+  fetchAllPlacePrefs, upsertPlacePref,
   fetchAllDishWishlist, markDishDone,
   fetchAllLists, fetchAllListItems, createList, updateList, deleteList, addListItem, removeListItem,
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
+import { canReuseBrowse } from "./lib/browseReuse.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import ListChips from "./components/ListChips.jsx";
@@ -57,6 +59,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [dishes, setDishes] = useState([]); // per-dish ratings (B1873008) — food_dishes rows
   const [dishWishlist, setDishWishlist] = useState([]); // dish-level "want to try" (NEW-3) — food_dish_wishlist rows
   const [dishPending, setDishPending] = useState(false);
+  const [placePrefs, setPlacePrefs] = useState([]); // per-restaurant facts — today the PRICE LEVEL (NEW-1, 2026-10-20) — food_place_prefs rows
+  const [savedNotice, setSavedNotice] = useState(null); // {visitId, at, kind, dishes} — what the open place card confirms after a save (VisitPanel)
   // Named restaurant lists (NEW-1 / B2088288) — a grouping orthogonal to status; see lib/foodLists.js.
   const [lists, setLists] = useState([]);
   const [listItems, setListItems] = useState([]);
@@ -94,16 +98,23 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   }, []);
 
   // Places in the current map viewport — public read, works signed out too.
+  // B2559168 (disk I/O): a move INTO an area the last uncapped answer already covered is served from
+  // what is on the map (lib/browseReuse.js) instead of another database call; capped, failed and
+  // Retry answers always go to the database.
+  const lastBrowseRef = useRef(null);
   useEffect(() => {
     if (!bounds) return;
+    if (canReuseBrowse(lastBrowseRef.current, bounds, placesRetry)) return;
     let cancelled = false;
     fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched, error }) => {
       if (cancelled) return;
       if (error) {
+        lastBrowseRef.current = null;
         reportBrowseError(error);
         setPlacesError(BROWSE_ERROR_MESSAGE);
         return; // keep the pins already drawn; the notice says the new view didn't load
       }
+      lastBrowseRef.current = { bounds, capped, retry: placesRetry };
       setPlacesError(null);
       setPlaces(data);
       setPlacesCap({ capped, totalMatched });
@@ -147,6 +158,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setDishWishlist(data);
   }, [accountActive]);
   useEffect(() => { reloadDishWishlist(); }, [reloadDishWishlist]);
+
+  // Per-restaurant facts — the PRICE LEVEL (NEW-1, 2026-10-20). food_place_prefs, fetched in full like the wishlist.
+  const reloadPlacePrefs = useCallback(async () => {
+    if (!accountActive) { setPlacePrefs([]); return; }
+    const { data } = await fetchAllPlacePrefs();
+    setPlacePrefs(data);
+  }, [accountActive]);
+  useEffect(() => { reloadPlacePrefs(); }, [reloadPlacePrefs]);
 
   const reloadLists = useCallback(async () => {
     if (!accountActive) { setLists([]); setListItems([]); return; }
@@ -439,8 +458,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     if (clearedWish) await removeWishlist(clearedWish.id);
     await reloadVisits(); // replaces the optimistic row with the real, server-confirmed one — never a duplicate
     await reloadWishlist();
-    if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
-    return true;
+    setSavedNotice({ visitId: savedVisit.id, at: Date.now(), kind: "new", dishes: draftDishes.length });
+    // A brand-new pin now exists as a manual pin: land on ITS page (the saved visit and its dishes), never close the card.
+    if (selected.kind === "newPin") {
+      if (payload.place_id) setSelected(null);
+      else setSelected({ kind: "manualPin", pin: { name: payload.custom_name, lat: payload.custom_lat, lon: payload.custom_lon, visitIds: [savedVisit.id] } });
+    }
+    return savedVisit.id; // truthy = confirmed save (VisitForm only checks truthiness)
   }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist, existing, reloadDishes, reloadDishWishlist, dishWishlist]);
 
   // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
@@ -625,6 +649,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
       return false;
     }
     await reloadVisits(); // replaces the optimistic row with the server-confirmed one
+    setSavedNotice({ visitId: id, at: Date.now(), kind: "edit" });
     return true;
   }, [visits, reloadVisits]);
 
@@ -638,6 +663,17 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const saveDish = useCallback(async (fields) => {
     setDishPending(true); setError(null);
     const { id, ...rest } = fields;
+    // ONE SOURCE OF TRUTH for a dish's name: a rename reaches EVERY rating of that dish at this place (its history), or the older rows
+    // would split off as a second dish. (Case/spacing-blind, the same rule the grouping uses.)
+    if (id && rest.name) {
+      const old = dishesForSelected.find((d) => d.id === id);
+      const key = (n) => (n || "").trim().toLowerCase();
+      if (old && rest.name !== old.name) {
+        const ids = dishesForSelected.filter((d) => key(d.name) === key(old.name)).map((d) => d.id);
+        const { error: renameErr } = await updateDishes(ids, { name: rest.name });
+        if (renameErr) { setDishPending(false); setError(renameErr.message || "Couldn't rename that dish."); return false; }
+      }
+    }
     const { data, error: err } = id ? await updateDish(id, rest) : await insertDish(rest);
     setDishPending(false);
     if (err) { setError(err.message || "Couldn't save that dish."); return false; }
@@ -653,7 +689,39 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadDishes();
     await reloadDishWishlist();
     return true;
-  }, [selected, dishWishlist, reloadDishes, reloadDishWishlist]);
+  }, [selected, dishWishlist, dishesForSelected, reloadDishes, reloadDishWishlist]);
+
+  // The selected restaurant's identity as a food_place_prefs row sees it (a snapshot place or a manual pin; a not-yet-saved new pin has none).
+  const selectedPrefIdentity = useMemo(() => {
+    if (!selected) return null;
+    if (selected.kind === "place") return { place_id: selected.place.id };
+    if (selected.kind === "manualPin") return { custom_name: selected.pin.name, custom_lat: selected.pin.lat, custom_lon: selected.pin.lon };
+    return null;
+  }, [selected]);
+  const prefForSelected = useMemo(() => {
+    if (!selectedPrefIdentity) return null;
+    return placePrefs.find((r) => (selectedPrefIdentity.place_id
+      ? r.place_id === selectedPrefIdentity.place_id
+      : !r.place_id && manualGroupKey(r.custom_name, r.custom_lat, r.custom_lon) === manualGroupKey(selectedPrefIdentity.custom_name, selectedPrefIdentity.custom_lat, selectedPrefIdentity.custom_lon))) || null;
+  }, [placePrefs, selectedPrefIdentity]);
+  const priceLevelForSelected = prefForSelected?.price_level ?? null;
+
+  // Price level (NEW-1): optimistic — the $ signs fill the instant he taps — then the one upsert; a failed write reverts and says so
+  // (LOUD-FAILURE: never a level that looks set but isn't saved).
+  const setPriceLevel = useCallback(async (level) => {
+    if (!selectedPrefIdentity) return false;
+    const before = placePrefs;
+    setPlacePrefs((rows) => {
+      const i = rows.findIndex((r) => (selectedPrefIdentity.place_id ? r.place_id === selectedPrefIdentity.place_id : !r.place_id && manualGroupKey(r.custom_name, r.custom_lat, r.custom_lon) === manualGroupKey(selectedPrefIdentity.custom_name, selectedPrefIdentity.custom_lat, selectedPrefIdentity.custom_lon)));
+      if (i >= 0) return rows.map((r, j) => (j === i ? { ...r, price_level: level } : r));
+      return [...rows, { id: `pending:${Date.now()}`, ...selectedPrefIdentity, price_level: level }];
+    });
+    setError(null);
+    const { error: err } = await upsertPlacePref(selectedPrefIdentity, { price_level: level });
+    if (err) { setPlacePrefs(before); setError(err.message || "Couldn't save the price level."); return false; }
+    await reloadPlacePrefs();
+    return true;
+  }, [selectedPrefIdentity, placePrefs, reloadPlacePrefs]);
 
   const removeDish = useCallback(async (id) => {
     const { error: err } = await deleteDish(id);
@@ -867,6 +935,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onSubmitVisit={accountActive ? submitVisit : undefined}
             onDeleteVisit={removeVisit}
             onEditVisit={accountActive ? editVisit : undefined}
+            savedNotice={savedNotice}
             pending={pending}
             error={error || (!accountActive ? "Sign in to log a visit here." : null)}
             manualNameEditable={selected.kind === "newPin"}
@@ -881,8 +950,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onDeleteDish={removeDish}
             dishPending={dishPending}
             openDishWishlistNames={openDishWishlistNamesForSelected}
+            priceLevel={priceLevelForSelected}
+            onSetPriceLevel={accountActive && selectedPrefIdentity ? setPriceLevel : undefined}
             listsControl={accountActive ? (
-              <AddToListControl lists={lists} onListIds={listIdsForSelected} onToggle={toggleSelectedOnList} onCreate={async (name) => {
+              <AddToListControl variant="pill" lists={lists} onListIds={listIdsForSelected} onToggle={toggleSelectedOnList} onCreate={async (name) => {
                 const r = await createListNamed(name);
                 if (r.ok) await toggleSelectedOnList(r.list.id);
                 return r;

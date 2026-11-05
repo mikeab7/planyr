@@ -26,8 +26,8 @@
  *
  * Pure; no DOM, no network, no engine imports — the caller injects the evaluator. */
 
-const CF_PER_ACFT = 43560;
 
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 /* Default steps if a jurisdiction supplies none. The real list is criteria-configurable
  * (`criteriaFor(...).wseSensitivityStepsFt`) — this is only the last-resort floor. */
 export const DEFAULT_STEPS_FT = [0, 1, 2, 5];

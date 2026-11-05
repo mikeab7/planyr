@@ -65,23 +65,36 @@ async function fetchAllFolderRows(sb) {
   return rows;
 }
 
+// NEW-6 (data-risk 2026-10-29) — fold sites rows into ONE status map keyed by every id a project can be
+// asked by: the row's own id (a solo project — id === its group — or a legacy row whose group_id column was
+// never populated), its group_id COLUMN, and data->>'groupId' (the key sites_block_delete_live_group and
+// rename_site_group actually use, which can drift from the column). This used to `continue` on a NULL
+// group_id, so a solo project's folder tree bucketed as never_existed — the only bucket --apply may touch.
+// Same rule as audit-orphan-doc-reviews.mjs' statusByProjectId, plus the jsonb key. Pure; exported for tests.
+export function statusByProjectKeys(sites) {
+  const byKey = new Map();
+  const note = (key, deletedAt) => {
+    if (!key) return;
+    const cur = byKey.get(key) || { hasLive: false, hasDeleted: false };
+    if (deletedAt == null) cur.hasLive = true; else cur.hasDeleted = true;
+    byKey.set(key, cur);
+  };
+  for (const r of sites || []) { note(r.id, r.deleted_at); note(r.group_id, r.deleted_at); note(r.groupKey, r.deleted_at); }
+  return byKey;
+}
+
 async function fetchSitesGroupStatus(sb) {
   const pageSize = 1000;
   let from = 0;
-  const byGroup = new Map();
+  let rows = [];
   for (;;) {
-    const { data, error } = await sb.from("sites").select("group_id,deleted_at").range(from, from + pageSize - 1);
+    const { data, error } = await sb.from("sites").select("id,group_id,deleted_at,groupKey:data->>groupId").order("id").range(from, from + pageSize - 1);
     if (error) throw error;
-    for (const r of data || []) {
-      if (!r.group_id) continue;
-      const cur = byGroup.get(r.group_id) || { hasLive: false, hasDeleted: false };
-      if (r.deleted_at == null) cur.hasLive = true; else cur.hasDeleted = true;
-      byGroup.set(r.group_id, cur);
-    }
+    rows = rows.concat(data || []);
     if (!data || data.length < pageSize) break;
     from += pageSize;
   }
-  return byGroup;
+  return statusByProjectKeys(rows);
 }
 
 // Pure bucketing rule — exported so it's unit-testable without a database or Drive.

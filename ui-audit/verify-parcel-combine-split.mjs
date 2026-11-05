@@ -58,7 +58,7 @@ await page.route("**/*.jpg", (r) => r.abort());
 
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
 const T = (id) => page.getByTestId(id);
-const parcelsLS = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || null; }, [SITE_ID, UID]);
+const parcelsLS = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || null; }, [SITE_ID, UID]);
 const siteAcres = async () => parseFloat((await T("parcels-site-acres").innerText()).replace(/,/g, ""));
 const rowNames = () => page.$$eval('[data-testid^="parcel-table-row-"]', (els) => els.map((e) => e.querySelector('[data-testid^="parcel-row-"]:not([data-testid*="check"]):not([data-testid*="eye"]):not([data-testid*="more"]):not([data-testid*="pencil"])')?.getAttribute("title")?.split(" — ")[0] || e.innerText.split("\n")[0]));
 const flat = (ps) => JSON.stringify((ps || []).map((p) => ({ n: p.label || p.splitName || p.addr, pts: p.points.map((q) => [Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100]), a: p.active !== false, l: !!p.locked, from: (p.combined?.from || []).map((s) => s.id) })).sort((a, b) => a.n.localeCompare(b.n)));
@@ -184,7 +184,9 @@ try {
   await openPanel();
   const pa = (a) => a.reduce((s, p) => { let t = 0; for (let i = 0; i < p.points.length; i++) { const q = p.points[i], r = p.points[(i + 1) % p.points.length]; t += q.x * r.y - r.x * q.y; } return s + Math.abs(t / 2); }, 0);
   ok("(5) pieces add up to the original acreage; site total unchanged", Math.abs(pa(pieces) - 160000) < 1 && Math.abs((await siteAcres()) - a0) < 0.006, `${pa(pieces)} ft²`);
-  ok("(5) pieces inherit include state; 'Split' tag + pencil on each", pieces.every((p) => p.active !== false) && (await page.$$('[data-testid^="parcel-row-pencil-"]')).length === 2);
+  let renameItems = 0; // Layout C: rename is a ⋯ menu item (the pencil left the name block so the source line keeps its full width)
+  for (const p of afterSplit.filter((q) => q.splitFrom)) { await page.getByTestId("parcel-row-more-" + p.id).click(); await sleep(300); renameItems += await page.getByTestId("parcel-row-menu-" + p.id + "-rename").count(); await page.keyboard.press("Escape"); await sleep(150); }
+  ok("(5) pieces inherit include state; 'Split' tag + a Rename item in each piece's ⋯ menu", pieces.every((p) => p.active !== false) && renameItems === 2);
   await shot("05-split");
 
   // (6) Undo via the toast
@@ -255,7 +257,7 @@ try {
       await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       await window.pfSupabase.from("sites").delete().eq("id", id);
       const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-      try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+      try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
       return !q.error && (q.data || []).length === 0;
     }, [SITE_ID, UID]).catch(() => false);
     ok("throwaway site deleted and confirmed gone from the cloud", gone);

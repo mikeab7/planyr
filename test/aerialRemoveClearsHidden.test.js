@@ -23,8 +23,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { isAerialVisible, withAerialVisible } from "../src/workspaces/site-planner/lib/aerialVisibility.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 
 describe("the References panel row's Remove clears aerialHidden for the pinned map reference", () => {
   const removeRowLine = src.split("\n").find((l) => l.includes("onRemove: (o) => {"));

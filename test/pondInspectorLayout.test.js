@@ -6,8 +6,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 const at = (needle) => {
   const i = src.indexOf(needle);
   if (i < 0) throw new Error(`marker not found: ${needle}`);
@@ -184,9 +185,9 @@ describe("PR-B — pond inspector fixes", () => {
     expect(src).toContain("title={p.label}"); // per-pond row: full name in title
   });
   it("B7 — Stored volume is one ac-ft row (cf in the tag); the split rows are 1dp", () => {
-    expect(sizingGroup).toContain('pondRow("Stored volume", `${f1(r.vol / 43560)} AC-FT`');
-    expect(sizingGroup.includes('pondRow("", `${f2(r.vol / 43560)} ac-ft`)')).toBe(false);
-    expect(sizingGroup).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} AC-FT`)');
+    expect(sizingGroup).toContain('pondRow("Stored volume", `${f1(r.vol / CF_PER_ACFT)} AC-FT`');
+    expect(sizingGroup.includes('pondRow("", `${f2(r.vol / CF_PER_ACFT)} ac-ft`)')).toBe(false);
+    expect(sizingGroup).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / CF_PER_ACFT)} AC-FT`)');
   });
   it("B7 — the Purpose 'Auto' segment drops the parenthetical; the hint reads 'picks by site needs · now:'", () => {
     expect(pondBody).toContain('g_purposeBtn(null, "Auto"');

@@ -150,7 +150,7 @@ for (let i = 0; i < 30 && !sawFar; i++) {
   s = await domState(page);
   if (s.parcelImg > 0) everImg = true;
   if (vectorsStoppedAt == null && s.vectorPaths === 0 && i > 0) vectorsStoppedAt = i + 1;
-  if (/zoom in a little/i.test(s.zoomTip)) sawFar = true;
+  if (/zoom in to see lots/i.test(s.zoomTip)) sawFar = true;
 }
 expect("the FAR (draw-nothing) floor was reached by zooming out", sawFar);
 expect("no county /export picture appeared at ANY zoom on the way out", !everImg);
@@ -159,7 +159,7 @@ if (sawFar) {
   console.log(`  state: ${JSON.stringify(s)} (vectors stopped after ${vectorsStoppedAt} wheel notches)`);
   expect("no vector outlines far out", s.vectorPaths === 0);
   expect("no server-image overlay far out either", s.parcelImg === 0);
-  expect("the far-zoom hint is shown", /zoom in a little to see the lines/i.test(s.zoomTip));
+  expect("the far-zoom hint is shown", /zoom in to see lots/i.test(s.zoomTip));
   expect("clicking still adds a parcel while nothing is drawn (B137)", await clickAddsParcel("far"));
   await clearSelectionIfAny();
 }

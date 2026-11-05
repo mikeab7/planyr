@@ -25,7 +25,7 @@ import PORTFOLIO from "../ui-audit/fixtures/jurisdiction-portfolio.json";
  * role's lookup into an outage so the honest-unknown label is rendered too, not just described. */
 const CASES = [
   { scope: "in-city", site: "Gessner", why: "1 · in city limits" },
-  { scope: "in-city-etj", site: "Will Clayton", why: "2 · in city limits AND inside another city's ETJ" },
+  { scope: "in-city-overlap", site: "Will Clayton", why: "2 · city limits that another city's ETJ polygon overlaps — the limits win, no ETJ is printed" },
   { scope: "etj", site: "Bain", why: "3 · unincorporated inside an ETJ, with a city clipping the edge" },
   { scope: "etj-clean", site: "Kennedy Greens", why: "3 · the ETJ city ALSO clips the edge — one name, not two" },
   { scope: "split", site: "Goose Creek", why: "part in city limits, rest in that city's ETJ" },

@@ -73,7 +73,7 @@ async function select(page, id) {
 }
 
 const readEl = (page, id) => page.evaluate(({ key, siteId, id }) => {
-  const rec = JSON.parse(localStorage.getItem(key) || "{}")[siteId];
+  const rec = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}")[siteId];
   return (rec.els || []).find((e) => e.id === id);
 }, { key: "planarfit:sites:v1", siteId: SITE_ID, id });
 

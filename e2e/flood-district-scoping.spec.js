@@ -16,6 +16,7 @@
  * whole input, which is what makes this checkable here rather than only on the live site.
  */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, selectGroup, readRowInfo } from "./lib/layersPanel.js";
 
 const LAT = 29.77938, LON = -95.89503;
 
@@ -68,27 +69,24 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(900);
 
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const groupHead = page.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ });
-    await expect(groupHead).toBeVisible({ timeout: 10000 });
-    if (await groupHead.getAttribute("aria-expanded") === "false") await groupHead.click();
-    const panel = page.locator("body");
+    // NEW-1 (Imagery & Layers): the panel is two panes now — open the planner's card and select Flood & Drainage.
+    await openPlannerLayers(page);
+    await selectGroup(page.locator(panelSel("planner")), "flood");
 
     // 1. THE INVERSION, pinned. This sentence must not exist anywhere on the panel.
     await expect(page.getByText(/Brookshire.{0,3}Katy Drainage District doesn.{0,3}t govern/i)).toHaveCount(0);
 
     // 2. All three district rows are listed in the open panel — not demoted behind the fold.
-    for (const label of ["District streams, watersheds & BFE", "District drainage easements", "Master Plan floodplains & improvements"]) {
+    for (const label of ["Watersheds & BFE", "Drainage Easements", "Master Plan Floodplains"]) {
       await expect(page.getByRole("checkbox", { name: label, exact: true })).toBeVisible({ timeout: 10000 });
     }
 
-    // 3. HCFCD and the City of Houston storm sewer are the ones that can't reach Waller —
-    //    demoted behind the one collapsed line, each naming its own reason.
-    const collapsed = page.getByRole("button", { name: /sources? that don't cover this site/i });
-    await expect(collapsed).toBeVisible({ timeout: 10000 });
-    await collapsed.click();
-    await expect(panel.getByText(/Harris County Flood Control District doesn.{0,3}t cover Waller County/i).first()).toBeVisible();
-    await expect(panel.getByText(/City of Houston.{0,3}s system doesn.{0,3}t reach Waller County/i).first()).toBeVisible();
+    // 3. HCFCD and the City of Houston storm sewer cannot reach Waller: they are NOT SHOWN at all (owner rule — a source that can't
+    //    serve this site is not listed), and there is no "show the N sources…" line to open them from.
+    const panelLoc = page.locator(panelSel("planner")).first();
+    await expect(panelLoc.getByTestId("layer-row-hcfcd_row")).toHaveCount(0);
+    await expect(panelLoc.getByTestId("layer-row-coh_storm")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sources? that don't cover this site/i })).toHaveCount(0);
 
     expect(errors, errors.join(" | ")).toHaveLength(0);
   });
@@ -108,13 +106,12 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(900);
 
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const groupHead = page.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ });
-    await expect(groupHead).toBeVisible({ timeout: 10000 });
-    if (await groupHead.getAttribute("aria-expanded") === "false") await groupHead.click();
+    // NEW-1 (Imagery & Layers): the panel is two panes now — open the planner's card and select Flood & Drainage.
+    await openPlannerLayers(page);
+    await selectGroup(page.locator(panelSel("planner")), "flood");
 
     await expect(page.getByText(/Brookshire.{0,3}Katy Drainage District doesn.{0,3}t govern/i)).toHaveCount(0);
-    for (const label of ["District streams, watersheds & BFE", "District drainage easements", "Master Plan floodplains & improvements"]) {
+    for (const label of ["Watersheds & BFE", "Drainage Easements", "Master Plan Floodplains"]) {
       await expect(page.getByRole("checkbox", { name: label, exact: true })).toBeVisible({ timeout: 10000 });
     }
   });
@@ -148,47 +145,36 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(900);
 
-    await page.getByRole("button", { name: /Layers/ }).first().click();
+    await openPlannerLayers(page);
     const live = page.locator('[data-testid="layer-panel"][data-surface="planner"]');
     await expect(live).toBeVisible({ timeout: 10000 });
-    const groupHead = live.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ });
-    if (await groupHead.getAttribute("aria-expanded") === "false") await groupHead.click();
+    await selectGroup(live, "flood");
 
     /* 1. The single most useful line in the panel — the zone-specific SFHA sentence.
      *
-     * ⛔ COPY UPDATED 2026-08-08 (B276449). This asserted, verbatim:
-     *     "FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here."
-     * B1236 (commit e82f0ce0, merged 0c141cb5, PR #884, 2026-07-30) deliberately re-shaped every
-     * FEMA verdict so THE ANSWER LEADS and FEMA's code follows as provenance — the owner report
-     * behind it was a Johnstown, CO site where the layer read "Type: X" and drew nothing, which is
-     * a correct answer nobody could use. `femaZoneVerdict` moved to lib/floodZoneCopy.js in the
-     * same change and now composes `${headline} — ${short}.`, so the zone letter is still named and
-     * the SFHA fact is still stated — in the opposite order, with the regulatory meaning spelled
-     * out. NOT a regression: the zone verdict was never lost, only rewritten. This spec was the
-     * only caller still pinned to the pre-B1236 wording, which is why it went red in both lanes.
+     * ⛔ COPY UPDATED 2026-08-08 (B276449): B1236 re-shaped every FEMA verdict so THE ANSWER LEADS and FEMA's code follows as
+     * provenance (`femaZoneVerdict`, lib/floodZoneCopy.js). The seeded snapshot is zones X + A, so Zone A (the SFHA) must win the
+     * headline — asserted as text, not as a substring match.
      *
-     * The seeded snapshot is zones X + A, so Zone A (the SFHA) must win the headline — that is the
-     * load-bearing half and it is asserted as text, not as a substring match. */
-    await expect(live.getByTestId("flood-fema-verdict")).toHaveText(
-      "100-year floodplain · FEMA Zone A — a mapped Special Flood Hazard Area — the regulatory 1%-annual-chance floodplain.",
-      { timeout: 10000 });
+     * ⛔ MOVED 2026-10-20 (NEW-1, Imagery & Layers): the verdict used to sit VISIBLE under the Flood group. The owner's redesign
+     * puts it where it is reachable but not visible — the FEMA row's ⓘ (PANEL-BREVITY rule 6). It is asserted there, and the
+     * pane itself is asserted to NOT carry it. */
+    await expect(live.getByTestId("layer-pane")).not.toContainText("100-year floodplain");
+    await expect.poll(async () => await readRowInfo(page, "fema"), { timeout: 15000 }).toContain(
+      "100-year floodplain · FEMA Zone A — a mapped Special Flood Hazard Area — the regulatory 1%-annual-chance floodplain.");
     // …and the facts ARE in hand, so the not-checked state stays quiet.
-    await expect(live.getByTestId("flood-facts-note")).toHaveCount(0);
+    expect(await readRowInfo(page, "fema")).not.toMatch(/not checked here yet/i);
 
-    // 2. The scoping reasons are there, on the rows they explain.
-    const collapsed = live.getByRole("button", { name: /sources? that don't cover this site/i });
-    await expect(collapsed).toBeVisible({ timeout: 10000 });
-    await collapsed.click();
-    await expect(live.getByText(/Harris County Flood Control District doesn.{0,3}t cover Waller County/i)).toBeVisible();
+    // 2. The sources that cannot reach this site are not shown, and no line offers to reveal them.
+    await expect(live.getByTestId("layer-row-hcfcd_row")).toHaveCount(0);
+    await expect(live.getByRole("button", { name: /sources? that don't cover this site/i })).toHaveCount(0);
 
-    // 3. The keep-alive copy: same component, no facts — so it says the honest thing rather
-    //    than nothing, and it is out of the accessibility tree entirely.
+    // 3. The keep-alive copy: same component, out of the accessibility tree entirely.
     const finder = page.locator('[data-testid="layer-panel"][data-surface="finder"]');
-    await expect(finder).toHaveCount(1);
+    // (The finder's card mounts only while its map is the active mode, so the hidden copy may be absent — never visible.)
     await expect(finder).toBeHidden();
     await expect(page.locator('[data-mode="map"][data-mode-active="false"][aria-hidden="true"]')).toHaveCount(1);
     await expect(page.locator('[data-mode="plan"][data-mode-active="true"]')).toHaveCount(1);
-    expect(await finder.getByTestId("flood-facts-note").first().textContent()).toMatch(/not checked here yet/i);
 
     expect(errors, errors.join(" | ")).toHaveLength(0);
   });

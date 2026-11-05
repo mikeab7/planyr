@@ -75,7 +75,7 @@ if (await parcelCaret.count()) {
   const w = await parcelCaret.evaluate((el) => Math.round(el.getBoundingClientRect().width));
   check("Parcel tools caret is 26px wide (matches the other five)", w === 26, `measured ${w}px`);
 }
-for (const [label, caretLabel] of [["Measure", "Measure modes"], ["Building", "Dock layout"], ["Road", "Road presets"], ["Parking", "Parking type"], ["Easement", "Easement options"]]) {
+for (const [label, caretLabel] of [["Measure", /^Measure mode:/], ["Building", "Dock layout"], ["Road", "Road presets"], ["Parking", "Parking type"], ["Easement", "Easement options"]]) {
   const caret = page.getByRole("button", { name: caretLabel });
   const w = await caret.evaluate((el) => Math.round(el.getBoundingClientRect().width)).catch(() => null);
   check(`${label} caret is a separate 26px button`, w === 26, `measured ${w}px`);
@@ -89,7 +89,7 @@ const pavingHasNoCaret = await page.evaluate(() => {
 check("Paving (no submenu) still has no caret button", pavingHasNoCaret === true, `pavingHasNoCaret=${pavingHasNoCaret}`);
 
 /* ── NEW-4: placement — the flyout lands under the caret, not off the whole row's left edge ────── */
-const measureCaret = page.getByRole("button", { name: "Measure modes" });
+const measureCaret = page.getByRole("button", { name: /^Measure mode:/ });
 const measureCaretBox = await measureCaret.boundingBox();
 await measureCaret.click();
 await page.waitForTimeout(200);
@@ -127,7 +127,7 @@ const selectBefore = await fullStyleSnapshot(selectBtn);
 // CARET opens the menu without side effects.
 const triggers = [
   ["Parcel tools", parcelToolsBtn],
-  ["Measure modes", page.getByRole("button", { name: /^Measure$/ })],
+  ["Measure mode:", page.getByRole("button", { name: /^Measure$/ })],
   ["Dock layout", page.getByRole("button", { name: /^Building$/ })],
   ["Road presets", page.getByRole("button", { name: /^Road$/ })],
   ["Parking type", page.getByRole("button", { name: /^Parking$/ })],
@@ -135,7 +135,7 @@ const triggers = [
 ];
 
 for (const [caretLabel, mainLoc] of triggers) {
-  const caretLoc = page.locator(`button[aria-label="${caretLabel}"]`);
+  const caretLoc = page.locator(`button[aria-label^="${caretLabel}"]`);
   const mainBefore = await fullStyleSnapshot(mainLoc);
   const caretBefore = await fullStyleSnapshot(caretLoc);
   const ariaBefore = await mainLoc.getAttribute("aria-expanded").catch(() => null);

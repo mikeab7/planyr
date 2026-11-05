@@ -48,6 +48,22 @@ describe("layoutSectionLabels — no overlaps, nothing outside the sketch", () =
       }
     });
   }
+  it("Grand Port (the owner's heavily curved reference lot): a distinct setback on every section, no two labels overlap", () => {
+    const G = JSON.parse(fs.readFileSync(new URL("./fixtures/grandPortParcel.json", import.meta.url)));
+    const pts = G.points;
+    const secs = boundarySections(pts, { defaultSetback: 25 });
+    expect(secs.length).toBeGreaterThanOrEqual(3);
+    expect(secs.length).toBeLessThanOrEqual(10);                 // the curve stays a handful of sections, not 46 edges
+    const fit = fitSketch(pts);
+    const items = secs.map((s, i) => ({ key: s.key, pts: sectionPath(pts, s).map(fit.map), text: `${100 + i * 15}′` }));
+    const placed = layoutSectionLabels(items, { width: 300, height: 150 });
+    expect(placed.size).toBeGreaterThanOrEqual(Math.min(3, secs.length));
+    const boxes = [...placed.values()].map((b) => ({ x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h }));
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      expect(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `grand port labels ${i}/${j}`).toBe(true);
+    }
+  });
   it("a forced (selected/hovered) short section still gets its label; an unforced one does not", () => {
     const tiny = [{ x: 100, y: 50 }, { x: 108, y: 50 }];
     expect(layoutSectionLabels([{ key: "t", pts: tiny, text: "25′" }]).has("t")).toBe(false);

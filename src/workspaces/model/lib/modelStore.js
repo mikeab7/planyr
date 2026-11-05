@@ -64,6 +64,32 @@ export function readLocalSheet(userId, projectId) {
   } catch (_) { return null; }
 }
 
+const metaKey = (scope, projectId) => `planyr:model:sheet:meta:v1:${scope}:${projectId}`;
+
+/** B2450528 — the device's record of how its stored workbook relates to the cloud: `baseVersion` = the
+ *  cloud `version` it was last confirmed against (null = never confirmed), `dirty` = edited since.
+ *  Sits beside the workbook under the same scope/id; null = a legacy copy saved before this record
+ *  existed. Never throws. */
+export function readSyncMeta(userId, projectId) {
+  if (!projectId) return null;
+  try {
+    const raw = localStorage.getItem(metaKey(userId || "local", projectId));
+    const v = raw ? JSON.parse(raw) : null;
+    if (!v || typeof v !== "object" || typeof v.dirty !== "boolean") return null;
+    return { baseVersion: Number.isFinite(v.baseVersion) ? v.baseVersion : null, dirty: v.dirty };
+  } catch (_) { return null; }
+}
+
+/** Returns false on a storage failure so the caller can surface it (LOUD-FAILURE). */
+export function writeSyncMeta(userId, projectId, { baseVersion, dirty }) {
+  if (!projectId) return false;
+  try {
+    localStorage.setItem(metaKey(userId || "local", projectId),
+      JSON.stringify({ baseVersion: Number.isFinite(baseVersion) ? baseVersion : null, dirty: !!dirty }));
+    return true;
+  } catch (_) { return false; }
+}
+
 /** B1953796 (R3) — a workbook built signed OUT lives under the "local" scope and, without this,
  *  was invisible the moment the user signed in (their own scope is empty; the cloud has none).
  *  Pure decision, one place: adopt the signed-out copy ONLY when the user's own scope is empty AND

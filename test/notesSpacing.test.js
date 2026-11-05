@@ -190,10 +190,22 @@ describe("the note's density", () => {
  * simpler set of numbers from `LINE_SPACINGS` above, on purpose: the old control's "Single" means
  * 1.15 (the redesign's own history), so reusing that name for a genuine 1.0 would silently change
  * what "Single" has always meant. The two ladders coexist; this one backs only the new popover. */
-describe("SPACING_LINE_OPTIONS — the new popover's 4-segment control", () => {
-  it("is Word's four, in Word's order, with real numeric values", () => {
-    expect(SPACING_LINE_OPTIONS.map((o) => o.name)).toEqual(["Single", "Default", "1.5", "Double"]);
-    expect(SPACING_LINE_OPTIONS.map((o) => o.value)).toEqual([1, 1.15, 1.5, 2]);
+describe("SPACING_LINE_OPTIONS — the new popover's line-spacing grid", () => {
+  it("is Word's four plus two tighter-than-single steps, in ascending order, with real numeric values", () => {
+    expect(SPACING_LINE_OPTIONS.map((o) => o.name)).toEqual(["Tighter", "Tight", "Single", "Default", "1.5", "Double"]);
+    expect(SPACING_LINE_OPTIONS.map((o) => o.value)).toEqual([0.8, 0.9, 1, 1.15, 1.5, 2]);
+  });
+
+  it("⛔ NEW-1: the button text is exactly what the owner asked for — 0.8 / 0.9 / 1.0 / 1.15 / 1.50 / 2.0", () => {
+    expect(SPACING_LINE_OPTIONS.map((o) => o.label)).toEqual(["0.8", "0.9", "1.0", "1.15", "1.50", "2.0"]);
+  });
+
+  it("⛔ NEW-1: 0.8 and 0.9 survive the whole round trip — style string, element read-back, closed-trigger glyph", () => {
+    for (const v of [0.8, 0.9]) {
+      expect(spacingStyle({ lineHeight: v })).toBe(`line-height:${v}`);
+      expect(spacingFromElement({ style: { lineHeight: String(v) } }).lineHeight).toBe(v);
+      expect(spacingGlyphFor(v)).toBe(String(v));
+    }
   });
 
   it("every option carries a stable id distinct from its display name", () => {

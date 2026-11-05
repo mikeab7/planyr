@@ -15,7 +15,7 @@ import { openModule } from "./helpers.js";
 const canvas = (p) => p.getByTestId("planner-canvas");
 
 const site = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return map[Object.keys(map)[0]] || {};
 });
 const counts = async (page) => {
@@ -39,7 +39,7 @@ async function startBlank(page) {
 }
 
 async function armMeasure(page, mode) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: mode, exact: true }).click();
 }
 

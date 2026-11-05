@@ -32,6 +32,14 @@ describe("fileIndex.mergeFactsIntoReviews — surface captured facts on review r
   it("no facts at all → reviews returned unchanged (degrades cleanly)", () => {
     expect(mergeFactsIntoReviews(reviews, [])).toBe(reviews);
   });
+  it("NEW-3: a facts row whose review no longer exists is IGNORED — the Library lists reviews, never bare facts", () => {
+    // Production holds two such rows (rvmqpx6yl58sjjl, rvmr7wwzeqw960j) — file_facts has no FK to doc_reviews
+    // by decision (see B-NEW-3 on the ledger), so the READER is what keeps them out of the list.
+    const orphan = toFactsRow({ projectId: "g1", needsFiling: false, placement: placementIn }, { id: "rvGONE", reviewId: "rvGONE" });
+    const merged = mergeFactsIntoReviews(reviews, [orphan]);
+    expect(merged.map((r) => r.id)).toEqual(["rv1", "rv2"]);   // nothing added
+    expect(merged[0]).toEqual({ id: "rv1", title: "A" });      // nothing patched onto a neighbour
+  });
   it("newest fact row wins for a review", () => {
     const older = { ...toFactsRow({ needsFiling: true }, { id: "rv1", reviewId: "rv1" }), updated_at: "2026-06-01T00:00:00Z" };
     const newer = { ...toFactsRow({ needsFiling: false }, { id: "rv1b", reviewId: "rv1" }), updated_at: "2026-06-20T00:00:00Z" };

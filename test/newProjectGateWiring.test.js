@@ -16,11 +16,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
 const SHELL = readFileSync(join(here, "../src/app/Shell.jsx"), "utf8");
-const PLANNER = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const PLANNER = plannerSource();
 
 describe("SitePlannerApp.jsx marks every freshly-minted project id before it can reach the URL", () => {
   it("declares the tracking ref", () => {

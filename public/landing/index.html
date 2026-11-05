@@ -207,6 +207,11 @@ p.sub strong { color: var(--ink); font-weight: 600; }
 
 .fine-print { margin: 0; color: var(--ink-2); font-size: 0.82rem; }
 
+/* Signed owner note — quiet, in the page's own type and palette; plain always-visible text. */
+.owner-note { margin: 36px 0 0; max-width: 520px; color: var(--ink-2); font-size: 0.88rem; line-height: 1.6; }
+.owner-note a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-2); text-underline-offset: 3px; }
+.owner-note a:hover, .owner-note a:focus-visible { text-decoration-color: var(--ink); }
+
 /* ============ FOOTER — survey-sheet legend ============ */
 footer {
   flex: 0 0 auto;
@@ -273,6 +278,7 @@ footer .wrap { display: flex; align-items: flex-end; justify-content: space-betw
         <a class="btn-secondary" href="/?app&amp;auth=signup">Create an account</a>
       </div>
       <p class="fine-print">Sign up only when you want to keep your work.</p>
+      <p class="owner-note">Planyr is new, and I read every email. If something's off or you have an idea, write me at <a href="mailto:michael@planyr.io">michael@planyr.io</a>. – Michael</p>
     </div>
   </div>
 </main>
@@ -292,7 +298,7 @@ footer .wrap { display: flex; align-items: flex-end; justify-content: space-betw
     <div class="footer-right">
       <span class="copyright">© 2026 Planyr</span>
       <nav class="footer-legal" aria-label="Legal">
-        <a href="/privacy/">Privacy</a><span aria-hidden="true"> · </span><a href="/terms/">Terms</a><span aria-hidden="true"> · </span><a href="mailto:michael@planyr.io">Contact</a>
+        <a href="/privacy/">Privacy</a><span aria-hidden="true"> · </span><a href="/terms/">Terms</a><span aria-hidden="true"> · </span><a href="mailto:hello@planyr.io">Contact</a>
       </nav>
     </div>
   </div>

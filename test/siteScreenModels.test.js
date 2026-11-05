@@ -154,12 +154,13 @@ describe("show-on-the-map pills — handles on the SAME layer keys the Layers pa
     expect(p.find((x) => x.id === "contamination").layers).toEqual(["env_lpst", "env_cleanups"]);
     for (const pill of p) for (const k of pill.layers) expect(ALL_LAYERS[k], k).toBeTruthy();
   });
-  it("a Colorado site: Colorado's own layers, no Texas-only layer, and no wells pill (ECMC is unwired)", () => {
+  it("a Colorado site: Colorado's own layers, no Texas-only layer, and ECMC's wells and flowlines as pills (B2528688 — ECMC is wired; they were 'no wells pill' while it was not)", () => {
     const p = pillsFor({ regions: ["CO"], untrusted: ["pipelines", "wells"], layers: ALL_LAYERS });
     expect(p.find((x) => x.id === "faults")).toBeUndefined();
     expect(p.find((x) => x.id === "traffic").layers).toEqual(["co_aadt"]);
-    expect(p.find((x) => x.id === "wells")).toBeUndefined();
-    expect(p.find((x) => x.id === "pipelines")).toBeUndefined();
+    expect(p.find((x) => x.id === "wells").layers).toEqual(["co_ecmc_wells", "co_ecmc_locations"]);
+    expect(p.find((x) => x.id === "pipelines").layers).toEqual(["co_ecmc_flowlines", "eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"]);
+    expect(p.find((x) => x.id === "contamination").layers).toContain("co_superfund");
     for (const pill of p) for (const k of pill.layers) expect(ALL_LAYERS[k].states === undefined || ALL_LAYERS[k].states.includes("CO"), k).toBe(true);
   });
   it("a Georgia site: pipelines come back as the (approximate) EIA layers", () => {

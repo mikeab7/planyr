@@ -59,3 +59,13 @@ export function formatCityFromAddress(address) {
   const parts = address.split(",").map((s) => s.trim()).filter(Boolean);
   return parts.length >= 2 ? parts[1] : null;
 }
+
+/* CUISINE (NEW-1, owner-approved mockup 2026-10-20: the line under the name reads "Japanese · Houston · $$$" —
+ * "drop the word 'Restaurant' from the category"). A trailing "Restaurant" word is removed from the formatted
+ * category; a category that IS just "restaurant" keeps the word (there is nothing else to say). Display-only. */
+export function formatCuisine(category) {
+  const full = formatCategory(category);
+  if (!full) return null;
+  const trimmed = full.replace(/\s+Restaurant$/i, "");
+  return trimmed || full;
+}

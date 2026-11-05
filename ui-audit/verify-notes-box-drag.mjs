@@ -135,16 +135,15 @@ async function run(label, { width, height, zoomSteps = 0 }) {
     JSON.stringify(after.map((b) => [b.x, b.y])) === JSON.stringify(before.map((b) => [b.x, b.y])),
     JSON.stringify(after.map((b, i) => (b.x === before[i].x && b.y === before[i].y ? null : `${before[i].text}: ${before[i].x},${before[i].y} → ${b.x},${b.y}`)).filter(Boolean)) || "identical");
 
-  /* ---- 2. A PRESS ON THE GRIP, NO MOVEMENT — the handle the drag is bound to ----------- */
+  /* ---- 2. A PRESS ON THE BORDER BAND, NO MOVEMENT — the handle the drag is bound to ----------- */
   const grip = await page.evaluate((idx) => {
     const el = [...document.querySelectorAll('[data-testid="note-anchor"]')]
       .filter((e) => { const r = e.getBoundingClientRect(); return r.top > 70 && r.bottom < window.innerHeight - 20; })[idx];
-    const g = el?.querySelector('[data-testid="note-anchor-grip"]');
-    if (!g) return null;
-    const r = g.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    if (!el || !el.querySelector('[data-testid="note-anchor-edge"]')) return null;   // B2426788: the border band is the handle
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width * 0.3), y: Math.round(r.top + 0.5) };
   }, onScreen.length - 1);
-  ok(`${label} · the box has a grab handle to press`, !!grip);
+  ok(`${label} · the box has a border band to press`, !!grip);
   if (grip) {
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
@@ -152,7 +151,7 @@ async function run(label, { width, height, zoomSteps = 0 }) {
     await page.mouse.up();
     await pacedWait(page, 900);
     after = await storedBoxes(page);
-    ok(`${label} · ⛔ A PRESS ON THE GRIP WITH NO MOVEMENT MOVES NOTHING`,
+    ok(`${label} · ⛔ A PRESS ON THE BORDER WITH NO MOVEMENT MOVES NOTHING`,
       JSON.stringify(after.map((b) => [b.x, b.y])) === JSON.stringify(before.map((b) => [b.x, b.y])),
       JSON.stringify(after.map((b, i) => (b.x === before[i].x && b.y === before[i].y ? null : `${before[i].text}: ${before[i].x},${before[i].y} → ${b.x},${b.y}`)).filter(Boolean)) || "identical");
 

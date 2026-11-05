@@ -130,10 +130,20 @@ export const MATERIAL_THRESHOLD = 1 / 20000;
  * survey's own combined factor. If it sits at 1.0000 the survey is on the grid; if it matches the
  * site's computed combined factor the survey is in GROUND coordinates.
  *
- * Returns a verdict of "grid" | "ground" | "other-scale" | "unknown". "other-scale" is deliberate
+ * Returns a verdict of "grid" | "ground" | "unit-mismatch" | "other-scale" | "unknown". "other-scale" is deliberate
  * and not a failure: a project can be scaled about a local origin with a factor the surveyor chose
  * rather than the one geometry implies, and saying "this is scaled, but not by the factor your
  * elevation predicts" is far more useful than forcing it into one of the two clean answers. */
+/* The metre↔foot factors, either way round: survey÷grid ≈ 3.28083 (survey in feet, grid in metres) or ≈ 0.30480 (the reverse). Tolerance 1e-3
+ * relative so a ground-vs-grid factor on top of a unit slip still reads as the unit slip. Null = not a unit ratio. */
+const M_TO_FT = 1 / 0.3048;
+const unitRatioHint = (r) => {
+  const near = (v) => Math.abs(r - v) / v <= 1e-3;
+  if (near(M_TO_FT)) return "survey ÷ grid ≈ 3.2808: the survey is in feet, the grid in metres";
+  if (near(1 / M_TO_FT)) return "survey ÷ grid ≈ 0.3048: the survey is in metres, the grid in feet";
+  return null;
+};
+
 export function detectSurveyFrame({ pairs = [], expectedCombined = null, tolerance = 2e-5 } = {}) {
   const ratios = (pairs || [])
     .map((p) => ({ survey: num(p.surveyFt), grid: num(p.gridFt) }))
@@ -151,14 +161,19 @@ export function detectSurveyFrame({ pairs = [], expectedCombined = null, toleran
   let verdict = "other-scale";
   if (Math.abs(ratio - 1) <= tolerance) verdict = "grid";
   else if (expectedGroundRatio != null && Math.abs(ratio - expectedGroundRatio) <= tolerance) verdict = "ground";
+  // NEW-1 (B2528672) — a ratio of ~3.2808 (or its inverse) is not a scale at all: one side is in METRES and the other in FEET. That is the
+  // Alabama / Missouri / Hawaii / Alaska trap (grid in metres, plat in feet), so it gets its own verdict instead of being passed off as "scaled".
+  else if (unitRatioHint(ratio)) verdict = "unit-mismatch";
+  const unitHint = verdict === "unit-mismatch" ? unitRatioHint(ratio) : null;
   return {
     verdict, ratio, samples: ratios.length, spread,
-    expectedGroundRatio,
+    expectedGroundRatio, unitHint,
     perMileFt: (ratio - 1) * 5280,
     consistent: spread <= tolerance * 4,
     reason:
       verdict === "grid" ? "survey distances match grid distances — the survey is on state plane grid."
       : verdict === "ground" ? "survey distances exceed grid distances by the site's combined scale factor — the survey is in GROUND (modified state plane) coordinates."
+      : verdict === "unit-mismatch" ? `survey and grid distances differ by the metre↔foot factor (${unitHint}) — one is in metres and the other in feet; fix the unit before reading a scale.`
       : "survey distances are scaled, but not by the factor this site's elevation predicts — read the combined factor and project origin off the survey sheet before reconciling.",
   };
 }

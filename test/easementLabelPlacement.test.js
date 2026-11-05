@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { placeEasementLabel, uprightDeg, ELONGATED_RATIO } from "../src/workspaces/site-planner/lib/easementLabelPlacement.js";
 import { deriveEasementRing, easementLabel } from "../src/workspaces/site-planner/lib/easements.js";
 import { labelTextWidthPx, featureNameFontPx } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const PPF = 0.45;           // working zoom (dimFontScale = 1)
 const BASE = 10.5;
@@ -154,7 +155,7 @@ describe("boundary + parcel-edge modes", () => {
 });
 
 describe("wiring", () => {
-  const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("the easement render uses the placement and no longer draws a bare centroid <text>", () => {
     expect(src).toMatch(/resolveEasementLabel\(m, txt/);
     expect(src).not.toMatch(/<text x=\{cp\.x\} y=\{cp\.y\} textAnchor="middle" fontSize=\{featureNameFontPx\(labelPpf, EASE_LABEL_BASE_PX\)/);

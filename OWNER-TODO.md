@@ -5,7 +5,34 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-05._
+_Last updated: 2026-11-04._
+
+## 🗂 A decision: your "that felt slow just now" recordings no longer have a screen (B2660320)
+- [x] **Decided 2026-11-04: RETIRE.** The old Storage dialog file and the test that guarded it are deleted (B2666224). The recordings still save on your computer, capped at three, and still go to the server when you press "Something was slow just now" — nothing visible changed.
+
+## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
+- [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
+
+
+## 📱 Two-minute check on your iPhone: does a pasted-table picture show straight away? (B2515969 / V1960400)
+- [ ] **In Notes on your iPhone, paste a few rows from a spreadsheet, tap the little "(Ctrl) ▾" tab, then the last picture icon.** The table should turn into a picture of itself within about a second. In the phone test I can run here, the picture sometimes shows only as a small "Pasted table" label until you tap the page once — that test uses a stand-in for Safari, so I can't tell whether your phone does it. If yours shows the label, tell me; if it just shows the picture, say so and I'll close it. (The tab itself is now thumb-sized — that was fixed.)
+
+## 🗺 Read four state laws to settle what unit their state plane grid is in (B2528673)
+- [ ] **Either send me the text of the grid-unit sentence for Alabama, Missouri, Hawaii and Alaska, or allow the legislature websites for my sessions.** I looked for what each state's law says its coordinate grid is measured in (metres, US survey feet, or international feet) and could not open any of the four legislature sites from here. What I found: Missouri's older law says metres but newer drafts say "international foot" (not confirmed passed); Alabama, Hawaii and Alaska I could not confirm. **Nothing is broken in the meantime** — I checked every place a coordinate can come in and none takes a typed or imported state plane number, and I added a guard so a future one has to say its unit. The one thing your answer changes is which kind of foot Missouri pre-selects when we first ask someone to choose feet or metres.
+
+## 🗺 A decision: Montgomery County, Texas — keep it on South Central, or move it to its legally defined zone? (B2478961)
+- [ ] **Decide (one word is enough: "keep" or "switch").** Every state now runs on its own legally defined State Plane zone. One county disagrees with the government's own list: the official zone tables put **Montgomery County (Conroe) in Texas Central**, but Planyr has always treated it like the rest of the Houston area (Texas South Central), and you told me Houston/Texas South Central must not change. So I **kept** South Central for Montgomery and marked it as a deliberate exception. Keeping costs a tiny measurement difference (far below what a screening tool resolves); switching is a one-line change but would shift existing Montgomery overlays slightly the next time they open. Nothing breaks either way.
+
+## 🗺 Michigan parcels: one decision left after the second search (B2507104, B2528400)
+I searched the 15 Michigan counties again. None had an open source, but now I know exactly why each one is shut (the three Schneider Beacon counties are settled from your Chrome measurement). One decision is yours:
+- [ ] **Decide whether to ask Washtenaw County (Ann Arbor) to approve Planyr.** The county's own parcel service says in writing it may be used "only in applications approved by Washtenaw County." The open copies floating around have outlines but no parcel numbers, so they can't power a lot card. A short request to the county GIS office is the only route to Washtenaw.
+- Also note: the same data-agreement question (B2366657) now covers eight Michigan counties, not three — Chippewa, Clare, Iosco, Ogemaw and Schoolcraft use the same FetchGIS vendor as Calhoun, Delta and Otsego.
+
+## 📅 A decision: should a freshly inserted blank schedule row stay visible after a reload? (B2428272) — ✅ DECIDED 2026-10-27, nothing for you here
+- [x] ~~**Decide.**~~ **Decided 2026-10-27: Option A — leave it as is.** A Focus filter hiding a not-started row after a reload is correct; naming the row and giving it a status is the normal flow. Nothing changed in the app. Recorded on B2428272.
+
+## 🗺 A decision: two New York counties ride consultants' copies of commercial parcel data (B2387344)
+- [ ] **Decide.** To make every New York county answer, Chenango and Herkimer are wired to layers published by engineering/planning consultants (not the counties) that are built on Regrid-sourced data; Nassau is a land trust's copy of the 2020 roll and Dutchess an unconfirmed account's copy. They work and are labelled that way, but a consultant can remove a layer, and Regrid's licence on redistribution is your call. **Option A (my recommendation):** keep them until each county publishes its own; **Option B:** drop Chenango/Herkimer to a named "no parcel data" gap. Niagara County's own server is down today (B2387345).
 
 ## 🛠 Admin page: two small one-time steps to finish the automatic Ops refresh and report clean-up (B2159504–B2159507)
 Everything else is built and live. Two things only you can do (the files are attached in chat):
@@ -34,8 +61,15 @@ Everything else is built and live. Two things only you can do (the files are att
 
 > **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
 >
-> - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
+> - [x] ~~**Decide:** should a project's overlays / comps follow the project's team?~~ **Decided by you (2026-10-05, repeated 2026-10-11): yes — overlays and comps follow the project.** Built as B2244017: anyone who can open a shared project now sees and loads its overlays and comps. Nothing was rewritten in your data.
+> - [ ] **Still open — reviews only:** should a project's **reviews** follow the project's team too? (Today: they stay private until shared on their own. Five of the six mismatched items are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates still cannot see.)
 > - [x] ~~**Apply `single_source_backfill_20261004.sql`**~~ — already applied to production 2026-10-05 (checked read-only 2026-10-08). `profiles_email_sync.sql` is left to the drift-report session by your 2026-10-08 instruction.
+
+## 🖼 12 overlay links on shared plans were wiped by mistake — restore them? (B2244016)
+
+> **What happened:** when a teammate opened one of your shared plans, the app couldn't read your PDF (it lived in your private storage), mistook "not allowed" for "file deleted", and erased the link to the file — in **your** plan too. The files themselves are all still safe in storage. It's fixed now: that can't happen again, and teammates can now open your overlays.
+> Affected: Goose Creek (the Master Site Plan PDF, on 7 plans), Bain (the Willow Point PDF, on 3 plans), Richfield (2 site plans on Concept A BN). Those plans show "Couldn't load … re-add" for that overlay on any device that doesn't already have a copy.
+> - [ ] **Decide:** say "restore the overlay links" and a session puts the 12 links back (nothing else on those plans changes; the script is written and checked, not run). I did not touch them because Goose Creek and Bain are off-limits without your OK.
 
 ## ✉️ Make team invites send email — Google steps only, no new accounts (B2049312)
 
@@ -223,6 +257,8 @@ Everything else is built and live. Two things only you can do (the files are att
 
 ## ✅ DONE 2026-10-04 — Signup bot check turned on, nothing for you here (B1160720/B1160723)
 
+> **UPDATE 2026-11-02 (B2619760):** the check turned out to guard Sign in and Forgot password too, and the app only sent it for Sign up — so nobody signed out could get back in. Fixed in code (nothing for you to do); all three now send it. Email confirmation is already OFF (`mailer_autoconfirm` is true), so step 2 below is done — only the optional tidy-up of the unused "check your email" wording is left, and it is deliberately not being removed.
+>
 > **✅ DONE 2026-10-04 — both steps below were completed by you:** Cloudflare Turnstile widget created, `VITE_TURNSTILE_SITE_KEY` set in Cloudflare Pages Production, the Turnstile secret pasted into Supabase (Attack Protection, provider Turnstile by Cloudflare) and captcha protection switched ON. Verified live: a real production signup created the `auth.users` row for mik@live.com at 2026-10-04 16:15:35 UTC, which can only exist if Supabase accepted the Turnstile token. "Confirm email" was then switched OFF in Supabase (Sign In / Providers); PR #1971 shipped the sign-up success state. The original text is kept below as history.
 
 
@@ -1074,6 +1110,8 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - [ ] **Reload planyr.io once** after a deploy to pick up the latest fixes (his open tab runs the old build until
       reloaded). Routine — only matters right after Claude ships something.
 
+- [ ] **Delete two scratch branches on GitHub (2 clicks each, github.com/mikeab7/planyr/branches) — `ledger-probe` and `ledger-e2e-tmp`.** Claude made them while proving the new ledger branch works and then could not remove them (the sandbox can create and push branches but not delete them). They hold nothing you need; the real branch is `ledger`. (NEW-1, 2026-11-05)
+
 ## Deferred / low-urgency (filed; no action needed unless he wants them sooner)
 - **B364 (remaining half) — two optional server backends, only if/when wanted.** The scanned-drawing reading
       now runs FREE in the browser (shipped 2026-07-05 — scanned sets get real sheet labels + auto-filing with no
@@ -1093,4 +1131,11 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 - **Tax rate table on a county parcel (B2179971) — needs something only you can get.** The table is built but stays hidden in every county, because no appraisal district's list of taxing units per account is reachable from here (hcad.org, fbcad.org, gcad, mcad are blocked for Claude). To switch it on for a county I need, for ONE tax year: the district's **entity legend** (the code → taxing-unit name list, e.g. what "D01" or "S07" means) and the tax office's **adopted rates**. Easiest: paste or send me the Harris and Fort Bend ones and I'll load them; the table then appears for those counties and stays hidden for any county without a complete list.
 
-- **Decide (B2189604):** the test account can read your real company schedules (Goose Creek, Kilgore, Bee Sand) but cannot save any. Is that intended (read-only company document) or should a stranger account see nothing? Either answer unblocks the schedule checks.
+
+- **Decision (B2394592, Kentucky parcels): ask the state for the parcel layer it already has?** Kentucky's Department of Revenue keeps a **statewide 2025 parcel layer** (every county, parcel number + acreage, no owner) on the state's GIS server, but it needs a key — so Planyr can't use it. Wiring it would turn all ~83 remaining Kentucky counties on at once, beyond the 37 wired now. The route is a short request to Kentucky's Division of Geographic Information (DGI) / the Department of Revenue for a public or partner key (or an open copy). Say "ask" and I'll draft the note; or leave it and the other 83 stay "no parcel data wired here yet."
+- **Decision (B2366657, Michigan parcels):** about 25 Michigan counties' official parcel maps are run by one vendor, FetchGIS (Amalgam LLC). Their data server refuses anything but their own web page, so Planyr cannot read it today (and will not imitate their page to get in). Calhoun, Delta and Otsego have nothing else. Do you want me to draft a data-access request to Amalgam, or leave those counties as "not wired"?
+- **DO THIS (B2485776, 2 minutes) — invite emails still arrive "from Michael Butler".** I read the sent message in your Gmail: Google replaced the From line with your own name. Cause: `no-reply@planyr.io` is an alias, but Gmail only lets the mailbox send *as* an address once it is added under "Send mail as". Steps (signed in as michael@planyr.io): Gmail → ⚙ **See all settings** → **Accounts and Import** → "Send mail as" → **Add another email address** → Name: `Planyr`, Email: `no-reply@planyr.io`, keep **Treat as an alias** ticked → **Next Step** → (same-domain address: it adds right away, or sends a confirmation to your own inbox — click its link) → leave "Make default" OFF. Then tell me "done" and I'll send one test to your plus-address and read the Sent headers. (Replies already go to support@planyr.io; nothing else needed.)
+
+- **Check + 5 choices (B2444757, Food visit sheet on your iPhone):** (1) **Does the Date field still run past the right edge of the sheet on your phone?** I couldn't make it happen in any test browser, so I rebuilt that field to be pinned to the column but I can't prove it's fixed from here — your answer closes it. (2) Choices I did NOT build: while "Log a visit" is open, the place's own "+ Add a dish" still sits above the form, so two add-a-dish buttons show at once — hide the place's dish list while logging? · At the tallest stop the sheet's top edge slices the Map/List/Pin/search row in half — stop just under that row, or cover it fully? · At the smallest stop the Log-a-visit button sits where the Food/Ambiance chips would be — intended? · The two rating sliders are tall, so a 3-dish visit is about three screens of scrolling to reach Date — shrink them?
+
+- **Decision (B2487268, Notes "Delete"): what should deleting a Notes page mean?** Today it goes into a 30-day Bin you can restore from, and "Delete forever" / emptying the bin / the 30-day clean-up destroys the writing for good. Of 227 deleted pages, 201 are already destroyed (106 of them yours) — and the database can't tell how long any of them sat in the Bin first, because the destroy step overwrites the original delete time. Two choices: **(1) "Delete means gone"** — keep today's behaviour, but record when each page was deleted and word the confirmations plainly; **(2) a real retention window** — the Bin stays, and nothing can be destroyed until it has sat there the full 30 days (the same "prove it first, then destroy" rule the Library now follows). Nothing was changed; say 1 or 2.

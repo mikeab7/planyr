@@ -51,20 +51,24 @@
  * whole original picture with no re-import.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Button, ToggleChip } from "../../ui/controls.jsx";
+import { Button, SegmentedControl, MenuItem, menuPanelStyle, FloatingToolbar, FloatingToolButton, FloatingToolDivider } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
+import { pinDragCursor } from "../../ui/controls.jsx";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import {
   clampCropRect, normalizeCrop, isFullCrop,
   clampPolyPoints, normalizePolyCrop, isUsablePoly, cropKind,
   rectToPolyPoints, MIN_POLY_VERTICES, MAX_POLY_VERTICES,
   constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
+  addPointAtNearestEdge, deletePointAt, canDeletePoint,
 } from "../../overlay/overlayCrop.js";
 import {
-  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, scaleToSlider, sliderToScale,
+  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo,
 } from "../../../workspaces/site-planner/lib/cropHistory.js";
 import { worldToScreen, screenToWorld, zoomAround, panBy, fitView } from "../../viewport/viewportTransform.js";
 import { wheelZoomFactor } from "../../viewport/viewAnchor.js";
+import { armCropWatchdog } from "../lib/cropDiag.js";
+import { visibleRect, gripBox, dotCenter, clipSegment } from "../lib/cropChrome.js";
 
 const HANDLE_SIZE = 12;
 const EDGE_LONG = 24; // the four mid-edge grips share ONE footprint: EDGE_LONG along the edge ...
@@ -82,6 +86,13 @@ const K_MAX = 16;
 // Fit fills the space it is given, so a small image is enlarged to it (zoom is only a view; the
 // stored crop is in image px). K_MAX still bounds a wheel/slider zoom.
 const FIT_MAX = 8;
+// Fit leaves this much room round the picture: the canvas is full-bleed in the dialog now (NEW-1, 2026-10-15), so a grip
+// sitting on the picture's own edge would otherwise be half outside the clipped dialog and lose half its grab area.
+const FIT_PAD = 16;
+// Fit also keeps the picture (and so every grip on its edge) ABOVE the floating toolbar: the pill's height + its offset from
+// the bottom + a small gap. Without it the pill sat on the bottom-centre edge grip at Fit (owner, live, 2026-10-15). Pan / zoom
+// by hand may still put things under the pill — that is fine; only the framed view is promised clear.
+const FIT_BOTTOM_RESERVE = { fill: 72, compact: 56 };
 const KEY_PAN_PX = 80; // one arrow-key press; Shift = four steps
 const ZOOM_STEP = 1.25; // the +/- buttons and keys
 
@@ -104,15 +115,25 @@ const HANDLE_CURSOR = {
 
 const fullRect = (imgW, imgH) => ({ x: 0, y: 0, w: imgW, h: imgH });
 const clampToImage = (v, max) => Math.min(Math.max(0, v), max);
-const ptsEqual = (a, b) => !!a && !!b && a.length === b.length
-  && a.every((p, i) => Math.abs(p[0] - b[i][0]) < 0.01 && Math.abs(p[1] - b[i][1]) < 0.01);
 
-// Shared style for the footer's small underlined text actions (Clear polygon / Reset to full page).
-const linkButtonStyle = (disabled) => ({
-  border: "none", background: "none", padding: 0, cursor: disabled ? "default" : "pointer",
-  fontSize: FONT_SIZE.label, color: disabled ? "var(--text-secondary)" : "var(--accent)",
-  opacity: disabled ? 0.5 : 1, textDecoration: "underline",
-});
+// Small inline icons for the header switch and the floating toolbar (module scope — MODULE-SCOPE-COMPONENTS).
+const ICON_PROPS = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+const RectIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><rect x="4" y="6" width="16" height="12" rx="1" /></svg>;
+const PolyIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M12 3 21 9.5 17.5 20h-11L3 9.5Z" /></svg>;
+const UndoIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>;
+const RedoIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 0 0 0 10h3" /></svg>;
+const ResetIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>;
+const HandIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v6" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15" /></svg>;
+const MinusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M5 12h14" /></svg>;
+const PlusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M5 12h14M12 5v14" /></svg>;
+const FitIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" {...ICON_PROPS}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>;
+const SegLabel = ({ icon, children }) => <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>{icon}{children}</span>;
+const MODE_OPTIONS = [
+  { key: "rect", label: <SegLabel icon={<RectIcon />}>Rectangle</SegLabel>, testid: "crop-mode-rect" },
+  { key: "poly", label: <SegLabel icon={<PolyIcon />}>Polygon</SegLabel>, testid: "crop-mode-poly" },
+];
+// The selected segment is a dark neutral, never the accent (same convention as the Overlays panel's Draws toggle).
+const MODE_SEG_STYLE = { display: "inline-flex", alignItems: "center", padding: "0 14px" };
 
 // This tool's chrome (scrim / handles / rule-of-thirds) is DELIBERATELY fixed dark-on-photo,
 // independent of the app's light/dark theme — the same convention every competent photo
@@ -125,6 +146,8 @@ const CROP_BG = "#111"; // design-exempt: fixed photo-editor chrome — see comm
 const CROP_WHITE = "#fff"; // design-exempt: fixed photo-editor chrome — see comment above
 const CROP_RECT_SHADOW = "0 0 0 1px rgba(0,0,0,0.6)"; // design-exempt: fixed photo-editor chrome — see comment above
 const CROP_GRID_LINE = "rgba(255,255,255,0.6)"; // design-exempt: fixed photo-editor chrome — see comment above
+const CROP_PILL_BG = "rgba(24,26,32,0.95)"; // design-exempt: fixed photo-editor chrome — same dark pill as the floating toolbar (controls.jsx)
+const CROP_PILL_TEXT = "#E8EAED"; // design-exempt: fixed photo-editor chrome — same dark pill as the floating toolbar (controls.jsx)
 const CROP_HANDLE_RADIUS = 2; // design-exempt: matches overlayPlacementHandles.js's map-side corner-square rx (11px handle, 2px round) — below the RADIUS scale's floor by design, a grip not a surface
 
 /** `src` — the image URL to crop (full resolution). `imgW`/`imgH` — its natural pixel size.
@@ -136,39 +159,37 @@ const CROP_HANDLE_RADIUS = 2; // design-exempt: matches overlayPlacementHandles.
  * not a shrink-to-fit box — the caller should hand it as much real screen space as it has).
  * `fill` (NEW-5) — instead of the fixed maxWidth/maxHeight box, the viewport takes whatever room
  * its parent leaves (the parent must give this component a definite height), measured live, and Fit
- * re-runs on resize until the user has zoomed or panned by hand. */
-export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCancel, maxWidth = 720, maxHeight = 520, fill = false }) {
+ * re-runs on resize until the user has zoomed or panned by hand.
+ *
+ * NEW-1 (2026-10-15, owner-approved mockup) — the chrome is ONE header row (Crop + file name · Rectangle|Polygon
+ * switch · Cancel / Done) and ONE floating dark pill over the drawing (Undo · Redo · Reset | Pan | − 19% + Fit);
+ * there is no footer. `fileName` is the header's second label. The small pre-placement box (`!fill`, ~420 wide)
+ * cannot hold the whole header, so THAT variant alone keeps the shape switch on top and Cancel / Done at the bottom.
+ * The old "Trim by feet" strip and the zoom slider are gone. */
+export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCancel, maxWidth = 720, maxHeight = 520, fill = false, fileName = "" }) {
   const initialKind = crop ? cropKind(crop) : "rect";
   const [mode, setMode] = useState(initialKind);
 
-  // NEW-3 (live-test 2026-09-22) — whatever this overlay ALREADY had saved for each shape, read
-  // regardless of which one is currently active. Captured once at mount so a shape drawn before
-  // this tool opened is never lost by switching to the other one and saving — see overlayCrop.js's
-  // `savedRectOf`/`savedPtsOf` header for the coexisting-shape design.
-  const initialRectRef = useRef(savedRectOf(crop));
-  const initialPtsRef = useRef(savedPtsOf(crop));
-  const hadAnySavedShape = !!(initialRectRef.current || initialPtsRef.current);
+  // NEW-5 (owner 2026-10-11) — the crop IS the shape of the active mode, nothing else. An overlay saved by
+  // an older build with BOTH a polygon and a hidden rectangle renders only its active `kind` (that is what
+  // `clipPathValueForCrop` / `cropClipShapeScreen` have always done), so reading just the active shape here
+  // shows exactly what is on the map, and the next Done drops the unused one for good.
+  const initialRectRef = useRef(initialKind === "rect" ? savedRectOf(crop) : null);
+  const initialPtsRef = useRef(initialKind === "poly" ? savedPtsOf(crop) : null);
 
-  // Rect draft — seeded from whatever rect was already saved (any kind), else the full image.
+  // Rect draft — the saved rectangle, else the full image.
   const [draft, setDraft] = useState(() => (
     initialRectRef.current ? clampCropRect(initialRectRef.current, imgW, imgH) : fullRect(imgW, imgH)
   ));
 
-  // Poly draft — seeded from a saved polygon when one exists; otherwise, if THIS overlay already
-  // had a rect crop, from that rect's own four corners (pre-closed, so switching to Polygon for
-  // the first time on a plain rect crop hands you an editable quad instead of an empty draw). A
-  // genuinely uncropped overlay (NEW-4) gets neither seed — Polygon opens straight into an empty,
-  // open draw so the first click places vertex 1, rather than a closed full-frame quad that
-  // swallows clicks until "Clear polygon" is found.
+  // Poly draft — a saved polygon when there is one; a genuinely uncropped (or rect-cropped) overlay opens
+  // Polygon straight into an empty, open draw so the first click places vertex 1 rather than a closed
+  // full-frame quad that swallows clicks.
   const [polyPts, setPolyPts] = useState(() => {
     if (initialPtsRef.current) return clampPolyPoints(initialPtsRef.current, imgW, imgH) || [];
-    if (!hadAnySavedShape) return [];
-    return rectToPolyPoints(initialRectRef.current || fullRect(imgW, imgH)) || [];
+    return [];
   });
-  const [polyClosed, setPolyClosed] = useState(hadAnySavedShape); // NEW-4: open/drawing when nothing was saved yet
-  // B2066224 — what the polygon looked like when it was only a seed (never hand-drawn): lets Done tell a
-  // shape the person drew from a stand-in the tool made, so a drawn one is never dropped (see `otherShapes`).
-  const polySeedRef = useRef(polyPts);
+  const [polyClosed, setPolyClosed] = useState(!!initialPtsRef.current);
   const [selectedVertex, setSelectedVertex] = useState(null); // index, closed mode only
 
   const [dragType, setDragType] = useState(null); // rect handle key while a gesture is live, else null
@@ -190,11 +211,12 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   // crop shapes above are stored in image px and never read it, which is what makes panning and
   // zooming unable to move a crop relative to the picture (VIEW-INDEPENDENT-ONCE in spirit — the
   // shape's own geometry has no view term).
-  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: 0, min: K_MIN, max: FIT_MAX, mode: "page" }));
+  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H - (fill ? FIT_BOTTOM_RESERVE.fill : FIT_BOTTOM_RESERVE.compact), { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" }));
   const userMovedRef = useRef(false); // true once the user zooms/pans by hand; Fit resets it
   const [handTool, setHandTool] = useState(false); // NEW-3: the on-screen Pan tool (left-drag pans)
   const [spaceDown, setSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [overClose, setOverClose] = useState(false); // pointer is on the closable first vertex → pointer cursor
   const panRef = useRef(null); // { startX, startY, startView }
   const panClickGuardRef = useRef(false); // a pan's pointer-up still fires a `click` on the click-catcher — swallow that one
 
@@ -207,6 +229,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
   // ---- rect handle dragging (unchanged from B1134754, screen deltas just read the live scale) --
   const beginDrag = (type) => (e) => {
+    if (e.button != null && e.button !== 0) return; // right-press opens the menu (poly) / does nothing — never starts a drag
     e.preventDefault();
     e.stopPropagation();
     // The undo frame is pushed on the first real movement, not the press: a plain click on a handle
@@ -226,9 +249,10 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       setDraft(clampCropRect(raw, imgW, imgH));
     };
     const onUp = () => { dragRef.current = null; setDragType(null); };
+    const releaseCursor = pinDragCursor(HANDLE_CURSOR[dragType] || "move"); // the resize arrow / move holds off the grip too
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    return () => { releaseCursor(); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [dragType, view.scale, imgW, imgH]);
 
   // ---- undo / redo (NEW-1 hardening, extended to both shapes + redo in NEW-4) — a snapshot is
@@ -258,6 +282,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
   // ---- poly vertex dragging (NEW-1; Shift constrains to 0/45/90° from the drag's own start) ----
   const beginVertexDrag = (idx) => (e) => {
+    if (e.button != null && e.button !== 0) return; // NEW-4: a right-press must not start a drag
     e.preventDefault();
     e.stopPropagation();
     vertexDragRef.current = { idx, startX: e.clientX, startY: e.clientY, startPt: polyPts[idx], snap: snapNow(), pushed: false };
@@ -279,14 +304,16 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       setPolyPts((pts) => pts.map((p, i) => (i === d.idx ? [nx, ny] : p)));
     };
     const onUp = () => { vertexDragRef.current = null; setDraggingVertex(null); };
+    const releaseCursor = pinDragCursor("move");
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    return () => { releaseCursor(); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [draggingVertex, view.scale, imgW, imgH]);
 
   // ---- insert a vertex on an existing edge (NEW-1) — press near an edge and it both inserts AND
   // starts dragging the new point in the same gesture, so "insert, then place it" is one motion.
   const beginEdgeInsert = (i) => (e) => {
+    if (e.button != null && e.button !== 0) return; // NEW-4: a right-press must not insert a point (the menu does, on request)
     e.preventDefault();
     e.stopPropagation();
     if (polyPts.length >= MAX_POLY_VERTICES) return;
@@ -303,6 +330,52 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     setDraggingVertex(i + 1);
     setSelectedVertex(i + 1);
   };
+
+  // ---- right-click point editing (NEW-4, Polygon mode, closed ring) ----------------------------
+  // Right-click a point → "Delete point" (disabled, not hidden, at the 3-point floor); right-click
+  // anywhere else → "Add control point" EXACTLY where you clicked, spliced into the nearest edge. Both go
+  // through the same undo stack as every other gesture. The browser's own menu is suppressed on the canvas.
+  const [menu, setMenu] = useState(null); // { kind: "vertex"|"canvas", x, y (client), idx?, pt? }
+  const menuRef = useRef(null);
+  const clientToImagePt = (e) => {
+    const r = boxRef.current.getBoundingClientRect();
+    const p = toImage(e.clientX - r.left, e.clientY - r.top);
+    return [clampToImage(p.x, imgW), clampToImage(p.y, imgH)];
+  };
+  const onVertexContext = (idx) => (e) => {
+    e.preventDefault(); e.stopPropagation();
+    setSelectedVertex(idx);
+    setMenu({ kind: "vertex", idx, x: e.clientX, y: e.clientY });
+  };
+  const onCanvasContext = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!polyClosed || !boxRef.current) { setMenu(null); return; }
+    setMenu({ kind: "canvas", pt: clientToImagePt(e), x: e.clientX, y: e.clientY });
+  };
+  const menuAddPoint = () => {
+    if (!menu || menu.kind !== "canvas") return;
+    const next = addPointAtNearestEdge(polyPts, menu.pt);
+    if (next !== polyPts) { pushPolyUndo(); setPolyPts(next); }
+    setMenu(null);
+  };
+  const menuDeletePoint = () => {
+    if (!menu || menu.kind !== "vertex" || !canDeletePoint(polyPts)) return;
+    pushPolyUndo();
+    setPolyPts(deletePointAt(polyPts, menu.idx));
+    setSelectedVertex(null);
+    setMenu(null);
+  };
+  useEffect(() => { setMenu(null); }, [mode, polyClosed]);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const away = (e) => { if (!menuRef.current || !menuRef.current.contains(e.target)) setMenu(null); };
+    const close = () => setMenu(null);
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => { window.removeEventListener("pointerdown", away, true); window.removeEventListener("blur", close); window.removeEventListener("resize", close); };
+  }, [menu]);
+  useEffect(() => { if (menu && menuRef.current) { const b = menuRef.current.querySelector("button:not([disabled])"); if (b) b.focus(); } }, [menu]);
 
   // ---- poly drawing (click to place a vertex; NEW-1) ------------------------------------------
   // A native double-click fires click(detail:1) → click(detail:2) → dblclick — so "double-click
@@ -340,37 +413,19 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     setPolyPts((pts) => [...pts, [px, py]]);
   };
 
-  // B2066224 — Done saves the ACTIVE shape and keeps the OTHER one alongside it, never drops it. The
-  // other shape is kept when the person put it there: a rectangle that is not the full page, or a
-  // closed polygon that was saved before this tool opened or has been edited away from its stand-in
-  // seed. A "full page" stand-in (what Reset leaves behind) and an unedited seed are the absence of a
-  // shape, not a shape. Before this, a shape drawn EARLIER IN THE SAME SESSION in the other mode was
-  // discarded on Done unless the overlay had also been saved with it before opening.
-  const otherShapes = () => {
-    const rect = normalizeCrop(draft, imgW, imgH);
-    const polyAuthored = polyClosed && !isFullImagePoly(polyPts, imgW, imgH)
-      && (!!initialPtsRef.current || !ptsEqual(polyPts, polySeedRef.current));
-    return { rect, pts: polyAuthored ? normalizePolyCrop(polyPts, imgW, imgH) : null };
-  };
+  // Done saves the ACTIVE mode's shape and nothing else (NEW-5). A full-page rectangle / full-page ring
+  // is "no crop", which collapses to null.
   const commit = () => {
-    const { rect: dormantRect, pts: dormantPts } = otherShapes();
     if (mode === "poly") {
-      // NEW-4: a closed ring exactly covering the full image (Polygon's own "Reset to full page")
-      // is "no crop", same as a full-page rect.
       const pts = isFullImagePoly(polyPts, imgW, imgH) ? null : normalizePolyCrop(polyPts, imgW, imgH);
-      if (!pts) { onCommit(dormantRect ? { kind: "rect", ...dormantRect } : null); return; }
-      onCommit({ kind: "poly", pts, ...(dormantRect || {}) });
+      onCommit(pts ? { kind: "poly", pts } : null);
     } else {
-      onCommit(dormantRect ? { kind: "rect", ...dormantRect, ...(dormantPts ? { pts: dormantPts } : {}) }
-        : (dormantPts ? { kind: "poly", pts: dormantPts } : null));
+      const rect = normalizeCrop(draft, imgW, imgH);
+      onCommit(rect ? { kind: "rect", ...rect } : null);
     }
   };
-  // "Clear polygon" — start a fresh hand-trace. The one action that leaves Polygon mode without a
-  // savable shape, which is why Done then says what it is waiting for.
-  const clearPoly = () => { pushUndo(); setPolyPts([]); setPolyClosed(false); setSelectedVertex(null); };
-  // "Reset to full page" (NEW-1/NEW-2) — resets the OVERLAY's crop, not the shape you are standing
-  // on: both shapes go back to the whole page, whichever mode is active. Polygon becomes the closed
-  // full-page quad (never an emptied draw), so Done stays available and saves "no crop".
+  // "Reset to full page" — the ONE reset: removes whatever crop is set (both modes go back to the whole
+  // page), so Done then saves "no crop". Polygon becomes the closed full-page quad, never an emptied draw.
   const resetAll = () => {
     pushUndo();
     setDraft(fullRect(imgW, imgH));
@@ -394,6 +449,9 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable);
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key;
+
+      // An open right-click menu owns Escape: it closes the menu, never the dialog.
+      if (menu && k === "Escape") { e.preventDefault(); e.stopPropagation(); setMenu(null); return; }
 
       // NEW-4 — undo / redo, in BOTH modes: Ctrl+Z · Ctrl+Shift+Z · Ctrl+Y (Cmd on a Mac).
       if (mod && (k === "z" || k === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
@@ -451,7 +509,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     const el = rootRef.current;
     el && el.addEventListener("keydown", onKey);
     return () => { el && el.removeEventListener("keydown", onKey); };
-  }, [draft, mode, polyClosed, polyPts, selectedVertex, hist]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft, mode, polyClosed, polyPts, selectedVertex, hist, menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard focus must stay inside the tool: a toolbar button that disables itself after being
   // pressed (Undo/Redo at the end of their history) drops focus to <body>, and then Ctrl+Z, the
@@ -526,11 +584,10 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       beginPan(e);
     }
   };
-  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: 0, min: K_MIN, max: FIT_MAX, mode: "page" });
+  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H - (fill ? FIT_BOTTOM_RESERVE.fill : FIT_BOTTOM_RESERVE.compact), { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" });
   const doFit = () => { userMovedRef.current = false; setView(fitNow()); };
   const do100 = () => { userMovedRef.current = true; setView((v) => zoomAround(v, 1 / v.scale, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
   const zoomBy = (f) => { userMovedRef.current = true; setView((v) => zoomAround(v, f, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
-  const zoomTo = (scale) => { userMovedRef.current = true; setView((v) => zoomAround(v, scale / v.scale, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
 
   // NEW-5 — fill mode: measure the room the parent leaves and keep the picture fitted to it until
   // the user takes over the view by hand.
@@ -556,62 +613,89 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   // `view` every render, so pan/zoom can never leave the crop rendered out of step with the image.
   const rTL = toScreen(draft.x, draft.y), rBR = toScreen(draft.x + draft.w, draft.y + draft.h);
   const rx = rTL.x, ry = rTL.y, rw = rBR.x - rTL.x, rh = rBR.y - rTL.y;
+  // B2448816 — nothing the crop draws may exist outside the drawing area (cropChrome.js): the outline / move surface is cut to
+  // the part that is on screen, and a grip is shown only while its point is, slid inward so it is never half cut off.
+  const rectVis = visibleRect(rx, ry, rw, rh, VIEW_W, VIEW_H);
 
-  const handleEl = (type, style, cursor) => (
-    <div key={type} data-testid={`crop-handle-${type}`} onPointerDown={beginDrag(type)} style={{
-      position: "absolute", cursor, touchAction: "none", pointerEvents: "auto", ...style,
-    }} />
-  );
+  // While the hand / Space pan is armed a press anywhere pans, so every grip shows grab(bing), not its resize / move arrow.
+  const panCursor = (spaceDown || handTool) ? (isPanning ? "grabbing" : "grab") : null;
+  const handleEl = (type, cx, cy, w, h, style, cursor) => {
+    const at = gripBox(cx, cy, w, h, VIEW_W, VIEW_H);
+    if (!at) return null;
+    return (
+      <div key={type} data-testid={`crop-handle-${type}`} onPointerDown={beginDrag(type)} style={{
+        position: "absolute", cursor: panCursor || cursor, touchAction: "none", pointerEvents: "auto",
+        left: at.left, top: at.top, width: w, height: h, ...style,
+      }} />
+    );
+  };
   const polyPtsScreen = polyPts.map(([x, y]) => { const s = toScreen(x, y); return [s.x, s.y]; });
+  const dotAt = (x, y, r) => dotCenter(x, y, r, VIEW_W, VIEW_H); // a vertex dot: null off screen, slid inward at the edge
   const polyPointsAttr = polyPtsScreen.map(([x, y]) => `${x},${y}`).join(" ");
   const zoomPct = Math.round(view.scale * 100);
 
+  // NEW-2 (2026-10-15) — self-capturing diagnostics (cropDiag.js): the owner's "couldn't click anything" freeze has not
+  // reproduced, so the dialog reports its own open state and watches for dead / blocked pointers and stalls.
+  const imgElRef = useRef(null);
+  const diagRef = useRef({});
+  diagRef.current = { imgW, imgH, view, viewW: VIEW_W, viewH: VIEW_H, fill, mode, renders: (diagRef.current.renders || 0) + 1, rev: diagRef.current.rev || 0 };
+  useEffect(() => { diagRef.current.rev = (diagRef.current.rev || 0) + 1; }, [mode, draft, polyPts, polyClosed, selectedVertex, view, hist, handTool, menu, dragType, draggingVertex]);
+  useEffect(() => armCropWatchdog({ root: rootRef.current, get: () => ({ ...diagRef.current, imgEl: imgElRef.current }) }), []);
+
+  const modeSwitch = (
+    <SegmentedControl options={MODE_OPTIONS} value={mode} onChange={setMode} data-testid="crop-mode"
+      accent="var(--text-primary)" onAccent="var(--surface-raised)" aria-label="Crop shape" segmentStyle={MODE_SEG_STYLE} />
+  );
+  const cancelBtn = <Button size="md" variant="ghost" onClick={onCancel} data-testid="crop-cancel">Cancel</Button>;
+  const doneBtn = <Button size="md" onClick={commit} disabled={!canCommit} title={doneWhy || undefined} data-testid="crop-done">Done</Button>;
+  const doneWhyEl = doneWhy ? <span data-testid="crop-done-why" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{doneWhy}</span> : null;
+  const hintText = mode !== "poly" ? "" : (!polyClosed
+    ? "Click to place points · Click the first point or press Enter to close"
+    : "Click an edge to add a point · Drag a point to move it · Delete removes the selected point");
+
   return (
     <div ref={rootRef} tabIndex={-1} style={{ outline: "none", ...(fill ? { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } : {}) }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-        <ToggleChip active={mode === "rect"} onClick={() => setMode("rect")}>Rectangle</ToggleChip>
-        <ToggleChip active={mode === "poly"} onClick={() => setMode("poly")}>Polygon</ToggleChip>
-        {mode === "poly" && (
-          <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
-            {!polyClosed
-              ? "Click to place points (Shift: snap to 0/45/90°) · click the first point or press Enter to close, or just press Done once you have three"
-              : "Click an edge to add a point · drag a point to move it · select a point and press Delete to remove it"}
-          </span>
-        )}
-        <span style={{ flex: 1 }} />
-        <Button size="sm" variant="ghost" onClick={undo} disabled={!canUndo(hist)} data-testid="crop-undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶ Undo</Button>
-        <Button size="sm" variant="ghost" onClick={redo} disabled={!canRedo(hist)} data-testid="crop-redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo">↷ Redo</Button>
-        <ToggleChip active={handTool} onClick={() => setHandTool((v) => !v)} data-testid="crop-pan-tool" title="Pan tool — drag the picture to move it (or hold Space, or use the arrow keys)">✋ Pan</ToggleChip>
-        <Button size="sm" variant="ghost" onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="crop-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</Button>
-        <input type="range" min={0} max={1} step={0.001} aria-label="Zoom" data-testid="crop-zoom-slider"
-          value={scaleToSlider(view.scale, K_MIN, K_MAX)} onChange={(e) => zoomTo(sliderToScale(parseFloat(e.target.value), K_MIN, K_MAX))}
-          style={{ width: 90, accentColor: "var(--accent)" }} />
-        <Button size="sm" variant="ghost" onClick={() => zoomBy(ZOOM_STEP)} data-testid="crop-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</Button>
-        <Button size="sm" variant="ghost" onClick={doFit} data-testid="crop-zoom-fit">Fit</Button>
-        <Button size="sm" variant="ghost" onClick={do100} data-testid="crop-zoom-100">100%</Button>
-        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", minWidth: 36, textAlign: "right" }} data-testid="crop-zoom-pct">
-          {zoomPct}%
-        </span>
-      </div>
+      {fill ? (
+        // ONE header row replaces the old title line, toolbar row and footer: name left, shape switch centre,
+        // Cancel / Done right. The side columns are minmax(0, 1fr) so a long file name truncates instead of
+        // pushing the switch off-centre.
+        <div data-testid="crop-header" style={{
+          flex: "none", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)", alignItems: "center", gap: 16,
+          padding: "10px 16px", borderBottom: "1px solid var(--border-default)",
+        }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
+            <h1 style={{ margin: 0, flex: "none", fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Crop</h1>
+            {fileName && <span title={fileName} data-testid="crop-file-name" style={{ minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fileName}</span>}
+          </div>
+          {modeSwitch}
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
+            {doneWhyEl}{cancelBtn}{doneBtn}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 6 }}>{modeSwitch}</div>
+      )}
 
-      <div ref={boxRef} onPointerDownCapture={onViewportPointerDownCapture} style={{
-        position: "relative", userSelect: "none",
-        ...(fill ? { flex: 1, minHeight: 0, width: "100%" } : { width: VIEW_W, height: VIEW_H }),
-        border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, background: CROP_BG,
+      <div style={{ position: "relative", ...(fill ? { flex: 1, minHeight: 0, width: "100%" } : { width: VIEW_W, height: VIEW_H }) }}>
+      <div ref={boxRef} onPointerDownCapture={onViewportPointerDownCapture} onContextMenu={(e) => e.preventDefault()} data-testid="crop-canvas" style={{
+        position: "absolute", inset: 0, userSelect: "none",
+        ...(fill ? {} : { border: "1px solid var(--border-default)", borderRadius: RADIUS.sm }), background: CROP_BG, boxSizing: "border-box",
         cursor: (spaceDown || handTool) ? (isPanning ? "grabbing" : "grab") : "default", touchAction: "none",
       }}>
         {/* image layer — clipped to the viewport so a pan/zoom can never spill the picture past
             the dialog's own edge; NOT the layer scrims/handles render in (see below) */}
         <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-          <img src={src} alt="" draggable={false} style={{
+          <img ref={imgElRef} src={src} alt="" draggable={false} style={{
             position: "absolute", left: 0, top: 0, width: imgW, height: imgH, transformOrigin: "0 0",
             transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
           }} />
         </div>
 
-        {/* chrome layer — deliberately NOT clipped (unlike B1134754's original single fit-sized
-            box, a handle sitting exactly at the crop's own edge must never lose half its grab area) */}
-        <div style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        {/* chrome layer — CLIPPED to the drawing area (B2448816). It used to be left unclipped so a grip on the crop's own edge
+            never lost half its grab area; zoomed in, that let the crop's move surface cover the header, the shape switch and
+            the toolbar. Now every piece is already computed inside the area (lib/cropChrome.js) and a grip near the edge
+            slides inward instead, so the clip costs no grab area — and the clip is the backstop, not the mechanism. */}
+        <div data-testid="crop-chrome" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           {mode === "rect" ? (
             <>
               <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -622,44 +706,58 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
                 <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill={CROP_SCRIM} mask={`url(#${rectMaskId})`} />
               </svg>
 
-              {/* The crop rect itself — border, rule-of-thirds while dragging, and the move surface. */}
-              <div
-                onPointerDown={beginDrag("move")}
-                style={{
-                  position: "absolute", left: rx, top: ry, width: rw, height: rh, pointerEvents: "auto",
-                  border: `1.5px solid ${CROP_WHITE}`, boxShadow: CROP_RECT_SHADOW, cursor: "move", touchAction: "none",
-                }}
-              >
-                {dragType && (
-                  <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                    <line x1="33.33%" y1="0" x2="33.33%" y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="66.67%" y1="0" x2="66.67%" y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="0" y1="33.33%" x2="100%" y2="33.33%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                    <line x1="0" y1="66.67%" x2="100%" y2="66.67%" stroke={CROP_GRID_LINE} strokeWidth="1" />
-                  </svg>
-                )}
-              </div>
+              {/* The crop rect itself — border, rule-of-thirds while dragging, and the move surface. Only the part that is
+                  on screen exists (B2448816): a side that ran off the drawing area is simply not drawn. */}
+              {rectVis && (
+                <div
+                  data-testid="crop-move"
+                  onPointerDown={beginDrag("move")}
+                  style={{
+                    position: "absolute", left: rectVis.x, top: rectVis.y, width: rectVis.w, height: rectVis.h, pointerEvents: "auto", boxSizing: "border-box",
+                    borderStyle: "solid", borderColor: CROP_WHITE,
+                    borderWidth: `${rectVis.top ? 1.5 : 0}px ${rectVis.right ? 1.5 : 0}px ${rectVis.bottom ? 1.5 : 0}px ${rectVis.left ? 1.5 : 0}px`,
+                    boxShadow: CROP_RECT_SHADOW, cursor: panCursor || "move", touchAction: "none",
+                  }}
+                >
+                  {dragType && (
+                    <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                      {[1 / 3, 2 / 3].map((f) => {
+                        const gx = rx + rw * f - rectVis.x, gy = ry + rh * f - rectVis.y;
+                        return (
+                          <g key={f}>
+                            <line x1={gx} y1="0" x2={gx} y2="100%" stroke={CROP_GRID_LINE} strokeWidth="1" />
+                            <line x1="0" y1={gy} x2="100%" y2={gy} stroke={CROP_GRID_LINE} strokeWidth="1" />
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  )}
+                </div>
+              )}
 
-              {/* 4 corner handles */}
+              {/* 4 corner handles — shown only while the corner itself is on screen */}
               {[["tl", rx, ry], ["tr", rx + rw, ry], ["bl", rx, ry + rh], ["br", rx + rw, ry + rh]].map(([type, cx, cy]) =>
-                handleEl(type, {
-                  left: cx - HANDLE_SIZE / 2, top: cy - HANDLE_SIZE / 2, width: HANDLE_SIZE, height: HANDLE_SIZE,
+                handleEl(type, cx, cy, HANDLE_SIZE, HANDLE_SIZE, {
                   background: CROP_WHITE, border: "1.5px solid var(--accent)", borderRadius: CROP_HANDLE_RADIUS,
                 }, HANDLE_CURSOR[type])
               )}
-              {/* 4 edge-midpoint handles — one shared footprint (NEW-6): EDGE_LONG along the edge by the
-                  corner grips' own thickness, visible like the corners, so no side is a thinner target */}
-              {[["t", rx + rw / 2, ry], ["b", rx + rw / 2, ry + rh], ["l", rx, ry + rh / 2], ["r", rx + rw, ry + rh / 2]].map(([type, cx, cy]) => {
+              {/* 4 edge-midpoint handles — one shared footprint (NEW-6): EDGE_LONG along the edge by the corner grips' own
+                  thickness, visible like the corners, so no side is a thinner target. Zoomed in, an edge's midpoint is
+                  usually off screen, so the grip rides the middle of the part of that edge that IS on screen (and is not
+                  shown at all while the edge is off screen). */}
+              {rectVis && [
+                ["t", rectVis.top, rectVis.x + rectVis.w / 2, ry], ["b", rectVis.bottom, rectVis.x + rectVis.w / 2, ry + rh],
+                ["l", rectVis.left, rx, rectVis.y + rectVis.h / 2], ["r", rectVis.right, rx + rw, rectVis.y + rectVis.h / 2],
+              ].map(([type, edgeOn, cx, cy]) => {
+                if (!edgeOn) return null;
                 const horiz = type === "t" || type === "b";
-                const w = horiz ? EDGE_LONG : EDGE_THICK, h = horiz ? EDGE_THICK : EDGE_LONG;
-                return handleEl(type, {
-                  left: cx - w / 2, top: cy - h / 2, width: w, height: h,
+                return handleEl(type, cx, cy, horiz ? EDGE_LONG : EDGE_THICK, horiz ? EDGE_THICK : EDGE_LONG, {
                   background: CROP_WHITE, border: "1.5px solid var(--accent)", borderRadius: CROP_HANDLE_RADIUS,
                 }, HANDLE_CURSOR[type]);
               })}
             </>
           ) : (
-            <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0 }}>
+            <svg width={VIEW_W} height={VIEW_H} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
               <mask id={polyMaskId}>
                 <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="white" />
                 {/* NEW-2 (2026-09-23) — the hole is punched from the CURRENT points even before the
@@ -689,65 +787,101 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
               {/* click-catcher — places a vertex while drawing; deselects the selected vertex once closed */}
               <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="transparent"
-                style={{ cursor: !polyClosed ? "crosshair" : "default", pointerEvents: "auto" }}
-                onClick={onDrawClick} />
+                style={{ cursor: panCursor || (!polyClosed ? (overClose ? "pointer" : "crosshair") : "default"), pointerEvents: "auto" }}
+                onMouseMove={!polyClosed && polyPts.length >= MIN_POLY_VERTICES ? (e) => {
+                  const r = boxRef.current?.getBoundingClientRect(); if (!r) return;
+                  const first = toScreen(polyPts[0][0], polyPts[0][1]);
+                  const near = Math.hypot(e.clientX - r.left - first.x, e.clientY - r.top - first.y) <= CLOSE_HIT_PX;
+                  setOverClose((o) => (o === near ? o : near));
+                } : undefined}
+                onClick={onDrawClick} onContextMenu={onCanvasContext} />
 
               {/* edge hit-targets — insert a vertex; rendered BEFORE the vertex circles so a vertex
                   always wins the hit test at an endpoint (CHROME-NEVER-EATS-A-PRESS: later paints on top) */}
               {polyClosed && polyPtsScreen.map(([x, y], i) => {
                 const [nx, ny] = polyPtsScreen[(i + 1) % polyPtsScreen.length];
+                const seg = clipSegment(x, y, nx, ny, VIEW_W, VIEW_H); // only the part of the edge that is on screen takes a press
+                if (!seg) return null;
                 return (
-                  <line key={`edge-${i}`} x1={x} y1={y} x2={nx} y2={ny}
+                  <line key={`edge-${i}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
                     stroke="transparent" strokeWidth={EDGE_HIT}
-                    style={{ cursor: "copy", touchAction: "none", pointerEvents: "auto" }}
-                    onPointerDown={beginEdgeInsert(i)} data-testid={`crop-poly-edge-${i}`} />
+                    style={{ cursor: panCursor || "copy", touchAction: "none", pointerEvents: "auto" }}
+                    onPointerDown={beginEdgeInsert(i)} onContextMenu={onCanvasContext} data-testid={`crop-poly-edge-${i}`} />
                 );
               })}
 
-              {!polyClosed && polyPtsScreen.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r={i === 0 ? VERTEX_R : 3}
-                  fill={i === 0 ? "var(--accent)" : CROP_WHITE} stroke={CROP_WHITE} strokeWidth={1}
-                  style={{ pointerEvents: "none" }} />
-              ))}
-              {polyClosed && polyPtsScreen.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r={VERTEX_R}
-                  fill={selectedVertex === i ? "var(--accent)" : CROP_WHITE}
-                  stroke="var(--accent)" strokeWidth={selectedVertex === i ? 2.5 : 1.5}
-                  style={{ cursor: "move", touchAction: "none", pointerEvents: "auto" }}
-                  onPointerDown={beginVertexDrag(i)} data-testid={`crop-poly-vertex-${i}`} />
-              ))}
+              {!polyClosed && polyPtsScreen.map(([x, y], i) => {
+                const c = dotAt(x, y, i === 0 ? VERTEX_R : 3);
+                return c && (
+                  <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? VERTEX_R : 3}
+                    fill={i === 0 ? "var(--accent)" : CROP_WHITE} stroke={CROP_WHITE} strokeWidth={1}
+                    style={{ pointerEvents: "none" }} />
+                );
+              })}
+              {polyClosed && polyPtsScreen.map(([x, y], i) => {
+                const c = dotAt(x, y, VERTEX_R); // a vertex that is off screen shows no handle until panned to; one at the edge slides in
+                return c && (
+                  <circle key={i} cx={c.x} cy={c.y} r={VERTEX_R}
+                    fill={selectedVertex === i ? "var(--accent)" : CROP_WHITE}
+                    stroke="var(--accent)" strokeWidth={selectedVertex === i ? 2.5 : 1.5}
+                    style={{ cursor: panCursor || "move", touchAction: "none", pointerEvents: "auto" }}
+                    onPointerDown={beginVertexDrag(i)} onContextMenu={onVertexContext(i)} data-testid={`crop-poly-vertex-${i}`} />
+                );
+              })}
             </svg>
           )}
         </div>
+
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 12, flexWrap: "wrap" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          {/* B2066226 — Reset keeps the leftmost slot in both modes; Clear polygon joins it on the right. */}
-          <button onClick={resetAll} disabled={nothingToReset} style={linkButtonStyle(nothingToReset)} data-testid="crop-reset"
-            title="Removes the whole crop — rectangle and polygon — so the full page shows">
-            Reset to full page
-          </button>
-          {mode === "poly" && (
-            <button onClick={clearPoly} disabled={polyPts.length === 0} style={linkButtonStyle(polyPts.length === 0)} data-testid="crop-clear-polygon">
-              Clear polygon
-            </button>
-          )}
-          <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
-            Scroll to zoom · Pan tool, Space+drag or arrow keys to move · Ctrl+Z undo · Ctrl+Shift+Z redo
-          </span>
-        </span>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {!doneWhy && (() => {
-            const o = otherShapes();
-            const kept = mode === "poly" ? (o.rect ? "rectangle" : null) : (o.pts ? "polygon" : null);
-            return kept ? <span data-testid="crop-keeps-other" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)" }}>Your {kept} is kept too</span> : null;
-          })()}
-          {doneWhy && <span data-testid="crop-done-why" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)" }}>{doneWhy}</span>}
-          <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={commit} disabled={!canCommit} title={doneWhy || undefined} data-testid="crop-done">Done</Button>
-        </div>
+      {/* The polygon hint — a small dark pill at the TOP-LEFT of the drawing; chrome that never takes a press. */}
+      {hintText && (
+        <div data-testid="crop-poly-hint" style={{
+          position: "absolute", left: 12, top: 12, maxWidth: "calc(100% - 24px)", padding: "6px 12px", borderRadius: RADIUS.md,
+          background: CROP_PILL_BG, color: CROP_PILL_TEXT, fontSize: FONT_SIZE.label, pointerEvents: "none",
+        }}>{hintText}</div>
+      )}
+
+      {/* The floating view toolbar — bottom-centre over the drawing. A sibling of the canvas box (not a child), so
+          the box's capture-phase pan handler can never swallow a press on these buttons. */}
+      <FloatingToolbar aria-label="View and history" data-testid="crop-toolbar" style={{ position: "absolute", left: "50%", bottom: fill ? 16 : 8, transform: "translateX(-50%)", zIndex: 2 }}>
+        <FloatingToolButton compact={!fill} onClick={undo} disabled={!canUndo(hist)} data-testid="crop-undo" title="Undo (Ctrl+Z)" aria-label="Undo"><UndoIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={redo} disabled={!canRedo(hist)} data-testid="crop-redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo"><RedoIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={resetAll} disabled={nothingToReset} data-testid="crop-reset" title="Back to the whole sheet" aria-label="Reset — back to the whole sheet">
+          <ResetIcon />{fill && "Reset"}
+        </FloatingToolButton>
+        <FloatingToolDivider />
+        <FloatingToolButton compact={!fill} active={handTool} onClick={() => setHandTool((v) => !v)} data-testid="crop-pan-tool" aria-label="Pan"
+          title="Pan — drag the picture to move it (or hold Space, or use the arrow keys). Scroll to zoom."><HandIcon /></FloatingToolButton>
+        <FloatingToolDivider />
+        <FloatingToolButton compact={!fill} onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="crop-zoom-out" aria-label="Zoom out" title="Zoom out (−)"><MinusIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={do100} data-testid="crop-zoom-100" aria-label={`Zoom ${zoomPct}% — press for 100%`} title="Current zoom — press to jump to 100%"
+          style={{ minWidth: 52 }}>{zoomPct}%</FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={() => zoomBy(ZOOM_STEP)} data-testid="crop-zoom-in" aria-label="Zoom in" title="Zoom in (+)"><PlusIcon /></FloatingToolButton>
+        <FloatingToolButton compact={!fill} onClick={doFit} data-testid="crop-zoom-fit" aria-label="Fit sheet" title="Fit the whole sheet"><FitIcon /></FloatingToolButton>
+      </FloatingToolbar>
       </div>
+
+      {!fill && (
+        // The small pre-placement box can't hold Cancel / Done in a header, so for THIS variant they stay at the bottom.
+        <div data-testid="crop-footer" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 6, gap: 8 }}>
+          {doneWhyEl}{cancelBtn}{doneBtn}
+        </div>
+      )}
+
+      {menu && (
+        <div ref={menuRef} role="menu" data-testid="crop-context-menu" onContextMenu={(e) => e.preventDefault()}
+          style={{ ...menuPanelStyle, position: "fixed", zIndex: 10, minWidth: 168,
+            left: Math.max(4, Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 180)),
+            top: Math.max(4, Math.min(menu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 56)) }}>
+          {menu.kind === "vertex" ? (
+            <MenuItem role="menuitem" data-testid="crop-menu-delete-point" disabled={!canDeletePoint(polyPts)} aria-disabled={!canDeletePoint(polyPts)}
+              title={canDeletePoint(polyPts) ? undefined : `A polygon needs at least ${MIN_POLY_VERTICES} points`} onClick={menuDeletePoint}>Delete point</MenuItem>
+          ) : (
+            <MenuItem role="menuitem" data-testid="crop-menu-add-point" disabled={polyPts.length >= MAX_POLY_VERTICES} onClick={menuAddPoint}>Add control point</MenuItem>
+          )}
+        </div>
+      )}
     </div>
   );
 }

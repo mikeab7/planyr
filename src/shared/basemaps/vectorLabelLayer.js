@@ -49,7 +49,11 @@ function ensurePane(map) {
 
 /* `L` is the app's Leaflet; `onStatus("loading" | "ready" | "failed")`. Returns `{ remove, status }`.
  * Safe to call remove() at any moment, including before the lazy chunk has arrived. */
-export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, mode = "hybrid", onStatus } = {}) {
+/* `decorateFallback(layer)` (NEW-1, 2026-11-01) lets the host give the RASTER fallback the same tile hygiene its own tile layers
+ * get (coalesced pruning + a retained-tile cap) before it is added. Without it the fallback was a bare Leaflet tile layer on a
+ * map with fade animation off: every tile that loaded re-ran Leaflet's whole retain/prune pass over every tile the layer had ever
+ * kept (measured on the planner: ~1.5 s of a five-step zoom at 4× CPU throttle, inside the tile `load` events). */
+export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, mode = "hybrid", onStatus, decorateFallback } = {}) {
   let removed = false;
   let status = "loading";
   let glLayer = null;
@@ -66,7 +70,9 @@ export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = 
         maxZoom: 21, opacity: ROAD_NAMES_TILES.defaultOpacity, zIndex: 2,
         attribution: FALLBACK_LABELS_ATTR,
         ...densityTileOptions(ROAD_NAMES_TILES.maxNative, typeof window !== "undefined" ? window.devicePixelRatio : 1),
-      }).addTo(map);
+      });
+      if (typeof decorateFallback === "function") { try { decorateFallback(fallback); } catch (e) { console.error("vectorLabelLayer: fallback decoration failed", e); } }
+      fallback.addTo(map);
     } catch (e) { console.error("vectorLabelLayer: raster fallback failed too", e); }
     say("failed");
   };

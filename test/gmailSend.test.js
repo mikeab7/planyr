@@ -26,6 +26,11 @@ describe("MIME", () => {
     expect(m).not.toMatch(/^Bcc:/m);
     expect(m).toMatch(/^Subject: =\?UTF-8\?B\?/m);
   });
+  it("Reply-To only when asked, and CR/LF-stripped", () => {
+    expect(buildMime({ from: "P <a@planyr.io>", to: "x@y.com", subject: "s", text: "t", html: "h", boundary: "B" })).not.toMatch(/^Reply-To:/m);
+    const m = buildMime({ from: "P <a@planyr.io>", to: "x@y.com", replyTo: "s@planyr.io\r\nBcc: evil@z.com", subject: "s", text: "t", html: "h", boundary: "B" });
+    expect(m).toMatch(/^Reply-To: s@planyr\.io Bcc: evil@z\.com$/m); expect(m).not.toMatch(/^Bcc:/m);
+  });
 });
 
 describe("sendViaGmail", () => {
@@ -34,10 +39,17 @@ describe("sendViaGmail", () => {
     const calls = [];
     const f = vi.fn(async (u) => { calls.push(u); return String(u).includes("oauth2") ? tokenOk() : new Response("{}", { status: 200 }); });
     const args = { serviceAccountJson: JSON.stringify(SA), sender: "cache-test@planyr.io", to: "a@b.com", subject: "s", html: "h", text: "t", fetchImpl: f };
-    expect(await sendViaGmail(args)).toEqual({ ok: true });
-    expect(await sendViaGmail(args)).toEqual({ ok: true });
+    expect(await sendViaGmail(args)).toEqual({ ok: true, id: null }); // an empty answer body: sent, no id to report
+    expect(await sendViaGmail(args)).toEqual({ ok: true, id: null });
     expect(calls.filter((u) => String(u).includes("oauth2"))).toHaveLength(1);
     expect(calls.filter((u) => String(u).includes("gmail"))).toHaveLength(2);
+  });
+  it("returns Gmail's message id (so a send can be found in Sent) and writes Reply-To when given", async () => {
+    let body = null;
+    const f = vi.fn(async (u, init) => { if (String(u).includes("gmail")) body = JSON.parse(init.body); return String(u).includes("oauth2") ? tokenOk() : new Response('{"id":"m42"}', { status: 200 }); });
+    const r = await sendViaGmail({ serviceAccountJson: JSON.stringify(SA), sender: "id-test@planyr.io", replyTo: "support@planyr.io", to: "a@b.com", subject: "s", html: "h", text: "t", fetchImpl: f });
+    expect(r).toEqual({ ok: true, id: "m42" });
+    expect(Buffer.from(body.raw, "base64url").toString("utf8")).toMatch(/^Reply-To: support@planyr\.io$/m);
   });
   it("surfaces a delegation refusal (token 401) loudly, sends nothing", async () => {
     const f = vi.fn(async () => new Response('{"error":"unauthorized_client"}', { status: 401 }));

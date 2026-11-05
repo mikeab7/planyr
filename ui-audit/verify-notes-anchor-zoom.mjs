@@ -221,15 +221,16 @@ ok("…with its words", (await tb("note-anchor").first().innerText()).includes("
 
 /* ════ 5. IT CAN BE MOVED AFTERWARDS ══════════════════════════════════════════════════ */
 console.log("\n5 · It can be moved");
-const grip = tb("note-anchor-grip").first();
-const gb = await grip.boundingBox();
+/* B2426788: a box is moved by grabbing its BORDER (the striped grip is retired) — the top edge, 30% across. */
+const boxBB = await tb("note-anchor").first().boundingBox();
+const gb = { x: boxBB.x + boxBB.width * 0.3 - 1, y: boxBB.y - 1, width: 2, height: 2 };
 await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
 await page.mouse.down();
 await page.mouse.move(gb.x + gb.width / 2 - 120, gb.y + gb.height / 2 + 60, { steps: 8 });
 await page.mouse.up();
 await pacedWait(page, 800);
 const moved = await tb("note-anchor").first().boundingBox();
-ok("⛔ DRAGGING THE GRIP MOVES IT, BY ABOUT WHAT WAS DRAGGED",
+ok("⛔ DRAGGING THE BORDER MOVES IT, BY ABOUT WHAT WAS DRAGGED",
   Math.abs((moved.x - afterReload.x) + 120) < 12 && Math.abs((moved.y - afterReload.y) - 60) < 12,
   `moved by ${Math.round(moved.x - afterReload.x)}, ${Math.round(moved.y - afterReload.y)}`);
 const movedDoc = anchorsIn(await storedDoc())[0];

@@ -195,13 +195,6 @@ export function loadBuildabilityRules(store) {
     return out;
   } catch (_) { return clone(); }
 }
-export function saveBuildabilityRules(rules, store) {
-  try {
-    const s = store || (typeof localStorage !== "undefined" ? localStorage : null);
-    if (s) s.setItem(LS, JSON.stringify(rules));
-  } catch (_) {}
-}
-
 export const LOMR_NOTE =
   "Pad likely needs the fill + CLOMR-F/LOMR-F pathway to exit the SFHA (FEMA review runs months) — even a compliant elevated pad stays “in the floodplain” for lenders and insurance until the LOMR-F issues.";
 export const WETLANDS_404_NOTE =

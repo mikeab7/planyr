@@ -157,7 +157,8 @@ export function createRotatedImageLayer(map) {
     setCrop(crop) { pendingCrop = crop || null; applyCrop(pendingCrop); },
     setOpacity(op) { img.style.opacity = String(op == null ? 1 : op); },
     setVisible(v) { img.style.display = v === false ? "none" : ""; },
-    setClickable(fn) { clickHandler = fn || null; img.style.pointerEvents = fn ? "auto" : "none"; img.style.cursor = fn ? "crosshair" : ""; },
+    // `kind`: "pin" = an armed pin-drop / pick (crosshair); anything else is a plain select-click (pointer — the press SELECTS, it does not place)
+    setClickable(fn, kind) { clickHandler = fn || null; img.style.pointerEvents = fn ? "auto" : "none"; img.style.cursor = !fn ? "" : kind === "pin" ? "crosshair" : "pointer"; },
     destroy() {
       map.off("move zoom viewreset", update);
       map.off("zoomanim", onZoomAnim);

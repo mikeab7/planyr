@@ -334,3 +334,72 @@ export function armBlankTileHeal(layer, { sweepMs = 2500, graceMs = STUCK_TILE_G
   const iv = setInterval(() => { try { sweepBlankTiles(layer, { graceMs, onHeal }); } catch (_) {} }, sweepMs);
   return () => clearInterval(iv);
 }
+
+/* ── 6. pace tile LOADS so a whole grid never lands in one burst (B2225425 round 3) ─────────────────
+ * A plan switch remounts the planner and with it the Leaflet map, so every aerial tile of the new view is requested at once —
+ * 112–252 tiles on the owner's Grand Port plans at a 2.15 device ratio (detail layer, retina path). When they answer together
+ * (the browser's cache on a plan already opened this session; the sandbox rig's instant replies) the main thread handles ~4
+ * loader tasks per tile back to back: measured 1,012 tasks / 242 ms of main-thread time inside ONE 335 ms heartbeat gap, with
+ * no single task over 45 ms. A posted message (the owner's MessageChannel heartbeat — and React's own scheduler) waits behind
+ * all of them, so it reads as a freeze even though no one task is long.
+ *
+ * The fix bounds how many tiles are IN FLIGHT at once: a tile's `src` is assigned only while fewer than `maxInFlight` tiles are
+ * loading; each `load`/`error` releases the next. A cached tile completes almost at once, so a revisit becomes a steady trickle
+ * interleaved with everything else instead of one wall; a network tile is latency-bound and `maxInFlight` is set well above any
+ * per-host limit that would matter. Nothing is skipped and nothing is reordered: tiles start in the order Leaflet asked for them
+ * (centre-out — GridLayer sorts by distance), and a tile Leaflet has already discarded before its turn is never fetched.
+ *
+ * Mechanism: `createTile` is Leaflet 1.9's own `TileLayer.createTile` with the one `tile.src = url` line routed through the
+ * pacer — same listeners (its own `_tileOnLoad` / `_tileOnError`), same attributes. A layer without those private hooks (another
+ * Leaflet version) is left untouched rather than half-wrapped. Retries (`withTileRetry`) and the blank-tile heal reassign `src`
+ * directly; they are rare and stay outside the pacer by design. */
+export function createTilePacer({ maxInFlight = 24 } = {}) {
+  const queue = [];
+  let inFlight = 0;
+  const stats = { started: 0, dropped: 0, peak: 0 };
+  const settle = () => { inFlight = Math.max(0, inFlight - 1); pump(); };
+  function start(job) {
+    inFlight++; stats.started++; stats.peak = Math.max(stats.peak, inFlight);
+    let done = false;
+    const fin = () => { if (done) return; done = true; job.tile.removeEventListener("load", fin); job.tile.removeEventListener("error", fin); settle(); };
+    job.tile.addEventListener("load", fin);
+    job.tile.addEventListener("error", fin);
+    job.tile.src = job.url;
+  }
+  function pump() {
+    while (inFlight < maxInFlight && queue.length) {
+      const job = queue.shift();
+      // discarded by Leaflet while it waited (pruned / layer removed): never fetch it
+      if (job.started === false && job.tile.__pfAttached && !job.tile.isConnected) { stats.dropped++; continue; }
+      job.started = true;
+      start(job);
+    }
+  }
+  return {
+    schedule(tile, url) { queue.push({ tile, url, started: false }); pump(); },
+    attached(tile) { tile.__pfAttached = true; },
+    get inFlight() { return inFlight; },
+    get queued() { return queue.length; },
+    stats,
+  };
+}
+const _sharedPacer = createTilePacer();
+export function paceTileLoads(layer, pacer = _sharedPacer) {
+  if (!layer || layer.__pfPaced) return layer;
+  if (typeof layer._tileOnLoad !== "function" || typeof layer._tileOnError !== "function" || typeof layer.getTileUrl !== "function") return layer;
+  layer.__pfPaced = true;
+  layer.createTile = function (coords, done) {
+    const tile = document.createElement("img");
+    tile.addEventListener("load", this._tileOnLoad.bind(this, done, tile));
+    tile.addEventListener("error", this._tileOnError.bind(this, done, tile));
+    if (this.options.crossOrigin || this.options.crossOrigin === "") tile.crossOrigin = this.options.crossOrigin === true ? "" : this.options.crossOrigin;
+    if (typeof this.options.referrerPolicy === "string") tile.referrerPolicy = this.options.referrerPolicy;
+    tile.alt = "";
+    const url = this.getTileUrl(coords);
+    // Leaflet appends the tile right after createTile returns; from then on a disconnected tile means "discarded"
+    queueMicrotask(() => pacer.attached(tile));
+    pacer.schedule(tile, url);
+    return tile;
+  };
+  return layer;
+}

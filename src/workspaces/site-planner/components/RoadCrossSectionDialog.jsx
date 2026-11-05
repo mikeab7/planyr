@@ -29,9 +29,8 @@ import {
   MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt, rowMarginsBySide,
 } from "../lib/roadCrossSection.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { trimInt as f0, trimDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
-const f1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "—");
-const f0 = (n) => (Number.isFinite(n) ? Math.round(n).toString() : "—");
 const uid = () => `xsec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /* NEW-2 (owner report, 2026-08-26 — "and lets make it horizontal? that makes sense to me based on the

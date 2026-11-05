@@ -81,7 +81,7 @@ const run = async () => {
 
   // ── Scenario 1: Measure tool, Area mode — the "26,169,663 SF" surface (NEW-2). ──
   await scenario("measure-area", async (r) => {
-    await page.getByLabel("Measure modes").click();
+    await page.getByLabel(/^Measure mode:/).click();
     await page.getByRole("button", { name: "Area" }).click();
     await page.waitForTimeout(150);
 

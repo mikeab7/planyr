@@ -35,7 +35,7 @@ try {
   console.log("served build:", JSON.stringify(s.build));
   if (want && !JSON.stringify(s.build).includes(want)) throw new Error(`deployed build does not contain ${want} yet`);
   await page.evaluate(async ([a, b, gid]) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     for (const r of [a, b]) {
       all[r.id] = r;
       const e = await window.pfSupabase.from("sites").upsert({ id: r.id, group_id: gid, site: r.site, name: r.name, county: "harris", updated_at: new Date().toISOString(), data: r });
@@ -115,7 +115,7 @@ finally {
           await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
           await window.pfSupabase.from("sites").delete().eq("id", id);
         }
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const left = await window.pfSupabase.from("sites").select("id").in("id", ids);
         out.remaining = (left.data || []).length;

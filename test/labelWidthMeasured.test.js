@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { layoutLabels } from "../src/workspaces/site-planner/lib/labelLayout.js";
 import { heuristicWidth, canvasWidth, bestMeasurer } from "../src/shared/markup/textWrap.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const FS = 13.5;
 const CHAR_W = FS * 0.6; // the estimate the app used to size every box with
@@ -92,7 +93,7 @@ describe("the shared measurer", () => {
 });
 
 describe("every caller was swept, not just the one that was reported", () => {
-  const SRC = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+  const SRC = plannerSource();
   /* ⛔ The point of the sweep. The measurement chip was the loudest instance; the element-label
    * pass and the parcel acreage badge shared the identical expression. A guard on the chip alone
    * would leave the other two to be rediscovered. */

@@ -64,7 +64,7 @@ const under = await page.evaluate(() => {
   const v = window.__plannerView.get();
   const f2p = (x, y) => new DOMPoint(x * v.ppf + v.offX, y * v.ppf + v.offY);
   const paths = [...document.querySelectorAll('[data-testid="road-network-surface"]')];
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const rec = Object.values(map)[0] || {};
   const out = [];
   for (const b of (rec.els || []).filter((e) => e.type === "building" && !e.points && e.w > 0 && e.h > 0)) {
@@ -84,7 +84,7 @@ log(under.length === 0, `no road pavement under any building${under.length ? " â
 
 // ---- 2. a drive target's outline is interrupted across the opening ------------------------------
 const outline = await page.evaluate(() => {
-  const g = [...document.querySelectorAll("svg polyline")].filter((n) => n.getAttribute("stroke") === "#9a9384");
+  const g = [...document.querySelectorAll("svg polyline")].filter((n) => n.getAttribute("stroke") === "#8f99a3");
   return { interruptedEdges: g.length, courtRect: !!document.querySelector('svg rect[stroke="none"]') };
 });
 log(outline.interruptedEdges >= 4, `drive target outline drawn as interrupted edges (${outline.interruptedEdges} segments)`);

@@ -20,6 +20,11 @@
  * addition nobody told this file about.
  */
 import { KEY_CONTRACT } from "../../workspaces/site-planner/lib/keyContract.js";
+// The Spreadsheet's Excel shortcuts are DERIVED from its own key tables (pure data, no UI), so this page cannot
+// disagree with what the handler does — same discipline as the Site section above.
+import { CHORDS } from "../../workspaces/model/lib/keymap.js";
+import { chordCoverage } from "../../workspaces/model/lib/univerExcelKeys/bindings.js";
+import { allKeyTips } from "../../workspaces/model/lib/keyTips.js";
 
 /** One shortcut. `combo` is an array of tokens `formatCombo` (./platform.js) renders for the
  *  current platform ("mod" = Ctrl on Windows/Linux, ⌘ on Mac). `keysText` is a pre-composed,
@@ -132,6 +137,12 @@ const MAP_FINDER_ITEMS = [
     id: "site.map-escape", label: "Close the open map menu or popover",
     combo: ["esc"],
     evidence: [{ file: "src/workspaces/site-planner/MapFinder.jsx", pattern: 'e.key === "Escape") setStatusMenu(null)' }],
+  }),
+  item({
+    id: "site.map-remove-lot", label: "Remove a lot you added with Select parcels",
+    keysText: "Hover it, then click",
+    note: "The cursor turns to a minus over a lot you have added.",
+    evidence: [{ file: "src/workspaces/site-planner/MapFinder.jsx", pattern: "inside ? REMOVE_CURSOR : ADD_CURSOR" }],
   }),
   item({
     id: "site.map-reorder", label: "Reorder a group's row in the Sites list",
@@ -291,48 +302,97 @@ const NOTES_ITEMS = [
     evidence: [{ file: "src/workspaces/notes/components/NotesTree.jsx", pattern: 'e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")' }] }),
 ];
 
-/* ── Spreadsheet (the "model" workspace) ──────────────────────────────────────────────────────── */
+/* ── Spreadsheet (the "model" workspace) — THE UNIVER GRID (NEW-1, 2026-10-31: default-on for every account) ──────────────────
+ *
+ * EXACTLY what the Univer grid supports, nothing the old grid used to do. Three sources, each with evidence the shortcuts test checks:
+ *   1. keys Univer does by itself — each cites the parity check (ui-audit/verify-univer-parity.mjs) that drives the real key and
+ *      reads the result through Univer's facade (a check that does not exist any more fails the evidence test);
+ *   2. the Excel-keys plugin (lib/univerExcelKeys) — derived from its own binding table, so the page cannot disagree with it;
+ *   3. the Alt key-tips and the Planyr command palette.
+ * Keys the old grid had that Univer does NOT (AutoSum Alt+=, F4 repeat, Shift+F11, Ctrl+PgUp/PgDn, Ctrl+S, Ctrl+G Name Box,
+ * Ctrl+wheel zoom) are deliberately NOT listed — `UNIVER_UNSUPPORTED_CHORDS` names the gaps. */
 
+/* Excel for Windows' chords the plugin or Univer handle, one row each, straight from lib/keymap.js's table. */
+const CHORD_LABELS = {
+  bold: "Bold", italic: "Italic", underline: "Underline", strikethrough: "Strikethrough",
+  "number-format-dialog": "Open the number format dialog", "currency-style": "Currency format", "percent-style": "Percent format",
+  "number-comma-style": "Number with thousands separator", "numfmt-general": "General format", "numfmt-date": "Date format",
+  "border-outline": "Outline border", "border-none": "Remove borders", "fill-right": "Fill the left column of the selection to the right",
+  "insert-date": "Enter today's date", "insert-time": "Enter the current time", "copy-above-formula": "Copy the formula from the cell above",
+  "copy-above-value": "Copy the value from the cell above",
+  "insert-cells": "Insert row / column (cells prompt when a block is selected)", "delete-cells": "Delete row / column (cells prompt when a block is selected)",
+  "sheet-prev": "Previous sheet tab", "sheet-next": "Next sheet tab",
+  "hide-rows": "Hide the selected rows", "unhide-rows": "Unhide rows", "hide-columns": "Hide the selected columns", "unhide-columns": "Unhide columns",
+};
+/* The plugin's selection-movement keys (bindings.js `NAV_ACTIONS`): label + the keys as a person reads them. */
+const NAV_LABELS = {
+  "nav-home": ["Start of the row", "Home"], "nav-home-extend": ["Extend the selection to the start of the row", "Shift+Home"],
+  "nav-start": ["Jump to cell A1", "Ctrl/⌘+Home"], "nav-start-extend": ["Extend the selection to A1", "Ctrl/⌘+Shift+Home"],
+  "nav-end": ["Jump to the last used cell", "Ctrl/⌘+End"], "nav-end-extend": ["Extend the selection to the last used cell", "Ctrl/⌘+Shift+End"],
+  "nav-page-down": ["Move a screen down", "PgDn"], "nav-page-up": ["Move a screen up", "PgUp"],
+  "nav-page-down-extend": ["Extend the selection a screen down", "Shift+PgDn"], "nav-page-up-extend": ["Extend the selection a screen up", "Shift+PgUp"],
+  "nav-across-right": ["Move a screen right", "Alt+PgDn"], "nav-across-left": ["Move a screen left", "Alt+PgUp"],
+  "nav-across-right-extend": ["Extend the selection a screen right", "Shift+Alt+PgDn"], "nav-across-left-extend": ["Extend the selection a screen left", "Shift+Alt+PgUp"],
+};
+const PARITY = "ui-audit/verify-univer-parity.mjs";
+const byCheck = (id) => [{ file: PARITY, pattern: `check("${id}"` }];
 const SPREADSHEET_ITEMS = [
-  item({ id: "sheet.nav", label: "Move the active cell", combo: ["arrowup"], note: "Arrow keys; Shift extends the selection.",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight"' }] }),
-  item({ id: "sheet.tab", label: "Move to the next / previous cell", combo: ["tab"], note: "Shift+Tab moves back.",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Tab") { e.preventDefault(); const c = stepCol' }] }),
-  item({ id: "sheet.enter", label: "Move down / up a row", combo: ["enter"], note: "Enter moves down, Shift+Enter moves up.",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Enter") { e.preventDefault(); const r = Math.max' }] }),
-  item({ id: "sheet.edit", label: "Edit the active cell", combo: ["f2"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "F2") { e.preventDefault(); startEdit' }] }),
-  item({ id: "sheet.clear", label: "Clear the selected range", combo: ["del"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "onBlankRange(r1, r2, c1, c2)" }] }),
-  item({ id: "sheet.home", label: "Jump to cell A1", combo: ["mod", "home"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'e.key === "Home") { e.preventDefault(); jumpTo(0, 0)' }] }),
-  item({ id: "sheet.end", label: "Jump to the last used cell", combo: ["mod", "end"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "usedRangeEnd(sheet)" }] }),
-  item({ id: "sheet.block-jump", label: "Jump to the edge of the current block of data", combo: ["mod", "arrowdown"], note: "Ctrl/⌘ + any arrow key.",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "ctrlArrowTarget(hasContent" }] }),
-  item({ id: "sheet.copy", label: "Copy", combo: ["mod", "c"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "c") { e.preventDefault(); onCopy' }] }),
-  item({ id: "sheet.paste", label: "Paste", combo: ["mod", "v"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "v") { e.preventDefault(); onPaste' }] }),
-  item({ id: "sheet.filldown", label: "Fill the top row of the selection down", combo: ["mod", "d"],
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: 'k === "d") { e.preventDefault(); onFillDown' }] }),
-  item({ id: "sheet.zoom", label: "Zoom the sheet", keysText: "Ctrl/⌘ + scroll wheel",
-    evidence: [{ file: "src/workspaces/model/components/SheetView.jsx", pattern: "zoomFromWheelDelta" }] }),
-  item({ id: "sheet.undo", label: "Undo", combo: ["mod", "z"],
-    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'k === "z" && !e.shiftKey) { e.preventDefault(); undo()' }] }),
-  item({ id: "sheet.redo", label: "Redo", combo: ["mod", "shift", "z"], note: "Ctrl/⌘+Shift+Z or Ctrl/⌘+Y.",
-    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: '(k === "z" && e.shiftKey) || k === "y"' }] }),
-  item({ id: "sheet.namebox", label: "Jump to a named range (Name Box)", combo: ["mod", "g"],
-    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'k === "g") { e.preventDefault(); nameBoxRef' }] }),
-  item({ id: "sheet.find", label: "Find", combo: ["mod", "f"],
-    evidence: [{ file: "src/workspaces/model/lib/commandRegistry.js", pattern: 'shortcut: "Ctrl+F"' }] }),
-  item({ id: "sheet.replace", label: "Replace", combo: ["mod", "h"],
-    evidence: [{ file: "src/workspaces/model/lib/commandRegistry.js", pattern: 'shortcut: "Ctrl+H"' }] }),
-  item({ id: "sheet.palette", label: "Open the command palette", combo: ["mod", "k"],
-    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'k === "k") { e.preventDefault(); setPaletteOpen(true)' }] }),
-  item({ id: "sheet.trace-clear", label: "Clear a formula trace", combo: ["esc"],
-    evidence: [{ file: "src/workspaces/model/ModelApp.jsx", pattern: 'e.key === "Escape" && !e.ctrlKey && !e.metaKey' }] }),
+  item({ id: "sheet.nav", label: "Move the active cell", combo: ["arrowup"], note: "Arrow keys; Shift extends the selection.", evidence: byCheck("key-nav-basic") }),
+  item({ id: "sheet.tab", label: "Move to the next / previous cell", combo: ["tab"], note: "Shift+Tab moves back.", evidence: byCheck("key-nav-basic") }),
+  item({ id: "sheet.enter", label: "Move down / up a row", combo: ["enter"], note: "Enter moves down, Shift+Enter moves up.", evidence: byCheck("key-nav-basic") }),
+  item({ id: "sheet.edit", label: "Edit the active cell", combo: ["f2"], evidence: byCheck("key-f2") }),
+  item({ id: "sheet.type", label: "Start typing in the active cell", keysText: "Any letter, digit or symbol", note: "A bare letter types — it never fires a single-letter app shortcut.", evidence: byCheck("bare-letter") }),
+  item({ id: "sheet.clear", label: "Clear the selected range", combo: ["del"], evidence: byCheck("spill-and-clear") }),
+  item({ id: "sheet.block-jump", label: "Jump to the edge of the current block of data", combo: ["mod", "arrowdown"], note: "Ctrl/⌘ + any arrow key.", evidence: byCheck("key-ctrl-shift-arrow") }),
+  item({ id: "sheet.block-extend", label: "Extend the selection to the end of the block of data", keysText: "Ctrl/⌘+Shift + any arrow key", evidence: byCheck("key-ctrl-shift-arrow") }),
+  item({ id: "sheet.copy", label: "Copy", combo: ["mod", "c"], note: "To the system clipboard — pastes into Excel, email and Notes with its formatting.", evidence: byCheck("clip-excel") }),
+  item({ id: "sheet.cut", label: "Cut", combo: ["mod", "x"], note: "Pasting moves the cells (formulas that point at them follow).", evidence: byCheck("clip-cut") }),
+  item({ id: "sheet.paste", label: "Paste", combo: ["mod", "v"], note: "From Planyr, Excel, Google Sheets, a web table or plain text.", evidence: byCheck("clip-internal") }),
+  item({ id: "sheet.filldown", label: "Fill the top row of the selection down", combo: ["mod", "d"], evidence: byCheck("key-fill") }),
+  item({ id: "sheet.undo", label: "Undo", combo: ["mod", "z"], note: "While typing in a cell it undoes the typing only.", evidence: byCheck("undo-typing") }),
+  item({ id: "sheet.redo", label: "Redo", combo: ["mod", "shift", "z"], note: "Ctrl/⌘+Shift+Z or Ctrl/⌘+Y.", evidence: byCheck("undo-redo-all") }),
+  item({ id: "sheet.find", label: "Find and replace", combo: ["mod", "f"], note: "Ctrl/⌘+H opens it on Replace.", evidence: byCheck("find-replace") }),
+  item({ id: "sheet.palette", label: "Open the command palette", combo: ["mod", "k"], note: "Every toolbar command by name, plus Trace precedents/dependents, Names and the consistency flags.",
+    evidence: [{ file: "ui-audit/lib/univerToolsChecks.mjs", pattern: 'check("tools-palette"' }] }),
+  item({ id: "sheet.trace-clear", label: "Clear a formula trace", combo: ["esc"], evidence: [{ file: "ui-audit/lib/univerToolsChecks.mjs", pattern: 'check("tools-trace"' }] }),
+  ...sheetChordItems(),
+  ...sheetNavItems(),
+  ...sheetAltItems(),
 ];
+
+/* Chords from the old key table that Univer does natively or the plugin builds — NOT the named gaps (`UNIVER_UNSUPPORTED_CHORDS`). */
+function sheetChordItems() {
+  const have = new Set(chordCoverage().filter((c) => c.how !== "gap" && c.how !== "unaccounted").map((c) => c.id));
+  return CHORDS.filter(([id]) => have.has(id)).map(([id, combo]) => item({
+    id: `sheet.chord.${id}`, label: CHORD_LABELS[id] || id, keysText: combo.replace(/^Ctrl/, "Ctrl/⌘"),
+    evidence: [{ file: "src/workspaces/model/lib/keymap.js", pattern: `["${id}", "${combo.replace(/"/g, '\\"')}"` }],
+  }));
+}
+
+/* Selection / movement keys: Univer's own (Ctrl+A, header clicks) and the plugin's (Shift+Space, Ctrl+Space, Home / End / Page). */
+function sheetNavItems() {
+  const plugin = (pattern) => [{ file: "src/workspaces/model/lib/univerExcelKeys/bindings.js", pattern }];
+  return [
+    item({ id: "sheet.nav.select-all", label: "Select the current region; again for the whole sheet", keysText: "Ctrl/⌘+A", evidence: byCheck("key-select-all") }),
+    item({ id: "sheet.nav.select-row", label: "Select the whole row", keysText: "Shift+Space", evidence: plugin('chord: "select-row"') }),
+    item({ id: "sheet.nav.select-column", label: "Select the whole column", keysText: "Ctrl+Space", evidence: plugin('chord: "select-column"') }),
+    ...Object.entries(NAV_LABELS).map(([id, [label, keys]]) => item({ id: `sheet.nav.${id}`, label, keysText: keys, evidence: [...plugin(`chord: "${id}"`), ...byCheck("key-nav-home-end-page")] })),
+    item({ id: "sheet.edit.newline", label: "New line inside the cell being edited", keysText: "Alt+Enter", evidence: byCheck("key-alt-enter") }),
+    item({ id: "sheet.edit.fill-selection", label: "Fill the whole selection with what you typed", keysText: "Ctrl/⌘+Enter", evidence: byCheck("key-ctrl-enter") }),
+    item({ id: "sheet.edit.cycle-ref", label: "Cycle $A$1 / A$1 / $A1 / A1 on the reference at the caret", keysText: "F4 (while editing a formula)", evidence: byCheck("key-f4") }),
+    item({ id: "sheet.header-select", label: "Select a whole column / row", keysText: "Click a column letter or row number (drag or Shift+click for a run; the corner box selects everything)", evidence: byCheck("header-select") }),
+    item({ id: "sheet.ctrl-click", label: "Select several separate ranges", keysText: "Ctrl/⌘+click or Ctrl/⌘+drag", note: "Ctrl/⌘+click on a selected cell removes it.", evidence: byCheck("ctrl-click") }),
+    item({ id: "sheet.header-move", label: "Move a column or row", keysText: "Select it, then Shift+drag its header", note: "A plain drag on a header selects more lines.", evidence: byCheck("header-shift-drag-moves") }),
+  ];
+}
+
+/* Excel's Alt key-tips: press and release Alt, then the letters — one row per path in lib/keyTips.js. */
+function sheetAltItems() {
+  return allKeyTips().map(({ path, label }) => item({
+    id: `sheet.alt.${path}`, label, keysText: ["Alt", ...path.split("")].join(", "),
+    evidence: [{ file: "src/workspaces/model/lib/keyTips.js", pattern: label }],
+  }));
+}
 
 /* ── Global (the app shell, and this page's own entry point) ─────────────────────────────────── */
 
@@ -347,8 +407,8 @@ const GLOBAL_ITEMS = [
   }),
   item({
     id: "global.fullscreen-bare", label: "Toggle full screen", combo: ["f"],
-    note: "Only where nothing editable is on screen (the map, or a drawing).",
-    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: '(e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()' }],
+    note: "Only where nothing editable is on screen (the map, or a drawing) — never on the Spreadsheet or a comp sheet.",
+    evidence: [{ file: "src/shared/ui/AppHeader.jsx", pattern: 'bareFullscreenAllowed({' }],
   }),
 ];
 

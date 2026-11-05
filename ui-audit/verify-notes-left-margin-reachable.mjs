@@ -142,13 +142,13 @@ for (const W of WIDTHS) {
   const originalPageLeft = g0.sheetL;
   const originalWidth = g0.sheetW;
   const src = await page.evaluate(() => {
-    const el = document.querySelector('.planyr-anchor[data-anchor-id="drag"] .planyr-anchor-grip');
+    const el = document.querySelector('.planyr-anchor[data-anchor-id="drag"]');   // B2426788: grabbed by its BORDER (top edge)
     const r = el.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+    return { x: Math.round(r.left + r.width * 0.3), y: Math.round(r.top + 0.5),
       onScreen: r.left > 0 && r.right < window.innerWidth };
   });
-  ok(`${W}px: the grip is on screen before the drag starts (the harness can vouch for the gesture)`,
-    src.onScreen, `grip at x=${src.x}`);
+  ok(`${W}px: the box's top border is on screen before the drag starts (the harness can vouch for the gesture)`,
+    src.onScreen, `border at x=${src.x}`);
   const travel = 260;
   await page.mouse.move(src.x, src.y);
   await page.mouse.down();

@@ -7,12 +7,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("O3 — map storage/depth == panel/section, from one source of truth", () => {
   it("the map 'Holds' uses the pond's USABLE storage (pondSplit.usableCf), NOT the gross tub volume", () => {
-    expect(src).toContain("const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;");
+    expect(src).toContain("const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / CF_PER_ACFT : null;");
     // the old gross-volume map label is gone
     expect(src.includes("`Holds ${f2(r.vol / SQFT_PER_ACRE)} AC-FT")).toBe(false);
   });

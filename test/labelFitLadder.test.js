@@ -11,6 +11,7 @@ import { test, assert } from "vitest";
 import { readFileSync } from "node:fs";
 import { layoutLabels, boxOf } from "../src/workspaces/site-planner/lib/labelLayout.js";
 import { labelForms, inlineLines, interiorFitter, pointInRing, LADDER_RUNGS } from "../src/workspaces/site-planner/lib/labelFitLadder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // ── the battery ────────────────────────────────────────────────────────────────────────────
 // Shapes chosen to be hostile to a fit test in different ways: a normal rect, a sliver, a
@@ -28,7 +29,7 @@ const LABELS = {
   short: ["Pond"],
   reflowable: ["Detention Pond", { parts: ["footprint 6.11 AC", "266,354 SF"], sep: " · ", keep: 1 }],
   plainWide: ["A Very Long Element Name Indeed", "1,234,567 SF", "1,400′ × 900′"],
-  fourLine: ["Building 12", "584,231 SF", "(incl. 4 bump-outs)", "516′ × 1,107′"],
+  fourLine: ["Building 12", "584,231 SF", "Cross-dock, 4 doors", "516′ × 1,107′"],
 };
 const bbox = (r) => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); } return { x0, x1, y0, y1 }; };
 const centroid = (r) => { let a = 0, cx = 0, cy = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; const f = p.x * q.y - q.x * p.y; a += f; cx += (p.x + q.x) * f; cy += (p.y + q.y) * f; } a /= 2; return { x: cx / (6 * a), y: cy / (6 * a) }; };
@@ -165,7 +166,7 @@ test("labelForms / inlineLines never return an empty or object-valued line", () 
 // pond `mustLabel`. Without this, somebody re-derives fit from the bounding box in a later edit
 // and the interior measurement quietly stops happening.
 test("SitePlanner feeds the shared ladder its ring, and marks ponds mustLabel", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   // B1449 — `rppf`, not `view.ppf`: the fit question is asked in FEET (labelLayout divides the
   // screen size by the ppf first), so it has to be asked at the ppf the geometry was EMITTED at or
   // a mid-gesture pond is fitted against an interior it does not have on screen. It is also what

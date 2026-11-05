@@ -17,7 +17,7 @@
  *     selection, no node selection, DOM focus not in the editor, `data-panning` cleared on release.
  * and plain clicks keep today's behaviour (caret in the cell, typing lands there, double-click
  * blank + a character makes exactly one box, double-click on a word selects it, Tab walks cells),
- * the exceptions keep their own drag (the box grip moves the box, the east handle resizes it), and
+ * the exceptions keep their own drag (the box BORDER moves the box — B2426788, the east handle resizes it), and
  * a drag that starts INSIDE the box being edited selects text instead of panning.
  *
  * ⛔ RED-PROOF: `--baseline=<url>` (or the same file against pre-fix code) is expected to FAIL the
@@ -345,15 +345,14 @@ console.log("\n5 · EXCEPTIONS KEEP THEIR OWN DRAG, AND THE BOX BEING EDITED SEL
   const page = await openNote();
   const box = page.locator('.planyr-anchor').nth(1);
   const bb = await box.boundingBox();
-  await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);   // hover reveals the grip
-  await pacedWait(page, 150);
-  const g = await center(page, ".planyr-anchor-grip", 1);
+  /* B2426788: the striped grip is retired — the box's BORDER band (top edge, 30% across, on the line) is the move handle. */
+  const g = { x: Math.round(bb.x + bb.width * 0.3), y: Math.round(bb.y + 0.5) };
   const v0 = await view(page);
   const x0 = (await box.boundingBox()).x;
   await drag(page, { x: g.x, y: g.y }, { dx: 60, dy: 40 }, { steps: 8 });
   const x1 = (await box.boundingBox()).x;
   const v1 = await view(page);
-  ok("the box grip still MOVES the box", x1 - x0 > 40, `box moved ${(x1 - x0).toFixed(1)}`);
+  ok("the box BORDER still MOVES the box", x1 - x0 > 40, `box moved ${(x1 - x0).toFixed(1)}`);
   ok("…and does not pan", Math.abs(v1.x - v0.x) <= TOL && Math.abs(v1.y - v0.y) <= TOL);
   await page.close();
 }

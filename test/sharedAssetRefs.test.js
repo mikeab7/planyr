@@ -16,6 +16,7 @@ import {
   collectAssetRefs, planAssetKeys, assetHolders, canReleaseAsset,
   releasePlanForOverlay, idbKeysReleasableOnPlanDelete,
 } from "../src/workspaces/site-planner/lib/sharedAssetRefs.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* The owner's real shape: an overlay whose bytes live in the cloud AND on the device. */
 const overlay = (id, { skey, ikey, dwg } = {}) => ({
@@ -142,7 +143,7 @@ describe("deleting a PLAN must not wipe a sibling's device copy", () => {
  * instance of this defect was a correct-looking delete at a call site that asked the wrong scope. */
 describe("the call sites ask the shared rule, not the current plan's list", () => {
   const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-  const planner = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   const storage = read("../src/workspaces/site-planner/lib/storage.js");
 
   it("SitePlanner no longer ref-counts a delete against `sheetOverlays`", () => {

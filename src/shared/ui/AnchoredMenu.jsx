@@ -38,6 +38,11 @@ import { MENU_LAYER_ATTR, pressBelongsToHigherMenu } from "./menuLayers.js";
  *                  (a different width-driving padding, a module's own line color); the panel is
  *                  never invisible for lack of it (B1263075/NEW-4 — see the style object below).
  *  - className   : panel className (default "menu", for the existing menu styles)
+ *  - swallowOutsidePress : opt-in. The press that DISMISSES the menu does nothing else — it is stopped in
+ *                  the capture phase (pointer/mouse/touch down AND the click that follows), so closing
+ *                  a "⋯" action menu by clicking the canvas never also deselects, deletes or drags what
+ *                  is under the pointer. Default false keeps the B1106256 pass-through (a ribbon button
+ *                  pressed while a menu is open both dismisses it AND activates).
  *  - hoverSafe   : historically opted a HOVER-opened popover (RowInfo/SourcesLegend) out of
  *                  the full-viewport click-away backdrop, which otherwise sat ON TOP of the
  *                  trigger and made a hover-opened menu's own appearance fire a spurious
@@ -60,6 +65,7 @@ export default function AnchoredMenu({
   panelStyle,
   className = "menu",
   hoverSafe = false,
+  swallowOutsidePress = false,
   children,
 }) {
   const menuRef = useRef(null);
@@ -133,10 +139,22 @@ export default function AnchoredMenu({
       ro = new ResizeObserver(place);
       ro.observe(anchorRef.current);
     }
+    /* ⛔ NEW-2 (2026-10-22, work-laptop report "the question mark help button isn't even working") — THE PANEL'S OWN SIZE
+     * IS AN INPUT TO ITS PLACEMENT, and it was measured exactly once. A bottom-corner menu ("above-left") puts its TOP at
+     * `anchor.top − gap − menuH`; the Help control swaps a 164 px menu for a 366 px Help / report view in the same
+     * portal, so the top stayed where the short menu wanted it and the taller view hung 112 px below a 641 px window
+     * (measured at 1913×641 @2.68: panel bottom 753) — its Back button off-screen, which read as "Help does nothing".
+     * Re-place whenever the panel itself changes size, never only when the anchor or window does. */
+    let panelRo;
+    if (typeof ResizeObserver !== "undefined" && menuRef.current) {
+      panelRo = new ResizeObserver(place);
+      panelRo.observe(menuRef.current);
+    }
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
       ro?.disconnect();
+      panelRo?.disconnect();
     };
   }, [open, placement, gap, width, anchorRef]);
 
@@ -175,10 +193,11 @@ export default function AnchoredMenu({
   // (account dropdown, project breadcrumb, rail flyouts).
   useEffect(() => {
     if (!open) return;
+    if (swallowOutsidePress) return undefined; // the swallow effect below owns Esc for this menu
     const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, swallowOutsidePress]);
 
   /* ⛔ B1106256 — dismiss via a document-level, CAPTURE-phase `mousedown` listener rather than a
    * full-viewport interactive backdrop element. The backdrop used to sit on TOP of every control on
@@ -225,9 +244,78 @@ export default function AnchoredMenu({
       if (pressBelongsToHigherMenu(e.target, zIndex)) return;
       onClose?.();
     };
+    if (swallowOutsidePress) return undefined; // the swallow effect below owns outside presses for this menu
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [open, onClose, anchorRef, zIndex]);
+  }, [open, onClose, anchorRef, zIndex, swallowOutsidePress]);
+
+  /* ⛔ NEW-1 (Schedule switcher stays open over the grid) — A PRESS INSIDE AN IFRAME NEVER REACHES THE PARENT
+   * DOCUMENT, so neither dismissal listener above (nor the swallow one below) can see it. The Schedule grid is the
+   * embedded /sequence/ app: clicking a cell, the status / owner popovers, anything in it, left the schedule and
+   * project switchers hanging open over the grid. The one thing the parent CAN observe is that focus moved into the
+   * frame (the window `blur`s and `document.activeElement` becomes the <iframe>), so that is treated as an outside
+   * press (backed by an explicit press/Escape notice from the embedded app, below). The blur path is read after a tick because activeElement settles just after the blur event; and it does not consume
+   * anything — the press already went to the cell, which still does its normal job. */
+  useEffect(() => {
+    if (!open) return undefined;
+    let t;
+    const onBlur = () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const a = document.activeElement;
+        if (a && a.tagName === "IFRAME" && !menuRef.current?.contains(a)) onCloseRef.current?.();
+      }, 0);
+    };
+    // The reliable signal: the embedded Schedule app tells us about every press / Escape inside it
+    // (public/sequence/index.html). Same-origin and source-checked; a notice only, so the cell's own click is untouched.
+    const onMsg = (e) => {
+      if (e.origin !== window.location.origin || !e.data || e.data.source !== "planar-seq") return;
+      if (e.data.type === "planar:press" || e.data.type === "planar:escape") onCloseRef.current?.();
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("message", onMsg);
+    return () => { clearTimeout(t); window.removeEventListener("blur", onBlur); window.removeEventListener("message", onMsg); };
+  }, [open]);
+
+  /* opt-in `swallowOutsidePress` (see the prop doc): the press/Esc that dismisses this menu is consumed whole,
+   * so it triggers nothing else. Deliberately a SEPARATE effect from the pass-through dismissal above, whose
+   * B1106256 guarantee (never stop the real event) stays untouched for every other consumer. */
+  useEffect(() => {
+    if (!open || !swallowOutsidePress) return undefined;
+    // pointerdown/mousedown/touchstart are stopped here, and a one-shot capture sweep eats the matching
+    // up/click that follows (it must outlive this effect, which unmounts the moment the menu closes).
+    const outside = (e) => {
+      const panel = menuRef.current, anchor = anchorRef?.current;
+      if (panel && panel.contains(e.target)) return false;
+      if (anchor && anchor.contains(e.target)) return false;
+      return !pressBelongsToHigherMenu(e.target, zIndex);
+    };
+    const eat = (e) => { e.stopPropagation(); e.preventDefault(); };
+    const onPress = (e) => {
+      if (!outside(e)) return;
+      eat(e);
+      if (e.type !== "pointerdown") return;
+      onClose?.();
+      const sweep = ["pointerup", "mouseup", "touchend", "click"];
+      let done = false;
+      const finish = () => { if (done) return; done = true; sweep.forEach((t) => document.removeEventListener(t, onTail, true)); clearTimeout(timer); };
+      const onTail = (e2) => { eat(e2); if (e2.type === "click") finish(); };
+      const timer = setTimeout(finish, 700);
+      sweep.forEach((t) => document.addEventListener(t, onTail, true));
+    };
+    const pressTypes = ["pointerdown", "mousedown", "touchstart"];
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();   // Esc closes ONLY this menu — not the host's own Esc handler (e.g. the inspector)
+      onClose?.();
+    };
+    pressTypes.forEach((t) => document.addEventListener(t, onPress, true));
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      pressTypes.forEach((t) => document.removeEventListener(t, onPress, true));
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, onClose, anchorRef, zIndex, swallowOutsidePress]);
 
   if (!open) return null;
 

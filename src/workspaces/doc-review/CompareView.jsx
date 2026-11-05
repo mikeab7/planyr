@@ -52,7 +52,7 @@ function paintWash(codes, W, H) {
 const kindLabel = (k) => (k === "added" ? "Added" : k === "removed" ? "Removed" : "Changed");
 const kindColor = (k) => (k === "added" ? CSS.added : k === "removed" ? CSS.removed : CSS.mixed);
 
-export default function CompareView({ a, b, onClose }) {
+export default function CompareView({ a, b, onClose, topInset = 0 }) {
   // a / b = { name, source } — source is a File/Blob/ArrayBuffer/{url} loadPdf accepts. `a` is the
   // OLDER revision (its removed ink is what's gone in the newer), `b` the NEWER.
   const [pdfs, setPdfs] = useState(null);   // { a, b } loaded pdf.js docs
@@ -67,6 +67,7 @@ export default function CompareView({ a, b, onClose }) {
   const canvasRef = useRef(null);
   const washRef = useRef(null);   // offscreen wash canvas
   const panRef = useRef(null);    // { x, y, tx, ty } during a drag
+  const [panning, setPanning] = useState(false); // NEW-4: the grabbing cursor is STATE — a ref read at render showed it late and left it stuck after release
   const runTok = useRef(0);       // supersede a stale compare (page change / unmount)
 
   // --- load both PDFs once ---
@@ -154,12 +155,14 @@ export default function CompareView({ a, b, onClose }) {
     if (e.button !== 0) return;
     const v = view; if (!v) return;
     panRef.current = { x: e.clientX, y: e.clientY, tx: v.tx, ty: v.ty };
+    setPanning(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} // the drag (and its cursor) outlives the canvas edge
   }, [view]);
   const onMove = useCallback((e) => {
     const p = panRef.current; if (!p) return;
     setView((v) => (v ? { ...v, tx: p.tx + (e.clientX - p.x), ty: p.ty + (e.clientY - p.y) } : v));
   }, []);
-  const endPan = useCallback(() => { panRef.current = null; }, []);
+  const endPan = useCallback(() => { panRef.current = null; setPanning(false); }, []);
 
   // --- click a change in the list → centre the view on it ---
   const jumpTo = useCallback((idx) => {
@@ -177,23 +180,25 @@ export default function CompareView({ a, b, onClose }) {
   const pageStepper = (side, num) => (
     num > 1 ? (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <button data-cmp={`page-${side}-prev`} disabled={pages[side] <= 1} onClick={() => setPages((p) => ({ ...p, [side]: Math.max(1, p[side] - 1) }))} style={stepBtn}>‹</button>
+        <button data-cmp={`page-${side}-prev`} disabled={pages[side] <= 1} onClick={() => setPages((p) => ({ ...p, [side]: Math.max(1, p[side] - 1) }))} style={stepBtn(pages[side] <= 1)}>‹</button>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>p{pages[side]}/{num}</span>
-        <button data-cmp={`page-${side}-next`} disabled={pages[side] >= num} onClick={() => setPages((p) => ({ ...p, [side]: Math.min(num, p[side] + 1) }))} style={stepBtn}>›</button>
+        <button data-cmp={`page-${side}-next`} disabled={pages[side] >= num} onClick={() => setPages((p) => ({ ...p, [side]: Math.min(num, p[side] + 1) }))} style={stepBtn(pages[side] >= num)}>›</button>
       </span>
     ) : null
   );
 
   return (
-    <div data-cmp="compare-view" data-status={status} data-active-region={activeRegion} data-change-count={counts.total} style={overlay}>
+    <div data-cmp="compare-view" data-status={status} data-active-region={activeRegion} data-change-count={counts.total} style={topInset ? { ...overlay, top: topInset } : overlay}>
       {/* header */}
       <div style={header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {/* B2426787 — the names and both page steppers WRAP rather than truncate: on a phone the old single nowrap line pushed
+            the second stepper under Close ✕. Each file name still ellipsises on its own; the steppers never clip. */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 10px", minWidth: 0, flex: "1 1 0" }}>
           <strong style={{ fontSize: 13 }}>Compare revisions</strong>
-          <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            <span style={{ color: CSS.removed }}>◀ {a.name || "Older"}</span> {pageStepper("a", numA)}
-            <span style={{ margin: "0 6px", color: "var(--muted)" }}>vs</span>
-            <span style={{ color: CSS.added }}>{b.name || "Newer"} ▶</span> {pageStepper("b", numB)}
+          <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: "2px 6px", fontSize: 12, color: "var(--muted)", minWidth: 0 }}>
+            <span style={{ ...nameChip, color: CSS.removed }}>◀ {a.name || "Older"}</span> {pageStepper("a", numA)}
+            <span style={{ color: "var(--muted)" }}>vs</span>
+            <span style={{ ...nameChip, color: CSS.added }}>{b.name || "Newer"} ▶</span> {pageStepper("b", numB)}
           </span>
         </div>
         <button data-cmp="close" onClick={onClose} style={closeBtn}>Close ✕</button>
@@ -214,8 +219,8 @@ export default function CompareView({ a, b, onClose }) {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
         <div ref={wrapRef} style={canvasWrap}
-          onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={endPan} onPointerLeave={endPan}>
-          <canvas ref={canvasRef} style={{ display: "block", cursor: panRef.current ? "grabbing" : "grab" }} />
+          onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={endPan}>
+          <canvas ref={canvasRef} style={{ display: "block", cursor: panning ? "grabbing" : "grab" }} />
           {status === "loading" ? <div style={busyOv} data-cmp="busy">Comparing revisions…</div> : null}
           {status === "error" ? <div style={errOv} data-cmp="error">{errMsg}</div> : null}
         </div>
@@ -249,6 +254,7 @@ function Dot({ c }) {
 }
 
 // --- inline styles (token-driven; the overlay chromes with the app theme) ---
+// B2426787 — `topInset` is where the app header ends: the overlay fills the body BELOW it (the header is z-index 60, so inset:0 hid the Compare header row under it).
 const overlay = { position: "absolute", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", background: "var(--surface-page)", color: "var(--ink)" };
 const header = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 12px", borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)" };
 const legend = { display: "flex", gap: 16, alignItems: "center", padding: "6px 12px", fontSize: 12, borderBottom: "1px solid var(--border-default)", flexWrap: "wrap" };
@@ -256,7 +262,8 @@ const warnBar = { padding: "6px 12px", fontSize: 12, color: "var(--warn-text)", 
 const canvasWrap = { position: "relative", flex: 1, minWidth: 0, overflow: "hidden", background: "var(--surface-page)", touchAction: "none" };
 const listPane = { width: 240, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", background: "var(--surface-raised)" };
 const listItem = { display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", borderBottom: "1px solid var(--border-default)", cursor: "pointer", font: "inherit", fontSize: 12, color: "var(--ink)" };
-const closeBtn = { border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
-const stepBtn = { border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 4, width: 20, height: 20, cursor: "pointer", lineHeight: 1, padding: 0 };
-const busyOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--hover-ghost)", fontSize: 13, color: "var(--muted)" };
+const nameChip = { maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const closeBtn = { flex: "none",  border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
+const stepBtn = (disabled) => ({ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--ink)", borderRadius: 4, width: 20, height: 20, lineHeight: 1, padding: 0, cursor: disabled ? "default" : "pointer" }); // disabled at either end of the pages → the arrow
+const busyOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--hover-ghost)", fontSize: 13, color: "var(--muted)", cursor: "progress" };
 const errOv = { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontSize: 13, color: "var(--warn-text)" };

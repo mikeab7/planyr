@@ -21,7 +21,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const ROAD_FILL = "#b9b4a8";
+const ROAD_FILL = "#9eabb7";
 const DEMO_ID = "verify-centerline-road";
 
 // road A — legacy rotated-rect road (200′ long × 25′ cross = 24′ travel + 0.5′ curb each side).
@@ -74,7 +74,7 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 // ---- 1. both roads render (legacy migrated + centerline) — no crash ----
 const roadGeom = await page.evaluate((fill) => {
   const paths = [...document.querySelectorAll("svg path")].filter((p) => (p.getAttribute("fill") || "").toLowerCase() === fill);
-  const polylines = [...document.querySelectorAll("svg polyline")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#7c786d");
+  const polylines = [...document.querySelectorAll("svg polyline")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#66737f");
   return { strips: paths.length, curbPolylines: polylines.length };
 }, ROAD_FILL);
 log(roadGeom.strips >= 2, `both roads render a centerline strip (found ${roadGeom.strips} road surfaces; legacy rect MIGRATED + centerline)`);
@@ -109,8 +109,8 @@ let anyPanel = false, anyClass = false, anyCurve = false, warnTxt = "";
 for (let i = 0; i < roadGeom.strips; i++) {
   if (!(await clickStripByIndex(i))) continue;
   const txt = await panelText();
-  if (/Selected\s*·\s*Road/i.test(txt)) anyPanel = true;
-  if (/Road class/i.test(txt)) anyClass = true;
+  if (/Selected\s*·\s*Road/i.test(txt) || /Cross-section/i.test(txt)) anyPanel = true;
+  if (/\bClass\b/.test(txt)) anyClass = true;
   if (/Curve at vertex/i.test(txt)) anyCurve = true;
   const w = txt.match(/⚠[^\n]{0,70}min for Truck[^\n]{0,10}/i);
   if (w) warnTxt = w[0].trim();
@@ -118,8 +118,8 @@ for (let i = 0; i < roadGeom.strips; i++) {
 }
 log(anyPanel, `selecting a road opens its Element panel`);
 log(anyClass, `panel shows the Road-class selector (B599)`);
-log(anyCurve, `panel exposes the per-vertex curve control (B597)`);
-log(!!warnTxt, `civil ⚠ min-radius warning shows for the tight truck-class curve (B599)${warnTxt ? ` — "${warnTxt}"` : ""}`);
+log(!anyCurve, `panel HIDES the per-vertex curve control (road-panel NEW-3: the min-radius feature is behind a flag, default OFF)`);
+log(!warnTxt, `civil ⚠ min-radius warning is HIDDEN (road-panel NEW-3, flag default OFF)${warnTxt ? ` — still shown: "${warnTxt}"` : ""}`);
 await page.screenshot({ path: OUT + "centerline-road-1-panel.png" });
 
 // ---- 2b. DRAG a road vertex handle (B597 startRoadVtx + on-edit civil check) — must not crash ----

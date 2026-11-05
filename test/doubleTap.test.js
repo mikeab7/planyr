@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DBLTAP_MS, DBLTAP_PX, EMPTY_TAP, tapTime, pairsWithLastTap, tapRecord, stepDoubleTap } from "../src/workspaces/site-planner/lib/doubleTap.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const press = (id, t, x = 100, y = 100, wasSel = false) => ({ id, t, x, y, wasSel });
 
@@ -121,7 +122,7 @@ describe("the pairing rules themselves", () => {
 });
 
 describe("source guard — the wall clock may not come back", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
   const LIB = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/doubleTap.js", import.meta.url)), "utf8");
 
   it("the planner's isDoubleTap reads the EVENT's clock", () => {

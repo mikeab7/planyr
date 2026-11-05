@@ -60,7 +60,7 @@ const porcelain = (dir) => spawnSync("git", ["status", "--porcelain"], { cwd: di
 /* The real generator + driver + backstop scripts, copied verbatim into a scratch repo's own
  * scripts/ dir. They are dependency-free by house rule, so this is enough to run the REAL
  * regeneration logic without a real `src/` tree or the rest of this repo. */
-const SCRIPT_FILES = ["lib/ledger.mjs", "merge-driver-ledgers.mjs", "post-merge-regen.mjs", "resolve-ledgers.mjs", "next-id.mjs", "idBlocks.mjs", "build-map.mjs", "build-backlog-index.mjs"];
+const SCRIPT_FILES = ["lib/ledger.mjs", "lib/ledgerBranch.mjs", "merge-driver-ledgers.mjs", "post-merge-regen.mjs", "resolve-ledgers.mjs", "next-id.mjs", "idBlocks.mjs", "build-map.mjs", "build-backlog-index.mjs"];
 
 function seedScripts(dir) {
   mkdirSync(join(dir, "scripts"), { recursive: true });

@@ -22,9 +22,10 @@ import { fileURLToPath } from "node:url";
 import { zOrder, byZ } from "../src/workspaces/site-planner/lib/planStyle.js";
 import * as PlanStyle from "../src/workspaces/site-planner/lib/planStyle.js";
 import { withMissingZ, migrateBandForce, Z_GAP, nextZ } from "../src/workspaces/site-planner/lib/zOrder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 const PS = read("../src/workspaces/site-planner/lib/planStyle.js");
 const stripComments = (src) => src
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -89,8 +90,10 @@ describe("the retired mechanism is genuinely GONE, not merely unused", () => {
     expect(SP_CODE).toMatch(/peers = els;/);
   });
   it("the dissolved road network no longer excludes a band-forced road (there is no band to force out of)", () => {
-    expect(SP_CODE).not.toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !bandForceOf\(x\)/);
-    expect(SP_CODE).toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !elHidden\(hiddenGroups, x\)/);
+    /* round 5 (B2233521): the dissolved network's steps moved out of SitePlanner.jsx into lib/roadNetBuild.js — read both */
+    const ROAD_NET_CODE = readFileSync(new URL("../src/workspaces/site-planner/lib/roadNetBuild.js", import.meta.url), "utf8");
+    expect(SP_CODE + ROAD_NET_CODE).not.toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !bandForceOf\(x\)/);
+    expect(ROAD_NET_CODE).toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !elHidden\(hiddenGroups, x\)/);
   });
 });
 

@@ -183,19 +183,16 @@ async function openProjectFromMap(page, siteName) {
   await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20_000 });
 }
 
-// Open the Plan ▾ crumb and return how many "Plans in this site" rows are showing, read off
-// the per-row Delete button's aria-label ("Delete plan <name>") — present exactly once per row
-// in `plansHere`, and ONLY when plansHere.length > 1 (NEW-3/B385042: a single-plan site shows
-// no switcher list at all, by design — so a collapse to 1 plan reads as ZERO rows here, not one).
+// Open the Plan ▾ crumb and return the names of every plan the menu shows: the CURRENT plan's row on top plus the other plans in the
+// list under it. (NEW-1, 2026-11-04 — the plan menu was redrawn: the old per-row ✕ whose aria-label this used to read is gone, and the
+// current plan is no longer repeated inside the list. A collapse of the site to one plan now reads as ONE name — the current row.)
 async function planSwitcherNames(page) {
   await page.getByTestId("plan-crumb").click();
   // Let the AnchoredMenu portal place itself.
   await page.waitForTimeout(150);
-  const deleteButtons = page.locator('button[aria-label^="Delete plan "]');
-  const n = await deleteButtons.count();
-  const names = [];
-  for (let i = 0; i < n; i++) names.push((await deleteButtons.nth(i).getAttribute("aria-label")).replace(/^Delete plan /, ""));
-  return names;
+  const current = (await page.getByTestId("plan-current-name").innerText()).trim();
+  const others = await page.getByTestId("plan-list-scroll").locator('[data-testid^="plan-open-"]').allInnerTexts();
+  return [current, ...others.map((t) => t.trim())];
 }
 
 test.describe("NEW-1 — team plan-count switcher", () => {

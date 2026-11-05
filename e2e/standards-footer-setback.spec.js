@@ -26,7 +26,7 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 const SHOTS = "test-results/standards-footer";
 
 const site = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return map[Object.keys(map)[0]] || {};
 });
 const parcelCount = async (page) => ((await site(page)).parcels || []).length;
@@ -193,7 +193,7 @@ test.describe("the Standards footer names its three actions", () => {
     await openStandardsParcels(page);
 
     const storedDash = () => page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       return (s.settings || {}).parcelStyle?.dash || null;
     });
@@ -228,7 +228,7 @@ test.describe("the Standards footer names its three actions", () => {
     await openStandardsParcels(page);
 
     const stored = () => page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       return { def: (s.settings || {}).parcelStyle?.dash || null, drawn: (s.parcels || [])[0]?.dash || null };
     });

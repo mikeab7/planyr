@@ -64,7 +64,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField }) {
+export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -88,7 +88,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
         style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: SPACE.xs, padding: `${SPACE.xs}px 0`, marginBottom: SPACE.md, border: "none", background: "transparent", color: "var(--accent-site-text, var(--text-primary))", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer" }}>← All parcels</button>
 
       <div style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0 }}>
-        <div data-testid="parcel-page-name" style={{ minWidth: 0, fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{name}</div>
+        <div data-testid="parcel-page-name" style={{ minWidth: 0, fontSize: FONT_SIZE.display, fontWeight: unnamed ? 400 : 700, color: unnamed ? "var(--text-secondary)" : "var(--text-primary)", overflowWrap: "anywhere" }}>{unnamed ? "Unnamed" : name}</div>
         {origin.chip && <span data-testid="parcel-provenance" style={{ flex: "none", padding: "0 8px", borderRadius: RADIUS.pill, border: LINE, background: "var(--surface-page)", color: "var(--text-secondary)", fontSize: FONT_SIZE.label, fontWeight: 700, lineHeight: "20px" }}>{origin.chip}</span>}
         <span style={{ flex: 1 }} />
         <button type="button" style={{ ...iconBtn, color: "var(--text-secondary)" }} onClick={() => handlers.onToggleLock(parcel.id)} data-testid="parcel-page-lock" aria-pressed={!!parcel.locked}
@@ -110,7 +110,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
 
       <label style={{ display: "block", marginTop: SPACE.xl }}>
         <span style={{ ...eyebrow, display: "block", marginBottom: SPACE.xs }}>Your name for it</span>
-        <CommitField value={parcel.label || ""} placeholder={name} ariaLabel="Your name for this parcel" testid="parcel-field-label" onCommit={(v) => handlers.onField(parcel.id, "label", v)} />
+        <CommitField value={parcel.label || ""} placeholder="" ariaLabel="Your name for this parcel" testid="parcel-field-label" onCommit={(v) => handlers.onField(parcel.id, "label", v)} />
       </label>
 
       <PageSection title="Source" testid="parcel-source">

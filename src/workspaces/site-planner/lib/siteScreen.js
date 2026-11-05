@@ -22,7 +22,7 @@ import { TRUSTED_CHECKS } from "./siteChecks.js";
 
 /* The city-limits layer keys per state — the Layers panel's own "City limits & ETJ" pair in Texas (one merged
  * row), the state's city layer elsewhere. Anything unknown gets no "Show lines" link rather than a dead one. */
-const LINE_LAYERS = { TX: ["jur_city", "jur_etj"], GA: ["ga_city"], CA: ["ca_city"], CO: ["co_city"] };
+export const LINE_LAYERS = { TX: ["jur_city", "jur_etj"], GA: ["ga_city"], CA: ["ca_city"], CO: ["co_city"], NJ: ["nj_city"], TN: ["tn_city"], NY: ["ny_village", "ny_city", "ny_town"] }; // NEW-1 — NJ / NY: no ETJ line exists
 
 /* Road frontage is asked of EVERY active parcel (largest first, capped) — see mergeRoadAnswers. */
 const MAX_ROAD_RINGS = 12;
@@ -61,7 +61,7 @@ export async function runSiteScreen(rings, opts = {}) {
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
-  const roadP = !sourceCoversState(GIS_SOURCES.road, state)
+  const roadP = !sourceCoversState(state === "TN" ? GIS_SOURCES.roadTn : GIS_SOURCES.road, state)
     ? Promise.resolve({ __notScreened: true })
     : Promise.all(roadRings(rings).map((ring) => Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e })))).then(mergeRoadAnswers);
   // CCN: Texas institutions (PUC). Off Texas ground they are never asked — the call simply applies.

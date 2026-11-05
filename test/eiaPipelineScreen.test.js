@@ -233,11 +233,19 @@ describe("Texas regression — unchanged: still TxRRC, still authoritative", () 
     expect(p.sourceName).toMatch(/Railroad Commission/);
   });
 
-  it("an UNKNOWN state (outside every region) keeps the legacy behaviour — the gate fires on a POSITIVE mismatch only", async () => {
+  it("an UNKNOWN state (outside the US) keeps the legacy behaviour — the gate fires on a POSITIVE mismatch only", async () => {
     const { opts, calls } = harness();
-    const r = await runSiteAnalysis(ring(-100.0, 41.0), opts); // Nebraska
+    const r = await runSiteAnalysis(ring(-79.38, 43.65), opts); // Toronto — no state answers
     expect(r.site.state).toBeNull();
     expect(calls.some((u) => u.startsWith(GIS_SOURCES.pipelines.serviceUrl))).toBe(true);
+  });
+
+  it("a Nebraska site (B2479568 amendment: siteState now names it) never queries the Texas RRC services", async () => {
+    const { opts, calls } = harness();
+    const r = await runSiteAnalysis(ring(-100.0, 41.0), opts);
+    expect(r.site.state).toBe("NE");
+    expect(calls.some((u) => u.startsWith(GIS_SOURCES.pipelines.serviceUrl))).toBe(false);
+    expect(calls.some((u) => u.startsWith(GIS_SOURCES.oilgas.serviceUrl))).toBe(false);
   });
 });
 
@@ -246,12 +254,15 @@ describe("siteState — Florida and Georgia are real outlines, and neighbours ar
     ["Atlanta", 33.75, -84.39, "GA"], ["Savannah", 32.08, -81.09, "GA"], ["Augusta", 33.47, -81.97, "GA"], ["Columbus", 32.46, -84.99, "GA"],
     ["Jacksonville", 30.33, -81.66, "FL"], ["Tampa", 27.95, -82.46, "FL"], ["Miami", 25.76, -80.19, "FL"], ["Pensacola", 30.42, -87.22, "FL"],
     ["Key West", 24.56, -81.78, "FL"], ["Naples", 26.14, -81.79, "FL"], ["Tallahassee", 30.44, -84.28, "FL"],
-    ["Birmingham AL", 33.52, -86.8, null], ["Montgomery AL", 32.37, -86.3, null], ["Gulf Shores AL", 30.25, -87.7, null],
-    ["Charleston SC", 32.78, -79.93, null],
-    // B1990960 (main): Georgia's ROUTING BOX is deliberately generous and answers "GA" for the SC / TN edges (fail-closed:
-    // a wrong "GA" only hides a Texas number). Which of those points is truly Georgia is decided by county polygons in
-    // jurisdiction.js. Pinned so a change to that decision is a visible one.
-    ["Aiken SC (inside the GA routing box)", 33.56, -81.72, "GA"], ["Chattanooga TN (inside the GA routing box)", 35.05, -85.3, "GA"],
+    // B2479568 amendment: the neighbours used to answer null (no region for them); every state now answers by name.
+    ["Birmingham AL", 33.52, -86.8, "AL"], ["Montgomery AL", 32.37, -86.3, "AL"], ["Gulf Shores AL", 30.25, -87.7, "AL"],
+    ["Charleston SC", 32.78, -79.93, "SC"],
+    // B1990960 (main) pinned Aiken SC as "GA" because Georgia's ROUTING BOX answered for the SC edge. B2479568 amendment: the box no
+    // longer answers for the state — real boundaries do — so Aiken is South Carolina (the routing box is untouched, jurisdiction.js).
+    ["Aiken SC (inside the GA routing box)", 33.56, -81.72, "SC"],
+    // NEW-1 (Tennessee): Chattanooga used to be pinned "GA" here (it sits in Georgia's box). Tennessee is now a real outline that starts
+    // exactly on the Georgia line, so Chattanooga is TN — and Rossville GA, 2 miles south of it, is still GA.
+    ["Chattanooga TN (inside the GA routing box)", 35.05, -85.3, "TN"], ["Rossville GA (just south of the line)", 34.98, -85.29, "GA"],
     // …but FLORIDA north of the box floor is Florida, not Georgia — the outlines are asked first.
     ["Jacksonville FL (inside the GA routing box)", 30.33, -81.66, "FL"], ["Tallahassee FL (inside the GA routing box)", 30.44, -84.28, "FL"],
     ["Houston TX", 29.76, -95.37, "TX"], ["Denver CO", 39.7, -104.99, "CO"],
@@ -304,18 +315,19 @@ describe("registry — one entry per layer, coverage + tier + lastVerified, scop
   });
 });
 
-describe("Layers panel — labels say approximate, transmission-only, FL/GA-scoped", () => {
+describe("Layers panel — labels say approximate, transmission-only, offered everywhere but Texas", () => {
   const rows = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"].map((id) => [id, ALL_LAYERS[id]]);
   it("all four layers exist", () => expect(rows.every(([, c]) => c && c.kind === "esriFeature")).toBe(true));
   for (const [id, cfg] of rows) {
-    it(`${id}: 'approx.' in the label; detail behind the info icon names transmission-only and no mains/gathering; FL/GA only`, () => {
+    it(`${id}: 'approx.' in the label; detail behind the info icon names transmission-only and no mains/gathering; every state but Texas`, () => {
       expect(cfg.label).toMatch(/approx/i);
       expect(cfg.sublabel).toMatch(/Approximate/);
       expect(cfg.sublabel).toMatch(/transmission/i);
       expect(cfg.sublabel).toMatch(/no local gas mains or gathering lines/i);
-      expect(cfg.infoCaveat).toMatch(/Sunshine 811/);
-      expect(cfg.infoCaveat).toMatch(/Georgia 811/);
-      expect(cfg.states).toEqual(["FL", "GA"]);
+      expect(cfg.infoCaveat).toMatch(/811 locate/); // state-neutral (NEW-1 2026-10-29): the row now serves every state but Texas; the FL/GA Analysis card still names its own one-call centre
+      expect(cfg.infoCaveat).not.toMatch(/Sunshine|Georgia 811/);
+      expect(cfg.statesNot).toEqual(["TX"]);
+      expect(cfg.states).toBeUndefined();
       expect(cfg.label.length).toBeLessThan(45); // short text in the row; the detail lives behind ⓘ
     });
   }

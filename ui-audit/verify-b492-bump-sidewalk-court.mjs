@@ -66,12 +66,12 @@ const near = (a, b, eps = 2) => Math.abs(a - b) <= eps;
 const readEls = async (pred = () => true, tries = 12) => {
   for (let i = 0; i < tries; i++) {
     const got = await page.evaluate((id) => {
-      try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; }
+      try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; }
     }, DEMO_ID);
     if (got && pred(got)) return got;
     await page.waitForTimeout(300);
   }
-  return await page.evaluate((id) => { try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
+  return await page.evaluate((id) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
 };
 const byId = (a, id) => a.find((x) => x.id === id) || {};
 const topCourt = (a) => a.find((x) => x.truckCourt && x.truckCourt.side === "top") || {};
@@ -129,7 +129,7 @@ await page.screenshot({ path: OUT + "b492-bumps.png" });
 // ---- 2) editable truck-court length: select a court, type a new length ----
 const csel = await page.evaluate(() => {
   const r = [...document.querySelectorAll("svg rect")].map((x) => ({ x, f: (x.getAttribute("fill") || "").toLowerCase() }))
-    .filter((o) => o.f === "#d6d1c7").map((o) => o.x).sort((p, q) => p.getBoundingClientRect().y - q.getBoundingClientRect().y)[0];
+    .filter((o) => o.f === "#d5d9de").map((o) => o.x).sort((p, q) => p.getBoundingClientRect().y - q.getBoundingClientRect().y)[0];
   if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 });
 if (csel) { await page.mouse.click(csel.x, csel.y); await page.waitForTimeout(400); }

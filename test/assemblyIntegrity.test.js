@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { assemblyIntegrity, assemblyTears, tearPayload, ASSEMBLY_TEAR_TOL_FT } from "../src/workspaces/site-planner/lib/assemblyIntegrity.js";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -515,7 +516,7 @@ describe("race 6 — undo of a multi-select move spanning two assemblies", () =>
  * editing SitePlanner, not by editing this module. These guards fail if a seam is removed — the
  * enumeration in the backlog item is the specification, and this is its enforcement. */
 describe("every seam that can put a child on the canvas or on the wire runs the guard", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("the guard exists and is LOUD on both channels (detected + healed)", () => {
     expect(src).toMatch(/const assemblyGuard = \(list, seam\) =>/);
@@ -531,8 +532,9 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     // realtime tombstone's removal via applyRemoteInstr) REPLACES it outright, discarding the
     // removal. The mutation check below replays the old bare-value shape and proves it is wrong.
     const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/setEls\(\(cur\) => /);
-    expect(block).not.toMatch(/setEls\(guarded\);/);
+    // (B2498961: the guard writes through `setElsRaw` — it RESTORES geometry and must never be re-interpreted by the drive-follow wrapper.)
+    expect(block).toMatch(/setEls(Raw)?\(\(cur\) => /);
+    expect(block).not.toMatch(/setEls(Raw)?\(guarded\);/);
   });
 
   it("MUTATION CHECK — a bare `setEls(guarded)` at the canvas seam would discard a same-batch functional update", () => {
@@ -583,7 +585,7 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     expect(store).toMatch(/function bondedHealWatch\(id\)/);
     expect(store).toMatch(/reportClientEvent\("assembly-tear-detected"/);
     expect(store).toMatch(/migrate\(rec, \{ onHeal: watch\.onHeal \}\)/);   // listens to the heal that already runs
-    expect(store).toMatch(/migrate\(r, \{ onHeal: watch\.onHeal \}\)/);     // …in the list read too
+    expect(store).toMatch(/migrate\(r, \{ onHeal: watch\.onHeal(, provenCleanEls: proven)? \}\)/);     // …in the list read too (B2236000: a cross-load proof may say the list is already clean)
     // …and the repair is WRITTEN BACK, or the next reader gets the tear again.
     expect(store).toMatch(/if \(persistHeal && wasTorn\)/);
     expect(src).toMatch(/loadSite\(siteId, \{ persistHeal: true \}\)/);

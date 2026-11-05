@@ -11,7 +11,7 @@
 
 // "HOUSTON" → "Houston" (H-GAC publishes ALL-CAPS names). Mirrors jurisdiction.js's
 // private titleCase so the identify and the labels render names identically.
-export const titleCaseName = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+export const titleCaseName = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bMc([a-z])(?=[a-z]{2})/g, (_m, c) => "Mc" + c.toUpperCase()); // "McAlester", "McKinney" — a lowercase pass alone gives "Mcalester"
 
 /* Signed shoelace area + centroid of one ring ([[x,y],...]). Degenerate rings
  * (area ~0) fall back to the vertex average so a sliver still gets an anchor. Pure. */
@@ -97,3 +97,16 @@ export function placeLabels(anchors, { project, viewW, viewH, charW = 6.8, boxH 
  * continent zoom. Pure. */
 export const labelsVisible = (labelZoom, zoom) =>
   !!labelZoom && typeof zoom === "number" && zoom >= labelZoom.min && zoom <= labelZoom.max;
+
+/* B2507065 (NEW-10): which of a set of labels already ON SCREEN (each {x, y, w, h, rank} — a centre and a size in px) may stay: the highest `rank` first, and any label whose
+ * box would overlap one already kept is dropped, so two names never pile up. Returns the kept indices. Pure. */
+export function declutterBoxes(boxes, gap = 4) {
+  const order = boxes.map((b, i) => i).sort((a, b) => (boxes[b].rank || 0) - (boxes[a].rank || 0));
+  const kept = [];
+  for (const i of order) {
+    const b = boxes[i];
+    if (kept.some((k) => collide(boxes[k], b, gap))) continue;
+    kept.push(i);
+  }
+  return kept.sort((a, b) => a - b);
+}

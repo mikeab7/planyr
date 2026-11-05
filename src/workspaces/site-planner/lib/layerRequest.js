@@ -11,6 +11,7 @@
  * coverage parameter here by construction; test/coverage.test.js locks it down.
  */
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+import { pipeSizeLabel } from "./desotoLayers.js"; // NEW-1 (DeSoto / Olive Branch) — the default formatter for a `lineLabel` row
 
 // Route a service URL through the same-origin Drive-backed cache proxy (B445) when asked. This
 // is a pure TRANSPORT swap — the layer still requests its full pinned sublayer set for the whole
@@ -83,10 +84,14 @@ export function overlayExportRequest(cfg, { proxy = false } = {}) {
  * `fillOpacity` tracks `opacity` so the panel's slider dims the whole symbol together, and a
  * `radius` a registry row may override (`cfg.pointRadius`) keeps a dense national point layer
  * from turning the view into confetti. */
-export function pointSymbolOptions(cfg = {}, opacity = 1) {
-  const color = cfg.color || "#b91c1c";
+export function pointSymbolOptions(cfg = {}, opacity = 1, props = null) {
+  /* NEW-1 (Mississippi): a POINT row may colour each marker by its attributes through `pointStyleFn(props) → { color, radius? }` (an open-release tank is red, a plugged well grey). The
+   * flat `cfg.color` stays the fallback and the colour of a row that declares no function, so every existing row draws exactly as before. Screen, hover restyle, the opacity setter and
+   * the print path all pass the feature's properties here — one rule, so the legend and the map cannot disagree. */
+  const ps = props && typeof cfg.pointStyleFn === "function" ? (cfg.pointStyleFn(props) || {}) : {};
+  const color = ps.color || cfg.color || "#b91c1c";
   return {
-    radius: cfg.pointRadius || 4,
+    radius: ps.radius || cfg.pointRadius || 4,
     color,
     weight: cfg.weight || 2,
     opacity,
@@ -108,12 +113,60 @@ export function pointSymbolOptions(cfg = {}, opacity = 1) {
  *                  (it needs leaflet), so it is injected; `test/pointSymbology.test.js` locks
  *                  down that every live call site passes one.
  *   interactive  — enable pointer events so the hover identify can fire on the features. */
+/* The label printed on a line (NEW-1, DeSoto / Olive Branch): the row's `lineLabel.field` read through `lineLabel.format` (default `pipeSizeLabel`, which cleans the
+ * city's hand-typed sizes), or null when there is nothing worth printing. Pure. */
+/* B2507064 (NEW-9) — THE DRAW BUDGET: no layer may freeze the tab. esri-leaflet asks a service for FULL-precision geometry and hands every vertex to Leaflet,
+ * which builds one SVG path per feature; the Discover DeSoto layer was 12 polygons holding 707,071 vertices (one polygon 634,514; a 28 MB answer), and turning it
+ * on zoomed out left Chrome on "Page Unresponsive" (measured live, ui-audit/verify-layer-no-freeze.mjs: the tab did not answer for the whole 160 s wait).
+ * Work that is already inside Leaflet cannot be interrupted, so the guard sits BEFORE it: `countVertices` is a cheap walk over the GeoJSON that stops at `cap`, and
+ * `layers.buildFeatureLayer` declines to draw a batch over `FEATURE_VERTEX_BUDGET` (and a layer whose batches together pass `FEATURE_VERTEX_TOTAL`) — the layer then
+ * reports a plain "too detailed to draw at this zoom" failure (status dot "failed") instead of hanging. A row that really needs more declares `vertexBudget`. */
+export const FEATURE_VERTEX_BUDGET = 120000;
+export const FEATURE_VERTEX_TOTAL = 300000;
+export function countVertices(features, cap = Infinity) {
+  let n = 0;
+  const walk = (c) => {
+    if (n > cap) return;
+    if (typeof c[0] === "number") { n += 1; return; }
+    for (let i = 0; i < c.length && n <= cap; i++) walk(c[i]);
+  };
+  for (const f of features || []) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "GeometryCollection") { for (const gg of g.geometries || []) if (gg && gg.coordinates) walk(gg.coordinates); }
+    else if (g.coordinates) walk(g.coordinates);
+    if (n > cap) break;
+  }
+  return n;
+}
+
+export function lineLabelText(cfg, props) {
+  const ll = cfg && cfg.lineLabel;
+  if (!ll || !ll.field || !props) return null;
+  const fmt = typeof ll.format === "function" ? ll.format : pipeSizeLabel;
+  const t = fmt(props[ll.field]);
+  return t ? String(t) : null;
+}
+
 export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: !!opts.interactive };
   if (cfg.fields) o.fields = cfg.fields;
   // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
   if (cfg.where) o.where = cfg.where;
+  // B2507064 (NEW-9): a row whose polygons are far more detailed than any screen can show (Future Land Use: 14 polygons, 308 k vertices, a ~2 s stall to draw) asks the SERVER to generalise to ~`simplifyFactor` pixels; layers.buildFeatureLayer re-asks when the zoom moves 2 levels so a zoomed-in view never keeps the coarse copy.
+  if (cfg.simplifyFactor) o.simplifyFactor = cfg.simplifyFactor;
+  // B2452976 (Florida): esri-leaflet answers a view with its service's first page only (2,000) and says nothing — a dense permit / wellfield layer then silently drops features. `fetchAll` follows the paging until the view is complete (the vertex budget still guards the draw).
+  if (cfg.fetchAll) o.fetchAllFeatures = true;
+  // NEW-1 (Mississippi): a row on a pre-10.7 ArcGIS Server asks for plain JSON, not GeoJSON — that server's GeoJSON answer ignores maxAllowableOffset (a 195,577-vertex cell stays 195,577) and answers HTTP 400 for a few large polygons (MDEQ Dam Safety), while its JSON honours both.
+  if (cfg.forceJson) o.isModern = false;
+  // NEW-1 (Georgia): a layer whose service answers one HUGE feature for any cell (DCA's protected mountains: one multipolygon, 536k vertices) asks for ONE big cell per view instead of six 512 px ones (each re-downloaded the whole feature, 11 MB apiece) and coarser coordinate text.
+  if (cfg.cellSize) o.cellSize = cfg.cellSize;
+  if (cfg.precision != null) o.precision = cfg.precision;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
+  // NEW-1 (DeSoto / Olive Branch): a row's `lineLabel` ({ field, minZoom }) puts a short text (the pipe size) on each line; the Leaflet half (`layers.buildFeatureLayer`) binds it.
+  if (cfg.lineLabel && typeof opts.onLabel === "function") {
+    o.onEachFeature = (feature, layer) => { const t = lineLabelText(cfg, feature && feature.properties); if (t) opts.onLabel(layer, t); };
+  }
   // A LINE-role row never fills: a polyline answered by a service as one long ring must not paint as a solid wedge.
   const noFill = cfg.role === "line" ? { fill: false } : null;
   o.style = typeof cfg.styleFn === "function"

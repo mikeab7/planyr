@@ -52,7 +52,7 @@ async function boot(opts = {}) {
   return { ctx, page, errs };
 }
 const order = (page) => page.evaluate(() => Array.from(document.querySelectorAll("[data-overlay-row]")).map((n) => n.getAttribute("data-overlay-row")));
-const stored = (page) => page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m.S && m.S.sheetOverlays) || []; });
+const stored = (page) => page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m.S && m.S.sheetOverlays) || []; });
 const undo = async (page) => { await page.evaluate(() => document.activeElement && document.activeElement.blur && document.activeElement.blur()); await page.locator('button[aria-label="Undo"]').click(); await page.waitForTimeout(350); };
 const sub = (page, id) => page.locator(`[data-overlay-row="${id}"] [data-testid="overlay-row-sub"]`).first().innerText();
 const open = async (page, id) => { const row = page.locator(`[data-overlay-row="${id}"]`); if ((await page.locator(`[data-testid="overlay-open-${id}"]`).count()) === 0) await page.locator(`[data-testid="reference-open-${id}"]`).click(); await page.waitForTimeout(300); return row; };
@@ -151,7 +151,7 @@ async function menuPick(page, id, label) {
   ok((await rot()) === "0", `undo steps back through each rotation (6 undos → ${await rot()})`);
 
   // ---- opacity ----------------------------------------------------------------------------------
-  const pct = page.locator('[data-testid="overlay-opacity-pct"]'); await pct.fill("40"); await pct.blur(); await page.waitForTimeout(250);
+  const pct = page.locator('[data-testid="overlay-opacity-pct"]'); await pct.click(); await pct.fill("40"); await pct.blur(); await page.waitForTimeout(250);
   ok((await stored(page)).find((o) => o.id === "a1").opacity === 0.4, "opacity % writes the overlay");
 
   // ---- Set scale preset: ratio changes; reload keeps it ------------------------------------------

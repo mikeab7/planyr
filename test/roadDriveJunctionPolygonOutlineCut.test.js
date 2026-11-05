@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { driveJunctionsOf } from "../src/workspaces/site-planner/lib/roadJunctions.js";
 import { roadStripRing } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 import { dissolveRings, polygonOutlineCutSegments, rectOutlineCutSegments } from "../src/workspaces/site-planner/lib/roadNetwork.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
@@ -165,14 +166,14 @@ describe("B1613152 — polygonOutlineCutSegments: a polygon pad's own outline is
 });
 
 describe("B1613152 — the polygon render branch wires the cut in (source guard, mirrors junctionOutlineCut.test.js's own render-frame half)", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("the polygon branch looks up roadNet.outlineCuts for its own element id", () => {
     const i = src.indexOf('if (el.points) { // polygon element');
     expect(i, "polygon element branch not found — has it moved or been reverted?").toBeGreaterThan(-1);
     const block = src.slice(i, i + 1400);
     expect(block).toMatch(/const outlineCut = roadNet && roadNet\.outlineCuts \? roadNet\.outlineCuts\.get\(el\.id\) : null;/);
-    expect(block).toMatch(/polygonOutlineCutSegments\(el, outlineCut\)/);
+    expect(block).toMatch(/polygonOutlineCutSegments\(el, outlineCut, roadNet\.mouths && roadNet\.mouths\.get\(el\.id\)\)/);
   });
 
   it("the polygon's own full-path stroke is suppressed exactly when a cut is active (never drawn twice)", () => {

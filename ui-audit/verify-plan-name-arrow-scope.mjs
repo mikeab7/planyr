@@ -73,7 +73,8 @@ try {
     await ctx.route("**/*", (r) => (r.request().url().startsWith(BASE) ? r.continue() : r.abort()));
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-plan-name-arrow-scope");
-    await page.goto(BASE, { waitUntil: "load" });
+    // The app opens on the Dashboard now — deep-link into the seeded plan (NEW-1, 2026-11-04: found stale while re-pointing this harness at the in-place rename field).
+    await page.goto(`${BASE.replace(/\/$/, "")}/#/project/${SITE_ID}/site`, { waitUntil: "load" });
     await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 30000 });
     await pacedWait(page, 3000);
     return { ctx, page };
@@ -89,7 +90,10 @@ try {
 
     await page.locator('[data-testid="plan-crumb"]').click();
     await pacedWait(page, 400);
-    const nameInput = page.locator('[data-testid="plan-name-input"]');
+    // NEW-1 (2026-11-04): the rename field is the current plan's ROW turned into a text field in place (double-click its name).
+    // Same guarantee on the new field: arrow-family keys move the caret and never nudge the selected building.
+    await page.locator('[data-testid="plan-current-name"]').dblclick();
+    const nameInput = page.locator('[data-testid="plan-rename-input"]');
     await nameInput.click();
     await pacedWait(page, 300);
     await page.keyboard.press("End");

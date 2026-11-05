@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "1d2a174fa",
-        "note": "B2175312: docked left-rail panels moved from the grey column backdrop to the white overlay surface (intended, owner-requested); only the left-rail region of the site-planner-left-rail surface changes [CI-authored by run 37533177908 on 1d2a174fa65d7933161d7f1b2eb53deb94a51a88]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "1d2a174fa",
-        "note": "B2175312: docked left-rail panels moved from the grey column backdrop to the white overlay surface (intended, owner-requested); only the left-rail region of the site-planner-left-rail surface changes [CI-authored by run 37533177908 on 1d2a174fa65d7933161d7f1b2eb53deb94a51a88]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       }
     }
   }

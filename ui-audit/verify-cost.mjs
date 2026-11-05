@@ -62,8 +62,9 @@ await page.locator('button[title="Yield"]').click({ timeout: 5000 }).catch(() =>
 await page.mouse.click(720, 620);
 await page.waitForTimeout(500);
 const bodyAfter = await page.evaluate(() => document.body.innerText);
-console.log("Inspector 'Curb & paving (cost)':", bodyAfter.includes("Curb & paving (cost)"));
-console.log("Inspector 'Curb type':", bodyAfter.includes("Curb type"));
+// road-panel redesign (NEW-2): cost is gone from the road inspector — expect false / false (the Yield rows above still price roads)
+console.log("Inspector 'Curb & paving (cost)' (expect false):", bodyAfter.includes("Curb & paving (cost)"));
+console.log("Inspector 'Curb type' (expect false):", bodyAfter.includes("Curb type"));
 await page.screenshot({ path: new URL("./screens/cost-inspector.png", import.meta.url).pathname });
 
 console.log("Page errors:", errors.length ? errors : "none");

@@ -75,10 +75,11 @@ import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } fr
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
 import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
-import { orderedIds, moveProject, buildSavedOrder } from "../../shared/projects/projectOrder.js";
+import { planProjectMove } from "../../shared/projects/projectOrder.js";
 import { loadProjectOrder, saveProjectOrder } from "./lib/dashboardProjectOrderPrefs.js";
 import { buildSinceLastHereFeed } from "./lib/sinceLastHereFeed.js";
 import { spanWords } from "./lib/dashboardDates.js";
+import { pinDragCursor } from "../../shared/ui/controls.jsx";
 
 // B1426608 — cards whose content is a short text/number list (no chart, map, or
 // thumbnail grid measuring its own box) shrink to content instead of stretching to fill their
@@ -170,6 +171,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // gets janky). react-grid-layout fires the matching Stop callback even if the gesture ends
   // off the grid, so this can't get stuck true.
   const [gridInteracting, setGridInteracting] = useState(false);
+  const gridCursorRelease = useRef(null); // pins grabbing / the resize arrow for the whole card drag (cursor convention)
 
   // Load the saved layout once per mount (this component is not kept alive — see Shell.jsx).
   // loadDashboardLayout already reconciles it against the current card catalog — any card shipped
@@ -352,11 +354,8 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   };
   const moveProjectInOrder = (groupId, dest) => {
     if (!orderReady) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
-    const today = [...projects].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    const full = orderedIds(today, projectOrder);
-    const next = moveProject(full, pursuitsRows.map((r) => r.groupId), groupId, dest);
-    if (next.every((id, i) => id === full[i])) return;
-    applyProjectOrder(buildSavedOrder(next));
+    const next = planProjectMove(projects, projectOrder, groupId, dest, pursuitsRows.map((r) => r.groupId));
+    if (next) applyProjectOrder(next);
   };
 
   const cardData = useMemo(() => ({
@@ -522,10 +521,10 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
               resizeHandles={["se"]}
               compactType="vertical"
               onLayoutChange={onGridLayoutChange}
-              onDragStart={() => setGridInteracting(true)}
-              onDragStop={() => setGridInteracting(false)}
-              onResizeStart={() => setGridInteracting(true)}
-              onResizeStop={() => setGridInteracting(false)}
+              onDragStart={() => { setGridInteracting(true); gridCursorRelease.current = pinDragCursor("grabbing"); }}
+              onDragStop={() => { setGridInteracting(false); gridCursorRelease.current?.(); }}
+              onResizeStart={() => { setGridInteracting(true); gridCursorRelease.current = pinDragCursor("nwse-resize"); }}
+              onResizeStop={() => { setGridInteracting(false); gridCursorRelease.current?.(); }}
             >
               {layout.map((entry) => (
                 <div key={entry.key}>{cardEl(entry)}</div>

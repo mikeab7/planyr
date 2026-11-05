@@ -15,9 +15,10 @@ import {
   roleOverElements, tierForRole, panesForRole, rolesOf, isRoleSplit, auditLayerRoles,
   exportsOverPlan, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL,
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
-  canLiftRole, configCanLift, tierForLayer, layerOverPlan, panesForLayer, bandKey, exportBandFor,
+  canLiftRole, configCanLift, tierForLayer, layerOverPlan, panesForLayer, bandKey, exportBandFor, lineHostZ,
 } from "../src/workspaces/site-planner/lib/mapStack.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/" + rel, import.meta.url)), "utf8");
 
@@ -154,13 +155,15 @@ describe("NEW-1 — no FREE-FORM z-order UI, and no second stacking scheme", () 
       expect(panel, `LayerPanel must not offer "${banned}" — the model is fixed`).not.toContain(banned);
     }
     // …and the ONE sanctioned ordering affordance is the named two-state lift.
-    expect(panel).toContain("Show above plan");
+    expect(panel).toContain("Draw above plan");
   });
 
   it("the planner names panes from the model instead of picking its own z-index", () => {
-    const planner = read("SitePlanner.jsx");
+    const planner = plannerSource();
     expect(planner).toContain("PANE_LINE");
-    expect(planner).toContain("CANVAS_Z.gisLine");
+    // NEW-1: the line host's z comes from the model's `lineHostZ` — the normal order is unchanged, and it only sinks while the Parcels tool is up.
+    expect(planner).toContain("lineHostZ(parcelsFront)");
+    expect(lineHostZ(false)).toBe(CANVAS_Z.gisLine);
     // The map-top host must never take pointer events — it sits over the plan, so if it did it
     // would swallow the click that selects a building and the drag that moves a handle.
     const host = planner.slice(planner.indexOf("the MAP-TOP HOST"), planner.indexOf("geoTopPaneRef} style") + 200);
