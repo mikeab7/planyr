@@ -33,6 +33,7 @@ if (args.includes("--legacy")) { // the owner's stored map snapshot ("Aerial bac
 }
 const err = await page.evaluate(async ([pl]) => { const { data: u } = await window.pfSupabase.auth.getUser(); const { error } = await window.pfSupabase.from("sites").insert({ id: pl.id, group_id: pl.groupId, site: pl.site, name: pl.name, county: null, user_id: u.user.id, version: 1, data: pl }); return error ? String(error.message) : null; }, [plan]);
 if (err) throw new Error(err);
+const verdicts = [];
 const setLayer = async (panel, key, on) => { const cb = panel.locator(`[data-testid="layer-row-${key}"] input[type="checkbox"]`).first(); if ((await cb.isChecked()) !== on) await (on ? cb.check() : cb.uncheck()); };
 try {
   await page.goto(`${BASE}/?planyrDiag=1#/project/${id}/site`, { waitUntil: "domcontentloaded" });
@@ -80,9 +81,15 @@ try {
     console.log(`\n${key}: zoom ${info.zoom}, service features ${info.nfeat}, polygons on map ${info.layers}   (cell = Truth/Loaded/Painted)`);
     for (const y of Object.keys(rows)) console.log(String(y).padStart(4), rows[y].join(" "));
     const holes = sample.filter((_, i) => info.truth && info.truth[i] && !painted[i]);
+    verdicts.push({ key, holes: holes.length, unloaded: sample.filter((_, i) => info.truth && info.truth[i] && !info.loaded[i]).length, truthPts: info.truth ? info.truth.filter(Boolean).length : 0, at: holes.slice(0, 6).map((p) => `${p.x},${p.y}`).join(" ") });
     console.log(`${key}: truth points ${info.truth ? info.truth.filter(Boolean).length : "?"}, truth-but-unpainted ${holes.length}, truth-but-unloaded ${sample.filter((_, i) => info.truth && info.truth[i] && !info.loaded[i]).length}`);
     await setLayer(panel, key, false); await page.waitForTimeout(2500);
   }
+  /* VERDICT (run with --els 0 so nothing of the plan sits on the fill): a hole is a point the service holds a polygon at that did not change the picture. A plan's own parcel outline / the panel's edge /
+   * the scale bar legitimately cover a handful of sample points (4 measured on the unfixed build with the live basemap on); the unfixed Map-Base-Off build leaves 19-20 per layer (the snapshot's rectangle). */
+  const LIMIT = 8;
+  for (const v of verdicts) console.log(`${v.holes <= LIMIT && v.truthPts > 50 ? "✅" : "❌"} ${v.key}: ${v.holes} unpainted of ${v.truthPts} service-covered points (limit ${LIMIT}); unloaded ${v.unloaded}${v.holes > LIMIT ? "  at " + v.at : ""}`);
+  if (verdicts.some((v) => v.holes > LIMIT || v.truthPts <= 50)) process.exitCode = 1;
 } finally {
   console.log("cleanup", JSON.stringify(await cleanupLive(page, { planId: id }))); await s.close();
 }
