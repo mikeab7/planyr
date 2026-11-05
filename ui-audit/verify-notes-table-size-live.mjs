@@ -57,6 +57,7 @@ async function reopen() {
 
 await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
+await wait(3000);                       // the page list fills after the button appears — count it only once it has
 const before = await page.locator('[data-testid^="notes-row-"]').count();
 await page.locator('[data-testid="notes-new-page"]').click();
 await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
@@ -125,6 +126,13 @@ try {
     if (await yes.count()) { await yes.click(); await wait(1200); }
   } catch (e) { console.log("  cleanup step error:", String(e).slice(0, 200)); }
   ok("the throwaway page is gone from the list", (await page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).count()) === 0);
+  /* ⛔ DELETE-MUST-VERIFY ACROSS A RELOAD: the first run of this harness reported "gone" and closed the browser before the
+   * delete reached the cloud, so the page came back on the next sign-in. Give the push time, reload, and look again. */
+  await wait(5000);
+  await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid^="notes-row-"]', { timeout: 30000 }).catch(() => {});
+  await wait(3000);
+  ok("…and still gone after a reload", (await page.locator(`[data-testid^="notes-row-"]`, { hasText: TITLE }).count()) === 0);
   const after = await page.locator('[data-testid^="notes-row-"]').count();
   ok("page count is back to what it was", after === before, `${before} → ${after}`);
 }
