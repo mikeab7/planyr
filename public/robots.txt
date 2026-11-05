@@ -1,5 +1,0 @@
-# Planyr — https://planyr.io
-User-agent: *
-Allow: /
-
-Sitemap: https://planyr.io/sitemap.xml
