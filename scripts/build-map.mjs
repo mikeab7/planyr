@@ -9,7 +9,8 @@
  * HOUSE RULES honoured:
  *   • Dependency-free — Node fs + regex only, no new packages (mirrors build-parcel-snapshot.mjs).
  *   • Descriptions are the human-value column and are PRESERVED across regenerations, keyed by
- *     path (parsed back out of the committed MAP.md). A brand-new file gets `TODO — describe`.
+ *     path (parsed back out of the committed MAP.md). A brand-new file gets a description DERIVED
+ *     from its own header comment (`deriveDescription`), never a placeholder (NEW-1, 2026-11-05).
  *   • Deterministic — NO volatile date/commit-hash stamp in the header (NEW-1, B<PENDING>,
  *     2026-09-08). A stamp that changes every run made this file (and its `--check` drift guard)
  *     look dirty on every regeneration even with zero real content change — a commit whose entire
@@ -152,6 +153,100 @@ export function scanRepo() {
 }
 
 // ----------------------------------------------------------------------------------------
+// Derive a real one-line description for a file that has none yet (NEW-1, 2026-11-05).
+//
+// WHY: a brand-new file used to arrive as `TODO — describe`. The nightly regen job commits whatever
+// this script writes, and `--check` / test/resolveLedgers.test.js both forbid a placeholder — so
+// when the job sat unmergeable for weeks (it cannot open its own PR), the first regen after the gap
+// wrote ~586 placeholders and turned main's required `build` red. A generator whose default output
+// fails its own guard can never run unattended. So the default is now a genuine description taken
+// from the file itself: the first sentence of its leading comment (every file here carries one),
+// else a factual line built from its exports. A description a human wrote is still preserved, keyed
+// by path, and always wins.
+// ----------------------------------------------------------------------------------------
+const MAX_DESC = 190;
+const PRAGMA = /^(?:eslint|@ts-|prettier-ignore|istanbul|c8 |vitest-environment|@vitest|global |jshint)/i;
+
+/** Pull the leading comment blocks out of a source string as cleaned plain-text paragraphs. */
+function leadingComments(src) {
+  const out = [];
+  let rest = src.replace(/^﻿/, "").replace(/^#!.*\n/, "");
+  for (let guard = 0; guard < 8; guard++) {
+    rest = rest.replace(/^\s+/, "");
+    rest = rest.replace(/^(["'])use (?:strict|client)\1;?/, "").replace(/^\s+/, "");
+    // Some files import first and put their header comment after the imports — step over them.
+    for (let i = 0; i < 40 && /^import\b/.test(rest); i++) {
+      const m = rest.match(/^import\s+(?:[^"';]*?\sfrom\s*)?(["'])[^"']+\1[^\n;]*;?[ \t]*/);
+      if (!m) break;
+      rest = rest.slice(m[0].length).replace(/^[ \t]*\/\/[^\n]*/, "").replace(/^\s+/, ""); // + same-line `// note`
+    }
+    let text = null;
+    if (rest.startsWith("/*")) {
+      const end = rest.indexOf("*/");
+      if (end < 0) break;
+      text = rest.slice(2, end).replace(/^\*+/, "")
+        .split("\n").map((l) => l.replace(/^\s*\*+ ?/, "")).join(" ");
+      rest = rest.slice(end + 2);
+    } else if (rest.startsWith("//")) {
+      const lines = [];
+      const re = /^\/\/+ ?(.*)(?:\n|$)/;
+      let m;
+      while ((m = rest.match(re))) { lines.push(m[1]); rest = rest.slice(m[0].length); }
+      text = lines.join(" ");
+    } else break;
+    text = text.replace(/\s+/g, " ").trim();
+    if (text && !PRAGMA.test(text)) out.push(text);
+  }
+  return out;
+}
+
+/** First sentence of a comment, minus a leading "file.js —" self-reference, capped in length. */
+function firstSentence(text, relPath) {
+  const base = basename(relPath);
+  const self = new RegExp("^(?:" + [relPath, base, base.replace(/\.[^.]+$/, "")]
+    .map((s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|") + ")\\s*(?:[—–:-]+)\\s*", "i");
+  let t = text.replace(self, "").trim();
+  // "Name (history, ticket refs) — rest" → "rest"
+  const stem = base.replace(/\.[^.]+$/, "").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  t = t.replace(new RegExp("^" + stem + "\\s*\\([^)]*\\)\\s*[—–:-]+\\s*", "i"), "").trim();
+  // Drop a leading ticket label ("B2092656 ×3 — ", "NEW-1 (Silvestri zoom freeze) — ") when real text follows.
+  const ticket = t.replace(/^(?:B-NEW-\d+|B\d+|NEW-\d+)(?:\s*[×x]\d+)?(?:\s*\([^)]*\))?(?:\s*\/\s*(?:B\d+|NEW-\d+))*\s*[—–:-]+\s*/, "");
+  if (ticket.length >= 24) t = ticket;
+  // A sentence ends at ". " / "? " / "! " unless it is a known abbreviation ("e.g. ", "i.e. ", "vs. ").
+  // Keep adding sentences until the line carries some substance (a lone "Building panel v3 (NEW-2)." does not).
+  const re = /[.?!](?=\s)/g;
+  let m, cut = -1;
+  while ((m = re.exec(t))) {
+    if (/(?:\be\.g|\bi\.e|\bvs|\betc|\bcf|\bno|\bapprox|\bB\d+|\bNEW-\d+)$/i.test(t.slice(0, m.index + 1).slice(-8))) continue;
+    if (m.index < 24) continue; // "B123." / "Note." — too short to stand alone, keep going
+    cut = m.index + 1;
+    if (cut >= 60 || cut >= MAX_DESC) break;
+  }
+  if (cut > 0) t = t.slice(0, cut);
+  t = t.replace(/\s+/g, " ").trim();
+  if (t.length > MAX_DESC) {
+    const sp = t.lastIndexOf(" ", MAX_DESC - 1);
+    t = t.slice(0, sp > 60 ? sp : MAX_DESC).replace(/[\s,;:—–(-]+$/, "") + "…";
+  }
+  if (/^[a-z]+(?=[\s,;:—–])/.test(t)) t = t[0].toUpperCase() + t.slice(1); // "a compact chip…" → "A compact chip…"
+  return t;
+}
+
+export function deriveDescription(relPath, src, exports = []) {
+  for (const c of leadingComments(src)) {
+    const s = firstSentence(c, relPath);
+    if (s.length >= 12) return s;
+  }
+  // No usable header comment: a factual line from the file's own exports — never a placeholder.
+  const shown = exports.slice(0, 4).map((e) => e.replace(/^default \((.+)\)$/, "$1").replace(/^default$/, "default export"));
+  if (shown.length) {
+    const more = exports.length > shown.length ? ` (+${exports.length - shown.length} more)` : "";
+    return `Module exporting ${shown.join(", ")}${more}.`;
+  }
+  return `Side-effect module (${basename(relPath)}), no exports.`;
+}
+
+// ----------------------------------------------------------------------------------------
 // Parse an existing MAP.md → { descriptions: Map(path→desc), inventory: [{path, exports}] }.
 // Used to (a) preserve descriptions on regen and (b) drift-compare in --check.
 // Line format authored by render(): `- **\`path\`** — description` then `  - _exports_: ...`.
@@ -216,8 +311,8 @@ export function render(inv, descriptions) {
   out.push("> **Regenerate it in the SAME commit whenever you add/remove/rename a file or change a primary");
   out.push("> export** (`node scripts/build-map.mjs`); CI runs `--check` and fails the build on drift. The");
   out.push("> one-line responsibilities are the human-value column — the script **preserves** them across");
-  out.push("> regenerations (keyed by path); a new file arrives as `TODO — describe` and `--check` fails until");
-  out.push("> it is filled in. Only the inventory (paths + exports) is drift-checked; descriptions are not diffed.");
+  out.push("> regenerations (keyed by path); a new file arrives described from its own header comment (edit the line");
+  out.push("> here to improve it and the edit sticks). Only the inventory (paths + exports) is drift-checked.");
   out.push(">");
   out.push("> Module owners: **infra** (shell/entry), **shared lib** (`src/shared/*`), **Site Planner**");
   out.push("> (incl. Cost/yield takeoff), **Schedule** (`src/workspaces/scheduler` + the `public/sequence`");
@@ -310,9 +405,17 @@ function generate() {
   const inv = scanRepo();
   let descriptions = new Map();
   if (existsSync(MAP_PATH)) descriptions = parseMap(readFileSync(MAP_PATH, "utf8")).descriptions;
+  // A file with no (or a placeholder) description gets one derived from the file itself.
+  let derived = 0;
+  for (const f of inv) {
+    const have = descriptions.get(f.path);
+    if (have && !have.startsWith(TODO)) continue;
+    descriptions.set(f.path, deriveDescription(f.path, readFileSync(join(REPO, f.path), "utf8"), f.exports));
+    derived++;
+  }
   writeFileSync(MAP_PATH, render(inv, descriptions));
   const todo = inv.filter((f) => !descriptions.get(f.path) || descriptions.get(f.path).startsWith(TODO)).length;
-  console.log(`MAP.md written — ${inv.length} files, ${todo} awaiting a description.`);
+  console.log(`MAP.md written — ${inv.length} files, ${derived} newly described from their own header, ${todo} awaiting a description.`);
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));

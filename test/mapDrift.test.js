@@ -14,7 +14,7 @@
  * that changed on every regen even with zero real content change — a PR was once observed whose
  * entire diff was "Refresh MAP.md's generated-at stamp"). */
 import { describe, it, expect } from "vitest";
-import { auditMap, render } from "../scripts/build-map.mjs";
+import { auditMap, render, deriveDescription } from "../scripts/build-map.mjs";
 
 describe("MAP.md generator", () => {
   it("runs cleanly and reports the documented shape", () => {
@@ -33,5 +33,48 @@ describe("MAP.md generator", () => {
       .split("\n").slice(0, 6).join("\n");
     expect(header).not.toMatch(/Generated \d{4}-\d{2}-\d{2}/);
     expect(header).not.toMatch(/@ `[0-9a-f]{7,}`/);
+  });
+
+  /* NEW-1 (2026-11-05): the generator's default for a file with no description used to be the
+   * placeholder `TODO — describe`, which `--check` and test/resolveLedgers.test.js both forbid. After
+   * the nightly job sat unmergeable for weeks, its first run wrote ~586 of them and main's required
+   * `build` went red. A generator whose default output fails its own guard cannot run unattended, so
+   * the default is now a genuine line derived from the file itself. */
+  describe("deriveDescription — the default is never a placeholder", () => {
+    const TODO = "TODO — describe";
+
+    it("uses the first sentence of the file's header comment, minus ticket labels", () => {
+      const src = "/* B2092656 ×3 — where a county's saved parcel copy lives in the browser. More detail follows here. */\nexport const x = 1;";
+      expect(deriveDescription("src/a/parcelWorker.js", src, ["x"])).toBe("Where a county's saved parcel copy lives in the browser.");
+    });
+
+    it("reads a header that comes AFTER the imports (and ignores a trailing // note on an import line)", () => {
+      const src = 'import { a } from "./a.js"; // NEW-1 (misleading note)\nimport b from "./b.js";\n\n/* Georgia jurisdiction facts — the pure, network-free half. */\nexport const g = 1;';
+      expect(deriveDescription("src/lib/georgia.js", src, ["g"])).toBe("Georgia jurisdiction facts — the pure, network-free half.");
+    });
+
+    it("reads a // line-comment header and skips eslint pragmas", () => {
+      const src = "/* eslint-disable */\n// Trailer parking rows — the pure rules the canvas label and the draw tool share.\n// More.\nexport const t = 1;";
+      expect(deriveDescription("src/lib/trailerRows.js", src, ["t"])).toBe("Trailer parking rows — the pure rules the canvas label and the draw tool share.");
+    });
+
+    it("caps a very long first sentence", () => {
+      const src = "/* " + "word ".repeat(120) + "*/\nexport const y = 1;";
+      const d = deriveDescription("src/lib/long.js", src, ["y"]);
+      expect(d.length).toBeLessThanOrEqual(192);
+      expect(d.endsWith("…")).toBe(true);
+    });
+
+    it("with no header comment falls back to the file's exports — still not a placeholder", () => {
+      expect(deriveDescription("src/lib/bare.js", "export function f(){}\n", ["f", "g"])).toBe("Module exporting f, g.");
+      expect(deriveDescription("src/lib/side.js", "console.log(1);\n", [])).toMatch(/side\.js/);
+    });
+
+    it("never returns the placeholder, whatever the input", () => {
+      for (const src of ["", "/* */", "// \n", "export default 1;", "/* TODO */ export const z = 1;"]) {
+        expect(deriveDescription("src/lib/q.js", src, [])).not.toContain(TODO);
+        expect(deriveDescription("src/lib/q.js", src, [])).not.toBe("");
+      }
+    });
   });
 });

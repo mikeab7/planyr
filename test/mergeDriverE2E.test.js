@@ -146,8 +146,12 @@ describe("(1)+(3) MAP.md — a genuine conflict, resolved, with the B384432 surv
     generate(dir, "build-map.mjs");
     // Hand-author b.js's description exactly as a real session does right after regenerating —
     // this is the description that must exist on ONLY this side of the merge.
-    writeFileSync(join(dir, "MAP.md"), readFileSync(join(dir, "MAP.md"), "utf8")
-      .replace("`src/b.js`** — TODO — describe", "`src/b.js`** — Branch B's own new helper."));
+    // (NEW-1, 2026-11-05: the generator now derives a description for a new file instead of writing the
+    // `TODO — describe` placeholder, so replace whatever it wrote rather than assuming the placeholder.)
+    const generated = readFileSync(join(dir, "MAP.md"), "utf8");
+    const handAuthored = generated.replace(/(`src\/b\.js`\*\* — ).*/, "$1Branch B's own new helper.");
+    if (handAuthored === generated) throw new Error("fixture bug: src/b.js's line was not found to hand-author");
+    writeFileSync(join(dir, "MAP.md"), handAuthored);
     commitAll(dir, "adds-b: new file, described");
 
     git(dir, "checkout", "-q", "main");
