@@ -32,6 +32,7 @@
  * moves both ways with the keyboard (B2046224 ×2/×3). The harness that proves all of this on every
  * field it can reach is ui-audit/verify-phone-typing.mjs. */
 import { layoutViewportHeight } from "./layoutViewport.js";
+import { isIosLike } from "./noAutofill.js";
 
 const KEYBOARD_MIN_PX = 120;
 const MARGIN = 12;
@@ -46,12 +47,19 @@ export function isTextEntry(el) {
   return el.tagName === "INPUT" && TEXT_TYPES.test(el.type || "text");
 }
 
-/** PURE — what a field's autofill attributes should become (null = leave it alone). */
-export function autofillStamp({ tagName, type = "text", autocomplete = "", name = "", contactField = false }) {
+/** PURE — what a field's autofill attributes should become (null = leave it alone).
+ *  `ios` picks the token: iOS ignores "off" (non-standard `x-planyr` + a neutral name instead), every other browser
+ *  needs a genuine "off" — Chrome keeps its saved-entry dropdown for an unknown token (NEW-1, 2026-10-16) — and must NOT
+ *  get a shared `name`, which would pool every field's history into one bucket. */
+export function autofillStamp({ tagName, type = "text", autocomplete = "", name = "", contactField = false, ios = true }) {
   if (contactField || tagName === "SELECT") return null;
   if (tagName === "INPUT" && /^password$/i.test(type) && /(current|new)-password/i.test(autocomplete)) return null;
   const ac = (autocomplete || "").trim();
   if (ac && ac !== "off" && ac !== "on" && REAL_TOKEN.test(ac)) return null; // a genuine contact/credential field
+  if (!ios) {
+    if (/^x-(?!planyr$)/.test(ac)) return null; // another module's own token (Food's x-food-*)
+    return ac === "off" ? null : { autocomplete: "off" };
+  }
   if (/^x-/.test(ac)) return name ? null : { name: "planyr-field" }; // already stamped (e.g. Food's own x-food-*)
   return { autocomplete: "x-planyr", ...(name ? {} : { name: "planyr-field" }) };
 }
@@ -61,6 +69,7 @@ function stamp(el) {
   const next = autofillStamp({
     tagName: el.tagName, type: el.type, autocomplete: el.getAttribute("autocomplete") || "",
     name: el.getAttribute("name") || "", contactField: el.hasAttribute("data-contact-field"),
+    ios: isIosLike(el.ownerDocument.defaultView?.navigator),
   });
   el.dataset.planyrStamped = "";
   if (!next) return;

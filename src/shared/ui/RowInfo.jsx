@@ -20,7 +20,7 @@ import { FONT_SIZE } from "./designTokens.js";
 const infoBtn = {
   flex: "none", margin: 0, padding: "0 1px", lineHeight: 1,
   border: "none", background: "transparent", color: "var(--text-tertiary)",
-  fontSize: FONT_SIZE.control, cursor: "pointer", display: "inline-flex", alignItems: "center",
+  fontSize: FONT_SIZE.control, cursor: "help", display: "inline-flex", alignItems: "center",
 };
 
 export default function RowInfo({ label, sections = [] }) {

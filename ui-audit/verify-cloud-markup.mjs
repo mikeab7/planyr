@@ -128,15 +128,20 @@ if (vtxScreen) {
   await page.mouse.dblclick(vtxScreen.x, vtxScreen.y);
   await page.waitForTimeout(400);
   const openedText = await panelText();
-  ok("double-click opens the inspector ('Markup · Cloud')", /Markup .*Cloud/.test(openedText));
-  ok("panel shows 'Arc size' with Small/Medium/Large presets", /Arc size/.test(openedText) && /small/.test(openedText) && /medium/.test(openedText) && /large/.test(openedText));
-  ok("panel shows 'Subject'", /Subject/.test(openedText));
-  ok("panel shows 'Comment'", /Comment/.test(openedText));
-  ok("panel shows 'Status' with all 5 Bluebeam-parity states", /Status/.test(openedText) && /None/.test(openedText) && /Accepted/.test(openedText) && /Rejected/.test(openedText) && /Cancelled/.test(openedText) && /Completed/.test(openedText));
-  ok("panel shows 'Label' and 'Layer'", /Label/.test(openedText) && /Layer/.test(openedText));
-  ok("panel shows 'Author'", /Author/.test(openedText));
-  ok("panel shows 'Created' / 'Modified' (auto timestamps)", /Created/.test(openedText) && /Modified/.test(openedText));
-  ok("reshape hint is the vertex idiom, not the box-resize one", /Drag a dot to reshape/.test(openedText));
+  ok("double-click opens the inspector (one title row: 'Cloud')", /^\s*Cloud\b/.test(openedText) && !/Markup\s*·/.test(openedText));
+  ok("panel shows 'Arc size' and NO Small/Medium/Large presets (NEW-3)", /Arc size/.test(openedText) && !/\bsmall\b/i.test(openedText) && !/\bmedium\b/i.test(openedText) && !/\blarge\b/i.test(openedText));
+  // NEW-4 — Subject…Author and the dates live in a collapsed "More"; open it before reading them.
+  ok("a collapsed 'More' section exists and the metadata is hidden until opened", /More/.test(openedText) && !/Subject/.test(openedText));
+  await page.locator('[data-testid="property-panel"]').getByText("More", { exact: true }).first().click();
+  await page.waitForTimeout(200);
+  const moreText = await panelText();
+  ok("panel shows 'Subject'", /Subject/.test(moreText));
+  ok("panel shows 'Comment'", /Comment/.test(moreText));
+  ok("panel shows 'Status' with all 5 Bluebeam-parity states", /Status/.test(moreText) && /None/.test(moreText) && /Accepted/.test(moreText) && /Rejected/.test(moreText) && /Cancelled/.test(moreText) && /Completed/.test(moreText));
+  ok("panel shows 'Label' and 'Layer'", /Label/.test(moreText) && /Layer/.test(moreText));
+  ok("panel shows 'Author'", /Author/.test(moreText));
+  ok("panel shows 'Created' / 'Modified' (auto timestamps)", /Created/.test(moreText) && /Modified/.test(moreText));
+  ok("no how-to hint text on the Cloud panel (NEW-5)", !/Drag a dot to reshape/.test(moreText) && !/Shift-click/.test(moreText));
 
   const subjInput = page.locator('[data-testid="property-panel"] input[placeholder="Cloud"]');
   if (await subjInput.count()) {

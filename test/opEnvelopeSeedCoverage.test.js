@@ -71,10 +71,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createOperationTracker } from "../src/workspaces/site-planner/lib/operationEnvelope.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP_PATH = join(here, "../src/workspaces/site-planner/SitePlanner.jsx");
-const SP = readFileSync(SP_PATH, "utf8");
+const SP = plannerSource();
 
 const slice = (fromMarker, toMarker) => {
   const from = SP.indexOf(fromMarker);
@@ -107,9 +107,10 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
       "\n  useEffect(() => {\n    if (!isCloudActive() || !siteId || !supabase) {",
     );
     const begin = body.indexOf("opTrackerRef.current.beginOperation(");
-    const reconcile = body.indexOf("eng.reconcile(merged");
+    // B2225425 (round 3): the seed now reconciles `shown` — `merged` with the read normalization applied (see refetchReplace)
+    const reconcile = body.indexOf("eng.reconcile(shown");
     expect(begin, "refetchReplace must call beginOperation before its seed reconcile").toBeGreaterThan(-1);
-    expect(reconcile, "refetchReplace must still call eng.reconcile(merged, ...)").toBeGreaterThan(-1);
+    expect(reconcile, "refetchReplace must still call eng.reconcile(shown, ...)").toBeGreaterThan(-1);
     expect(begin).toBeLessThan(reconcile);
   });
 
@@ -155,7 +156,7 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
   it("mergeParcels passes the real \"merge\" op kind, not the generic \"edit\" fallback", () => {
     const body = slice(
       "const combineParcelsAction = (ids) => {",
-      "\n  // Remove ONE parcel by id (B598)",
+      "\n  /* ---- NEW-1: the right rail's Parcel tools menu, wired",
     );
     expect(body.includes('pushHistory("merge")'), "the one combine (combineParcelsAction, which mergeParcels calls) must call pushHistory(\"merge\") so its rows carry a real op_kind").toBe(true);
     expect(body.includes("pushHistory();"), "mergeParcels must not also fall back to the bare pushHistory()").toBe(false);

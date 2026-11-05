@@ -21,6 +21,7 @@
  * usage count instead, so the blast radius is visible without a confirmation dialog standing in
  * the way.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import {
@@ -67,6 +68,7 @@ function NewNameRow({ sheet, selRange, onDefineName }) {
     <div style={{ padding: 8, borderBottom: "1px solid var(--border-default)", display: "flex", flexDirection: "column", gap: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <input
+          {...NO_AUTOFILL}
           data-testid="name-manager-new-input"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -112,6 +114,7 @@ function NameRow({ entry, sheet, selRange, onGoTo, onRenameName, onRetargetName,
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {renaming ? (
           <input
+            {...NO_AUTOFILL}
             autoFocus
             value={renameText}
             onChange={(e) => setRenameText(e.target.value)}
@@ -125,7 +128,7 @@ function NameRow({ entry, sheet, selRange, onGoTo, onRenameName, onRetargetName,
         ) : (
           <button
             type="button" title="Rename" onClick={() => setRenaming(true)}
-            style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", font: "inherit", fontSize: 13, fontWeight: 650, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 650, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >{entry.name}</button>
         )}
         <button type="button" title="Jump to this name's target" onClick={() => onGoTo(entry.r1 - 1, entry.c1 - 1, entry.r2 - 1, entry.c2 - 1)} style={smallBtnStyle()}>Go</button>
@@ -177,6 +180,7 @@ export default function NameManager({ open, sheet, selRange, onClose, onGoTo, on
       </div>
       <div style={{ flex: "none", padding: 8, borderBottom: "1px solid var(--border-default)" }}>
         <input
+          {...NO_AUTOFILL}
           ref={searchRef}
           data-testid="name-manager-search"
           value={search}

@@ -56,7 +56,8 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     // so its Title 32 water & sanitation districts are the "who is entitled to serve" half there,
     // exactly as the MUD/CCN rows are in Texas. It is a fifth MEMBER of the one consolidated row,
     // not a second row — which is the whole point of the merge group.
-    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud"].sort());
+    // B2507057 — the DeSoto County MS / Olive Branch utilities joined the one row (Mississippi has no CCN; the city's and the regional authority's own mains are the provider data there).
+    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_easements", "ms_dcrua_main", "ms_dcrua_service_area", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp", "ms_psc_sewer", "ms_psc_water", "ok_water_systems", "tn_pws"].sort());
   });
   it("every member keeps group 'utilities' and its own fetch (url/kind) untouched", () => {
     for (const [, cfg] of membersOf("water_sewer")) {
@@ -65,8 +66,8 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
       expect(cfg.source, `${cfg.label} has no provenance for the ⓘ`).toBeTruthy();
     }
   });
-  it("MERGE_GROUPS.water_sewer has the single consolidated label 'Water & sewer'", () => {
-    expect(MERGE_GROUPS.water_sewer.label).toBe("Water & sewer");
+  it("MERGE_GROUPS.water_sewer has the single consolidated label 'Water & Sewer'", () => {
+    expect(MERGE_GROUPS.water_sewer.label).toBe("Water & Sewer");
   });
   it("MERGE_GROUPS.water_sewer note is explicitly inclusive, never AHJ-exclusive", () => {
     expect(MERGE_GROUPS.water_sewer.note).toMatch(/every provider|not just the parcel/i);
@@ -78,24 +79,24 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     ];
     for (const label of allLabels()) for (const b of banned) expect(label).not.toBe(b);
   });
-  it("buildGroupSlots folds all 4 members into ONE row when the Utilities group is built", () => {
+  it("buildGroupSlots folds every member into ONE row when the Utilities group is built", () => {
     const utilEntries = Object.entries(ALL_LAYERS).filter(([, cfg]) => cfg.group === "utilities");
     const slots = buildGroupSlots(utilEntries);
     const waterSlot = slots.find((s) => s.kind === "merge" && s.mergeGroup === "water_sewer");
     expect(waterSlot).toBeTruthy();
-    expect(waterSlot.members.length).toBe(5); // NEW-2 — co_water_districts joined the group (see the member list above)
+    expect(waterSlot.members.length).toBe(19); // NEW-1 (Oklahoma) — ok_water_systems joined too; B2521584 — tn_pws (Tennessee TDEC water service areas) joined; NEW-2 — co_water_districts joined the group; B2507057 — the 12 DeSoto / Olive Branch / PSC / DCRUA members (see the member list above)
     // and only ONE such slot — never split across two rows
     expect(slots.filter((s) => s.kind === "merge" && s.mergeGroup === "water_sewer").length).toBe(1);
   });
 });
 
 describe("B898 — Fire hydrants consolidated to ONE layer", () => {
-  it("exactly the 3 hydrant-relevant adapters merge under fire_hydrants", () => {
+  it("exactly the 5 hydrant-relevant adapters merge under fire_hydrants", () => {
     const members = membersOf("fire_hydrants");
-    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "osm_hydrants"].sort());
+    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants", "sl_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants; NEW-1 — the City of Sugar Land's
   });
-  it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire hydrants'", () => {
-    expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire hydrants");
+  it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire Hydrants'", () => {
+    expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire Hydrants");
   });
   it("no standalone provider-named hydrant label survives", () => {
     const banned = ["Fire hydrants (OSM)", "Fire hydrants (City of Houston)"];
@@ -104,12 +105,12 @@ describe("B898 — Fire hydrants consolidated to ONE layer", () => {
 });
 
 describe("B898 — Electric consolidated to ONE layer", () => {
-  it("exactly the 3 electric adapters merge under electric (OSM power/poles + HIFLD transmission + HIFLD substations)", () => {
+  it("exactly the 4 electric adapters merge under electric (OSM power/poles + HIFLD transmission + HIFLD substations + the Mississippi PSC electric service areas, B2507057)", () => {
     const members = membersOf("electric");
-    expect(members.map(([id]) => id).sort()).toEqual(["hifld_substations", "hifld_tx", "osm_power"].sort());
+    expect(members.map(([id]) => id).sort()).toEqual(["hifld_substations", "hifld_tx", "ms_psc_electric", "osm_power"].sort());
   });
   it("MERGE_GROUPS.electric has the single consolidated label", () => {
-    expect(MERGE_GROUPS.electric.label).toBe("Electric (lines, substations & poles)");
+    expect(MERGE_GROUPS.electric.label).toBe("Electric");
   });
   it("no standalone provider-named electric label survives", () => {
     const banned = ["Power lines & poles (OSM)", "Transmission lines (HIFLD)", "Electric substations (HIFLD)"];
@@ -125,10 +126,18 @@ describe("B898 — every merge-group member is tagged 'utilities' and no group s
     for (const id of w) { expect(e.has(id)).toBe(false); expect(f.has(id)).toBe(false); }
     for (const id of e) expect(f.has(id)).toBe(false);
   });
-  it("every mergeGroup member lives in the Utilities group", () => {
+  it("every mergeGroup member lives in its merge group's ONE registry group", () => {
+    /* NEW-1 (Imagery & Layers) — B898 had three merge groups, all Utilities. The redesign adds Counties & Cities (Jurisdictions) and Pipelines
+     * (Environmental). The invariant that mattered was never "utilities" — it is that a merge group is ONE panel row in ONE group, so every
+     * member must share the same registry `group`. */
+    const groupOf = {};
     for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
-      if (cfg.mergeGroup) expect(cfg.group, `${id} (mergeGroup ${cfg.mergeGroup})`).toBe("utilities");
+      if (!cfg.mergeGroup) continue;
+      groupOf[cfg.mergeGroup] = groupOf[cfg.mergeGroup] || cfg.group;
+      expect(cfg.group, `${id} (mergeGroup ${cfg.mergeGroup})`).toBe(groupOf[cfg.mergeGroup]);
+      expect(MERGE_GROUPS[cfg.mergeGroup], `${cfg.mergeGroup} has a MERGE_GROUPS record`).toBeTruthy();
     }
+    expect(groupOf).toMatchObject({ water_sewer: "utilities", electric: "utilities", fire_hydrants: "utilities", counties_cities: "jurisdiction", pipelines: "environmental" });
   });
 });
 
@@ -147,8 +156,8 @@ describe("B898 — function-first labels: no bare provider-code suffix on a solo
 
 describe("B898 — Flood & drainage rename (auto by AHJ, no hard-coded 'Houston' label)", () => {
   it("hcfcd_row / coh_storm carry function-first labels, not provider names", () => {
-    expect(ALL_LAYERS.hcfcd_row.label).toBe("Drainage channels & ROW");
-    expect(ALL_LAYERS.coh_storm.label).toBe("Storm sewer");
+    expect(ALL_LAYERS.hcfcd_row.label).toBe("Channels & ROW");
+    expect(ALL_LAYERS.coh_storm.label).toBe("Storm Sewer");
     expect(ALL_LAYERS.hcfcd_row.group).toBe("flood");
     expect(ALL_LAYERS.coh_storm.group).toBe("flood");
   });
@@ -168,14 +177,14 @@ describe("B898 — Flood & drainage rename (auto by AHJ, no hard-coded 'Houston'
  * layer with no geometry in hand declines rather than guessing.
  * ------------------------------------------------------------------------- */
 describe("identifyOverlaysAt (B1092)", () => {
-  const HIT = { title: "District drainage easements", rows: [{ label: "Easement width", text: "70 ft", href: null }], note: "hard constraint", sourceName: "BKDD" };
+  const HIT = { title: "Drainage Easements", rows: [{ label: "Easement width", text: "70 ft", href: null }], note: "hard constraint", sourceName: "BKDD" };
   const layer = (hit) => ({ identifyAt: () => hit });
   const at = { lat: 29.77938, lng: -95.89503, tolDeg: 0.0001 };
 
   it("returns the feature under the point, tagged with the layer it came from", () => {
     const out = identifyOverlaysAt({ bkdd_easements: layer(HIT) }, { bkdd_easements: { on: true } }, at);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: "bkdd_easements", layerLabel: "District drainage easements", title: "District drainage easements" });
+    expect(out[0]).toMatchObject({ id: "bkdd_easements", layerLabel: "Drainage Easements", title: "Drainage Easements" });
     expect(out[0].rows[0].text).toBe("70 ft");
   });
   it("a layer that is OFF is never identified — you can't click what isn't drawn", () => {

@@ -29,13 +29,15 @@ import {
   matchingOpenDishWishlist, formatScore, dishScoreTier, scoreSatisfiesQuarterStep,
 } from "../src/workspaces/food/lib/dishAggregates.js";
 import ScoreMeter, {
-  DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS, clampScore, nudgeScore,
+  DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS, clampScore,
 } from "../src/workspaces/food/components/ScoreMeter.jsx";
 import DishesSection from "../src/workspaces/food/components/DishesSection.jsx";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../src/workspaces/food/lib/formatPlace.js";
 import { computeVisitAggregates, orderAgainEntries } from "../src/workspaces/food/lib/visitAggregates.js";
+import { visitRowLabel, visitsToShow, headerSubline, nextPriceLevel } from "../src/workspaces/food/lib/restaurantPanel.js";
+import { formatCuisine } from "../src/workspaces/food/lib/formatPlace.js";
 import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../src/workspaces/food/lib/dateFormat.js";
 import { preferAppleMaps, directionsUrl } from "../src/workspaces/food/lib/directions.js";
 import { resolveSnap, heightForSnap } from "../src/workspaces/food/lib/bottomSheetSnap.js";
@@ -539,8 +541,9 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
 
   it("the RPC partitions the bbox into a grid AND weights each cell's cap by its own true count — never a flat 1/N share", () => {
     const sql = src("db/food.sql");
-    expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy");
-    expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx");
+    // B2559168: the bucket is cast to int2 so the ranking rows stay narrow (see foodBrowseDiskIo.test.js)
+    expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1))::int2 as gy");
+    expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1))::int2 as gx");
     expect(sql).toContain("partition by gy, gx");
     expect(sql).toContain("count(*) over () as total_matched");
     // The proportional weighting — this is the line that fixed the >13x disparity. A flat
@@ -729,30 +732,26 @@ describe("basemap crash fix — no explicit undefined subdomains, degrades inste
 describe("VisitPanel — rating slider (not a button row) and a date field that never defaults", () => {
   it("the date field starts empty for a FRESH log — never pre-filled with today (edit mode pre-fills from the visit being edited, see the edit-a-visit describe block below)", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useState\(\(\) => initial\?\.visited_on \|\| ""\)/);
+    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useDraftField\(draftKey, "visitedOn", \(\) => initial\?\.visited_on \|\| ""\)/); // kept across a remount (lib/draftStore.js); the INITIAL value is still empty for a fresh log
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
-  it("rating is a range-slider control, step 0.5 across 1-10 (lib/ratingScale.js) — never a row of per-value buttons", () => {
+  it("rating is a range-slider control, step 0.25 across 1-10 (lib/ratingScale.js) — never a row of per-value buttons", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/type="range"/);
-    expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
-    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
-    // The old design this replaces: ten separate <button> elements, one per whole number.
+    const slider = src("components/RatingSlider.jsx");
+    expect(slider).toMatch(/type="range"/);
+    expect(slider).toMatch(/min=\{RATING_MIN\} max=\{RATING_MAX\} step=\{RATING_STEP\}/);
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.25;/);
     expect(panel).not.toMatch(/role="radiogroup"/);
     expect(panel).not.toContain("RatingPicker");
-    // Exactly ONE range-input DEFINITION in the source (RatingSlider) — but rendered TWICE
-    // (Food + Ambiance, B634978) as the same reused component, never a second hand-rolled slider
-    // or per-value buttons re-added for either.
-    const rangeInputs = [...panel.matchAll(/type="range"/g)];
-    expect(rangeInputs.length).toBe(1);
-    const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
-    expect(sliderUsages.length).toBe(2);
+    // ONE range-input definition in the whole module (RatingSlider), reused by Food, Ambiance and the dish ScoreMeter.
+    expect(panel).not.toMatch(/type="range"/);
+    expect(src("components/ScoreMeter.jsx")).not.toMatch(/type="range"/);
+    expect([...panel.matchAll(/<RatingSlider /g)].length).toBe(2);
   });
 
   it("⛔ NEW (2026-08-27/28 owner block) — the slider's current value shows at NATURAL precision (9, 8.5, 8.25), never padded to a fixed decimal count", () => {
-    const panel = src("components/VisitPanel.jsx");
-    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    const slider = src("components/RatingSlider.jsx");
     // The old `.toFixed(1)` forced a constant one decimal ("9.0") — dropped entirely, both in the
     // visible label and in the a11y valuetext. `shown` is used bare so JS's own number-to-string
     // conversion (which never pads) does the formatting.
@@ -762,8 +761,7 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
   });
 
   it("the rating stays optional — no value is committed until the slider is actually touched, and it can be cleared", () => {
-    const panel = src("components/VisitPanel.jsx");
-    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    const slider = src("components/RatingSlider.jsx");
     // The rest position is a purely visual thumb placement, distinct from a committed value —
     // onChange(null) (Clear) is reachable, and the rest constant is never passed to onChange
     // directly from a mount-time effect (no useEffect in RatingSlider ITSELF — the panel's own
@@ -1277,8 +1275,8 @@ describe("formatPlace — display-only category title-casing and address tidy (B
 
   it("is DISPLAY-ONLY — the place panel header uses it (NEW-2 moved the formatting from FoodApp into VisitPanel's own PanelHeader), never the old naive underscore-swap, and the raw stored value is never mutated", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toContain('import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";');
-    expect(panel).toMatch(/formatCategory\(category\)/);
+    expect(panel).toContain('import { formatCuisine, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";');
+    expect(panel).toMatch(/formatCuisine\(category\)/); // NEW-1 (2026-10-20): the word "Restaurant" is dropped from the category line
     expect(panel).toMatch(/formatAddress\(address\)/);
     expect(panel).not.toMatch(/\.category\?\.replace\(\/_\/g/); // the old lowercase-with-spaces version is gone
   });
@@ -1369,7 +1367,7 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
 
   it("Escape clears the selection exactly like the close button — same onClose, no separate escape state", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const onKey = \(e\) => \{ if \(e\.key === "Escape"\) onClose\(\); \};/);
+    expect(panel).toMatch(/const onKey = \(e\) => \{ if \(e\.key !== "Escape"\) return; if \(dishSheetKey\) setDishSheetKey\(null\); else onClose\(\); \};/); // NEW-2: the dish sheet steps back first
     expect(panel).toMatch(/window\.addEventListener\("keydown", onKey\)/);
     expect(panel).toMatch(/return \(\) => window\.removeEventListener\("keydown", onKey\)/);
   });
@@ -1387,8 +1385,9 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     const panel = src("components/VisitPanel.jsx");
     const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
     expect(sliderUsages.length).toBe(2);
-    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
-    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
+    // NEW-1 (2026-10-27): the field names are the ONE caps label (FOOD_TYPE.label) wrapped in a span, so the form never carries a second label dialect.
+    expect(panel).toMatch(/<span style=\{FOOD_TYPE\.label\}>Food<\/span>\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
+    expect(panel).toMatch(/<span style=\{FOOD_TYPE\.label\}>Ambiance<\/span>\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
     expect(panel).not.toMatch(/>Rating</); // the old ambiguous bare label is gone
   });
 
@@ -1410,11 +1409,14 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
 
   it("VisitCard shows Food and Ambiance chips independently — a visit with only one set still renders sensibly, same principle as a dateless visit (NEW-2 renamed VisitRow/RatingPill to VisitCard/Chip as part of the panel rebuild, same independent-rendering behavior)", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const hasRating = visit\.rating != null;/);
-    expect(panel).toMatch(/const hasAmbiance = visit\.rating_ambiance != null;/);
-    expect(panel).toMatch(/\{hasRating && <Chip label="Food" value=\{visit\.rating\} \/>\}/);
-    expect(panel).toMatch(/\{hasAmbiance && <Chip label="Ambiance" value=\{visit\.rating_ambiance\} \/>\}/);
-    expect(panel).toMatch(/\{!hasRating && !hasAmbiance && !hasWouldReturn && <span/); // all-absent fallback, only when NONE present
+    // NEW-1 (2026-10-20): the visit row is ONE line built by restaurantPanel.visitRowLabel — each rating is added only when set.
+    expect(panel).toMatch(/visitRowLabel\(visit, formatVisitDate\)/);
+    const lib = src("lib/restaurantPanel.js");
+    // NEW-1 (2026-10-27): the row is built from visitRowParts (date apart from the scores); visitRowLabel is the same parts as one plain string.
+    expect(lib).toMatch(/if \(visit\.rating != null\) parts\.push\(\{ kind: "score", label: "Food", value: formatRating\(visit\.rating\) \}\);/);
+    expect(lib).toMatch(/if \(visit\.rating_ambiance != null\) parts\.push\(\{ kind: "score", label: "Ambiance", value: formatRating\(visit\.rating_ambiance\) \}\);/);
+    expect(visitRowLabel({ visited_on: "2026-01-05", rating: "8.25", rating_ambiance: null }, () => "Jan 5")).toBe("Jan 5 · Food 8.25");
+    expect(visitRowLabel({ visited_on: null, rating: null, rating_ambiance: 8 }, () => "x")).toBe("No date · Ambiance 8.0");
   });
 });
 
@@ -1456,8 +1458,8 @@ describe("quarter-point ratings — schema widened to numeric(4,2), CHECK loosen
     expect(sql).toMatch(/rating\s+numeric\(3,1\)\s+check/); // the original inline create, left alone
   });
 
-  it("entry is HALF-point steps again (2026-10-05 owner decision #15; the column still accepts the quarters saved in this period)", () => {
-    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
+  it("entry is QUARTER-point steps everywhere (2026-10-11 owner decision #16, superseding the 2026-10-05 half-step lock)", () => {
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.25;/);
   });
 
   it("⛔ VisitList shows ratings at natural precision too — Number(v.rating)/Number(v.rating_ambiance), never the raw numeric(4,2) string (which would otherwise read '9.00' post-widen)", () => {
@@ -1477,16 +1479,14 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     expect(sql).toContain("alter table public.food_visits add column if not exists what_was_good text;");
   });
 
-  it("the form has a SEPARATE 'What was good' field, sitting directly under 'What I had' — never merged into it", () => {
+  it("NEW-2 (2026-10-11): the form no longer asks for 'What was good' — saved text is never rewritten and is still shown read-only", () => {
     const panel = src("components/VisitPanel.jsx");
-    const whatIHadIdx = panel.indexOf("What I had");
-    const whatWasGoodIdx = panel.indexOf("What was good");
-    expect(whatIHadIdx).toBeGreaterThan(-1);
-    expect(whatWasGoodIdx).toBeGreaterThan(whatIHadIdx);
-    expect(panel).toMatch(/placeholder="The hamachi, the agedashi…"/);
-    expect(panel).toMatch(/what_was_good: whatWasGood \|\| null,/);
-    // Genuinely a separate field — never appended onto what_i_had's own value.
-    expect(panel).not.toMatch(/whatIHad \+ .*whatWasGood/);
+    const formBody = panel.slice(panel.indexOf("function VisitForm("), panel.indexOf("/* The header"));
+    expect(formBody).not.toMatch(/What was good/);
+    expect(formBody).not.toMatch(/visit-highlights-input/);
+    expect(formBody).not.toMatch(/what_was_good/); // the submit payload omits it, so an edit's update never touches the saved column
+    expect(panel).toMatch(/\{visit\.what_was_good && \(/); // read-only, above the edit form (NEW-1: the visit ROW is one compact line)
+    expect(panel).toMatch(/data-testid="visit-legacy-good"/);
   });
 
   it("⛔ RENAMED to 'Order again' (NEW-2, owner: 'the thing he opens the app for while standing at the door') — still every past visit's what_was_good, still rendered ABOVE Past visits, but now DEDUPED and explicitly newest-first, not a plain join", () => {
@@ -1496,20 +1496,12 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     // this superseded joined every occurrence, even repeats.
     expect(lib).toMatch(/const seen = new Set\(\);/);
     expect(lib).toMatch(/if \(!text \|\| seen\.has\(text\)\) continue;/);
+    // NEW-1 (2026-10-20, owner-approved mockup): the panel no longer draws an "Order again" block at all — the DISH LIST is the
+    // order (restaurantPanel.dishSections). The lib stays (VisitList still reads what_was_good); old visits' text is read in the edit form.
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/function OrderAgain\(\{ entries \}\) \{/);
-    expect(panel).toMatch(/entries\.join\("; "\)/);
-    expect(panel.indexOf("<OrderAgain")).toBeGreaterThan(-1);
-    // Compared against <PastVisitsSection's USAGE (inside the same `body` JSX block <OrderAgain
-    // itself sits in), not the data-testid string inside PastVisitsSection's own definition —
-    // that definition sits EARLIER in the file (function declarations precede the component that
-    // uses them), which would make this comparison backwards regardless of actual render order.
-    expect(panel.indexOf("<OrderAgain")).toBeLessThan(panel.indexOf("<PastVisitsSection"));
-  });
-
-  it("renders NOTHING when no past visit has a liked entry — no empty heading, quiet by default", () => {
-    const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/if \(!entries\.length\) return null;/);
+    expect(panel).not.toMatch(/<OrderAgain\b|<OrderAgain /); // the DISH-level OrderAgainControl (Yes/Maybe/No) is a different thing and stays
+    expect(panel).not.toMatch(/orderAgainEntries/);
+    expect(panel).toMatch(/data-testid="visit-legacy-good"/);
   });
 
   it("kept as plain unparsed text — never split into a dish taxonomy, tags, or a separate entity (checked in visitAggregates.js, which now owns orderAgainEntries, AND VisitPanel.jsx)", () => {
@@ -1585,7 +1577,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     expect(submitVisitFn).toMatch(/setError\("Give this place a name first\."\);\s*\n\s*return false;/);
     expect(submitVisitFn).toMatch(/if \(err\) \{/);
     expect(submitVisitFn).toMatch(/setError\(err\.message \|\| "Couldn't save that visit\."\);\s*\n\s*return false;/);
-    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,320}return true;/);
+    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,900}return savedVisit\.id;/); // B2268433: the saved visit's id (truthy) is the confirmation
   });
 
   it("NEW-1 (2026-08-27) — the visit is added OPTIMISTICALLY before the write resolves, and rolled back (never left as a phantom) if it fails", () => {
@@ -1616,7 +1608,6 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     expect(resetBlock).toMatch(/setCost\(""\);/);
     expect(resetBlock).toMatch(/setVisitedOn\(""\);/);
     expect(resetBlock).toMatch(/setDishRows\(/); // NEW-1: the dish drafts reset too (the old "What I had" box is gone)
-    expect(resetBlock).toMatch(/setWhatWasGood\(""\);/);
     expect(resetBlock).toMatch(/setNotes\(""\);/);
     expect(resetBlock).toMatch(/setWouldReturn\(null\);/);
   });
@@ -1625,7 +1616,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const panel = src("components/VisitPanel.jsx");
     // The reset calls appear exactly once each, all inside the `if (saved)` block (checked above)
     // — not duplicated at the top of submit() where they'd run before the save even resolves.
-    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatWasGood(\"\")"]) {
+    for (const setter of ["setRating(null)", "setCost(\"\")"]) {
       const count = panel.split(setter).length - 1;
       expect(count).toBe(1);
     }
@@ -1661,14 +1652,9 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
 
   it("the ✕ close glyph is explicitly out of scope and stays", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toContain("✕");
-    // Still the Close button specifically, not the glyph having moved somewhere unrelated — the
-    // window is the close button's own JSX element (aria-label="Close" up to its closing tag),
-    // not a fixed character count (NEW-2 widened the button's own style block, which a fixed-200
-    // window doesn't account for).
-    const startIdx = panel.indexOf('aria-label="Close"');
-    const closeBtn = panel.slice(startIdx, panel.indexOf("</button>", startIdx));
-    expect(closeBtn).toContain("✕");
+    // NEW-4 (2026-10-11): the glyph now lives in the ONE shared CloseX component, which the panel header renders as "Close".
+    expect(src("components/CloseX.jsx")).toContain("✕");
+    expect(panel).toMatch(/<CloseX onClick=\{onClose\} label="Close" testId="food-panel-close"/);
   });
 
   it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
@@ -2213,7 +2199,8 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
 
   it("the drag handle's own hit area is at least 44 CSS px tall", () => {
     const handleBlock = sheet.slice(sheet.indexOf('data-testid="food-sheet-drag-handle"'), sheet.indexOf('data-testid="food-sheet-drag-handle"') + 400);
-    expect(handleBlock).toMatch(/minHeight:\s*44/);
+    expect(handleBlock).toMatch(/minHeight:\s*(44|56|HANDLE_ZONE_PX)/); // NEW-5 (2026-10-11): 56 — a constant since NEW-1 (2026-10-23)
+    expect(sheet).toMatch(/const HANDLE_ZONE_PX = 56;/);
   });
 
   it("never renders a full-viewport backdrop — the map above the sheet must stay directly interactive (no scrim to swallow its pan gesture)", () => {
@@ -2252,7 +2239,7 @@ describe("VisitPanel — responsive container: BottomSheet on mobile, the same r
   });
 
   it("both containers render the exact SAME `body` JSX — the switch only changes what wraps it, never a divergent second copy of the content", () => {
-    expect(panel).toMatch(/const body = \(/);
+    expect(panel).toMatch(/const body = openDishRow \? \(/); // NEW-2: the dish sheet is the body's other branch — still ONE body for every container
     const mobileBranch = panel.slice(panel.indexOf("if (isMobile)"), panel.indexOf("return (\n    <div data-testid=\"food-visit-panel\""));
     expect(mobileBranch).toContain("{body}");
     expect(panel.slice(panel.indexOf("food-visit-panel\""))).toContain("{body}");
@@ -2273,31 +2260,27 @@ describe("VisitPanel — responsive container: BottomSheet on mobile, the same r
   });
 });
 
-describe("VisitPanel — score strip (block 2), only when the place has at least one visit (NEW-2)", () => {
+describe("VisitPanel — score pills (block 2, NEW-1 2026-10-20 mockup), only when the place has at least one visit", () => {
   const panel = src("components/VisitPanel.jsx");
+  const pills = panel.slice(panel.indexOf("function ScorePills"), panel.indexOf("/* Actions"));
 
-  it("renders Food (hero), Ambiance, Visits, Cost — one decimal on ratings, tabular-nums so digits don't jitter", () => {
-    const strip = panel.slice(panel.indexOf("function ScoreStrip"), panel.indexOf("/* Order again"));
-    expect(strip).toMatch(/avgFood == null \? "—" : avgFood\.toFixed\(1\)/);
-    expect(strip).toMatch(/avgAmbiance == null \? "—" : avgAmbiance\.toFixed\(1\)/);
-    expect(strip).toMatch(/avgCost == null \? "—" : `\$\$\{avgCost\.toFixed\(2\)\}`/);
-    expect(strip).toMatch(/fontVariantNumeric:\s*"tabular-nums"/);
+  it("renders '8.25 Food' and '8.0 Ambiance' through the ONE rating formatter (no toFixed(1) — the old tile said 8.3 for 8.25), tabular-nums, and the '+ List' pill on the same row", () => {
+    expect(pills).toMatch(/formatRating\(avgFood\)/);
+    expect(pills).toMatch(/formatRating\(avgAmbiance\)/);
+    expect(pills).not.toMatch(/toFixed\(/);
+    expect(pills).toMatch(/fontVariantNumeric:\s*"tabular-nums"/);
+    expect(pills).toMatch(/\{listsControl\}/);
+  });
+
+  it("the VISITS and COST tiles, the 'Last … · Since …' line and the 'Best dish:' line are gone", () => {
+    expect(panel).not.toMatch(/Best dish/);
+    expect(panel).not.toMatch(/formatRelativeDate|formatMonthYear/);
+    expect(panel).not.toMatch(/avgCost|visitCount/);
+    expect(panel).not.toMatch(/bestDishRow/);
   });
 
   it("is gated on everVisited — never renders for a zero-visit place", () => {
-    expect(panel).toMatch(/\{everVisited && <ScoreStrip aggregates=\{aggregates\} bestDish=\{bestDish\} \/>\}/);
-  });
-
-  it("shows a last-visit (formatted + relative), a first-visit (month/year), and a best-dish (B1873008) facts line, omitted entirely when none of the three exist", () => {
-    const strip = panel.slice(panel.indexOf("function ScoreStrip"), panel.indexOf("/* Order again"));
-    expect(strip).toMatch(/formatVisitDate\(lastVisitDate\)/);
-    expect(strip).toMatch(/formatRelativeDate\(lastVisitDate\)/);
-    expect(strip).toMatch(/formatMonthYear\(firstVisitDate\)/);
-    // B1873008 — "best dish here" joins the SAME single facts line (PANEL-BREVITY: at most one
-    // short line per group, never a second line for one more fact) rather than a line of its own.
-    expect(strip).toMatch(/bestDishLine = bestDish \? `Best dish: \$\{bestDish\.name\} \(\$\{Number\(bestDish\.latestScore\)\}\)` : null;/);
-    expect(strip).toMatch(/\{\(lastLine \|\| firstLine \|\| bestDishLine\) && \(/);
-    expect(strip).toMatch(/\[lastLine, firstLine, bestDishLine\]\.filter\(Boolean\)\.join\(" · "\)/);
+    expect(panel).toMatch(/\{everVisited && <ScorePills aggregates=\{aggregates\} listsControl=\{listsControl\} \/>\}/);
   });
 });
 
@@ -2376,7 +2359,7 @@ describe("VisitPanel — Actions row (block 4): want-to-try disappears once visi
   it("clicking 'Log a visit' opens the form in place — never auto-opens on mount, even for a never-visited place (NEW-2 changed this default from the old always-open-when-zero-visits behavior)", () => {
     expect(panel).toMatch(/const \[adding, setAdding\] = useState\(false\); \/\/ NEW-2: never auto-opens, even on a never-visited place/);
     // Also closes any in-progress edit (2026-08-28 owner block) — only one form open at a time.
-    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ if \(editingVisitId\) drafts\.clear\(`edit:\$\{editingVisitId\}`\); drafts\.clear\("new"\); setEditingVisitId\(null\); setAdding\(true\); \};/);
   });
 });
 
@@ -2393,59 +2376,55 @@ describe("VisitPanel — Empty state (block 6, never visited): no score strip, n
   });
 
   it("PastVisitsSection itself renders nothing at zero visits — no 'Past visits · 0' heading", () => {
-    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending, dishesWithDate, onSaveDish, onDeleteDish, dishPending \}\) \{\s*if \(!pastVisits\.length\) return null;/);
+    const section = panel.slice(panel.indexOf("function PastVisitsSection"), panel.indexOf("/* Empty state"));
+    expect(section).toMatch(/if \(!pastVisits\.length\) return null;/);
   });
 });
 
-describe("VisitPanel — Past visit cards (block 5): chips, Would-return, overflow delete-behind-confirm via AnchoredMenu", () => {
+describe("VisitPanel — visit rows (NEW-1, 2026-10-20 mockup): one compact line each, chevron, tap = edit, Delete inside the edit form", () => {
   const panel = src("components/VisitPanel.jsx");
   const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+  const formBlock = panel.slice(panel.indexOf("function VisitForm("), panel.indexOf("/* The header"));
 
-  it("shows a Would-return chip only when would_return is exactly true (never for false or null)", () => {
-    expect(cardBlock).toMatch(/const hasWouldReturn = visit\.would_return === true;/);
-    expect(cardBlock).toMatch(/\{hasWouldReturn && <WouldReturnChip \/>\}/);
+  it("a visit is ONE line — '<date> · Food 8.25 · Ambiance 8.0' from restaurantPanel.visitRowLabel — with a chevron; no dish list, no 'dishes avg', no Had/Good/cost/notes lines", () => {
+    expect(cardBlock).toMatch(/visitRowLabel\(visit, formatVisitDate\)/);
+    expect(cardBlock).toMatch(/data-testid="food-visit-row-label"/);
+    const rowOnly = cardBlock.slice(cardBlock.indexOf('data-testid="food-visit-card" onClick')); // the compact ROW (the editing branch above it may read saved legacy text)
+    expect(rowOnly).not.toMatch(/dishes avg|meanDishScoreForVisit|what_i_had|what_was_good|visit\.cost|visit\.notes/);
+    expect(cardBlock).toMatch(/›/);
   });
 
-  it("would_return WAS already wired end-to-end before this rebuild (VisitForm's Yes/No, and the old VisitRow already displayed it as plain text) — this only redesigns the DISPLAY as a chip, it doesn't newly wire the column", () => {
-    expect(panel).toMatch(/would_return: wouldReturn,/); // VisitForm's submit payload, unchanged
+  it("a missing date reads 'No date' (the lib), and the row still renders the ratings it has", () => {
+    expect(visitRowLabel({ visited_on: null, rating: 7.5, rating_ambiance: 8 }, () => "unused")).toBe("No date · Food 7.5 · Ambiance 8.0");
   });
 
-  it("only non-empty visit fields render — 'Had X' / 'Good X' / cost — never an empty labelled row", () => {
-    expect(cardBlock).toMatch(/\{visit\.what_i_had && <div[^>]*>Had \{visit\.what_i_had\}<\/div>\}/);
-    expect(cardBlock).toMatch(/\{visit\.what_was_good && <div[^>]*>Good \{visit\.what_was_good\}<\/div>\}/);
-    expect(cardBlock).toMatch(/\{visit\.cost != null && <div/);
+  it("would_return is still saved by VisitForm (unchanged payload) even though the compact row no longer draws a chip for it", () => {
+    expect(panel).toMatch(/would_return: wouldReturn,/);
   });
 
-  it("an undated visit renders at reduced emphasis (opacity), matching that fetchAllVisits already sorts it last", () => {
-    expect(cardBlock).toMatch(/const dateless = !visit\.visited_on;/);
-    expect(cardBlock).toMatch(/opacity:\s*dateless \? 0\.65 : 1/);
-  });
-
-  it("delete lives behind the '···' overflow menu, through AnchoredMenu — the SAME portal-based menu SearchBox already uses, not a plain absolutely-positioned dropdown that would clip inside the scrolling list (B632176's class of bug)", () => {
-    expect(panel).toMatch(/import AnchoredMenu from "\.\.\/\.\.\/\.\.\/shared\/ui\/AnchoredMenu\.jsx";/);
-    expect(cardBlock).toMatch(/<AnchoredMenu\b/);
-    expect(cardBlock).not.toMatch(/position:\s*"absolute"/); // no locally-nested dropdown reintroduced
-  });
-
-  it("Delete requires a confirm step INSIDE the menu — never window.confirm, never a bare standalone red link", () => {
-    expect(cardBlock).toMatch(/const \[confirming, setConfirming\] = useState\(false\);/);
-    expect(cardBlock).toMatch(/data-testid="food-visit-delete-menu-item"/);
-    expect(cardBlock).toMatch(/data-testid="food-visit-delete-confirm"/);
-    expect(cardBlock).toMatch(/Delete this visit\?/);
-    expect(cardBlock).not.toMatch(/window\.(confirm|prompt|alert)/);
-  });
-
-  it("the confirm step's Delete button reuses the EXISTING --danger token, not a second/new red", () => {
-    expect(cardBlock).toMatch(/var\(--danger-text, var\(--danger\)\)/);
+  it("there is NO ··· overflow menu on a visit row any more — AnchoredMenu is gone from the panel; Delete lives at the bottom of the EDIT form behind an inline confirm (never window.confirm)", () => {
+    expect(panel).not.toMatch(/AnchoredMenu/);
+    expect(cardBlock).not.toMatch(/food-visit-menu-btn/);
+    expect(formBlock).toMatch(/data-testid="food-visit-delete-menu-item"/);
+    expect(formBlock).toMatch(/data-testid="food-visit-delete-confirm"/);
+    expect(formBlock).toMatch(/Delete this visit\?/);
+    expect(formBlock).toMatch(/var\(--danger-text, var\(--danger\)\)/);
+    expect(panel).not.toMatch(/window\.(confirm|prompt|alert)/);
     expect(cardBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/); // no raw hex anywhere in this component
   });
 
-  it("the overflow button itself is at least 44 CSS px", () => {
-    expect(cardBlock).toMatch(/minWidth:\s*44,\s*minHeight:\s*44/);
+  it("the row is at least 44 CSS px tall (a finger target)", () => {
+    expect(cardBlock).toMatch(/minHeight:\s*44/);
   });
 
-  it("Past visits section label reads 'Past visits · N'", () => {
-    expect(panel).toMatch(/Past visits · \{pastVisits\.length\}/);
+  it("section label reads 'Visits · N'; the two most recent show and the rest sit behind 'Show N more' (restaurantPanel.visitsToShow)", () => {
+    expect(panel).toMatch(/<SectionLabel count=\{pastVisits\.length\}>Visits<\/SectionLabel>/); // renders "Visits · N" (components/SectionLabel.jsx)
+    expect(panel).not.toMatch(/Past visits · /);
+    expect(panel).toMatch(/visitsToShow\(pastVisits,/);
+    expect(panel).toMatch(/data-testid="food-visits-more"/);
+    expect(panel).toMatch(/Show \{hidden\} more/);
+    expect(visitsToShow([{ id: 1 }, { id: 2 }, { id: 3 }], false)).toEqual({ shown: [{ id: 1 }, { id: 2 }], hidden: 1 });
+    expect(visitsToShow([{ id: 1 }, { id: 2 }, { id: 3 }], true).hidden).toBe(0);
   });
 });
 
@@ -2475,18 +2454,17 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
   it("VisitForm pre-fills every field from `initial` when editing, and stays blank for a fresh log (initial undefined)", () => {
     const formStart = panel.indexOf("function VisitForm(");
     const formBody = panel.slice(formStart, panel.indexOf("\n}", panel.indexOf("return (", formStart)));
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "rating", \(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "ratingAmbiance", \(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "cost", \(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
     expect(formBody).not.toMatch(/useState\(\(\) => initial\?\.what_i_had/); // NEW-1: no editable "What I had"; the saved text is shown read-only
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_was_good \|\| ""\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.notes \|\| ""\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.would_return \?\? null\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "notes", \(\) => initial\?\.notes \|\| ""\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "wouldReturn", \(\) => initial\?\.would_return \?\? null\)/);
   });
 
   it("the date field has an explicit Clear affordance (a native date input's own clear gesture isn't reliably reachable on every platform)", () => {
     const formStart = panel.indexOf("function VisitForm(");
-    const formBody = panel.slice(formStart, panel.indexOf("function Chip("));
+    const formBody = panel.slice(formStart, panel.indexOf("/* The header"));
     expect(formBody).toMatch(/\{visitedOn && \(/);
     expect(formBody).toMatch(/onClick=\{\(\) => setVisitedOn\(""\)\}/);
   });
@@ -2495,15 +2473,9 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
     expect(cardBlock).toMatch(/data-testid="food-visit-card" onClick=\{onOpenEdit\}/);
   });
 
-  it("the ··· menu's click handler stops propagation, so opening the menu never ALSO opens edit via the card's own onClick", () => {
-    expect(cardBlock).toMatch(/onClick=\{\(e\) => \{ e\.stopPropagation\(\); setMenuOpen/);
-  });
-
-  it("the menu offers Edit ABOVE Delete (a constructive action before a destructive one)", () => {
-    const editIdx = cardBlock.indexOf('data-testid="food-visit-edit-menu-item"');
-    const deleteIdx = cardBlock.indexOf('data-testid="food-visit-delete-menu-item"');
-    expect(editIdx).toBeGreaterThan(0);
-    expect(deleteIdx).toBeGreaterThan(editIdx);
+  it("the row has no ··· menu (NEW-1, 2026-10-20): the tap IS the edit, and the edit form carries Delete (onDelete) below Save/Cancel", () => {
+    expect(cardBlock).not.toMatch(/setMenuOpen|food-visit-menu-btn|food-visit-edit-menu-item/);
+    expect(cardBlock).toMatch(/onCancel=\{onCloseEdit\} onSubmit=\{onSubmitEdit\} onSaved=\{onCloseEdit\} onDelete=\{onDelete\}/);
   });
 
   it("Cancel is free — no write, no rollback state needed, because nothing was written until Save", () => {
@@ -2512,8 +2484,8 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
 
   it("editingVisitId is lifted to VisitPanel (not local to VisitCard) so only one form — the new-visit form or ONE card's edit — is ever open at once", () => {
     expect(panel).toMatch(/const \[editingVisitId, setEditingVisitId\] = useState\(null\);/);
-    expect(panel).toMatch(/const handleOpenEdit = useCallback\(\(id\) => \{ setAdding\(false\); setEditingVisitId\(id\); \}, \[\]\);/);
-    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
+    expect(panel).toMatch(/const handleOpenEdit = useCallback\(\(id\) => \{ drafts\.clear\("new"\); drafts\.clear\(`edit:\$\{id\}`\); setAdding\(false\); setEditingVisitId\(id\); \}, \[drafts\]\);/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ if \(editingVisitId\) drafts\.clear\(`edit:\$\{editingVisitId\}`\); drafts\.clear\("new"\); setEditingVisitId\(null\); setAdding\(true\); \};/);
   });
 
   it("FoodApp's editVisit uses the SAME optimistic-update/rollback shape submitVisit already uses", () => {
@@ -2539,7 +2511,7 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
 
 describe("VisitPanel — Header (block 1): wrapping name, category · city, a tappable directions link, a circular close button", () => {
   const panel = src("components/VisitPanel.jsx");
-  const headerBlock = panel.slice(panel.indexOf("function PanelHeader"), panel.indexOf("/* Score strip"));
+  const headerBlock = panel.slice(panel.indexOf("function PriceLevelControl"), panel.indexOf("/* Score pills"));
 
   it("the name wraps rather than truncates — no text-overflow:ellipsis / white-space:nowrap on it", () => {
     expect(headerBlock).not.toMatch(/textOverflow:\s*"ellipsis"/);
@@ -2547,9 +2519,32 @@ describe("VisitPanel — Header (block 1): wrapping name, category · city, a ta
     expect(headerBlock).toMatch(/overflowWrap:\s*"anywhere"/);
   });
 
-  it("line 2 joins category and city/neighbourhood with ' · ', omitted entirely when both are absent (a manual pin has neither)", () => {
-    expect(headerBlock).toMatch(/const categoryLine = \[formatCategory\(category\), city\]\.filter\(Boolean\)\.join\(" · "\);/);
-    expect(headerBlock).toMatch(/\{categoryLine && </);
+  it("line 2 is '<cuisine> · <city>' (restaurantPanel.headerSubline, the word Restaurant dropped) followed by the price-level control; the text is omitted when both are absent (a manual pin has neither)", () => {
+    expect(headerBlock).toMatch(/const subline = headerSubline\(\{ cuisine: formatCuisine\(category\), city \}\);/);
+    expect(headerBlock).toMatch(/\{subline && <span>\{subline\}<\/span>\}/);
+    expect(headerSubline({ cuisine: "Japanese", city: "Houston" })).toBe("Japanese · Houston");
+    expect(headerSubline({ cuisine: null, city: null })).toBe("");
+    expect(formatCuisine("japanese_restaurant")).toBe("Japanese");
+    expect(formatCuisine("restaurant")).toBe("Restaurant");
+    expect(formatCuisine("sports_bar")).toBe("Sports Bar");
+  });
+
+  it("the address line is NEUTRAL GREY and reads '<street> · Directions' — the whole line is the directions link (NEW-1)", () => {
+    const addr = headerBlock.slice(headerBlock.indexOf('data-testid="food-directions-link"'), headerBlock.indexOf("</a>"));
+    expect(addr).toMatch(/color: "var\(--text-secondary\)"/);
+    expect(addr).not.toMatch(/accent-food/);
+    expect(addr).toMatch(/\{formattedAddress\} · <span[^>]*>Directions<\/span>/);
+  });
+
+  it("the price level is four $ buttons (filled dark up to the level, the rest light grey; all grey when unset), tapping the current level clears it (restaurantPanel.nextPriceLevel)", () => {
+    expect(headerBlock).toMatch(/function PriceLevelControl/);
+    expect(headerBlock).toMatch(/PRICE_LEVELS\.map\(/);
+    expect(headerBlock).toMatch(/onChange\(nextPriceLevel\(set \? level : null, n\)\)/);
+    expect(headerBlock).toMatch(/color: filled \? "var\(--text-primary\)" : "var\(--text-tertiary\)"/);
+    expect(nextPriceLevel(null, 2)).toBe(2);
+    expect(nextPriceLevel(2, 3)).toBe(3);
+    expect(nextPriceLevel(3, 3)).toBe(null);
+    expect(nextPriceLevel(3, 9)).toBe(3);
   });
 
   it("the address is a tappable link that opens directions, only rendered when both an address AND coordinates exist", () => {
@@ -2558,9 +2553,11 @@ describe("VisitPanel — Header (block 1): wrapping name, category · city, a ta
     expect(headerBlock).toMatch(/target="_blank" rel="noopener noreferrer"/);
   });
 
-  it("close is a circular icon button (border-radius 50%, >=44px), not a bare glyph floating in the corner", () => {
-    expect(headerBlock).toMatch(/borderRadius:\s*"50%"/);
-    expect(headerBlock).toMatch(/width:\s*44,\s*height:\s*44,\s*minWidth:\s*44,\s*minHeight:\s*44/);
+  it("close is a PLAIN X (no circle) with a >=44px touch target — NEW-4 (2026-10-11): one X style across /food (components/CloseX.jsx)", () => {
+    expect(headerBlock).toMatch(/<CloseX /);
+    const x = src("components/CloseX.jsx");
+    expect(x).not.toMatch(/borderRadius/);
+    expect(x).toMatch(/size = 44/);
   });
 
   it("the selection-tie accent dot (B634976) survives the rebuild", () => {
@@ -2579,7 +2576,7 @@ describe("VisitPanel — the header stays visible while the panel's content scro
   const panel = src("components/VisitPanel.jsx");
 
   it("PanelHeader is wrapped in its own position:sticky;top:0 div, inside peekRef so the peek-height measurement is unaffected", () => {
-    const bodyStart = panel.indexOf("const body = (");
+    const bodyStart = panel.indexOf("const body = openDishRow");
     const bodySlice = panel.slice(bodyStart, panel.indexOf("{showSaved &&"));
     const peekRefIdx = bodySlice.indexOf("ref={peekRef}");
     const stickyIdx = bodySlice.indexOf('position: "sticky", top: 0');
@@ -2590,7 +2587,7 @@ describe("VisitPanel — the header stays visible while the panel's content scro
   });
 
   it("only the header is sticky — NOT the whole peekRef block (score strip stays in normal scroll, so it doesn't permanently eat the mobile sheet's limited 'half' snap height)", () => {
-    const scoreStripIdx = panel.indexOf("everVisited && <ScoreStrip");
+    const scoreStripIdx = panel.indexOf("everVisited && <ScorePills");
     const stickyWrapperIdx = panel.indexOf('position: "sticky", top: 0');
     expect(stickyWrapperIdx).toBeGreaterThan(0);
     expect(scoreStripIdx).toBeGreaterThan(stickyWrapperIdx); // ScoreStrip renders AFTER (outside) the sticky wrapper closes
@@ -2601,36 +2598,25 @@ describe("VisitPanel — the header stays visible while the panel's content scro
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
- * VISIT CARD LAYOUT (owner block, 2026-08-28: "the three dots and date should be more in line
- * with the rest of the info" — on his screenshot, date/··· sat flush against the far edge,
- * ~600px from the rating chip on a 390pt screen). Live-verified: the ··· button sits at the
- * IDENTICAL x position across three differently-shaped cards (one chip+date, three chips+would-
- * return wrapping to two lines, no chips+a dateless card) — .scratch-repro/verify-card-
- * alignment.mjs measured x=330 on all three, a genuine straight line, not an anecdote.
+ * VISIT ROW LAYOUT. History: the 2026-08-28 owner block put the date in line with the chips and the ··· in its own
+ * column. NEW-1 (2026-10-20, owner-approved mockup) collapsed the card to ONE compact line — "<date> · Food 8.25 ·
+ * Ambiance 8.0" + a chevron — with Delete moved into the edit form, so the ··· column no longer exists.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
-describe("VisitPanel — visit card layout: date lives WITH the chips, ··· is a fixed-position column", () => {
+describe("VisitPanel — visit row layout (NEW-1, 2026-10-20): one centred flex line, the label truncates, the chevron is its own fixed item", () => {
   const panel = src("components/VisitPanel.jsx");
   const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
 
-  it("the date sits INSIDE the same flex-wrap row as the chips, not in a separate right-aligned group", () => {
-    const chipRowIdx = cardBlock.indexOf('flexWrap: "wrap"');
-    const dateIdx = cardBlock.indexOf("formatVisitDate(visit.visited_on)");
-    const menuButtonIdx = cardBlock.indexOf('data-testid="food-visit-menu-btn"');
-    expect(chipRowIdx).toBeGreaterThan(0);
-    expect(dateIdx).toBeGreaterThan(chipRowIdx);
-    expect(dateIdx).toBeLessThan(menuButtonIdx); // date renders BEFORE the menu button, inside the same row
+  it("the row is a single flex line with its content vertically centred", () => {
+    const rowIdx = cardBlock.indexOf('data-testid="food-visit-card"');
+    const rowSlice = cardBlock.slice(rowIdx, rowIdx + 400);
+    expect(rowSlice).toMatch(/display: "flex", alignItems: "center"/);
   });
 
-  it("the outer row centres its content vertically (not flex-start), so ··· centres against whatever height the chip+date row wraps to", () => {
-    const outerRowIdx = cardBlock.indexOf('justifyContent: "space-between"');
-    const rowSlice = cardBlock.slice(outerRowIdx, outerRowIdx + 120);
-    expect(rowSlice).toMatch(/alignItems:\s*"center"/);
-  });
-
-  it("··· is its own fixed-size flex item (flex: \"0 0 auto\"), never sharing a group with the variable-width date text", () => {
-    const testidIdx = cardBlock.indexOf('data-testid="food-visit-menu-btn"');
-    const menuBtnBlock = cardBlock.slice(testidIdx, testidIdx + 200);
-    expect(menuBtnBlock).toMatch(/flex:\s*"0 0 auto"/);
+  it("the label ellipsises on one line (the whole row is the tap target, so nothing is lost) and the chevron never shrinks", () => {
+    const labelIdx = cardBlock.indexOf('data-testid="food-visit-row-label"');
+    expect(cardBlock.slice(labelIdx, labelIdx + 400)).toMatch(/textOverflow: "ellipsis", whiteSpace: "nowrap"/);
+    const chev = cardBlock.slice(cardBlock.indexOf("›") - 120, cardBlock.indexOf("›"));
+    expect(chev).toMatch(/flex: "none"/);
   });
 });
 
@@ -2911,33 +2897,30 @@ describe("NEW-1 (2026-08-27 owner block) — saving a visit gives an unmistakabl
 
   it("the confirmation banner exists, is a role=\"status\" (not an alert/modal), and reads a plain success message", () => {
     expect(panel).toMatch(/data-testid="food-save-confirmation"/);
-    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 300, panel.indexOf('data-testid="food-save-confirmation"') + 400);
+    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 300, panel.indexOf('data-testid="food-save-confirmation"') + 900);
     expect(bannerBlock).toMatch(/role="status"/);
     expect(bannerBlock).toMatch(/Visit saved/);
     expect(bannerBlock).toMatch(/var\(--success-bg\)/);
     expect(bannerBlock).toMatch(/var\(--success-text\)/);
   });
 
-  it("shown ONLY on savedNonce > 0 (never on mount) and auto-dismisses — no dismiss button, nothing for the owner to click away", () => {
-    expect(panel).toMatch(/const \[savedNonce, setSavedNonce\] = useState\(0\);/);
-    const effectBlock = panel.slice(panel.indexOf("if (savedNonce === 0) return undefined"), panel.indexOf("}, [savedNonce]);") + 20);
-    expect(effectBlock).toMatch(/setTimeout\(\(\) => setShowSaved\(false\), SAVE_CONFIRMATION_MS\)/);
+  it("shown ONLY for a notice FoodApp recorded after a confirmed save (never on mount) and auto-dismisses — the only control is Edit visit, no dismiss", () => {
+    expect(panel).toMatch(/const \[showSaved, setShowSaved\] = useState\(false\);/);
+    const effectBlock = panel.slice(panel.indexOf("if (!savedNotice || !noticeHere) return undefined"), panel.indexOf("}, [noticeAt, noticeHere]);") + 30);
+    expect(effectBlock).toMatch(/setTimeout\(\(\) => setShowSaved\(false\), left\)/);
     expect(effectBlock).toMatch(/clearTimeout\(t\)/);
-    // No dismiss affordance anywhere near the banner — it is not a toast the owner has to close.
-    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 50, panel.indexOf('data-testid="food-save-confirmation"') + 400);
-    expect(bannerBlock).not.toMatch(/onClick/);
   });
 
   it("fires ONLY on a confirmed save (the SAME B668194 gate VisitForm already uses to clear its fields) — never on a failed save, which the error banner already covers", () => {
-    expect(panel).toMatch(/onSaved\?\.\(\);/);
+    expect(panel).toMatch(/onSaved\?\.\(saved\);/);
     const submitFn = panel.slice(panel.indexOf("const submit = async (e) => {"), panel.indexOf("return (", panel.indexOf("const submit = async (e) => {")));
     const savedBlock = submitFn.slice(submitFn.indexOf("if (saved) {"), submitFn.indexOf("};", submitFn.indexOf("if (saved) {")));
-    expect(savedBlock).toMatch(/setWouldReturn\(null\);\s*\n\s*\/\/[\s\S]{0,300}onSaved\?\.\(\);/); // field-clear AND onSaved share the same `if (saved)` gate
-    expect(panel).toMatch(/<VisitForm pending=\{pending\} onCancel=\{\(\) => setAdding\(false\)\} onSubmit=\{onSubmitVisit\} onSaved=\{handleSaved\} \/>/);
+    expect(savedBlock).toMatch(/setWouldReturn\(null\);\s*\n\s*\/\/[\s\S]{0,300}onSaved\?\.\(saved\);/); // field-clear AND onSaved share the same `if (saved)` gate
+    expect(panel).toMatch(/<VisitForm pending=\{pending\} onCancel=\{\(\) => setAdding\(false\)\} onSubmit=\{onSubmitVisit\} onSaved=\{handleSaved\} knownRows=\{knownDishRows\} \/>/);
   });
 
   it("lives INSIDE peekRef's own measured block, not an absolute overlay over the header/close button — so it never covers the title or the close button, and the sheet's own existing peek-height re-measure (no deps, re-measures every render) picks it up for free", () => {
-    const peekBlock = panel.slice(panel.indexOf("<div ref={peekRef}>"), panel.indexOf("{everVisited && <OrderAgain"));
+    const peekBlock = panel.slice(panel.indexOf("<div ref={peekRef}>\n        {/* Sticky header"), panel.indexOf("{everVisited && onSaveDish && ("));
     expect(peekBlock).toMatch(/data-testid="food-save-confirmation"/);
     expect(peekBlock).not.toMatch(/position:\s*"absolute"/);
   });
@@ -3223,82 +3206,45 @@ describe("FoodApp — saveDish never touches food_visits.rating or any visit fie
   });
 });
 
-describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minus/plus nudge buttons, a readable numeral, and the 'Not rated over a filled track' bug killed", () => {
-  it("min 1, max 10, step 0.25 — the redesign's scale change, ticks unchanged", () => {
+describe("ScoreMeter — now the shared RatingSlider (NEW-2, 2026-10-11): quarter steps, no minus/plus, one readout, one Clear", () => {
+  it("min 1, max 10, step 0.25, evenly spaced whole-number ticks 1-10", () => {
     expect(DISH_SCORE_MIN).toBe(1);
     expect(DISH_SCORE_MAX).toBe(10);
     expect(DISH_SCORE_STEP).toBe(0.25);
-    expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
+    expect(DISH_SCORE_TICKS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
-  it("⛔ exactly ONE <input type=\"range\"> on EVERY device — no per-value tap grid anywhere (2026-10-05: ratings are sliders, never tap buttons)", () => {
+  it("⛔ no - / + nudge buttons, no tap grid, no range input of its own — it wraps RatingSlider", () => {
     const meter = src("components/ScoreMeter.jsx");
-    const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
-    expect(body.match(/type="range"/g) || []).toHaveLength(1);
-    // The tick-label .map() renders plain <span> ticks, never a button grid.
-    const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
-    expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
-    expect(meter).not.toMatch(/ScoreTapGrid|score-tap/);
-    // Buttons: minus + plus + Clear = 3 — never one per score stop here.
-    expect((body.match(/<button/g) || []).length).toBe(3);
-    expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
+    expect(meter).toMatch(/<RatingSlider /);
+    expect(meter).not.toMatch(/<button|type="range"|nudgeScore|score-tap|dish-score-minus|dish-score-plus/);
   });
 
-  it("Clear sets the value back to null, matching the visit rating slider's own Clear affordance", () => {
-    const meter = src("components/ScoreMeter.jsx");
-    expect(meter).toMatch(/data-testid="dish-score-clear"/);
-    expect(meter).toMatch(/onClick=\{\(\) => onChange\(null\)\}/);
+  it("clampScore snaps to the nearest quarter point and clamps at both ends", () => {
+    expect(clampScore(8.3)).toBe(8.25);
+    expect(clampScore(11)).toBe(10);
+    expect(clampScore(0)).toBe(1);
+    expect(clampScore(5)).toBe(5);
   });
 
-  describe("clampScore / nudgeScore — pure functions, the exact math the minus/plus buttons and the slider both call", () => {
-    it("clampScore snaps to the nearest quarter point and clamps at both ends", () => {
-      expect(clampScore(8.3)).toBe(8.25);
-      expect(clampScore(11)).toBe(10);
-      expect(clampScore(0)).toBe(1);
-      expect(clampScore(5)).toBe(5);
-    });
-
-    it("⛔ PROVE IT — the minus/plus buttons move the value by EXACTLY 0.25 and clamp at 1 and 10", () => {
-      expect(nudgeScore(5, 0.25)).toBe(5.25);
-      expect(nudgeScore(5, -0.25)).toBe(4.75);
-      expect(nudgeScore(9.75, 0.25)).toBe(10); // clamp at the ceiling
-      expect(nudgeScore(10, 0.25)).toBe(10); // already at the ceiling — stays put, never overshoots
-      expect(nudgeScore(1.25, -0.25)).toBe(1); // clamp at the floor
-      expect(nudgeScore(1, -0.25)).toBe(1);
-    });
-
-    it("from an UNSET score, either nudge button ESTABLISHES a rating at the floor rather than jumping past it", () => {
-      expect(nudgeScore(null, 0.25)).toBe(DISH_SCORE_MIN);
-      expect(nudgeScore(null, -0.25)).toBe(DISH_SCORE_MIN);
-    });
-  });
-
-  describe("rendered output (react-dom/server — no DOM needed, real component code)", () => {
+  describe("rendered output (react-dom/server)", () => {
     const render = (value) => renderToStaticMarkup(createElement(ScoreMeter, { value, onChange: () => {} }));
 
-    it("⛔ THE BUG THIS KILLS — an UNSET score shows an em dash, a caption that says nothing is set, and the track in its NEUTRAL state, never the string 'Not rated' over a filled bar", () => {
+    it("an UNSET score reads 'Not rated' with a neutral (unfilled) track, and keeps the dish test ids", () => {
       const html = render(null);
-      expect(html).not.toMatch(/Not rated/);
+      expect(html).toContain("Not rated");
       expect(html).toContain('data-score-state="unset"');
-      expect(html).toContain(">—<"); // the em-dash numeral
-      expect(html).toContain("not set yet"); // the caption — never silent, never "quarter steps" while unset
-      expect(html).not.toContain("quarter steps");
-      // The thumb sits at the scale's own floor (nothing filled before it) and the track is the
-      // flat neutral colour, never the striped accent meter.
-      expect(html).toMatch(/<input[^>]*value="1"/);
-      expect(html).toContain("var(--border-default)"); // the neutral track fill
+      expect(html).toContain('data-testid="dish-score-slider"');
+      expect(html).toContain('data-testid="dish-score-meter"');
+      expect(html).not.toContain("dish-score-clear");
+      expect(html).toContain("--rs-color:var(--border-default)");
     });
 
-    it("a SET score shows a large numeral trimmed of trailing zeros, right-aligned beside '/ 10', and the 'quarter steps' caption", () => {
-      const wholeNumber = render(8);
-      expect(wholeNumber).toContain('data-score-state="set"');
-      expect(wholeNumber).toContain(">8<");
-      expect(wholeNumber).not.toContain(">8.00<");
-      expect(wholeNumber).toContain("quarter steps");
-      expect(wholeNumber).toContain("/ 10");
-
-      expect(render(8.5)).toContain(">8.5<");
-      expect(render(8.25)).toContain(">8.25<");
+    it("a SET score reads 'N / 10' at natural precision with a Clear link", () => {
+      expect(render(8)).toContain(">8 / 10<");
+      expect(render(8.5)).toContain(">8.5 / 10<");
+      expect(render(8.25)).toContain(">8.25 / 10<");
+      expect(render(8)).toContain("dish-score-clear");
     });
   });
 });
@@ -3311,44 +3257,48 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
   });
 
   it("Enter commits (and, only when adding a NEW dish, reopens a blank row); Escape cancels — unchanged by the redesign", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
     expect(editRow).toMatch(/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); onCancel\(\); \}/);
-    expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!initial\); \}/);
+    expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!isEdit && !isRerate\); \}/);
     expect(editRow).toMatch(/if \(ok && andReopen\) reset\(\);/);
   });
 
   it("the dish name is the editor's HERO field — transparent background, no box, a 2px accent underline — never the same filled-grey box as every other field (the shipped defect)", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    const nameInput = editRow.slice(editRow.indexOf('data-testid="dish-name-input"') - 400, editRow.indexOf('data-testid="dish-name-input"') + 400);
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
+    const nameInput = editRow.slice(editRow.indexOf("<DishNameField"), editRow.indexOf("<DishNameField") + 900); // B2268434: the field now lives in DishNameField, styled by the editor
     expect(nameInput).toMatch(/background: "transparent"/);
     expect(nameInput).toMatch(/borderBottom: "2px solid var\(--accent-food\)"/);
     expect(nameInput).toMatch(/fontWeight: 600/);
   });
 
-  it("the dish name field autocompletes against existing dish names at this place AND open (not-done) wishlist names, via a native <datalist> (no custom dropdown widget)", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    expect(editRow).toMatch(/const suggestions = \[\.\.\.new Set\(\[\.\.\.existingNames, \.\.\.openWishlistNames\]\)\];/);
-    expect(editRow).toMatch(/<datalist id=\{listId\}>/);
+  it("the dish name field suggests dishes already saved at this place AND open (not-done) wishlist names — our own list (misspelling-tolerant via dishSuggest), not a native <datalist> (B2268434)", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
+    expect(editRow).toMatch(/openWishlistNames\.filter/);
+    expect(editRow).toMatch(/<DishNameField/);
+    expect(editRow).not.toMatch(/<datalist/);
+    expect(section).toMatch(/suggestDishes\(value, rows\)/);
   });
 
   it("Course and Price share a row — Course flexes, Price is a fixed narrow field", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
     expect(editRow).toMatch(/flex: 1, minWidth: 0[\s\S]{0,80}?Course/);
     expect(editRow).toMatch(/flex: "0 0 92px"[\s\S]{0,80}?Price/);
   });
 
   it("price is entered in dollars and stored as ROUNDED integer cents", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
     expect(editRow).toMatch(/price_cents: price === "" \? null : Math\.round\(Number\(price\) \* 100\),/);
   });
 
   it("⛔ every field label is small-caps, 10px (FONT_SIZE.micro), letter-spaced, in the secondary text token", () => {
-    expect(section).toMatch(/const FIELD_LABEL_STYLE = \{[\s\S]{0,220}?fontSize: FONT_SIZE\.micro,[\s\S]{0,220}?textTransform: "uppercase"/);
+    // NEW-1 (2026-10-27): the field label IS the shared caps label (lib/foodType.js: 10.5, bold, uppercase, tracked, secondary) — one dialect, not a local 10px copy.
+    expect(section).toMatch(/const FIELD_LABEL_STYLE = \{ display: "block", \.\.\.FOOD_TYPE\.label,/);
+    expect(src("lib/foodType.js")).toMatch(/textTransform: "uppercase"/);
   });
 
   it("Order it again — now carries its own label (the shipped defect: three buttons with nothing saying what they answer), and EVERY selected state uses the SAME accent fill (previously only 'yes' got the real fill)", () => {
-    const control = section.slice(section.indexOf("const ORDER_AGAIN_OPTIONS"), section.indexOf("function DishHistoryPanel"));
-    expect(control).toMatch(/Order it again\?/);
+    const control = section.slice(section.indexOf("const ORDER_AGAIN_OPTIONS"), section.indexOf("export function todayLocal"));
+    expect(control).toMatch(/label = "Order it again\?"/); // the dish sheet reuses the control as "Would I eat it again"
     expect(control).toMatch(/glyph: "✓"/);
     expect(control).toMatch(/glyph: "~"/);
     expect(control).toMatch(/glyph: "✕"/);
@@ -3358,26 +3308,24 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
   });
 
   it("the buttons row: ADD mode gets 'Save & add another' (primary) + 'Save & close' + Cancel; EDIT mode gets only 'Save' (primary) + Cancel — an owner decision, not a guess", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
-    expect(editRow).toMatch(/\{initial \? "Save" : "Save & add another"\}/);
-    expect(editRow).toMatch(/!initial && \(/); // "Save & close" only renders when adding
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
+    expect(editRow).toMatch(/\{isEdit \|\| isRerate \? "Save" : "Save & add another"\}/);
+    expect(editRow).toMatch(/!isEdit && !isRerate && \(/); // "Save & close" only renders when adding
     expect(editRow).toMatch(/data-testid="dish-save-close-btn"/);
     expect(editRow).toMatch(/data-testid="dish-cancel-btn"/);
   });
 
-  it("sortable by score (default), name, price, last had — unchanged", () => {
-    expect(section).toMatch(/const \[sortKey, setSortKey\] = useState\("score"\);/);
-    expect(section).toMatch(/score: \(a, b\) => \(Number\(b\.latestScore \?\? -1\) - Number\(a\.latestScore \?\? -1\)\)/);
-    expect(section).toMatch(/<option value="name">Sort: name<\/option>/);
-    expect(section).toMatch(/<option value="price">Sort: price<\/option>/);
-    expect(section).toMatch(/<option value="last">Sort: last had<\/option>/);
-  });
-
-  it("THE ORDER shows only latest order_again='yes' dishes, with a Copy button, and only renders when non-empty — unchanged", () => {
-    expect(section).toMatch(/data-testid="food-the-order"/);
-    expect(section).toMatch(/orderEntries\.length > 0 &&/);
-    expect(section).toMatch(/data-testid="food-the-order-copy"/);
-    expect(section).toMatch(/navigator\?\.clipboard\?\.writeText/);
+  it("NEW-1 (2026-10-20 mockup): NO Sort control and NO separate 'The order' card / Copy button — the dish list IS the order, grouped by eat-again through restaurantPanel.dishSections", () => {
+    expect(section).not.toMatch(/sortKey|Sort: |food-dishes-sort/);
+    expect(section).not.toMatch(/food-the-order|theOrderEntries|theOrderAsText|clipboard/);
+    expect(section).toMatch(/const sections = useMemo\(\(\) => dishSections\(rows\), \[rows\]\);/);
+    expect(section).toMatch(/data-testid="food-dishes-order"/);
+    expect(section).toMatch(/data-testid="food-dishes-maybe"/);
+    expect(section).toMatch(/testId="food-dishes-skip-toggle"/); // the Skip header is a SectionLabel toggle (components/SectionLabel.jsx)
+    expect(section).toMatch(/const \[skipOpen, setSkipOpen\] = useState\(false\);/); // Skip is collapsed by default
+    expect(section).toMatch(/\{sections\.order\.length > 0 && \(/); // an empty section is not drawn
+    expect(section).toMatch(/\{sections\.maybe\.length > 0 && \(/);
+    expect(section).toMatch(/\{sections\.skip\.length > 0 && \(/);
   });
 
   it("a section with zero visits renders nothing — dishes only ever exist under a real visit", () => {
@@ -3395,45 +3343,50 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
     expect(section).toMatch(/minHeight: 44/);
   });
 
-  describe("⛔ REMOVE THE BARE X, DROP THE PENCIL — delete and edit both moved into the row's kebab menu", () => {
-    it("the OLD bare-delete testids are gone", () => {
-      expect(section).not.toMatch(/dish-delete-btn/);
-      expect(section).not.toMatch(/dish-row-edit-btn/); // the standalone pencil button
+  describe("⛔ NO BARE X, NO PENCIL, NO KEBAB (NEW-2, 2026-10-20): every per-dish action lives in the DISH SHEET", () => {
+    const sheet = section.slice(section.indexOf("export function DishSheet"), section.indexOf("export default function DishesSection"));
+    const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("/* ── The dish sheet (NEW-2)"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishBadge"));
+
+    it("the OLD bare-delete / pencil / kebab testids are gone", () => {
+      expect(section).not.toMatch(/dish-delete-btn|dish-row-edit-btn|dish-row-kebab|DishKebabMenu|AnchoredMenu/);
     });
 
-    it("delete lives ONLY inside DishKebabMenu — the row/editor bodies contain no delete testid at all", () => {
-      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
-      expect(kebab).toMatch(/data-testid="dish-row-delete"/);
-      expect(kebab).toMatch(/data-testid="dish-row-delete-confirm"/);
-      expect(kebab).toMatch(/data-testid="dish-row-delete-cancel"/);
-
-      const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    it("delete lives ONLY at the bottom of the dish sheet, behind an inline confirm (never window.confirm), and deletes EVERY rating of the dish", () => {
+      expect(sheet).toMatch(/data-testid="dish-row-delete"/);
+      expect(sheet).toMatch(/data-testid="dish-row-delete-confirm"/);
+      expect(sheet).toMatch(/data-testid="dish-row-delete-cancel"/);
+      expect(sheet).toMatch(/const \[confirmingDelete, setConfirmingDelete\] = useState\(false\);/);
+      expect(sheet).toMatch(/for \(const e of \[row, \.\.\.\(row\.history \|\| \[\]\)\]\) await onDeleteDish\(e\.id\);/);
+      expect(section).not.toMatch(/window\.(confirm|prompt|alert)/);
       expect(editRow).not.toMatch(/delete/i);
-
-      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
-      // Sliced up to the <DishKebabMenu> tag itself, so its own onDelete={onDeleteDish} prop
-      // plumbing (which necessarily NAMES delete) falls outside this slice — only a directly
-      // rendered delete AFFORDANCE (a testid, a button) in the row's own body would trip this.
-      const displayRowOwnBody = displayRow.slice(0, displayRow.indexOf("<DishKebabMenu"));
-      expect(displayRowOwnBody).not.toMatch(/data-testid="[^"]*delete/i);
+      expect(displayRow).not.toMatch(/data-testid="[^"]*delete/i);
     });
 
-    it("delete requires a second confirming tap inside the kebab, never window.confirm", () => {
-      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
-      expect(kebab).toMatch(/const \[confirmingDelete, setConfirmingDelete\] = useState\(false\);/);
-      expect(kebab).toMatch(/confirmingDelete \?/);
+    it("tapping the row opens the sheet (the whole row is the target); the row shows badge · name · one grey line · chevron", () => {
+      expect(displayRow).toMatch(/data-testid="dish-row" data-dish-section=\{section\} data-dish-scored=\{[^}]*\} onClick=\{onOpen\}/);
+      expect(displayRow).toMatch(/<DishBadge score=\{row\.latestScore\} section=\{section\} \/>/);
+      expect(displayRow).toMatch(/const sub = dishSubline\(row\);/);
+      expect(displayRow).toMatch(/\{CHEVRON\}/);
     });
 
-    it("clicking the row opens the editor (row onClick={onOpenEdit}) — this is what makes the pencil redundant", () => {
-      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
-      expect(displayRow).toMatch(/data-testid="dish-row" data-dish-scored=\{[^}]*\} onClick=\{onOpenEdit\}/);
+    it("the sheet: '‹ <restaurant>' back + Done, the name as an editable title, the ONE shared slider, Yes/Maybe/No as 'Would I eat it again', a note with the placeholder 'How to order it next time', history only with 2+ ratings, Rate again at the bottom", () => {
+      expect(sheet).toMatch(/data-testid="dish-sheet-back"/);
+      expect(sheet).toMatch(/data-testid="dish-sheet-done"/);
+      expect(sheet).toMatch(/data-testid="dish-sheet-name"/);
+      expect(sheet).toMatch(/<RatingSlider value=\{score\} onChange=\{setScore\}/);
+      expect(sheet).toMatch(/label="Would I eat it again"/);
+      expect(sheet).toMatch(/placeholder="How to order it next time"/);
+      expect(sheet).toMatch(/const history = dishHistoryEntries\(row\);/);
+      expect(sheet).toMatch(/\{history\.length >= 2 && \(/);
+      expect(sheet).toMatch(/data-testid="dish-rate-again-btn"/);
+      expect(sheet).toMatch(/data-sheet-form=""/); // an open sheet hides "Log a visit" like any form
     });
 
-    it("History is wired to render ONLY when the dish has more than one rating (row.history.length > 0) — owner decision: kept, not dropped, moved off the row click into the kebab", () => {
-      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
-      expect(displayRow).toMatch(/hasHistory=\{row\.history\.length > 0\}/);
-      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
-      expect(kebab).toMatch(/\{hasHistory && \([\s\S]{0,120}?data-testid="dish-row-history"/);
+    it("Done on an existing rating EDITS it (id, name, score, eat-again, note); after Rate again, Done writes a NEW rating dated today on the most recent visit", () => {
+      expect(sheet).toMatch(/onSaveDish\(\{ id: row\.id, name: name\.trim\(\), score, order_again: orderAgain, note: note \|\| null \}\)/);
+      expect(sheet).toMatch(/visit_id: visits\[0\]\.id, rated_on: todayLocal\(\)/);
+      expect(sheet).toMatch(/const startRerate = \(\) => \{ setRerate\(true\); setScore\(null\); \};/); // a re-rate starts unset
     });
   });
 
@@ -3449,18 +3402,35 @@ describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score
       expect(html).toMatch(/data-score-tier="high"[^>]*>8\.25</);
     });
 
-    it("an UNSCORED dish renders a DASHED row: an em-dash chip, 'Not scored yet' in accent text, and a 'Score it' button — never a bare score of any kind", () => {
+    it("an UNSCORED dish renders an em-dash badge and sits in MAYBE (unanswered) with 'Add a note' — never a bare score of any kind", () => {
       const html = renderWith([{ id: "d1", visit_id: "v1", name: "Mystery dish", score: null, updated_at: "2026-01-01T00:00:00Z" }]);
       expect(html).toMatch(/data-score-tier="unset"[^>]*>—</);
-      expect(html).toContain("Not scored yet");
-      expect(html).toContain('data-testid="dish-score-it-btn"');
       expect(html).toContain('data-dish-scored="false"');
+      expect(html).toContain('data-dish-section="maybe"');
+      expect(html).toContain("Add a note");
     });
 
-    it("no bare delete control anywhere in the rendered (closed-menu) markup — the kebab is the only door", () => {
-      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Ribs", score: 7, updated_at: "2026-01-01T00:00:00Z" }]);
+    it("no delete control, no kebab, no Sort, no 'The order' card in the rendered markup — a row is badge · name · line · chevron and the sheet is the only door", () => {
+      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Ribs", score: 7, order_again: "yes", updated_at: "2026-01-01T00:00:00Z" }]);
       expect(html).not.toMatch(/delete/i);
-      expect(html).toContain('data-testid="dish-row-kebab"');
+      expect(html).not.toContain("dish-row-kebab");
+      expect(html).not.toMatch(/Sort|The order|Copy/);
+      expect(html).toContain('data-dish-section="order"');
+      expect(html).toContain('data-badge="dark"');
+      expect(html).toContain("›");
+    });
+
+    it("sections: yes → WHAT TO ORDER, maybe/unanswered → MAYBE, no → Skip (collapsed: its rows are NOT in the markup until tapped), each sorted by score desc", () => {
+      const html = renderWith([
+        { id: "a", visit_id: "v1", name: "Aa", score: 7, order_again: "yes" }, { id: "b", visit_id: "v1", name: "Bb", score: 9, order_again: "yes" },
+        { id: "c", visit_id: "v1", name: "Cc", score: 5, order_again: "maybe" }, { id: "d", visit_id: "v1", name: "Dd", score: 3, order_again: "no" },
+      ]);
+      expect(html.indexOf(">Bb<")).toBeLessThan(html.indexOf(">Aa<"));
+      expect(html).toContain("What to order");
+      expect(html).toContain("Maybe");
+      expect(html.replace(/<!-- -->/g, "")).toContain("Skip · 1 dish");
+      expect(html).not.toContain(">Dd<");
+      expect(html).toContain('data-badge="light"');
     });
 
     it("round trip: a saved 8.25 reads back and DISPLAYS as \"8.25\" (not 8.250, not 8.3)", () => {
@@ -3478,11 +3448,10 @@ describe("VisitPanel — Dishes section wired into place detail (only when everV
     expect(panel).toMatch(/\{everVisited && onSaveDish && \(\s*<DishesSection/);
   });
 
-  it("a visit's own mean dish score is shown next to (never replacing) its Food chip, read-only", () => {
+  it("a visit row carries NO 'dishes avg' (NEW-1, 2026-10-20) — a dish score still never derives a visit rating (dishAggregates has no write path)", () => {
     const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
-    expect(cardBlock).toMatch(/const avgDishScore = onSaveDish \? meanDishScoreForVisit\(dishesWithDate \|\| \[\], visit\.id\) : null;/);
-    expect(cardBlock).toMatch(/data-testid="food-visit-avg-dish-score"/);
-    expect(cardBlock).toMatch(/\{hasRating && <Chip label="Food" value=\{visit\.rating\} \/>\}/); // the chip itself is untouched
+    expect(cardBlock).not.toMatch(/meanDishScoreForVisit|dishes avg/);
+    expect(panel).not.toMatch(/meanDishScoreForVisit/);
   });
 
   it("editing a past visit reveals its own DishesSection, scoped to only that visit's dishes — the 'visit editor gains dish rows' brief", () => {
@@ -3491,8 +3460,9 @@ describe("VisitPanel — Dishes section wired into place detail (only when everV
     expect(cardBlock).toMatch(/visits=\{\[visit\]\}/);
   });
 
-  it("'Best dish here' surfaces in the score strip's facts line, derived from dishRowsForTable/bestDishRow — never a second aggregate engine", () => {
-    expect(panel).toMatch(/const bestDish = useMemo\(\(\) => bestDishRow\(dishRowsForTable\(dishesWithDate \|\| \[\]\)\), \[dishesWithDate\]\);/);
+  it("the 'Best dish:' line is gone (NEW-1, 2026-10-20) — the WHAT TO ORDER section, sorted by score, is where the best dish reads", () => {
+    expect(panel).not.toMatch(/bestDishRow|Best dish/);
+    expect(panel).toMatch(/const knownDishRows = useMemo\(\(\) => dishRowsForTable\(dishesWithDate \|\| \[\]\), \[dishesWithDate\]\);/);
   });
 });
 

@@ -1094,7 +1094,14 @@ export default function NotesTree({
      * that only answered one of them when the pointer arrives from a sibling that answered
      * both, which is exactly the "row → group heading" path. */
     onDragEnter: (e) => { if (!canDropOn(pageId)) return; e.preventDefault(); setDropId(pageId); },
-    onDragOver: (e) => { if (!canDropOn(pageId)) return; e.preventDefault(); setDropId(pageId); },
+    /* The drop cursor is set EXPLICITLY (convention 2026-10-20): "move" where the row accepts the page, "none" where
+     * it is its own subtree / itself — a refused dragover that sets nothing shows whatever the drag started with. */
+    onDragOver: (e) => {
+      if (!canDropOn(pageId)) { try { e.dataTransfer.dropEffect = "none"; } catch (_) {} return; }
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
+      setDropId(pageId);
+    },
     onDragLeave: () => setDropId((d) => (d === pageId ? null : d)),
     onDrop: (e) => {
       e.preventDefault();
@@ -1110,7 +1117,12 @@ export default function NotesTree({
     const key = `root:${g?.org ? "org" : (g?.projectId ?? "none")}`;
     return {
       onDragEnter: (e) => { if (!dragId) return; e.preventDefault(); setDropId(key); },
-      onDragOver: (e) => { if (!dragId) return; e.preventDefault(); setDropId(key); },
+      onDragOver: (e) => {
+        if (!dragId) { try { e.dataTransfer.dropEffect = "none"; } catch (_) {} return; }
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
+        setDropId(key);
+      },
       onDragLeave: () => setDropId((d) => (d === key ? null : d)),
       onDrop: (e) => {
         e.preventDefault();

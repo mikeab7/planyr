@@ -32,9 +32,10 @@ import {
   FEAT_EDIT_REF_SPAN_FT, FEAT_EDIT_MAX_CANVAS_FRAC, FEAT_EDIT_FLOOR_MIN_PPF,
   featureEditFloorPpf, featureEditOpacity,
 } from "../src/workspaces/site-planner/lib/featureEditZoom.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const planner = plannerSource();
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 /* The owner's two real canvases, both taken from HIS measurements rather than invented: the
@@ -236,7 +237,8 @@ describe("both clusters are wired to it, and to the RENDER view AND the canvas w
   });
 
   it("B225's container gate is still there — this ADDS a question, it does not replace one", () => {
-    expect(body).toContain("const FEAT_BTN_MIN_PX = 72;");
+    // NEW-1 (2026-11-04): the number (72) now lives in lib/buildingButtons.js as BUTTON_WALL_MIN_PX — the grading label placer reads the same wall filter; test/spotLabelPlacement pins it at 72
+    expect(body).toContain("const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;");
     expect(body).toContain("< FEAT_BTN_MIN_PX) return null;");
   });
 

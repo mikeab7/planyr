@@ -24,8 +24,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 
 // Isolate the rehydrate-from-storage effect body so assertions can't accidentally match one of the
 // OTHER two idbPut call sites (create-time / page-change) elsewhere in the file.
@@ -78,7 +79,7 @@ describe("(2) a raster-step failure is LOUD and distinct from a network failure 
   });
   it("the rasterFailed branch runs BEFORE the generic missing/network classification (never double-classified)", () => {
     const rasterIdx = effectBody.indexOf("if (rasterFailed) {");
-    const genericIdx = effectBody.indexOf('const reason = key ? (res.missing ? "missing" : "network") : "missing";');
+    const genericIdx = effectBody.indexOf("const reason = overlayLoadReason({ key, missing: res.missing, uid: activeUid() });"); // NEW-1 (B2244016)
     expect(rasterIdx).toBeGreaterThan(-1);
     expect(genericIdx).toBeGreaterThan(rasterIdx);
   });
@@ -104,6 +105,7 @@ describe("(3) the placeholder UI has a distinct label + action for a rasterize f
   it("a \"render\" failure offers re-add (not the network retry, which would loop forever on the same bytes)", () => {
     // retryOverlay is only wired for the "network" branch; render/missing fall through to reAddOverlay.
     const clickHandler = renderBody.slice(renderBody.indexOf("onClick={"));
-    expect(clickHandler).toMatch(/if \(ovErr === "network"\) retryOverlay\(o\.id\); else reAddOverlay\(o\.id\);/);
+    // NEW-1 (B2244016) — "denied" (another account's file Storage refused) also retries; it is never "gone".
+    expect(clickHandler).toMatch(/if \(ovErr === "network" \|\| ovErr === "denied"\) retryOverlay\(o\.id\); else reAddOverlay\(o\.id\);/);
   });
 });

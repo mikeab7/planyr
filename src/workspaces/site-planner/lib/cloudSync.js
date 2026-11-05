@@ -13,6 +13,8 @@ import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { normalizeRenameStampForWrite } from "./projectName.js";
 import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
 import { cloudSitesKey } from "./activeUser.js";
+import * as planStore from "./planStore.js";
+import { collectPurgeManifest } from "./projectPurgeRecord.js";
 import { headerSlice, mergeHeader, sameHeader } from "./headerMerge.js";
 import { createSiteModel } from "./siteModel.js";
 
@@ -196,14 +198,7 @@ function abandonUnownedSiteWrite(uid, id) {
   delete siteVersions[id];
   delete lastHeaderSig[id];
   try {
-    const key = cloudSitesKey(uid);
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    const map = JSON.parse(raw) || {};
-    if (id in map) {
-      delete map[id];
-      localStorage.setItem(key, JSON.stringify(map));
-    }
+    planStore.removeOne(cloudSitesKey(uid), id);   // B2165120: that plan's entry only
   } catch (_) { /* best-effort local cleanup; the retry-suppression above is what actually matters */ }
 }
 export function cloudUpsert(uid, model) {
@@ -585,6 +580,13 @@ export async function cloudRowsPresent(uid, ids) {
   } catch (e) {
     return { ok: false, present: [], error: (e && e.message) || "read threw" };
   }
+}
+
+/* NEW-4 — read-only snapshot of what a project holds, taken BEFORE a permanent delete so the purge can be
+ * recorded (projectPurgeRecord.js). Never throws; unreadable parts come back null. */
+export async function cloudPurgeManifest(uid, ids, groupId) {
+  if (!supabase || !uid) return { ids: [], groupId: groupId || null, rows: null, counts: null };
+  return collectPurgeManifest(supabase, { ids, groupId });
 }
 
 // PostgREST reports an unknown RPC as PGRST202 ("Could not find the function … in the schema

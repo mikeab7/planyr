@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import { deedCallsShown } from "../src/workspaces/site-planner/lib/easements.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 — metes-and-bounds call labels default OFF. RED on main: `deedCallsShown` does not exist and the
    canvas draws the labels unconditionally. */
@@ -21,7 +22,7 @@ describe("deedCallsShown — the one gate for per-course call labels", () => {
 });
 
 describe("render wiring (source guard)", () => {
-  const src = fs.readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+  const src = plannerSource();
   it("the per-call label map sits behind deedCallsShown, and no other site draws c.label", () => {
     expect(src).toMatch(/deedCallsShown\(m\) && labelPpf > 0\.12 && \(m\.calls \|\| \[\]\)\.map/);
     expect((src.match(/\(m\.calls \|\| \[\]\)\.map/g) || []).length).toBe(1);

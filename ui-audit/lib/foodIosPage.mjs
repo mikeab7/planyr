@@ -19,7 +19,7 @@ export const LIVE_MARK = "ZZ-E2E-THROWAWAY";
 export const LIVE_ABURI = "81f01ab6-64d4-46b1-bf67-d99c4eb98dd4";
 
 export const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || (LIVE ? "https://planyr.io" : "http://localhost:4180");
-export const PHONES = { "iPhone 15": { kb: 380 }, "iPhone SE": { kb: 304 } };
+export const PHONES = { "iPhone 15": { kb: 380 }, "iPhone 15 Pro Max": { kb: 400 }, "iPhone SE": { kb: 304 } };
 
 // ── a painted stand-in for satellite imagery (so a gap is visible in the screenshot) ─────────────
 function crc32(buf) { let c, crc = 0xffffffff; for (const b of buf) { c = (crc ^ b) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xffffffff) >>> 0; }
@@ -94,8 +94,10 @@ export async function cleanupLive(base = BASE) {
       // the test account owns no real visits, so "everything of this user's in food_visits" is the throwaway set.
       const { data: u } = await c.auth.getUser();
       const del = await c.from("food_visits").delete().eq("user_id", u.user.id);
+      const delPrefs = await c.from("food_place_prefs").delete().eq("user_id", u.user.id); // the price levels a run set (NEW-1, 2026-10-20)
       const left = await c.from("food_visits").select("id").eq("user_id", u.user.id);
-      return { error: del.error && String(del.error.message), left: left.data ? left.data.length : "?" };
+      const leftPrefs = await c.from("food_place_prefs").select("id").eq("user_id", u.user.id);
+      return { error: (del.error && String(del.error.message)) || (delPrefs.error && String(delPrefs.error.message)) || null, left: (left.data && leftPrefs.data) ? left.data.length + leftPrefs.data.length : "?" };
     }, LIVE_MARK);
   } finally { await s.close(); }
 }
@@ -112,7 +114,7 @@ async function openLive(phone, mode) {
   return { initScripts, desktop };
 }
 
-export async function open(browser, phone, mode) {
+export async function open(browser, phone, mode, fixtureOpts = {}) {
   if (LIVE) {
     const { initScripts, desktop } = await openLive(phone, mode);
     const s = await openSignedIn({ base: BASE, engine: browser.browserType().name() === "webkit" ? "webkit" : "chromium", device: desktop ? null : phone, viewport: { width: 1280, height: 800 }, initScripts });
@@ -131,7 +133,7 @@ export async function open(browser, phone, mode) {
   const ctx = await browser.newContext(desktop ? { viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true } : { ...devices[phone], ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   page.setDefaultTimeout(5000);
-  const state = makeFixture({ aburi: true });
+  const state = makeFixture({ aburi: true, ...fixtureOpts });
   await installFixture(page, state);
   // satellite stand-in: any external image request (tile servers) gets the painted tile
   await page.route("**/*", (route) => {

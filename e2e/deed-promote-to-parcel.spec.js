@@ -67,7 +67,7 @@ async function open(page, id, rec) {
 }
 
 const parcelsInStore = (page, id) => page.evaluate((sid) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return all[sid]?.parcels || [];
 }, id);
 
@@ -109,7 +109,7 @@ test.describe("NEW-2 · the legal description becomes the boundary when the coun
        and a guard that depends on save timing is not a guard. */
     await expect(page.locator('[data-feature="markup:mkDeed1"]')).toHaveCount(1);
     await expect.poll(async () => page.evaluate((sid) => {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       return (all[sid]?.markups || []).map((m) => m.id);
     }, ID), { timeout: 10_000 }).toContain("mkDeed1");
 
@@ -230,7 +230,7 @@ test("NEW-2 × B290241 · a promoted parcel turns WITH its deed, by Colorado's c
   await expect.poll(async () => (await parcelsInStore(page, ID)).length, { timeout: 15_000 }).toBe(1);
 
   const readRings = async () => page.evaluate((sid) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = all[sid] || {};
     const deed = (s.markups || []).find((m) => m.id === "mkDeed1");
     const pc = (s.parcels || [])[0];

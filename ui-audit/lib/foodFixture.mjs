@@ -35,7 +35,7 @@ function authSession() {
  *  real-iPhone screenshot was taken on (B2046224 ×3) — for verify-food-ios-screens. Off by default
  *  so every other harness's counts are unchanged. */
 export const ABURI_ID = "fx-aburi";
-export function makeFixture({ variant = "plain", aburi = false } = {}) {
+export function makeFixture({ variant = "plain", aburi = false, dishes = false } = {}) {
   const manualName = variant === "case" ? "dao'n" : variant === "curly" ? "DAO’N" : "DAO'N";
   const places = [
     { id: "fx-daon", name: "DAO'N", lat: DAON_AT.lat + 0.00035, lon: DAON_AT.lon, category: "restaurant", cuisine: "asian", address: "1 Fixture Way, Houston, TX 77077", brand: null, source: "fixture", source_licence: "x", metro: "houston", confidence: 0.95 },
@@ -58,8 +58,21 @@ export function makeFixture({ variant = "plain", aburi = false } = {}) {
       created_at: "2026-09-20T12:00:00Z", updated_at: "2026-09-20T12:00:00Z",
     });
   }
+  // `dishes: true` (needs `aburi`): the place card as the owner's iPhone screenshot showed it — an undated second visit ("No date") and one
+  // dish in each group (WHAT TO ORDER / MAYBE / SKIP) so every section label, the Skip chevron and "+ Add a dish" are on screen (NEW-1/NEW-2, 2026-10-27).
+  const dishRows = [];
+  if (aburi && dishes) {
+    visits.push({
+      id: "00000000-0000-4000-8000-0000000000b2", user_id: FIXTURE_UID, place_id: ABURI_ID,
+      custom_name: null, custom_lat: null, custom_lon: null,
+      visited_on: null, rating: "7.5", rating_ambiance: "7.5", cost: null, what_i_had: null, what_was_good: null, notes: null,
+      created_at: "2026-09-21T12:00:00Z", updated_at: "2026-09-21T12:00:00Z",
+    });
+    const d = (n, name, score, order_again, note = null) => ({ id: `00000000-0000-4000-8000-0000000000d${n}`, user_id: FIXTURE_UID, visit_id: "00000000-0000-4000-8000-0000000000b1", place_id: ABURI_ID, name, course: null, score, order_again, price_cents: null, note, rated_on: null, created_at: `2026-09-20T12:0${n}:00Z`, updated_at: `2026-09-20T12:0${n}:00Z` });
+    dishRows.push(d(1, "Aburi Salmon Nigiri", "9.5", "yes", "ask for the extra torch"), d(2, "Miso Soup", "7", "yes"), d(3, "Edamame", "8", null), d(4, "Udon", "4.5", "no"));
+  }
   // lists / listItems / wishlist (NEW-1 / B2088288): in-memory, stateful, so a harness can drive the real list UI.
-  return { places, visits, writes: [], manualName, lists: [], listItems: [], wishlist: [] };
+  return { places, visits, dishes: dishRows, writes: [], manualName, lists: [], listItems: [], wishlist: [] };
 }
 
 export async function installFixture(page, state, { e2e = true } = {}) {
@@ -135,7 +148,8 @@ export async function installFixture(page, state, { e2e = true } = {}) {
         return json([]);
       }
     }
-    if (path.startsWith("/rest/v1/")) return json([]); // dishes, dish wishlist: empty
+    if (path === "/rest/v1/food_dishes" && req.method() === "GET") return json(state.dishes || []);
+    if (path.startsWith("/rest/v1/")) return json([]); // dish wishlist, place prefs: empty
     return json({});
   });
 }

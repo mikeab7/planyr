@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MF = readFileSync(join(here, "../src/workspaces/site-planner/MapFinder.jsx"), "utf8");
@@ -28,9 +29,9 @@ describe("NEW-1 (B1462256): every MapFinder FloatingNotice is gated on `visible`
   // Matches the `{<condition> && (\n  <FloatingNotice` shape every call site in this file uses.
   const CALL_SITE_RE = /\{([^{}]*?)&&\s*\(\s*\n\s*<FloatingNotice/g;
 
-  it("finds all three known call sites (select-parcels tip, backup notice, cached notice)", () => {
+  it("finds all four known call sites (select-parcels tip, backup notice, cached notice, parcel-source notice)", () => {
     const matches = [...MF.matchAll(CALL_SITE_RE)];
-    expect(matches.length, "expected MapFinder to render exactly 3 FloatingNotice call sites").toBe(3);
+    expect(matches.length, "expected MapFinder to render exactly 4 FloatingNotice call sites (B2293536 added the parcel-source notice)").toBe(4);
   });
 
   it("every <FloatingNotice call site's guarding condition checks `visible` — a future notice added without it fails here", () => {
@@ -54,7 +55,7 @@ describe("NEW-1 (B1462256): every MapFinder FloatingNotice is gated on `visible`
 
   it("the Site workspace's two ToastHosts are gated on their active flag too", () => {
     const app = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
-    const planner = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const planner = plannerSource();
     expect(app).toMatch(/\{isActive && <ToastHost toasts=\{statusToasts\}/);
     expect(planner).toMatch(/\{active && <ToastHost toasts=\{toasts\}/);
   });

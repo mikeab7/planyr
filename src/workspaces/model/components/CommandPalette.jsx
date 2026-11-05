@@ -14,13 +14,15 @@
  * builds `ctx` once and hands the SAME object everywhere. This component decides nothing about
  * what an action DOES — only how to find it and invoke it.
  */
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { COMMANDS, COMMAND_GROUPS, searchCommands } from "../lib/commandRegistry.js";
 
 const RESULT_LIMIT = 60;
 
-export default function CommandPalette({ open, ctx, onClose }) {
+// `commands` defaults to the registry; the Univer grid passes its own rows (lib/univerTools/palette.js) so ONE palette shows whichever grid is on.
+export default function CommandPalette({ open, ctx, onClose, commands = COMMANDS }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const boxRef = useRef(null);
@@ -63,7 +65,7 @@ export default function CommandPalette({ open, ctx, onClose }) {
     else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight;
   }, [index]);
 
-  const results = useMemo(() => searchCommands(COMMANDS, query, ctx).slice(0, RESULT_LIMIT), [query, ctx]);
+  const results = useMemo(() => searchCommands(commands, query, ctx).slice(0, RESULT_LIMIT), [commands, query, ctx]);
 
   if (!open) return null;
 
@@ -105,6 +107,7 @@ export default function CommandPalette({ open, ctx, onClose }) {
         }}
       >
         <input
+          {...NO_AUTOFILL}
           ref={inputRef}
           data-testid="model-command-palette-input"
           value={query}

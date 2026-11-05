@@ -24,6 +24,23 @@ export function decideTargetOf({ selectedCount = 0, hasPin = false } = {}) {
   return null;
 }
 
+/* B2451472 — WHETHER AN ESCAPE KEYSTROKE CLEARS THE DECIDE BAR (the keyboard twin of its ✕).
+ *
+ * Escape is the most shared key on the map: menus, the note composer, calibration, overlay editing and
+ * every text field already give it a meaning, so the bar takes it ONLY when nothing else has claimed it
+ * this press. Each flag is a plain fact the caller reads (state or DOM), not a DOM node, so the rule is
+ * unit-testable and cannot grow a second implementation:
+ *   decideTarget   — `decideTargetOf`'s answer; with no ground in hand there is nothing to clear (a no-op).
+ *   mapShown       — the Map is the visible workspace AND mode. The finder stays mounted, hidden, behind an
+ *                    open project and behind other workspaces; its listener must not eat their Escape.
+ *   typing         — a text-entry control or a native select has focus: Escape keeps its normal meaning there.
+ *   ownedElsewhere — an open menu/popover (Record info included: the FIRST Escape closes only that),
+ *                    modal, or an armed/in-progress tool already owns this press and wins.
+ * Returns true to clear the selection / pin exactly as the ✕ does. */
+export function escapeClearsDecideBar({ decideTarget = null, mapShown = false, typing = false, ownedElsewhere = false } = {}) {
+  return !!decideTarget && !!mapShown && !typing && !ownedElsewhere;
+}
+
 /* THE STICKY ANSWER, and the reason it exists: the retired Site/Comp toggle made one thing cheap
  * that ground-first makes dearer. Flipping to Comp once meant every following search made a comp;
  * now the app asks each time, so entering comps one at a time costs one extra click each. This

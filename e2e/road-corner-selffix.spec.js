@@ -30,13 +30,16 @@ async function loadOwnerPlan(page) {
   await page.addInitScript(([id, rec]) => {
     localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [id]: rec }));
     localStorage.setItem("planarfit:currentSite:v1", id);
+    // road-panel redesign NEW-3 — the min-radius review (flags + Fix) is hidden behind ONE flag, default OFF;
+    // this spec is that feature's own regression guard, so it opts in.
+    localStorage.setItem("planyr:flag:roadRadiusReview", "1");
   }, [SITE_ID, site]);
   await page.goto("/");
   await expect(canvas(page)).toBeVisible();
 }
 
 const roads = (page) => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts))
     .map((e) => ({ id: e.id, cls: e.roadClass, n: e.pts.length, pts: e.pts, vtx: e.vtx || [] }));

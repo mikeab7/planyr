@@ -2,13 +2,14 @@
  *
  * Seeds a THROWAWAY site (one building) through the app's own local-cache path, opens its Building
  * inspector in LIGHT then DARK, and walks every section: header (number · lock · ⋯ · ✕ · summary), the Loading wall
- * picker at a non-zero rotation (picker labels vs the painted aprons), the dock stack, 8 typed parking
+ * picker at a non-zero rotation (picker labels vs the painted aprons), the per-wall rows, 8 typed parking
  * rows, Structure folding, and outline width 4 / opacity 50 (drawn, then in the export clone). Writes a
  * panel screenshot per theme when SHOTS_DIR is set. The throwaway is ALWAYS deleted and confirmed gone
  * (owner constraint 15). KNOWN-GOOD ARM: the run is VOID unless the untouched header reports "Building 1".
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… node ui-audit/verify-building-panel-rethink.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -27,7 +28,7 @@ const { browser, context, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [SITE_ID, UID]);
 const bldg = async () => ((await model())?.els || []).find((e) => e.id === "bz1");
 const kids = async () => ((await model())?.els || []).filter((e) => e.attachedTo === "bz1");
 const wall = (side) => page.locator(`[data-testid="loading-wall-picker"] [data-wall="${side}"]`);
@@ -59,7 +60,7 @@ try {
     const num = await T("building-header").getByRole("textbox", { name: "Building number" }).inputValue();
     ok(`[${scheme}] known-good: header reads Building with number 1`, num === "1");
     if (num !== "1") throw new Error("VOID run — the instrument did not see the header");
-    ok(`[${scheme}] summary line, no Pin / Delete element row`, /SF · (Cross-dock|Single-load)/.test(await T("building-summary").innerText()) && (await page.getByRole("button", { name: /Pin|Delete element/ }).count()) === 0);
+    ok(`[${scheme}] summary line, no Pin / Delete element row`, /SF · \d+ doors?/.test(await T("building-summary").innerText()) && (await page.getByRole("button", { name: /Pin|Delete element/ }).count()) === 0);
     ok(`[${scheme}] four sections present, Structure closed`, (await page.getByRole("button", { name: /^.*Footprint/ }).count()) > 0 && (await page.getByRole("button", { name: /Structure/ }).getAttribute("aria-expanded")) === "false");
 
     // rotation 45 → picker labels follow; click walls; canvas agrees
@@ -67,15 +68,16 @@ try {
     await rot.fill("45"); await rot.press("Enter");
     await waitFor(async () => Math.round((await bldg())?.rot || 0) === 45);
     ok(`[${scheme}] picker labels at rot 45: top NE, bottom SW`, (await wall("top").getAttribute("data-compass")) === "NE" && (await wall("bottom").getAttribute("data-compass")) === "SW");
-    await T("add-dock-zone").click(); await sleep(500);
+    { const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first(); await addWallLayer(page, dock, "court", 500); }   // Building panel v2: a court on both linked walls
     ok(`[${scheme}] canvas aprons NE + SW agree with the picker (cross-dock)`, JSON.stringify(await apronCompass()) === JSON.stringify(["NE", "SW"]), JSON.stringify(await apronCompass()));
     await wall("bottom").click(); await sleep(600);
-    ok(`[${scheme}] click SW wall → single-load NE; picker says "NE wall"`, (await T("loading-walls-label").innerText()) === "NE wall" && (await bldg()).dock === "single");
+    ok(`[${scheme}] click SW wall → single-load NE; picker says NE is the loaded wall`, JSON.stringify(await page.locator('[data-testid="loading-wall-picker"] [data-loaded="1"]').evaluateAll((n) => n.map((g) => g.getAttribute("data-compass")))) === '["NE"]' && (await bldg()).dock === "single");
     await wall("top").click(); await wall("top").click(); await sleep(600);   // unload, then reload the NE wall
     await wall("bottom").click(); await sleep(600);
     ok(`[${scheme}] second wall click re-loads opposite wall → cross-dock`, (await bldg()).dock === "cross" || (await T("loading-type").innerText()) === "Cross-dock");
     // parking rows 8
-    const rows = T("end-parking-row").locator("input").first();
+    { const rear = page.locator('[data-testid="wall-row"][data-role="ends"]').first(); await addWallLayer(page, rear, "parking"); }
+    const rows = page.getByLabel("Parking rows");
     await rows.fill("8"); await rows.press("Enter"); await sleep(800);
     await rows.evaluate((el) => el.blur());
     const park = (await kids()).filter((k) => k.type === "parking" && k.sideParkSide);
@@ -83,7 +85,7 @@ try {
     ok(`[${scheme}] 8 typed parking rows laid out (${park.length} wall(s), depth ${rowsDone})`, park.length > 0 && (await rows.inputValue()) === "8");
     await page.screenshot({ path: SHOTS ? `${SHOTS}/${scheme}-canvas.png` : undefined }).catch(() => {});
     // outline width/opacity
-    const w = page.getByLabel("Outline width"); await w.fill("4"); await w.press("Enter");
+    const w = page.getByLabel("Line weight"); await w.fill("4"); await w.press("Enter");
     const o = page.getByLabel("Outline opacity"); await o.fill("50"); await o.press("Enter");
     await waitFor(async () => (await bldg())?.strokeWidth === 4 && (await bldg())?.strokeOpacity === 0.5);
     if (SHOTS) await T("property-panel").screenshot({ path: `${SHOTS}/${scheme}-panel.png` }).catch(() => {});
@@ -92,7 +94,7 @@ try {
     const attrs = await page.evaluate(() => { const r = document.querySelector('[data-el-id="bz1"] rect'); return { w: r.getAttribute("stroke-width"), o: r.getAttribute("stroke-opacity") }; });
     ok(`[${scheme}] outline width 4 / opacity 0.5 drawn on the canvas`, attrs.w === "4" && attrs.o === "0.5", JSON.stringify(attrs));
     // reset for the next theme pass
-    await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); if (m[id]) { m[id].els = m[id].els.filter((e) => e.id === "bz1").map((e) => { const { strokeWidth, strokeOpacity, ...r } = e; return { ...r, rot: 0, dock: "cross", dockAxis: "x" }; }); localStorage.setItem(k, JSON.stringify(m)); } }, [SITE_ID, UID]);
+    await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); if (m[id]) { m[id].els = m[id].els.filter((e) => e.id === "bz1").map((e) => { const { strokeWidth, strokeOpacity, ...r } = e; return { ...r, rot: 0, dock: "cross", dockAxis: "x" }; }); localStorage.setItem(k, JSON.stringify(m)); } }, [SITE_ID, UID]);
   }
   ok("no page errors", errors.length === 0, errors.join(" | "));
 } catch (e) {
@@ -104,7 +106,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [SITE_ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

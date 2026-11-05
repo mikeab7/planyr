@@ -1,3 +1,5 @@
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+import { commaDec2 as f2 } from "../../../shared/units/numberFormat.js";
 // NEW-1 — the pond MAP label's area text. One tiny pure module, because the owner's rule about
 // what that label says needs somewhere it can be ASSERTED rather than grepped.
 //
@@ -34,11 +36,9 @@
 // exported sheet cannot drift (PDF-PARITY: both go through the one `labelCands` build that calls
 // these, and there is no second copy of the string to fall out of step).
 
-const SQFT_PER_ACRE = 43560;
 
 // Match SitePlanner's `f2` exactly — 2dp, locale-grouped. Kept local (like every other lib here)
 // rather than reaching back into the component.
-const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** The pond's area line: acreage only. `sf` is the drawn footprint area in square feet. */
 export const pondAreaLabelLine = (sf) => `${f2((Number(sf) || 0) / SQFT_PER_ACRE)} AC`;

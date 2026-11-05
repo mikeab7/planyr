@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* B901 anti-drift guard: the element-sync engine's last-ditch keepalive commit must be wired
  * directly to the browser's real unload signals (beforeunload / visibilitychange-hidden), not
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
 describe("B901 — element-sync keepalive flush is wired to REAL browser unload, not just the forced-reload registry", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  const src = plannerSource();
 
   it("the element-sync flush effect listens for the native beforeunload event directly", () => {
     // Find the element-sync keepalive-commit block by its distinctive keepaliveCommit call, then

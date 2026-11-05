@@ -1269,3 +1269,49 @@ describe("compParse NEW-4 — consumed keywords never leak into Notes; a leading
     expect(d.notes).toMatch(/Great dock-high building/);
   });
 });
+
+// NEW-1 (one-line comp that mentions commencement) — a commencement keyword used to take the first
+// date on the line and then blank the WHOLE line, so rate / size / escalation / title never parsed
+// and the execution date could be stored as the commencement date. Only the keyword + the date
+// nearest after it is claimed now; every other detector runs on the rest of the line.
+describe("compParse: a one-line comp that mentions commencement keeps everything else", () => {
+  it("rate, size, escalation survive 'commencing <date>'", () => {
+    const { draft } = parsePaste("150,000 SF lease at $0.55/SF/mo NNN, 5.25% bumps, commencing 12/1/2026").rows[0];
+    expect(draft.compType).toBe("lease");
+    expect(draft.leaseCommencementDate).toBe("2026-12-01");
+    expect(draft.leaseSizeSf).toBe("150000");
+    expect(draft.leaseRate).toBe("0.55");
+    expect(draft.leaseRatePeriod).toBe("monthly");
+    expect(draft.leaseRateExpense).toBe("nnn");
+    expect(draft.leaseEscalationPct).toBe("5.25");
+  });
+  it("title, size and rate survive 'RCD <date>'", () => {
+    const { draft } = parsePaste("Acme Logistics, 120,000 SF, $0.58/SF/mo NNN, RCD 3/1/2027").rows[0];
+    expect(draft.leaseCommencementDate).toBe("2027-03-01");
+    expect(draft.title).toBe("Acme Logistics");
+    expect(draft.leaseSizeSf).toBe("120000");
+    expect(draft.leaseRate).toBe("0.58");
+  });
+  it("the execution date is never stored as the commencement date", () => {
+    const { draft } = parsePaste("Lease executed 9/15/2026, commencing 1/1/2027").rows[0];
+    expect(draft.leaseCommencementDate).toBe("2027-01-01");
+    expect(draft.compDate).toBe("2026-09-15");
+  });
+});
+
+// NEW-3 — an impossible calendar day (2/30, 2/29 in a non-leap year) is no date at all.
+describe("compParse: impossible calendar dates are not dates", () => {
+  it("findDateToken refuses 2/30 and 2/29/2025 but keeps 2/29/2024", () => {
+    expect(findDateToken("2/30/2026")).toBeNull();
+    expect(findDateToken("2/29/2025")).toBeNull();
+    expect(findDateToken("2/29/2024").iso).toBe("2024-02-29");
+    expect(findDateToken("2026-02-30")).toBeNull();
+    expect(findDateToken("April 31, 2026")).toBeNull();
+  });
+  it("a pasted comp carrying one gets no compDate", () => {
+    const sold = parsePaste("Sold 2/30/2026 $4M 40,000 SF warehouse").rows[0].draft;
+    expect(sold.compDate).toBe("");
+    const lease = parsePaste("$0.55/SF/mo NNN 2/29/2025").rows[0].draft;
+    expect(lease.compDate).toBe("");
+  });
+});

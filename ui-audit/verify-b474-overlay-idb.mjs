@@ -17,7 +17,7 @@ const check = (n, p, d = "") => { results.push({ n, p }); console.log(`  ${p ? "
 const idbBytes = (page, key) => page.evaluate((k) => new Promise((res) => {
   try { const r = indexedDB.open("planyr", 1); r.onsuccess = () => { try { const g = r.result.transaction("kv", "readonly").objectStore("kv").get(k); g.onsuccess = () => res(typeof g.result === "string" ? g.result.length : 0); g.onerror = () => res(0); } catch (_) { res(0); } }; r.onerror = () => res(0); } catch (_) { res(0); }
 }), key);
-const ovRec = (page) => page.evaluate((k) => { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); const s = Object.values(m)[0]; const o = s && s.sheetOverlays && s.sheetOverlays[0]; return o ? { hasSrc: !!o.src, idbKey: o.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
+const ovRec = (page) => page.evaluate((k) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); const s = Object.values(m)[0]; const o = s && s.sheetOverlays && s.sheetOverlays[0]; return o ? { hasSrc: !!o.src, idbKey: o.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
 const ovImgs = (page) => page.evaluate(() => document.querySelectorAll("image[data-overlay-image]").length);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -44,7 +44,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const siteId = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
 // Open the "Overlay" panel so its file input mounts, then drop a site-plan overlay image.

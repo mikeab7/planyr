@@ -39,6 +39,7 @@
  */
 import { contours as d3contours } from "d3-contour";
 import { douglasPeucker } from "./vectorLayers.js";
+import { clipPolyline, chaikin, polylineLength, pointAlong, expandRing } from "./polylineClip.js";
 
 const BORDER_EPS = 0.01;   // ring coords sit exactly on 0/width/height when frame-closed
 const SIMPLIFY_TOL = 0.5;  // Douglas–Peucker in CELLS (~1 screen px at CELL_PX=2)
@@ -194,6 +195,11 @@ export function anchorLabels(run, { arcStep = LABEL_ARC_CELLS, minRun = LABEL_MI
 export function buildContours(grid, {
   maxLevels = 50, labelCap = 40, indexEvery = 5, clip = null,
   labelArcCells = LABEL_ARC_CELLS, labelMinRunCells = LABEL_MIN_RUN_CELLS,
+  interval: forcedInterval = null,   // ROUND 4 (B2349122): the proposed-surface contours ride the EXISTING layer's interval
+  simplifyTol = SIMPLIFY_TOL,        // ROUND 10 (NEW-1): the proposed contours are traced at a fraction of a cell — see buildProposedContours
+  /* NEW-1 (Imagery & Layers): the owner's chosen Interval (1/2/5/10 ft) as a FLOOR under the automatic pick, so a
+   * steep view that must coarsen to stay readable still does, but a flat Houston view traces at the chosen step. */
+  minInterval = null,
 } = {}) {
   const { values, mask, width, height } = grid;
   let min = Infinity, max = -Infinity;
@@ -204,7 +210,7 @@ export function buildContours(grid, {
     if (v > max) max = v;
   }
   if (!(max > min)) return { interval: 1, levels: [], labels: [], validMin: null, validMax: null };
-  const interval = pickInterval(max - min, maxLevels);
+  const interval = forcedInterval > 0 ? forcedInterval : Math.max(minInterval > 0 ? minInterval : 0, pickInterval(max - min, maxLevels));
   const first = Math.ceil(min / interval) * interval;
   const thresholds = [];
   for (let lv = first; lv <= max; lv += interval) thresholds.push(lv);
@@ -242,11 +248,11 @@ export function buildContours(grid, {
               run[0][0] === run[run.length - 1][0] && run[0][1] === run[run.length - 1][1];
             let simp;
             if (closed) {
-              simp = douglasPeucker(run.slice(0, -1), SIMPLIFY_TOL);
+              simp = douglasPeucker(run.slice(0, -1), simplifyTol);
               simp = simp.concat([simp[0]]);
               if (simp.length < 4) continue;
             } else {
-              simp = douglasPeucker(run, SIMPLIFY_TOL);
+              simp = douglasPeucker(run, simplifyTol);
               if (simp.length < 2) continue;
             }
             if (isIndex) {
@@ -269,3 +275,129 @@ export function buildContours(grid, {
   return { interval, levels, labels, validMin: min, validMax: max };
 }
 
+
+/* ROUND 5 (NEW-2 / NEW-3) — PROPOSED contours off the contour lattice (proposedSurface.contourLatticeSteps): marching
+ * squares with linear interpolation along cell edges (d3's default — never a cell-edge staircase), then per line:
+ *   1. CLIP to the daylight line (`clipRings` − `clipHoles`, lattice px): nothing proposed is drawn outside it, and the
+ *      cut endpoint is the exact crossing — the existing layer is cut by the SAME clipper on the other side, so the two
+ *      families meet there (polylineClip.js);
+ *   2. CUT out of every building pad (`cutRings`): the pad is flat at the FFE, so a line that interpolates across the
+ *      dock wall's vertical step inside one cell is the wall, not a contour — it is removed with the stub it leaves;
+ *   3. pieces shorter than `minPieceCells` are dropped;
+ *   4. Chaikin smoothing (`smoothPasses`, endpoints kept ON the daylight line), then a light Douglas–Peucker;
+ *   5. ONE label per index-contour piece, at its middle, with the line's own angle there (`angle`, radians, lattice
+ *      px frame = the feet frame's orientation), only on a piece at least `labelMinCells` long.
+ * Lines in LATTICE PIXEL coordinates. Pure; the worker's `contours-proposed` job is its only runtime caller. */
+/* ROUND 10 (NEW-1, third attempt at even band contours — B2571184 ×3): BOTH simplification passes were far coarser than the
+ * spacing they act on. `buildContours` simplified every traced ring at 0.5 cell (3 ft on the 6 ft contour lattice) and this
+ * file again at 0.12 cell (0.7 ft) — on a slope band whose contours are interval × ratio apart (4 ft at a 2 ft interval and a
+ * 2:1 slope) that moved lines by up to a fifth of their spacing, so a plane the surface holds exactly drew bunched and gapped
+ * (measured on the owner's Concept A: crossings of one transect 5.6 / 3.0 / 3.8 / 3.9 / 4.7 / 4.1 ft apart against a true 4.0).
+ * Marching squares with linear interpolation is exact on a plane, so the only thing that can move a contour off its level is
+ * what is done to it afterwards: the simplifier now keeps every vertex within 0.02 cell (~0.1 ft) of the traced line. */
+const PROPOSED_TRACE_TOL = 0.02;    // cells — the first pass, in buildContours
+const PROPOSED_SIMPLIFY_TOL = 0.02; // cells — after smoothing; keeps the vertex count sane without re-cornering
+const PAD_CUT_EXPAND_CELLS = 1.0;   // the wall's own interpolation band (one cell either side of the pad ring) is cut too
+const MIN_CLOSED_AREA_CELLS = 2.0;  // ROUND 6 (NEW-2): a closed ring enclosing less than this is lattice noise, not a pit or a hump — dropped
+const ringAreaCells = (ring) => { let a = 0; for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]; return Math.abs(a) / 2; };
+const isClosed = (line) => line.length > 3 && Math.abs(line[0][0] - line[line.length - 1][0]) < 1e-9 && Math.abs(line[0][1] - line[line.length - 1][1]) < 1e-9;
+/* The daylight line off the lattice's own field (`inside`: +1 graded, −1 existing, signed across the band): the +0 iso,
+ * interpolated — closed rings in lattice px, split into outers and holes by winding. */
+export function traceDaylight(inside, width, height) {
+  const rings = [], holes = [];
+  const polys = d3contours().size([width, height]).thresholds([0])(inside);
+  for (const poly of polys) for (const polygon of poly.coordinates) polygon.forEach((ring, i) => { if (ring.length >= 4) (i === 0 ? rings : holes).push(ring); });
+  return { rings, holes };
+}
+/* ROUND 7 (NEW-1) — THE SLOPE BAND'S OUTLINE, traced like a contour. `values` is the band field
+ * (gradingPaint.bandField: > 0 in the band and on its "core" side, < 0 past it, extrapolated one cell so the zero
+ * crossing lands where the thrown slope really meets the ground); the 0 iso is traced with the same interpolated
+ * marching squares the contours use, every ring Chaikin-smoothed (closed rings stay closed) and lightly simplified, and
+ * a ring enclosing less than `minAreaCells` is dropped as noise. Returns { rings, holes } in LATTICE PIXELS (the value
+ * at index i sits at i + 0.5, as for the contours). Pure; the worker's `band-outline` job is its runtime caller. */
+export function traceBandOutline(values, width, height, { smoothPasses = 2, minAreaCells = 1.5 } = {}) {
+  const rings = [], holes = [];
+  const polys = d3contours().size([width, height]).thresholds([0])(values);
+  const area = (r) => { let a = 0; for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return Math.abs(a) / 2; };
+  for (const poly of polys) for (const polygon of poly.coordinates) polygon.forEach((ring, i) => {
+    if (ring.length < 4 || area(ring) < minAreaCells) return;
+    let sm = smoothPasses > 0 ? chaikin(ring, smoothPasses) : ring.map((p) => [p[0], p[1]]);
+    if (sm.length > 8) {
+      const open = douglasPeucker(sm.slice(0, -1), PROPOSED_SIMPLIFY_TOL);
+      sm = open.length >= 3 ? [...open, [open[0][0], open[0][1]]] : sm;
+    }
+    (i === 0 ? rings : holes).push(sm);
+  });
+  return { rings, holes };
+}
+
+/* ROUND 6 (NEW-1) — how far apart adjacent contours of `interval` sit along a traced piece, in lattice cells: the median over
+ * samples along the piece of interval / |∇z| (central differences on the lattice, one-sided beside a void). Infinity where the
+ * surface is flat. The canvas uses it to drop a band to a coarser interval where its lines would touch at the zoom drawn. */
+export function pieceSpacingCells(grid, piece, interval, samples = 9) {
+  const { values, mask, width, height } = grid;
+  const at = (i, j) => (i < 0 || j < 0 || i >= width || j >= height || (mask && !mask[j * width + i])) ? NaN : values[j * width + i];
+  const grad = (x, y) => {
+    const i = Math.max(0, Math.min(width - 1, Math.round(x - 0.5))), j = Math.max(0, Math.min(height - 1, Math.round(y - 0.5)));
+    const c = at(i, j); if (c !== c) return NaN;
+    const xr = at(i + 1, j), xl = at(i - 1, j), yd = at(i, j + 1), yu = at(i, j - 1);
+    const gx = xr === xr && xl === xl ? (xr - xl) / 2 : xr === xr ? xr - c : xl === xl ? c - xl : 0;
+    const gy = yd === yd && yu === yu ? (yd - yu) / 2 : yd === yd ? yd - c : yu === yu ? c - yu : 0;
+    return Math.hypot(gx, gy);
+  };
+  const L = polylineLength(piece);
+  const gs = [];
+  for (let k = 0; k < samples; k++) { const m = pointAlong(piece, L > 0 ? (k + 0.5) / samples : 0.5); const g = grad(m.x, m.y); if (g === g) gs.push(g); }
+  if (!gs.length) return Infinity;
+  gs.sort((a, b) => a - b);
+  const g = gs[gs.length >> 1];
+  return g > 1e-9 ? interval / g : Infinity;
+}
+export function buildProposedContours(grid, {
+  interval = 1, clipRings = null, clipHoles = null, cutRings = [], smoothPasses = 2, minPieceCells = 1, labelMinCells = 8, inside = null,
+} = {}) {
+  const base = buildContours(grid, { interval, maxLevels: 400, labelCap: 0, indexEvery: 5, simplifyTol: PROPOSED_TRACE_TOL });
+  // the graded area (the daylight line) off the lattice's own field — OR, when the caller hands an explicit outer clip
+  // (boundary mode: the setback and its holes, ROUND 6), that clip ALONE: inside the setback everything is graded, so the
+  // field's own crossing there is only the limit line read half a cell off, and clipping to both would cut the proposed
+  // lines a hair short of where the existing layer is cut (one ring, one clipper, both sides)
+  const daylight = inside ? traceDaylight(inside, grid.width, grid.height) : { rings: [], holes: [] };
+  const clips = [];
+  if (clipRings && clipRings.length) clips.push([...clipRings, ...(clipHoles || [])]);
+  else if (daylight.rings.length) clips.push([...daylight.rings, ...daylight.holes]);
+  const cutWide = cutRings.map((r) => expandRing(r, PAD_CUT_EXPAND_CELLS));
+  const levels = [], labels = [];
+  for (const lv of base.levels) {
+    const lines = [], spacing = [];
+    for (const run of lv.lines) {
+      let pieces0 = [run];
+      for (const clip of clips) pieces0 = pieces0.flatMap((p) => clipPolyline(p, clip, { keepInside: true }));
+      for (const p0 of pieces0) {
+        const pieces = cutWide.length ? clipPolyline(p0, cutWide, { keepInside: false }) : [p0];
+        for (const piece of pieces) {
+          if (piece.length < 2 || polylineLength(piece) < minPieceCells) continue;
+          let sm = smoothPasses > 0 ? chaikin(piece, smoothPasses) : piece;
+          if (sm.length > 3) sm = douglasPeucker(sm, PROPOSED_SIMPLIFY_TOL);
+          // smoothing a line that rounds a corner can pull a vertex over a ring: cut once more — inside every clip, and
+          // on the pad itself (the first cut took the wall's band with it; this one keeps the ring exact)
+          let finals = [sm];
+          for (const clip of clips) finals = finals.flatMap((p) => clipPolyline(p, clip, { keepInside: true }));
+          if (cutRings.length) finals = finals.flatMap((p) => clipPolyline(p, cutRings, { keepInside: false }));
+          for (const fl of finals) {
+            if (fl.length < 2 || polylineLength(fl) < minPieceCells) continue;
+            if (isClosed(fl) && ringAreaCells(fl) < MIN_CLOSED_AREA_CELLS) continue;   // a noise loop (one wobbling cell), never a contour
+            const len = polylineLength(fl);
+            const sp = pieceSpacingCells(grid, fl, base.interval);
+            if (lv.isIndex && len >= labelMinCells) {
+              const m = pointAlong(fl, 0.5);
+              labels.push({ level: lv.level, px: m.x, py: m.y, angle: m.angle, lenCells: len, spacingCells: sp, anchor: `${lines.length}:0` });
+            }
+            lines.push(fl); spacing.push(sp);
+          }
+        }
+      }
+    }
+    if (lines.length) levels.push({ level: lv.level, isIndex: lv.isIndex, lines, spacing });
+  }
+  return { interval: base.interval, levels, labels, daylight, validMin: base.validMin, validMax: base.validMax };
+}

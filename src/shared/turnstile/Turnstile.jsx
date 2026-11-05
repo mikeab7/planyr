@@ -1,47 +1,65 @@
-/* Cloudflare Turnstile widget (B1160720, NEW-1) — a small, config-gated CAPTCHA control.
+/* Cloudflare Turnstile widget (B1160720; shared by Sign in / Sign up / Forgot password — NEW-1).
  *
- * Loads Cloudflare's script lazily and only once (module-scope cached promise, the same
- * shape every lazy-import cache in this repo uses — e.g. terrainLazy.js's loadTerrain()),
- * so a page that never renders a signup form never fetches it. Three honest states while
- * mounted, reported via `onStateChange` so the caller (AuthPanel) can gate its own Submit
- * button rather than guessing from the token alone: "loading" (script/widget not ready
- * yet — the form must still render, just with Submit disabled) · "ready" (widget painted,
- * waiting on the user) · "error" (script failed to load or Cloudflare rejected the render —
- * Submit stays disabled with an explicit message, never a silent dead end).
- *
- * Turnstile tokens are single-use and expire in a few minutes, so this exposes an
- * imperative `reset()` (via ref) that BOTH the expired-callback and a failed submit call —
- * a stale token must never be resubmitted, and the widget must never be left showing a
- * green check for a token the server already rejected. */
+ * ONE widget component for every auth mode. It loads Cloudflare's script lazily and only once
+ * (module-scope cached promise, the same shape every lazy-import cache in this repo uses), so a
+ * page that never opens the auth panel never fetches it. It only REPORTS — the submit rules
+ * (wait for a token, single-use, timeout, retry) live in the pure `captchaGate.js`:
+ *   onToken(token)     a token arrived; "" = it was cleared (expired / reset / unmounted)
+ *   onStateChange(s)   "loading" | "ready" | "interactive" (a visible challenge is up) | "error"
+ *   onTimeout()        Cloudflare gave up on an interactive challenge
+ * `appearance`: "always" (sign-up keeps its visible box) or "interaction-only" (sign-in / reset stay
+ * invisible unless Cloudflare needs the person). Changing it re-renders the widget cleanly: the old
+ * one is removed, its token cleared. Expired tokens are refreshed by Turnstile itself
+ * (`refresh-expired: auto`); the callbacks are read through refs so a re-render never leaves the
+ * widget holding a stale handler. A blocked / hanging script ends in "error" after SCRIPT_WAIT_MS,
+ * never an endless "loading".
+ * Tokens are single-use: `reset()` (via ref) asks Cloudflare for a fresh one. */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { TURNSTILE_SITE_KEY } from "./turnstileConfig.js";
+// NEW-1 (B2619760 follow-up): a blocked script / widget error / timeout is reported, so a broken bot check is not silent.
+import { reportAuthEvent, AUTH_EVENT } from "../auth/authTelemetry.js";
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 let scriptPromise = null;
+export const SCRIPT_WAIT_MS = 10000;
 
 function loadTurnstileScript() {
   if (typeof window === "undefined") return Promise.reject(new Error("no window"));
   if (window.turnstile) return Promise.resolve(window.turnstile);
   if (scriptPromise) return scriptPromise;
+  const base = SCRIPT_SRC.split("?")[0];
   scriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src^="${SCRIPT_SRC.split("?")[0]}"]`);
-    const done = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error("Turnstile script loaded but window.turnstile is missing")));
-    if (existing) { existing.addEventListener("load", done); existing.addEventListener("error", () => reject(new Error("Turnstile script failed to load"))); return; }
-    const s = document.createElement("script");
-    s.src = SCRIPT_SRC; s.async = true; s.defer = true;
+    let settled = false;
+    const finish = (fn, v) => { if (settled) return; settled = true; clearTimeout(slow); fn(v); };
+    const slow = setTimeout(() => finish(reject, new Error("Turnstile script timed out")), SCRIPT_WAIT_MS);
+    const done = () => (window.turnstile ? finish(resolve, window.turnstile) : finish(reject, new Error("Turnstile script loaded but window.turnstile is missing")));
+    const failed = () => finish(reject, new Error("Turnstile script failed to load"));
+    let s = document.querySelector(`script[src^="${base}"]`);
+    if (!s) {
+      s = document.createElement("script");
+      s.src = SCRIPT_SRC; s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    }
     s.addEventListener("load", done);
-    s.addEventListener("error", () => reject(new Error("Turnstile script failed to load")));
-    document.head.appendChild(s);
-  }).catch((e) => { scriptPromise = null; throw e; }); // a failed load isn't cached — a later retry (e.g. reopening the modal) tries again
+    s.addEventListener("error", failed);
+  }).catch((e) => {
+    // A failed load isn't cached, and its dead <script> tag is removed so "Try again" really re-fetches.
+    scriptPromise = null;
+    document.querySelectorAll(`script[src^="${base}"]`).forEach((n) => n.remove());
+    throw e;
+  });
   return scriptPromise;
 }
 
-const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange }, ref) {
+const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTimeout, appearance = "always" }, ref) {
   const hostRef = useRef(null);
   const widgetIdRef = useRef(null);
-  const [state, setState] = useState("loading"); // loading | ready | error
+  const cb = useRef({});
+  cb.current = { onToken, onStateChange, onTimeout };
+  const [state, setState] = useState("loading");
+  const [errorCode, setErrorCode] = useState("");   // Cloudflare's own error code (or "script") — readable by the outside-in check
 
-  const report = (s) => { setState(s); onStateChange && onStateChange(s); };
+  const report = (s) => { setState(s); cb.current.onStateChange && cb.current.onStateChange(s); };
 
   useImperativeHandle(ref, () => ({
     reset() {
@@ -51,26 +69,54 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange }, ref)
 
   useEffect(() => {
     let cancelled = false;
+    report("loading");
+    cb.current.onToken && cb.current.onToken("");
     loadTurnstileScript()
       .then((turnstile) => {
         if (cancelled || !hostRef.current) return;
         widgetIdRef.current = turnstile.render(hostRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
-          callback: (token) => onToken && onToken(token),
-          "expired-callback": () => { onToken && onToken(""); report("ready"); }, // token gone; widget re-arms itself
-          "error-callback": () => { onToken && onToken(""); report("error"); },
+          appearance,
+          // "flexible" (NEW-1 point 7): the visible challenge shrinks to the container instead of a fixed
+          // 300 px box that overflows a narrow phone; it still renders at full size where there is room.
+          size: "flexible",
+          "refresh-expired": "auto",
+          callback: (token) => { cb.current.onToken && cb.current.onToken(token); report("ready"); },
+          "expired-callback": () => { cb.current.onToken && cb.current.onToken(""); }, // Turnstile refreshes it itself
+          "error-callback": (code) => {
+            cb.current.onToken && cb.current.onToken("");
+            setErrorCode(String(code == null ? "" : code).slice(0, 20));
+            reportAuthEvent(AUTH_EVENT.CAPTCHA_WIDGET_ERROR, { code: String(code == null ? "" : code) });
+            report("error");
+          },
+          "timeout-callback": () => {
+            cb.current.onToken && cb.current.onToken("");
+            reportAuthEvent(AUTH_EVENT.CAPTCHA_TIMEOUT, { reason: "challenge" });
+            cb.current.onTimeout && cb.current.onTimeout();
+            report("error");                       // NEW-1 point 7: the challenge is over — never left `interactive` with no clock
+          },
+          "before-interactive-callback": () => report("interactive"),
+          "after-interactive-callback": () => report("ready"),
         });
         report("ready");
       })
-      .catch(() => { if (!cancelled) report("error"); });
+      .catch((e) => {
+        if (cancelled) return;
+        // "timed out" = the script hung; anything else = it was blocked / failed / loaded without window.turnstile.
+        const timedOut = /timed out/i.test(String((e && e.message) || ""));
+        setErrorCode("script");
+        reportAuthEvent(timedOut ? AUTH_EVENT.CAPTCHA_TIMEOUT : AUTH_EVENT.CAPTCHA_BLOCKED, { reason: timedOut ? "script" : "script-blocked" });
+        report("error");
+      });
     return () => {
       cancelled = true;
       try { widgetIdRef.current != null && window.turnstile && window.turnstile.remove(widgetIdRef.current); } catch (_) {}
+      widgetIdRef.current = null;
+      cb.current.onToken && cb.current.onToken("");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [appearance]);
 
-  return <div ref={hostRef} data-testid="turnstile-widget" data-turnstile-state={state} />;
+  return <div ref={hostRef} data-testid="turnstile-widget" data-turnstile-state={state} data-turnstile-error={errorCode || undefined} data-turnstile-appearance={appearance} />;
 });
 
 export default Turnstile;

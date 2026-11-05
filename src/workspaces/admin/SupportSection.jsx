@@ -13,11 +13,12 @@ import AdminPanel, { Chip, PanelState, useAdminLoad } from "./AdminPanel.jsx";
 import { AdminTable, Th, Td, Clip, RelTime, LinkButton } from "./AdminTable.jsx";
 import { useAdminData } from "./AdminData.jsx";
 import { setReportStatus, fetchRecentErrorsForUser, ticketFrom } from "./lib/adminPanels.js";
+import { splitDeployReloads } from "./lib/adminIssues.js";
 import { groupSupport, contextSummary } from "./lib/adminSupport.js";
 
 function RecentErrors({ userId }) {
-  const { loading, data, error, reload } = useAdminLoad(() => fetchRecentErrorsForUser(supabase, userId), [userId]);
-  const rows = data || [];
+  const { loading, data, error, reload } = useAdminLoad(() => fetchRecentErrorsForUser(supabase, userId, 50), [userId]);
+  const { errors: rows, deployReloads } = splitDeployReloads(data, 15);
   return (
     <div style={{ marginTop: 6 }}>
       <PanelState loading={loading} error={error} empty={rows.length === 0} emptyText="No recent errors from this account." onRetry={reload} />
@@ -26,6 +27,7 @@ function RecentErrors({ userId }) {
           <RelTime iso={r.at} /> · build {r.build || "?"} · {r.module || "—"} · {r.message || "(no message)"}
         </div>
       ))}
+      {deployReloads > 0 && <div data-testid="deploy-reloads-line" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", padding: "2px 0" }}>{deployReloads} deploy {deployReloads === 1 ? "reload" : "reloads"} (expected)</div>}
     </div>
   );
 }
@@ -105,6 +107,7 @@ export default function SupportSection() {
   const d = useAdminData();
   const { support } = d;
   const { open, closed } = support.tickets;
+  const { hideInternal, setHideInternal } = d;
   const [filter, setFilter] = useState("open");
   const [expandedId, setExpandedId] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -121,15 +124,18 @@ export default function SupportSection() {
   return (
     <AdminPanel
       id="support" title="Support"
-      blurb={support.loading || support.error ? "Reports filed from inside the app, as a queue." : `${open.length} open, ${closed.length} closed. Written reports first; bare slow taps grouped by account.`}
+      blurb={support.loading || support.error ? "Reports filed from inside the app, as a queue." : `${open.length} open, ${closed.length} closed${hideInternal && support.hiddenOpen + support.hiddenClosed ? ` — excluding ${support.hiddenOpen + support.hiddenClosed} from internal/test accounts and marked tests` : ""}. Written reports first; bare slow taps grouped by account.`}
       actions={(
         <>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: FONT_SIZE.control, fontWeight: 600 }} title="Reports from test and internal accounts (e2e, your own) and signed-out reports marked as a test. Nothing is closed or deleted — this only hides them from the list, the nav badge and the Overview tile.">
+            <input type="checkbox" checked={hideInternal} onChange={(e) => setHideInternal(e.target.checked)} data-testid="support-hide-internal" /> Hide internal{support.hiddenOpen + support.hiddenClosed ? ` (${support.hiddenOpen + support.hiddenClosed})` : ""}
+          </label>
           <SegmentedControl value={filter} onChange={setFilter} options={[{ key: "open", label: `Open ${open.length}` }, { key: "closed", label: `Closed ${closed.length}` }]} aria-label="Status" />
           <Button variant="ghost" size="sm" onClick={support.reload}>Refresh</Button>
         </>
       )}
     >
-      <PanelState loading={support.loading} error={support.error} empty={!support.loading && !support.error && list.length === 0} emptyText={filter === "open" ? "Nothing open." : "Nothing closed yet."} emptyHint={open.length + closed.length === 0 ? "No reports have been filed from the app yet." : undefined} onRetry={support.reload} />
+      <PanelState loading={support.loading} error={support.error} empty={!support.loading && !support.error && list.length === 0} emptyText={filter === "open" ? "Nothing open." : "Nothing closed yet."} emptyHint={open.length + closed.length === 0 ? (support.allCount > 0 ? "Everything filed so far is from internal or test accounts — switch off Hide internal to see it." : "No reports have been filed from the app yet.") : undefined} onRetry={support.reload} />
       {!support.loading && !support.error && list.length > 0 && (
         <AdminTable maxHeight={640} minWidth={720}>
           <thead><tr><Th>Kind</Th><Th>From</Th><Th>What</Th><Th>When</Th><Th /></tr></thead>

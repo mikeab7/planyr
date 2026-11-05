@@ -467,22 +467,22 @@ describe("wiring in public/sequence/index.html", () => {
     }
   });
 
-  it("BOTH keyboard entry points resolve the whole selection via structuralTargets, not a bare selectedId", () => {
-    expect(src).toMatch(/if \(!e\.repeat && selectedId !== null\) indentSelectionByIds\(structuralTargets\(selectedId\)\);/);
-    expect(src).toMatch(/if \(!e\.repeat && selectedId !== null\) outdentSelectionByIds\(structuralTargets\(selectedId\)\);/);
+  it("BOTH keyboard entry points resolve the whole selection via structuralTargets (through blockOnlyTargets, which refuses several ranges out loud), not a bare selectedId", () => {
+    expect(src).toMatch(/if \(!e\.repeat && selectedId !== null\) \{ const ids = blockOnlyTargets\(selectedId\); if \(ids\) indentSelectionByIds\(ids\); \}/);
+    expect(src).toMatch(/if \(!e\.repeat && selectedId !== null\) \{ const ids = blockOnlyTargets\(selectedId\); if \(ids\) outdentSelectionByIds\(ids\); \}/);
     // REVERT-proof: the old single-anchor calls must be gone, not just supplemented.
     expect(src).not.toMatch(/indentTaskById\(selectedId\)/);
     expect(src).not.toMatch(/outdentTaskById\(selectedId\)/);
   });
 
   it("the CONTEXT MENU indent/outdent also resolve the whole selection, and canOutdent reflects it", () => {
-    expect(src).toMatch(/onIndent=\{\(\) => \{ indentSelectionByIds\(structuralTargets\(taskCtx\.task\.id\)\); setTaskCtx\(null\); \}\}/);
-    expect(src).toMatch(/onOutdent=\{\(\) => \{ outdentSelectionByIds\(structuralTargets\(taskCtx\.task\.id\)\); setTaskCtx\(null\); \}\}/);
+    expect(src).toMatch(/onIndent=\{\(\) => \{ const ids = blockOnlyTargets\(taskCtx\.task\.id\); if \(ids\) indentSelectionByIds\(ids\); setTaskCtx\(null\); \}\}/);
+    expect(src).toMatch(/onOutdent=\{\(\) => \{ const ids = blockOnlyTargets\(taskCtx\.task\.id\); if \(ids\) outdentSelectionByIds\(ids\); setTaskCtx\(null\); \}\}/);
     expect(src).toMatch(/canOutdent=\{\(\(\) => \{/);
   });
 
   it("rowRangeSelIds requires a genuine multi-row range (never mistakes a single row for one)", () => {
-    expect(src).toMatch(/const rowRangeSelIds = \(\) => \{[\s\S]{0,300}if \(r2 <= r1\) return \[\];/);
+    expect(src).toMatch(/const rowRangeSelIds = \(\) => \{[\s\S]{0,400}if \(rows\.length <= 1\) return \[\];/);
   });
 
   it("requestDelete deletes a childless selection immediately — no prompt gains an extra click", () => {
@@ -534,7 +534,7 @@ describe("wiring in public/sequence/index.html", () => {
 
   // ── NEW-ROWMOVE wiring pins ────────────────────────────────────────────────────────────────
   it('the "Move to…" context-menu entry resolves the whole selection via structuralTargets, same as indent/outdent', () => {
-    expect(src).toMatch(/onMoveTo=\{\(\) => \{ setMoveToCtx\(\{ ids: structuralTargets\(taskCtx\.task\.id\), projId: taskCtx\.projId \}\); setTaskCtx\(null\); \}\}/);
+    expect(src).toMatch(/onMoveTo=\{\(\) => \{ const ids = blockOnlyTargets\(taskCtx\.task\.id\); if \(ids\) setMoveToCtx\(\{ ids, projId: taskCtx\.projId \}\); setTaskCtx\(null\); \}\}/);
   });
 
   it("MoveToModal commits through moveSelectionByIds with the ids FROZEN at menu-open time, not a re-resolved live selection", () => {
@@ -546,17 +546,17 @@ describe("wiring in public/sequence/index.html", () => {
   });
 
   it("the drag gesture pushes NO undo state mid-drag — moveRows (the only setData-triggering call) fires ONLY from onUp, never from computeAndPaint/tick/onMove", () => {
-    const startRowDragBody = extractFn(src, "const startRowDrag = (e, anchorTaskId) => {");
+    const startRowDragBody = extractFn(src, "const startRowDrag = (e, anchorTaskId, opts = null) => {");
     expect(startRowDragBody, "startRowDrag not found in index.html").not.toBeNull();
     // computeAndPaint is the per-frame function; onUp is the drop handler. Isolate computeAndPaint's
     // OWN body (up to onUp's declaration) and assert it never calls moveRows/setData itself.
-    const computeAndPaintOnly = startRowDragBody.slice(0, startRowDragBody.indexOf("const onMove = "));
+    const computeAndPaintOnly = startRowDragBody.slice(0, startRowDragBody.indexOf("function onMove("));
     expect(computeAndPaintOnly).not.toMatch(/\bmoveRows\(/);
     expect(computeAndPaintOnly).not.toMatch(/\bsetData\(/);
     // Every moveRows( call site in the whole gesture lives INSIDE onUp (one per before/after/into
     // branch — only one branch runs per actual drop, but all three are legitimately in source) —
     // and NONE come from computeAndPaint/tick/onMove, which run continuously during the drag.
-    const onUpBody = startRowDragBody.slice(startRowDragBody.indexOf("const onUp = "));
+    const onUpBody = startRowDragBody.slice(startRowDragBody.indexOf("function onUp("));
     const totalCalls = (startRowDragBody.match(/\bmoveRows\(/g) || []).length;
     const onUpCalls = (onUpBody.match(/\bmoveRows\(/g) || []).length;
     expect(totalCalls, "moveRows must not be called anywhere in startRowDrag outside onUp").toBe(onUpCalls);

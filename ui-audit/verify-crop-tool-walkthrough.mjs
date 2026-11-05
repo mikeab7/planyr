@@ -16,6 +16,7 @@
  * and the OVERLAYS row still expanded (NEW-6b); edge grips share one footprint (NEW-6a).
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -61,20 +62,20 @@ const openPlan = async (url) => {
   await page.waitForTimeout(500);
 };
 const stored = () => page.evaluate(() => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.W1 && raw.W1.sheetOverlays.find((x) => x.id === "ovW");
   return o ? (o.crop ?? null) : undefined;
 });
 const waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 const openCrop = async () => {
-  if (!(await page.locator('[data-testid="overlay-crop-open"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
-  await page.locator('[data-testid="overlay-crop-open"]').click();
+  if (!(await page.locator('[data-testid^="overlay-crop-switch-"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
+  await openCropEditor(page);
   await page.waitForTimeout(600);
 };
 const imgBox = () => dlg.locator("img").first().boundingBox();
 const viewBox = () => dlg.locator("img").first().evaluate((img) => { const r = img.parentElement.parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
-const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-pct"]').textContent(), 10);
+const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-100"]').textContent(), 10);
 const vertexCount = () => dlg.locator('[data-testid^="crop-poly-vertex-"]').count();
 // screen position of an IMAGE FRACTION, read from the image's own live box — valid at any pan/zoom
 const at = async (fx, fy) => { const b = await imgBox(); return { x: b.x + fx * b.width, y: b.y + fy * b.height }; };
@@ -103,8 +104,10 @@ check("tab is foreground", await page.evaluate(() => document.visibilityState ==
   const v = await viewBox(), b = await imgBox();
   await page.screenshot({ path: OUT + "crop-walk-1-open.png" });
   const wShare = b.width / v.w, hShare = b.height / v.h;
-  check("NEW-5: a landscape sheet fills the crop window (one dimension ≥ 95% of it, the other ≥ 85%)",
-    Math.max(wShare, hShare) >= 0.95 && Math.min(wShare, hShare) >= 0.85, JSON.stringify({ view: [v.w | 0, v.h | 0], img: [b.width | 0, b.height | 0], wShare: +wShare.toFixed(2), hShare: +hShare.toFixed(2) }));
+  // 2026-10-15: Fit now keeps the whole sheet (and every edge grip) ABOVE the floating toolbar, so the height-limited dimension is
+  // ~87% rather than 95% — the sheet is still shown big, both dimensions ≥ 80%.
+  check("NEW-5: a landscape sheet fills the crop window (the larger share ≥ 85%, the other ≥ 80%)",
+    Math.max(wShare, hShare) >= 0.85 && Math.min(wShare, hShare) >= 0.80, JSON.stringify({ view: [v.w | 0, v.h | 0], img: [b.width | 0, b.height | 0], wShare: +wShare.toFixed(2), hShare: +hShare.toFixed(2) }));
   const dv = await dlg.evaluate((el) => { const c = el.firstElementChild.getBoundingClientRect(); return { w: c.width, h: c.height, vw: innerWidth, vh: innerHeight }; });
   check("NEW-5: the dialog itself takes most of the window (≥ 90% wide, ≥ 88% tall)", dv.w >= dv.vw * 0.9 && dv.h >= dv.vh * 0.88, JSON.stringify(dv));
 }
@@ -120,7 +123,7 @@ check("tab is foreground", await page.evaluate(() => document.visibilityState ==
 }
 
 /* ---- NEW-3: on-screen zoom and pan controls exist ---------------------------------------------- */
-for (const id of ["crop-zoom-out", "crop-zoom-in", "crop-zoom-slider", "crop-zoom-fit", "crop-zoom-100", "crop-pan-tool", "crop-undo", "crop-redo"]) {
+for (const id of ["crop-zoom-out", "crop-zoom-in", "crop-zoom-fit", "crop-zoom-100", "crop-pan-tool", "crop-undo", "crop-redo"]) {
   check(`control present: ${id}`, (await dlg.locator(`[data-testid="${id}"]`).count()) === 1);
 }
 check("NEW-4: Undo and Redo are visible buttons, both disabled before any edit",
@@ -241,7 +244,7 @@ check("polygon saved (kind poly, 6 points)", !!s2 && s2.kind === "poly" && s2.pt
 await openCrop();
 await dlg.locator("button", { hasText: "Rectangle" }).click();
 await page.waitForTimeout(150);
-check("NEW-2: in Rectangle mode the button says 'Reset to full page' and is ENABLED (a polygon is still saved)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
+check("NEW-2: in Rectangle mode Reset is ENABLED (a polygon is still saved)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
 await dlg.locator('[data-testid="crop-reset"]').click(); await page.waitForTimeout(150);
 await dlg.locator("button", { hasText: "Polygon" }).click(); await page.waitForTimeout(150);
 check("NEW-2: switching to Polygon after the Reset shows the full-page quad, not the old 6-point polygon", (await vertexCount()) === 4);
@@ -274,7 +277,7 @@ await page.goto("about:blank");
 await openPlan(cb);
 const s5 = await stored();
 check("after a hard reload (cache-busted URL) the rectangle crop is still saved", !!s5 && s5.kind === "rect", JSON.stringify(s5));
-check("NEW-6b: …and the OVERLAYS row is STILL expanded (Crop… reachable with no extra click)", (await page.locator('[data-testid="overlay-crop-open"]').count()) === 1);
+check("NEW-6b: …and the OVERLAYS row is STILL expanded (Crop… reachable with no extra click)", (await page.locator('[data-testid^="overlay-crop-switch-"]').count()) === 1);
 await page.screenshot({ path: OUT + "crop-walk-3-after-reload.png" });
 await openCrop();
 check("reopening after the reload shows the saved rectangle (Reset enabled)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());

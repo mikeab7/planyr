@@ -40,15 +40,17 @@ import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSa
 import {
   SHEET_COLUMNS, NOTES_COLUMN, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption, optionsForColumn,
-  absorbPasteIntoSheet, groupLabelIsRedundant,
+  absorbPasteIntoSheet, groupLabelIsRedundant, activeCellFlags,
 } from "../lib/compSheetColumns.js";
 import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
-import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
+import { reverseGeocodeLatLon, geocodeAddress } from "../../../workspaces/site-planner/lib/geocode.js";
+import { resolveCountyForPoint } from "../../sitePlans/lib/overlayCompCounty.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 import { MOBILE_BREAKPOINT_PX } from "../lib/compMobileLayout.js";
 import CompEntryMobileSheet from "./CompEntryMobileSheet.jsx";
+import { pinDragCursor } from "../../ui/controls.jsx";
 
 // B1091712 — below MOBILE_BREAKPOINT_PX this whole panel renders CompEntryMobileSheet
 // instead of the table below (a transposed, one-comp-per-screen layout — see that file's own
@@ -188,7 +190,11 @@ export function locationCellText(row, overlaysById) {
 }
 
 export function draftFromParsedRow(parsed) {
-  return { _id: newRowId(), draft: { ...emptyDraft(null), ...parsed.draft }, cellFlags: parsed.cellFlags || {} };
+  const row = { _id: newRowId(), draft: { ...emptyDraft(null), ...parsed.draft }, cellFlags: parsed.cellFlags || {} };
+  // NEW-1 — a pasted row with an address but no coordinates is geocoded after the paste (the
+  // sheet effect below), through the same forward lookup the map's search box uses.
+  if (parsed.geocodeQuery && !row.draft.anchor) row.pendingGeocode = parsed.geocodeQuery;
+  return row;
 }
 
 // B986096-HARDENING-9 ("hide unused columns entirely") — the group band's colSpans must be
@@ -708,7 +714,8 @@ function compAverageParts(rows) {
 function ProblemsList({ rows, onResolvePeriod, attemptedSave }) {
   const items = [];
   rows.forEach((row, i) => {
-    const { cellFlags, draft } = row;
+    const { draft } = row;
+    const cellFlags = activeCellFlags(row.cellFlags, draft.compType); // a flag from the row's previous type no longer shows
     const periodFlag = cellFlags.leaseRatePeriod;
     if (periodFlag?.level === "blocking") {
       const rate = draft.leaseRate || "0.00";
@@ -873,6 +880,56 @@ export default function CompEntryGrid({
   rowsRef.current = rows;
   const onRowsChangeRef = useRef(onRowsChange);
   onRowsChangeRef.current = onRowsChange;
+  // NEW-1 — every async patch below goes through here, which also advances `rowsRef` at once: two
+  // lookups landing in the same tick would otherwise both map over the SAME pre-patch array and
+  // the second would silently undo the first (34 pasted pins resolve dozens of lookups at once).
+  const patchRows = (fn) => {
+    const next = fn(rowsRef.current);
+    if (next === rowsRef.current) return;
+    rowsRef.current = next;
+    onRowsChangeRef.current(next);
+  };
+  // NEW-1/NEW-2 — a PASTED pin (a sheet's x/y or "lat, lon" column, or a geocoded address) has no
+  // county yet; it resolves here with the same boundary lookup a hand-dropped pin uses
+  // (`resolveCountyForPoint`). `countyPending` is cleared either way — a miss is the honest null
+  // the save step (compSavePrep.js) tries once more. And an address-only row is geocoded here.
+  const lookupsInFlightRef = useRef(new Set());
+  useEffect(() => {
+    rows.forEach((row) => {
+      const a = row.draft.anchor;
+      if (a && a.countyPending && typeof a.lat === "number" && typeof a.lon === "number") {
+        const key = `county|${row._id}|${locationCacheKey(a)}`;
+        if (lookupsInFlightRef.current.has(key)) return;
+        lookupsInFlightRef.current.add(key);
+        resolveCountyForPoint(a.lat, a.lon).then((county) => {
+          patchRows((cur) => cur.map((r) => {
+            const ra = r.draft.anchor;
+            if (r._id !== row._id || !ra || !ra.countyPending || locationCacheKey(ra) !== locationCacheKey(a)) return r;
+            const { countyPending: _p, ...rest } = ra;
+            return { ...r, draft: { ...r.draft, anchor: { ...rest, county: county || null } } };
+          }));
+        });
+        return;
+      }
+      if (!a && row.pendingGeocode) {
+        const key = `geo|${row._id}|${row.pendingGeocode}`;
+        if (lookupsInFlightRef.current.has(key)) return;
+        lookupsInFlightRef.current.add(key);
+        const query = row.pendingGeocode;
+        geocodeAddress(query).then((ans) => {
+          patchRows((cur) => cur.map((r) => {
+            if (r._id !== row._id || r.draft.anchor || r.pendingGeocode !== query) return r;
+            const { pendingGeocode: _q, ...restRow } = r;
+            if (!ans || ans.error || typeof ans.lat !== "number") return restRow; // stays "needs a Location"
+            return { ...restRow, draft: { ...r.draft, anchor: { kind: "pin", lat: ans.lat, lon: ans.lon, county: null, countyPending: true } } };
+          }));
+        }).catch(() => {
+          patchRows((cur) => cur.map((r) => { if (r._id !== row._id) return r; const { pendingGeocode: _q, ...restRow } = r; return restRow; }));
+        });
+      }
+    });
+  }, [rows]);
+
   useEffect(() => {
     rows.forEach((row) => {
       const anchor = row.draft.anchor;
@@ -881,9 +938,9 @@ export default function CompEntryGrid({
       if (!anchor || (anchor.kind !== "pin" && anchor.kind !== "parcel")) return;
       const key = locationCacheKey(anchor);
       if (!key || row.locationCache?.key === key) return; // already resolved, or already in flight, for this exact position
-      onRowsChangeRef.current(rowsRef.current.map((r) => (r._id === row._id ? { ...r, locationCache: { key, text: null, resolving: true } } : r)));
+      patchRows((cur) => cur.map((r) => (r._id === row._id ? { ...r, locationCache: { key, text: null, resolving: true } } : r)));
       reverseGeocodeLatLon(anchor.lat, anchor.lon).then((ans) => {
-        onRowsChangeRef.current(rowsRef.current.map((r) => {
+        patchRows((cur) => cur.map((r) => {
           if (r._id !== row._id) return r;
           // The anchor may have moved on (re-picked, or the row deleted and a new one reusing
           // nothing) by the time this resolves — only apply a response that still matches.
@@ -1757,10 +1814,10 @@ export default function CompEntryGrid({
   };
 
   function rowIsReady(row) {
-    return !rowHasBlockingFlags(row.cellFlags) && validateComp(draftToComp(row.draft)).length === 0;
+    return !rowHasBlockingFlags(activeCellFlags(row.cellFlags, row.draft.compType)) && validateComp(draftToComp(row.draft)).length === 0;
   }
   const readyRows = rows.filter(rowIsReady);
-  const blockingCount = rows.filter((r) => rowHasBlockingFlags(r.cellFlags)).length;
+  const blockingCount = rows.filter((r) => rowHasBlockingFlags(activeCellFlags(r.cellFlags, r.draft.compType))).length;
   // ⛔ HARDENING-13 (B986096, owner P0 live-test, "the footer used to name the reason, now it
   // just says '1 blocking'") — `missingCount` counts ANY row with a validateComp error, blocking
   // or not — a row can appear in both counts.
@@ -1826,12 +1883,14 @@ export default function CompEntryGrid({
     e.preventDefault();
     const sy = e.clientY;
     const startH = dockHeightRef.current;
+    const releaseCursor = pinDragCursor("row-resize"); // stays a resize arrow even when the pointer outruns the 6px edge
     const move = (ev) => {
       const h = typeof window !== "undefined" ? window.innerHeight : 800;
       const next = clamp(startH + (sy - ev.clientY), DOCK_HEIGHT_MIN, Math.min(DOCK_HEIGHT_MAX, h - 80));
       setDockHeight(next);
     };
     const up = () => {
+      releaseCursor();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       try { window.localStorage?.setItem(DOCK_HEIGHT_KEY, String(dockHeightRef.current)); } catch { /* private mode / quota — height just won't persist */ }
@@ -2029,7 +2088,7 @@ export default function CompEntryGrid({
           total content exceeds `dockHeight` — same intent as HARDENING-28, now paid for by the
           panel shrinking to content instead of a floor forced onto the grid regardless of row count. */}
       <div onPointerDown={startResize} title="Drag to resize"
-        style={{ flex: "none", height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
+        style={{ flex: "none", height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "row-resize", background: "var(--border-default)" }} />
       <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>Paste comps</span>
         <button onClick={requestClose} aria-label="Close"
@@ -2065,6 +2124,7 @@ export default function CompEntryGrid({
           tabIndex={-1}
           role="grid"
           aria-label="Comp entry sheet"
+          data-letters-are-text=""
           aria-rowcount={rows.length + 1}
           aria-colcount={visibleIdx.length + 2}
           onKeyDown={onGridKeyDown}

@@ -196,7 +196,9 @@ begin
     raised := true; err := sqlerrm;
   end;
   execute 'reset role'; execute 'set local request.jwt.claims = default';
-  if not raised or err not like '%Not signed in%' then
+  -- B2404338 (2026-10-21): EXECUTE is now revoked from anon on this function, so the refusal arrives at
+  -- the GRANT layer ("permission denied for function") before the body's own "Not signed in" check runs.
+  if not raised or (err not like '%Not signed in%' and err not like '%permission denied%') then
     failed := failed + 1;
     rep := rep || format(E'\nFAIL  4. set_plan_lock() did not refuse an unauthenticated caller — raised=%s err=%s', raised, coalesce(err, '<none>'));
   else
@@ -250,7 +252,9 @@ begin
     raised := true; err := sqlerrm;
   end;
   execute 'reset role'; execute 'set local request.jwt.claims = default';
-  if not raised or err not like '%Not signed in%' then
+  -- B2404338 (2026-10-21): EXECUTE is now revoked from anon on this function, so the refusal arrives at
+  -- the GRANT layer ("permission denied for function") before the body's own "Not signed in" check runs.
+  if not raised or (err not like '%Not signed in%' and err not like '%permission denied%') then
     failed := failed + 1;
     rep := rep || format(E'\nFAIL  7. set_project_team() did not refuse an unauthenticated caller — raised=%s err=%s', raised, coalesce(err, '<none>'));
   else
@@ -310,7 +314,9 @@ begin
     raised := true; err := sqlerrm;
   end;
   execute 'reset role'; execute 'set local request.jwt.claims = default';
-  if not raised or err not like '%Not signed in%' then
+  -- B2404338 (2026-10-21): EXECUTE is now revoked from anon on this function, so the refusal arrives at
+  -- the GRANT layer ("permission denied for function") before the body's own "Not signed in" check runs.
+  if not raised or (err not like '%Not signed in%' and err not like '%permission denied%') then
     failed := failed + 1;
     rep := rep || format(E'\nFAIL  10. set_project_team_state() did not refuse an unauthenticated caller — raised=%s err=%s', raised, coalesce(err, '<none>'));
   else

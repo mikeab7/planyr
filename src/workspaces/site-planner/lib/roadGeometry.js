@@ -1261,7 +1261,13 @@ export function teeGeometry(params) {
     // SHARP corner. The old code only applied the clamp when tMax > 0, so a zero reach silently fell
     // through and kept the FULL requested radius — the one case where "no room" produced the biggest
     // possible return.
-    if (!(tMax > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
+    /* NEW-1 (road → parking) — A SHARP CORNER IS NEVER BUILT PAST THE END OF THE EDGE IT SITS ON. When the drive's edge line meets the face line BEYOND where the face
+     * ends (`along` > the run available that way — a drive exactly as wide as the lane it enters, tilted a few degrees, so its edge line crosses the field's side edge
+     * a foot or two outside the field), the degenerate corner used to be that far point and the wedge a triangle poking out past the field's end. It is clamped to the
+     * face's own end: the pavement it adds still closes the gore the strip's flat cap leaves, and none of it lies outside the face. */
+    const availDir = awaySign > 0 ? availPos : availNeg;
+    const sharp = along > availDir + EPS && Number.isFinite(availDir) ? add(E0, mul(awayThrough, Math.max(0, availDir))) : corner;
+    if (!(tMax > EPS)) return { tan1: sharp, tan2: sharp, arc: [sharp], R: 0, t: 0, centre: null, u1: awayThrough };
     if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
     let Rc = R > 0 ? R : 0;
     let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
@@ -1780,6 +1786,7 @@ export function weldCoverPolygon(P, arms, opts = {}) {
  * two ARM INDICES it joins, so a caller can find (say) the two arms of one road and read the throat
  * span between them. `wedges` are ADDITIVE pavement polygons for the boolean union — same contract as
  * teeGeometry.wedges: never painted over a seam, always unioned. Pure — unit-tested. */
+export const SOFT_TANGENT_FT = 8;   // the most tangent length the fallback above may use
 export function nodeJunction(params) {
   const { node, arms, R = 0, tessDeg = DEFAULT_TESS_DEG, flatDeg = 178, roundOwnCorner = false } = params || {};
   if (!node || !Array.isArray(arms) || arms.length < 2) return null;
@@ -1792,6 +1799,8 @@ export function nodeJunction(params) {
     prepped.push({
       i, u: mul(a.dir, 1 / L), half: Math.max(0, +a.half || 0), road: a.road != null ? a.road : null,
       avail: Number.isFinite(a.avail) ? Math.max(0, a.avail) : Infinity,
+      // NEW-2 — the arm's run past a MILD bend (roadJunctions `armStraightRun`); defaults to `avail`, so a caller that passes none is untouched
+      soft: Number.isFinite(a.soft) ? Math.max(Number.isFinite(a.avail) ? Math.max(0, a.avail) : 0, a.soft) : (Number.isFinite(a.avail) ? Math.max(0, a.avail) : Infinity),
       deep: Number.isFinite(a.deep) ? a.deep : Math.max(1, Math.min(Math.max(0, +a.half || 0) * 0.5, 12)),
       bearing: Math.atan2(a.dir.y, a.dir.x),
     });
@@ -1824,7 +1833,13 @@ export function nodeJunction(params) {
     corners.push(corner);
     // Room left along each arm BEYOND the corner (the corner already sits some way out).
     const alongA = dot(sub(corner, node), A.u), alongB = dot(sub(corner, node), B.u);
-    const tMax = Math.max(0, Math.min((A.avail - alongA) * 0.9, (B.avail - alongB) * 0.9, R > 0 ? R : 0));
+    let tMax = Math.max(0, Math.min((A.avail - alongA) * 0.9, (B.avail - alongB) * 0.9, R > 0 ? R : 0));
+    /* NEW-2 (2026-10-15) — NEVER SILENTLY SQUARE. A return needs the corner (alongA / alongB out) plus a tangent run on a STRAIGHT arm; an arm that bends
+     * mildly just past the node has less straight run than that, and `tMax` fell to 0 — a square corner on this side while the other side kept its full
+     * radius. Fall back to the run past the mild bend (`soft`) with the tangent length capped at SOFT_TANGENT_FT, so the radius SHRINKS instead of vanishing. */
+    if (!(tMax > EPS) && R > 0) {
+      tMax = Math.max(0, Math.min((A.soft - alongA) * 0.9, (B.soft - alongB) * 0.9, R, SOFT_TANGENT_FT));
+    }
     const phi = Math.acos(Math.max(-1, Math.min(1, dot(A.u, B.u))));
     let f = null;
     if (tMax > EPS && phi > 1e-3 && phi < Math.PI - 1e-3) {

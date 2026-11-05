@@ -36,8 +36,16 @@ export function groupProjectsByGroupId(siteRows, elementRecencyBySite) {
     // A-B1953794 — the SAME chooser the Map's Sites list uses (siteRecency.js), so both surfaces
     // show one project through one plan; content edits count (element recency), not just headers.
     const newest = pickRepresentativePlan(rows, elementRecencyBySite);
+    // NEW-1 (2026-10-08) — when the PROJECT was created (its earliest plan), so a project made
+    // after his saved order lands on top (shared/projects/projectOrder.js). Null when no row has one.
+    let createdAt = null;
+    for (const r of rows) {
+      const t = Date.parse(r.created_at);
+      if (Number.isFinite(t) && (createdAt == null || t < createdAt)) createdAt = t;
+    }
     out.push({
       groupId,
+      createdAt,
       // B1161793 (NEW-2) — the representative PLAN's own row id, distinct from `groupId` (which
       // is a separate value shared across sibling plans, or falls back to a solo plan's id when
       // it has no group). The Pursuits card's Yield/Quiet columns key off `site_elements.site_id`,

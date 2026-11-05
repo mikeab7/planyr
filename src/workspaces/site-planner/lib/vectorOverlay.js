@@ -28,9 +28,15 @@ import { gisCache } from "./gisCache.js";
 import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
+import { cardNode } from "./identifyCard.js";
+import { makeHighlight, setHighlight, releaseHighlight, childFor } from "./featureHighlight.js";
+import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
+import { siteState } from "./siteRegion.js";
+import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
-import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
+import { streamBufferBands, bufferLegend, streamBufferLossNote } from "./georgiaStreamBuffers.js";
+import { streamBufferBandsTn, bufferLegendTn } from "./tennesseeStreamBuffers.js";   // B2521584 (Tennessee)
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
@@ -131,8 +137,8 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 // Map-cartography label style: white with a dark halo reads on any imagery/theme —
 // this is on-map lettering (like the tile providers' own labels), not app chrome,
 // so it deliberately does not follow the app theme tokens.
-const labelHtml = (text, { uppercase }) =>
-  `<span style="position:absolute;transform:translate(-50%,-50%);white-space:nowrap;color:#fff;` +
+const labelHtml = (text, { uppercase, angle = 0 }) =>
+  `<span style="position:absolute;transform:translate(-50%,-50%)${angle ? ` rotate(${Math.round(angle * 10) / 10}deg)` : ""};white-space:nowrap;color:#fff;` +
   `text-shadow:0 0 3px rgba(0,0,0,0.9),0 0 7px rgba(0,0,0,0.55);font:700 11px/1.2 system-ui,sans-serif;` +
   `letter-spacing:0.05em;${uppercase ? "text-transform:uppercase;" : ""}pointer-events:none;">${escapeHtml(text)}</span>`;
 
@@ -164,7 +170,16 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
    * barely see. So a point gets the filled-disc symbology instead, and everything else keeps
    * the boundary style verbatim. */
   const pointStyle = () => ({ ...pointSymbolOptions(cfg, opacity), className: "pf-boundary-hit" });
-  const lineStyle = () => ({
+  /* B2507065 (NEW-10, owner constraint #47) — Counties & Cities reads at a glance. CITY LIMITS: a bolder outline plus a light tint INSIDE (none outside = unincorporated). COUNTIES:
+   * a heavier DASHED grey line with a light halo (the `pf-county-line` CSS filter) — a different kind of line from a city's solid one; state lines (adminBoundaryData) are heavier still. */
+  const countyLine = isCountyLinesId(source.id), cityLine = isCityLimitsId(source.id);
+  const lineStyle = () => (countyLine ? {
+    color: COUNTY_LINE_COLOR, weight: COUNTY_LINE_WEIGHT, opacity: Math.max(opacity, 0.85), dashArray: COUNTY_LINE_DASH,
+    fill: true, fillColor: COUNTY_LINE_COLOR, fillOpacity: interactive ? 0.02 : 0, className: "pf-boundary-hit pf-county-line",
+  } : cityLine ? {
+    color: lineColor, weight: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), opacity,
+    fill: true, fillColor: lineColor, fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit",
+  } : {
     color: lineColor, weight: cfg.weight || 2, opacity,
     // B761: a boundary source can request a DASHED stroke (cfg.dash) — used to draw ETJ
     // in the same hue as solid city limits, so line-style (not color) tells them apart.
@@ -196,39 +211,14 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   const wireFeature = (feature, lyr) => {
     if (!interactive) return;
-    lyr.on("mouseover", (e) => {
-      if (!identifyOk()) return;
-      // A point's emphasis is a fatter ring at full fill — dropping fillOpacity to 0.1 (the
-      // right nudge for a boundary's near-invisible hit fill) would make a hovered disc FAINTER
-      // than an unhovered one, i.e. emphasis backwards.
-      try { lyr.setStyle(isPointFeature(feature) ? { weight: (cfg.weight || 2) + 1.2, fillOpacity: 1 } : { weight: (cfg.weight || 2) + 1.2, fillOpacity: 0.1 }); } catch (_) {}
-      try { lyr.bindTooltip(displayName(feature), { sticky: true, direction: "top" }).openTooltip(e.latlng); } catch (_) {}
-    });
-    lyr.on("mouseout", () => {
-      try { lyr.setStyle(baseStyle(feature)); } catch (_) {}
-      try { lyr.unbindTooltip(); } catch (_) {}
-    });
+    // B2507061 (owner constraint #43): NO hover tooltip and no hover emphasis — a boundary answers a CLICK with the clean card, and nothing else.
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
-      // Content built as DOM nodes (names arrive from an external service — never innerHTML them).
-      const el = document.createElement("div");
-      el.style.cssText = "font-size:12px;line-height:1.45;max-width:250px;";
-      const head = document.createElement("div");
-      head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;";
-      head.textContent = displayName(feature);
-      el.append(head);
-      // B1075: registry-declared detail rows (BKDD easement width + its recorded exhibit) —
-      // an easement is a hard buildable-area constraint, so its width has to REACH the user,
-      // not sit invisibly behind a band on the map.
-      appendIdentifyRows(el, source, feature && feature.properties);
-      const note = document.createElement("div");
-      note.style.cssText = "opacity:0.85;margin-top:4px;";
-      note.textContent = source.identifyNote || "";
-      const src = document.createElement("div");
-      src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:4px;";
-      src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
-      el.append(note, src);
-      openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(el).openOn(map);
+      const about = source.sourceName ? `Source: ${source.sourceName}` : null;
+      const node = cardNode({ title: displayName(feature), rows: identifyRowsFor(source, feature && feature.properties), note: source.identifyNote || null, about });
+      openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map);
+      const token = makeHighlight(lyr); // B2507061: only the CLICKED feature is outlined, and only until its card closes
+      if (token) { setHighlight(token); openPopup.on("remove", () => releaseHighlight(token)); }
     });
   };
   // Close OUR identify popover (never someone else's) — on toggle-off / fallback the
@@ -254,8 +244,29 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   // Re-place the zoom-gated name labels for the current view (pure math in
   // boundaryLabels.js; bigger polygons win, collisions drop).
+  /* B2507065 (NEW-10): COUNTY names go alongside the line on each county's own side, turned to run parallel to it ("DeSoto Co." / "Shelby Co., TN"), instead of at the middle
+   * of the county. Pure placement in countyLineLabels.js; this only projects and draws. */
+  const refreshCountyLabels = () => {
+    if (!map || !lastFc || !labelsVisible(source.labelZoom, map.getZoom())) return;
+    const size = map.getSize(), c = map.getCenter();
+    const home = siteState({ lat: c.lat, lng: c.lng });
+    const labels = countyLineLabels((lastFc.features) || [], {
+      textOf: (f) => countyLabelText(nameOf(f), source.stateAbbr, home),
+      project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
+      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x, y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
+      viewW: size.x, viewH: size.y,
+    });
+    for (const p of labels) {
+      const icon = L.divIcon({ className: "", html: labelHtml(p.text, { uppercase: false, angle: p.angle }), iconSize: [0, 0] });
+      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
+      group.addLayer(mk);
+      labelMarkers.push(mk);
+    }
+  };
+
   const refreshLabels = () => {
     clearLabels();
+    if (isCountyLinesId(source.id)) { refreshCountyLabels(); return; }
     if (!map || !anchors.length || !labelsVisible(source.labelZoom, map.getZoom())) return;
     const size = map.getSize();
     /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already
@@ -422,7 +433,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
    * hands the same answer to any surface that can supply a lat/lng: null when nothing
    * is under the point, or when the layer has fallen back to the raster/live path (no
    * geometry in hand to test, and claiming otherwise would be a guess). */
-  group.identifyAt = (at) => identifyPayload(source, lastFc, at, fellBack, (f) => displayName(f));
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, fellBack, (f) => displayName(f), (f) => childFor(geo, f));
 
   return group;
 }
@@ -431,12 +442,14 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
  * canvas card describe a feature identically. `titleOf` is the layer's OWN headline
  * rule (a boundary layer's label field vs. a line layer's registry title), so neither
  * borrows the other's wording. Pure given `fc`. */
-function identifyPayload(source, fc, at, disabled, titleOf) {
+function identifyPayload(source, fc, at, disabled, titleOf, childOf = null) {
   if (disabled || !fc) return null;
   const f = hitFeature(fc, at || {});
   if (!f) return null;
   const props = f.properties || {};
+  const token = childOf ? makeHighlight(childOf(f)) : null; // the planner outlines this feature while its card is open
   return {
+    ...(token ? { highlight: token } : {}),
     sourceId: source.id || null,
     title: titleOf(f),
     rows: identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref }),
@@ -492,38 +505,19 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     openPopup = null;
   };
 
-  // Identify popover DOM (external attribute values → textContent, never innerHTML).
+  // Identify popover DOM (external attribute values → textContent, never innerHTML): the clean card (identifyCard.js), source behind the (i).
   const identifyEl = (props) => {
     const p = props || {};
-    const color = (styleFor(source, p) || {}).color || "#333";
-    const el = document.createElement("div");
-    el.style.cssText = "font-size:12px;line-height:1.5;max-width:260px;";
-    const head = document.createElement("div");
-    head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;display:flex;align-items:center;gap:6px;";
-    const sw = document.createElement("span");
-    sw.style.cssText = `width:14px;height:0;border-top:3px solid ${color};flex:none;`;
-    const ct = document.createElement("span");
-    ct.textContent = identifyTitle(source, p);
-    head.append(sw, ct);
-    el.append(head);
-    appendIdentifyRows(el, source, p);
-    const note = document.createElement("div");
-    note.style.cssText = "opacity:0.85;margin-top:4px;";
-    note.textContent = source.identifyNote || "";
-    const src = document.createElement("div");
-    src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:3px;";
-    src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
-    el.append(note, src);
-    return el;
+    return cardNode({ title: identifyTitle(source, p), rows: identifyRowsFor(source, p), note: source.identifyNote || null, about: source.sourceName ? `Source: ${source.sourceName}` : null });
   };
 
   const wireFeature = (feature, lyr) => {
     if (!interactive) return;
-    lyr.on("mouseover", () => { try { lyr.setStyle({ weight: (styleFeature(feature).weight || 2) + 1.5 }); } catch (_) {} });
-    lyr.on("mouseout", () => { try { lyr.setStyle(styleFeature(feature)); } catch (_) {} });
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
       openPopup = L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(identifyEl(feature.properties)).openOn(map);
+      const token = makeHighlight(lyr);
+      if (token) { setHighlight(token); openPopup.on("remove", () => releaseHighlight(token)); }
     });
   };
 
@@ -625,7 +619,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   /* (B1092) Identify without a Leaflet click — see cachedVectorLayer.identifyAt. In the
    * far-out RASTER mode there is no geometry in hand, so this honestly answers null
    * rather than guessing from a picture. */
-  group.identifyAt = (at) => identifyPayload(source, lastFc, at, mode !== "vector", (f) => identifyTitle(source, f.properties || {}));
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, mode !== "vector", (f) => identifyTitle(source, f.properties || {}), (f) => childFor(geo, f));
   return group;
 }
 
@@ -645,6 +639,8 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
   // Georgia stream buffers are a corridor of a different kind: per-feature widths from three sources, not one
   // assumed width off one source — a sibling builder, same pane / status / export contract.
   if (cfg.bufferRule === "ga_streams") return cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts);
+  // Tennessee's construction-permit stream buffers: NHD streams + TDEC's own list of restricted waters — the same shape, a different rule (B2521584).
+  if (cfg.bufferRule === "tn_streams") return cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts);
   const source = VECTOR_SOURCES[cfg.pipelineSource || "txrrc_pipe"];
   if (!source) return null;
   const { cache = gisCache } = opts;
@@ -752,13 +748,13 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
  *
  * Vector-only: below the NHD source's vector gate there are no centrelines to buffer, so it reports "zoom in". */
 export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
-  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd;
-  if (!nhd || !trout || !district) return null;
+  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd, rivers = VECTOR_SOURCES.ga_protected_rivers, mrpa = VECTOR_SOURCES.ga_mrpa_corridor;
+  if (!nhd || !trout || !district || !rivers || !mrpa) return null;
   const { cache = gisCache } = opts;
 
   let map = null, opacity = initialOpacity, seq = 0;
-  const data = { nhd: null, trout: null, district: null };
-  const failed = { nhd: false, trout: false, district: false };
+  const data = { nhd: null, trout: null, district: null, rivers: null, mrpa: null };
+  const failed = { nhd: false, trout: false, district: false, rivers: false, mrpa: false };
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const group = L.layerGroup([], { pane });
   const bands = L.layerGroup([]);
@@ -767,7 +763,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
   const paint = () => {
     bands.clearLayers();
     if (!data.nhd) return;
-    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district });
+    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district, rivers: failed.rivers ? null : data.rivers, mrpa: failed.mrpa ? null : data.mrpa });
     // Widest first, so a narrower tier laid over a wider one stays legible instead of being buried by it.
     list.sort((a, b) => b.tier.eachSideFt - a.tier.eachSideFt);
     for (const { ring, tier } of list) {
@@ -778,9 +774,9 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
         interactive: false,
       }));
     }
-    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline"].filter(Boolean);
-    if (lost.length) {
-      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown are the 25 ft state minimum only, NOT the full rule (screening only).`);
+    const lossNote = streamBufferLossNote(cfg.label, failed);
+    if (lossNote) {
+      report("failed", lossNote);
     } else if (!list.length) {
       report("empty", "No state-waters streams in this view.");
     } else if (data.nhd.truncated) {
@@ -807,7 +803,7 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
       onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data[name] = fr.data; failed[name] = false; paint(); } },
     }).then((r) => { if (mySeq === seq) { data[name] = r.data; failed[name] = false; } })
       .catch((e) => { if (mySeq === seq) { failed[name] = true; reportClientEvent("ga-stream-buffer-source-failed", String((e && e.message) || e), { source: name }); } });
-    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district)]);
+    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district), pull("rivers", rivers), pull("mrpa", mrpa)]);
     if (mySeq !== seq || !map) return;
     if (failed.nhd) {
       bands.clearLayers();
@@ -833,7 +829,94 @@ export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, 
     seq++;
     m.off("moveend", refresh);
     L.LayerGroup.prototype.onRemove.call(this, m);
-    map = null; data.nhd = data.trout = data.district = null;
+    map = null; data.nhd = data.trout = data.district = data.rivers = null;
+  };
+  group.setOpacity = (o) => { opacity = o; paint(); };
+  group.getExportMode = () => "vector";
+  return group;
+}
+
+/* Tennessee STREAM BUFFER bands (B2521584) — the sibling of the Georgia builder above, with the same pane / status / export contract (the export
+ * gatherer reads the polygons exactly as it reads a pipeline corridor — PDF-PARITY). The rule is `tennesseeStreamBuffers.streamBufferBandsTn`, pure
+ * and unit-tested: USGS NHD streams at 30 ft each side (the Construction General Permit's average natural riparian buffer). The NHD pull comes
+ * through `fetchCached`, the same SWR cache entry the drawn "Streams" layer uses, so turning the buffer on beside it costs no second pull.
+ *
+ * LOUD, never partial-and-silent: the status line always carries what is NOT drawn (the 60 ft tier on TDEC-listed waters), and a failed NHD pull
+ * clears the bands and says so. Vector-only: below the NHD source's vector gate there are no centrelines, so it says "zoom in". */
+export function cachedTnStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  const nhd = VECTOR_SOURCES.nhd_flowlines;
+  if (!nhd) return null;
+  const { cache = gisCache } = opts;
+  const NOT_DRAWN = "The 60 ft tier on TDEC-listed waters is not drawn.";
+
+  let map = null, opacity = initialOpacity, seq = 0, data = null;
+  const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
+  const group = L.layerGroup([], { pane });
+  const bands = L.layerGroup([]);
+  group.addLayer(bands);
+
+  const paint = () => {
+    bands.clearLayers();
+    if (!data) return;
+    const list = streamBufferBandsTn({ nhd: data });
+    for (const { ring, tier } of list) {
+      bands.addLayer(L.polygon(ring.map(([lng, lat]) => [lat, lng]), {
+        pane: CORRIDOR_PANE,
+        stroke: true, color: tier.color, weight: 0.5, opacity: Math.min(1, opacity + 0.15),
+        fill: true, fillColor: tier.color, fillOpacity: 0.18 * opacity,
+        interactive: false,
+      }));
+    }
+    if (!list.length) report("empty", "No streams in this view.");
+    else if (data.truncated) report("loaded", `Partial — too many streams in this view to buffer them all; zoom in. ${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
+    else report("loaded", `${bufferLegendTn(list).join(" · ")}. ${NOT_DRAWN}`);
+  };
+
+  const refresh = async () => {
+    if (!map) return;
+    const zoom = map.getZoom();
+    const b = map.getBounds();
+    const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+    const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
+    if (decideVectorOrImage(nhd, { zoom, bboxAreaDeg: areaDeg }) === "image") {
+      seq++; bands.clearLayers(); data = null;
+      report("empty", "Zoom in to about street level to see the stream buffers.");
+      return;
+    }
+    const mySeq = ++seq;
+    try {
+      const r = await fetchCached(nhd, bbox, {
+        cache, zoom,
+        onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data = fr.data; paint(); } },
+      });
+      if (mySeq !== seq || !map) return;
+      data = r.data;
+      paint();
+    } catch (e) {
+      if (mySeq !== seq || !map) return;
+      bands.clearLayers();
+      reportClientEvent("tn-stream-buffer-source-failed", String((e && e.message) || e), { source: "nhd" });
+      report("failed", `${cfg.label}: couldn't load the USGS stream lines here — no buffers are shown (screening only).`);
+    }
+  };
+
+  group.onAdd = function (m) {
+    map = m;
+    if (!m.getPane(CORRIDOR_PANE)) {
+      const p = m.createPane(CORRIDOR_PANE);
+      p.style.zIndex = 349; // just below the GIS overlay pane (350) → bands sit under the stream lines
+    }
+    L.LayerGroup.prototype.onAdd.call(this, m);
+    m.on("moveend", refresh);
+    report("loading");
+    refresh();
+    return this;
+  };
+  group.onRemove = function (m) {
+    seq++;
+    m.off("moveend", refresh);
+    L.LayerGroup.prototype.onRemove.call(this, m);
+    map = null; data = null;
   };
   group.setOpacity = (o) => { opacity = o; paint(); };
   group.getExportMode = () => "vector";

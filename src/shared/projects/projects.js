@@ -96,6 +96,17 @@ export function listProjects() {
   }
 }
 
+/* NEW-2 (library record-only sites) — the "tracked" (record-only) sites, which listProjects() above leaves out on
+ * purpose. Exposed separately so a surface that must reach EVERY document (the Library) can ask for them by name
+ * instead of loosening the pursuit filter every other "pick a project" surface relies on. */
+export function listTrackedProjects() {
+  try {
+    return groupProjects(loadSiteSummaries().filter((s) => roleOf(s) === "tracked"));
+  } catch (_) {
+    return [];
+  }
+}
+
 /* THE PROJECT LIST CHANGED — one signal, every surface (B482 ×2).
  *
  * A same-tab localStorage write fires NO native `storage` event, so a warm that lands in one
@@ -117,7 +128,7 @@ export function notifyProjectsChanged() {
 /** Subscribe to "the project list may have moved". Returns an unsubscribe. */
 export function onProjectsChanged(cb) {
   if (typeof window === "undefined") return () => {};
-  const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) cb(); };
+  const onStorage = (e) => { if (!e.key || (e.key.startsWith("planarfit:sites") && !/^planarfit:sites:.*(:p:|:led$)/.test(e.key))) cb(); };   // B2165120: see ProjectBreadcrumb — the index write is the one signal per edit
   window.addEventListener("storage", onStorage);
   return () => window.removeEventListener("storage", onStorage);
 }

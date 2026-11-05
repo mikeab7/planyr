@@ -1,3 +1,4 @@
+import { LockGlyph } from "../../../shared/ui/LockToggle.jsx";
 /* Element context-menu row icons (B845584 — the context-menu rebuild).
  *
  * A dedicated idiom from `icons.jsx`'s 24×24/stroke-2 family on purpose: the menu rebuild's brief
@@ -109,14 +110,8 @@ export const DuplicateIcon = ({ size = 14 }) => (
   </svg>
 );
 
-// Lock — closed and open padlock, one path swapped on the `open` prop (same idiom as the app's
-// existing 24×24 PadlockIcon, redrawn at 14×14/1.3 to match this menu's finer stroke).
-export const LockIcon = ({ size = 14, open = false }) => (
-  <svg {...base(size)}>
-    <rect x="2.8" y="6.2" width="8.4" height="5.3" rx="1" />
-    <path d={open ? "M4.6 6.2V4.6a2.4 2.4 0 0 1 4.5-1.2" : "M4.6 6.2V4.6a2.4 2.4 0 0 1 4.8 0v1.6"} />
-  </svg>
-);
+// Lock — re-exported from the ONE greyscale lock (shared/ui/LockToggle.jsx); not a second drawing.
+export const LockIcon = ({ size = 14, open = false }) => <LockGlyph locked={!open} size={size} />;
 
 // Align rotation — a compass-style return arrow around a centre dot.
 export const AlignRotationIcon = ({ size = 14 }) => (

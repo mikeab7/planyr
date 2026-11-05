@@ -348,7 +348,7 @@ async function main() {
   await layersBtn.click().catch(() => {}); // reopen so subsequent checks/toggles can see the panel
   await page.waitForTimeout(300);
   const viewBoxAfterPan = await svg.getAttribute("viewBox");
-  const parcelPosAfter = await page.evaluate(() => { const p = document.querySelector('svg [stroke="#7c786d"], svg polygon, svg path'); const b = p && p.getBoundingClientRect(); return b ? { x: Math.round(b.x), y: Math.round(b.y) } : null; });
+  const parcelPosAfter = await page.evaluate(() => { const p = document.querySelector('svg [stroke="#66737f"], svg polygon, svg path'); const b = p && p.getBoundingClientRect(); return b ? { x: Math.round(b.x), y: Math.round(b.y) } : null; });
   console.log(`  (debug) viewBox before=${viewBoxBeforePan} after=${viewBoxAfterPan}`);
   console.log(`  (debug) an svg shape's position before=${JSON.stringify(parcelPosBefore)} after=${JSON.stringify(parcelPosAfter)}`);
   console.log(`  (debug) LERC fetch count before/after pan: ${lercBeforePan} → ${seen.lercFetches.length}`);

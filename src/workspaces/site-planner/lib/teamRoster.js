@@ -9,7 +9,7 @@ export function initialsOf(name, email) {
   return (base.slice(0, 2) || "?").toUpperCase();
 }
 
-/* members: [{userId, role, displayName, email}] · invites: [{id, email, role}] */
+/* members: [{userId, role, displayName, email}] · invites: [{id, email, role, lastSentAt?, declinedAt?}] */
 export function groupRoster(members, invites, myUid) {
   const rows = (members || []).map((m) => ({
     kind: "member", id: m.userId, role: m.role === "admin" ? "admin" : "member",
@@ -21,6 +21,9 @@ export function groupRoster(members, invites, myUid) {
   const invited = (invites || []).map((iv) => ({
     kind: "invite", id: iv.id, role: iv.role === "admin" ? "admin" : "member", email: iv.email, name: iv.email,
     lastSentAt: iv.lastSentAt || null,
+    // NEW-1 (invite inbox): set once the invitee declined. The row stays in "Invited" so the inviter
+    // SEES the answer instead of the invite silently vanishing; they can remove it or invite again.
+    declinedAt: iv.declinedAt || null,
   }));
   const sections = [
     { id: "admins", label: "Admins", rows: rows.filter((r) => r.role === "admin") },
@@ -48,4 +51,30 @@ export function resendCooldownMs(lastSent, now = Date.now()) {
   const t = typeof lastSent === "number" ? lastSent : Date.parse(lastSent || "");
   if (!Number.isFinite(t)) return 0;
   return Math.max(0, t + RESEND_WINDOW_MS - now);
+}
+
+/* NEW-4 (2026-10-29) — the roster for the SELECTED team, and only that team. A roster is two requests
+ * (members, invites); click team A then team B quickly and A's answers could land after B's and stay on
+ * screen under B's name and admin controls — where Remove / Change role then sent B's team id with A's
+ * user id. Every load takes a ticket; a result is applied only if it is still the newest ticket AND its
+ * team is still the selected one, and members + invites are applied TOGETHER (never one team's members
+ * beside another's invites). A failure is reported, never swallowed into a stale list.
+ * `fetchMembers/fetchInvites(teamId)`, `getSelected()` and the two callbacks are injected. */
+export function createRosterLoader({ fetchMembers, fetchInvites, getSelected, onApply, onError }) {
+  let ticket = 0;
+  return {
+    /** Forget any in-flight load (the selection changed or the panel closed). */
+    cancel() { ticket += 1; },
+    async load(teamId) {
+      const mine = ++ticket;
+      if (!teamId) { onApply(teamId, [], []); return; }
+      try {
+        const [members, invites] = await Promise.all([fetchMembers(teamId), fetchInvites(teamId)]);
+        if (mine !== ticket || getSelected() !== teamId) return; // superseded, or another team is showing now
+        onApply(teamId, members || [], invites || []);
+      } catch (e) {
+        if (mine === ticket && getSelected() === teamId && onError) onError(e);
+      }
+    },
+  };
 }

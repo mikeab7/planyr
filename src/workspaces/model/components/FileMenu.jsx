@@ -37,11 +37,12 @@ const chromeBtnStyle = {
 // click the SAME hidden `<input type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
 // rows already click — so a palette-driven import opens the identical OS file picker through the
 // identical DOM node, never a second import trigger.
-const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }, ref) {
+const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile, onOpenFile, univerSwitch }, ref) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const xlsxInputRef = useRef(null);
   const csvInputRef = useRef(null);
+  const openInputRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     openImportXlsx: () => xlsxInputRef.current?.click(),
@@ -54,6 +55,11 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
     e.target.value = ""; // so re-choosing the SAME file still fires a change event next time
     if (file) onImportXlsxFile(file);
   };
+  const onOpenFileChosen = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file && onOpenFile) onOpenFile(file);
+  };
   const onCsvFileChosen = (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
@@ -64,7 +70,7 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8 }}>
       <button
         type="button" ref={anchorRef} data-testid="model-file-menu-btn" title="Export or import this workbook"
-        aria-haspopup="true" disabled={busy} onClick={() => setOpen((o) => !o)}
+        aria-haspopup="true" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={() => setOpen((o) => !o)}
         style={{ ...chromeBtnStyle, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
       >
         <IconFile /><span>File</span><span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
@@ -100,6 +106,14 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
       )}
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={260}>
         <div>
+          {onOpenFile && (
+            <>
+              <MenuItem data-testid="model-open-file" title="Saves the file in your Library, then opens it here to edit — your original stays untouched" onClick={() => { setOpen(false); openInputRef.current?.click(); }}>
+                Open Excel or CSV file…
+              </MenuItem>
+              <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
+            </>
+          )}
           <MenuItem data-testid="model-export-xlsx" onClick={() => pick(onExportXlsx)}>Download as Excel (.xlsx)</MenuItem>
           <MenuItem data-testid="model-export-csv" onClick={() => pick(onExportCsv)}>Download active sheet as CSV</MenuItem>
           <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
@@ -109,8 +123,19 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
           <MenuItem data-testid="model-import-csv" title="Adds a new sheet — your other sheets are untouched" onClick={() => { setOpen(false); csvInputRef.current?.click(); }}>
             Import CSV (new sheet)…
           </MenuItem>
+          {univerSwitch && (
+            // The owner's safety hatch — rendered ONLY for a confirmed is_admin() user (ModelApp passes null otherwise); every other
+            // account sees the menu above and has no way to the regular grid. Per device. See lib/gridChoice.js.
+            <>
+              <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
+              <MenuItem data-testid="model-univer-switch" title={univerSwitch.regular ? "Back to the new grid on this device. Your workbook is saved the same way." : "Owner-only fallback: show the old grid on this device. Your workbook is saved the same way."} onClick={() => { setOpen(false); univerSwitch.setRegular(!univerSwitch.regular); }}>
+                {univerSwitch.regular ? "Use the new grid" : "Use the regular grid"}
+              </MenuItem>
+            </>
+          )}
         </div>
       </AnchoredMenu>
+      <input ref={openInputRef} type="file" accept=".xlsx,.xlsm,.xls,.csv" onChange={onOpenFileChosen} style={{ display: "none" }} data-testid="model-open-file-input" />
       <input ref={xlsxInputRef} type="file" accept=".xlsx" onChange={onXlsxFileChosen} style={{ display: "none" }} data-testid="model-import-xlsx-input" />
       <input ref={csvInputRef} type="file" accept=".csv" onChange={onCsvFileChosen} style={{ display: "none" }} data-testid="model-import-csv-input" />
     </span>

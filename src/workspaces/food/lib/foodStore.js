@@ -67,12 +67,6 @@ export function reportBrowseError(error, now = Date.now()) {
   } catch (_) { return Promise.resolve(false); }
 }
 
-export async function fetchPlaceById(id) {
-  if (!supabase || !id) return { data: null, error: null };
-  const { data, error } = await supabase.from("food_places").select("*").eq("id", id).maybeSingle();
-  return { data, error };
-}
-
 /** Search the WHOLE 100,000+-place, three-metro snapshot by name — deliberately NOT scoped to
  *  the current viewport (owner, 2026-08-18: "the entire point of search is finding a place you
  *  cannot see"). Backed by `food_places_search_by_name` (db/food.sql): a trigram word-similarity
@@ -90,15 +84,88 @@ export async function fetchPlaceById(id) {
  *  closer (see the RPC's `order by sim desc, distance_km asc` — distance is the TIEBREAK). */
 const SEARCH_RESULT_CAP = 60; // a pool well past the ~10 shown: the client re-ranks it nearest-the-map-first (lib/searchProximity.js), so the nearby comparable matches must be IN it
 
+/** Name rows first (their order is the RPC's relevance order), then any address-only rows not
+ *  already present. Pure — the id is the dedupe key, so a place found both ways is listed once. */
+export function mergeNameAndAddressRows(nameRows, addressRows) {
+  const seen = new Set((nameRows || []).map((r) => r.id));
+  const extra = (addressRows || []).filter((r) => r && !seen.has(r.id) && (seen.add(r.id), true));
+  return [...(nameRows || []), ...extra];
+}
+
+let _lastAddressReport = { msg: "", at: 0 };
+/** The address half failing must not hide the name results — but it must not be silent either
+ *  (LOUD-FAILURE): record it to client_errors through this module's own client, at most once a
+ *  minute per message, exactly like reportBrowseError. */
+export function reportAddressSearchError(error, now = Date.now()) {
+  try {
+    const message = `food_places_search_by_address: ${(error && (error.message || error.code)) || "unknown error"}`;
+    if (message === _lastAddressReport.msg && now - _lastAddressReport.at < 60000) return Promise.resolve(false);
+    _lastAddressReport = { msg: message, at: now };
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:address-search-rpc", message: message.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
+let _lastSidewaysReport = 0;
+/** NEW-3 (2026-10-11): the visit sheet's own content box was ever pushed sideways (scrollLeft != 0). The sheet puts it
+ *  straight back, and this records that it happened — once a minute at most — so a recurrence on his phone leaves a row
+ *  (the cause could not be reproduced in the sandbox: no Apple WebKit). Same client + table as reportBrowseError. */
+export function reportSheetSideways(detail, now = Date.now()) {
+  try {
+    if (now - _lastSidewaysReport < 60000) return Promise.resolve(false);
+    _lastSidewaysReport = now;
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:sheet-sideways", message: `visit sheet pushed sideways: ${JSON.stringify(detail || {})}`.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
+let _lastStuckReport = 0;
+/** NEW-1 (B2243588 ×2): a drag the person clearly made on the visit sheet that the sheet did not follow. Same client/table/throttle as
+ *  reportSheetSideways — a recurrence on his phone leaves a row (source `food:sheet-stuck`) instead of an unreproducible report. */
+export function reportSheetStuck(detail, now = Date.now()) {
+  try {
+    if (now - _lastStuckReport < 60000) return Promise.resolve(false);
+    _lastStuckReport = now;
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:sheet-stuck", message: `visit sheet did not follow a drag: ${JSON.stringify(detail || {})}`.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
 export async function searchPlacesByName(query, center, signal) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
-  let call = supabase.rpc("food_places_search_by_name", {
+  const args = {
     p_query: query.trim(), p_cap: SEARCH_RESULT_CAP,
     p_center_lat: center?.lat ?? null, p_center_lon: center?.lon ?? null,
-  });
-  if (signal) call = call.abortSignal(signal); // NEW-1: a newer keystroke cancels this request (lib/searchSession.js)
-  const { data, error } = await call;
-  return { data: data || [], error };
+  };
+  let nameCall = supabase.rpc("food_places_search_by_name", args);
+  // B2051665: the name search only ever matches a restaurant's NAME, so a typed city or street
+  // address found nothing. `food_places_search_by_address` (db/food.sql) matches every typed word
+  // against the address; it runs in parallel and its rows are merged in (cap 30: enough to hold
+  // the nearest matches without drowning the name results).
+  let addrCall = supabase.rpc("food_places_search_by_address", { ...args, p_cap: 30 });
+  if (signal) { nameCall = nameCall.abortSignal(signal); addrCall = addrCall.abortSignal(signal); } // NEW-1: a newer keystroke cancels these (lib/searchSession.js)
+  const [nameRes, addrRes] = await Promise.all([nameCall, addrCall]);
+  if (addrRes.error && !(signal && signal.aborted)) reportAddressSearchError(addrRes.error);
+  const data = mergeNameAndAddressRows(nameRes.data || [], addrRes.error ? [] : (addrRes.data || []));
+  return { data, error: nameRes.error };
 }
 
 /** Batch name/location lookup for a set of place ids — used to label the visit LIST, which
@@ -351,6 +418,15 @@ export async function insertDish(dish) {
   return { data, error };
 }
 
+/** One edit applied to every rating row of a dish (a rename must reach the dish's whole history, or the old rows would split off as
+ *  a second dish). `ids` are the rows of ONE dish at ONE place; same stripping as updateDish. */
+export async function updateDishes(ids, patch) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { place_id: _p, visit_id: _v, ...rest } = patch;
+  const { data, error } = await supabase.from("food_dishes").update(rest).in("id", ids).select();
+  return { data, error };
+}
+
 export async function updateDish(id, patch) {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
   const { place_id: _ignoredPlace, visit_id: _ignoredVisit, ...rest } = patch; // both DB-derived/fixed — never re-sent
@@ -362,6 +438,37 @@ export async function deleteDish(id) {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const { error } = await supabase.from("food_dishes").delete().eq("id", id);
   return { error };
+}
+
+/** ── Restaurant prefs: the PRICE LEVEL (NEW-1, 2026-10-20) ─────────────────────────────────────────
+ *  food_place_prefs (db/food_place_prefs.sql): one row per (user, place-or-manual-pin) carrying the owner's
+ *  OpenTable-style price level 1–4 (null = unset). Fetched in full like the wishlist; written with an upsert on
+ *  the restaurant's identity so the first tap creates the row and every later tap edits it in place. */
+export async function fetchAllPlacePrefs() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_place_prefs").select("*");
+  return { data: data || [], error };
+}
+
+/** `identity` is { place_id } or { custom_name, custom_lat, custom_lon }; `patch` today is { price_level }.
+ *  ⛔ NOT an `.upsert()`: the table's uniqueness is two PARTIAL unique indexes (`where place_id is not null` / `is null`, the
+ *  manual one over rounded expressions), and `ON CONFLICT (cols)` cannot name a partial index's predicate through PostgREST —
+ *  measured live 2026-10-20 (V1795840 first run): the $$ tap looked saved, the insert was refused, nothing persisted. So: find
+ *  the restaurant's row, UPDATE it by id, else INSERT. A duplicate slipping past the lookup is still refused by the index (loud). */
+export async function upsertPlacePref(identity, patch) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { uid, error: authErr } = await signedInUserId("Sign in to set a price level");
+  if (authErr) return { data: null, error: authErr };
+  let find = supabase.from("food_place_prefs").select("id").eq("user_id", uid);
+  find = identity.place_id
+    ? find.eq("place_id", identity.place_id)
+    : find.is("place_id", null).eq("custom_name", identity.custom_name).eq("custom_lat", identity.custom_lat).eq("custom_lon", identity.custom_lon);
+  const { data: existing, error: findErr } = await find.limit(1).maybeSingle();
+  if (findErr) return { data: null, error: findErr };
+  const { data, error } = existing
+    ? await supabase.from("food_place_prefs").update(patch).eq("id", existing.id).select().maybeSingle()
+    : await supabase.from("food_place_prefs").insert({ ...identity, ...patch, user_id: uid }).select().maybeSingle();
+  return { data, error };
 }
 
 /** ── Named restaurant lists (NEW-1 / B2088288) ───────────────────────────────────────────

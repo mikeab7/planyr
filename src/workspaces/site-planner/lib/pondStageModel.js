@@ -37,6 +37,8 @@ import { polyArea } from "./polygonSplit.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { volumeBetween } from "./pondGeom.js";
 import { identityCache } from "./pureCache.js";
+import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+export { CF_PER_ACFT, SQFT_PER_ACRE };
 
 const EPS = 1e-6;
 
@@ -72,8 +74,6 @@ const elevMemo = identityCache(8);
 const modelMemo = identityCache(8);
 
 const detKey = (det = {}) => `${det.depth}|${det.freeboard}|${det.slope}|${det.tobElev}`;
-export const CF_PER_ACFT = 43560;
-export const SQFT_PER_ACRE = 43560;
 
 const detOf = (det = {}) => ({
   depth: det.depth != null ? det.depth : 8,

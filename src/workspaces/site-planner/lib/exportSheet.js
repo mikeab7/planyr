@@ -28,11 +28,12 @@ import L from "leaflet";
 import { visibleEls, visibleParcels } from "./contentVisibility.js";
 import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
+import { aerialWantedOnSheet } from "./aerialVisibility.js";
 import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -43,13 +44,16 @@ import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
-import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity } from "./exportStyle.js";
+import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity, overlayLabelFontSize, overlayLabelHalo } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
-import { buildOverlayVectorFragment, esriPrintFeatures, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
-import { labelAnchors, placeLabels } from "./boundaryLabels.js";
-import { VECTOR_SOURCES, styleFor, isCountyLinesId } from "./vectorLayers.js";
+import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
+import { labelAnchors, placeLabels, declutterBoxes } from "./boundaryLabels.js";
+import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
+import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
+import { siteState } from "./siteRegion.js";
 import { gisCache } from "./gisCache.js";
 import { gridRequest } from "./demGrid.js";
 
@@ -81,6 +85,7 @@ export function createExportSheet(ctx) {
     svgRef, stateRef, overlayRefs, geoMapRef,
     // --- map + layer state ------------------------------------------------------
     basemapOn, basemapSrc, overlays, layerStatus,
+    showAerial = true, // B2589680 — the PLAN-LEVEL aerial toggle (map View ▾ / Overlays): the sheet carries the aerial exactly when the map shows it
     // --- presentation -----------------------------------------------------------
     PAL, f0,
     // --- sheet content (built in SitePlanner so screen + sheet share one source) --
@@ -208,6 +213,12 @@ export function createExportSheet(ctx) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
+    /* NEW-1 — PARCELS IN FRONT is a SCREEN state (mapStack.parcelsOnTop): with the Parcels tool open the plan's own parcel +
+       setback group is rendered after the annotations. The sheet shows the NORMAL order, so the group goes back into the slot
+       the canvas left for it (PDF-PARITY: printing with the tool open prints what printing without it prints). */
+    const topTier = clone.querySelector(`[${PARCEL_TIER_ATTR}="top"]`);
+    const tierSlot = clone.querySelector(`[${PARCEL_TIER_SLOT_ATTR}]`);
+    if (topTier && tierSlot) { topTier.removeAttribute(PARCEL_TIER_ATTR); tierSlot.replaceWith(topTier); }
     /* NEW-1 — THE MEASUREMENT VALUE INVARIANT, asserted here rather than left to review: a
        measurement must never print its geometry without its value. The `withFullRender` pass above
        lifts every zoom gate off measurement labels precisely so this can't happen, but the label
@@ -251,8 +262,8 @@ export function createExportSheet(ctx) {
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     root.insertBefore(bg, root.firstChild);
-    // Always include the aerial (even if it's hidden on screen), placed beneath everything
-    // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
+    // Include the aerial exactly when the map is showing it (B2589680 — it used to be "always, even if hidden on screen"),
+    // placed beneath everything but the paper. Two sources (B735): when the LIVE
     // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
     // (it's a sibling of the exported <svg>, tagged data-export="skip"), so the caller passes
     // `exportAerial` — a frame-exact snapshot synthesized from the SAME source's `export`
@@ -266,7 +277,9 @@ export function createExportSheet(ctx) {
     // draw that underlay UNDERNEATH the live aerial. If the live fetch is dropped, the underlay
     // still shows real imagery instead of white; if it succeeds it fully covers the underlay.
     const aerials = [];
-    if (exportAerial) {
+    if (!aerialWantedOnSheet(showAerial)) {
+      // B2589680 — the map is NOT showing the aerial, so neither does the sheet (the exhibit follows the map; there is no print-only switch)
+    } else if (exportAerial) {
       if (underlay && typeof underlay.src === "string" && underlay.src.startsWith("data:")) aerials.push({ a: underlay, tag: false }); // reliable fallback, bottom
       aerials.push({ a: exportAerial, tag: true }); // live view, on top (the LOUD-FAILURE marker)
     } else if (underlay) {
@@ -483,6 +496,10 @@ export function createExportSheet(ctx) {
         // dark aerial — drawn on screen, invisible on paper.
         if (typeof node.closest === "function" && node.closest("[data-export-vector]")) {
           const tag = node.tagName && node.tagName.toLowerCase();
+          if (tag === "text") { // B2589346: layer labels print at a physical size (7 pt + halo), never "11 clone units" (a zone code once printed a fifth of the sheet tall on a tight frame)
+            node.setAttribute("font-size", r6(overlayLabelFontSize(sheetScale)));
+            node.setAttribute("stroke-width", r6(overlayLabelHalo(sheetScale)));
+          }
           if (tag === "path" || tag === "circle") {
             const authored = parseFloat(node.getAttribute("stroke-width"));
             const isCase = node.hasAttribute("data-vcase");
@@ -759,7 +776,7 @@ export function createExportSheet(ctx) {
   // silent white sheet — LOUD-FAILURE). Returns null when there's no live basemap to capture (then
   // buildExportSvg falls back to any dropped/from-map underlay). Async (B839 tile fetches).
   const exportAerialForFrame = async (frame) => {
-    if (!origin || !basemapOn) return null;
+    if (!origin || !basemapOn || !aerialWantedOnSheet(showAerial)) return null; // B2589680 — no fetch/stitch for an aerial the map is not showing
     const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
     // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
     // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
@@ -854,14 +871,27 @@ export function createExportSheet(ctx) {
     const kind = cfg.kind;
     if (kind === "esriFeature") { // every esriFeature row: lines + points + polygons (B2081252)
       if (typeof ref.eachFeature !== "function") return { features: [] };
-      const features = [];
+      const features = [], labels = [];
       ref.eachFeature((l) => {
         const gj = l && l.feature;
         if (!gj || !gj.geometry) return;
         // B2081252 — lines, POINTS and POLYGONS, same symbology as the screen (the pure rule lives in overlayVectorSvg).
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
+        // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
+        // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
+        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          const bb = l.getBounds && l.getBounds();
+          const rank = bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0;
+          for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text, rank }); }
+        }
       });
-      return { features };
+      /* B2589346 — a row that declutters on screen (`lineLabel.declutter`: DeSoto zoning, whose polygons are small and dense) declutters the SAME way on the sheet (PDF-PARITY): the larger polygon keeps its code, a label that
+       * would sit on top of one already kept is dropped — never a pile of overlapping codes in the PDF. Box = the on-screen label's footprint (text width ≈ 7 px a character + padding, 14 px tall) in the same map pixels. */
+      if (cfg.lineLabel && cfg.lineLabel.declutter && labels.length > 1) {
+        const keep = new Set(declutterBoxes(labels.map((lb) => ({ x: lb.x, y: lb.y, w: String(lb.text).length * 7 + 8, h: 14, rank: lb.rank || 0 }))));
+        return { features, labels: labels.filter((_lb, i) => keep.has(i)).map(({ rank: _r, ...rest }) => rest) };
+      }
+      return { features, labels: labels.map(({ rank: _r, ...rest }) => rest) };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
       if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it
@@ -900,12 +930,25 @@ export function createExportSheet(ctx) {
       let fc = geo ? geo.toGeoJSON() : null;
       if ((!fc || !fc.features) && typeof ref.eachFeature === "function") { const fs = []; ref.eachFeature((l) => l.feature && fs.push(l.feature)); fc = { type: "FeatureCollection", features: fs }; }
       if (!fc || !fc.features || !fc.features.length) return { features: [] };
-      const style = { stroke: cfg.color || "#374151", strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+      // B2507065 (NEW-10) — PDF-PARITY with the screen: counties a heavier dashed grey line, city limits a bolder outline + light tint, county names along the line.
+      const style = isCountyLinesId(id)
+        ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
+        : isCityLimitsId(id)
+          ? { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || BOUNDARY_FALLBACK_INK, fillOpacity: CITY_TINT_OPACITY }
+          : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
       const features = [];
       for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
       let labels = [];
       const src = VECTOR_SOURCES[id];
-      if (src && src.labelField) {
+      if (src && isCountyLinesId(id) && src.labelField) {
+        const home = siteState({ lat: origin.lat, lng: origin.lon });
+        const placedC = countyLineLabels(fc.features, {
+          textOf: (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home),
+          project: (lng, lat) => projLLtoPx([lng, lat]),
+          viewW: size.w, viewH: size.h,
+        });
+        labels = placedC.map((p) => ({ x: p.x, y: p.y, text: p.text, angle: p.angle }));
+      } else if (src && src.labelField) {
         const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
         const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
         const tmpl = src.nameTemplate || "{name}";
@@ -1096,7 +1139,7 @@ export function createExportSheet(ctx) {
    * `scaleLabel`/`preparedBy` are plain strings for the title block (empty → that row omits
    * whichever half is blank); the caller (SitePlanner) computes the scale text via printScale.js.
    *
-   * NEW-2 — `includeMetricsBand` is the print menu's "Stats band" toggle (default true, so an
+   * NEW-2 — `includeMetricsBand` is the print menu's "Site summary strip" toggle (default true, so an
    * existing sheet renders unchanged unless the owner turns it off). Off: `printSheetLayout`
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
@@ -1129,14 +1172,19 @@ export function createExportSheet(ctx) {
     /* NEW-1 (2026-10-05) — EDITABLE MARKUPS. With `annotate` (the PDF's "Flatten markups" toggle OFF) the
        annotation-class nodes are lifted OUT of the clone — AFTER the print restyle above, so their stroke
        weights and label sizes are exactly what the flattened sheet would have drawn — and written into
-       the PDF as native annotations by exportPDF. Everything else (aerial, GIS, parcels, buildings,
-       furniture) stays page content. The preview never passes `annotate`, so it still shows the markups. */
+       the PDF as native annotations by exportPDF. Since 2026-10-20 (B2384528, owner constraint #28) that is EVERY drawn
+       object — site elements included; the aerial, GIS, parcels, references and furniture stay page content. The preview
+       never passes `annotate`, so it still shows everything. */
     let annotationSet = null;
+    let annotationPins = [];
+    let annotationsKeptInPage = 0; // NEW-1 — annotations stacked behind page content stay in the picture (see annotationExtract)
     if (annotate) {
-      const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
+      const [{ extractMarkupAnnotations, domToTree }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
-      const { descriptors, patterns } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, f2p, measureText });
+      const { descriptors, patterns, flattened, pinned, notes } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, els, f2p, measureText });
+      annotationsKeptInPage = flattened.length;
+      annotationPins = pinned;
       // clone user units → PDF points: the nested <svg> is fitted "meet" into the plan box, then the page
       // unit (page.w units across wIn inches) converts to points; PDF y runs up, so it flips.
       const [vx, vy, vw, vh] = built.clone.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
@@ -1145,7 +1193,34 @@ export function createExportSheet(ctx) {
       const pu = (layout.page.wIn * 72) / layout.page.w, pageHpt = layout.page.hIn * 72, k = sFit * pu;
       const M0 = [k, 0, 0, -k, (ox - vx * sFit) * pu, pageHpt - (oy - vy * sFit) * pu];
       const frame = [ox * pu, pageHpt - (oy + vh * sFit) * pu, (ox + vw * sFit) * pu, pageHpt - oy * pu];
-      annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString() });
+      // feet per PDF point on this sheet (clone units per foot from f2p, then the page fit) — the scale every native
+      // measurement carries, so a viewer that recomputes a measured value gets Planyr's number (NEW-2, 2026-10-20)
+      const a0 = f2p({ x: 0, y: 0 }), a1 = f2p({ x: 1, y: 0 });
+      const unitsPerFt = Math.hypot(a1.x - a0.x, a1.y - a0.y);
+      const ftPerPt = unitsPerFt > 0 && k > 0 ? 1 / (unitsPerFt * k) : null;
+      /* NEW-1 (2026-10-27) — SHEET FURNITURE ON TOP OF THE SITE, AND REMOVABLE: the Buildings table, the scale bar and the north
+         arrow. Page content paints UNDER every annotation, so a plate left in the page picture is painted over by whatever site
+         element's annotation overlaps it (the owner's Buildings table lost "Building" off its third row — "it's printing
+         under"). Each plate becomes its own Stamp, appended LAST so it paints above every site annotation — the stacking the
+         flattened sheet and the screen already have — and Bluebeam can select, move or delete it. They stay where the corner
+         picker put them (the table top-right on the owner's plan, as on screen). */
+      const furnLift = [];
+      for (const fel of Array.from(built.clone.querySelectorAll("[data-furniture-kind]"))) {
+        const kind = fel.getAttribute("data-furniture-kind");
+        descriptors.push({ family: "sheet-furniture", id: kind, kind, tree: domToTree(fel, { measureText, root: built.clone }), meta: { subject: kind === "scale-bar" ? "Scale bar" : kind === "north-arrow" ? "North arrow" : "Buildings table" } });
+        furnLift.push({ el: fel, kind });
+      }
+      annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString(), ftPerPt });
+      // LOUD-FAILURE: a plate leaves the page ONLY once its annotation exists — never a table or scale bar in neither place
+      const haveAnnot = (id) => annotationSet.annots.some((a) => a.family === "sheet-furniture" && a.id === id);
+      for (const { el, kind } of furnLift) {
+        if (haveAnnot(kind)) el.remove();
+        else annotationSet.degraded.push(`${kind === "scale-bar" ? "scale bar" : kind === "north-arrow" ? "north arrow" : "Buildings table"} stays in the page (it could not be written as its own annotation)`);
+      }
+      // LOUD-FAILURE: every object kept in the page, and why, rides the same warning list as any other simplification
+      const WHY = { "under-reference": "a reference drawing shown above the plan covers it", "under-pinned": "it sits under something that is printed into the page", "under-page": "page content drawn after it covers it", straddle: "it and another object each sit partly on top of the other" };
+      for (const pin of pinned) annotationSet.degraded.push(`${pin.name} is printed into the page, not editable: ${WHY[pin.why] || pin.why}${pin.by ? ` (${pin.by})` : ""}`);
+      for (const n of notes) annotationSet.degraded.push(n);
     }
     const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
     plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
@@ -1164,7 +1239,7 @@ export function createExportSheet(ctx) {
         : "Concept site plan — planning-level estimates, not a survey.",
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
     });
-    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet };
+    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage, annotationPins };
   };
 
   // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
@@ -1178,7 +1253,7 @@ export function createExportSheet(ctx) {
     try {
       const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
-      const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet } = composed;
+      const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage = 0 } = composed;
       mark("composed sheet");
       // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
       // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
@@ -1199,12 +1274,18 @@ export function createExportSheet(ctx) {
         releaseCanvas(canvas); // NEW-5 — a full-page sheet at print DPI; released once encoded
         const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
         const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
-        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [] });
+        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [], viewport: annotationSet ? annotationSet.viewport : null });
         // LOUD-FAILURE: a markup that could not become a fully native annotation is still in the file (as a
         // look-alike) — but say so, never let it pass as a clean editable export.
-        if (annotationSet && annotationSet.degraded.length) {
-          try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
-          flashWarn(`⚠ ${annotationSet.degraded.length} markup detail${annotationSet.degraded.length === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
+        const simplified = annotationSet ? annotationSet.degraded.length - annotationsKeptInPage : 0; // pins are said below
+        if (annotationSet && annotationSet.degraded.length) try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
+        if (simplified > 0) {
+          flashWarn(`⚠ ${simplified} detail${simplified === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
+        }
+        // NEW-1 — LOUD-FAILURE: an object page content must paint over can't be a PDF annotation (those always paint over
+        // the page), so it was printed into the picture in its true place. Say so instead of leaving it looking editable.
+        if (annotationsKeptInPage > 0) {
+          flashWarn(`⚠ ${annotationsKeptInPage} item${annotationsKeptInPage === 1 ? " was" : "s were"} printed into the page to keep the stacking order — usually because a reference drawing shown above the plan covers ${annotationsKeptInPage === 1 ? "it" : "them"} (not editable in Bluebeam).`, 9000);
         }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));

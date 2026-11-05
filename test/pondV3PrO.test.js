@@ -8,8 +8,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { assessBuildability } from "../src/workspaces/site-planner/lib/buildableEnvelope.js";
 import { bindingBermCap, bermNeedsInlets, drainageBermCapFt } from "../src/workspaces/site-planner/lib/inwardBerm.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("O2 — the design evaluator and the optimizer agree on the berm/gravity-inflow rule", () => {
   // one geometry: grade 100, drainage cap at +2.5 ft (rim 102.5), a design that berms to rim 106.

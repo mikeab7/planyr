@@ -57,7 +57,8 @@ export async function extractPlansInBrowser({ keepNames = false, download = true
   const stores = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k === "planarfit:sites:v1" || (k && k.startsWith("planarfit:sites:cloud:"))) stores.push(k);
+    // B2165120: a store is `<base>` (the legacy whole-library entry, now only a mirror) beside `<base>:p:<id>` entries, `<base>:idx`, `<base>:led` — list the BASES only
+    if (k === "planarfit:sites:v1" || (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length)))) stores.push(k);
   }
 
   /* Raster byte lengths, measured from IndexedDB rather than guessed. The VALUES are read to take
@@ -102,6 +103,11 @@ export async function extractPlansInBrowser({ keepNames = false, download = true
   for (const storeKey of stores) {
     let sites;
     try { sites = JSON.parse(localStorage.getItem(storeKey) || "{}"); } catch (e) { continue; }
+    /* B2165120: the per-plan entries are the truth; the whole-library entry above can lag behind them (it is refreshed on a quiet period / tab hide). */
+    for (let j = 0; j < localStorage.length; j++) {
+      const pk = localStorage.key(j);
+      if (pk && pk.startsWith(storeKey + ":p:")) { try { sites[pk.slice((storeKey + ":p:").length)] = JSON.parse(localStorage.getItem(pk)); } catch (e) { /* an unreadable entry is skipped, never deleted */ } }
+    }
     for (const [id, plan] of Object.entries(sites)) {
       if (!plan || typeof plan !== "object") continue;
       const stripped = [];

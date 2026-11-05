@@ -19,8 +19,9 @@ import {
 } from "../src/workspaces/site-planner/lib/measureSheet.js";
 import { measureLabelVisible, measureLabelThreshold } from "../src/workspaces/site-planner/lib/measureStyle.js";
 import { DIM_CALLOUT_MIN_PPF } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SP = fs.readFileSync(path.join(process.cwd(), "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 const EXPORT_SHEET = fs.readFileSync(path.join(process.cwd(), "src/workspaces/site-planner/lib/exportSheet.js"), "utf8");
 
 /* ---------------------------------------------------------------- (a) the value is never gated off
@@ -252,12 +253,21 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
   it("NEW-6 — the centroid NAME labels still ride labelK, on top of the zoom ramp", () => {
     for (const base of ["EASE_LABEL_BASE_PX", "ENCUMBER_LABEL_BASE_PX", "TRACED_LABEL_BASE_PX"]) {
       expect(SP, `${base} must be declared`).toMatch(new RegExp(`const ${base} = [\\d.]+;`));
-      // …and its rendered size must be the ramp TIMES labelK — never one without the other.
+    }
+    // encumbrance + traced render through the ramp TIMES labelK — never one without the other.
+    for (const base of ["ENCUMBER_LABEL_BASE_PX", "TRACED_LABEL_BASE_PX"]) {
       expect(SP, `${base} must render through featureNameFontPx(...) * labelK`)
         .toMatch(new RegExp(`fontSize=\\{featureNameFontPx\\(labelPpf, ${base}\\) \\* labelK\\}`));
     }
-    // and every one of them is gated by the fit rule, not merely resized
-    expect((SP.match(/featureNameLabelVisible\(/g) || []).length).toBeGreaterThanOrEqual(3);
+    // B2198432 — the EASEMENT label moved into lib/easementLabelPlacement.js (rotated along the strip):
+    // the ramp + fit rule live there, and the render scales the whole label group by labelK.
+    expect(SP).toMatch(/resolveEasementLabel\(m, txt, \{ labelPpf, basePx: EASE_LABEL_BASE_PX/);
+    expect(SP).toMatch(/rotate\(\$\{pl\.angle\}\) scale\(\$\{labelK\}\)/);
+    const PL = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/easementLabelPlacement.js", import.meta.url), "utf8");
+    expect(PL).toMatch(/featureNameFontPx\(labelPpf, basePx\)/);
+    expect(PL).toMatch(/featureNameLabelVisible\(/);
+    // and every name label is gated by the fit rule, not merely resized
+    expect((SP.match(/featureNameLabelVisible\(/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
   it("in-progress tool drafts never reach a sheet (constant px, and not document content)", () => {

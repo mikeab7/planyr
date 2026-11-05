@@ -1,3 +1,5 @@
+// FIRST, before anything can touch the URL: what an e-mail link (reset / confirm) just said — see shared/auth/authReturn.js.
+import "./shared/auth/authReturn.js";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Shell from "./app/Shell.jsx";
@@ -8,6 +10,8 @@ import { isEnrolled } from "./shared/telemetry/perfSampling.js";
 import { perfRecorderEnabled } from "./shared/telemetry/perfRecorderHandle.js";
 import { retireGisSw } from "./workspaces/site-planner/lib/registerGisSw.js";
 import { installPhoneTyping } from "./shared/ui/phoneTyping.js";
+import { installFileDragGuard } from "./shared/files/fileDrag.js";
+import { installSitesRawView } from "./shared/storage/sitesRawView.js";
 import "./index.css";
 
 // Self-report runtime errors (B279): global error / unhandledrejection / preloadError
@@ -15,6 +19,13 @@ import "./index.css";
 // Installed first (before the chunk guard and render) so it can catch the earliest boot
 // errors too. Fail-safe — never throws into the app.
 installClientErrorTelemetry();
+
+// Automation only (B2200384): `window.__planyrSitesRaw(key)` = the plan library as the old whole-library entry would read, built from the per-plan entries.
+installSitesRawView(window);
+
+// A dropped file must never be opened/downloaded by the browser anywhere in the app, and a
+// drag-hover overlay must never outlive its drag (NEW-1/NEW-2) — one window-level tracker.
+installFileDragGuard();
 
 /* Self-report SPEED, not just crashes (NEW-4). Long tasks, INP, and a periodic sample of the
  * scene — elements drawn, layers on, panels open, edits since load, seconds since load — so the

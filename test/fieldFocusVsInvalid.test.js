@@ -23,9 +23,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const CSS = readFileSync(fileURLToPath(new URL("../src/index.css", import.meta.url)), "utf8");
-const PLANNER = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const PLANNER = plannerSource();
 
 const numInput = () => {
   const i = PLANNER.indexOf("function NumInput(");

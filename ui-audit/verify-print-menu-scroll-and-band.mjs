@@ -9,7 +9,7 @@
  * wheel notch over it used to silently zoom the hidden canvas instead of scrolling the options
  * column. Fix: `data-wheelscroll="1"` on the compose screen's root.
  *
- * NEW-2: a single "Stats band" toggle in the Content section turns off the stormwater bars +
+ * NEW-2: a single "Site summary strip" toggle in the Content section turns off the stormwater bars +
  * site-metrics line + disclaimer as one unit, defaults ON, persists on the site's settings,
  * updates the live preview immediately, and the plan reclaims the freed space (no gap, no extra
  * page). Verified here against the actual composed sheet SVG text — not a screenshot.
@@ -126,7 +126,7 @@ try {
      a control that's already visible at the TOP (the "Letter" paper-size chip) removes that
      confound and asks the real question. */
   await panelScroll.evaluate((el) => { el.scrollTop = 0; });
-  const topChip = page.getByText("Letter", { exact: true }).first();
+  const topChip = page.getByRole("button", { name: /Letter/ }).first();
   await topChip.evaluate((el) => el.focus());
   await page.waitForTimeout(50);
   const scrollTopBeforeKey = await panelScroll.evaluate((el) => el.scrollTop);
@@ -163,22 +163,22 @@ try {
   if (downloadVisible) ok.push("Download PDF stays reachable in the footer at a short window height once the panel is scrolled");
   else fail.push("Download PDF is not visible even after scrolling the panel to the bottom");
 
-  /* ================= NEW-2 — the "Stats band" toggle ===================================== */
+  /* ================= NEW-2 — the "Site summary strip" toggle ===================================== */
   const before2 = await readPreviewSvgText();
-  if (before2 == null) fail.push("no sheet preview rendered before testing the Stats band toggle");
+  if (before2 == null) fail.push("no sheet preview rendered before testing the Site summary strip toggle");
   else if (!/Site area:/.test(before2) && !/STORMWATER/.test(before2) && !/planning-level estimates/.test(before2)) {
     fail.push("the default (band ON) preview shows none of the site-metrics line / stormwater bars / disclaimer — cannot exercise the toggle meaningfully");
   } else {
     ok.push("band ON by default: the composed sheet includes the site-metrics line and/or the disclaimer (byte-identical to pre-existing behavior)");
   }
 
-  const bandToggle = page.getByText("Stats band", { exact: true }).first();
-  if (!(await bandToggle.count())) fail.push('no "Stats band" toggle found in the Content section');
+  const bandToggle = page.getByText("Site summary strip", { exact: true }).first();
+  if (!(await bandToggle.count())) fail.push('no "Site summary strip" toggle found in the Content section');
   else {
     // capture the plan's rendered height in the layout before turning the band off
     await bandToggle.click(); // turn OFF
     const afterOff = await waitPreviewChange(before2);
-    if (!afterOff) fail.push("turning the Stats band OFF never rebuilt the sheet preview");
+    if (!afterOff) fail.push("turning the Site summary strip OFF never rebuilt the sheet preview");
     else {
       const stillHasMetrics = /Site area:/.test(afterOff);
       const stillHasNote = /planning-level estimates/.test(afterOff);
@@ -207,29 +207,29 @@ try {
     await bandToggle.click();
     const afterOn = await waitPreviewChange(afterOff);
     if (afterOn && (/Site area:/.test(afterOn) || /planning-level estimates/.test(afterOn))) ok.push("re-enabling the toggle restores the band on the preview");
-    else fail.push("re-enabling the Stats band toggle did not restore the band");
+    else fail.push("re-enabling the Site summary strip toggle did not restore the band");
   }
 
   /* ---- NEW-2b. PERSISTENCE — closing and reopening the print flow keeps the choice --------- */
-  await page.getByText("Stats band", { exact: true }).first().click(); // OFF again
+  await page.getByText("Site summary strip", { exact: true }).first().click(); // OFF again
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: "✕" }).first().click(); // Cancel
   await page.waitForSelector('[data-testid="print-compose"]', { state: "detached", timeout: 10_000 });
   await openCompose();
-  const bandCheckboxState = await page.locator('[data-testid="print-compose"] label:has-text("Stats band") input[type="checkbox"]').isChecked().catch(() => null);
-  if (bandCheckboxState === false) ok.push("the Stats band choice PERSISTS across closing and reopening the print flow (still off)");
-  else fail.push(`the Stats band choice did not persist — expected unchecked, found ${bandCheckboxState}`);
+  const bandCheckboxState = await page.locator('[data-testid="print-compose"] label:has-text("Site summary strip") input[type="checkbox"]').isChecked().catch(() => null);
+  if (bandCheckboxState === false) ok.push("the Site summary strip choice PERSISTS across closing and reopening the print flow (still off)");
+  else fail.push(`the Site summary strip choice did not persist — expected unchecked, found ${bandCheckboxState}`);
   // leave it back ON so this fixture doesn't leave a surprising state for anything after it
-  await page.getByText("Stats band", { exact: true }).first().click();
+  await page.getByText("Site summary strip", { exact: true }).first().click();
 } catch (e) {
   fail.push(`print-menu scroll/band flow failed — ${String(e).split("\n")[0]}`);
 }
 
 await browser.close();
 
-console.log("NEW-1/NEW-2 — print menu wheel scroll + Stats band toggle\n");
+console.log("NEW-1/NEW-2 — print menu wheel scroll + Site summary strip toggle\n");
 for (const o of ok) console.log(`  ✓ ${o}`);
 for (const f of fail) console.log(`  ✗ ${f}`);
 console.log();
-console.log(fail.length ? "✗ FAIL" : "✓ PASS — wheel/trackpad scroll the print dialog's options column, and the Stats band toggle removes the whole band (bars + metrics + disclaimer), reclaims the space, keeps the same page, previews live, and persists.");
+console.log(fail.length ? "✗ FAIL" : "✓ PASS — wheel/trackpad scroll the print dialog's options column, and the Site summary strip toggle removes the whole band (bars + metrics + disclaimer), reclaims the space, keeps the same page, previews live, and persists.");
 process.exit(fail.length ? 1 : 0);

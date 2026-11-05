@@ -462,23 +462,60 @@ async function driveKeyReferencedElsewhere(id, driveKey) {
 // orphaned; never delete bytes another review might still need (legacy name-shared keys, B?F1).
 export const shouldDeleteBytes = ({ guardOk, sharedByOther }) => guardOk === true && !sharedByOther;
 
-/* HARD delete (was deleteReview's body): remove the bytes, the facts row, the doc_reviews row,
- * and the local mirror. Reached only via "Delete forever" in Recently-deleted, the 30-day lazy
+/* NEW-1 (data-risk 2026-10-29) — is a site_plan_overlays row still built from this review?
+ * Soft-deleted overlays count (their row still holds the FK). Fails SAFE: a failed read answers
+ * "blocked", never "clear" — destroying bytes is the unrecoverable direction. Production's FK is
+ * ON DELETE RESTRICT and refuses the row delete anyway; this asks first so an environment whose
+ * FK is CASCADE (the checked-in file said so until NEW-2) can never hard-delete a placed plan. */
+export async function overlayReferencesReview(id) {
+  try {
+    const { data, error } = await supabase.from("site_plan_overlays").select("id").eq("review_id", id).limit(1);
+    if (error) return { guardOk: false, referenced: false, error: error.message };
+    return { guardOk: true, referenced: (data || []).length > 0 };
+  } catch (e) { return { guardOk: false, referenced: false, error: String((e && e.message) || e) }; }
+}
+// Pure decision (exported for tests): the purge may proceed ONLY on a CONFIRMED not-referenced answer.
+export const mayPurgeReview = ({ guardOk, referenced }) => guardOk === true && !referenced;
+// Worded so friendlySaveError's "site_plan_overlays_review_id_fkey" arm renders the plain-English notice.
+export const OVERLAY_BLOCK_MESSAGE = 'violates foreign key constraint "site_plan_overlays_review_id_fkey" on table "site_plan_overlays"';
+
+/* HARD delete (was deleteReview's body): the doc_reviews row, then the bytes, the facts row and
+ * the local mirror. Reached only via "Delete forever" in Recently-deleted, the 30-day lazy
  * purge, or the pre-migration degrade above. RLS scopes every store to the owner (or a
- * team-admin on a shared review). Cleanup failures surface via orphaned/cleanupFailed (NEW-4). */
+ * team-admin on a shared review). Cleanup failures surface via orphaned/cleanupFailed (NEW-4).
+ *
+ * NEW-1 ORDER — PROVE-THEN-DESTROY: the row delete runs FIRST and is the proof. Bytes and facts
+ * are destroyed only after the row is really gone; a refusal (the overlay FK, RLS, network)
+ * returns ok:false with Storage, Drive and file_facts all untouched, so a review that cannot be
+ * purged stays completely intact and re-openable. (The old order removed the bytes first and
+ * then hit the FK — leaving a row and an overlay pointing at nothing, retried forever.) */
 export async function purgeReview(id) {
   if (!supabase || !id) return { ok: false };
+  const uid = await currentUid();
+  // Prefer the cloud record; if the network read misses, fall back to the local mirror so
+  // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
+  let rec = null, cloudRec = false;
+  try { rec = await loadReview(id, { includeDeleted: true }); cloudRec = !!rec; } catch (_) { rec = null; }
+  if (!rec && uid) rec = readDraft(uid, id);
+  // 1. Ask first: a placed site plan built from this document blocks the purge outright.
+  const ov = await overlayReferencesReview(id);
+  if (!mayPurgeReview(ov)) {
+    return { ok: false, removed: 0, error: ov.referenced ? OVERLAY_BLOCK_MESSAGE : `Couldn't confirm no site plan uses this document (${ov.error || "unknown"})`, blocked: true };
+  }
+  // 2. The row delete IS the proof. Scope by id only; RLS decides (own review OR team-admin on a
+  // shared one). B757 — `.select("id")` returns the rows actually removed, so a 0-row no-op is
+  // DISTINGUISHABLE from a real removal (matching the sites path, B372/B468).
+  const { data, error } = await supabase.from("doc_reviews").delete().eq("id", id).select("id");
+  const removed = Array.isArray(data) ? data.length : 0;
+  if (error) return { ok: false, removed: 0, error: error.message, blocked: true };
+  // The cloud row exists but nothing was deleted (RLS / ownership): nothing is proven, destroy nothing.
+  if (removed === 0 && cloudRec) return { ok: true, removed: 0 };
   delete reviewStored[id];
   delete reviewVersions[id]; // stop tracking a removed review's version (B314)
-  const uid = await currentUid();
   let orphaned = 0;       // # source files whose byte-cleanup didn't confirm
   let sharedKept = 0;     // # Drive files kept because another review still references the key (NEW-F1)
   let cleanupErr = false; // an unexpected throw during cleanup
   try {
-    // Prefer the cloud record; if the network read misses, fall back to the local mirror so
-    // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
-    let rec = await loadReview(id, { includeDeleted: true });
-    if (!rec && uid) rec = readDraft(uid, id);
     const srcs = (rec && rec.sources) || [];
     // Supabase Storage keys are srcId-named (unique per source) — no sharing possible there.
     const keys = srcs.map((s) => s.storageKey).filter(Boolean);
@@ -506,20 +543,10 @@ export async function purgeReview(id) {
     const { error: fErr } = await supabase.from("file_facts").delete().or(`id.eq.${id},review_id.eq.${id}`);
     if (fErr && !isMissingColumn(fErr) && !/relation|does not exist|schema cache/i.test(fErr.message || "")) factsFailed = true;
   } catch (_) { factsFailed = true; }
-  // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
-  // would block an admin from deleting a teammate's shared review, which the policy permits.
-  // B757 — `.select("id")` returns the rows actually removed, so a 0-row no-op (RLS/ownership
-  // mismatch, or an already-deleted row) is DISTINGUISHABLE from a real removal — matching the
-  // sites path (B372/B468). A bare `.delete()` reported success on both, the silent no-op this fixes.
-  const { data, error } = await supabase.from("doc_reviews").delete().eq("id", id).select("id");
-  const removed = Array.isArray(data) ? data.length : 0;
-  // B579: clear the localStorage mirror only AFTER the cloud delete succeeds. Clearing it first
-  // (the old order) meant a failed delete (network/auth) left the cloud row alive but the local
-  // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
-  // step so a failed delete leaves a fully consistent, retry-able state.
-  if (!error && uid) clearDraft(uid, id);
+  // B579: the localStorage mirror is cleared only AFTER the cloud delete succeeded (it has).
+  if (uid) clearDraft(uid, id);
   const cleanupFailed = orphaned > 0 || cleanupErr || factsFailed;
-  return { ok: !error, removed, error: error ? error.message : null, orphaned: orphaned || undefined, sharedKept: sharedKept || undefined, cleanupFailed: cleanupFailed || undefined };
+  return { ok: true, removed, error: null, orphaned: orphaned || undefined, sharedKept: sharedKept || undefined, cleanupFailed: cleanupFailed || undefined };
 }
 
 /* Lazy 30-day purge (NEW-F3): hard-purge anything that's sat in Recently-deleted past the
@@ -600,7 +627,7 @@ export async function unfileReviewsForDeletedProject(groupId) {
 // only the filing fields, and re-upserts; the work layer + sources are untouched. (The
 // stored object path doesn't move — storageKey already encodes the prior location and
 // stays valid; re-pathing the bytes is a backend-tranche nicety, not needed to re-file.)
-export async function refileReview(id, { projectId = null, project = "", discipline, item, orgScope = false } = {}) {
+export async function refileReview(id, { projectId = null, project = "", discipline, item, orgScope = false, folderId = null } = {}) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const rec = await loadReview(id);
   if (!rec) return { ok: false, error: "Review not found." };
@@ -625,6 +652,10 @@ export async function refileReview(id, { projectId = null, project = "", discipl
     : { ...rec, projectId: projectId || null, project: project || "", orgScope: false };
   if (discipline) next.discipline = discipline;
   if (item) next.item = item;
+  // The owner's explicit folder pick is stored on the record (same field a folder drop writes, B686) so the
+  // Library list honours it; a refile with NO pick clears a stale one — the new decision supersedes the old.
+  // (null, not delete: the write merges UNDER the stored record, so a deleted key would resurrect the old pick.)
+  next.folderId = folderId ? String(folderId) : null;
   return upsertReview({ ...next, updatedAt: Date.now() });
 }
 
@@ -913,6 +944,12 @@ export async function fileNewReview({ projectId = null, project = "", discipline
     sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: stored.storageKey, oversize: stored.oversize, driveKey: stored.driveKey }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
+  // B2064899 (follow-up, 2026-10-08) — the upload already wrote this review's file_facts row with BLANK
+  // item / date / revision, and the first upsert of a never-seen review id used to just RECORD its filing
+  // signature as "already mirrored" (syncFileFactsForReview's never-loaded rule), so the index kept the blanks
+  // forever (production 2026-10-06: two fresh uploads, item "zz-sweep-v191/192" on the review, "" in the index).
+  // Priming the signature with an EMPTY record makes this first save count as the filing edit it is.
+  rememberFiledSignature(id, {});
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
   return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, large: stored.large, name: fileName || "document.pdf",
     driveError: stored.driveError };

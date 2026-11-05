@@ -4,8 +4,8 @@
  *
  * HOW THIS PROVES IT. The handler lives inside the SitePlanner component, so it cannot be
  * imported. This test lifts the REAL `toggleAnalysisLayer` body out of SitePlanner.jsx and runs it
- * in a scope where every free identifier the body touches is recorded. Only the three things it is
- * ALLOWED to touch (setOverlays, ensureBasemapOn, ALL_LAYERS) are provided; ANY other identifier
+ * in a scope where every free identifier the body touches is recorded. Only the things it is
+ * ALLOWED to touch (setOverlays, ensureBasemapOn, setLayersHidden, ALL_LAYERS) are provided; ANY other identifier
  * (setView, requestFit, setFitReq, a framing helper, zoomAround…) counts as a view mutation. The
  * view held here (ppf/offX/offY) is asserted identical afterwards, in the three cases the owner
  * named. RED-PROOF: `ACTIVATE_SRC=<path to the pre-fix SitePlanner.jsx>` runs the same test on it
@@ -31,6 +31,7 @@ function run(layerId, wantOn, view) {
   const provided = {
     setOverlays: (u) => { overlays = typeof u === "function" ? u(overlays) : u; },
     ensureBasemapOn: () => { basemapCalls++; },
+    setLayersHidden: () => {},                       // NEW-1 (Imagery & Layers): ending Hide Layers is not a view change
     ALL_LAYERS: { fema: { opacity: 0.7 }, wetlands: { opacity: 0.7 } },
     layerId, wantOn,
   };

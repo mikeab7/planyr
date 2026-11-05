@@ -127,6 +127,7 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT, mintId = nu
     const prev = before.get(e.id);
     if (!prev) continue;                               // minted BY the heal (a restored wall strip)
     if (prev === e) continue;                          // untouched objects are returned by identity
+    if (e.type === "road" && Array.isArray(e.pts)) continue;   // B2498961 — a drive that FOLLOWED a re-seated field (driveFollow.js) moved with it; it is not a tear of its own
     const dx = num(e.cx) - num(prev.cx);
     const dy = num(e.cy) - num(prev.cy);
     const dist = Math.hypot(dx, dy);

@@ -70,7 +70,7 @@ export default function PanelChrome({ title, icon, subtitle, actionsRef, floatin
       style={{
         flex: "none", display: "flex", alignItems: "center", gap: 4,
         padding: "8px 8px 8px 13px", borderBottom: "1px solid var(--planner-border)",
-        userSelect: "none", cursor: onDragStart ? "grab" : "default",
+        userSelect: "none", cursor: onDragStart ? "move" : "default",
       }}>
       {icon ? <span data-panel-icon="1" style={{ flex: "none", display: "grid", placeItems: "center", width: 28, height: 28, color: "var(--text-secondary)" }}>{icon}</span> : null}
       <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>

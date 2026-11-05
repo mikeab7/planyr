@@ -59,13 +59,13 @@ const cx = box.x + box.w * 0.5, cy = box.y + box.h * 0.5;
 // so the proof is robust to which collection the markup lands in.
 const readStore = () => page.evaluate((key) => {
   try {
-    const all = JSON.parse(localStorage.getItem(key) || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
     const s = all.s1; if (!s) return { found: false, total: 0 };
     const n = (x) => (Array.isArray(x) ? x.length : 0);
     return { found: true, total: n(s.els) + n(s.markups) + n(s.measures) + n(s.callouts) };
   } catch (e) { return { found: false, total: 0, err: String(e) }; }
 }, SITES_KEY);
-const histLen = () => page.evaluate((k) => { try { return (JSON.parse(localStorage.getItem(k) || "{}").s1 || []).length; } catch (e) { return -1; } }, HIST_KEY);
+const histLen = () => page.evaluate((k) => { try { return (JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}").s1 || []).length; } catch (e) { return -1; } }, HIST_KEY);
 const domRects = () => page.evaluate(() => document.querySelectorAll("svg rect[stroke]").length);
 
 const baseline = await readStore();

@@ -174,8 +174,11 @@ describe("NEW-2 · grid convergence is computed in the site's own state-plane zo
   });
 
   it("ground outside every modelled zone returns an HONEST NULL, never 0 and never a guess", () => {
-    expect(gridConvergenceDeg(41.88, -87.63)).toBeNull();          // Chicago
-    expect(gridConvergenceDeg(34.05, -118.24)).toBeNull();         // Los Angeles
+    // (Chicago and Los Angeles were this test's examples until NEW-1 STATE-PLANE-AUDIT gave every state its zones.)
+    expect(gridConvergenceDeg(50.5, -100)).toBeNull();             // Manitoba
+    expect(gridConvergenceDeg(20.0, -140)).toBeNull();             // open Pacific
+    expect(gridConvergenceDeg(41.88, -87.63)).not.toBeNull();      // Chicago → Illinois East
+    expect(gridConvergenceDeg(34.05, -118.24)).not.toBeNull();     // Los Angeles → California zone 5
     expect(gridConvergenceDeg(NaN, -95.8)).toBeNull();
     expect(gridConvergenceDeg(29.8, undefined)).toBeNull();
     // 0 is a REAL answer (on the central meridian) and must stay distinguishable from "unknown".

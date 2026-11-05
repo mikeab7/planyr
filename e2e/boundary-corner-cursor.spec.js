@@ -28,7 +28,7 @@ const cursorAt = (page, x, y) => page.evaluate(([px, py]) => {
 }, [x, y]);
 
 const siteRecord = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const id = localStorage.getItem("planarfit:currentSite:v1");
   return map[id] || null;
 });

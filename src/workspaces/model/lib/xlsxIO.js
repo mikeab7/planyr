@@ -37,7 +37,9 @@ import {
   SHEET_VERSION, migrateWorkbook, migrateSheet, colLetterName, isFormulaText,
   formatAt, styleAt, cellKey,
 } from "./sheetModel.js";
-import { evaluateWorkbook, formulaSource, literalTypedValue } from "./sheetEngine.js";
+import { formulaSource, literalTypedValue } from "./sheetEngine.js";
+import { evalFromPlain } from "./evalValues.js";
+import { EXCEL_ERROR_CODES } from "./excelErrors.js";
 import { RESERVED_NAME_PREFIXES } from "./namedRanges.js";
 import {
   parseFormula, FUNCTION_NAMES, parseRefText, colNumToLetters, isDate, isErrVal, serialToYMD,
@@ -147,6 +149,10 @@ function sanitizeExcelSheetName(name, used) {
 
 /* ---- EXPORT ----------------------------------------------------------------------------- */
 
+/** A cached error Excel can store. Anything else (Univer's #CYCLE!/#SPILL!/#CALC!, the older engine's #CIRC!) is written as #VALUE! —
+ *  `fullCalcOnLoad` makes Excel recompute it anyway; an unknown code in the file would be a corrupt cell. */
+const excelErrorCode = (code) => (EXCEL_ERROR_CODES.has(code) ? code : "#VALUE!");
+
 function toExcelScalar(v) {
   if (v == null || (typeof v === "object" && v.k === "blank")) return undefined;
   if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
@@ -188,7 +194,7 @@ function applyCellStyle(cell, style) {
     const border = {};
     for (const edge of ["top", "right", "bottom", "left"]) {
       const token = style.border[edge];
-      if (token) border[edge] = { style: token === "double" ? "double" : "thin" };
+      if (token) border[edge] = { style: token === "double" ? "double" : token === "thick" ? "medium" : "thin" };
     }
     if (Object.keys(border).length) cell.border = border;
   }
@@ -238,13 +244,21 @@ function collectWritableKeys(sheet) {
  *  explanation — and a RE-IMPORT of this same file reads it back as the plain value it now is,
  *  never a dead formula pretending to be live (per the build brief's own "make sure a re-import
  *  does not turn a live reference into a dead literal without the user knowing"). */
-export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) {
+export async function exportWorkbookToXlsxBlob(workbookIn, { projectNames, evaluated } = {}) {
+  // NEW-1 — THE VALUES COME FROM UNIVER'S ENGINE (lib/univerEval.js `evaluateForExport`), never from Planyr's older evaluator. The
+  // caller runs it (on the main thread; the client does it for the worker) and hands the answer in: this file runs inside a
+  // Web Worker and must not import Univer. `evaluated.workbook` is the workbook as Univer was handed it — `[Column]` names and
+  // interleaved XIRR pairs already rewritten to Excel syntax — so the formulas written below are formulas Excel understands.
+  if (!evaluated || !evaluated.workbook || !evaluated.values) {
+    throw new Error("exportWorkbookToXlsxBlob needs `evaluated` (lib/univerEval.js evaluateForExport) — the export no longer has an evaluator of its own.");
+  }
+  const workbook = evaluated.workbook;
   const wb = new ExcelJS.Workbook();
   wb.creator = "Planyr";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // a Planyr-computed cached value must never look stale
 
-  const evalResult = evaluateWorkbook(workbook, { projectNames });
+  const evalResult = evalFromPlain(evaluated.values);
   const usedSheetNames = new Set();
   const excelNameById = new Map();
   for (const entry of workbook.sheets) excelNameById.set(entry.id, sanitizeExcelSheetName(entry.name, usedSheetNames));
@@ -256,10 +270,16 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
     const colIndexById = new Map(sheet.columns.map((c, i) => [c.id, i]));
     const evalForSheet = evalResult.get(entry.id);
 
-    ws.columns = sheet.columns.map((c) => ({ width: pxToExcelWidth(c.width) }));
+    ws.columns = sheet.columns.map((c) => (c.hidden ? { width: pxToExcelWidth(c.width), hidden: true } : { width: pxToExcelWidth(c.width) }));
     for (let r = 0; r < sheet.rowCount; r++) {
       const h = sheet.rowHeights[r];
       if (h != null) ws.getRow(r + 1).height = pxToPt(h);
+    }
+    // ExcelJS only writes a row that has cells or an explicit height, so an empty hidden row gets its height stated too.
+    for (const r of Object.keys(sheet.hiddenRows || {})) {
+      const row = ws.getRow(Number(r) + 1);
+      row.hidden = true;
+      if (row.height == null) row.height = pxToPt(sheet.rowHeights[r] || 22);
     }
 
     for (const key of collectWritableKeys(sheet)) {
@@ -283,7 +303,7 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
             if (scalar !== undefined) wsCell.value = scalar;
             valueIsDate = isDate(res.value);
           } else {
-            wsCell.value = { error: (res && res.error) || "#ERROR!" };
+            wsCell.value = { error: excelErrorCode(res && res.error) };
           }
           wsCell.note = `Planyr live reference "=${src}" — frozen to its resolved value on export (Excel has no equivalent live reference).`;
         } else if (res && res.ok) {
@@ -291,7 +311,7 @@ export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) 
           wsCell.value = result === undefined ? { formula: src } : { formula: src, result };
           valueIsDate = isDate(res.value);
         } else {
-          wsCell.value = { formula: src, result: { error: (res && res.error) || "#ERROR!" } };
+          wsCell.value = { formula: src, result: { error: excelErrorCode(res && res.error) } };
         }
       } else if (raw != null && raw !== "") {
         const v = literalTypedValue(raw);
@@ -393,7 +413,7 @@ function excelStyleToPlanyrStyle(cell) {
     const b = {};
     for (const edge of ["top", "right", "bottom", "left"]) {
       const e = border[edge];
-      if (e && e.style) b[edge] = e.style === "double" ? "double" : "thin";
+      if (e && e.style) b[edge] = e.style === "double" ? "double" : (e.style === "medium" || e.style === "thick") ? "thick" : "thin";
     }
     if (Object.keys(b).length) style.border = b;
   }
@@ -454,6 +474,8 @@ async function readWorkbookFile(arrayBuffer) {
   wb.worksheets.forEach((ws, i) => sheetNameToId.set(ws.name.trim().toLowerCase(), `sheet${i + 1}`));
 
   let unsupportedCount = 0;
+  let blockMerges = 0; // NEW-1 (open uploaded Excel) — merges the model can't draw (see below); reported, never silent
+  const hiddenSheets = wb.worksheets.filter((ws) => ws.state && ws.state !== "visible").length;
   const rawSheets = wb.worksheets.map((ws, i) => {
     const id = `sheet${i + 1}`;
     const colCount = Math.max(1, ws.columnCount || 1);
@@ -484,7 +506,9 @@ async function readWorkbookFile(arrayBuffer) {
           if (text != null) cells[key] = text;
         }
 
-        if (cell.numFmt) formats[key] = cell.numFmt;
+        // "General" is Excel's name for NO format. Some writers (SheetJS, hence every converted .xls) spell
+        // it out on the cell; passed through, the formatter would print the word "General" instead of the value.
+        if (cell.numFmt && !/^general$/i.test(String(cell.numFmt).trim())) formats[key] = cell.numFmt;
         const style = excelStyleToPlanyrStyle(cell);
         if (style) styles[key] = style;
       });
@@ -493,7 +517,8 @@ async function readWorkbookFile(arrayBuffer) {
     const merges = [];
     for (const range of (ws.model && ws.model.merges) || []) {
       const parsed = parseA1Range(range);
-      if (!parsed || parsed.r1 !== parsed.r2) continue; // vertical/block merges: content kept, visual merge dropped (sheetModel.js file header — B1007283)
+      if (!parsed) continue;
+      if (parsed.r1 !== parsed.r2) { blockMerges++; continue; } // vertical/block merges: content kept, visual merge dropped (sheetModel.js file header — B1007283)
       const c1 = parsed.c1 - 1, c2 = parsed.c2 - 1;
       if (c2 <= c1 || c1 >= columns.length || c2 >= columns.length) continue;
       merges.push({ r: parsed.r1 - 1, c1Id: columns[c1].id, c2Id: columns[c2].id });
@@ -502,7 +527,10 @@ async function readWorkbookFile(arrayBuffer) {
     for (let c = 0; c < columns.length; c++) {
       const w = ws.getColumn(c + 1).width;
       if (w != null) columns[c].width = excelWidthToPx(w);
+      if (ws.getColumn(c + 1).hidden) columns[c].hidden = true;
     }
+    const hiddenRows = {};
+    for (let r = 1; r <= Math.max(maxRow, ws.rowCount); r++) if (ws.getRow(r).hidden) hiddenRows[r - 1] = true; // an empty hidden row past the data still counts
     const rowHeights = {};
     for (let r = 1; r <= maxRow; r++) {
       const h = ws.getRow(r).height;
@@ -515,7 +543,7 @@ async function readWorkbookFile(arrayBuffer) {
 
     const rawSheet = {
       version: SHEET_VERSION, nextColId: columns.length + 1, columns, rowCount: maxRow,
-      cells, formats, styles, rowHeights, freezeRows, freezeCols, merges,
+      cells, formats, styles, rowHeights, hiddenRows, freezeRows, freezeCols, merges,
       names: {}, dismissedInconsistencies: {}, unsupportedFormulas,
     };
     return { id, name: ws.name || `Sheet${i + 1}`, sheet: migrateSheet(rawSheet) };
@@ -543,14 +571,14 @@ async function readWorkbookFile(arrayBuffer) {
   }
 
   const workbook = migrateWorkbook({ sheets: rawSheets, activeSheetId: rawSheets[0].id });
-  return { workbook, unsupportedCount };
+  return { workbook, unsupportedCount, blockMerges, hiddenSheets };
 }
 
 /** Parse an ArrayBuffer holding a real .xlsx file into a Planyr workbook. Every worksheet, in
  *  order; formulas stay formulas where every function they call is implemented (see
  *  `checkFormulaSupport`), otherwise the cell keeps the file's own cached VALUE and its original
  *  text lands in `unsupportedFormulas` (never dropped, never a whole-import failure). Returns
- *  `{ workbook, unsupportedCount }` so the caller can tell the user how many cells were kept as
+ *  `{ workbook, unsupportedCount, blockMerges, hiddenSheets }` so the caller can tell the user how many cells were kept as
  *  values (LOUD-FAILURE — never silent). Throws on a file ExcelJS can't parse at all, or on a
  *  file with zero worksheets — the caller surfaces that as a visible error.
  *

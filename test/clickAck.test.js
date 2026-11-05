@@ -63,4 +63,20 @@ describe("clickAck", () => {
     vi.advanceTimersByTime(3000);
     expect(body.children).toHaveLength(0);
   });
+  it("B2335056 — a tracked ring is re-projected on every view change, and stops once it settles", () => {
+    let pos = [100, 200]; let cb = null; let unsubbed = 0;
+    const track = { project: () => pos, subscribe: (f) => { cb = f; return () => { unsubbed++; cb = null; }; } };
+    const a = startClickAck(100, 200, track);
+    const el = body.children[0];
+    pos = [40, 260]; cb();
+    expect(el.style.left).toBe("40px"); expect(el.style.top).toBe("260px");
+    pos = [Number.NaN, 5]; cb(); // a bad projection never teleports the ring
+    expect(el.style.left).toBe("40px");
+    a.done();
+    expect(unsubbed).toBe(1);
+  });
+  it("B2335056 — untracked rings keep the fixed pixel (old behaviour)", () => {
+    startClickAck(7, 9);
+    expect(body.children[0].style.left).toBe("7px");
+  });
 });

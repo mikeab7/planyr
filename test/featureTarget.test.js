@@ -28,6 +28,7 @@ import {
   featureKeyOf, gestureAnchorKey, chromePressFacts,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
 import { DBLTAP_MS, DBLTAP_PX } from "../src/workspaces/site-planner/lib/doubleTap.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const feat = (feature, extra = {}) => ({ feature, handle: false, dim: false, ...extra });
 const plain = () => feat(null);
@@ -366,7 +367,7 @@ describe("NEW-1 — a press on identity-transparent chrome anchors to what is BE
 });
 
 describe("source guard — the render must keep stamping what the resolver reads", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
 
   it("the handle layer still carries the attribute the resolver checks", () => {
     expect(SP).toMatch(new RegExp(`${HANDLE_ATTR}="1"`));
@@ -395,7 +396,8 @@ describe("source guard — the render must keep stamping what the resolver reads
    * resolution nobody experiences — green while the gesture is broken, which is this file's whole
    * subject. Both call sites go through `dblOpts`, and that is pinned here. */
   it("the hook and the real dblclick handler resolve through the SAME options", () => {
-    expect(SP).toMatch(/featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\)/);
+    // B2264880 — the root's answer is held in `t` so an empty-stack double-click can fall back to the lot under the point.
+    expect(SP).toMatch(/const t = resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\);\s*\n\s*featureDoubleAction\(t \|\| interiorParcelTarget\(/);
     expect(SP).toMatch(/const dblOpts = \(e, x, y\) =>/);
     expect((SP.match(/dblOpts\(/g) || []).length).toBe(2); // exactly the two resolution call sites
   });
@@ -464,7 +466,7 @@ describe("source guard — the render must keep stamping what the resolver reads
     // NEW-2 (B806081) — Add Leader placement (handleAddLeaderCapture) shares this same capture
     // handler and is checked ahead of the stack picker, for the identical reason: it has to win the
     // press before any element/markup's own bubble-phase handler can steal it.
-    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\)/);
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; (?:if \(touchCountRef\.current < 2 && handleIdentifyCapture\(e\)\) return; )?if \(touchCountRef\.current < 2\)/);
   });
 
   /* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, instance five, and the reason it is TWO guards: the
@@ -544,7 +546,7 @@ describe("source guard — the render must keep stamping what the resolver reads
  * parcel" and none of the building's own rows.
  */
 describe("NEW-1 — a label's right-click never forwards to whatever it sits over", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
 
   it("the acreage badge's context handler opens its OWN menu unconditionally — no resolver, no forward", () => {
     const at = SP.indexOf("const onChipContext");
@@ -608,7 +610,7 @@ describe("NEW-1 — a label's right-click never forwards to whatever it sits ove
  *     once by forwarding at the layer itself to whatever is currently selected.
  */
 describe("NEW-1 (click-ownership audit) — the acreage badge selects on left-click, every label is a direct dispatch target, and the handle layer forwards a right-click to what's selected", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
 
   it("startAcChip selects the parcel on pointerdown, before the drag is armed", () => {
     const at = SP.indexOf("const startAcChip = (e, id) => {");
@@ -729,13 +731,13 @@ describe("nextPickIndex — Alt+click cycles deeper only at the SAME point", () 
 });
 
 describe("the picker is wired into the canvas's own capture-phase press handler", () => {
-  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const SP = plannerSource();
 
   it("handleStackPick runs before the vertex-edit capture logic, and can short-circuit it", () => {
     // NEW-2 (B806081) — handleAddLeaderCapture was inserted ahead of the stack picker in this same
     // chain (it must win over Alt+click too, since Add Leader is a modal placement, not a modifier).
     expect(SP, "the picker must be wired into the SAME capture handler as the double-click anchor's notePress")
-      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
+      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; (?:if \(touchCountRef\.current < 2 && handleIdentifyCapture\(e\)\) return; )?if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
   });
 
   /* NEW-1 (2026-09-12, click-ownership audit) — the gating that used to live directly in

@@ -172,7 +172,16 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // generous ceiling, not a target.
     // ⛔ Bumped 180 → 240 (2026-09-30, NEW-1): 24 Louisiana parishes wired in one pass took it from 175
     // to 199 — again purely real counties being wired one at a time, not a blind expansion.
-    expect(keys.length).toBeLessThan(240);
+    // ⛔ Bumped 240 → 400 (2026-10-16, NEW-1): all 82 Mississippi counties wired from ONE measured MARIS table
+    // (57 new rows on top of 24) — real counties, one source, not a blind expansion.
+    // ⛔ Bumped 400 → 600 (2026-10-19, NEW-1, B2317680): Missouri's 71 county rows (one table, measured per county) took it from ~360 to 431 —
+    // real counties wired from per-county measurements, not a blind expansion. 16 sibling state sessions are adding rows the same day.
+    // ⛔ Bumped 900 → 1200 (2026-10-20, NEW-1, Michigan): 52 Michigan rows from one measured table took it past 900 (921); a bigger step so the next sibling state does not collide on this line.
+    // ⛔ Bumped 600 → 900 (2026-10-19, NEW-1, Pennsylvania): 60 county rows from one measured table (PASDA's per-county layers + county-run servers), 10 more sibling state sessions landing the same day.
+    // ⛔ Bumped 600 → 900 (2026-10-20, NEW-1, B2349360): Washington (34), Oklahoma, South Dakota, New Mexico and the other same-day state sessions each wired a measured per-county table — real counties, not a blind expansion.
+    // ⛔ Kentucky NEW-2 (2026-10-20): 15 more measured Kentucky county rows on top of the 22 — real counties from a measured table, not a blind expansion (ceiling now 1200, set by the South Carolina session below).
+    // ⛔ Bumped 900 → 1200 (2026-10-20, NEW-1, South Carolina B2348800): 45 South Carolina county rows from ONE measured table (the state's RFA statewide layer scoped per county + ten county layers) took the merged tree to 914 — real counties wired from per-county measurements, not a blind expansion.
+    expect(keys.length).toBeLessThan(1200);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
@@ -274,7 +283,7 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
   });
 
   it("a state with NO wired source at all resolves to NO candidates — never every candidate", () => {
-    // Pierre, SD — a real, geometry-resolvable county in a state with ZERO configured parcel
+    // Selby, Walworth County SD (was Pierre/Hughes until the 2026-10-29 second pass wired Hughes) — a real, geometry-resolvable county with ZERO configured parcel
     // sources (no statewide composite, no individual county). This is the case the old fallback
     // got backwards: "we don't know a source" became "try all of them" instead of the honest "we
     // have none to try".
@@ -284,7 +293,7 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
     // non-participating counties already rely on) — so the case moved to one of the only two
     // states (SD, WA) with no wired source at all, rather than deleting the case the fallback rule
     // is actually about.
-    const cand = candidateCountiesForPoint(44.3683, -100.3510);
+    const cand = candidateCountiesForPoint(45.51, -100.03);
     expect(cand).toEqual([]);
   });
 
@@ -520,7 +529,7 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
     const id = countyIdentity(30.6996, -91.4368);
     expect(id.status).toBe("no-source");
     expect(id.name).toBe("Pointe Coupee Parish");
-    expect(noParcelSourceNote(id)).toBe("Pointe Coupee Parish — no parcel data wired here yet.");
+    expect(noParcelSourceNote(id)).toBe("Pointe Coupee Parish has a parcel map, but it isn't open to the public, so Planyr can't show lots here yet."); // locked: Atlas behind a private proxy (NEW-1, 2026-10-22)
   });
 
   it("Orleans and East Baton Rouge never query each other — the parishes are ~80 miles apart", () => {
@@ -554,11 +563,12 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
  * Nevada, Ohio and every other statewide-only state offline to fix Michigan. */
 describe("B1597232 — an unsourced county is an ANSWER (no candidates), not a licence to ask its neighbour", () => {
   it("a state whose only county source is elsewhere returns NOTHING, not that source", () => {
-    // Michigan wires exactly two sources — Oakland County and the City of Detroit — and Wayne
-    // County is neither. Both Wayne paths (no bbox match; inside Oakland's padded bbox) are pinned
-    // at their exact measured points in test/cityScopes.test.js.
-    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual([]); // Taylor
-    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual([]); // Livonia
+    // Michigan wired only Oakland and Detroit when this was written (Wayne was the gap); since 2026-10-20 (NEW-1) Wayne has its own
+    // source, so the same rule is pinned on a county that is STILL unwired: Alcona (BS&A-only) must not be handed any neighbour's source.
+    // Both former Wayne paths (no bbox match; inside Oakland's padded bbox) now return Wayne ALONE — pinned in test/cityScopes.test.js.
+    expect(candidateCountiesForPoint(44.6852, -83.6154)).toEqual([]); // Alcona
+    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual(["mi_wayne"]); // Taylor
+    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual(["mi_wayne"]); // Livonia
   });
 
   it("the same rule, a different state: an unwired Louisiana parish never reaches the two wired ones", () => {

@@ -19,8 +19,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { pondLedgerSignature, createIdentityToken, POND_LEDGER_INPUTS } from "../src/workspaces/site-planner/lib/pondLedgerKey.js";
 import { accumulatePondLedger } from "../src/workspaces/site-planner/lib/pondLedger.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 /* A complete, realistic input set. Deliberately every field populated: a planted change against a
  * null baseline can pass for the wrong reason (null → value moves any key). */

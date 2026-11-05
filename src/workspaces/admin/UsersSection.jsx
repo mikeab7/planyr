@@ -14,6 +14,7 @@ import { exactTime, fmtDate } from "./lib/adminFormat.js";
 import { fetchRecentErrorsForUser, ago } from "./lib/adminPanels.js";
 import { goAdminSection } from "./lib/adminRoute.js";
 import { groupSupport } from "./lib/adminSupport.js";
+import { splitDeployReloads } from "./lib/adminIssues.js";
 import { STATUSES, statusCounts, filterUsers, sortUsers, teamLabel, fetchUserActivity, shapeUserActivity } from "./lib/adminUsers.js";
 
 const TONE = { active: "ok", quiet: "warn", dormant: "neutral", never: "neutral" };
@@ -32,7 +33,8 @@ function Fact({ k, children }) {
 function UserDetail({ user, onClose, goReset }) {
   const d = useAdminData();
   const act = useAdminLoad(() => fetchUserActivity(supabase, user.id), [user.id]);
-  const errs = useAdminLoad(() => fetchRecentErrorsForUser(supabase, user.id, 8), [user.id]);
+  const errs = useAdminLoad(() => fetchRecentErrorsForUser(supabase, user.id, 50), [user.id]);
+  const { errors: userErrors, deployReloads } = splitDeployReloads(errs.data, 8);
   const open = d.support.tickets.open.filter((t) => t.userId === user.id);
   const { items: supportItems, groups: supportGroups } = groupSupport(open);
   const internal = d.isInternal(user.email);
@@ -78,9 +80,10 @@ function UserDetail({ user, onClose, goReset }) {
 
         <h4 style={{ margin: "12px 0 4px", fontSize: FONT_SIZE.control, fontWeight: 700 }}>Recent errors</h4>
         <PanelState loading={errs.loading} error={errs.error} onRetry={errs.reload} />
-        {!errs.loading && !errs.error && ((errs.data || []).length === 0 ? <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>None.</div> : (errs.data || []).map((r) => (
+        {!errs.loading && !errs.error && (userErrors.length === 0 ? <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>None.</div> : userErrors.map((r) => (
           <div key={r.id} style={{ fontSize: FONT_SIZE.label, padding: "2px 0", color: "var(--text-secondary)", wordBreak: "break-word" }}><RelTime iso={r.at} /> · {r.module || "—"} · {r.message || "(no message)"}</div>
         )))}
+        {!errs.loading && !errs.error && deployReloads > 0 && <div data-testid="deploy-reloads-line" style={{ fontSize: FONT_SIZE.label, padding: "2px 0", color: "var(--text-tertiary)" }}>{deployReloads} deploy {deployReloads === 1 ? "reload" : "reloads"} (expected)</div>}
 
         <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
           <Button size="sm" variant="ghost" onClick={() => goReset(user.id)}>Reset password…</Button>

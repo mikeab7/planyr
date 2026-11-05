@@ -35,6 +35,7 @@ export const REBUILD = {
   NONE: null,
   GIS: "gis-service",       // a published GIS endpoint will serve it again on the next pan
   CLOUD: "cloud",           // a copy exists in the signed-in user's account
+  RECOMPUTE: "recompute",   // the value is derived — recalculating the data it came from gives it back (the spreadsheet's calculation cache)
   IDB_MIRROR: "idb-mirror", // mirrored in the large store (but the mirror is best-effort — see below)
 };
 
@@ -47,8 +48,26 @@ export const LOCAL_CLASSES = [
   {
     id: "history", label: "Version history", rebuild: REBUILD.IDB_MIRROR, reclaimable: false,
     // Mirrored into IndexedDB by storage.js — but that write is FIRE-AND-FORGET, so on any given
-    // device the localStorage copy may be the only one. Never reclaimable. (B474 review #14.)
+    // device the localStorage copy may be the only one. Never RECLAIMABLE (this class is never bulk-dropped). The one sanctioned
+    // removal is storage.relocateHistoryToIdb (B2200385): it drops the localStorage copy only after the IndexedDB copy was
+    // written, read back and compared, and records `planarfit:sites:history:idbonly`.
     match: (k) => has(k, "planarfit:sites:history"),
+  },
+  {
+    /* B2200384 — the device copy of the plans is one entry per plan (`<store>:p:<planId>`), a tiny index (`<store>:idx`) and — only on a device not yet
+     * moved, or transiently while an older tab is open — the old whole-library entry. Each is its own class so the abort events say
+     * what is taking the room. The per-plan entries are the only copy of the work: never reclaimable. The old entry is a DUPLICATE of them once they verify,
+     * but it is removed only by `planStore.retireLegacy` (read back and counted first), never by the bulk reclaim — so it is `reclaimable: false` too. */
+    id: "plan-entries", label: "Saved plans (one slot per plan)", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+):p:/.test(k),
+  },
+  {
+    id: "plan-index", label: "Saved-plan index", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+):idx$/.test(k),
+  },
+  {
+    id: "legacy-plans", label: "Old whole-library copy", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => /^planarfit:sites:(v1|cloud:[^:]+)(:led)?$/.test(k),
   },
   {
     id: "plans", label: "Saved plans", rebuild: REBUILD.NONE, reclaimable: false,
@@ -82,11 +101,19 @@ export const IDB_CLASSES = [
     match: (k) => has(k, "planarfit:sites:history"),
   },
   {
+    /* The Spreadsheet's calculation cache (NEW-1, B2604xxx): formula results remembered per workbook so a reload paints complete (lib/univerCalcCache.js).
+     * Entirely derived — an entry is used only when its hash equals the workbook about to load, and losing it costs one recalculation.
+     * NOT in the bulk-reclaim set on purpose: the shared reclaim path (storageReclaim.js) only knows the GIS namespaces, and this class is
+     * small (one entry per workbook, capped at ~2 MB) — it is classified so the census names it instead of calling it "Other". */
+    id: "calccache", label: "Spreadsheet results", rebuild: REBUILD.RECOMPUTE, reclaimable: false,
+    match: (k) => has(k, "model:calc:"),
+  },
+  {
     /* Performance recordings (NEW-1). In the LARGE tier deliberately — TIER-BY-REBUILDABILITY:
      * a diagnostic must never compete with saved plans for the ~5 MB small store. NOT reclaimable,
      * because nothing can rebuild one: the moment it describes is gone. It is kept small by its
-     * own writer instead (perfCaptureStore.js prunes to three on every write) and it is shown in
-     * the storage panel with its own clear control, so it can never grow without being visible. */
+     * own writer instead (perfCaptureStore.js prunes to three on every write), so it can never grow
+     * without bound. (The Storage screen that listed it was retired 2026-11-04, NEW-1.) */
     id: "perfcaptures", label: "Performance recordings", rebuild: REBUILD.NONE, reclaimable: false,
     match: (k) => has(k, "perfcap:"),
   },

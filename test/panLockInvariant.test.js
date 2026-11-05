@@ -18,8 +18,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 // The block is identified by the transform write itself, not by a line number.
 // NEW-1 (2026-07-30): the write now goes through `setWrapTransform`, the ONE helper that writes

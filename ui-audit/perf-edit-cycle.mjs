@@ -41,6 +41,9 @@ import { selfTimeByFunction } from "./lib/cpuProfile.mjs";
 import { editCycleVerdict, linearFitXY } from "./lib/editCycle.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/* NEW-1 (B217540 ×3): `--switches N` runs the plan-switch + ordinary-editing scenario (perf-edit-switch.mjs) — same fixtures, same
+ * paced/visible-tab discipline, its own budget file beside this one. The cycle below is the paste/drag/resize loop on ONE plan. */
+if (process.argv.includes("--switches")) { await import("./perf-edit-switch.mjs"); process.exit(process.exitCode ?? 0); }
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--") ? process.argv[i + 1] : d; };
@@ -91,8 +94,8 @@ const counters = (page) => page.evaluate(() => {
     canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
     features: new Set([...document.querySelectorAll("[data-feature]")].map((n) => n.getAttribute("data-feature"))).size,
     /* what the device holds — the thing every whole-plan autosave re-reads and re-writes */
-    lsKB: (() => { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += k.length + (localStorage.getItem(k) || "").length; } } catch (_) {} return Math.round(n / 1024); })(),
-    sitesKB: (() => { try { return Math.round((localStorage.getItem("planarfit:sites:v1") || "").length / 1024); } catch (_) { return null; } })(),
+    lsKB: (() => { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += k.length + ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "").length; } } catch (_) {} return Math.round(n / 1024); })(),
+    sitesKB: (() => { try { return Math.round(((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "").length / 1024); } catch (_) { return null; } })(),
     historyKB: (() => { try { return Math.round((localStorage.getItem("planarfit:sites:history:v1") || "").length / 1024); } catch (_) { return null; } })(),
   };
 });
@@ -152,7 +155,7 @@ try {
       rec.groupId = "xtra-fat"; rec.notes = "x".repeat(FAT_KB * 1024); extra[rec.id] = rec; bytes += FAT_KB * 1024;
     }
     out.store = { extraPlans: Object.keys(extra).length, extraKB: Math.round(bytes / 1024) };
-    await context.addInitScript((x) => { try { const k = "planarfit:sites:v1"; const cur = JSON.parse(localStorage.getItem(k) || "{}"); localStorage.setItem(k, JSON.stringify({ ...x, ...cur })); } catch (_) {} }, extra);
+    await context.addInitScript((x) => { try { const k = "planarfit:sites:v1"; const cur = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); localStorage.setItem(k, JSON.stringify({ ...x, ...cur })); } catch (_) {} }, extra);
   }
   await context.addInitScript(INSTRUMENT);
   await context.addInitScript(() => { window.__PLANYR_E2E = true; });

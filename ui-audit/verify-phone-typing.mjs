@@ -25,7 +25,7 @@
 import { webkit, devices } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { openSignedIn } from "./lib/signedInSession.mjs";
+import { openSignedIn, proveSignedIn, TEST_ACCOUNT_EMAIL } from "./lib/signedInSession.mjs";
 import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive, listIds } from "./lib/liveFixtures.mjs";
 import { installStubSupabase } from "./lib/stubSupabase.mjs";
 import { IOS_MODEL, KEYBOARDS, probeFocused, shootWithKeyboard, CONTACT_WORDS, REAL_TOKEN } from "./lib/iosKeyboard.mjs";
@@ -77,10 +77,29 @@ const seed = (signedIn) => `(() => { try {
 const liveOpen = new Set();
 const closeLeakedLive = async () => { const all = [...liveOpen]; liveOpen.clear(); await Promise.all(all.map((c) => c().catch(() => {}))); };
 
+let liveSession = null; // a Playwright storageState captured from the ONE live sign-in
+// a signed-in page for data work (cleanup) on the stored session — falls back to a real sign-in only if none is stored
+async function liveDataPage() {
+  if (!liveSession) return openSignedIn({ base: BASE, engine: "webkit" });
+  const b = await webkit.launch();
+  const page = await (await b.newContext({ storageState: liveSession })).newPage();
+  await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20000 });
+  const proof = await proveSignedIn(page);
+  if (proof.email !== TEST_ACCOUNT_EMAIL) { await b.close(); return openSignedIn({ base: BASE, engine: "webkit" }); }
+  return { page, close: () => b.close() };
+}
 async function openLive(phone, mode, { signedIn = true, route }) {
   const initScripts = [[IOS_MODEL, { kbPx: KEYBOARDS[phone], tallInner: mode === "ios-tallinner" }]];
   let ctx, page, close;
-  if (signedIn) {
+  if (signedIn && liveSession) {
+    // SIGN IN ONCE: reuse the stored session (Supabase rate-limits /auth/v1/verify per IP — signing in afresh per
+    // surface tripped `over_request_rate_limit` mid-run on 2026-10-08). Each surface still PROVES the session below.
+    const b = await webkit.launch();
+    ctx = await b.newContext({ ...devices[phone], storageState: liveSession });
+    for (const [fn, arg] of initScripts) await ctx.addInitScript(fn, arg);
+    page = await ctx.newPage(); close = () => b.close();
+  } else if (signedIn) {
     const s = await openSignedIn({ base: BASE, engine: "webkit", device: phone, initScripts });
     ({ context: ctx, page } = s); close = s.close;
   } else {
@@ -100,7 +119,15 @@ async function openLive(phone, mode, { signedIn = true, route }) {
   // than the stub's instant fetch. Scoring before it is armed measures iOS's raw reveal WITHOUT the app's pin-back — a wrong
   // picture (it flipped the known-answer arm under parallel network load) — so wait for the app's own armed flag.
   await page.waitForFunction(() => window.__PLANYR_PAGE_CONTAINMENT_GUARD_INSTALLED === true, null, { timeout: 45000 }).catch(() => { throw new Error("the page-containment guard never armed on the live page — scoring now would measure the wrong thing"); });
-  const closer = () => { liveOpen.delete(closer); return close(); };
+  if (signedIn) {
+    // getUser() is a network call that can come back empty once under live load (seen 2026-10-08 with the fixture row
+    // visible, i.e. signed in) — ask again rather than void the surface; still BOTH halves of the proof are required
+    let proof = null;
+    for (let i = 0; i < 3; i++) { proof = await proveSignedIn(page); if (proof.email === TEST_ACCOUNT_EMAIL && proof.fixtureVisible) break; await page.waitForTimeout(1000); }
+    if (proof.email !== TEST_ACCOUNT_EMAIL || !proof.fixtureVisible) throw new Error("live surface not provably signed in — " + JSON.stringify(proof));
+  }
+  // carry the LATEST tokens forward (the client may have rotated the refresh token), so the next surface needs no sign-in
+  const closer = async () => { liveOpen.delete(closer); if (signedIn) liveSession = await ctx.storageState().catch(() => liveSession); return close(); };
   liveOpen.add(closer);
   return { ctx: { close: closer }, page, errs };
 }
@@ -200,7 +227,18 @@ const SURFACES = [
     } },
   { id: "site — set location dialog", route: `#/project/${PROJ}/site`, signedIn: false, open: async (p) => { await tapSel(p, '[data-testid="mobile-panels-tab"]'); await p.getByRole("button", { name: /^Land$/ }).first().click(); await p.waitForTimeout(500); await tapSel(p, '[data-testid="set-location-cta"]'); }, scope: '[role="dialog"]' },
   { id: "notes", route: "#/notes", open: async (p) => { if (!LIVE) await p.getByRole("button", { name: /new (page|note)|\+ page|add page/i }).first().click({ timeout: 2500 }).catch(() => {}); await p.waitForTimeout(600); } }, // live: the account's existing "Untitled page" — never create a note
-  { id: "spreadsheet", route: `#/project/${PROJ}/spreadsheet`, open: async () => {} },
+  // NEW-2: the Spreadsheet is the Univer grid (a LAZY canvas chunk) for every account. The old surface scored the formula-bar <input> and the
+  // in-cell <input>; now the DOM text fields a person can see are the name box (+ whatever Univer mounts), so the surface FIRST waits for the
+  // grid and then taps A1 (a real touch) — an empty field list on a surface that never mounted would be vacuous, and "fields found" below
+  // still FAILS on zero fields. COVERAGE GAP, stated rather than hidden: Univer's in-cell editor is a zero-size contenteditable behind the
+  // canvas (listFields skips width-0 nodes on purpose), so the caret the person sees while typing in a cell is NOT scored here any more.
+  { id: "spreadsheet", route: `#/project/${PROJ}/spreadsheet`, open: async (p) => {
+      await p.waitForSelector('canvas[id^="univer-sheet-main-canvas"]', { timeout: 60000 });
+      await p.waitForTimeout(1500);
+      const pt = await p.evaluate(() => { const b = document.querySelector('canvas[id^="univer-sheet-main-canvas"]').getBoundingClientRect(); return { x: b.left + 90, y: b.top + 32 }; });
+      await p.touchscreen.tap(pt.x, pt.y).catch(() => {});
+      await p.waitForTimeout(500);
+    } },
   { id: "schedule — agenda", route: "#/org/schedule", open: async () => {} },
   { id: "schedule — new schedule", route: `#/project/${PROJ}/schedule`, open: async (p) => { await p.getByRole("button", { name: /create|new schedule/i }).first().click({ timeout: 3000 }).catch(() => {}); await p.waitForTimeout(500); } },
   { id: "library", route: `#/project/${PROJ}/library`, open: async () => {} },
@@ -342,8 +380,8 @@ const section = async (name, fn) => { if (ONLY && !new RegExp(ONLY).test(name)) 
 const browser = await webkit.launch();
 let liveSchedulesBefore = null;
 if (LIVE) { // seed the throwaway plan the Site Planner surfaces need (a parcel + a building), remembering the schedules that already exist
-  const sd = await openSignedIn({ base: BASE });
-  try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); } finally { await sd.close(); }
+  const sd = await openSignedIn({ base: BASE, engine: "webkit" }) /* same engine as the scored runs: one trust store, one browser */;
+  try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); liveSession = await sd.context.storageState(); } finally { await sd.close(); }
 }
 try {
   // ── 0. KNOWN-ANSWER ARM ───────────────────────────────────────────────────────────────────────
@@ -417,7 +455,7 @@ try {
 } finally {
   await browser.close();
   if (LIVE) { // owner rule 15: clear what the run made, then PROVE it is gone
-    const sd = await openSignedIn({ base: BASE });
+    const sd = await liveDataPage();
     try { const c = await cleanupLive(sd.page, { planId: PROJ, scheduleIdsBefore: liveSchedulesBefore }); console.log("live cleanup:", JSON.stringify(c)); check("live cleanup left nothing behind", !c.errors.length && c.left.site === 0 && !c.left.schedules, JSON.stringify(c)); } finally { await sd.close(); }
   }
 }

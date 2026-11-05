@@ -19,7 +19,7 @@ const selected = (p) => p.getByTestId("measure-selected");
 
 function measureCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.measures || []).length;
   });
@@ -33,7 +33,7 @@ async function startBlank(page) {
 
 // Arm the Measure tool in a specific mode via the Measure ▾ menu.
 async function armMeasure(page, mode) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: mode, exact: true }).click();
 }
 

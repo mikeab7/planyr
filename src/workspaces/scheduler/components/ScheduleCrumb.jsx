@@ -56,13 +56,14 @@ export default function ScheduleCrumb({
         data-testid="schedule-crumb"
         onClick={() => { if (listLoaded) setOpen((o) => !o); }}
         disabled={!listLoaded}
+        aria-busy={!listLoaded || undefined}
         title={listLoaded ? "Switch schedule" : "Your schedules haven’t loaded yet"}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "0 1 auto",
           height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
-          background: "transparent", cursor: "pointer", fontFamily: "inherit",
+          background: "transparent", cursor: listLoaded ? "pointer" : "default", fontFamily: "inherit",
           fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
           maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
         }}

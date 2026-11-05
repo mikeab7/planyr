@@ -1,3 +1,4 @@
+import { GA_ROWS } from "../src/workspaces/site-planner/lib/gaParcels.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
@@ -318,11 +319,12 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
   });
 
   it("names the county — with the right suffix per state — when nothing is wired there", () => {
+    // NEW-1 (2026-10-22) — the sentence says WHY now ("none" = nothing found, the default for an unresearched county); the
+    // suffix rule is unchanged for Texas and now also applies to Colorado, whose bare boundary names would not read as prose.
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Walker", state: "TX" }))
-      .toBe("Walker County — no parcel data wired here yet.");
-    // Colorado rows read as bare county names in this app's copy, so no "County" suffix.
+      .toBe("Planyr hasn't found a public parcel map it can use for Walker County.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Mesa", state: "CO" }))
-      .toBe("Mesa — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Mesa County.");
   });
 
   // B1361425 — every state OTHER than Texas now carries geometry from the nationwide Esri source,
@@ -332,17 +334,17 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
   // "every state but CO"; this proves the fix directly against the specific defect it closes.
   it("never double-suffixes a name that already carries its own designation (a parish, a borough, an independent city)", () => {
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Orleans Parish", state: "LA" }))
-      .toBe("Orleans Parish — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Orleans Parish.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Denali Borough", state: "AK" }))
-      .toBe("Denali Borough — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Denali Borough.");
     expect(noParcelSourceNote({ status: "no-source", key: null, name: "Fairfax city", state: "VA" }))
-      .toBe("Fairfax city — no parcel data wired here yet.");
+      .toBe("Planyr hasn't found a public parcel map it can use for Fairfax city.");
   });
 
   it("is actually WIRED into the click path (B1120 — an unused export ships nothing)", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
     expect(src).toMatch(/import \{[^}]*countyIdentity[^}]*\} from "\.\/lib\/counties\.js"/s);
-    expect(src).toMatch(/noParcelSourceNote\(countyIdentity\(/);
+    expect(src).toMatch(/parcelGapNotice\(countyIdentity\(/);
   });
 });
 
@@ -528,13 +530,19 @@ describe("B1574257 — the county-designation strip introduces no new key collis
     expect(collisionsUnder(WIDE)).toEqual(collisionsUnder(NARROW));
   });
 
-  it("the pre-existing collisions are exactly the six independent-city/county pairs, and none is configured", () => {
+  it("the pre-existing collisions are exactly the six independent-city/county pairs, and none is configured under the shared key", () => {
     const pre = collisionsUnder(NARROW);
     expect(pre).toHaveLength(6);
     expect(pre.join(" | ")).toMatch(/MD_baltimore.*MO_stlouis.*VA_fairfax.*VA_franklin.*VA_richmond.*VA_roanoke/);
-    for (const key of ["md_baltimore", "mo_stlouis", "va_fairfax", "va_franklin", "va_richmond", "va_roanoke"]) {
+    // NEW-1 (B2317680): Missouri was wired, so mo_stlouis is now St. Louis COUNTY's real row — and St. Louis city keys apart (INDEPENDENT_CITY_KEYS), so the
+    // shared key can never answer for the city. The other five pairs are still unconfigured.
+    for (const key of ["md_baltimore", "va_fairfax", "va_franklin", "va_richmond", "va_roanoke"]) {
       expect(COUNTIES_MAP[key], key).toBeUndefined();
     }
+    expect(COUNTIES.mo_stlouis.label).toBe("St. Louis County, MO");
+    expect(COUNTIES_MAP.mo_stlouiscity).toBeTruthy();
+    expect(countyKeyForName("St. Louis city", "MO")).toBe("mo_stlouiscity");
+    expect(countyKeyForName("St. Louis County", "MO")).toBe("mo_stlouis");
   });
 
   it("no designation strips a name to nothing — an empty slug would key every such row alike", () => {
@@ -557,7 +565,7 @@ describe("NEW-1 (2026-09-23) — 11 more Georgia counties are registered and sha
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });
@@ -711,7 +719,7 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });
@@ -734,8 +742,9 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
   it("Georgia now has 60 county keys in both registries (25 pre-existing (first + second pass) + ga_tift (B1874880) + 34 third pass, this batch)", () => {
     const gaInCounties = Object.entries(COUNTIES).filter(([, c]) => c.state === "GA").map(([k]) => k);
     const gaInMap = Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "GA").map(([k]) => k);
-    expect(gaInCounties).toHaveLength(60);
-    expect(gaInMap).toHaveLength(60);
+    // B2316720 — gaParcels.js adds its own rows on top of these 60 hand-written ones (test/georgiaCounties.test.js owns that table).
+    expect(gaInCounties).toHaveLength(60 + GA_ROWS.length);
+    expect(gaInMap).toHaveLength(60 + GA_ROWS.length);
   });
 
   it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
@@ -789,8 +798,8 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
     expect(sharedLayerUrlConflicts()).toEqual([]);
   });
 
-  it("Long and Walton stay unwired (no usable public parcel source, per this session's own record)", () => {
-    expect(COUNTIES_MAP.ga_long).toBeUndefined();
+  it("Walton stays unwired (no usable public parcel source, per this session's own record); Long was wired later, 2026-10-29 (B2504800)", () => {
+    expect(COUNTIES_MAP.ga_long).toBeDefined();
     expect(COUNTIES_MAP.ga_walton).toBeUndefined();
   });
 
@@ -828,7 +837,7 @@ describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are regist
       expect(COUNTIES_MAP[k], k).toBeTruthy();
       expect(COUNTIES[k].state, k).toBe("GA");
       expect(COUNTIES_MAP[k].state, k).toBe("GA");
-      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^(https:\/\/|\/gis-proxy\/)/); // B2316720 — ga_cook now rides the relay like ga_tift
       expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
     }
   });

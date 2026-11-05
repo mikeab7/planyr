@@ -23,6 +23,7 @@
  * report its absence as a pass.
  */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, layerRow, openRowMenu, readRowInfo } from "./lib/layersPanel.js";
 
 /* A tract whose whole-site fit lands BELOW the z16 terrain gate — the owner's situation restated
  * as geometry ("he was zoomed out"). Waller County, as on his real plan. */
@@ -39,8 +40,10 @@ const site = {
   layerOverrides: { contours: true },
 };
 
-const PANEL = '[data-testid="layer-panel"][data-surface="planner"]';
-const CONTOURS = `${PANEL} [data-testid="layer-row-contours"]`;
+const PANEL = panelSel("planner");
+/* NEW-1 (Imagery & Layers): the panel shows ONE group at a time and a row's ▾ dropdown holds the zoom line, so a spec asks for a ROW by id
+ * (the helper selects the group that holds it) and opens its dropdown when it wants the "Too far out to draw" block. */
+const contoursRow = (page) => layerRow(page, "contours");
 
 async function openPlanner(page) {
   await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
@@ -56,7 +59,7 @@ async function openPlanner(page) {
   await page.waitForTimeout(1500);
   // BOTH hosts stay mounted (the finder's copy is hidden), so click the VISIBLE control and assert
   // against the planner SURFACE, never against page text.
-  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+  await openPlannerLayers(page);
   await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
   await page.waitForTimeout(400);
 }
@@ -73,7 +76,7 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
        owner's report itself. */
     await expect(page.locator(PANEL)).not.toContainText("Zoom in to ≥");
 
-    const row = page.locator(CONTOURS);
+    const row = await contoursRow(page);
     await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
 
     // The checkbox still says ON — that is the honest state, and it is the reason the row itself
@@ -86,10 +89,14 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
     // coming out of this one" with no legend anywhere.
     await expect(row.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
 
-    // The line is LIVE and specific — computed from the actual current zoom, not a static rule.
-    const fix = row.getByTestId("layer-zoom-fix");
+    // NEW-1 (Imagery & Layers): NO text sits under a row, ever — the CLOSED row says nothing about zoom…
+    await expect(row).not.toContainText(/zoom in|too far out/i);
+    // …and the fix is in its ▾ dropdown: "Too far out to draw" and a Zoom In button (it replaces the old live "zoom in N levels" line).
+    const menu = await openRowMenu(page, "contours");
+    await expect(menu.getByTestId("layer-zoom-note")).toHaveText("Too far out to draw");
+    const fix = menu.getByTestId("layer-zoom-fix");
     await expect(fix).toBeVisible();
-    await expect(fix).toHaveText(/^Not showing at this zoom — zoom in \d+ levels?$/);
+    await expect(fix).toHaveText("Zoom In");
 
     // …and the static sentence it replaced is GONE from the row (PANEL-BREVITY: replace, never
     // accumulate). The full rule still lives behind the row's ⓘ, which is exempt.
@@ -100,11 +107,11 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await openPlanner(page);
 
-    const row = page.locator(CONTOURS);
+    const row = await contoursRow(page);
     await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
     const before = await page.getByTestId("planner-canvas").getAttribute("data-view-ppf");
 
-    await row.getByTestId("layer-zoom-fix").click();
+    await (await openRowMenu(page, "contours")).getByTestId("layer-zoom-fix").click();
     await page.waitForTimeout(900);
 
     // The map really moved — the affordance FIXES the condition rather than describing it.
@@ -121,9 +128,9 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await openPlanner(page);
 
-    const row = page.locator(CONTOURS);
+    const row = await contoursRow(page);
     await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
-    await row.locator('input[type="checkbox"]').first().uncheck();  // .first() — see the note above
+    await row.locator('input[type="checkbox"]').first().uncheck();
     await page.waitForTimeout(400);
 
     await expect(row).toHaveAttribute("data-layer-state", "off");
@@ -141,7 +148,7 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await openPlanner(page);
 
-    const road = page.locator(`${PANEL} [data-testid="layer-row-jur_road_authority"]`);
+    const road = await layerRow(page, "jur_road_authority");
     await expect(road).toBeVisible();
     await expect(road).toHaveAttribute("data-layer-state", "off");
     await road.locator('input[type="checkbox"]').first().check();
@@ -151,20 +158,20 @@ test.describe("NEW-1 — the four states a Layers row can be in", () => {
 
     /* Zoom out past its gate. The open Layers card sits over the zoom controls at this viewport,
        so collapse it first — clicking through an overlay is not a thing a user can do either. */
-    const layersToggle = page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first();
-    await layersToggle.click();
+    await page.getByTestId("layers-collapse").click();
     for (let i = 0; i < 6; i++) {
       await page.getByRole("button", { name: "Zoom out" }).click();
       await page.waitForTimeout(120);
     }
     await page.waitForTimeout(500);
-    await layersToggle.click();
+    await openPlannerLayers(page);
     await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(400);
 
-    await expect(road).toHaveAttribute("data-layer-state", "dormant-zoom");
-    await expect(road.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
-    await expect(road.getByTestId("layer-zoom-fix")).toHaveText(/^Not showing at this zoom — zoom in \d+ levels?$/);
+    const road2 = await layerRow(page, "jur_road_authority");
+    await expect(road2).toHaveAttribute("data-layer-state", "dormant-zoom");
+    await expect(road2.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
+    await expect((await openRowMenu(page, "jur_road_authority")).getByTestId("layer-zoom-note")).toHaveText("Too far out to draw");
   });
 });
 
@@ -243,29 +250,24 @@ async function openPlannerFor(page, siteFixture) {
   await page.getByText(siteFixture.site, { exact: false }).first().click();
   await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 25000 });
   await page.waitForTimeout(1500);
-  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+  await openPlannerLayers(page);
   await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
   await page.waitForTimeout(400);
 }
 
 test.describe("NEW-2 — a merge group never offers a sub-source the site's own state can't have", () => {
-  const WATER_SEWER = `${PANEL} [data-testid="layer-row-water_sewer"]`;
-
-  test("a Texas site's \"Water & sewer\" row never mentions the Colorado sub-source", async ({ page }) => {
+  test("a Texas site's \"Water & Sewer\" row never mentions the Colorado sub-source", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await openPlanner(page); // the Waller County, TX fixture already declared above
 
-    const row = page.locator(WATER_SEWER);
+    const row = await layerRow(page, "water_sewer");
     await expect(row).toBeVisible();
     await row.locator('input[type="checkbox"]').first().check();
     await page.waitForTimeout(300);
 
     // The ⓘ lists every contributing provider by name (layerPanelInfo.js
     // mergeGroupInfoSections) — a Texas site must never see the Colorado-only one.
-    await page.getByRole("button", { name: "About Water & sewer" }).hover();
-    const popover = page.getByRole("note");
-    await expect(popover).toBeVisible();
-    await expect(popover).not.toContainText("Colorado");
+    expect(await readRowInfo(page, "water_sewer")).not.toContain("Colorado");
 
     // ⛔ THE OTHER HALF OF THE SAME DEFECT: the raw registry-drift diagnostic text must never
     // leak into this panel at all — it is developer-facing, and B685200's fix keeps it out of
@@ -273,11 +275,11 @@ test.describe("NEW-2 — a merge group never offers a sub-source the site's own 
     await expect(row).not.toContainText("no vector source registered");
   });
 
-  test("a Colorado site's \"Water & sewer\" row never offers the Texas-only providers, and honestly reports it has nothing wired up here", async ({ page }) => {
+  test("a Colorado site's \"Water & Sewer\" row never offers the Texas-only providers, and honestly reports it has nothing wired up here", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await openPlannerFor(page, CO_SITE);
 
-    const row = page.locator(WATER_SEWER);
+    const row = await layerRow(page, "water_sewer");
     await expect(row).toBeVisible();
     await row.locator('input[type="checkbox"]').first().check();
 
@@ -289,24 +291,23 @@ test.describe("NEW-2 — a merge group never offers a sub-source the site's own 
     await expect(row.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
 
     // The row still says something honest — never silent (LOUD-FAILURE) — and it is the plain,
-    // user-facing wording, never the internal "no vector source registered" diagnostic.
-    await expect(row).toContainText("Planyr doesn't have a data source wired up");
+    // user-facing wording, never the internal "no vector source registered" diagnostic. It lives in the
+    // row's ▾ now (no persistent text under a row).
+    const menu = await openRowMenu(page, "water_sewer");
+    await expect(menu).toContainText("Planyr doesn't have a data source wired up");
     await expect(row).not.toContainText("no vector source registered");
 
     // The ⓘ lists only the in-state PROVIDER LINE (layerPanelInfo.js mergeGroupInfoSections:
     // one `"${label} — Source: ${source}"` line per member) — none of the Texas-only ones this
     // site could never be served by. ⛔ NOT a bare substring check for "CCN"/"MUD"/"Houston":
-    // the merge group's own GENERIC explanatory note (MERGE_GROUPS.water_sewer.note, always
-    // rendered first, unrelated to which members are in scope) legitimately mentions "CCN/MUD"
-    // in prose — asserting on the exact per-provider SOURCE lines is what actually distinguishes
-    // "the concept is explained" from "the Texas provider is offered here".
-    await page.getByRole("button", { name: "About Water & sewer" }).hover();
-    const popover = page.getByRole("note");
-    await expect(popover).toBeVisible();
-    await expect(popover).toContainText("Water & sanitation districts (Colorado) — Source: Colorado DOLA");
-    await expect(popover).not.toContainText("Source: PUC CCN"); // ccn_service
-    await expect(popover).not.toContainText("Source: TCEQ, via HARC"); // jur_mud
-    await expect(popover).not.toContainText("Source: City of Houston"); // coh_water / coh_ww
+    // the merge group's own GENERIC explanatory note legitimately mentions "CCN/MUD" in prose —
+    // asserting on the exact per-provider SOURCE lines is what distinguishes "the concept is
+    // explained" from "the Texas provider is offered here".
+    const info = await readRowInfo(page, "water_sewer");
+    expect(info).toContain("Water & Sanitation Districts (Colorado) — Source: Colorado DOLA");
+    expect(info).not.toContain("Source: PUC CCN"); // ccn_service
+    expect(info).not.toContain("Source: TCEQ, via HARC"); // jur_mud
+    expect(info).not.toContain("Source: City of Houston"); // coh_water / coh_ww
   });
 });
 
@@ -324,14 +325,13 @@ test.describe("NEW-1 — the map finder gets the same treatment (one mechanism, 
     await page.goto("/#/site-planner", { waitUntil: "load" });
     await page.waitForTimeout(2500);
 
-    const finder = '[data-testid="layer-panel"][data-surface="finder"]';
-    // The finder's Layers card may start collapsed; open whichever visible control reveals it.
-    const toggle = page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first();
-    if (await toggle.count()) await toggle.click().catch(() => {});
-    await expect(page.locator(finder)).toBeVisible({ timeout: 20000 });
+    // The finder's Imagery & Layers card may start collapsed; open it through its own chip.
+    const chip = page.getByTestId("finder-layers-expand").filter({ visible: true });
+    if (await chip.count()) await chip.first().click();
+    await expect(page.locator(panelSel("finder"))).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(500);
 
-    const row = page.locator(`${finder} [data-testid="layer-row-contours"]`);
+    const row = await layerRow(page, "contours", { surface: "finder" });
     await expect(row).toBeVisible();
     await row.locator('input[type="checkbox"]').first().check();
     await page.waitForTimeout(500);
@@ -340,8 +340,10 @@ test.describe("NEW-1 — the map finder gets the same treatment (one mechanism, 
     await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
     await expect(row.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
 
-    const fix = row.getByTestId("layer-zoom-fix");
-    await expect(fix).toHaveText(/^Not showing at this zoom — zoom in \d+ levels?$/);
+    const menu = await openRowMenu(page, "contours", { surface: "finder" });
+    await expect(menu.getByTestId("layer-zoom-note")).toContainText("Too far out to draw");
+    const fix = menu.getByTestId("layer-zoom-fix");
+    await expect(fix).toHaveText(/Zoom In/);
     await fix.click();
     await page.waitForTimeout(1200);
 

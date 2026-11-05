@@ -26,10 +26,11 @@ import { fileURLToPath } from "node:url";
 import {
   SMOOTH_ZOOM_KEY, SMOOTH_ZOOM_DEFAULT, readSmoothZoom, writeSmoothZoom, subscribeSmoothZoom,
 } from "../src/shared/prefs/smoothZoom.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
-const planner = read("src/workspaces/site-planner/SitePlanner.jsx");
+const planner = plannerSource();
 const viewMenu = read("src/workspaces/site-planner/components/ViewMenu.jsx");
 const settings = read("src/shared/ui/InterfaceSettings.jsx");
 const header = read("src/shared/ui/AppHeader.jsx");

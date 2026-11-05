@@ -41,7 +41,7 @@ export const LAYER_SCOPE = {
   // national
   fema: "national", wetlands: "national", hifld_tx: "national", elevation: "national",
   osm_power: "national", osm_hydrants: "national", mapillary: "national",
-  eia_gas: "national", eia_petroleum: "national", eia_crude: "national", eia_hgl: "national", // NEW-1 — EIA is national; the FL/GA gate is `states`, not scope
+  eia_gas: "national", eia_petroleum: "national", eia_crude: "national", eia_hgl: "national", // NEW-1 — EIA is national; the where-it-is-offered gate is `statesNot: ["TX"]` on the registry row, not scope
   // statewide
   txrrc_pipe: "statewide", txrrc_wells: "statewide",
   jur_county: "statewide", jur_city: "statewide", jur_mud: "statewide",
@@ -278,8 +278,11 @@ export function boundsFromLeaflet(map) {
 // persisted, like the existing planarfit:* UI prefs. localStorage is guarded so the
 // module imports cleanly in the node test environment.
 // ---------------------------------------------------------------------------
-export const RELEVANCE_MODES = ["all", "dim", "hide"];
-export const DEFAULT_RELEVANCE = "dim";
+/* NEW-2 — two modes only: "all" = Show (a row with no data near the view renders like every other row) and "hide" (it is not
+ * rendered). The old "dim" mode faded a real layer toward the background, which the text-hierarchy rule forbids; a STORED "dim"
+ * (the old default) is read as Show by `normalizeMode`, so nobody's saved preference is left naming a mode that no longer exists. */
+export const RELEVANCE_MODES = ["all", "hide"];
+export const DEFAULT_RELEVANCE = "all";
 export const DEFAULT_RADIUS_MI = 2.5;
 const RADIUS_MIN = 0.5, RADIUS_MAX = 25;
 const PREF_KEY = "planarfit:relevance:v1";

@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   COMMANDS, COMMAND_GROUPS, searchCommands, fuzzyScore, resolveLabel, isCommandDisabled,
   toggleBoldPatch, toggleItalicPatch, toggleUnderlinePatch, toggleStrikePatch,
-  toggleWrapPatch, increaseIndentPatch, decreaseIndentPatch,
+  toggleWrapPatch,
 } from "../src/workspaces/model/lib/commandRegistry.js";
 import { NUMBER_FORMATS } from "../src/workspaces/model/lib/numberFormats.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomStepButton } from "../src/workspaces/model/lib/sheetZoom.js";
@@ -24,7 +24,7 @@ function makeCtx(overrides = {}) {
     traceMode: "precedents", traceLevel: 1, traceTruncated: false, traceNoFurther: false, traceCellCount: 1,
     inconsistencyCount: 0, inconsistencyPanelOpen: false, nameManagerOpen: false, zoom: 1,
     onUndo: vi.fn(), onRedo: vi.fn(), onFormatPainterToggle: vi.fn(), onClearFormatting: vi.fn(),
-    onSetCellStyle: vi.fn(), onAutoColorToggle: vi.fn(), onMergeToggle: vi.fn(),
+    onSetCellStyle: vi.fn(), onAdjustIndent: vi.fn(), onAutoColorToggle: vi.fn(), onMergeToggle: vi.fn(),
     onApplyFormat: vi.fn(), onNumberFormatOp: vi.fn(), onApplyBorder: vi.fn(),
     onInsertRow: vi.fn(), onInsertColumn: vi.fn(), onDeleteRow: vi.fn(), onDeleteColumn: vi.fn(),
     onSetFreezeTopRow: vi.fn(), onSetFreezeFirstColumn: vi.fn(), onSetFreezeAtSelection: vi.fn(), onUnfreeze: vi.fn(),
@@ -35,6 +35,11 @@ function makeCtx(overrides = {}) {
     onAddSheetTab: vi.fn(), onDuplicateSheetCurrent: vi.fn(), onRenameSheetCurrent: vi.fn(), onDeleteSheetCurrent: vi.fn(),
     onExportXlsx: vi.fn(), onExportCsv: vi.fn(), onOpenImportXlsx: vi.fn(), onOpenImportCsv: vi.fn(),
     onZoomChange: vi.fn(),
+    // Excel shortcuts block (2026-10-29)
+    onOpenDialog: vi.fn(), onOpenColorMenu: vi.fn(), onMergeCenter: vi.fn(), onClipboardCommand: vi.fn(), onCancelCut: vi.fn(),
+    onFillRight: vi.fn(), onInsertDate: vi.fn(), onInsertTime: vi.fn(), onCopyAbove: vi.fn(), onAutoSum: vi.fn(), onRepeatLast: vi.fn(),
+    onClearAll: vi.fn(), onClearContents: vi.fn(), onInsertCells: vi.fn(), onDeleteCells: vi.fn(), onHide: vi.fn(), onUnhide: vi.fn(),
+    onAutofit: vi.fn(), onSheetStep: vi.fn(), onSaveNow: vi.fn(),
     ...overrides,
   };
 }
@@ -60,8 +65,8 @@ const EXPECT = {
   "valign-middle": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith({ valign: null }),
   "valign-bottom": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith({ valign: "bottom" }),
   "wrap-text": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(toggleWrapPatch(ctx.activeStyle)),
-  "indent-increase": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(increaseIndentPatch(ctx.activeStyle)),
-  "indent-decrease": (ctx) => expect(ctx.onSetCellStyle).toHaveBeenCalledWith(decreaseIndentPatch(ctx.activeStyle)),
+  "indent-increase": (ctx) => expect(ctx.onAdjustIndent).toHaveBeenCalledWith(1),
+  "indent-decrease": (ctx) => expect(ctx.onAdjustIndent).toHaveBeenCalledWith(-1),
   "merge-toggle": (ctx) => expect(ctx.onMergeToggle).toHaveBeenCalledTimes(1),
   "percent-style": (ctx) => expect(ctx.onApplyFormat).toHaveBeenCalledWith("0.0%"),
   "currency-style": (ctx) => expect(ctx.onApplyFormat).toHaveBeenCalledWith("$#,##0.00"),
@@ -102,6 +107,42 @@ const EXPECT = {
   "zoom-in": (ctx) => expect(ctx.onZoomChange).toHaveBeenCalledWith(zoomStepButton(ctx.zoom, 1)),
   "zoom-out": (ctx) => expect(ctx.onZoomChange).toHaveBeenCalledWith(zoomStepButton(ctx.zoom, -1)),
   "zoom-reset": (ctx) => expect(ctx.onZoomChange).toHaveBeenCalledWith(DEFAULT_ZOOM),
+  // ---- Excel shortcuts block (2026-10-29): each id is named by a chord in lib/keymap.js and/or a leaf in lib/keyTips.js ----
+  "number-comma-style": (ctx) => expect(ctx.onApplyFormat).toHaveBeenCalledWith("#,##0.00"),
+  "number-format-dialog": (ctx) => expect(ctx.onOpenDialog).toHaveBeenCalledWith("number-format"),
+  "border-thick-box": (ctx) => expect(ctx.onApplyBorder).toHaveBeenCalledWith({ edges: ["top", "right", "bottom", "left"], style: "thick", mode: "outline" }),
+  "fill-color-menu": (ctx) => expect(ctx.onOpenColorMenu).toHaveBeenCalledWith("fill"),
+  "font-color-menu": (ctx) => expect(ctx.onOpenColorMenu).toHaveBeenCalledWith("font"),
+  "merge-cells": (ctx) => expect(ctx.onMergeToggle).toHaveBeenCalledTimes(1),
+  "merge-center": (ctx) => expect(ctx.onMergeCenter).toHaveBeenCalledTimes(1),
+  "unmerge-cells": (ctx) => expect(ctx.onMergeToggle).toHaveBeenCalledTimes(1),
+  "freeze-toggle": (ctx) => expect(ctx.onSetFreezeAtSelection).toHaveBeenCalledTimes(1),
+  copy: (ctx) => expect(ctx.onClipboardCommand).toHaveBeenCalledWith("copy"),
+  cut: (ctx) => expect(ctx.onClipboardCommand).toHaveBeenCalledWith("cut"),
+  paste: (ctx) => expect(ctx.onClipboardCommand).toHaveBeenCalledWith("paste"),
+  "cancel-cut": (ctx) => expect(ctx.onCancelCut).toHaveBeenCalledTimes(1),
+  "fill-right": (ctx) => expect(ctx.onFillRight).toHaveBeenCalledTimes(1),
+  "insert-date": (ctx) => expect(ctx.onInsertDate).toHaveBeenCalledTimes(1),
+  "insert-time": (ctx) => expect(ctx.onInsertTime).toHaveBeenCalledTimes(1),
+  "copy-above-formula": (ctx) => expect(ctx.onCopyAbove).toHaveBeenCalledWith("formula"),
+  "copy-above-value": (ctx) => expect(ctx.onCopyAbove).toHaveBeenCalledWith("value"),
+  autosum: (ctx) => expect(ctx.onAutoSum).toHaveBeenCalledTimes(1),
+  "repeat-last": (ctx) => expect(ctx.onRepeatLast).toHaveBeenCalledTimes(1),
+  "clear-all": (ctx) => expect(ctx.onClearAll).toHaveBeenCalledTimes(1),
+  "clear-contents": (ctx) => expect(ctx.onClearContents).toHaveBeenCalledTimes(1),
+  "insert-cells": (ctx) => expect(ctx.onInsertCells).toHaveBeenCalledTimes(1),
+  "delete-cells": (ctx) => expect(ctx.onDeleteCells).toHaveBeenCalledTimes(1),
+  "hide-rows": (ctx) => expect(ctx.onHide).toHaveBeenCalledWith("rows"),
+  "unhide-rows": (ctx) => expect(ctx.onUnhide).toHaveBeenCalledWith("rows"),
+  "hide-columns": (ctx) => expect(ctx.onHide).toHaveBeenCalledWith("columns"),
+  "unhide-columns": (ctx) => expect(ctx.onUnhide).toHaveBeenCalledWith("columns"),
+  "autofit-column": (ctx) => expect(ctx.onAutofit).toHaveBeenCalledWith("columns"),
+  "autofit-row": (ctx) => expect(ctx.onAutofit).toHaveBeenCalledWith("rows"),
+  "column-width": (ctx) => expect(ctx.onOpenDialog).toHaveBeenCalledWith("column-width"),
+  "row-height": (ctx) => expect(ctx.onOpenDialog).toHaveBeenCalledWith("row-height"),
+  "sheet-prev": (ctx) => expect(ctx.onSheetStep).toHaveBeenCalledWith(-1),
+  "sheet-next": (ctx) => expect(ctx.onSheetStep).toHaveBeenCalledWith(1),
+  "save-now": (ctx) => expect(ctx.onSaveNow).toHaveBeenCalledTimes(1),
 };
 
 const isGeneratedNumberFormatId = (id) => NUMBER_FORMATS.some((f) => `numfmt-${f.id}` === id);
@@ -222,15 +263,6 @@ describe("style toggle-patch helpers — the SAME computation Ribbon.jsx's own b
   it("toggleWrapPatch toggles on/null", () => {
     expect(toggleWrapPatch({})).toEqual({ wrap: true });
     expect(toggleWrapPatch({ wrap: true })).toEqual({ wrap: null });
-  });
-  it("increaseIndentPatch increments from unset", () => {
-    expect(increaseIndentPatch({})).toEqual({ indent: 1 });
-    expect(increaseIndentPatch({ indent: 2 })).toEqual({ indent: 3 });
-  });
-  it("decreaseIndentPatch floors at 0 and stores null rather than 0 (matches setCellStyle's own null-means-unset convention)", () => {
-    expect(decreaseIndentPatch({ indent: 1 })).toEqual({ indent: null });
-    expect(decreaseIndentPatch({})).toEqual({ indent: null });
-    expect(decreaseIndentPatch({ indent: 2 })).toEqual({ indent: 1 });
   });
 });
 

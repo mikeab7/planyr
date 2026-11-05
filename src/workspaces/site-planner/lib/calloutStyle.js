@@ -33,6 +33,27 @@ import { FAMILY_DEFAULT_INK, CALLOUT_DEFAULT_FILL } from "../../../shared/theme/
 
 export const CALLOUT_LINE = { weight: 1.4, dash: "solid", opacity: 1, fillOpacity: 1 };
 
+/** Vertical alignment of the text inside a box taller than its text (NEW-1, layout "A"). A box only
+ *  ever grows taller than its text when the user has dragged a fixed height (`boxH`), so every box
+ *  saved before this existed is unaffected whichever default is picked; "top" is the Word/Bluebeam
+ *  default and keeps the text where an untouched box has always drawn it. */
+export const CALLOUT_VALIGNS = ["top", "middle", "bottom"];
+export const CALLOUT_VALIGN_DEFAULT = "top";
+
+/** What a box DISPLAYS for its stored text. All caps is a display transform — the stored text is never
+ *  rewritten, so turning it off restores the typed case. */
+export function calloutDisplayText(text, st) {
+  const t = text == null ? "" : String(text);
+  return st && st.caps ? t.toUpperCase() : t;
+}
+
+/** Extra distance (px) the text block sits below the box's top padding edge when the box is taller
+ *  than its text: top → 0, middle → half the slack, bottom → all of it. Never negative. */
+export function calloutVAlignOffset(valign, boxH, naturalH) {
+  const slack = Math.max(0, (Number.isFinite(boxH) ? boxH : 0) - (Number.isFinite(naturalH) ? naturalH : 0));
+  return valign === "bottom" ? slack : valign === "middle" ? slack / 2 : 0;
+}
+
 /** The style keys a callout/text box can carry, in panel order. */
 export const CALLOUT_STD_KEYS = ["weight", "dash", "opacity", "fillOpacity"];
 
@@ -52,6 +73,9 @@ export function calloutStyle(c) {
     bold: !!o.bold,
     italic: !!o.italic,
     underline: !!o.underline,
+    strike: !!o.strike,
+    caps: !!o.caps,
+    valign: CALLOUT_VALIGNS.includes(o.valign) ? o.valign : CALLOUT_VALIGN_DEFAULT,
     padX: o.padX ?? 14, padY: o.padY ?? 8,
     lineHeight: o.lineHeight ?? 1.3,
     weight: Number.isFinite(o.weight) && o.weight > 0 ? o.weight : CALLOUT_LINE.weight,
@@ -59,4 +83,13 @@ export function calloutStyle(c) {
     opacity: Number.isFinite(o.opacity) ? o.opacity : CALLOUT_LINE.opacity,
     fillOpacity: Number.isFinite(o.fillOpacity) ? o.fillOpacity : CALLOUT_LINE.fillOpacity,
   };
+}
+
+/** The SVG/CSS `text-decoration` value for a resolved style, or undefined when neither is on.
+ *  Strikethrough composes with underline ("underline line-through"). */
+export function calloutTextDecoration(st) {
+  const parts = [];
+  if (st && st.underline) parts.push("underline");
+  if (st && st.strike) parts.push("line-through");
+  return parts.length ? parts.join(" ") : undefined;
 }

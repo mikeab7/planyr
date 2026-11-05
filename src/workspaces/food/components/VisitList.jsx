@@ -32,8 +32,11 @@
 import { useMemo, useState } from "react";
 import { manualPinKey } from "../lib/foodStore.js";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
+import { chipBox } from "../lib/chipStyle.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { FOOD_TYPE } from "../lib/foodType.js";
 
 const SORTS = {
   // A dateless visit's key is "" — the empty string, which string-compares BELOW every real
@@ -105,7 +108,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
         <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <tr style={{ textAlign: "left", ...FOOD_TYPE.label }}>{/* NEW-1 (2026-10-27): the ONE caps label (lib/foodType.js) */}
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Place</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Rating</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>
@@ -134,10 +137,10 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>
                       {v.placeName}
                       {v.isWishlist && (
-                        <span style={{
-                          marginLeft: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                        <span data-chip="" style={{
+                          ...chipBox(16, 5), marginLeft: 6, fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
                           color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
-                          borderRadius: RADIUS.pill, padding: "0 5px",
+                          borderRadius: RADIUS.pill,
                         }}>
                           Want to try
                         </span>
@@ -145,8 +148,8 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating ? (
-                        <span style={{
-                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
+                        <span data-chip="" style={{
+                          ...chipBox(20, 6), borderRadius: RADIUS.sm, fontWeight: 700,
                           background: colorForRating(v.rating), color: textColorForRating(v.rating),
                         }}>
                           {/* Number(): rating is a Postgres numeric(4,2) column, so PostgREST's raw
@@ -161,8 +164,8 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating_ambiance ? (
-                        <span style={{
-                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
+                        <span data-chip="" style={{
+                          ...chipBox(20, 6), borderRadius: RADIUS.sm, fontWeight: 700,
                           background: colorForRating(v.rating_ambiance), color: textColorForRating(v.rating_ambiance),
                         }}>
                           {Number(v.rating_ambiance)}/10

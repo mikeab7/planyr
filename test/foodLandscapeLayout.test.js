@@ -67,7 +67,7 @@ describe("wiring", () => {
   });
   it("a landscape phone gets the side card, an upright one the bottom sheet, desktop the rail", () => {
     const v = src("components/VisitPanel.jsx");
-    expect(v).toMatch(/if \(landscape\) \{\s*return <SideDock/);
+    expect(v).toMatch(/if \(landscape\) \{\s*return <DraftStoreContext\.Provider value=\{drafts\}><SideDock/);
     expect(v).toMatch(/const isMobile = narrowPhone && !landscape/);
   });
   it("the one-row header is opt-in and only Food turns it on", () => {

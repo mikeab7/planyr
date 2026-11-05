@@ -1,0 +1,436 @@
+{
+"recordedOn": "2026-10-21",
+"query": "outStatistics count(OBJECTID) groupBy COUNTY_ID, COUNTY_NAME on Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
+"counties": [
+{
+"id": 1,
+"name": "Anderson",
+"parcels": 36479
+},
+{
+"id": 2,
+"name": "Bedford",
+"parcels": 24049
+},
+{
+"id": 3,
+"name": "Benton",
+"parcels": 16538
+},
+{
+"id": 4,
+"name": "Bledsoe",
+"parcels": 11386
+},
+{
+"id": 5,
+"name": "Blount",
+"parcels": 66556
+},
+{
+"id": 6,
+"name": "Bradley",
+"parcels": 51030
+},
+{
+"id": 7,
+"name": "Campbell",
+"parcels": 27574
+},
+{
+"id": 8,
+"name": "Cannon",
+"parcels": 8507
+},
+{
+"id": 9,
+"name": "Carroll",
+"parcels": 19950
+},
+{
+"id": 10,
+"name": "Carter",
+"parcels": 32016
+},
+{
+"id": 11,
+"name": "Cheatham",
+"parcels": 21805
+},
+{
+"id": 13,
+"name": "Claiborne",
+"parcels": 22532
+},
+{
+"id": 14,
+"name": "Clay",
+"parcels": 7137
+},
+{
+"id": 15,
+"name": "Cocke",
+"parcels": 25276
+},
+{
+"id": 16,
+"name": "Coffee",
+"parcels": 32729
+},
+{
+"id": 17,
+"name": "Crockett",
+"parcels": 10174
+},
+{
+"id": 18,
+"name": "Cumberland",
+"parcels": 65809
+},
+{
+"id": 20,
+"name": "Decatur",
+"parcels": 14118
+},
+{
+"id": 21,
+"name": "DeKalb",
+"parcels": 18330
+},
+{
+"id": 22,
+"name": "Dickson",
+"parcels": 28417
+},
+{
+"id": 23,
+"name": "Dyer",
+"parcels": 21595
+},
+{
+"id": 24,
+"name": "Fayette",
+"parcels": 26349
+},
+{
+"id": 25,
+"name": "Fentress",
+"parcels": 16435
+},
+{
+"id": 26,
+"name": "Franklin",
+"parcels": 26853
+},
+{
+"id": 27,
+"name": "Gibson",
+"parcels": 30845
+},
+{
+"id": 28,
+"name": "Giles",
+"parcels": 18832
+},
+{
+"id": 29,
+"name": "Grainger",
+"parcels": 15616
+},
+{
+"id": 30,
+"name": "Greene",
+"parcels": 43083
+},
+{
+"id": 31,
+"name": "Grundy",
+"parcels": 11958
+},
+{
+"id": 32,
+"name": "Hamblen",
+"parcels": 30955
+},
+{
+"id": 34,
+"name": "Hancock",
+"parcels": 6164
+},
+{
+"id": 35,
+"name": "Hardeman",
+"parcels": 20300
+},
+{
+"id": 36,
+"name": "Hardin",
+"parcels": 28584
+},
+{
+"id": 37,
+"name": "Hawkins",
+"parcels": 36573
+},
+{
+"id": 38,
+"name": "Haywood",
+"parcels": 11388
+},
+{
+"id": 39,
+"name": "Henderson",
+"parcels": 18071
+},
+{
+"id": 40,
+"name": "Henry",
+"parcels": 26001
+},
+{
+"id": 42,
+"name": "Houston",
+"parcels": 6654
+},
+{
+"id": 43,
+"name": "Humphreys",
+"parcels": 13798
+},
+{
+"id": 44,
+"name": "Jackson",
+"parcels": 9025
+},
+{
+"id": 45,
+"name": "Jefferson",
+"parcels": 34889
+},
+{
+"id": 46,
+"name": "Johnson",
+"parcels": 14174
+},
+{
+"id": 48,
+"name": "Lake",
+"parcels": 3901
+},
+{
+"id": 49,
+"name": "Lauderdale",
+"parcels": 13799
+},
+{
+"id": 50,
+"name": "Lawrence",
+"parcels": 25815
+},
+{
+"id": 51,
+"name": "Lewis",
+"parcels": 8717
+},
+{
+"id": 52,
+"name": "Lincoln",
+"parcels": 19947
+},
+{
+"id": 53,
+"name": "Loudon",
+"parcels": 36530
+},
+{
+"id": 54,
+"name": "McMinn",
+"parcels": 31392
+},
+{
+"id": 55,
+"name": "McNairy",
+"parcels": 19266
+},
+{
+"id": 56,
+"name": "Macon",
+"parcels": 14440
+},
+{
+"id": 57,
+"name": "Madison",
+"parcels": 49516
+},
+{
+"id": 58,
+"name": "Marion",
+"parcels": 22276
+},
+{
+"id": 59,
+"name": "Marshall",
+"parcels": 19524
+},
+{
+"id": 60,
+"name": "Maury",
+"parcels": 52849
+},
+{
+"id": 61,
+"name": "Meigs",
+"parcels": 9506
+},
+{
+"id": 62,
+"name": "Monroe",
+"parcels": 30148
+},
+{
+"id": 64,
+"name": "Moore",
+"parcels": 4257
+},
+{
+"id": 65,
+"name": "Morgan",
+"parcels": 14381
+},
+{
+"id": 66,
+"name": "Obion",
+"parcels": 20061
+},
+{
+"id": 67,
+"name": "Overton",
+"parcels": 15547
+},
+{
+"id": 68,
+"name": "Perry",
+"parcels": 9858
+},
+{
+"id": 69,
+"name": "Pickett",
+"parcels": 5922
+},
+{
+"id": 70,
+"name": "Polk",
+"parcels": 13127
+},
+{
+"id": 71,
+"name": "Putnam",
+"parcels": 38445
+},
+{
+"id": 72,
+"name": "Rhea",
+"parcels": 21506
+},
+{
+"id": 73,
+"name": "Roane",
+"parcels": 35887
+},
+{
+"id": 74,
+"name": "Robertson",
+"parcels": 37790
+},
+{
+"id": 76,
+"name": "Scott",
+"parcels": 15373
+},
+{
+"id": 77,
+"name": "Sequatchie",
+"parcels": 12669
+},
+{
+"id": 78,
+"name": "Sevier",
+"parcels": 70744
+},
+{
+"id": 80,
+"name": "Smith",
+"parcels": 12092
+},
+{
+"id": 81,
+"name": "Stewart",
+"parcels": 12521
+},
+{
+"id": 82,
+"name": "Sullivan",
+"parcels": 78824
+},
+{
+"id": 83,
+"name": "Sumner",
+"parcels": 86672
+},
+{
+"id": 84,
+"name": "Tipton",
+"parcels": 30135
+},
+{
+"id": 85,
+"name": "Trousdale",
+"parcels": 5467
+},
+{
+"id": 86,
+"name": "Unicoi",
+"parcels": 10298
+},
+{
+"id": 87,
+"name": "Union",
+"parcels": 14736
+},
+{
+"id": 88,
+"name": "Van Buren",
+"parcels": 7334
+},
+{
+"id": 89,
+"name": "Warren",
+"parcels": 23859
+},
+{
+"id": 90,
+"name": "Washington",
+"parcels": 61009
+},
+{
+"id": 91,
+"name": "Wayne",
+"parcels": 13014
+},
+{
+"id": 92,
+"name": "Weakley",
+"parcels": 20187
+},
+{
+"id": 93,
+"name": "White",
+"parcels": 17866
+},
+{
+"id": 95,
+"name": "Wilson",
+"parcels": 66902
+}
+]
+}

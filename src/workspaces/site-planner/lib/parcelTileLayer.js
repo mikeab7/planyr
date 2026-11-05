@@ -134,9 +134,9 @@ export class ParcelIndex {
 /** Draw every item the index holds for tile (x, y, z) onto `ctx` as ONE stroked path. `ctx` is
  *  already scaled to CSS pixels (the caller applies devicePixelRatio). Returns how many lots drew. Pure
  *  of the DOM: the unit test hands it a counting mock context. */
-export function drawParcelTile(ctx, index, { x, y, z, size = 256, style = PARCEL_OUTLINE_STYLE }) {
+export function drawParcelTile(ctx, index, { x, y, z, size = 256, style = PARCEL_OUTLINE_STYLE, items: given = null }) {
   ctx.clearRect(0, 0, size, size);
-  const items = index.query(tileLngLatBounds(x, y, z, size));
+  const items = given || index.query(tileLngLatBounds(x, y, z, size));
   if (!items.length) return 0;
   const scale = WORLD_PX * Math.pow(2, z), ox = x * size, oy = y * size;
   ctx.beginPath();

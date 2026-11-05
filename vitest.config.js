@@ -1,4 +1,15 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
+
+// NEW-7 — THE SUITE RUNS IN UTC, wherever it runs. Measured 2026-10-19 in a container with
+// TZ=America/Chicago: `npm test` → 6 failed / 24,683 passed, every failure in two files that build
+// a date from `toISOString().slice(0, 10)` (a UTC calendar day) and compare it to a product
+// "today" computed in LOCAL time (scheduleHealth's `localIso`) — a midnight-UTC instant is the
+// previous day in Central, so "one day overdue" was not overdue. CI was green only because GitHub
+// runners are UTC. Pinned here, before `defineConfig`, so every worker inherits it (Node reads
+// `process.env.TZ` dynamically; workers inherit the parent's env). The two files were ALSO made
+// timezone-honest in their own right (test/scheduleHealth.test.js builds LOCAL calendar days), so
+// the pin is belt-and-braces, not what the tests mean.
+process.env.TZ = "UTC";
 
 // Standalone, intentionally minimal. These are fast, pure-logic smoke tests over
 // the shared/canonical modules that multiple parallel branches keep editing
@@ -17,5 +28,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.js"],
+    // NEW-1 (2026-11-05): checks over the REAL ledger content run in the ledger-health job (vitest.ledger.config.js),
+    // never in main's build — the ledger lives on its own branch and must not be able to fail an unrelated PR.
+    exclude: [...configDefaults.exclude, "test/ledger-data/**"],
   },
 });

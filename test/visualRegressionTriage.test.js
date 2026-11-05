@@ -5,7 +5,7 @@
  * unit-tested directly rather than only exercised end-to-end.
  */
 import { describe, it, expect } from "vitest";
-import { buildTriageMarkdown } from "../ui-audit/visual-regression.mjs";
+import { buildTriageMarkdown, renderOsLabel } from "../ui-audit/visual-regression.mjs";
 
 describe("buildTriageMarkdown — the CI-authored-baseline triage artifact", () => {
   it("lists every row, changed and unchanged alike, never silently dropping one", () => {
@@ -63,5 +63,18 @@ describe("buildTriageMarkdown — the CI-authored-baseline triage artifact", () 
     expect(withReason).toContain("a real reason");
     const noReason = buildTriageMarkdown([]);
     expect(noReason).toMatch(/\(none\)/);
+  });
+});
+
+describe("renderOsLabel — names the OS a visual-regression render ran on (B2445360)", () => {
+  it("reads PRETTY_NAME out of /etc/os-release, quoted or not", () => {
+    expect(renderOsLabel('NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 26.04 LTS"\nVERSION_ID="26.04"\n')).toBe("Ubuntu 26.04 LTS");
+    expect(renderOsLabel("PRETTY_NAME=Debian\n")).toBe("Debian");
+  });
+
+  it("never throws: missing or unreadable text reads 'unknown OS'", () => {
+    expect(renderOsLabel("")).toBe("unknown OS");
+    expect(renderOsLabel(undefined)).toBe("unknown OS");
+    expect(renderOsLabel("NAME=Ubuntu\n")).toBe("unknown OS");
   });
 });

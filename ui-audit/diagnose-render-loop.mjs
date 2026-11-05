@@ -128,7 +128,7 @@ async function main() {
   await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   const roadCount = await page.evaluate(() => {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = m[Object.keys(m)[0]] || {};
     return (s.els || []).filter((e) => e.type === "road").length;
   });

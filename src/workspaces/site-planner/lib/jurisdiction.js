@@ -40,9 +40,20 @@ import { resolveCounty } from "./countyPolygons.js";
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
 /* NEW-1 (Georgia) — the pure Georgia facts: envelope, consolidated city-counties, the county-governs note. */
 import { GA_ENVELOPE, georgiaConsolidatedFor, GA_COUNTY_GOVERNS_NOTE, GA_CONSOLIDATED_NOTE } from "./georgiaJurisdiction.js";
+/* NEW-1 (Tennessee) — the pure Tennessee facts: routing box, the three consolidated governments, the road-authority decoder. */
+import {
+  TN_ENVELOPE, inTennesseeEnvelope, inTennesseeOutline, tennesseeConsolidatedFor, tnRoadAuthority,
+  TN_COUNTY_GOVERNS_NOTE, TN_CONSOLIDATED_NOTE, SHELBY_UDC_NOTE, shelbyUdcApplies,
+} from "./tennesseeJurisdiction.js";
+/* NEW-1 (DeSoto County MS, B2507059) — the pure Mississippi facts: the routing box, the relay URLs of the county's own County Outline + Municipalities layers. */
+import { inDeSotoEnvelope, MS_COUNTY_URL, MS_CITY_URL, MS_COUNTY_GOVERNS_NOTE } from "./mississippiJurisdiction.js";
 /* NEW-1 (California) — the California twin: envelope, the one consolidated city-county (San Francisco), the
  * county-governs note, and the three legal city names the CDT layer publishes. Same shape, same rules. */
 import { inCaliforniaEnvelope, CA_CITY_DISPLAY, californiaConsolidatedFor, CA_COUNTY_GOVERNS_NOTE, CA_CONSOLIDATED_NOTE } from "./californiaJurisdiction.js";
+import {
+  inNewJerseyEnvelope, inNewYorkEnvelope, inNjNyEnvelope, municipalName, municipalType, NY_COUNTY_DISPLAY,
+  NJ_MUNICIPAL_NOTE, NY_MUNICIPAL_NOTE,
+} from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 /* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
 import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
@@ -50,7 +61,9 @@ import { etjNamesOf } from "./etjNames.js";
  * area is 96.2% on the owner's own Goose Creek parcel, and 70–85% where it is 99% at Grand Port. */
 import {
   areaShare, unionAreaSqM, ringsAsPolygons, esriPolygons, SQM_PER_ACRE,
+  siteWindow, clipPolysToWindow, normalizePolys, distanceToBoundaryM, subtractNorm,
 } from "./jurisdictionShare.js";
+import { yieldToMain } from "./yieldToMain.js";
 /* ⛔ NEW-1 — "city limits" is three jurisdiction classes, not a boolean. */
 import { classifyCityLimit, CITY_LIMIT_CLASSES, dominantClass } from "./cityLimitClass.js";
 
@@ -103,6 +116,50 @@ export const JURISDICTION_SOURCES = {
     sourceName: "Georgia DCA municipal boundaries",
     note: "Georgia city limits (DCA). A point in no city is unincorporated — the county governs (Georgia has no ETJ). Screening only — verify with the city.",
   },
+  /* NEW-1 (Tennessee) — the State of Tennessee's county and city layers. Same roles as Georgia's, so every downstream consumer
+   * reads them identically. Routed to by `countySourcesForPoint` / `citySourcesForPoint` inside the Tennessee box, never by
+   * default. The city layer is NAME-only and a city that crosses a county line is one polygon, so the county of a site always
+   * comes from the county role at the site itself. */
+  countyTn: {
+    id: "countyTn", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyTn.serviceUrl,
+    fields: { name: "NAME", fips: "GEOID" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "State of Tennessee county boundaries",
+    note: "Tennessee county boundary (State of Tennessee, edited 2026-03-18). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (DeSoto County MS, B2507059) — the county's own County Outline and Municipalities layers (BaseLayers 8 and 4, through the relay). Same roles as Tennessee's, so every
+   * downstream consumer reads them identically. Routed to ONLY inside DeSoto County's box, where the Tennessee line makes the two states' routing boxes overlap: both state layers are
+   * asked there and the one that names a county decides the state. Mississippi has no ETJ, and outside the five cities the county governs. */
+  countyMs: {
+    id: "countyMs", role: "county", label: "County", kind: "polygon",
+    url: MS_COUNTY_URL,
+    fields: { name: "COUNTY" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "DeSoto County, MS GIS — County Outline",
+    note: "DeSoto County boundary (the county's own GIS). Screening only — verify with the jurisdiction.",
+  },
+  cityMs: {
+    id: "cityMs", role: "city", label: "City limits", kind: "polygon",
+    url: MS_CITY_URL,
+    fields: { name: "NAME" },
+    titleCaseName: true, // the layer publishes OLIVE BRANCH / HORN LAKE in capitals
+    fullPurposeOnly: true,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "DeSoto County, MS GIS — Municipalities",
+    note: "DeSoto County's five city limits (Olive Branch, Southaven, Horn Lake, Hernando, Walls). A point in none is unincorporated — the county governs (Mississippi has no ETJ). Screening only — verify with the city.",
+  },
+  cityTn: {
+    id: "cityTn", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityTn.serviceUrl,
+    fields: { name: "NAME" },
+    fullPurposeOnly: GIS_SOURCES.cityTn.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "State of Tennessee city boundaries",
+    note: "Tennessee city limits (State of Tennessee, edited 2026-03-18 — annexations since then are not in it). A point in no city is unincorporated — the county governs (Tennessee has no ETJ). Screening only — verify with the city.",
+  },
   /* NEW-1 (California) — CDT State Geoportal counties. Same `role: "county"`, so every downstream consumer
    * reads it identically; only endpoint and field names differ. Routed to by `countySourcesForPoint` inside
    * the California envelope, never by default. */
@@ -127,6 +184,81 @@ export const JURISDICTION_SOURCES = {
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "California CDT city boundaries",
     note: "California city limits (CDT State Geoportal). A point in no city is unincorporated — the county governs (California cities have no ETJ). Screening only — verify with the city.",
+  },
+  /* NEW-1 (New Jersey) — NJOGIS counties. Same `role: "county"`, so every downstream consumer reads it identically.
+   * Routed to by `countySourcesForPoint` inside the NJ outline, never by default. NJOGIS publishes the county ALL-CAPS. */
+  countyNj: {
+    id: "countyNj", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyNj.serviceUrl,
+    fields: { name: "COUNTY", fips: "FIPSSTCO" },
+    titleCaseName: true,
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "NJOGIS statewide county boundaries",
+    note: "New Jersey county boundary (NJOGIS). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (New Jersey) — NJOGIS municipal boundaries: all 564 municipalities tile the state, one government per polygon, so
+   * `fullPurposeOnly`. The internal name carries the type as a suffix (see njnyJurisdiction.js); `municipalTier` marks a
+   * source the containment probe must ask in addition to the others in its role. */
+  cityNj: {
+    id: "cityNj", role: "city", label: "Municipal boundaries", kind: "polygon",
+    url: GIS_SOURCES.cityNj.serviceUrl,
+    fields: { name: "NAME", type: "MUN_TYPE", fips: "CENSUS2020" },
+    municipal: { baseField: "NAME", typeField: "MUN_TYPE" },
+    municipalTier: "municipality",
+    fullPurposeOnly: GIS_SOURCES.cityNj.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 14 * 24 * 3600 * 1000,
+    sourceName: "NJOGIS municipal boundaries",
+    note: "New Jersey municipal boundaries (NJOGIS). Every acre of the state is in a municipality — the municipality, not the county, is the zoning and site-plan authority. Screening only — verify with the municipality.",
+  },
+  /* NEW-1 (New York) — NYS ITS Civil Boundaries. Counties: "St Lawrence" is printed "St. Lawrence". */
+  countyNy: {
+    id: "countyNy", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyNy.serviceUrl,
+    fields: { name: "NAME", fips: "FIPS_CODE" },
+    nameDisplay: NY_COUNTY_DISPLAY,
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "NYS ITS statewide county boundaries",
+    note: "New York county boundary (NYS ITS Civil Boundaries). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (New York) — the CITY ROLE IS THREE TIERS here: a village, then the town that holds it, or a city instead of a town.
+   * Zoning and site-plan approval come from the village if the site is in one, otherwise the town or city, so all three are
+   * asked and all three are named. Listed in governing order; the label sorts them again so the order never depends on a response. */
+  villageNy: {
+    id: "villageNy", role: "city", label: "Village limits", kind: "polygon",
+    url: GIS_SOURCES.villageNy.serviceUrl,
+    fields: { name: "NAME", town: "TOWN", fips: "FIPS_CODE" },
+    municipal: { baseField: "NAME", typeConst: "Village" },
+    municipalTier: "village",
+    fullPurposeOnly: GIS_SOURCES.villageNy.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 14 * 24 * 3600 * 1000,
+    sourceName: "NYS ITS Civil Boundaries (villages)",
+    note: "New York village limits (NYS ITS). A village's own board approves zoning and site plans inside it. Screening only — verify with the village.",
+  },
+  cityNy: {
+    id: "cityNy", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityNy.serviceUrl,
+    fields: { name: "NAME", fips: "FIPS_CODE" },
+    municipal: { baseField: "NAME", typeConst: "City" },
+    municipalTier: "city",
+    fullPurposeOnly: GIS_SOURCES.cityNy.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 14 * 24 * 3600 * 1000,
+    sourceName: "NYS ITS Civil Boundaries (cities)",
+    note: "New York city limits (NYS ITS). New York City is one city spanning five counties. Screening only — verify with the city.",
+  },
+  townNy: {
+    id: "townNy", role: "city", label: "Town limits", kind: "polygon",
+    url: GIS_SOURCES.townNy.serviceUrl,
+    fields: { name: "NAME", fips: "FIPS_CODE" },
+    municipal: { baseField: "NAME", typeConst: "Town" },
+    municipalTier: "town",
+    fullPurposeOnly: GIS_SOURCES.townNy.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 14 * 24 * 3600 * 1000,
+    sourceName: "NYS ITS Civil Boundaries (towns)",
+    note: "New York town limits (NYS ITS). Land outside a city is in a town; a village inside it may be the zoning authority instead. Screening only — verify with the town.",
   },
   city: {
     id: "city", role: "city", label: "City limits", kind: "polygon",
@@ -165,6 +297,17 @@ export const JURISDICTION_SOURCES = {
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "TxDOT Roadway Inventory",
     note: "Maintenance authority from the TxDOT Roadway Inventory. Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess. Screening only.",
+  },
+  /* NEW-1 (Tennessee) — TDOT's Road Segment inventory (updated monthly): GOVT_CTRL names who owns and maintains each segment. The
+   * Tennessee counterpart of the TxDOT row above, chosen by LOCATION in `identifyRoadAuthority` so no caller changes. */
+  roadTn: {
+    id: "roadTn", role: "road", label: "Road maintenance authority", kind: "line",
+    url: GIS_SOURCES.roadTn.serviceUrl,
+    fields: { name: "RTE_NME", authority: "GOVT_CTRL", system: "ADM_SYS", funcClass: "FUNC_CLASS", route: "NBR_RTE" },
+    tolMeters: 40,
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "TDOT Road Segment inventory",
+    note: "Maintenance authority from TDOT's Road Segment inventory (government control per segment; updated monthly). Screening only — verify with the road's owner.",
   },
 };
 
@@ -482,10 +625,27 @@ export function countySourcesForPoint(lat, lng) {
    * here proves nothing about the state: the DCA layer answering with a polygon is what says "Georgia"
    * (`identifyJurisdiction` flags an empty, error-free answer as `notInGeorgia`). Overlaps neither TX
    * nor CO, so those two resolve exactly as they always did. */
-  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyGa];
+  /* NEW-1 (Tennessee) — same contract: the box only ROUTES (it also holds KY / VA / NC / GA / AL / MS / AR / MO ground); the state's own
+   * county layer answering with a polygon is what says "Tennessee". Tennessee's box and Georgia's overlap along the Georgia line
+   * (Chattanooga is in both), so a point in both asks BOTH layers and whichever has a county wins. Overlaps none of TX / CO / CA / NJ / NY. */
+  {
+    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng), ms = inDeSotoEnvelope(lat, lng);
+    /* NEW-1 (DeSoto MS) — DeSoto County's box overlaps Tennessee's along the state line (Southaven / Horn Lake sit within a mile of it): ask both, the one that names a county decides. */
+    if (ms) return [JURISDICTION_SOURCES.countyMs, tn ? JURISDICTION_SOURCES.countyTn : null].filter(Boolean);
+    if (tn) return [JURISDICTION_SOURCES.countyTn, ga ? JURISDICTION_SOURCES.countyGa : null].filter(Boolean);
+    if (ga) return [JURISDICTION_SOURCES.countyGa];
+  }
   /* NEW-1 (California) — same contract as Georgia's: the envelope only ROUTES (it also holds NV / OR / AZ /
    * Baja ground); the CDT layer answering with a polygon is what says "California". Overlaps none of TX / CO / GA. */
   if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.countyCa];
+  /* NEW-1 (New Jersey + New York) — same contract: the outline only ROUTES (it also holds PA / DE / CT / MA / VT ground); the
+   * state's own county layer answering with a polygon is what says "New Jersey" / "New York". The two outlines overlap along the
+   * Hudson / Arthur Kill / Rockland–Bergen line, so a point in both asks BOTH layers and whichever has a county wins. Overlaps
+   * none of TX / CO / GA / CA. */
+  {
+    const nj = inNewJerseyEnvelope(lat, lng), ny = inNewYorkEnvelope(lat, lng);
+    if (nj || ny) return [nj ? JURISDICTION_SOURCES.countyNj : null, ny ? JURISDICTION_SOURCES.countyNy : null].filter(Boolean);
+  }
   return []; // honest "no live county-boundary source configured here" — see countyAtPoint's offline floor
 }
 
@@ -527,8 +687,24 @@ export const CITY_SOURCES = [
 export function citySourcesForPoint(lat, lng) {
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
-  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.cityGa];
+  {
+    const tn = inTennesseeEnvelope(lat, lng), ga = inEnvelope(GA_ENVELOPE, lat, lng); // NEW-1 (Tennessee) — overlaps Georgia's box; both are asked there
+    if (inDeSotoEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityMs, tn ? JURISDICTION_SOURCES.cityTn : null].filter(Boolean); // NEW-1 (DeSoto MS) — likewise; the Tennessee layer answers empty on Mississippi ground
+    if (tn) return [JURISDICTION_SOURCES.cityTn, ga ? JURISDICTION_SOURCES.cityGa : null].filter(Boolean);
+    if (ga) return [JURISDICTION_SOURCES.cityGa];
+  }
   if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityCa]; // NEW-1 (California) — likewise
+  /* NEW-1 (New Jersey + New York) — NJ: the one municipal layer. NY: village, city, town (governing order). A point in both
+   * outlines asks all four; the one that is not that state's simply answers empty. */
+  {
+    const nj = inNewJerseyEnvelope(lat, lng), ny = inNewYorkEnvelope(lat, lng);
+    if (nj || ny) {
+      return [
+        ...(nj ? [JURISDICTION_SOURCES.cityNj] : []),
+        ...(ny ? [JURISDICTION_SOURCES.villageNy, JURISDICTION_SOURCES.cityNy, JURISDICTION_SOURCES.townNy] : []),
+      ];
+    }
+  }
   return CITY_SOURCES.filter((s) => {
     if (s.bbox) return bboxHas(s.bbox, lat, lng);
     if (s === JURISDICTION_SOURCES.city) return inEnvelope(TX_ENVELOPE, lat, lng); // the un-bboxed TxGIO statewide row
@@ -650,7 +826,10 @@ const trimUrl = (s) => String(s).replace(/\/+$/, "");
 const defaultFetchJson = (url, opts) => fetchArcgisJson(url, opts);
 
 function buildQueryUrl(base, params) {
-  const u = new URL(trimUrl(base) + "/query");
+  /* A source `url` may be ROOT-RELATIVE (the same-origin /gis-proxy relay — DeSoto County MS, B2507059); `new URL` with no base throws on it, so it resolves against the app's own
+   * origin (an absolute URL ignores the base). Outside a browser the fallback origin only keeps a unit test's query shape intact. */
+  const origin = typeof window !== "undefined" && window.location && window.location.origin ? window.location.origin : "https://planyr.io";
+  const u = new URL(trimUrl(base) + "/query", origin);
   u.searchParams.set("f", "json");
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
   return u.toString();
@@ -778,6 +957,10 @@ export function normalizeFeature(source, attrs) {
   if (out.name != null && out.name !== "" && source.titleCaseName) out.name = titleCase(out.name);
   // NEW-1 (California) — a source may map a layer's LEGAL names onto the names people use (display only).
   if (out.name != null && source.nameDisplay && source.nameDisplay[out.name]) out.name = source.nameDisplay[out.name];
+  /* NEW-1 (New Jersey + New York) — a municipal source builds its name from the base name + the TYPE of government, as a
+   * suffix ("Hempstead Village", "Hempstead Town"): the Village of Hempstead and the Town of Hempstead are different
+   * governments with one bare name, and `placeKey` would merge them if the type were not part of the name. */
+  if (source.municipal) { const mn = municipalName(source.municipal, attrs); if (mn) out.name = mn; }
   /* ⛔ NEW-1 — THE JURISDICTION CLASS TRAVELS WITH THE FEATURE, from here on. Baytown's one
    * city-limits table mixes full-purpose limits with limited-purpose and strip annexation, and a
    * consumer that reads only `name` cannot tell them apart — which is how 24 of 38 polygons came to
@@ -1027,10 +1210,24 @@ export function shareQueryRing(rings, padDeg = 0.0008) {
 /* Turn one source's returned features into per-city, per-CLASS area shares — whole-site and
  * per-parcel. Pure (no network): the fetch is the caller's. */
 export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
+  const it = cityAreasSteps(src, features, rings, ref, opts);
+  for (;;) { const r = it.next(); if (r.done) return r.value; }
+}
+
+/* ⛔ THE SAME COMPUTATION, AS A STEP GENERATOR — slow report 55807aa9. A share is the one place the app runs clipper over a
+ * whole published city boundary, and it runs INSIDE the continuation of the response that carried it, so every millisecond of
+ * it is charged to `Response.json.then` and blocks the page (measured: ~0.5–0.9 s per plan open on Bolt-on). Each `yield` below
+ * is a unit of work small enough to be a task of its own; `cityAreasFromFeaturesAsync` drives them with a time budget and lets
+ * the page paint between. The sync wrapper above drives the identical steps to completion, so every caller that wants the
+ * answer NOW (the unit suites, the recorded fixtures) gets byte-for-byte the same result. */
+function* cityAreasSteps(src, features, rings, ref, opts = {}) {
   const toleranceM = Number(opts.toleranceM) || 0;
   const site = ringsAsPolygons(rings);
   const totalSqM = unionAreaSqM(site, ref);
   const parcels = (rings || []).map((r) => ringsAsPolygons([r]));
+  // Everything below measures ground under the SITE, so a jurisdiction is cut to a window around it first (see siteWindow).
+  const pad = opts.windowPadM != null ? opts.windowPadM : SHARE_WINDOW_PAD_M;
+  const win = siteWindow(rings, pad);
   const groups = new Map();
   for (const f of features || []) {
     const n = normalizeFeature(src, f.attrs || {});
@@ -1052,19 +1249,51 @@ export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
    * repo predates the geometry request, and without this they would all have read "no city".) */
   const withGeom = (features || []).filter((f) => f && f.geometry && (f.geometry.rings || []).length).length;
   if ((features || []).length && !withGeom) return null;
+  yield;
   const rows = [];
   for (const g of groups.values()) {
     if (!g.polys.length) continue;
-    const whole = areaShare(site, g.polys, ref, { toleranceM, totalSqM });
+    const near = clipPolysToWindow(g.polys, win);
+    // dissolved ONCE per jurisdiction and reused by the whole-site measurement and every parcel's
+    const rawClipNorm = near.length ? normalizePolys(near, ref) : null;
+    /* ⛔ NEW-1 (Concept A, 2026-10-28) — AN ETJ IS MEASURED NET OF EVERY CITY'S FULL-PURPOSE LIMITS. An ETJ is by definition the
+     * ground OUTSIDE all city limits (Local Gov't Code ch. 42), so where a published ETJ polygon lies under a city's limits the
+     * two layers are disagreeing and the limits win. Before this, a site wholly inside Sugar Land read "City of Sugar Land ·
+     * Houston ETJ" because Houston's ETJ polygon (H-GAC's AND Houston's own planning layer — identical coverage) overlaps ~8% of
+     * the ground around it that Sugar Land's limits (TxGIO AND Fort Bend CAD) also cover. `opts.clipOutNorm` is the dissolved
+     * union of those limits; it is applied to ETJ groups ONLY, and the share that was removed is kept (`overlapShare`) so the
+     * disagreement is reported, not hidden. */
+    const net = src.role === "etj" && opts.clipOutNorm && opts.clipOutNorm.length && rawClipNorm;
+    const clipNorm = net ? subtractNorm(rawClipNorm, opts.clipOutNorm) : rawClipNorm;
+    yield;
+    const whole = areaShare(site, near, ref, { toleranceM, totalSqM, clipNorm, skipDistance: true });
+    let overlapShare = 0;
+    if (net) {
+      const rawWhole = areaShare(site, near, ref, { toleranceM, totalSqM, clipNorm: rawClipNorm, skipDistance: true });
+      overlapShare = Math.max(0, (rawWhole.rawShare || 0) - (whole.rawShare || 0));
+      yield;
+    }
+    /* `distanceM` stays EXACT. The nearest-boundary distance is measured on the windowed polygon, which is exact whenever it is
+     * under the window's pad (every cut edge is at least that far away); a boundary further than the pad — or an empty
+     * window — takes the full published polygon, so the answer never changes, it only stops being paid for in the common case. */
+    let distanceM = distanceToBoundaryM(site, near, ref);
+    if (!(distanceM < pad)) distanceM = distanceToBoundaryM(site, g.polys, ref);
+    whole.distanceM = distanceM;
+    yield;
+    const perParcel = [];
+    for (let i = 0; i < parcels.length; i++) {
+      // a parcel's own distance is not part of any answer (only the whole-site one is carried), so it is not computed
+      const r = areaShare(parcels[i], near, ref, { toleranceM, clipNorm, skipDistance: true });
+      perParcel.push({ index: i, id: (opts.parcelIds || [])[i] || null, acres: r.totalAcres, share: r.share, insideAcres: r.insideAcres });
+      yield;
+    }
     rows.push({
       name: g.name, class: g.class, sourceId: src.id, uniqueIds: uniq(g.uniqueIds),
       share: whole.share, rawShare: whole.rawShare,
       insideAcres: whole.insideAcres, distanceM: whole.distanceM,
       confident: whole.confident, refusedReason: whole.refusedReason,
-      perParcel: parcels.map((p, i) => {
-        const r = areaShare(p, g.polys, ref, { toleranceM });
-        return { index: i, id: (opts.parcelIds || [])[i] || null, acres: r.totalAcres, share: r.share, insideAcres: r.insideAcres };
-      }),
+      overlapShare,
+      perParcel,
     });
   }
   rows.sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0));
@@ -1076,6 +1305,28 @@ export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
     parcelIds: (opts.parcelIds || []).slice(0, (rings || []).length),
     rows,
   };
+}
+
+/* How far around the site a jurisdiction is kept when it is measured. Must exceed any distance a caller reads as exact; 3 km is
+ * the margin the recorded fixtures were cut at (`record-jurisdiction-areas`), and the exact fallback above covers the rest. */
+export const SHARE_WINDOW_PAD_M = 3000;
+/* The longest one slice of share work may run before it hands the thread back. Well under the 50 ms long-task line, because a
+ * slice can only be as short as its smallest indivisible step. */
+export const SHARE_SLICE_MS = 12;
+
+/* Drive the steps with a time budget. `yieldFn` hands the thread back (default: scheduler.yield, else a macrotask), `now` is
+ * injectable so the slicing is testable without a clock. Resolves to exactly what `cityAreasFromFeatures` returns. */
+export async function cityAreasFromFeaturesAsync(src, features, rings, ref, opts = {}) {
+  const now = opts.now || (() => (typeof performance !== "undefined" ? performance.now() : Date.now()));
+  const yieldFn = opts.yieldFn || yieldToMain;
+  const budget = opts.sliceMs ?? SHARE_SLICE_MS;
+  const it = cityAreasSteps(src, features, rings, ref, opts);
+  let sliceStart = now();
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    if (now() - sliceStart >= budget) { await yieldFn(); sliceStart = now(); }
+  }
 }
 
 /* Merge several sources' answers. Where two sources both hold a city in the same class, the larger
@@ -1111,6 +1362,7 @@ export function mergeCityAreas(results) {
     totalSqM: base.totalSqM, totalAcres: base.totalAcres,
     parcelCount: base.parcelCount, parcelAcres: base.parcelAcres, parcelIds: base.parcelIds,
     sources: live.map((r) => r.sourceId),
+    netted: live.every((r) => r.netted),
     rows: Array.from(byKey.values()).sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0)),
   };
 }
@@ -1124,7 +1376,17 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
   const fetchJson = opts.fetchJson || defaultFetchJson;
   const ring = shareQueryRing(rings);
   if (!ring) return Promise.resolve(null);
-  const key = "jurshare:" + src.id + ":" + ringKey(rings.flat());
+  // NEW-1 — an ETJ answer netted against city limits is a different quantity from the raw one cached before; its own key.
+  const net = src.role === "etj" && typeof opts.clipOutFn === "function";
+  const key = "jurshare:" + src.id + (net ? ":net1" : "") + ":" + ringKey(rings.flat());
+  /* ⛔ ONE COMPUTE PER (cache, key) AT A TIME. The header badge and the drainage authority both ask for the same share the
+   * moment a plan opens, and `cache.swr` only dedupes a FETCH (via the shared request coalescer), not the clipper work that
+   * follows it — so a cold open measured the same city boundary being dissolved twice, back to back. A second caller now
+   * joins the first's promise; the entry is dropped when it settles, so a later call (after an edit, or a failed attempt)
+   * computes afresh exactly as before. Keyed per cache object so an injected test cache never shares state with the app's. */
+  let live = _shareInFlight.get(cache);
+  if (!live) { live = new Map(); _shareInFlight.set(cache, live); }
+  if (live.has(key)) return live.get(key);
   const fetcher = async () => {
     const params = buildIdentifyParams(src, { ring, returnGeometry: true, maxVerts: 8 });
     const direct = buildQueryUrl(src.url, params);
@@ -1133,13 +1395,58 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
     if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
     else j = await fetchJson(direct);
     const feats = (j.features || []).map((f) => ({ attrs: f.attributes || {}, geometry: f.geometry || null }));
-    const res = cityAreasFromFeatures(src, feats, rings, ref, { parcelIds: opts.parcelIds });
+    /* The city limits to net against are fetched only when there is an ETJ polygon to net. If they cannot be had the ETJ share is
+     * still measured (un-netted, exactly as before) but is marked `netted: false` and dropped from the cache below, so a raw answer
+     * is never remembered under the netted key; the caller then leans on the whole-site-in-a-city rule instead. */
+    let clipOutNorm = null;
+    if (net && feats.length) clipOutNorm = await opts.clipOutFn();
+    const res = await cityAreasFromFeaturesAsync(src, feats, rings, ref, { parcelIds: opts.parcelIds, sliceMs: opts.sliceMs, yieldFn: opts.yieldFn, now: opts.now, clipOutNorm });
     // A null here is "could not measure" — cache nothing, so the next call retries.
     if (!res) throw new Error("city share: source answered without geometry");
+    res.netted = net && (!feats.length || !!clipOutNorm);
     return res;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: src.ttl || 0 });
-  return fresh.then((r) => (r && r.data && r.data.rows ? r.data : null)).catch(() => null);
+  const out = fresh.then((r) => {
+    if (net && r && r.data && r.data.netted === false) { try { cache.remove(key); } catch (_) { /* best effort */ } }
+    return r && r.data && r.data.rows ? r.data : null;
+  }).catch(() => null)
+    .finally(() => { live.delete(key); });
+  live.set(key, out);
+  return out;
+}
+const _shareInFlight = new WeakMap();
+
+/* NEW-1 — the dissolved union of every FULL-PURPOSE city limit around the site, as clipper paths in the identify's own frame, for
+ * netting an ETJ against. Limited-purpose and strip annexation are not subtracted (they are not the city's whole reach and are
+ * reported in their own field). Cut to the same window the shares use. Null only when NO city source answered; one source down
+ * while another answered just subtracts less. */
+export async function fetchCityClipOut(citySrcs, rings, ref, opts = {}) {
+  const fetchJson = opts.fetchJson || defaultFetchJson;
+  const ring = shareQueryRing(rings);
+  if (!ring || !(citySrcs || []).length) return null;
+  const win = siteWindow(rings, SHARE_WINDOW_PAD_M);
+  const polys = [];
+  let answered = 0;
+  await Promise.all(citySrcs.map(async (src) => {
+    try {
+      const params = buildIdentifyParams(src, { ring, returnGeometry: true, maxVerts: 8 });
+      const direct = buildQueryUrl(src.url, params);
+      const proxied = src.viaProxy ? proxiedQueryUrl(src.url, params) : null;
+      let j;
+      if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
+      else j = await fetchJson(direct);
+      for (const f of (j && j.features) || []) {
+        if (!f || !f.geometry) continue;
+        const n = normalizeFeature(src, f.attributes || {});
+        if ((n.limitClass || CITY_LIMIT_CLASSES.unknown.id) !== CITY_LIMIT_CLASSES.full.id) continue;
+        polys.push(...esriPolygons(f.geometry));
+      }
+      answered++;
+    } catch (_) { /* this source adds nothing to the netting; see the header */ }
+  }));
+  if (!answered) return null;
+  return normalizePolys(clipPolysToWindow(polys, win), ref);
 }
 
 export async function identifyJurisdiction(lng, lat, opts = {}) {
@@ -1172,6 +1479,13 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   // NEW-2 — the rings the SHARE is measured on: every active parcel when the caller has them.
   const shareRings = (opts.rings && opts.rings.length ? opts.rings : (opts.ring ? [opts.ring] : []))
     .filter((r) => r && r.length >= 3);
+  /* NEW-1 — the city limits an ETJ is netted against, fetched at most once and only if an ETJ share pass actually needs them. */
+  const clipCitySrcs = shareRings.length && roles.includes("etj")
+    ? citySourcesForPoint(lat, lng).filter((s) => s && !s.unavailable && s.url) : [];
+  let clipOutPromise = null;
+  const clipOutFn = clipCitySrcs.length
+    ? () => (clipOutPromise || (clipOutPromise = fetchCityClipOut(clipCitySrcs, shareRings, [lng, lat], opts)))
+    : null;
   await Promise.all(roles.map(async (role) => {
     const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
     if (!srcs.length) {
@@ -1180,7 +1494,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       /* NEW-1 (Georgia) — Georgia has NO ETJ, so "no ETJ layer for this area yet" would be a false
        * promise of a coming feature (and would put ETJ wording on a Georgia site). The role is simply
        * not applicable there: silent, like every other role with nothing to ask. */
-      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inCaliforniaEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inTennesseeEnvelope(lat, lng) && !inDeSotoEnvelope(lat, lng) && !inCaliforniaEnvelope(lat, lng) && !inNjNyEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
       return;
     }
     opts.onStatus && opts.onStatus(role, "loading");
@@ -1207,6 +1521,9 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const names = uniq(parts.flatMap((p) => p.names));
     const ages = parts.map((p) => p.ageMs).filter((a) => a != null);
     out[role] = names;
+    // NEW-1 (New Jersey + New York) — WHICH county source named the county. The NJ and NY routing outlines overlap on the
+    // Hudson, so both layers are asked there and the state is whichever one answered — never the outline itself.
+    if (role === "county") out.countySourceIds = srcs.filter((_, i) => parts[i] && parts[i].names.length).map((sx) => sx.id);
     if (role === "etj") {
       out.etjUndetermined = parts.flatMap((p) => p.undetermined || []);
       out.etjReleased = uniq(parts.flatMap((p) => p.released || []));
@@ -1313,21 +1630,25 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
          * outside Baytown while SIX of the sixteen drawn parcels are inside it. Gating the probe on
          * the ring result would have kept the app blind to exactly the site the owner flagged. */
         try {
-          const anyRes = probe.points.length === 1
-            // One parcel: the multipoint IS the point query, so ask it the cheap way and share the
-            // cache entry the per-parcel pass below is about to want.
-            ? await identifySource(srcs[0], { lng: probe.points[0][0], lat: probe.points[0][1] }, opts).fresh
-            : await identifySource(srcs[0], { points: probe.points }, opts).fresh;
-          if (anyRes.error) { out.cityCentroid = null; out.cityAll = null; out.citySome = []; }
+          /* NEW-1 (New Jersey + New York) — Texas's city role is "the statewide row first, a city's own layer in addition", so the
+           * probe asks `srcs[0]`. NJ / NY have no such row: New York's city role is village + city + town, three layers that
+           * each answer a different tier, so the probe asks every `municipalTier` source and unions what they name. */
+          const probeSrcs = srcs.some((sx) => sx.municipalTier) ? srcs.filter((sx) => sx.municipalTier) : [srcs[0]];
+          const askNames = async (g) => {
+            const rs = await Promise.all(probeSrcs.map((ps) => identifySource(ps, g, opts).fresh));
+            if (rs.some((r) => r.error)) return null;
+            return uniq(rs.flatMap((r, i) => r.items.map((it) => normalizeFeature(probeSrcs[i], it.attrs).name)).filter((v) => v != null && v !== "").map(String));
+          };
+          // One parcel: the multipoint IS the point query, so ask it the cheap way and share the
+          // cache entry the per-parcel pass below is about to want.
+          const anyNames = await askNames(probe.points.length === 1
+            ? { lng: probe.points[0][0], lat: probe.points[0][1] }
+            : { points: probe.points });
+          if (anyNames === null) { out.cityCentroid = null; out.cityAll = null; out.citySome = []; }
           else {
-            const anyNames = uniq(anyRes.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
             if (!anyNames.length) { out.cityCentroid = []; out.cityAll = []; out.citySome = []; }
             else {
-              const per = await Promise.all(probe.points.map(async ([px, py]) => {
-                const r = await identifySource(srcs[0], { lng: px, lat: py }, opts).fresh;
-                if (r.error) return null;
-                return uniq(r.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
-              }));
+              const per = await Promise.all(probe.points.map(async ([px, py]) => askNames({ lng: px, lat: py })));
               if (per.some((p) => p === null)) {
                 // A parcel we could not test cannot be counted as inside OR outside. Fall back to
                 // the multipoint fact, which is honest but weaker: these cities hold PART of the site.
@@ -1367,7 +1688,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
        * A source that cannot be measured (no geometry returned, an outage) leaves the union-query
        * `names` from above untouched — exactly the city fallback's own contract. */
       const areaParts = await Promise.all(srcs.filter((sx) => !sx.release).map((s) =>
-        identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds })));
+        identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds, clipOutFn: role === "etj" ? clipOutFn : null })));
       const merged = mergeCityAreas(areaParts);
       if (merged && areaParts.some(Boolean)) {
         const stated = merged.rows.filter((r) => r.share != null);
@@ -1375,10 +1696,19 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
         // A clip below the floor is real (it touched) but never a governing peer — named on its own
         // field so a consumer (the badge's non-governing tail) can say so rather than drop it silent.
         const edge = uniq(stated.filter((r) => r.share < CITY_SHARE_MIN && r.rawShare > 0).map((r) => r.name));
-        if (governing.length || edge.length) {
+        if (governing.length || edge.length || (role === "etj" && merged.netted)) {
           out[role] = governing;
           out[role + "Edge"] = edge;
           out[role + "ShareMethod"] = "area";
+        }
+        if (role === "etj" && merged.netted) {
+          /* NEW-1 — this ETJ answer is net of city limits, so an empty list here is a FINDING ("none of the site is outside a city's
+           * limits and in an ETJ"), not "the area pass said nothing". What the netting removed rides along, so the overlap between
+           * the publishers' layers is disclosed rather than silently resolved. */
+          out.etjNetted = true;
+          out.etjCityOverlap = merged.rows
+            .filter((r) => (r.overlapShare || 0) >= CITY_SHARE_MIN)
+            .map((r) => ({ name: r.name, share: r.overlapShare }));
         }
       }
     }
@@ -1390,11 +1720,20 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
    * `formatJurisdictionBadge` returns null for it (its documented "nothing to show"). A FAILED county
    * lookup is NOT this — that is an outage, and stays an outage. A Georgia point that resolves a county
    * gets `state: "GA"`, which the label reads to say the county governs. */
-  const gaCountySrc = countySourcesForPoint(lat, lng)[0] === JURISDICTION_SOURCES.countyGa;
-  if (gaCountySrc && roles.includes("county")) {
+  /* ⛔ NEW-1 (Tennessee) — THE SAME RULE, AND THE ONE PLACE TWO STATES' BOXES MEET. Tennessee's routing box and Georgia's overlap along
+   * the Georgia line (Chattanooga, Cleveland, Rossville), so a point there asks BOTH county layers and the state is whichever one named a
+   * county — never the box. Neither naming one (an empty, error-free answer from every layer asked) means the point is in neither state. */
+  const gaTnCountySrcs = countySourcesForPoint(lat, lng).filter((sx) => sx === JURISDICTION_SOURCES.countyGa || sx === JURISDICTION_SOURCES.countyTn || sx === JURISDICTION_SOURCES.countyMs);
+  if (gaTnCountySrcs.length && roles.includes("county")) {
     const cs = out.sources.find((x) => x && x.id === "county");
-    if (out.county.length) out.state = "GA";
-    else if (cs && cs.state === "empty") { out.notInGeorgia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+    const ids = out.countySourceIds || [];
+    if (out.county.length) out.state = ids.includes("countyMs") ? "MS" : ids.includes("countyTn") ? "TN" : "GA"; // NEW-1 (DeSoto MS) — a DeSoto County polygon says Mississippi
+    else if (cs && cs.state === "empty") {
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyGa)) out.notInGeorgia = true;
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyTn)) out.notInTennessee = true;
+      if (gaTnCountySrcs.includes(JURISDICTION_SOURCES.countyMs)) out.notInMississippi = true;
+      out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = [];
+    }
   }
   /* ⛔ NEW-1 (California) — THE SAME RULE AS GEORGIA'S ABOVE: POINT-IN-POLYGON DECIDES "IS THIS CALIFORNIA",
    * NEVER THE ENVELOPE. The routing box holds Reno / Las Vegas's edge, southern Oregon, the Colorado River's
@@ -1405,6 +1744,17 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const cs = out.sources.find((x) => x && x.id === "county");
     if (out.county.length) out.state = "CA";
     else if (cs && cs.state === "empty") { out.notInCalifornia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+  }
+  /* ⛔ NEW-1 (New Jersey + New York) — THE SAME RULE AS GEORGIA'S AND CALIFORNIA'S: POINT-IN-POLYGON DECIDES "IS THIS NJ / NY", NEVER
+   * THE OUTLINE. The outlines hold slivers of PA / DE / CT / MA / VT and the other state across a river. County role routed to
+   * NJ's and/or NY's layer + answered WITHOUT error + no county from either = not NJ / NY: nothing to report, and nothing is
+   * guessed (least of all "Unincorporated" — neither state has any). A FAILED lookup stays an outage. */
+  const njnyCountySrcs = countySourcesForPoint(lat, lng).filter((sx) => sx === JURISDICTION_SOURCES.countyNj || sx === JURISDICTION_SOURCES.countyNy);
+  if (njnyCountySrcs.length && roles.includes("county")) {
+    const cs = out.sources.find((x) => x && x.id === "county");
+    const ids = out.countySourceIds || [];
+    if (out.county.length) out.state = ids.includes("countyNj") ? "NJ" : ids.includes("countyNy") ? "NY" : null;
+    else if (cs && cs.state === "empty") { out.notInNjNy = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
   }
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
    *
@@ -1425,6 +1775,17 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     : out.cityAll.length ? "in"
     : out.citySome.length ? "partial"
     : "none";
+  /* ⛔ NEW-1 (Concept A, 2026-10-28) — CITY LIMITS OUTRANK ANY ETJ HIT, EVEN WHERE THE ETJ COULD NOT BE NETTED BY AREA.
+   * The area pass above nets the ETJ against the limits exactly. This is the floor beneath it, for the two cases it cannot reach: a
+   * bare POINT (no ring to measure) and an area pass whose city limits or ETJ geometry did not come back. A full-purpose city that
+   * holds the WHOLE site (`cityContainment === "in"`) leaves no ground for any ETJ to govern — an ETJ never lies inside a city's
+   * limits — so an ETJ name here is the publishers' layers overlapping, and it is withheld from `etj` (and recorded). A PARTIAL
+   * city is deliberately left alone: the rest of the site is exactly where an ETJ can legitimately be. */
+  if (!out.etjNetted && out.cityContainment === "in" && (out.etj || []).length) {
+    out.etjCityOverlap = out.etj.map((name) => ({ name, share: null }));
+    out.etj = [];
+  }
+  out.etjCityOverlap = out.etjCityOverlap || [];
   /* NEW-2 — with the area pass the coverage IS complete: every active parcel is measured, not a
    * largest-first sample to 98% of drawn area, so `sampled`/`truncated` are both false by
    * construction and `areaShare` (the share of the site the TEST covered) is 1. The city shares
@@ -1472,6 +1833,16 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
+  /* NEW-1 (Tennessee) — Davidson, Moore and Trousdale are consolidated city-county governments with NO unincorporated land: a point in
+   * the county that no city polygon names (a hole in the published layer, or Moore County outside the Lynchburg town polygon) is still
+   * inside the Metro government, never "unincorporated". Said as data so no consumer reads the silence as a finding. */
+  if (out.state === "TN") {
+    const cons = tennesseeConsolidatedFor(out.county);
+    if (cons) { out.consolidated = cons; if (out.cityContainment === "none") out.unincorporated = false; }
+  }
+  /* NEW-1 (New Jersey + New York) — neither state has ANY unincorporated land, so "no municipality found" on a confirmed NJ / NY point
+   * is a data gap (open water, a boundary seam), never "unincorporated". Said as its own flag so nothing reads silence as a finding. */
+  if ((out.state === "NJ" || out.state === "NY") && out.cityContainment === "none") { out.unincorporated = false; out.noMunicipality = true; }
   // Cities the ring touches that hold NO part of the site — the footnote set, never the headline.
   const held = [...(out.cityAll || []), ...out.citySome];
   out.edgeOnlyCities = out.cityAll === null ? [] : out.city.filter((c) => !held.some((k) => samePlace(k, c)));
@@ -1530,8 +1901,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
   // NEW-1 (Georgia) — the point sat in the Georgia routing envelope but in no Georgia county (SC / AL / FL
   // ground): there is no Georgia jurisdiction to name, and guessing "Unincorporated" would be a fabrication.
-  if (j.notInGeorgia) return null;
+  if (j.notInGeorgia && !j.state) return null; // NEW-1 (Tennessee) — a Tennessee point inside Georgia's box sets notInGeorgia AND state TN; it must keep its Tennessee answer
+  if (j.notInTennessee && !j.state) return null; // NEW-1 (Tennessee) — the same, for KY / VA / NC / AL / MS / AR / MO ground inside the routing box (a GA point in the overlap sets notInTennessee and state GA — it keeps its Georgia answer)
+  if (j.notInMississippi && !j.state) return null; // NEW-1 (DeSoto MS) — the Tennessee line: a point the county layer does not hold is nothing to show here
   if (j.notInCalifornia) return null; // NEW-1 (California) — the same, for NV / OR / AZ / Baja ground inside the routing box
+  if (j.notInNjNy) return null; // NEW-1 (New Jersey + New York) — the same, for PA / DE / CT / MA / VT ground inside a routing outline
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
   // B209506 — dedupe an ETJ against the city limits by PLACE, not by string. "HOUSTON" from H-GAC and
   // "Houston" from TxGIO are the same city, and a case-sensitive compare rendered both.
@@ -1658,7 +2032,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
   /* ⛔ NEW-1 — the remainder's own wording carries NO governing separator. It is one slot in the
    * governing chain, so an inner " · " would read as a second slot; a parenthetical does not. */
   const ownEtj = etjsRaw.find((e) => partCities.some((c) => samePlace(c, e)));
-  const remainderLabel = ownEtj
+  const remainderLabel = j.state === "TN" && tennesseeConsolidatedFor(counties)
+    ? `rest in ${tennesseeConsolidatedFor(counties).label}` // NEW-1 (Tennessee) — a consolidated county has no unincorporated land
+    : (j.state === "NJ" || j.state === "NY")
+    ? "rest outside the mapped municipality" // NEW-1 — there is no ETJ and no unincorporated land here; the rest is another municipality, open water or off the map
+    : ownEtj
     ? "rest in its ETJ"
     : etjsAll.length
     ? `rest in ${etjsAll[0]} ETJ`
@@ -1685,7 +2063,16 @@ export function formatJurisdictionBadge(j, opts = {}) {
 
   // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
   // "not applicable", distinct from a failure, so it stays quiet.
-  const etjs = etjsAll;
+  /* ⛔ NEW-1 (Concept A, 2026-10-28) — A CITY THAT HOLDS THE WHOLE SITE LEAVES NO ETJ. The dedupe above only removes the SAME city's
+   * ETJ ("City of Houston" + "Houston ETJ"); a DIFFERENT city's ETJ polygon over ground inside the limits survived it, and the badge
+   * read "City of Sugar Land · Houston ETJ". An ETJ lies outside every city's limits by definition (Local Gov't Code ch. 42), so when
+   * the limits hold the whole site an ETJ name here is two published layers overlapping, and the limits win. What was withheld is
+   * kept in `etjOverlap` so the tooltip can say so. A SPLIT site (`partCities`) is untouched: its other part is where an ETJ lives. */
+  const etjOverlapNames = coreCities.length
+    ? uniq([...etjsRaw, ...(j.etjCityOverlap || []).map((o) => o.name)].filter(Boolean).map(String)
+        .filter((e) => !coreCities.some((c) => samePlace(c, e))))
+    : [];
+  const etjs = coreCities.length ? [] : etjsAll;
   // …and once a city is named as the ETJ, its edge sliver is not a second fact worth a slot.
   const edgeParts = edgeCities.filter((c) => !etjs.some((e) => samePlace(e, c)));
   const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
@@ -1700,9 +2087,10 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
   /* NEW-1 (Georgia, California) — "GA" | "CA" on a point-in-polygon-confirmed site, else null. The field names
    * (`gaState`, `gaNote`) predate California and are kept: they are consumed by the badge component and tests. */
-  const gaState = j.state === "GA" ? "GA" : j.state === "CA" ? "CA" : null;
+  const gaState = ["GA", "CA", "TN", "MS", "NJ", "NY"].includes(j.state) ? j.state : null; // NEW-1 — NJ / NY / TN ride the same state-aware label model
   const gaConsolidated = gaState === "GA" ? georgiaConsolidatedFor(counties, coreCities)
-    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities) : null;
+    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities)
+    : gaState === "TN" ? tennesseeConsolidatedFor(counties) : null; // NJ / NY: no consolidated city-county
   const label = formatJurisdictionLabel({
     state: gaState,
     consolidated: gaConsolidated,
@@ -1731,7 +2119,12 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // B793 — a mere edge-only sliver is qualified in-line, not flagged: the ⚑ straddle mark
   // stays for real multi-jurisdiction membership (2+ core cities, counties, or ISDs — or
   // 2+ cities with no centroid answer to arbitrate).
-  const straddle = counties.length > 1 || isds.length > 1 || coreCities.length > 1
+  /* NEW-1 (New York) — a village INSIDE a town is the normal nested answer, not a straddle: two municipalities of the SAME type
+   * (two villages, two towns) are. Texas keeps its rule exactly. */
+  const multiCore = (j.state === "NJ" || j.state === "NY")
+    ? Object.values(coreCities.reduce((m, c) => { const t = municipalType(c) || "?"; m[t] = (m[t] || 0) + 1; return m; }, {})).some((n) => n > 1)
+    : coreCities.length > 1;
+  const straddle = counties.length > 1 || isds.length > 1 || multiCore
     // NEW-1 — a genuinely SPLIT site is the straddle this mark was made for.
     || partCities.length > 0
     || (allCities === null && !containmentUnknown && cities.length > 1);
@@ -1743,7 +2136,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 (Georgia) — "GA" on a confirmed Georgia site, plus the consolidated city-county it sits in
     // (or null) and the one tooltip note that says the county governs (no ETJ exists there).
     state: gaState, consolidated: gaConsolidated,
-    gaNote: gaState ? [gaState === "CA" ? CA_COUNTY_GOVERNS_NOTE : GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? (gaState === "CA" ? CA_CONSOLIDATED_NOTE : GA_CONSOLIDATED_NOTE) : ""].filter(Boolean).join(" ") : null,
+    gaNote: gaState === "NJ" ? NJ_MUNICIPAL_NOTE : gaState === "NY" ? NY_MUNICIPAL_NOTE
+      : gaState === "TN" ? [!coreCities.length && !partCities.length && !gaConsolidated ? TN_COUNTY_GOVERNS_NOTE : "", // only where the county IS the local government — on a city site it is noise
+        gaConsolidated ? TN_CONSOLIDATED_NOTE : "", shelbyUdcApplies(counties, coreCities) ? SHELBY_UDC_NOTE : "",
+        `City limits are the State of Tennessee's layer, last edited ${GIS_SOURCES.cityTn.dataLastEdited}; annexations since then are not shown — verify with the city.`].filter(Boolean).join(" ")
+      : gaState ? [gaState === "CA" ? CA_COUNTY_GOVERNS_NOTE : GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? (gaState === "CA" ? CA_CONSOLIDATED_NOTE : GA_CONSOLIDATED_NOTE) : ""].filter(Boolean).join(" ") : null,
     /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
      * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
      * mid-word. It is the same principle as the two fields above: nothing reads back out of the
@@ -1770,6 +2167,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
     cityShareMethod: j.cityShareMethod || null,
     citySharePct: splitShare != null ? splitShare : (coreCities.length ? shareOfCity(coreCities[0]) : null),
     etjUnmappedCities: j.etjUnmappedCities || [],
+    /* NEW-1 — ETJ the publishers' layers claim over ground the city limits hold. Never governing; carried so the tooltip can disclose it. */
+    etjOverlap: etjOverlapNames,
+    etjOverlapNote: etjOverlapNames.length
+      ? `${etjOverlapNames.map((n) => `${n}'s ETJ layer`).join(" and ")} also covers part of this ground, but it lies inside ${coreCities.map((c) => `City of ${c}`).join(" + ")}'s limits. An ETJ is outside city limits by definition, so the limits govern.`
+      : null,
     // NEW-1 (DFW) — carried as data so a consumer never parses the label for it.
     etjUnavailable: !!j.etjUnavailable && !etjs.length,
     etjCoverage: j.etjCoverage || null,
@@ -1823,10 +2225,31 @@ const CO_COUNTY_NAME_TO_KEY = {
 export async function countyAtPoint(lng, lat, opts = {}) {
   // NEW-5 — the same region routing the identify uses, so a Colorado point is answered by
   // Colorado's boundary layer. Outside Colorado this is the exact TxDOT source it always was.
-  const src = countySourcesForPoint(lat, lng)[0];
+  const srcList = countySourcesForPoint(lat, lng);
+  const src = srcList[0];
   const isCo = src === JURISDICTION_SOURCES.countyCo;
   const isGa = src === JURISDICTION_SOURCES.countyGa; // NEW-1 (Georgia)
   const isCa = src === JURISDICTION_SOURCES.countyCa; // NEW-1 (California)
+  /* NEW-1 (New Jersey + New York) — the two outlines overlap on the Hudson, so a point there has TWO candidate sources; ask
+   * them in turn and let the one that names a county decide the state. */
+  const njny = srcList.filter((x) => x === JURISDICTION_SOURCES.countyNj || x === JURISDICTION_SOURCES.countyNy);
+  if (njny.length) {
+    for (const nsrc of njny) {
+      const nr = await identifySource(nsrc, { lng, lat }, opts).fresh;
+      const f = nr.items.map((it) => normalizeFeature(nsrc, it.attrs)).find((x) => x.name);
+      if (f) return { name: String(f.name), key: null, fips: f.fips ? String(f.fips) : null, state: nsrc === JURISDICTION_SOURCES.countyNj ? "NJ" : "NY", ageMs: nr.ageMs, ts: nr.ts };
+    }
+    // Neither layer named a county: fall through to the offline floor below (which never invents a Texas key for another state).
+  }
+  /* NEW-1 (Tennessee) — Tennessee's box overlaps Georgia's, so a point there has TWO candidate sources: ask them in turn (Tennessee
+   * first) and let the one that names a county decide the state. Neither naming one falls through to the offline floor below. */
+  if (srcList.includes(JURISDICTION_SOURCES.countyTn) || srcList.includes(JURISDICTION_SOURCES.countyMs)) {
+    for (const tsrc of srcList) {
+      const tr = await identifySource(tsrc, { lng, lat }, opts).fresh;
+      const f = tr.items.map((it) => normalizeFeature(tsrc, it.attrs)).find((x) => x.name);
+      if (f) return { name: String(f.name), key: null, fips: f.fips ? String(f.fips) : null, state: tsrc === JURISDICTION_SOURCES.countyMs ? "MS" : tsrc === JURISDICTION_SOURCES.countyTn ? "TN" : "GA", ageMs: tr.ageMs, ts: tr.ts };
+    }
+  }
   /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
    * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
    * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
@@ -1864,7 +2287,7 @@ export async function countyAtPoint(lng, lat, opts = {}) {
     }
     // B1551618 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
     // both TX and CO (and whose offline geometry ALSO couldn't answer, e.g. mid-load) as Texas.
-    return { name: null, key: null, fips: null, state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+    return { name: null, key: null, fips: null, state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : njny.length ? null : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   }
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
   // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
@@ -1894,8 +2317,31 @@ export async function countyAtPoint(lng, lat, opts = {}) {
 // authorities[] (distinct labels), ... } — or an honest empty/unknown when nothing
 // mapped is within tolerance (never a guess; the honest-unknown rule applies per road).
 // ---------------------------------------------------------------------------
+/* NEW-1 (Tennessee) — TDOT's functional-class text → the FHWA number the per-road list already decodes (1 Interstate … 7 Local),
+ * so a Tennessee road sorts and labels exactly like a Texas one. Unrecognised text stays null (no class is better than a wrong one). */
+export function tnFuncClassNumber(text) {
+  const t = String(text == null ? "" : text).toLowerCase();
+  if (!t) return null;
+  if (/interstate/.test(t)) return 1;
+  if (/freeway|expressway/.test(t)) return 2;
+  if (/principal arterial/.test(t)) return 3;
+  if (/minor arterial/.test(t)) return 4;
+  if (/minor collector/.test(t)) return 6;
+  if (/collector/.test(t)) return 5;
+  if (/local/.test(t)) return 7;
+  return null;
+}
+/* A TDOT road name, tidied: the inventory writes "CULVERT ST." with a trailing period (and a doubled one on a few). Display only. */
+const tnRoadName = (n) => {
+  const raw = n && n.name != null ? String(n.name).trim().replace(/\.+$/g, "").replace(/\s+/g, " ") : "";
+  return raw ? titleCase(raw).replace(/\bSr(\s*\d+)/g, "SR$1").replace(/\bUs(\s*\d+)/g, "US$1") : null;
+};
+
 export async function identifyRoadAuthority(lng, lat, opts = {}) {
-  const src = JURISDICTION_SOURCES.road;
+  /* NEW-1 (Tennessee) — the road source follows the LOCATION: a point inside the Tennessee outline reads TDOT's Road Segment inventory,
+   * everything else the TxDOT one it always did (callers already refuse to ask the TxDOT row off Texas ground). */
+  const tnRoad = opts.roadSource ? opts.roadSource === JURISDICTION_SOURCES.roadTn : inTennesseeOutline(lat, lng);
+  const src = opts.roadSource || (tnRoad ? JURISDICTION_SOURCES.roadTn : JURISDICTION_SOURCES.road);
   const ring = opts.ring && opts.ring.length >= 3 ? opts.ring : null;
   opts.onStatus && opts.onStatus("road", "loading");
   const q = identifySource(src, ring ? { ring } : { lng, lat }, opts);
@@ -1905,8 +2351,8 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const rows = r.items.map((it) => {
     const n = normalizeFeature(src, it.attrs);
     return {
-      route: n.route, name: roadDisplayName(n), system: n.system, funcClass: n.funcClass,
-      authority: roadAuthority(n.authority, n.system),
+      route: n.route, name: tnRoad ? tnRoadName(n) : roadDisplayName(n), system: n.system, funcClass: tnRoad ? tnFuncClassNumber(n.funcClass) : n.funcClass,
+      authority: tnRoad ? tnRoadAuthority(n.authority, n.system) : roadAuthority(n.authority, n.system),
       distMeters: ring ? null : Math.round(polylineDistMeters(it.geometry, lng, lat)),
       lengthM: polylineLengthMeters(it.geometry, lat),
     };
@@ -1938,7 +2384,7 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const state = roads.length ? "loaded" : r.error ? "failed" : "empty";
   opts.onStatus && opts.onStatus("road", state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
   return {
-    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts, tolMeters: src.tolMeters,
+    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts, tolMeters: src.tolMeters, sourceName: src.sourceName,
     error: r.error ? humanize(r.error) : null,
     note: roads.length ? src.note : r.error ? humanize(r.error) : `No roads matched within ${src.tolMeters} m — screening only.`,
   };

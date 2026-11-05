@@ -653,7 +653,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     // "a predecessor is late" health condition can resolve predecessor tasks — was
     // `dispOf(t, !isLeaf, rolled)`, no third arg, before that condition existed.
     expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled, byId\)/);
-    expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
+    expect(src).toMatch(/\}, \[data\.projects, data\.settings, NOW\]\);/);
     expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks, data\.settings\) : \{\}/);
   });
   // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
@@ -1546,7 +1546,7 @@ describe("cascade fixed point — a task naming its OWN ANCESTOR (summary row) a
 });
 
 // ── NEW-1 — a pinned date on a meeting-bound row that ISN'T a real meeting day must flag LOUDLY.
-// `pinnedStart` (not the never-set `pinnedMeetingDate`) is what a plain grid date-cell edit sets on
+// `pinnedStart` (not the stepped-pin field, which only right-click Next/Previous meeting sets — B2642096 ×2) is what a plain grid date-cell edit sets on
 // ANY task, so this is the owner's exact repro shape: type a date directly into a meeting-bound
 // row's Start cell and it used to hold silently with meetingInfeasible reading false even when the
 // date is nowhere on the body's calendar. Owner repro: Goose Creek task 168, P&Z body recurrence
@@ -1760,7 +1760,7 @@ describe("anti-drift: the round-2 scheduler fixes still exist in the real source
     expect(src).toMatch(/setData\(d => \{\s*const newProjects = \{\};\s*Object\.entries\(d\.projects\)/);
   });
   it("G1: a health-dot click preserves a covering multi-row range (mouse fill works)", () => {
-    expect(src).toMatch(/const inSpan = selRange && ri >= Math\.min\(selRange\.r1, selRange\.r2\)/);
+    expect(src).toMatch(/const inSpan = selRange && selTouchesRow\(selRange, ri\)/);
     expect(src).toMatch(/if \(!inSpan\) setSelRange\(\{r1:ri, r2:ri, c1:ci, c2:ci\}\);/);
   });
   it("G2: the parent-lock guards lock the whole cost FAMILY by type (col.t), not just col.k", () => {
@@ -2126,7 +2126,7 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
   it("B624: a typed Start/Finish on a weekend/holiday rolls forward to the next working day + toasts", () => {
     // rollForwardToWorkday is applied to the parsed date in the grid commit path, and the toast
     // names the reason (weekend vs holiday) — never a silent weekend/holiday endpoint.
-    expect(src).toMatch(/const rolled = rollForwardToWorkday\(p\);/);
+    expect(src).toMatch(/const rolled = (_boundHere \? p : )?rollForwardToWorkday\(p\);/);   // NEW-1: a meeting-bound row skips the roll (its calendar decides)
     expect(src).toMatch(/const why = \(wd === 0 \|\| wd === 6\) \? "a weekend" : "a holiday";/);
     expect(src).toMatch(/moved to \$\{toShortDate\(rolled\)\} — you picked \$\{why\}/);
   });
@@ -4396,6 +4396,47 @@ describe("groupRowsByProject — MasterView's 'Group by project' sections, never
   });
 });
 
+describe("groupRowsByProject — NEW-1 (B2210992 follow-up): Task Report groups follow the owner's project order", () => {
+  const row = (id, projId, projOwnerLabel, projName, projSiteId) => ({ id, projId, projSiteId, projOwnerLabel, projName, projLabel: `${projOwnerLabel} / ${projName}` });
+  const rows = () => [
+    row(1, 1, "8 South", "Master Schedule", "g-8s"),
+    row(1, 2, "Goose Creek", "Master Schedule", "g-gc"),
+    row(1, 3, "Grand Port", "Master Schedule", "g-gp"),
+  ];
+
+  it("RED-PROOF shape — with no order, '8 South' sorts first (digit before letters); with his order it does not", () => {
+    expect(E.groupRowsByProject(rows()).map(g => g.label)[0]).toBe("8 South / Master Schedule");
+    const ordered = E.groupRowsByProject(rows(), ["g-gp", "g-gc", "g-8s"]);
+    expect(ordered.map(g => g.label)).toEqual(["Grand Port / Master Schedule", "Goose Creek / Master Schedule", "8 South / Master Schedule"]);
+  });
+
+  it("a project's several schedules stay together at its position, ordered by schedule name", () => {
+    const rs = [...rows(), row(1, 4, "Goose Creek", "MUD v PID", "g-gc")];
+    const labels = E.groupRowsByProject(rs, ["g-gc", "g-gp", "g-8s"]).map(g => g.label);
+    expect(labels).toEqual(["Goose Creek / Master Schedule", "Goose Creek / MUD v PID", "Grand Port / Master Schedule", "8 South / Master Schedule"]);
+  });
+
+  it("projects missing from the order, and org-owned schedules, keep today's order BENEATH the positioned ones", () => {
+    const rs = [...rows(), row(1, 9, "Organization", "Pursuits", null)];
+    const labels = E.groupRowsByProject(rs, ["g-gp"]).map(g => g.label);
+    expect(labels).toEqual(["Grand Port / Master Schedule", "8 South / Master Schedule", "Goose Creek / Master Schedule", "Organization / Pursuits"]);
+  });
+
+  it("stale ids in the order are skipped, never fatal; a null/empty order is today's order", () => {
+    expect(E.groupRowsByProject(rows(), ["gone", "g-gc"]).map(g => g.siteId)[0]).toBe("g-gc");
+    expect(E.groupRowsByProject(rows(), null).map(g => g.label)).toEqual(E.groupRowsByProject(rows()).map(g => g.label));
+    expect(E.groupRowsByProject(rows(), []).map(g => g.label)).toEqual(E.groupRowsByProject(rows()).map(g => g.label));
+  });
+
+  it("column sort orders rows WITHIN a group and never moves a group (rows arrive already sorted)", () => {
+    const rs = [row(5, 1, "8 South", "Master Schedule", "g-8s"), row(1, 3, "Grand Port", "Master Schedule", "g-gp"), row(2, 1, "8 South", "Master Schedule", "g-8s"), row(9, 3, "Grand Port", "Master Schedule", "g-gp")];
+    const g = E.groupRowsByProject(rs, ["g-gp", "g-8s"]);
+    expect(g.map(x => x.siteId)).toEqual(["g-gp", "g-8s"]);
+    expect(g[0].gRows.map(r => r.id)).toEqual([1, 9]); // input (sorted) order preserved inside the group
+    expect(g[1].gRows.map(r => r.id)).toEqual([5, 2]);
+  });
+});
+
 describe("otherScheduleMeetingBodies — schedName is the qualified label, never a bare (possibly ambiguous) name", () => {
   it("a site-owned schedule's schedName is crossScheduleLabel, not the bare name", () => {
     const data = { projects: { 1: { id: 1, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek", meetingBodies: [{ id: "b1", name: "X", recurrence: [] }] } } };
@@ -4509,8 +4550,9 @@ describe("B1873360/B1873361 — every cross-schedule display in MasterView/the s
     expect(src).toMatch(/projOwnerLabel: ownerLabel, projLabel, depth, isLeaf/);
   });
   it("'Group by project' groups via groupRowsByProject, keyed by projId", () => {
-    expect(src).toMatch(/return groupRowsByProject\(sortedRows\)\.flatMap\(\(\{projId, gRows, label\}\) => \[/);
-    expect(src).toMatch(/<tr key=\{`grp-\$\{projId\}`\}>/);
+    expect(src).toMatch(/groupRowsByProject\(sortedRows, projOrder\.ids\)/);
+    expect(src).toMatch(/return groupedRows\.flatMap\(\(\{projId, gRows, label, siteId, rank\}, gi\) => \{/);
+    expect(src).toMatch(/<tr key=\{`grp-\$\{projId\}`\} data-grp-site=/);
     // The old buggy shape keyed a plain object by the bare name (`groups[t.projName]`) — that
     // exact code construct is gone from the render path (it still appears once, in this fix's
     // own explanatory comment, which is why this isn't a blanket file-wide `not.toMatch`).
@@ -4908,5 +4950,527 @@ describe("anti-drift: NEW-1 findMeetingBodyElsewhere + NEW-2 double-lag helpers 
   it("meetingBindingTrace picks the driver by the LATEST constrained start, same as cascadeDates' own predEarly reduce, in both", () => {
     expect(src).toMatch(/if \(d && \(!earliestDate \|\| d > earliestDate\)\) \{ earliestDate = d; driver = \{ dep, predTask \}; \}/);
     expect(mjs).toMatch(/if \(d && \(!earliestDate \|\| d > earliestDate\)\) \{ earliestDate = d; driver = \{ dep, predTask \}; \}/);
+  });
+});
+
+// ── NEW-1 (2026-11-03) — a meeting-calendar task always lands on a REAL meeting ──────────────────
+// Typed dates (and a Finish, a fill-down, a first binding) resolve FORWARD to the first meeting on or
+// after them — CALENDAR ONLY, never backward, never "nearest". Predecessor-driven dates keep B816's
+// agenda-deadline rule (unchanged, and proven below with the December case). Stored dates are never
+// revisited by the cascade, so nothing ratchets (B1701360) and an off-calendar stored row (Goose Creek
+// task 168) is left exactly as it is, still flagged.
+describe("NEW-1 — meeting-bound tasks jump FORWARD to the next real meeting", () => {
+  // 3rd Tuesday: Sep 15, Oct 20, Nov 17, Dec 15 2026 · Jan 19 2027.
+  const pz = { id: "mb_pz", name: "P&Z", recurrence: [{ positions: [3], weekday: 2, months: "all", anchor: null }] };
+  const pzSpecial = { ...pz, extraDates: ["2026-12-12"] };                    // a special-called Saturday meeting
+  const pzCancelled = { ...pz, blackoutDates: ["2026-12-15"] };               // December regular meeting cancelled
+  const pzLead = { ...pz, agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  const bound = (id, o = {}) => mk(id, { meetingBound: true, meetingBodyId: "mb_pz", ...o });
+  // The relevant lines of updateTask, in order: the gate → merge → the pin rules → cascade.
+  const edit = (tasks, id, patch, bodies) => {
+    const bodyOf = bid => bodies.find(b => b.id === bid);
+    const res = E.resolveBoundEdit(tasks, id, patch, bodyOf);
+    const up = res.updates;
+    const ts = tasks.map(t => {
+      if (t.id !== id) return t;
+      const u = { ...t, ...up };
+      if ("predecessors" in up) delete u.pinnedStart;
+      if ("end" in up && !("start" in up)) u.pinnedEnd = !!u.end;
+      if ("start" in up && !("predecessors" in up)) u.pinnedStart = true;
+      if (res.startOverride) { u.start = res.startOverride; u.end = res.startOverride; }
+      return u;
+    });
+    return { res, tasks: E.cascadeDates(ts, bodies) };
+  };
+  const at = (tasks, id) => tasks.find(t => t.id === id);
+
+  describe("the gate: a typed Start", () => {
+    it("a meeting date stays, and nothing is announced", () => {
+      const { res, tasks } = edit([bound(1)], 1, { start: "2026-11-17" }, [pz]);
+      expect(res.notice).toBeNull();
+      expect(at(tasks, 1).start).toBe("2026-11-17");
+      expect(at(tasks, 1).meetingDateOffCalendar).toBe(false);
+    });
+    it("a non-meeting date moves to the first meeting AFTER it, and that is what is stored", () => {
+      const { res, tasks } = edit([bound(1)], 1, { start: "2026-11-02" }, [pz]);
+      expect(res.notice).toEqual({ kind: "moved", typed: "2026-11-02", date: "2026-11-17", bodyName: "P&Z" });
+      const t = at(tasks, 1);
+      expect(t.start).toBe("2026-11-17"); expect(t.end).toBe("2026-11-17");
+      expect(t.pinnedStart).toBe(true);                       // stored as the hard-coded date
+      expect(t.meetingDateOffCalendar).toBe(false);           // never an off-calendar date from an edit
+      expect(t.meetingInfeasible).toBe(false);
+    });
+    it("the day after a meeting goes FORWARD to the next one — never back to the nearer earlier one", () => {
+      // 11/18 is 1 day after the 11/17 meeting and 27 days before 12/15: nearest would pick 11/17.
+      const { tasks } = edit([bound(1)], 1, { start: "2026-11-18" }, [pz]);
+      expect(at(tasks, 1).start).toBe("2026-12-15");
+    });
+    it("the day before a meeting lands on that meeting", () => {
+      expect(at(edit([bound(1)], 1, { start: "2026-11-16" }, [pz]).tasks, 1).start).toBe("2026-11-17");
+    });
+    it("crosses a month and a year boundary", () => {
+      expect(at(edit([bound(1)], 1, { start: "2026-12-16" }, [pz]).tasks, 1).start).toBe("2027-01-19");
+      expect(at(edit([bound(1)], 1, { start: "2026-12-31" }, [pz]).tasks, 1).start).toBe("2027-01-19");
+    });
+    it("a cancelled meeting (blackoutDates) is skipped", () => {
+      expect(at(edit([bound(1)], 1, { start: "2026-12-01" }, [pzCancelled]).tasks, 1).start).toBe("2027-01-19");
+    });
+    it("a special-called meeting (extraDates) counts — including on a Saturday", () => {
+      expect(at(edit([bound(1)], 1, { start: "2026-12-01" }, [pzSpecial]).tasks, 1).start).toBe("2026-12-12");
+      // typing the Saturday meeting itself keeps it (no weekend roll for a bound row)
+      const r = edit([bound(1)], 1, { start: "2026-12-12" }, [pzSpecial]);
+      expect(r.res.notice).toBeNull(); expect(at(r.tasks, 1).start).toBe("2026-12-12");
+    });
+    it("is CALENDAR-ONLY: the agenda lead does not skip a meeting the person typed", () => {
+      // 10-business-day lead: 12/15's agenda closed 12/1, but a typed 12/10 still goes to 12/15 (and shows the flag).
+      const { tasks } = edit([bound(1)], 1, { start: "2026-12-10" }, [pzLead]);
+      const t = at(tasks, 1);
+      expect(t.start).toBe("2026-12-15");
+      expect(t.meetingDateOffCalendar).toBe(false);
+      expect(t.meetingDeadline).toBe("2026-12-01");
+    });
+  });
+
+  describe("the gate: a typed Finish, fill-down, clear", () => {
+    it("a typed Finish becomes the same forward jump — start == end, 0 days, NOT a finish lock", () => {
+      const { res, tasks } = edit([bound(1, { start: "2026-11-17", end: "2026-11-17", pinnedStart: true })], 1, { end: "2026-11-20" }, [pz]);
+      expect(res.updates.end).toBeUndefined();
+      expect(res.notice.date).toBe("2026-12-15");
+      const t = at(tasks, 1);
+      expect(t.start).toBe("2026-12-15"); expect(t.end).toBe("2026-12-15"); expect(t.duration).toBe(0);
+      expect(t.pinnedEnd).toBeFalsy();
+      expect(t.meetingDateOffCalendar).toBe(false);
+    });
+    it("a stale finish lock is cleared so the row stays in bound mode", () => {
+      const { tasks } = edit([bound(1, { start: "2026-11-17", end: "2026-11-18", pinnedEnd: true, duration: 2 })], 1, { start: "2026-12-01" }, [pz]);
+      const t = at(tasks, 1);
+      expect(t.pinnedEnd).toBe(false); expect(t.start).toBe("2026-12-15"); expect(t.end).toBe("2026-12-15");
+    });
+    it("fill-down: every bound row in the range resolves on its own (one gate, per-row)", () => {
+      let ts = [bound(1), bound(2), bound(3)];
+      for (const id of [1, 2, 3]) ts = edit(ts, id, { start: "2026-11-02" }, [pz]).tasks;
+      expect(ts.map(t => t.start)).toEqual(["2026-11-17", "2026-11-17", "2026-11-17"]);
+    });
+    it("clearing a date (unschedule) is left alone", () => {
+      const r = edit([bound(1, { start: "2026-11-17", pinnedStart: true })], 1, { start: "" }, [pz]);
+      expect(r.res.notice).toBeNull(); expect(r.res.updates).toEqual({ start: "" });
+    });
+    it("an UNBOUND row is never touched", () => {
+      const r = edit([mk(1)], 1, { start: "2026-11-02" }, [pz]);
+      expect(r.res.updates).toEqual({ start: "2026-11-02" }); expect(at(r.tasks, 1).start).toBe("2026-11-02");
+    });
+    it("a FINISHED row keeps its actual dates", () => {
+      const done = bound(1, { start: "2026-11-02", end: "2026-11-02", health: "green", percentComplete: 100 });
+      const r = edit([done], 1, { start: "2026-11-03" }, [pz]);
+      expect(r.res.updates).toEqual({ start: "2026-11-03" }); expect(r.res.notice).toBeNull();
+    });
+    it("a summary (parent) row is never touched", () => {
+      const r = E.resolveBoundEdit([bound(1), mk(2, { parentId: 1 })], 1, { start: "2026-11-02" }, bid => bid === "mb_pz" ? pz : undefined);
+      expect(r.updates).toEqual({ start: "2026-11-02" });
+    });
+  });
+
+  describe("when no meeting can be resolved — kept as typed, and the row says why", () => {
+    it("calendar deleted: date kept, notice names it, the row is flagged as bound-to-missing", () => {
+      const ts = [bound(1, { meetingBodyId: "mb_gone" })];
+      const r = E.resolveBoundEdit(ts, 1, { start: "2026-11-02" }, () => undefined);
+      expect(r.updates).toEqual({ start: "2026-11-02" });
+      expect(r.notice).toEqual({ kind: "nobody", typed: "2026-11-02" });
+      const out = E.cascadeDates([{ ...ts[0], start: "2026-11-02", pinnedStart: true }], []);
+      expect(out[0].start).toBe("2026-11-02"); expect(out[0].meetingBodyMissing).toBe(true);
+    });
+    it("no rule and no dates ahead: date kept, notice says so, and the existing off-calendar flag shows", () => {
+      const empty = { id: "mb_pz", name: "Empty board", recurrence: [] };
+      const { res, tasks } = edit([bound(1)], 1, { start: "2026-11-02" }, [empty]);
+      expect(res.notice).toEqual({ kind: "none-ahead", typed: "2026-11-02", bodyName: "Empty board" });
+      expect(at(tasks, 1).start).toBe("2026-11-02");
+      expect(at(tasks, 1).meetingDateOffCalendar).toBe(true);
+      expect(at(tasks, 1).meetingInfeasible).toBe(true);
+    });
+    it("the toast sentences", () => {
+      const f = s => s.split("-").slice(1).join("/") + "/" + s.slice(2, 4);
+      expect(E.boundEditNotice({ kind: "moved", typed: "2026-12-10", date: "2026-12-12", bodyName: "P&Z" }, "Hearing", f))
+        .toBe("Hearing moved to 12/12/26, the next P&Z meeting — 12/10/26 isn't one of its meeting dates.");
+      expect(E.boundEditNotice({ kind: "none-ahead", typed: "2026-12-10", bodyName: "P&Z" }, "Hearing", f)).toMatch(/no meeting on or after 12\/10\/26/);
+      expect(E.boundEditNotice({ kind: "nobody", typed: "2026-12-10" }, "Hearing", f)).toMatch(/no longer exists/);
+      expect(E.boundEditNotice(null, "x", f)).toBe("");
+    });
+  });
+
+  describe("binding an already-dated task to a calendar for the first time", () => {
+    it("a stand-alone dated row moves forward to a meeting WITHOUT being pinned, and is a fixed point", () => {
+      const { res, tasks } = edit([mk(1, { start: "2026-11-02", end: "2026-11-02" })], 1, { meetingBound: true, meetingBodyId: "mb_pz" }, [pz]);
+      expect(res.startOverride).toBe("2026-11-17");
+      expect(res.notice.kind).toBe("moved");
+      expect(at(tasks, 1).start).toBe("2026-11-17");
+      expect(at(tasks, 1).pinnedStart).toBeFalsy();
+      let again = tasks;                                            // no ratchet on repeat cascades
+      for (let i = 0; i < 4; i++) again = E.cascadeDates(again, [pz]);
+      expect(at(again, 1).start).toBe("2026-11-17");
+    });
+    it("a row already ON a meeting date is left alone", () => {
+      const { res } = edit([mk(1, { start: "2026-11-17", end: "2026-11-17" })], 1, { meetingBound: true, meetingBodyId: "mb_pz" }, [pz]);
+      expect(res.startOverride).toBeNull(); expect(res.notice).toBeNull();
+    });
+    it("a predecessor-driven row is left to the engine (agenda-deadline rule), no override", () => {
+      const ts = [mk(1, { start: "2026-12-08", end: "2026-12-08", pinnedStart: true }),
+                  mk(2, { start: "2026-12-09", end: "2026-12-09", predecessors: [{ id: 1, type: "FS", lag: 0 }] })];
+      const { res, tasks } = edit(ts, 2, { meetingBound: true, meetingBodyId: "mb_pz" }, [pz]);
+      expect(res.startOverride).toBeNull();
+      expect(res.rebinding).toBe(true);
+      expect(at(tasks, 2).start).toBe("2026-12-15");
+    });
+    it("re-sending the SAME binding does not touch a stored off-calendar date (no surprise move)", () => {
+      const legacy = bound(1, { start: "2026-09-30", end: "2026-09-30", pinnedStart: true });
+      const { res, tasks } = edit([legacy], 1, { meetingBound: true, meetingBodyId: "mb_pz", deadlineForTaskId: null }, [pz]);
+      expect(res.rebinding).toBe(false); expect(res.startOverride).toBeNull();
+      expect(at(tasks, 1).start).toBe("2026-09-30");
+    });
+  });
+
+  describe("the predecessor path (unchanged — proven, not assumed)", () => {
+    const pred = (end) => mk(1, { start: end, end, pinnedStart: true });
+    it("THE OWNER'S CASE: predecessor finishes Dec 8, next meeting is Dec 12 → the task goes to Dec 12", () => {
+      const out = E.cascadeDates([pred("2026-12-08"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] })], [pzSpecial]);
+      expect(at(out, 2).start).toBe("2026-12-12");
+      expect(at(out, 2).meetingInfeasible).toBe(false);
+    });
+    it("a calendar with NO lead time just uses the next meeting", () => {
+      const out = E.cascadeDates([pred("2026-12-08"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] })], [pz]);
+      expect(at(out, 2).start).toBe("2026-12-15");
+    });
+    it("a lead time whose deadline has passed → the next meeting whose deadline still works", () => {
+      // 12/15's agenda closed 12/1 (10 business days) — before the Dec 9 packet-ready date — so it rolls to Jan 19.
+      const out = E.cascadeDates([pred("2026-12-08"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] })], [pzLead]);
+      expect(at(out, 2).start).toBe("2027-01-19");
+      expect(at(out, 2).meetingDeadline).toBe("2027-01-05");
+    });
+    it("a second-reading task is a LATER meeting than the first", () => {
+      const out = E.cascadeDates([pred("2026-11-02"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] }),
+        bound(3, { predecessors: [{ id: 2, type: "FS", lag: 0 }] })], [pz]);
+      expect(at(out, 2).start).toBe("2026-11-17");
+      expect(at(out, 3).start).toBe("2026-12-15");
+    });
+    it("B816 pin kept: a predecessor that later slips past a hard-coded meeting does NOT move it — it flags infeasible", () => {
+      const typed = edit([pred("2026-11-02"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] })], 2, { start: "2026-12-15" }, [pz]).tasks;
+      expect(at(typed, 2).pinnedStart).toBe(true);
+      const slipped = typed.map(t => t.id === 1 ? { ...t, start: "2026-12-16", end: "2026-12-16" } : t);
+      const out = E.cascadeDates(slipped, [pz]);
+      expect(at(out, 2).start).toBe("2026-12-15");              // stays put
+      expect(at(out, 2).meetingInfeasible).toBe(true);          // and says so
+    });
+    it("a typed-into task no longer follows its predecessor (pinnedStart) — recorded behaviour, unchanged by this item", () => {
+      const typed = edit([pred("2026-11-02"), bound(2, { predecessors: [{ id: 1, type: "FS", lag: 0 }] })], 2, { start: "2026-11-17" }, [pz]).tasks;
+      const slipped = typed.map(t => t.id === 1 ? { ...t, start: "2026-12-01", end: "2026-12-01" } : t);
+      expect(at(E.cascadeDates(slipped, [pz]), 2).start).toBe("2026-11-17");
+    });
+  });
+
+  describe("stored data is never moved on load, and nothing ratchets", () => {
+    it("an off-calendar stored pinned row (Goose Creek task 168 shape) is left alone and stays flagged", () => {
+      let ts = [bound(1, { start: "2026-09-30", end: "2026-09-30", pinnedStart: true })];
+      for (let i = 0; i < 5; i++) ts = E.cascadeDates(ts, [pz]);
+      expect(at(ts, 1).start).toBe("2026-09-30");
+      expect(at(ts, 1).meetingDateOffCalendar).toBe(true);
+    });
+    it("a jumped row is a fixed point under repeated cascades", () => {
+      let ts = edit([bound(1)], 1, { start: "2026-11-02" }, [pz]).tasks;
+      for (let i = 0; i < 5; i++) ts = E.cascadeDates(ts, [pz]);
+      expect(at(ts, 1).start).toBe("2026-11-17");
+    });
+  });
+
+  describe("anti-drift: the gate is wired into every edit path in the real source", () => {
+    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    it("resolveMeetingForward / resolveBoundEdit / boundEditNotice exist VERBATIM in src + mirror", () => {
+      for (const needle of [
+        "return meetingDatesInRange(body, iso, addD(iso, 366 * 3))[0] || null;",
+        "if (livePred && !merged.pinnedStart) return { ...none, rebinding };",
+        "if (t.pinnedEnd) patched.pinnedEnd = false;",
+        "delete patched.end;",
+      ]) { expect(src).toContain(needle); expect(mjs).toContain(needle); }
+    });
+    it("updateTask applies the gate (and previewProject mirrors it, so the preview cannot lie)", () => {
+      expect(src).toMatch(/const boundEdit = resolveBoundEdit\(d\.projects\[pid\]\?\.tasks \|\| \[\], taskId, updatesIn,/);
+      expect(src).toMatch(/const boundEdit = resolveBoundEdit\(tasks, tId, patchIn,/);
+      expect(src).toContain("if (boundEdit.startOverride) { u.start = boundEdit.startOverride; u.end = boundEdit.startOverride; }");
+    });
+    it("applyUpdate skips the weekend/holiday roll for a bound row (a Saturday meeting is a real meeting)", () => {
+      expect(src).toContain("const rolled = _boundHere ? p : rollForwardToWorkday(p);");
+    });
+  });
+
+  describe("a typed date HOLDS, and he is TOLD when an edit creates a conflict (owner decision)", () => {
+    const pred = (id, end, o = {}) => mk(id, { start: end, end, pinnedStart: true, ...o });
+    const lnk = [{ id: 1, type: "FS", lag: 0 }];
+    const plain = (id, o = {}) => mk(id, { predecessors: lnk, ...o });
+    const f = s => s.split("-").slice(1).join("/") + "/" + s.slice(2, 4);
+    // the same lines updateTask runs: edit → cascade → diff against the pre-edit flags
+    const editNotice = (tasks, id, patch, bodies = []) => {
+      const r = edit(tasks, id, patch, bodies);
+      const typed = !!((("start" in r.res.updates) && r.res.updates.start) || (("end" in r.res.updates) && r.res.updates.end));
+      const c = E.newPinConflicts(tasks, r.tasks, typed ? [id] : []);
+      return { ...r, conflicts: c, msg: E.pinConflictNotice(c, typed ? id : null, f) };
+    };
+    const settled = (tasks, bodies = []) => E.cascadeDates(tasks, bodies);
+
+    it("typed LATER than the predecessor allows → no conflict, no notice (effectively the later of the two)", () => {
+      const base = settled([pred(1, "2026-11-02"), plain(2)]);
+      const r = editNotice(base, 2, { start: "2026-11-20" });
+      expect(at(r.tasks, 2).start).toBe("2026-11-20");
+      expect(at(r.tasks, 2).startConflict).toBe(false);
+      expect(r.conflicts).toEqual([]); expect(r.msg).toBe("");
+    });
+    it("typed EARLIER than it allows → the date HOLDS (not moved) and he is told right then", () => {
+      const base = settled([pred(1, "2026-11-10"), plain(2)]);            // pred ends 11/10 → allows 11/11
+      const r = editNotice(base, 2, { start: "2026-11-04" });
+      expect(at(r.tasks, 2).start).toBe("2026-11-04");                    // not moved for him
+      expect(at(r.tasks, 2).startConflict).toBe(true);                    // the existing row flag (B443250) still shows
+      expect(r.conflicts).toHaveLength(1);
+      expect(r.msg).toBe('"t2" is set to 11/04/26, earlier than "t1" allows (11/11/26). Your date holds; edit "t1" to move it, or unpin the date.');
+    });
+    it("a predecessor LATER moves past a typed date → the date holds and he is told at THAT edit, naming both", () => {
+      const base = settled([pred(1, "2026-11-02"), plain(2, { start: "2026-11-10", end: "2026-11-10", pinnedStart: true })]);
+      expect(at(base, 2).startConflict).toBe(false);
+      const r = editNotice(base, 1, { start: "2026-11-20", end: "2026-11-20" });   // the predecessor is edited, not task 2
+      expect(at(r.tasks, 2).start).toBe("2026-11-10");                    // holds
+      expect(at(r.tasks, 2).startConflict).toBe(true);
+      expect(r.msg).toBe('"t1" now runs past "t2"\'s typed date 11/10/26 (it can\'t start before 11/23/26). The typed date holds; edit "t1", or unpin the date.');
+    });
+    it("a conflict CLEARS once he fixes the predecessor — and fixing it announces nothing", () => {
+      const base = settled([pred(1, "2026-11-02"), plain(2, { start: "2026-11-10", end: "2026-11-10", pinnedStart: true })]);
+      const broken = editNotice(base, 1, { start: "2026-11-20", end: "2026-11-20" });
+      expect(at(broken.tasks, 2).startConflict).toBe(true);
+      const fixed = editNotice(broken.tasks, 1, { start: "2026-11-03", end: "2026-11-03" });
+      expect(at(fixed.tasks, 2).startConflict).toBe(false);
+      expect(fixed.conflicts).toEqual([]); expect(fixed.msg).toBe("");
+      // and breaking it AGAIN is a new conflict, announced again
+      expect(editNotice(fixed.tasks, 1, { start: "2026-11-25", end: "2026-11-25" }).msg).toMatch(/now runs past "t2"/);
+    });
+    it("does NOT repeat for a conflict already sitting on the schedule when an UNRELATED row is edited", () => {
+      const sitting = settled([pred(1, "2026-11-10"), plain(2, { start: "2026-11-04", end: "2026-11-04", pinnedStart: true }), mk(3, { start: "2026-12-01", end: "2026-12-01", pinnedStart: true })]);
+      expect(at(sitting, 2).startConflict).toBe(true);
+      const r = editNotice(sitting, 3, { start: "2026-12-02" });
+      expect(r.conflicts).toEqual([]); expect(r.msg).toBe("");
+    });
+    it("re-typing a date INTO a row that is in conflict is still announced (he is told about the date he just entered)", () => {
+      const sitting = settled([pred(1, "2026-11-10"), plain(2, { start: "2026-11-04", end: "2026-11-04", pinnedStart: true })]);
+      expect(editNotice(sitting, 2, { start: "2026-11-05" }).msg).toMatch(/is set to 11\/05\/26, earlier than "t1" allows/);
+    });
+    it("a fresh load never announces: the check only runs on an edit, and equal before/after is empty", () => {
+      const sitting = settled([pred(1, "2026-11-10"), plain(2, { start: "2026-11-04", end: "2026-11-04", pinnedStart: true })]);
+      expect(E.newPinConflicts(sitting, E.cascadeDates(sitting, []))).toEqual([]);
+    });
+    it("a typed FINISH the chain cannot meet is announced too (reuses the B616 flag)", () => {
+      const base = settled([pred(1, "2026-11-10"), plain(2, { duration: 5, durValue: 5 })]);
+      const r = editNotice(base, 2, { end: "2026-11-12" });
+      expect(at(r.tasks, 2).finishConflict).toBe(true);
+      expect(r.msg).toMatch(/locked finish 11\/12\/26 can't be met/);
+    });
+    it("a FINISHED row is never announced", () => {
+      const base = settled([pred(1, "2026-11-10"), plain(2, { health: "green", percentComplete: 100 })]);
+      expect(editNotice(base, 2, { start: "2026-11-04" }).msg).toBe("");
+    });
+    it("MEETING row: the typed date first jumps to a meeting, then the rules apply to the MEETING date", () => {
+      // pred ends 11/20 (allows 11/23). Typed 11/02 jumps to the 11/17 meeting — EARLIER than the predecessor allows → told.
+      const base = settled([pred(1, "2026-11-20"), bound(2, { predecessors: lnk })], [pz]);
+      const early = editNotice(base, 2, { start: "2026-11-02" }, [pz]);
+      expect(at(early.tasks, 2).start).toBe("2026-11-17");
+      expect(at(early.tasks, 2).startConflict).toBe(true);
+      expect(early.msg).toMatch(/earlier than "t1" allows \(11\/23\/26\)/);
+      expect(early.res.notice.kind).toBe("moved");
+      // typed 11/18 jumps FORWARD to 12/15 — later than the predecessor allows → no conflict, no conflict notice
+      const late = editNotice(base, 2, { start: "2026-11-18" }, [pz]);
+      expect(at(late.tasks, 2).start).toBe("2026-12-15");
+      expect(late.conflicts).toEqual([]);
+    });
+    it("MEETING row: a typed meeting whose agenda has closed (lead time) is announced, the date holds", () => {
+      // 12/15's agenda closed 12/1; the predecessor isn't ready until 12/9.
+      const base = settled([pred(1, "2026-12-08"), bound(2, { predecessors: lnk })], [pzLead]);
+      const r = editNotice(base, 2, { start: "2026-12-10" }, [pzLead]);
+      expect(at(r.tasks, 2).start).toBe("2026-12-15");
+      expect(at(r.tasks, 2).meetingInfeasible).toBe(true);
+      expect(r.msg).toMatch(/agenda closed 12\/01\/26 and "t1" isn't ready until 12\/09\/26/);
+    });
+    it("anti-drift: the check is wired into updateTask AND previewProject's reviewer (one check, VERBATIM in the mirror)", () => {
+      const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+      const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+      expect(src).toContain("newPinConflicts(_beforeTasks, tasks, _typedDate ? [taskId] : [])");
+      expect(src).toContain("newPinConflicts(proj.tasks, previewTasks,");
+      for (const needle of ['const kind = t.finishConflict ? "finish" : t.startConflict ? "start"', "return [...now.values()].filter(c => !was.has(c.id) || always.has(c.id));"]) {
+        expect(src).toContain(needle); expect(mjs).toContain(needle);
+      }
+    });
+  });
+});
+
+// ── B2642096 ×2 — a STEPPED row (right-click Next/Previous meeting sets `pinnedMeetingDate`) must obey a typed date ──
+// Owner repro, his real schedule 'MUD v PID' task 11 'P&Z Public Hearing & Consideration': Start typed 11/05/26,
+// toast said "moved to 11/17/26", the row stayed on 10/20/26. Cause: applyMeetingBinding reads
+// `t.pinnedMeetingDate || (pinnedStart ? start : "")`, so a leftover pinnedMeetingDate BEATS the new start, and
+// resolveBoundEdit never touched it. B2642096's first pass (and its live check) only used rows that had never
+// been stepped — the comment that `pinnedMeetingDate` is "never set" was false (onStepMeeting sets it).
+describe("B2642096 ×2 — a person's date edit replaces an earlier stepped meeting pin", () => {
+  // Baytown P&Z: 3rd Tuesday → Oct 20, Nov 17, Dec 15 2026.
+  const pz = { id: "mb_pz", name: "Baytown P&Z Commission", recurrence: [{ positions: [3], weekday: 2, months: "all", anchor: null }] };
+  const pzLead = { ...pz, agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  const stepped = (id, o = {}) => mk(id, { name: "P&Z Public Hearing & Consideration", meetingBound: true, meetingBodyId: "mb_pz", start: "2026-10-20", end: "2026-10-20", duration: 0, durValue: 0, pinnedStart: true, pinnedMeetingDate: "2026-10-20", ...o });
+  // the same lines updateTask runs, in order: gate → merge → pin rules → cascade → settle the toast against the cascaded row
+  const apply = (tasks, id, patch, bodies = [pz]) => {
+    const bodyOf = bid => bodies.find(b => b.id === bid);
+    const res = E.resolveBoundEdit(tasks, id, patch, bodyOf);
+    const up = res.updates;
+    const ts = tasks.map(t => {
+      if (t.id !== id) return t;
+      const u = { ...t, ...up };
+      if ("predecessors" in up) delete u.pinnedStart;
+      if ("end" in up && !("start" in up)) u.pinnedEnd = !!u.end;
+      if ("start" in up && !("predecessors" in up)) u.pinnedStart = true;
+      if (res.startOverride) { u.start = res.startOverride; u.end = res.startOverride; }
+      return u;
+    });
+    const out = E.cascadeDates(ts, bodies);
+    const row = out.find(t => t.id === id);
+    const notice = E.settleBoundNotice(res, row && row.start);
+    return { res, tasks: out, row, notice };
+  };
+  const f = s => s.split("-").slice(1).join("/") + "/" + s.slice(2, 4);
+
+  it("THE OWNER'S FIXTURE (red on main): stepped to 10/20, typed 11/05 → the row lands on 11/17", () => {
+    const { row, notice } = apply([stepped(11)], 11, { start: "2026-11-05" });
+    expect(row.start).toBe("2026-11-17");
+    expect(row.end).toBe("2026-11-17");
+    expect(row.pinnedMeetingDate).toBeUndefined();
+    expect(notice).toEqual({ kind: "moved", typed: "2026-11-05", date: "2026-11-17", bodyName: "Baytown P&Z Commission" });
+  });
+  it("a typed date that is ALREADY a real meeting also lands (on main it snapped back with NO toast)", () => {
+    const { row, notice } = apply([stepped(11)], 11, { start: "2026-11-17" });
+    expect(row.start).toBe("2026-11-17");
+    expect(notice).toBeNull();
+  });
+  it("a typed FINISH on a stepped row becomes a Start at the next meeting and lands", () => {
+    const { row, res } = apply([stepped(11)], 11, { end: "2026-11-05" });
+    expect(row.start).toBe("2026-11-17");
+    expect(res.updates.pinnedMeetingDate).toBeUndefined();
+    expect("pinnedMeetingDate" in res.updates).toBe(true);
+  });
+  it("range fill-down: every stepped row in the fill lands on its own typed meeting", () => {
+    let ts = [stepped(1), stepped(2, { pinnedMeetingDate: "2026-11-17", start: "2026-11-17", end: "2026-11-17" })];
+    ts = apply(ts, 1, { start: "2026-12-01" }).tasks;
+    ts = apply(ts, 2, { start: "2026-12-01" }).tasks;
+    expect(ts.map(t => t.start)).toEqual(["2026-12-15", "2026-12-15"]);
+  });
+  it("clearing the date on a stepped row really clears it (the pin does not hold the old date)", () => {
+    const { res, row } = apply([stepped(11)], 11, { start: "" });
+    expect("pinnedMeetingDate" in res.updates).toBe(true);
+    expect(res.updates.pinnedMeetingDate).toBeUndefined();
+    expect(row.start || "").not.toBe("2026-10-20");
+  });
+  it("no calendar / nothing ahead: the typed date is kept as typed AND the old pin is gone", () => {
+    const none = apply([stepped(11)], 11, { start: "2026-11-05" }, [{ ...pz, recurrence: [], extraDates: [] }]);
+    expect(none.res.notice.kind).toBe("none-ahead");
+    expect(none.res.updates.pinnedMeetingDate).toBeUndefined();
+    expect(none.row.start).toBe("2026-11-05");
+    const nobody = apply([stepped(11)], 11, { start: "2026-11-05" }, []);
+    expect(nobody.res.notice.kind).toBe("nobody");
+    expect(nobody.row.start).toBe("2026-11-05");
+  });
+  it("an explicit step in the same patch is never stripped (Next/Previous meeting still pins)", () => {
+    const r = E.resolveBoundEdit([stepped(11)], 11, { pinnedMeetingDate: "2026-11-17" }, () => pz);
+    expect(r.updates).toEqual({ pinnedMeetingDate: "2026-11-17" });
+    const { row } = apply([stepped(11)], 11, { pinnedMeetingDate: "2026-11-17" });
+    expect(row.start).toBe("2026-11-17");
+  });
+  it("an unstepped row's patch is returned untouched (no stray key, same object)", () => {
+    const row = stepped(11, { pinnedMeetingDate: undefined });
+    const patch = { start: "2026-11-17" };
+    expect(E.resolveBoundEdit([row], 11, patch, () => pz).updates).toEqual({ start: "2026-11-17" });
+    expect("pinnedMeetingDate" in E.resolveBoundEdit([row], 11, patch, () => pz).updates).toBe(false);
+  });
+  it("type a date, then step: Next/Previous read the NEW date, and stepping pins it again", () => {
+    let ts = apply([stepped(11)], 11, { start: "2026-11-05" }).tasks;
+    const row = ts.find(t => t.id === 11);
+    expect(E.adjacentMeetingDate(pz, row.start, "next")).toBe("2026-12-15");
+    expect(E.adjacentMeetingDate(pz, row.start, "prev")).toBe("2026-10-20");
+    ts = apply(ts, 11, { pinnedMeetingDate: "2026-12-15" }).tasks;
+    expect(ts.find(t => t.id === 11).start).toBe("2026-12-15");
+    expect(ts.find(t => t.id === 11).pinnedMeetingDate).toBe("2026-12-15");
+  });
+  it("a row with a predecessor (9FS+10d): the typed date still lands, and the pin-conflict notice fires for the meeting it can't make", () => {
+    // 9 ends Nov 9 → +10 calendar days → packet ready Nov 19; 10 business-day lead → the Nov 17 agenda closed ~Nov 3.
+    const p9 = mk(9, { name: "Prelim plat", start: "2026-11-02", end: "2026-11-09", duration: 6, pinnedStart: true });
+    const row11 = stepped(11, { predecessors: [{ id: 9, type: "FS", lag: 10, lagUnit: "calendar" }] });
+    const before = [p9, row11];
+    const { row, tasks } = apply(before, 11, { start: "2026-11-05" }, [pzLead]);
+    expect(row.start).toBe("2026-11-17");
+    const c = E.newPinConflicts(before, tasks, [11]);
+    expect(c.length).toBe(1);
+    expect(c[0].kind).toBe("meeting");
+    expect(E.pinConflictNotice(c, 11, f)).toMatch(/11\/17\/26/);
+  });
+  it("UNPIN really unpins: the patch clears BOTH pins, and the row goes back to its predecessor", () => {
+    const p9 = mk(9, { name: "Prelim plat", start: "2026-09-01", end: "2026-09-08", duration: 6, pinnedStart: true });
+    const row11 = stepped(11, { predecessors: [{ id: 9, type: "FS", lag: 0 }] });
+    const patch = E.unpinStartPatch(row11);
+    expect(patch.pinnedStart).toBe(false);
+    expect(patch.predecessors).toEqual(row11.predecessors);
+    expect("pinnedMeetingDate" in patch).toBe(true);
+    expect(patch.pinnedMeetingDate).toBeUndefined();
+    const { row } = apply([p9, row11], 11, patch, [pz]);
+    expect(row.pinnedMeetingDate).toBeUndefined();
+    expect(row.pinnedStart).toBeFalsy();
+    expect(row.start).toBe("2026-09-15");                 // the predecessor drives it to the next September meeting
+  });
+  it("the pin icon reads BOTH pins on a bound row, and ignores a stale pinnedMeetingDate on an unbound one", () => {
+    expect(E.startIsPinned({ meetingBound: true, pinnedMeetingDate: "2026-10-20" })).toBe(true);
+    expect(E.startIsPinned({ meetingBound: true, pinnedStart: true })).toBe(true);
+    expect(E.startIsPinned({ meetingBound: true })).toBe(false);
+    expect(E.startIsPinned({ meetingBound: false, pinnedMeetingDate: "2026-10-20" })).toBe(false);
+    expect(E.startIsPinned({ pinnedStart: true })).toBe(true);
+  });
+
+  describe("the toast can never announce a move the row did not make", () => {
+    const moved = { kind: "moved", typed: "2026-11-05", date: "2026-11-17", bodyName: "P&Z" };
+    it("row holds the asked date → the original notice stands", () => {
+      expect(E.settleBoundNotice({ notice: moved, asked: "2026-11-17" }, "2026-11-17")).toEqual(moved);
+    });
+    it("row sits somewhere else → says what happened instead of the requested date", () => {
+      const n = E.settleBoundNotice({ notice: moved, asked: "2026-11-17" }, "2026-10-20");
+      expect(n.kind).toBe("held");
+      const msg = E.boundEditNotice(n, "Hearing", f);
+      expect(msg).toMatch(/10\/20\/26/);
+      expect(msg).toMatch(/11\/17\/26/);
+      expect(msg).not.toMatch(/moved to 11\/17\/26/);
+    });
+    it("no notice at all but the row did not take the asked date → still announced", () => {
+      expect(E.settleBoundNotice({ notice: null, asked: "2026-11-17" }, "2026-10-20").kind).toBe("held");
+    });
+    it("nothing was asked (not a bound date edit) → no notice invented", () => {
+      expect(E.settleBoundNotice({ notice: null, asked: "" }, "2026-10-20")).toBeNull();
+    });
+  });
+
+  describe("anti-drift: the fix exists VERBATIM in src + mirror, and the false comments are gone", () => {
+    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    it("the pure helpers match", () => {
+      for (const needle of ["const settleBoundNotice = ", "const unpinStartPatch = ", "const startIsPinned = ", "const dropStep = "]) {
+        expect(src.replace("export ", "")).toContain(needle); expect(mjs.replace(/export const/g, "const")).toContain(needle);
+      }
+    });
+    it("updateTask settles the toast against the cascaded row; unpin and the pin icon use the shared helpers", () => {
+      expect(src).toContain("settleBoundNotice(boundEdit, editedT && editedT.start)");
+      expect(src).toContain("updateTask(task.id, unpinStartPatch(task), projId)");
+      expect(src).toContain("startIsPinned(task)");
+    });
+    it("no source still claims pinnedMeetingDate is never set", () => {
+      expect(src).not.toMatch(/nothing in this app ever sets/);
+      expect(mjs).not.toMatch(/nothing in this app ever sets/);
+      const falseBelief = ["never-set `pinned", "MeetingDate`"].join("");   // built in two halves so this file does not match itself
+      expect(readFileSync(fileURLToPath(new URL("./schedulerEngine.test.js", import.meta.url)), "utf8")).not.toContain(falseBelief);
+    });
   });
 });

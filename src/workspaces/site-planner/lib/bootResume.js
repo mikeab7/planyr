@@ -189,3 +189,21 @@ export function resumeTargetAfterSignIn({ routeProjectId, currentId, plansOfGrou
 export function routeProjectJustChanged(prevProjectId, projectId) {
   return prevProjectId !== undefined && prevProjectId !== projectId;
 }
+
+/* B2225425 (round 3, found by the plan-open live harness) — WHEN must the URL writer (effect 2) stand down for the route reconcile
+ * (effect 1)? Only for a route change that came from OUTSIDE — never for the round trip of the writer's OWN last write. The echo of
+ * our own hash write is a route change too, and flagging it left the one-pass "defer" flag standing (effect 2 does not re-run on
+ * that pass: its own inputs did not change), so it was consumed by the NEXT switch's write instead, which was then skipped:
+ * project A → project B → back to A left the URL naming B for good (measured on planyr.io b94ffe1, and on builds before both perf
+ * rounds). `ownEcho` = the incoming route is exactly what the writer last asked for. Pure. */
+export function routeChangeNeedsDefer(prevProjectId, projectId, ownEcho) {
+  return routeProjectJustChanged(prevProjectId, projectId) && !ownEcho;
+}
+
+/* NEW-1 point 5 (follow-up to B2619760) — a session that DIED under the person ("You were signed out") is not a
+ * decision to leave the project. `meta.lost` (shared/auth/sessionIntent.js) says the sign-out was nobody's request
+ * here; then the route keeps naming the project, so signing back in returns to the same plan (the resume reads the
+ * route). A deliberate Sign out still counts as leaving, exactly as before. Pure. */
+export function userLeftOnSignOut(meta) {
+  return !(meta && meta.lost);
+}

@@ -24,6 +24,8 @@ import AdminPasswordResetSection from "./AdminPasswordResetSection.jsx";
 import OpsSection from "./OpsSection.jsx";
 import { SECTIONS } from "./lib/adminSections.js";
 import { parseAdminHash, goAdminSection } from "./lib/adminRoute.js";
+import { installSweepHook } from "./lib/sweepHook.js";
+import { supabase } from "../site-planner/lib/supabase.js";
 
 /** The current section id, following the hash (back/forward, reload, typed). */
 export function useAdminSection() {
@@ -92,6 +94,7 @@ function Body({ section, go }) {
 
 export default function AdminApp({ onExit, user }) {
   const [section, go] = useAdminSection();
+  useEffect(() => installSweepHook(window, supabase), []); // the weekly sweep records itself through this (B2159507)
   return (
     <AdminDataProvider selfEmail={user?.email || null}>
       <div data-testid="admin-app" style={{ height: "100%", overflow: "hidden", background: "var(--surface-page)", display: "flex", flexDirection: "column", pointerEvents: "auto" }}>

@@ -21,10 +21,17 @@ export function withVisitDate(dishes, visitsById) {
   return dishes.map((d) => ({ ...d, visited_on: visitsById.get(d.visit_id)?.visited_on ?? null }));
 }
 
+/** The day a rating applies to: `rated_on` when it was given apart from its visit (a re-rate from the place page), else the
+ *  visit's own day, else null (undated visit). The ONE place that answers "when was this score given". */
+export function dishDate(d) {
+  return d.rated_on || d.visited_on || null;
+}
+
 function dishSortKey(d) {
-  // Prefer the visit's own date (when a dish was actually eaten); fall back to the dish row's
-  // own updated/created timestamp so an undated visit still orders sensibly against others.
-  return d.visited_on || d.updated_at || d.created_at || "";
+  // The rating's day first (an undated one falls back to when the row was written), then the row's own creation time, so two
+  // ratings of one dish on the same day (a re-rate from the place page) still order oldest -> newest.
+  const day = dishDate(d) || (d.created_at || "").slice(0, 10);
+  return `${day}|${d.created_at || ""}`;
 }
 
 /** Every dish row belonging to any of `visitIds` — the one filter both a snapshot place (whose
@@ -90,18 +97,17 @@ export function formatCents(cents) {
   return `$${(Number(cents) / 100).toFixed(2)}`;
 }
 
-/** A dish score (a Postgres numeric(4,2), quarter-point steps 1.00-10.00 — see db/food.sql),
- *  trimmed of trailing zeros for display: 8.00 -> "8", 8.50 -> "8.5", 8.25 -> "8.25". Number()
- *  does this for free (it's a plain binary float once coerced — 0.25/0.5/0.75 are all exact in
- *  IEEE754, so no rounding trap the way 0.1/0.3 would be) — this just names the pattern and
- *  handles the null/non-finite/string-from-PostgREST cases every other numeric read site here
- *  already coerces (see ratingColor.js's own header). Returns null for "no score yet" so a
- *  caller's own em-dash/placeholder logic decides how that renders, never a fabricated "0". */
+/** THE ONE rating formatter (NEW-1, 2026-10-20: "one number, one precision, everywhere") — a dish score AND a visit's Food /
+ *  Ambiance both come through here (restaurantPanel.formatRating is this same function re-exported), so the top pills, the
+ *  visit rows and the dish badges can never disagree the way "Food 8.3" vs "8.25" did. Ratings are quarter steps, so the
+ *  exact quarter value is shown: 8.25 → "8.25", 8.5 → "8.5", 8 → "8.0". Returns null for "no score yet" so a caller's own
+ *  placeholder decides how that renders. This file stays import-free (its header rule). */
 export function formatScore(score) {
   if (score == null) return null;
   const n = Number(score);
   if (!Number.isFinite(n)) return null;
-  return String(n);
+  const q = Math.round(n * 4) / 4; // every stored rating is a quarter step; this only guards float noise from a mean
+  return Number.isInteger(q) ? `${q}.0` : String(q);
 }
 
 /** The dish-row score CHIP's three-tier ramp (NEW-1, 2026-09-28 redesign) — DELIBERATELY NOT

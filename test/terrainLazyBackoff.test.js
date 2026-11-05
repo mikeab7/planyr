@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { retryDelayMs, loadTerrain, terrainNow, __resetTerrainLazy } from "../src/workspaces/site-planner/lib/terrainLazy.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -130,7 +131,7 @@ describe("the call sites still handle a rejection (LOUD-FAILURE, not a new silen
       .toMatch(/loadTerrain\(\)[\s\S]{0,900}the debounced point sample below owns the LOUD failure state/);
     expect(read("src/workspaces/site-planner/lib/layers.js"))
       .toMatch(/loadTerrain\(\)[\s\S]{0,900}terrain module failed to load/);
-    const SP = read("src/workspaces/site-planner/SitePlanner.jsx");
+    const SP = plannerSource();
     expect(SP).toMatch(/loadTerrain\(\)[\s\S]{0,400}\.catch\(/);
     expect(SP).toMatch(/Promise\.allSettled\(\[\s*\n\s*loadTerrain\(\)/);
   });

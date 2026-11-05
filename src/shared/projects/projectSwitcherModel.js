@@ -86,6 +86,12 @@ export function orderForSwitcher(list = [], currentId = null, pinnedIds = [], op
   ];
 }
 
+/* One formatter for the whole session. `Date#toLocaleDateString(locale, opts)` builds a fresh Intl.DateTimeFormat on every call (~1.5 ms each in
+ * Chrome), and the project switcher renders a row per project on EVERY render of the header — measured on a 143-plan account at 213 ms of one plan
+ * open (NEW-1, B2224000). Same locale (the default), same options → the same string. */
+let shortDateFmt = null;
+const shortDate = (t) => (shortDateFmt || (shortDateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }))).format(new Date(t));
+
 /** Short row time: "now", "12m", "4h", "3d", "2w", then a short date for anything over ~a month. */
 export function relTimeShort(ts, now = Date.now()) {
   const t = toMs(ts);
@@ -98,7 +104,7 @@ export function relTimeShort(ts, now = Date.now()) {
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
   if (day < 30) return `${Math.floor(day / 7)}w`;
-  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return shortDate(t);
 }
 
 /** Split `name` into [{ text, hit }] around every case-insensitive occurrence of `q`. */

@@ -1,5 +1,11 @@
 // src/shared/formula/formula.js
 //
+// ⛔ NOTE (NEW-1, 2026-10-31): the SPREADSHEET module no longer uses this file to compute values — its evaluator is Univer's engine run
+// headless (src/workspaces/model/lib/univerEval.js), and this evaluator is DEPRECATED there (kept as the reference the differential tests
+// compare against, until the regular grid is deleted). It remains the live engine of the Schedule's and Cost Estimating's formula columns
+// (inlined into public/sequence/index.html), and its PARSER / reference-rewrite helpers (parseFormula, rewriteFormulaFor*) are still the
+// syntax tools the regular grid and the consistency audit read formula TEXT with — they compute no values.
+//
 // Planyr formula engine — a small, dependency-free Excel-style expression
 // evaluator. It is the calculation core behind the scheduler's user-defined
 // "Formula" columns (and Cost Estimating's), and — as of A1 cell references,
@@ -1353,6 +1359,13 @@ function yearFrac(s, e, basis) {
   if (basis === 3) return (b - a) / 365; // actual/365
   const A = serialToYMD(a), B = serialToYMD(b);  // 30/360 (basis 0 US, 4 European)
   let d1 = A.d, d2 = B.d;
+  if (basis !== 4) {
+    // Basis 0 is NASD 30/360 (B1179328: same number as Excel). Its last-day-of-February rules run
+    // BEFORE the 31-day clamps, in this order: both dates last-of-Feb → d2 = 30; d1 last-of-Feb → d1 = 30.
+    const lastOfFeb = (ymd) => ymd.m === 2 && ymd.d === (isLeap(ymd.y) ? 29 : 28);
+    if (lastOfFeb(A) && lastOfFeb(B)) d2 = 30;
+    if (lastOfFeb(A)) d1 = 30;
+  }
   if (d1 === 31) d1 = 30;
   if (d2 === 31 && (basis === 4 || d1 === 30)) d2 = 30;
   return ((B.y - A.y) * 360 + (B.m - A.m) * 30 + (d2 - d1)) / 360;

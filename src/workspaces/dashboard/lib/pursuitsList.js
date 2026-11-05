@@ -20,6 +20,7 @@
  * weighed against (date) is now gone too.
  */
 import { shortenDisplayName } from "../../../shared/projects/projectModel.js";
+import { orderProjects } from "../../../shared/projects/projectOrder.js";
 
 const OPEN_STATUSES = new Set(["pursuit", "active", "onhold"]);
 
@@ -34,8 +35,8 @@ const PURSUIT_NAME_MAX_CHARS = 26;
  * real element-edit recency (dashboardElementRecencyFetch.js + siteRecency.js), never
  * last-edited/autosave. Sorted alphabetically by name — see this module's header for why (B1342848)
  * and why that's never quiet time. */
-export function pursuitsTable(projects, quietDaysByGroup) {
-  return (projects || [])
+export function pursuitsTable(projects, quietDaysByGroup, savedOrder = null) {
+  const today = (projects || [])
     .filter((p) => p.role !== "tracked" && OPEN_STATUSES.has(p.status))
     .map((p) => ({
       groupId: p.groupId,
@@ -43,9 +44,13 @@ export function pursuitsTable(projects, quietDaysByGroup) {
       name: shortenDisplayName(p.name, PURSUIT_NAME_MAX_CHARS),
       county: p.county,
       status: p.status,
+      createdAt: p.createdAt ?? null,
       quietDays: quietDaysByGroup && quietDaysByGroup[p.groupId] != null ? quietDaysByGroup[p.groupId] : null,
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  // NEW-1 (2026-10-08) — alphabetical is now only "today's order", the fallback; his saved order
+  // (projectOrder.js) lays over it. No saved order = byte-for-byte the old alphabetical list.
+  return orderProjects(today, savedOrder);
 }
 
 /** { [groupId]: whole days since the group's real last edit }, derived from a

@@ -8,6 +8,7 @@
  * removed from Drive (folders + files), which then mirrors as a recoverable Drive-trash move.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { runDriveSync } from "../lib/driveSyncRun.js";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
   validateFolderName, suggestNextNumberedName, liveRows, displayLabel, countTemplate,
@@ -17,6 +18,7 @@ import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
+import { applyFolderRead, templatePreviewAllowed, FOLDER_READ_FAILED_PREFIX } from "../lib/folderLoadDecision.js";
 
 // The template's total folder count, for the "Create the standard N-folder structure" button —
 // computed once from the same pure template the seed itself uses, never a hand-typed number.
@@ -24,6 +26,7 @@ const TEMPLATE_FOLDER_COUNT = countTemplate(FOLDER_TEMPLATE);
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
 import { relTime } from "../../../shared/projects/projectModel.js";
 import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
+import { isFileMoveDrag } from "../lib/fileMove.js";
 
 /* Per-project remembered expansion (B-item: tree opens collapsed, not with every
  * category flung open). One key per project so switching projects can't bleed state. */
@@ -84,6 +87,7 @@ export default function FolderTree({
   const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false); // NEW-4 — a failed read never renders the seed template
   const [expanded, setExpanded] = useState(() => new Set());
   const [editing, setEditing] = useState(null); // { id, value }
   const [moving, setMoving] = useState(null); // id being re-parented
@@ -96,19 +100,39 @@ export default function FolderTree({
   const dropTargetRef = useRef(undefined); // ref mirror — dragover/dragleave race without re-render lag
   const setDropTarget = (id, label) => { dropTargetRef.current = id; setDropTargetId(id); onDragTarget?.(label); };
   const syncTimer = useRef(null);
+  // NEW-5 — which project the rail is showing RIGHT NOW (updated every render, so an async result that
+  // lands after a switch can tell it belongs to the previous one).
+  const shownProjectRef = useRef(projectId);
+  shownProjectRef.current = projectId;
   // Which project's stored expansion has been restored — persistence must not fire before the
   // restore (the initial empty set would overwrite what the user had open last visit).
   const expandedLoadedFor = useRef(null);
 
   // Every rows update also publishes upward (the unified view places files by these rows).
-  const setRows = useCallback((list) => { setRowsRaw(list); onRowsChange?.(list); },
+  // `rowsRef` mirrors what is shown so `reload` (NEW-4) can keep it on a failed read without
+  // re-creating the callback on every change.
+  const rowsRef = useRef([]);
+  const setRows = useCallback((list) => { rowsRef.current = list; setRowsRaw(list); onRowsChange?.(list); },
     [onRowsChange]);
 
+  // NEW-4 — a failed re-read KEEPS the rows on screen and says so (folderLoadDecision.js; the same
+  // NEW-F5 rule FileBrowser applies to the file list). Returns the rows shown, or null on failure
+  // so a caller that depends on a fresh read (a seed, a delete) can stop rather than mirror a tree
+  // it never read.
   const reload = useCallback(async () => {
-    if (!signedIn || !projectId) return;
-    const list = await listFolders(projectId);
-    setRows(list);
-    return list;
+    if (!signedIn || !projectId) return null;
+    const r = await listFolders(projectId);
+    if (shownProjectRef.current !== projectId) return null; // NEW-5 — another project is showing now
+    const d = applyFolderRead(rowsRef.current, r);
+    setLoadFailed(d.failed);
+    if (d.failed) {
+      setError(d.error);
+      import("../../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("cloud-read-failed", "folder tree re-read failed", { projectId, error: r && r.error })).catch(() => {});
+      return null;
+    }
+    setRows(d.rows);
+    setError((e) => (e && e.startsWith(FOLDER_READ_FAILED_PREFIX) ? "" : e)); // a read that recovered retires its own notice, nothing else's
+    return d.rows;
   }, [signedIn, projectId, setRows]);
 
   // Load → restore this project's remembered expansion (default: everything collapsed) → kick a
@@ -122,12 +146,26 @@ export default function FolderTree({
   useEffect(() => {
     let live = true;
     expandedLoadedFor.current = null;
-    setDrive({ state: "idle", msg: "", at: 0 }); // a project switch must not inherit the last project's status
-    if (!signedIn || !projectId) { setRows([]); return; }
+    // NEW-5 — a project switch must not inherit the last project's status, nor let its still-pending
+    // debounced sync fire (runDriveSync drops reports for a project that is no longer shown).
+    if (syncTimer.current) { clearTimeout(syncTimer.current); syncTimer.current = null; }
+    setDrive({ state: "idle", msg: "", at: 0 });
+    if (!signedIn || !projectId) { setRows([]); setLoadFailed(false); return; }
     (async () => {
       setLoading(true); setError("");
-      const list = await listFolders(projectId);
+      const r = await listFolders(projectId);
       if (!live) return;
+      // NEW-4 — `fresh`: this is a project switch / first load, so a failed read shows NOTHING
+      // (never the previous project's rows) and is marked failed, which keeps the "Create the
+      // standard structure" template off the screen until a real read says the tree is empty.
+      const d = applyFolderRead([], r, { fresh: true });
+      setLoadFailed(d.failed);
+      if (d.failed) {
+        setRows([]); setError(d.error); setLoading(false);
+        import("../../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("cloud-read-failed", "folder tree load failed", { projectId, error: r && r.error })).catch(() => {});
+        return;
+      }
+      const list = d.rows;
       setRows(list);
       // Restore what the user last had open, pruning ids of since-deleted folders. A first
       // visit restores the empty set = all collapsed (the tree no longer flings itself open).
@@ -160,19 +198,15 @@ export default function FolderTree({
   const scheduleSync = useCallback((delay = 800) => {
     if (!projectId) return;
     if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(async () => {
-      setDrive({ state: "syncing", msg: "Mirroring to Google Drive…" });
-      const r = await syncFoldersToDrive(projectId, {
-        onProgress: ({ done, total }) => setDrive({ state: "syncing", msg: `Mirroring to Google Drive… ${done} of ${total}` }),
+    syncTimer.current = setTimeout(() => {
+      // NEW-5 — the run is tagged with ITS project; reports for a project that is no longer shown are dropped.
+      runDriveSync({
+        projectId,
+        isShown: (id) => shownProjectRef.current === id,
+        setDrive,
+        sync: syncFoldersToDrive,
+        remember: (id, at) => { try { localStorage.setItem(driveSyncAtKey(id), String(at)); } catch (_) { /* footer still shows this session's time */ } },
       });
-      if (r.skipped) setDrive({ state: "off", msg: "Saved in Planyr — Google Drive isn't connected.", at: 0 });
-      else if (r.ok) {
-        // A CONFIRMED reconcile — the only thing that may claim "Synced" (LOUD-FAILURE:
-        // the label is driven by the real backend result, never a static checkmark).
-        const at = Date.now();
-        try { localStorage.setItem(driveSyncAtKey(projectId), String(at)); } catch (_) { /* footer still shows this session's time */ }
-        setDrive({ state: "ok", msg: "", at });
-      } else setDrive({ state: "error", msg: r.error || "Drive sync had a problem.", at: 0 });
     }, delay);
   }, [projectId]);
 
@@ -186,9 +220,9 @@ export default function FolderTree({
     setCreating(true); setError("");
     const seed = await ensureSeeded(projectId);
     if (seed && seed.ok === false) setError(seed.error || "Couldn't set up folders.");
-    await reload();
+    const list = await reload();
     setCreating(false);
-    scheduleSync(0); // seed → sync now so Drive materializes promptly
+    if (list) scheduleSync(0); // seed → sync now so Drive materializes promptly (NEW-4: never mirror a tree we failed to read)
   }, [projectId, creating, reload, scheduleSync]);
 
   // Right-click context menu closes on Escape (the backdrop handles click-away).
@@ -276,8 +310,8 @@ export default function FolderTree({
     setPendingDelete(null);
     const r = await trashSubtree(projectId, id);
     if (!r.ok) { setError(r.error || "Delete failed."); return; }
-    await reload();
-    scheduleSync(0); // trash the Drive folders promptly
+    const list = await reload();
+    if (list) scheduleSync(0); // trash the Drive folders promptly (NEW-4: a failed re-read keeps the old tree and skips the mirror)
   };
 
   // ── render ─────────────────────────────────────────────────────────────────────────────
@@ -318,12 +352,13 @@ export default function FolderTree({
           title={`${node.name} — right-click for options`}
           style={{
             display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16,
-            borderRadius: 6, color: T.text, minHeight: 30,
+            borderRadius: 6, color: T.text, minHeight: 30, cursor: !isEditing && (embedded || kids.length) ? "pointer" : "default",
             outline: isDropTarget ? `1.5px dashed ${T.accent}` : "none", outlineOffset: -1.5,
             background: isDropTarget ? "var(--hover-menu)"
               : isSelected ? "var(--hover-menu)"
               : (hoveredId === node.id || (menu && menu.node && menu.node.id === node.id)) ? T.raised : "transparent",
           }}
+          onClick={(e) => { if (e.target === e.currentTarget && !isEditing && (embedded || kids.length)) onNameClick(); }}
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
           onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); e.stopPropagation(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
@@ -334,13 +369,14 @@ export default function FolderTree({
            * row is STILL the current target (the ref mirror) and only when the pointer
            * really left this row's subtree (child spans can't flicker it). */
           onDragEnter={onFileDrop ? (e) => {
-            if (!hasFilesDrag(e)) return;
+            if (!hasFilesDrag(e) && !isFileMoveDrag(e.dataTransfer)) return; // OS files OR an in-app file row (NEW-1)
             e.preventDefault();
             if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
           } : undefined}
           onDragOver={onFileDrop ? (e) => {
-            if (!hasFilesDrag(e)) return;
+            if (!hasFilesDrag(e) && !isFileMoveDrag(e.dataTransfer)) return;
             e.preventDefault(); e.stopPropagation();
+            e.dataTransfer.dropEffect = isFileMoveDrag(e.dataTransfer) ? "move" : "copy";
             if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
           } : undefined}
           onDragLeave={onFileDrop ? (e) => {
@@ -440,13 +476,15 @@ export default function FolderTree({
           <div
             onClick={() => onSelect?.(null)}
             onDragEnter={onFileDrop ? (e) => {
-              if (!hasFilesDrag(e)) return;
+              if (!hasFilesDrag(e) || isFileMoveDrag(e.dataTransfer)) return; // an in-app file row is refused here (NEW-1)
               e.preventDefault();
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
             onDragOver={onFileDrop ? (e) => {
+              if (isFileMoveDrag(e.dataTransfer)) { e.dataTransfer.dropEffect = "none"; return; } // an in-app row is refused here: no-drop cursor
               if (!hasFilesDrag(e)) return;
               e.preventDefault(); e.stopPropagation();
+              e.dataTransfer.dropEffect = "copy";
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
             onDragLeave={onFileDrop ? (e) => {
@@ -466,7 +504,12 @@ export default function FolderTree({
           </div>
         )}
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
-          : tree.length === 0 ? (
+          : loadFailed && tree.length === 0 ? (
+            // NEW-4 — a failed first read: nothing to show, and NOT an invitation to seed.
+            <div data-testid="folder-tree-load-failed" style={{ color: T.sub, padding: 16, fontSize: 12.5, lineHeight: 1.5 }}>
+              Couldn’t load this project’s folders. <button onClick={() => reload()} style={{ border: "none", background: "none", color: T.accent, cursor: "pointer", fontWeight: 700, padding: 0, font: "inherit" }}>Try again</button>
+            </div>
+          ) : templatePreviewAllowed({ loading, failed: loadFailed, treeLength: tree.length }) ? (
             <div>
               <div style={{ padding: "8px 8px 2px" }}>
                 <button

@@ -10,6 +10,7 @@
  * Logged out, local fixture, no external GIS. Modes: BASE_URL (default the local preview).
  */
 import { chromium } from "@playwright/test";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -47,7 +48,7 @@ await page.locator("text=Overlays").first().click(); await page.waitForTimeout(5
 await page.locator('button[title^="Zoom to fit"]').first().click(); await page.waitForTimeout(700);
 
 const select = async (id) => { if (!(await page.locator(`[data-testid="overlay-crop-${id}"]`).count())) await page.locator("button", { hasText: id + ".png" }).first().click(); await page.waitForTimeout(400); };
-const stored = (id) => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.H1 && raw.H1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop ?? null, rotation: o.rotation || 0, ftPerPx: o.ftPerPx, x: o.x, y: o.y } : null; }, id);
+const stored = (id) => page.evaluate((id) => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.H1 && raw.H1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop ?? null, rotation: o.rotation || 0, ftPerPx: o.ftPerPx, x: o.x, y: o.y } : null; }, id);
 // Geometry in CLIENT px: the full image box (unrotated frames only) + the chrome.
 const geo = (id) => page.evaluate((id) => {
   const img = document.querySelector(`image[data-overlay-id="${id}"]`);
@@ -106,7 +107,7 @@ exp = [f2(0.1, 0.625), f2(0.3, 0.625), f2(0.3, 0.875), f2(0.1, 0.875)];
 check("poly crop: the grips hug the polygon's BOUNDING BOX", g.sc.length === 4 && g.sc.every((p, i) => near(p.x, exp[i].x) && near(p.y, exp[i].y)), JSON.stringify({ got: g.sc, exp }));
 
 /* 5. Reset crop → full image (on the unrotated polygon-cropped overlay, so the image box is axis-aligned) */
-await page.locator('[data-testid="overlay-crop-reset"]').click(); await page.waitForTimeout(600);
+await clearCrop(page); await page.waitForTimeout(600);
 g = await geo("ovP");
 check("Reset crop: the grips return to the full image", g.sc.length === 4 && near(g.sc[0].x, g.img.x, 3) && near(g.sc[0].y, g.img.y, 3) && near(g.sc[2].x, g.img.x + g.img.w, 3) && near(g.sc[2].y, g.img.y + g.img.h, 3), JSON.stringify({ img: g.img, tl: g.sc[0], br: g.sc[2] }));
 

@@ -1,7 +1,9 @@
 /* V1580368 step 1 (B217540 ×2) — signed in as the throwaway test account on a real deploy: dragging does not rewrite the
  * device's plans store on every pointer-move frame, and the settled position is saved after release.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-gesture-save-signed-in.mjs [https://planyr.io] [--expect-sha <merge sha>]
- * Seeds a throwaway one-building plan on the test account, deletes it at the end and verifies it is gone. */
+ * Seeds a throwaway one-building plan on the test account, deletes it at the end and verifies it is gone.
+ * V1617536 (B217540 ×3) adds: the whole drag-and-settle is ONE write of the plans store (origin/main wrote it twice — the 50 ms mirror and
+ * the 400 ms settle tick), and six more real drags each cost ONE write and no edit-sized long task. */
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -57,12 +59,12 @@ try {
   KEY = await page.evaluate(() => Object.keys(localStorage).find((k) => /^planarfit:sites:cloud:/.test(k)) || "planarfit:sites:v1");
   check("the signed-in plans store key is the user-scoped one", /cloud:/.test(KEY), KEY);
   if (p) {
-    const pos = () => page.evaluate(([k, id]) => { const m = JSON.parse(localStorage.getItem(k) || "{}"); for (const r of Object.values(m)) { if (!r || (r.id !== id && r.groupId !== id)) continue; const e = (r.els || []).find((x) => x.id === "b1"); if (e) return Math.round(e.cx) + "," + Math.round(e.cy); } return null; }, [KEY, ID]);
+    const pos = () => page.evaluate(([k, id]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); for (const r of Object.values(m)) { if (!r || (r.id !== id && r.groupId !== id)) continue; const e = (r.els || []).find((x) => x.id === "b1"); if (e) return Math.round(e.cx) + "," + Math.round(e.cy); } return null; }, [KEY, ID]);
     const before = await pos();
     check("precondition: the building is readable from the device store (else the position checks are vacuous)", before !== null, String(before));
-    if (before === null) console.log("store keys:", await page.evaluate((k) => JSON.stringify(Object.entries(JSON.parse(localStorage.getItem(k) || "{}")).map(([a, r]) => [a, r && r.id, r && (r.els || []).length]).slice(0, 8)), KEY));
+    if (before === null) console.log("store keys:", await page.evaluate((k) => JSON.stringify(Object.entries(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}")).map(([a, r]) => [a, r && r.id, r && (r.els || []).length]).slice(0, 8)), KEY));
     await page.evaluate((k) => { window.__w = 0; window.__by = {}; const o = Storage.prototype.setItem; Storage.prototype.setItem = function (a, b) { window.__by[a] = (window.__by[a] || 0) + 1; if (a === k) window.__w++; return o.call(this, a, b); }; }, KEY);
-    console.log("localStorage keys:", await page.evaluate(() => JSON.stringify(Object.keys(localStorage).map((k) => [k, (localStorage.getItem(k) || "").length]).filter((x) => /planarfit|planyr/.test(x[0])).slice(0, 25))));
+    console.log("localStorage keys:", await page.evaluate(() => JSON.stringify(Object.keys(localStorage).map((k) => [k, ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "").length]).filter((x) => /planarfit|planyr/.test(x[0])).slice(0, 25))));
     const rect = () => page.evaluate(() => { const r = document.querySelector('[data-feature^="el:"]').getBoundingClientRect(); return Math.round(r.left) + "," + Math.round(r.top); });
     const rectBefore = await rect();
     console.log("diag hit", JSON.stringify(await page.evaluate(([x, y]) => window.__plannerHitTarget(x, y), [p.x, p.y])), "features", await page.evaluate(() => JSON.stringify([...document.querySelectorAll("[data-feature]")].map((e) => e.getAttribute("data-feature")).slice(0, 8))), "banner", await page.evaluate(() => (document.body.innerText.match(/(read-only|locked|can.t save|offline|changed in another)[^\n]{0,80}/i) || [""])[0]));
@@ -71,7 +73,6 @@ try {
     await page.mouse.move(p.x - 90, p.y + 60, { steps: 40 });
     const during = await page.evaluate(() => window.__w);
     console.log("diag mid-drag rect", await rect());
-    await page.screenshot({ path: "/tmp/claude-0/-home-user-planyr/720c8ccf-2e2a-5c04-809a-6ed6fdb39dc0/scratchpad/mid.png" });
     await page.mouse.up();
     await page.waitForTimeout(3500);
     console.log("setItem writes by key (whole run after arming):", await page.evaluate(() => JSON.stringify(window.__by)));
@@ -80,21 +81,49 @@ try {
     check("the drag really moved the building on screen (else the save checks are vacuous)", rectAfter !== rectBefore, `${rectBefore} → ${rectAfter}`);
     check("plans store written at most once WHILE the drag was in flight", during <= 1, `${during} write(s) in a 40-frame drag (main: ~29)`);
     check("the store is written after release", after >= 1, `${after} total`);
+    check("the whole drag-and-settle is ONE write of the plans store (V1617536; origin/main: 2)", after - during <= 1, `${after - during} write(s) after release`);
     check("the stored building is at the settled position", pAfter !== before, `${before} → ${pAfter}`);
     await page.reload({ waitUntil: "load" });
     await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
     await page.waitForTimeout(3000);
     check("after a reload the building is where it was left", (await pos()) === pAfter, await pos());
+    /* V1617536 step 2 — six more REAL drags on the reloaded plan: each is one write of the plans store and no edit-sized long task. */
+    await page.evaluate((k) => {
+      window.__w = 0; window.__lt = [];
+      try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(e.duration); }).observe({ type: "longtask", buffered: false }); } catch (_) {}
+      if (!window.__wrapped) { window.__wrapped = true; const o = Storage.prototype.setItem; Storage.prototype.setItem = function (a, b) { if (a === k) window.__w++; return o.call(this, a, b); }; }
+    }, KEY);
+    const perDrag = [];
+    for (let i = 0; i < 6; i++) {
+      const q = await page.evaluate(() => {
+        const g = document.querySelector('[data-feature^="el:"]'); const r = g.getBoundingClientRect();
+        for (const [fx, fy] of [[0.62, 0.3], [0.38, 0.3], [0.62, 0.7], [0.85, 0.5], [0.15, 0.5], [0.3, 0.5]]) {
+          const x = r.left + r.width * fx, y = r.top + r.height * fy, t = window.__plannerHitTarget && window.__plannerHitTarget(x, y);
+          if (t && t.kind === "el") return { x, y };
+        } return null; });
+      if (!q) break;
+      const r0 = await rect();
+      await page.evaluate(() => { window.__w = 0; window.__lt.length = 0; });
+      const dx = i % 2 ? 70 : -70;
+      await page.mouse.move(q.x, q.y); await page.waitForTimeout(200); await page.mouse.down(); await page.waitForTimeout(120);
+      await page.mouse.move(q.x + dx / 4, q.y + 6, { steps: 3 }); await page.mouse.move(q.x + dx, q.y + 30, { steps: 12 });
+      await page.mouse.up(); await page.waitForTimeout(1500);
+      const w = await page.evaluate(() => ({ writes: window.__w, max: Math.max(0, ...window.__lt) }));
+      perDrag.push({ moved: (await rect()) !== r0, ...w });
+    }
+    check("six more drags happened and each really moved the building", perDrag.length === 6 && perDrag.every((d) => d.moved), JSON.stringify(perDrag));
+    check("each edit is at most ONE write of the plans store", perDrag.every((d) => d.writes <= 1), perDrag.map((d) => d.writes).join(","));
+    check("no edit-sized long task (all under 150 ms)", perDrag.every((d) => d.max < 150), perDrag.map((d) => Math.round(d.max)).join(","));
   }
   const b2 = await served();
   check("the build served at the end is the build served at the start", b2 === b1, `${b1} → ${b2}`);
 } finally {
   const gone = await page.evaluate(async (id) => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
       if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
-      return { local: !JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
+      return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
   }, ID).catch((e) => ({ error: String(e) }));
   check("throwaway plan deleted (local + cloud) and verified gone", !!gone.local && !!gone.cloud, JSON.stringify(gone));

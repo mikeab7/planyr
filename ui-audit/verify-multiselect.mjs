@@ -5,7 +5,7 @@
  *          touches is selected into the same set; then move/delete come for free from B569.
  * Seeds a plan with two separated elements (building + parking), boots the planner logged-out,
  * and drives the SVG canvas. (Logged-out is fine — the planner is fully usable signed-out.)
- * Plan-style fills: building #f3ece1 · parking #cdd7dd · neutral selection line #1B1E26. */
+ * Plan-style fills: building #f3ece1 · parking #d6e5f2 · neutral selection line #1B1E26. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
@@ -114,7 +114,7 @@ log(!(await measurePoly()).present, "B569 Delete removed the single marquee-sele
 
 // Drag a box around BOTH elements → both selected into the shared set.
 await marqueeBtn.click(); await page.waitForTimeout(150); // re-arm (the measure marquee handed back to Select)
-let b = await centerOf("#f3ece1"), p = await centerOf("#cdd7dd");
+let b = await centerOf("#f3ece1"), p = await centerOf("#d6e5f2");
 log(!!b && !!p, `two separate elements present (building ${!!b}, parking ${!!p})`);
 const box = await bbox("svg");
 // from just outside the top-left of the building to just past the bottom-right of the parking
@@ -124,21 +124,21 @@ log(after >= 2, `B570 marquee drag selected BOTH elements — neutral multi-sele
 
 /* ───────────── B569 — neutral chrome, multi-move, multi-delete + one-step undo ───────────── */
 // Multi-move: the marquee handed the set to Select; dragging one member moves BOTH.
-b = await centerOf("#f3ece1"); p = await centerOf("#cdd7dd");
+b = await centerOf("#f3ece1"); p = await centerOf("#d6e5f2");
 const b0 = { ...b }, p0 = { ...p };
 await drag(b, { x: b.x + 70, y: b.y + 80 });
-const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#cdd7dd");
+const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#d6e5f2");
 const bMoved = Math.hypot(b1.x - b0.x, b1.y - b0.y), pMoved = Math.hypot(p1.x - p0.x, p1.y - p0.y);
 log(bMoved > 30 && pMoved > 30, `B569 multi-MOVE: dragging one member moved the WHOLE selection (building Δ=${bMoved.toFixed(0)}px, parking Δ=${pMoved.toFixed(0)}px)`);
 
 // Multi-delete: Delete removes both; Ctrl+Z restores both in ONE undo step.
 await page.keyboard.press("Delete");
 await page.waitForTimeout(300);
-const goneB = await centerOf("#f3ece1"), goneP = await centerOf("#cdd7dd");
+const goneB = await centerOf("#f3ece1"), goneP = await centerOf("#d6e5f2");
 log(!goneB && !goneP, "B569 multi-DELETE removed both selected elements");
 await page.keyboard.press("Control+z");
 await page.waitForTimeout(400);
-const backB = await centerOf("#f3ece1"), backP = await centerOf("#cdd7dd");
+const backB = await centerOf("#f3ece1"), backP = await centerOf("#d6e5f2");
 log(!!backB && !!backP, "B569 a SINGLE undo restored BOTH (multi-delete is one undo step)");
 
 /* ───────────── B569 — Ctrl/⌘-click toggle in the default pointer ───────────── */
@@ -149,7 +149,7 @@ await page.evaluate(() => { const b = [...document.querySelectorAll("button")].f
 await page.waitForTimeout(200);
 await page.keyboard.press("Escape");
 await page.waitForTimeout(150);
-b = await centerOf("#f3ece1"); p = await centerOf("#cdd7dd");
+b = await centerOf("#f3ece1"); p = await centerOf("#d6e5f2");
 await page.mouse.click(b.x, b.y);            // single-select the building
 await page.waitForTimeout(150);
 await modClick(p, "Control");                // Ctrl-click adds the parking → {building, parking}

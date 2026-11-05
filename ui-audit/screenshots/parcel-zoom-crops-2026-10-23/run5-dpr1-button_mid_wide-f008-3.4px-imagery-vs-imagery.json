@@ -1,0 +1,26 @@
+{
+ "build": "e5d81d0",
+ "dpr": 1,
+ "gesture": "button − mid→wide",
+ "frame": 8,
+ "ms": 532,
+ "worstPx": 3.45,
+ "at": {
+  "offset": -3.4472727272727752,
+  "horizontal": true,
+  "x": 526.5527272727272,
+  "y": 484
+ },
+ "verdict": "imagery-vs-imagery",
+ "why": "the band's edges step along its length (two copies of the picture overlapping); the outline is straight",
+ "steps": 21,
+ "inkSpread": 0,
+ "bandSpread": 3.5,
+ "edgeSpread": 7,
+ "onBandShare": 0.24,
+ "worstOffset": 3.45,
+ "doubledSteps": 0,
+ "firstPassVerdict": "imagery-vs-imagery",
+ "byEye": "frame shows two imagery levels at once (enlarged old level in a block of tiles, a stub at the seam); every outline centred on the current level",
+ "currentJudge": "imagery-vs-imagery (re-judged from the crop with the final slideCrop rules)"
+}

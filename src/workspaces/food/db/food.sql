@@ -219,29 +219,38 @@ returns table (
 )
 language sql stable
 set search_path = public, pg_temp
+-- B2559168 (disk I/O): the ranking runs on NARROW rows (id + grid cell) and the wide columns are
+-- joined back for only the <= p_cap survivors, and the sort budget is raised for THIS function
+-- only. Before, every zoomed-out call sorted tens of thousands of wide rows through two window
+-- passes at the default ~2 MB work_mem and spilled ~13 MB of temp files to disk per call (34 GB
+-- written in 24 days). See food_browse_and_address_disk_io.sql for the measurements.
+set work_mem = '12MB'
 as $$
   with matched as (
-    select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
-      width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy,
-      width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx
+    select id,
+      width_bucket(lat, p_south, p_north, greatest(p_grid, 1))::int2 as gy,
+      width_bucket(lon, p_west, p_east, greatest(p_grid, 1))::int2 as gx
     from public.food_places
     where geom OPERATOR(extensions.&&) extensions.st_makeenvelope(p_west, p_south, p_east, p_north, 4326)::extensions.geography
   ),
-  counted as (
-    select *,
+  ranked as (
+    select id, gy, gx,
       count(*) over (partition by gy, gx) as cell_count,
-      count(*) over () as total_matched
+      count(*) over () as total_matched,
+      row_number() over (partition by gy, gx order by id) as rn
     from matched
   ),
-  ranked as (
-    select *, row_number() over (partition by gy, gx order by id) as rn
-    from counted
+  picked as (
+    select id, gy, gx, rn, total_matched
+    from ranked
+    where rn <= greatest(1, ceil(p_cap::numeric * cell_count / greatest(total_matched, 1)))
+    order by gy, gx, rn
+    limit p_cap
   )
-  select id, name, lat, lon, category, cuisine, address, brand, source, source_licence, total_matched
-  from ranked
-  where rn <= greatest(1, ceil(p_cap::numeric * cell_count / greatest(total_matched, 1)))
-  order by gy, gx, rn
-  limit p_cap;
+  select f.id, f.name, f.lat, f.lon, f.category, f.cuisine, f.address, f.brand, f.source, f.source_licence, p.total_matched
+  from picked p
+  join public.food_places f on f.id = p.id
+  order by p.gy, p.gx, p.rn;
 $$;
 
 grant execute on function public.food_places_in_bounds_sampled(
@@ -440,6 +449,69 @@ begin
   where c.sim >= cut.s
   order by c.sim desc, distance_km asc nulls last, f.name asc
   limit v_cap;
+end;
+$$;
+
+-- ── NEW-1 (2026-10-10, typo search): the pool must hold the NEARBY correct rows too. ───────────────────
+-- Ordering the p_cap pool by similarity alone let a misspelled query ("Carabas") fill it with far rows whose
+-- dirty stored name matches the typo, pushing the real nearby chain row to ~30th of 60 (and off the end for
+-- worse typos). With a centre, the pool is now the top-p_cap by similarity PLUS the 40 nearest candidates
+-- within 100 km (same 0.3 threshold), de-duplicated; the client ranker (searchProximity.js) orders them.
+-- Without a centre the behaviour is unchanged. Distance is computed only for candidates inside the
+-- 100 km ring (st_dwithin on the geography index), so the NEW-1 perf property above is kept.
+create or replace function public.food_places_search_by_name_fast(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, sim real, distance_km double precision
+)
+language plpgsql stable
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_q text := lower(p_query);
+  v_cap integer := greatest(1, p_cap);
+  v_pt extensions.geography;
+begin
+  perform set_config('pg_trgm.word_similarity_threshold', '0.3', true);
+  if p_center_lat is not null and p_center_lon is not null then
+    v_pt := extensions.st_setsrid(extensions.st_makepoint(p_center_lon, p_center_lat), 4326)::extensions.geography;
+  end if;
+  return query
+  with cand as materialized (
+    select f.id, word_similarity(v_q, lower(f.name)) as sim
+    from public.food_places f
+    where v_q <% lower(f.name)
+  ),
+  cut as (select min(t.sim) as s from (select c0.sim from cand c0 order by c0.sim desc limit v_cap) t),
+  near as (
+    select c.id from cand c join public.food_places f on f.id = c.id
+    where v_pt is not null and extensions.st_dwithin(f.geom, v_pt, 100000)
+    order by extensions.st_distance(f.geom, v_pt) asc
+    limit 40
+  ),
+  top as (
+    select c.id, c.sim from cand c join public.food_places f on f.id = c.id cross join cut
+    where c.sim >= cut.s
+    order by c.sim desc,
+      case when v_pt is null then null else extensions.st_distance(f.geom, v_pt) end asc nulls last, f.name asc
+    limit v_cap
+  ),
+  pool as (
+    select t.id, t.sim from top t
+    union
+    select c.id, c.sim from cand c join near n on n.id = c.id
+  )
+  select f.id, f.name, f.lat, f.lon, f.category, f.cuisine, f.address, f.brand, f.source, f.source_licence, f.metro,
+    p.sim,
+    case when v_pt is null then null else extensions.st_distance(f.geom, v_pt) / 1000.0 end as distance_km
+  from pool p
+  join public.food_places f on f.id = p.id
+  order by p.sim desc, distance_km asc nulls last, f.name asc;
 end;
 $$;
 
@@ -781,6 +853,83 @@ alter table public.food_dishes add constraint food_dishes_score_check
 --   select numeric_precision, numeric_scale from information_schema.columns
 --     where table_name = 'food_dishes' and column_name = 'score';               -- expect 4, 2
 
+-- ── food_places_search_by_address (B2051665, owner NEW-1 follow-up: typing a CITY or a full STREET
+-- ADDRESS must find that place, not just a restaurant NAME). The name search above only ever matches
+-- `lower(name)`, so "Dallas" or "7170 Skillman St" returned nothing from the snapshot. This is a
+-- read-only sibling: a row matches when EVERY typed word (letters/digits only, so punctuation and
+-- LIKE wildcards in the query can never act as patterns) appears in lower(address) — "7170 skillman
+-- st dallas" finds "7170 Skillman St, Dallas, TX, 75231-5651". Needs one word of 3+ chars so the
+-- trigram index can serve it; a query of only 1-2 char words returns nothing rather than scanning.
+-- Ordered nearest-first from the optional centre (the map view's midpoint), the same ordering the
+-- client then applies across both sources (lib/searchProximity.js). Same corrupted-concatenated-
+-- address exclusion as the name search. `sim` is a fixed 0.95 (all words matched), `confidence` rides
+-- along so the client's registry/confidence de-ranking works unchanged. Abbreviations ("Street" vs
+-- "St") are NOT expanded — a stated limit, not silent.
+create index if not exists food_places_address_trgm_idx
+  on public.food_places using gin (lower(address) gin_trgm_ops);
+
+create or replace function public.food_places_search_by_address(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, confidence double precision,
+  sim real, distance_km double precision
+)
+language plpgsql stable
+set search_path = public, extensions, pg_temp
+as $fn$
+#variable_conflict use_column
+-- B2559168: the same filter as before, but each typed word becomes a LITERAL `lower(address) like
+-- '%word%'` in dynamic SQL, because a pattern built per row from unnest() cannot use the trigram
+-- GIN index above — the old form seq-scanned all 82k rows on every keystroke (~1,000 ms; 206
+-- statement timeouts logged). With literals the planner uses a Bitmap Index Scan (~44 ms).
+-- Words are [a-z0-9] only and are quoted with %L, so nothing typed can act as a pattern or SQL.
+declare
+  v_words text[];
+  v_like text;
+begin
+  v_words := array(
+    select distinct w from unnest(string_to_array(
+      btrim(regexp_replace(lower(coalesce(p_query, '')), '[^a-z0-9]+', ' ', 'g')), ' ')) w
+    where w <> ''
+  );
+  if cardinality(v_words) not between 1 and 8 then return; end if;
+  if not exists (select 1 from unnest(v_words) w where length(w) >= 3) then return; end if;
+  select string_agg(format('lower(fp.address) like %L', '%' || w || '%'), ' and ')
+    into v_like from unnest(v_words) w;
+  return query execute format($q$
+    select m.id, m.name, m.lat, m.lon, m.category, m.cuisine, m.address, m.brand,
+      m.source, m.source_licence, m.metro, m.confidence, 0.95::real as sim,
+      case when $1 is null or $2 is null then null
+        else extensions.st_distance(
+          m.geom,
+          extensions.st_setsrid(extensions.st_makepoint($2, $1), 4326)::extensions.geography
+        ) / 1000.0
+      end as distance_km
+    from (
+      -- Rank on a CHEAP flat-earth distance (no PostGIS per row: a city word like "Dallas" matches
+      -- ~30k rows, and a true geography distance on each measured 412 ms); only the p_cap survivors
+      -- get the exact st_distance above. Flat-earth ordering is exact enough to pick the nearest.
+      select fp.*
+      from public.food_places fp
+      where fp.address is not null
+        and %s
+        and fp.address !~ '\d{5}(-\d{4})?\s+and\s+\d+\s+\S'
+      order by case when $1 is null or $2 is null then 0
+        else power(fp.lat - $1, 2) + power((fp.lon - $2) * cos(radians($1)), 2) end asc,
+        fp.name asc
+      limit least(greatest(1, $3), 100)
+    ) m
+    order by distance_km asc nulls last, m.name asc
+  $q$, v_like) using p_center_lat, p_center_lon, p_cap;
+end;
+$fn$;
+
+grant execute on function public.food_places_search_by_address(text, integer, double precision, double precision) to anon, authenticated;
+
 -- ── food_lists + food_list_items: NAMED RESTAURANT LISTS (NEW-1 / B2088288, owner chat block
 -- 2026-10-05: "create multiple lists for restaurants i eat at depending on the need, like for lunch
 -- while im at work ... whereas for dinner after work"). A user-named GROUPING of places, orthogonal
@@ -885,3 +1034,10 @@ create policy "Users delete own food_list_items" on public.food_list_items
 -- Verify (read-only; safe to run any time) -----------------------------------
 --   select relname, relrowsecurity from pg_class where oid in ('public.food_lists'::regclass, 'public.food_list_items'::regclass); -- both true
 --   select polrelid::regclass, polname from pg_policy where polrelid in ('public.food_lists'::regclass, 'public.food_list_items'::regclass); -- 4 + 4 owner-only, no anon
+
+
+-- ── B2268434 (2026-10-17): a rating given from the PLACE page is dated the day it was given ────────────────
+-- food_dishes.rated_on: null = the rating belongs to its visit's own day (visited_on, the one source); set only for a
+-- re-rate / add made from the place page, where the visit it hangs off may be months old. Applied to production 2026-10-17.
+-- RLS: the four own-row policies are whole-row (user_id = auth.uid()), so they already cover the new column.
+alter table public.food_dishes add column if not exists rated_on date;

@@ -31,7 +31,8 @@ const projectCrumb = (page) => page.locator('[data-mode-active="true"]').getByTe
 
 async function renamePlan(page, next) {
   await planCrumb(page).click();
-  const input = page.getByTestId("plan-name-input");
+  await page.getByTestId("plan-current-name").dblclick();   // NEW-1 (2026-11-04): the current row is the rename control
+  const input = page.getByTestId("plan-rename-input");
   await input.fill(next);
   await input.press("Enter");
   await page.keyboard.press("Escape");
@@ -61,7 +62,8 @@ test.describe("instant cross-tab sync (same browser)", () => {
     // 3 · B has an edit in flight (typing a plan name) → A changes something → B's draft is untouched
     await b.bringToFront();
     await planCrumb(b).click();
-    const draft = b.getByTestId("plan-name-input");
+    await b.getByTestId("plan-current-name").dblclick();
+    const draft = b.getByTestId("plan-rename-input");
     await draft.fill("Half typed in B");
     await a.bringToFront();
     await renamePlan(a, "Second Rename In A");
@@ -80,12 +82,12 @@ test.describe("instant cross-tab sync (same browser)", () => {
     await drawBuilding(a, await canvas(a).boundingBox(), { expect: 1 });
     await expect.poll(() => featureCount(b), LIVE).toBe(1);
     const readSetback = (page) => page.evaluate(() => {
-      const r = JSON.parse(localStorage.getItem("planarfit:sites:v1")).p1;
+      const r = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")).p1;
       return r.settings ? r.settings.setback : undefined;
     });
     // A writes through the SAME storage funnel its own saves use (the transport B listens on).
     await a.evaluate(() => {
-      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+      const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"));
       m.p1 = { ...m.p1, settings: { ...(m.p1.settings || {}), setback: 37 }, updatedAt: Date.now() + 5 };
       localStorage.setItem("planarfit:sites:v1", JSON.stringify(m));
     });

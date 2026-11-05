@@ -11,8 +11,8 @@
  * value carries provenance + a verify flag. LOUD-FAILURE: an unknown/absent program is stated
  * plainly, never assumed available. Pure + Node-testable; no DOM/network. */
 
-const SQFT_PER_ACRE = 43560;
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 /* Keyed by detention AUTHORITY id (matching detentionRules.js). `available` is tri-state:
  * true (a program exists), false (confirmed none), null (unknown — verify). Fee rates that
  * aren't published are null (never fabricated). */

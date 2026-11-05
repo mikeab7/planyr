@@ -16,8 +16,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "../src/workspaces/site-planner/lib/pondLabelText.js";
 import { labelForms } from "../src/workspaces/site-planner/lib/labelFitLadder.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 
 describe("the pond area line is acreage and nothing else", () => {
   it("renders just the acreage — the owner's Tsakiris figure, exactly", () => {

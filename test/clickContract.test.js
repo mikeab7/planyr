@@ -18,9 +18,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CLICK_CONTRACT, E2E_DRIVEN, contractFor, REVIEW_CLICK_CONTRACT, REVIEW_NON_MARKUP_TOOLS, reviewContractFor } from "../e2e/clickContract.table.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 const DR = read("../src/workspaces/doc-review/DocReview.jsx");
 
 /* A source guard must assert about CODE, not about prose. These files document the shapes they
@@ -143,15 +144,25 @@ describe("per-type click wiring (the pond regression, and the types the owner as
        on the basin and press 2 on the overhanging label matched nothing either way AND wiped the
        record, so a third press had nothing to pair with. One key per feature is the rule now — the
        ACTION still branches on which surface took the press. */
-    expect(SP).toMatch(/if \(isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ featureDoubleAction\(\{ kind: "el", id: d\.el\.id \}, e\); return; \}/);
+    /* NEW-2 (B2249169) — the label's press now hands over to the element body's own `startMoveEl` (so a press
+       that starts on a label also DRAGS the element). The contract is unchanged, only where it is honoured:
+       startMoveEl pairs the double-tap on the element's own id for ordinary elements, and the label keeps
+       pairing it itself for the GROUPED / LOCKED case startMoveEl does not pair — never both. */
+    expect(SP).toMatch(/if \(\(d\.el\.groupId \|\| d\.el\.locked\) && isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ featureDoubleAction\(\{ kind: "el", id: d\.el\.id \}, e\); return; \}/);
+    expect(SP, "a label press must start the element's own move (drag from a label)").toMatch(/startMoveEl\(e, d\.el\.id\);/);
+    expect(SP, "startMoveEl must still pair the double-tap on the element's own id").toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{/);
     expect(SP, "a pond label must not go back to a private double-tap key").not.toMatch(/isDoubleTap\(e, `\$\{d\.el\.id\}:label`/);
-    expect(SP).toMatch(/setSel\(\{ kind: "el", id: d\.el\.id \}\); *\/\/ single click: select only/);
+    // single click: select only — startMoveEl selects first and moves only past the drag gate (histOnArm)
+    expect(SP).toMatch(/setSel\(\{ kind: "el", id \}\);\s*\n\s*\/\* NEW-2 — pushHistory\(\) USED TO FIRE HERE/);
   });
 
-  it("PARCEL: single click selects; a double-click opens the Parcel panel", () => {
+  it("PARCEL: single click selects; a double-click opens the parcel's page", () => {
     expect(SP).toMatch(/if \(isDoubleTap\(e, `parcel:\$\{id\}`, sel\?\.kind === "parcel" && sel\.id === id\)\) \{[\s\S]{0,240}featureDoubleAction\(\{ kind: "parcel", id \}, e\);/);
-    expect(SP).toMatch(/const openParcelPanel = \(\) => \{/);
-    expect(SP).toMatch(/t\.kind === "parcel"[\s\S]{0,400}openParcelPanel\(\);/);
+    // B2264880 — the double-click opens the parcel's own PAGE (record · setbacks · style) through the ONE
+    // entry point every other way in uses; the old list-only `openParcelPanel` is gone.
+    expect(SP).toMatch(/const openParcelPage = \(id\) => \{/);
+    expect(SP).toMatch(/t\.kind === "parcel"[\s\S]{0,400}openParcelPage\(t\.id\);/);
+    expect(SP).not.toMatch(/openParcelPanel/);
   });
 
   /* ⛔ NEW-2 — THE CONTRACT HAS ONE IMPLEMENTATION NOW, AND THAT IS THE POINT OF THIS CASE.
@@ -201,7 +212,8 @@ describe("per-type click wiring (the pond regression, and the types the owner as
      * chrome needs (see lib/featureTarget.js). The stack read is unchanged and still comes first. */
     // B1342704 widened the gap: an early return swallows a gesture that began on an on-shape
     // add/remove control (`gestureActionRef.current`), ahead of the resolution call below.
-    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,800}featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\);/);
+    // B2264880 — resolved into `t` first, so a double-click on empty land inside a lot can fall back to that lot.
+    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,1100}const t = resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\);\s*\n\s*featureDoubleAction\(t \|\| interiorParcelTarget\(p2f\(e\.clientX, e\.clientY\)\), e\);/);
     expect(SP, "a double-click mid-draw must still finish the shape, exactly like Enter").toMatch(/const onBgDouble = \(e\) => \{\s*\n\s*if \(finishActiveDrawing\(\)\) return;/);
     expect(SP, "the root resolver must use the browser's own hit-test, never a second geometric one").toMatch(/document\.elementsFromPoint\(x, y\)/);
     // Every family the resolver can name must actually be stamped on the render, or a double-click

@@ -66,8 +66,13 @@ describe("attachFeatureRetry: an esriFeature layer's \"load\" reports what it ac
     const lyr = fakeFeatureLayer([]);
     const onStatus = vi.fn();
     attachFeatureRetry(lyr, "env_cleanups", { label: "EPA Superfund / RCRA" }, onStatus, 3);
-    lyr.fire("requesterror", { error: { code: 503 } });
-    lyr.fire("load"); // the retried request eventually lands, honestly empty
+    vi.useFakeTimers();
+    try {
+      lyr.fire("requesterror", { error: { code: 503 } });
+      vi.advanceTimersByTime(8000); // the retry fires (a `load` BEFORE this is a slower sibling cell and must not overwrite "retrying…")
+      lyr.fire("loading");
+      lyr.fire("load"); // the retried request eventually lands, honestly empty
+    } finally { vi.useRealTimers(); }
     const lastCall = onStatus.mock.calls[onStatus.mock.calls.length - 1];
     expect(lastCall[0]).toBe("env_cleanups");
     expect(lastCall[1]).toBe("empty");

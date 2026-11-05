@@ -24,6 +24,7 @@ import {
 import { DIM_CALLOUT_MIN_PPF, dimCalloutVisible } from "../src/workspaces/site-planner/lib/labelLayout.js";
 import { PALETTES } from "../src/shared/theme/palette.js";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 // --- NEW-1: the chip's ink is a theme token, and it is legible on the chip's plate ------------
 
@@ -170,7 +171,7 @@ describe("NEW-3 — chipRoleWords: a chip is a control, not a headline", () => {
  * Paint order in an SVG is document order, so this is a structural fact about SitePlanner.jsx, not
  * a computable one — hence a source guard. The live click-through is V###. */
 describe("NEW-4 — setback chrome is raised into the selection-chrome layer", () => {
-  const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const SRC = plannerSource();
   const at = (needle) => {
     const i = SRC.indexOf(needle);
     expect(i, `expected to find ${needle}`).toBeGreaterThan(-1);

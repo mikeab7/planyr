@@ -15,6 +15,8 @@ import {
   groupState, setVisible, setManyVisible, showAll, anyHidden, hiddenKeys,
   groupsFor, hiddenSummary, normalizeRetiredToggles,
 } from "../src/workspaces/site-planner/lib/contentVisibility.js";
+import { floodMasterState } from "../src/workspaces/site-planner/lib/floodGroup.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Recursive source walk (js/jsx only) — used by the "nothing writes the retired toggle" guard.
@@ -92,14 +94,15 @@ describe("groupState is the flood-master shape, stated in terms of SHOWN", () =>
     expect(groupState({}, []).all).toBe(false);
   });
 
-  it("⛔ matches LayerPanel's floodMaster contract — the two masters are ONE idea", () => {
-    /* If the flood row's shape changes, this fails and the two are reconciled deliberately rather
-     * than drifting into two mechanisms that look different for no reason. */
-    const src = readFileSync(resolve(here, "../src/workspaces/site-planner/components/LayerPanel.jsx"), "utf8");
-    expect(src).toMatch(/floodMaster\.all/);
-    expect(src).toMatch(/floodMaster\.any/);
-    expect(src).toMatch(/floodMaster\.onCount/);
-    expect(src).toMatch(/floodMaster\.ids/);
+  it("⛔ matches the flood group's master contract — the two masters are ONE idea", () => {
+    /* If the shape changes, this fails and the two are reconciled deliberately rather than drifting into two
+     * mechanisms that look different for no reason. NEW-1 (Imagery & Layers): the Layers panel no longer renders a
+     * "Show all flood & drainage" master row (owner), so the contract is checked against the pure function that
+     * defined it (floodGroup.floodMasterState) instead of the panel's source. */
+    const flood = floodMasterState([{ rows: [["a", {}]] }], { a: { on: true } });
+    expect(Object.keys(flood).sort()).toEqual(["all", "any", "ids", "onCount"]);
+    expect(flood).toEqual({ ids: ["a"], onCount: 1, all: true, any: true });
+    expect(groupState({}, ["a"])).toEqual(flood); // same shape, same meaning (SHOWN count) for a visible key
     expect(Object.keys(groupState({}, ["a"])).sort()).toEqual(["all", "any", "ids", "onCount"]);
   });
 });
@@ -240,7 +243,7 @@ describe("the retired dock-door toggle cannot strand a plan", () => {
   });
 
   it("the model still DEFAULTS it on, so a plan that never had the key shows its doors", () => {
-    const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    const planner = plannerSource();
     expect(planner).toMatch(/showDocks:\s*true/);
     // …and the migration is actually wired into the settings initializer, not merely exported.
     expect(planner).toContain("normalizeRetiredToggles(stored)");
@@ -284,7 +287,8 @@ describe("⛔ THE INVARIANT: this module cannot touch the model", () => {
  * this one names the seams that exist today so a refactor cannot quietly drop one.
  */
 describe("⛔ every render pass that paints for an element asks the predicate", () => {
-  const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const planner = plannerSource();
+  const roadNetBuild = readFileSync(resolve(here, "../src/workspaces/site-planner/lib/roadNetBuild.js"), "utf8");   // B2233521: where the dissolved network's steps now live
   /** The body of a `const <name> = useMemo(() => { … }, [deps]);` block. */
   const memoBody = (name) => {
     const i = planner.indexOf(`const ${name} = useMemo(`);
@@ -301,7 +305,10 @@ describe("⛔ every render pass that paints for an element asks the predicate", 
    * for itself. Removing this line is exactly the build the owner reported on. */
   it("roadNet — the dissolved pavement drops hidden roads, and re-renders when the map changes", () => {
     const body = memoBody("roadNet");
-    expect(body, "the dissolved road network paints hidden roads").toMatch(/elHidden\(hiddenGroups/);
+    /* round 5 (B2233521): the memo's body moved to lib/roadNetBuild.js `roadNetSteps` so the plan-open warm-up can drive the SAME steps in slices. The filter lives THERE;
+     * the memo must hand it `hiddenGroups` and re-run when it changes. */
+    expect(body, "the memo does not hand the steps the hidden groups").toMatch(/roadNetSteps\(\{[^}]*hiddenGroups/);
+    expect(roadNetBuild, "the dissolved road network paints hidden roads").toMatch(/elHidden\(hiddenGroups, x\)/);
     expect(body, "the memo cannot see a visibility change").toMatch(/\}, \[[^\]]*hiddenGroups[^\]]*\]/);
   });
 
@@ -313,7 +320,8 @@ describe("⛔ every render pass that paints for an element asks the predicate", 
 
   it("MUTATION CHECK — the sweep really does read the source it claims to", () => {
     expect(planner).toContain("const roadNet = useMemo(");
-    expect(memoBody("roadNet")).toContain("isCenterlineRoad");
+    expect(memoBody("roadNet")).toContain("roadNetSteps");
+    expect(roadNetBuild).toContain("isCenterlineRoad(x)");
   });
 });
 
@@ -343,7 +351,7 @@ describe("refHidden — the ONE gate every handle / selection chrome asks", () =
 });
 
 describe("NEW-1 — wiring: no handle group or hover path bypasses the gate", () => {
-  const src = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const src = plannerSource();
   it("the hover scan skips hidden elements and featActiveId is gated", () => {
     expect(src).toMatch(/if \(elHidden\(hiddenGroups, x\)\) continue;/);
     expect(src).toMatch(/refHidden\(hiddenGroups, els, \{ kind: "el", id \}\)/);

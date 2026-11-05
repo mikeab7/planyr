@@ -149,6 +149,10 @@ describe("wiring guards", () => {
     expect(home).toMatch(/data-testid="library-version-history"/);
     expect(lib).toMatch(/<LibraryHome[\s\S]*?onOpenHistory=\{[^}]*history: true/);
   });
+  it("a Save made while the original upload is still in flight waits for it, so version 1 is kept (found by the live run)", () => {
+    expect(dr).toMatch(/pendingUploadRef\.current = \{ srcId, upload \}/);
+    expect(dr).toMatch(/await pend\.upload\.catch/);
+  });
   it("opening an earlier version never downloads", () => {
     const ed = readFileSync(new URL("../src/workspaces/doc-review/components/VersionHistorySheet.jsx", import.meta.url), "utf8");
     expect(ed).not.toMatch(/createObjectURL|\.download\s*=|download=/);

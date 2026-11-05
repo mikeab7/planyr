@@ -28,8 +28,8 @@
  */
 import { volumeBetween } from "./pondGeom.js";
 import { pondElevations } from "./pondStageModel.js";
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 
-const CF_PER_ACFT = 43560;
 export const DEFAULT_BAND_FT = 1;
 // A band shortfall inside display precision is not a real shortfall. 0.01 ac-ft ≈ 16 yd³ — noise at
 // a grid-cell boundary, not an obligation.

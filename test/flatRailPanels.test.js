@@ -5,9 +5,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const chrome = read("../src/shared/ui/PanelChrome.jsx");
 const floating = read("../src/shared/ui/FloatingPanel.jsx");
 const analysis = read("../src/workspaces/site-planner/components/SiteAnalysis.jsx");
@@ -68,5 +69,31 @@ describe("status rows read label-left / value-right (no left-gutter chip)", () =
   });
   it("the phone panel stops at the Tools edge tab so it can never cover the header ×", () => {
     expect(src).toContain("calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px)");
+  });
+});
+
+describe("populated-state groups found boxed by the live check (V1421552)", () => {
+  it("Analysis's 'Who governs this site' group is divider-bounded, not a bordered card", () => {
+    const g = analysis.slice(analysis.indexOf('data-section="governs"'), analysis.indexOf('data-section="governs"') + 400);
+    expect(g).toContain("borderTop");
+    expect(g).not.toMatch(/border: "1px solid/);
+    expect(g).not.toContain("borderRadius");
+  });
+  it("Drainage's 'Assumptions: correct if needed' group is a flat divider group, not a card", () => {
+    const i = src.indexOf('data-flat-group="assumptions"');
+    expect(i).toBeGreaterThan(0);
+    const g = src.slice(i, i + 260);
+    expect(g).toContain("borderTop");
+    expect(g).not.toContain("borderRadius");
+    expect(g).not.toContain("background:");
+  });
+  it("Land's parcel-table rows are divider rows (accent rule when selected), not bordered cards", () => {
+    const rows = read("../src/workspaces/site-planner/components/ParcelsPanel.jsx");
+    const i = rows.indexOf('data-testid={`parcel-table-row-');
+    expect(i).toBeGreaterThan(0);
+    const g = rows.slice(i, i + 700);
+    expect(g).toContain("borderBottom: LINE");
+    expect(g).toContain("borderRadius: 0");
+    expect(g).not.toContain("RADIUS.md");
   });
 });

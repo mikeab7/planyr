@@ -99,7 +99,7 @@ export default function DeletedProjectNotice({ status, name, deletedAt, scope = 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" style={secondaryBtn} onClick={onDashboard}>Go to Dashboard</button>
           {deleted && (
-            <button type="button" style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={restore}>
+            <button type="button" style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} aria-busy={busy ? "true" : undefined} onClick={restore}>
               {busy ? "Restoring…" : (isPlan ? "Restore plan" : "Restore project")}
             </button>
           )}

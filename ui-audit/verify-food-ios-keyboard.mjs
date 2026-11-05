@@ -153,7 +153,7 @@ try {
     // ── 1. THE REPORTED FIELD: The Buffalo Grill → "+ Add a dish" → dish name (autoFocus) ────────
     await section(`${mode} 1`, async () => {
       const { ctx, page, errs } = await open(browser, `${FIX}?buffalo=1`, mode);
-      check(`[${mode}] 1 sheet opens at half with the Dishes · Sort row`, (await page.locator('[data-testid="food-dishes-sort"]').count()) === 1
+      check(`[${mode}] 1 sheet opens at half with the dish list ("+ Add a dish")`, (await page.locator('[data-testid="food-add-dish-btn"]').count()) === 1
         && (await page.locator('[data-testid="food-bottom-sheet"]').getAttribute("data-sheet-snap")) === "half");
       await page.locator('[data-testid="food-add-dish-btn"]').tap();
       await page.waitForTimeout(900); // autoFocus → keyboard
@@ -212,7 +212,7 @@ try {
     for (const start of ["peek", "full"]) {
       await section(`${mode} 5 ${start}`, async () => {
         const { ctx, page } = await open(browser, `${FIX}?buffalo=1`, mode);
-        const handle = page.locator('[data-testid="food-sheet-drag-handle"]');
+        const handle = page.locator('[data-testid="food-sheet-drag-handle"] > span'); // the visible bar (NEW-1, 2026-10-23)
         const hb = await handle.boundingBox();
         const x = hb.x + hb.width / 2, y = hb.y + hb.height / 2;
         await page.mouse.move(x, y); await page.mouse.down();

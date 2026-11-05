@@ -252,7 +252,7 @@ async function measurePlacement(page, box, ppf) {
   }
   if (!a) return { error: "no bare-canvas click point clear of the boundary magnet at this zoom" };
   const b = { x: a.x, y: a.y - 120 };
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: "Length", exact: true }).click();
   let moved = null;
   for (let attempt = 0; attempt < 3; attempt++) {

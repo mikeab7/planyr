@@ -224,7 +224,7 @@ describe("two clients, one delete — the live repro (NEW-1)", () => {
     // Client B is a SECOND signed-in browser that pulled before the delete: the site sits in its
     // cloud cache, its tombstone store is {}. (Michael runs two Chrome browsers; the presence pill
     // read "2 here" the whole session.)
-    const b = makeBrowser({ ["planarfit:sites:cloud:" + UID]: a.store["planarfit:sites:cloud:" + UID] });
+    const b = makeBrowser(Object.fromEntries(Object.entries(a.store).filter(([k]) => k.startsWith("planarfit:sites:cloud:" + UID))));   // B2200384: every per-plan entry + the index
 
     // Client A deletes the project. It deletes correctly on A.
     a.activate();

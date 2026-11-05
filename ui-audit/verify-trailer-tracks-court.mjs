@@ -63,12 +63,12 @@ const near = (a, b, eps = 3) => Math.abs(a - b) <= eps;
 const readEls = async (pred = () => true, tries = 14) => {
   for (let i = 0; i < tries; i++) {
     const got = await page.evaluate((id) => {
-      try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; }
+      try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; }
     }, DEMO_ID);
     if (got && pred(got)) return got;
     await page.waitForTimeout(300);
   }
-  return await page.evaluate((id) => { try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
+  return await page.evaluate((id) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
 };
 const topCourt = (a) => a.find((x) => x.truckCourt && x.truckCourt.side === "top") || {};
 const topTrailer = (a) => { const c = topCourt(a); return a.find((x) => x.type === "trailer" && x.forCourt === c.id) || {}; };

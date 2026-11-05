@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, HIST_CAP, scaleToSlider, sliderToScale,
+  emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, HIST_CAP,
 } from "../src/workspaces/site-planner/lib/cropHistory.js";
 
 describe("cropHistory — undo/redo for both crop shapes (NEW-4)", () => {
@@ -48,18 +48,5 @@ describe("cropHistory — undo/redo for both crop shapes (NEW-4)", () => {
     const before = JSON.stringify(h);
     undoHistory(h, "B"); redoHistory(h, "B"); pushHistory(h, "C");
     expect(JSON.stringify(h)).toBe(before);
-  });
-});
-
-describe("zoom slider mapping (NEW-3)", () => {
-  it("is logarithmic and round-trips", () => {
-    for (const s of [0.02, 0.1, 0.5, 1, 4, 16]) expect(sliderToScale(scaleToSlider(s, 0.02, 16), 0.02, 16)).toBeCloseTo(s, 6);
-    expect(scaleToSlider(0.02, 0.02, 16)).toBe(0);
-    expect(scaleToSlider(16, 0.02, 16)).toBe(1);
-  });
-  it("clamps out-of-range input", () => {
-    expect(scaleToSlider(100, 0.02, 16)).toBe(1);
-    expect(sliderToScale(-1, 0.02, 16)).toBeCloseTo(0.02, 9);
-    expect(sliderToScale(2, 0.02, 16)).toBeCloseTo(16, 9);
   });
 });
