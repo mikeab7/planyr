@@ -183,6 +183,31 @@ describe("ledger branch — inbox (a writer with no shell)", () => {
 });
 
 describe("ledger branch — importDelta (cut-over and straggler PRs)", () => {
+  it("an EDIT of an entry the ledger has since MOVED to another state lands where it lives now — never a second copy (a duplicate id)", () => {
+    const code = join(root, "code4");
+    mkdirSync(code);
+    git(code, ["init", "-q", "-b", "main"]);
+    cpSync(join(FIXTURE, "ledger"), join(code, "ledger"), { recursive: true });
+    writeFileSync(join(code, "ledger/backlog/verify/B90.md"), "### B90 — fixture verify item #data\n- Verify: live\n- note: original\n");
+    git(code, ["add", "-A"]); git(code, ["commit", "-qm", "base"], { env: ID });
+    const base = git(code, ["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(join(code, "ledger/backlog/verify/B90.md"), "### B90 — fixture verify item #data\n- Verify: live\n- note: original\n- PR ADDED THIS LINE\n");   // the PR edits it in `verify`
+    git(code, ["add", "-A"]); git(code, ["commit", "-qm", "pr"], { env: ID });
+    const tip = git(code, ["rev-parse", "HEAD"]).stdout.trim();
+    const a = codeClone("a");
+    putEntry(a, "B90", "### B90 — fixture verify item #data\n- Verify: live\n- note: original\n", { sleep: noSleep });
+    moveEntry(a, "B90", "done", { sleep: noSleep });                                  // meanwhile the ledger moved it to done
+    let rep;
+    ledgerTx(a, (dir) => (rep = importDelta(code, base, tip, dir)), { sleep: noSleep });
+    expect(rep.added).toEqual([]);                                                    // nothing re-created
+    expect(rep.modified.join()).toMatch(/done\/B90\.md/);
+    const fresh = codeClone("f"); syncCheckout(fresh);
+    const copies = readLedgerDir(fresh, "backlog").entries.filter((e) => e.id === "B90");
+    expect(copies).toHaveLength(1);                                                   // ONE copy, still in done
+    expect(copies[0].state).toBe("done");
+    expect(copies[0].text).toMatch(/PR ADDED THIS LINE/);                             // and the PR's edit was not lost
+  });
+
   it("a MOVE of an entry the ledger has since changed is reported, never renumbered; a non-overlapping edit 3-way merges", () => {
     const code = join(root, "code3");
     mkdirSync(code);

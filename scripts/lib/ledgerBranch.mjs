@@ -461,12 +461,31 @@ export function importDelta(codeRepo, baseRef, tipRef, dir) {
       report.conflicts.push(`${path}: changed on the ledger since this branch started and the edits overlap — branch's version NOT applied`);
       continue;
     }
-    if (base != null) { // a move or edit whose target did not exist: write it (the D row removed the old home)
+    if (base != null) {
+      // The path did not exist on the ledger. Either (a) this is a MOVE — the same id was removed from another state in this
+      // diff, so the D row already cleared the old home and we write the new one — or (b) it is an EDIT of an entry the
+      // ledger has since MOVED to another state. (b) must NEVER re-create the stale copy (that is a duplicate id): edit the
+      // entry where it lives now, as a 3-way merge of (current, the PR's base, the PR's text), or report it.
+      const homes = findEntryFiles(dir, id);
+      if (!deletedIds.has(id) && homes.length) {
+        if (homes.length > 1) { report.conflicts.push(`${path}: the entry exists in several states on the ledger (${homes.map((h) => h.file).join(", ")}) — apply the branch's edit by hand`); continue; }
+        const homePath = join(dir, homes[0].file);
+        const cur = readFileSync(homePath, "utf8");
+        if (cur === tip) { report.skipped.push(`${path} (already identical in ${homes[0].state})`); continue; }
+        const merged = cur === base ? tip : threeWay(cur, base, tip);
+        if (merged == null) { report.conflicts.push(`${path}: the ledger MOVED this entry to \`${homes[0].state}\` and its text overlaps the branch's edit — NOT applied (apply by hand)`); continue; }
+        writeFileSync(homePath, merged); report.modified.push(`${homes[0].file} (the branch edited it in \`${state}\`; applied where the ledger now keeps it)`); continue;
+      }
       mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, tip); report.added.push(path); continue;
     }
     // a MOVE (the same id was removed from another state in this diff): never a new id, never renumbered
     if (deletedIds.has(id)) {
       if (keptMoves.has(id)) { report.conflicts.push(`${path}: the entry also changed on the ledger since this branch started — its move to \`${state}\` is NOT applied (reconcile by hand)`); continue; }
+      if (existsSync(target)) { // re-running an import, or the destination was filled/edited since: never overwrite it
+        if (readFileSync(target, "utf8") === tip) report.skipped.push(`${path} (identical)`);
+        else report.conflicts.push(`${path}: already exists on the ledger with different text — the branch's moved copy NOT applied`);
+        continue;
+      }
       mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, tip); report.added.push(path); continue;
     }
     // brand-new id on the branch
