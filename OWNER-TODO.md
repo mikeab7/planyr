@@ -1112,6 +1112,8 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 - [ ] **Delete two scratch branches on GitHub (2 clicks each, github.com/mikeab7/planyr/branches) — `ledger-probe` and `ledger-e2e-tmp`.** Claude made them while proving the new ledger branch works and then could not remove them (the sandbox can create and push branches but not delete them). They hold nothing you need; the real branch is `ledger`. (NEW-1, 2026-11-05)
 
+- [ ] **One setting, ~1 minute (B2671188): let GitHub Actions open pull requests.** In GitHub → the planyr repo → Settings → Actions → General → "Workflow permissions", tick **"Allow GitHub Actions to create and approve pull requests"** (if it is greyed out, your organization's settings are overriding it). Why: the nightly job that refreshes the index file your claude.ai Project syncs (`BACKLOG_OPEN.md`) has been failing every night since at least Nov 1 — it prepares the update but GitHub refuses to let it open the pull request, so the index goes stale. Found while moving the backlog to its own branch (not caused by it). Until you do this, a Claude session has to open that pull request by hand.
+
 ## Deferred / low-urgency (filed; no action needed unless he wants them sooner)
 - **B364 (remaining half) — two optional server backends, only if/when wanted.** The scanned-drawing reading
       now runs FREE in the browser (shipped 2026-07-05 — scanned sets get real sheet labels + auto-filing with no
