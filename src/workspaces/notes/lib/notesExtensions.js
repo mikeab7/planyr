@@ -38,7 +38,7 @@ import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
 import { NoteTableFill } from "./notesTableFill.js";
 import { NoteTableMultiSelect } from "./notesTableMultiSelect.js";
-import { Table, TableCell, TableHeader } from "@tiptap/extension-table";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
@@ -59,7 +59,7 @@ import NoteTableToText from "./notesTableToText.js";
 import NoteTableColumns, { NoteTableView } from "./notesTableColumns.js";
 import { TABLE_COL_MIN_WIDTH } from "./notesTableWidth.js";
 import { adoptEmptyBlockSize, rowCarryPlugin, seedMark, sizeEmptyBlocks } from "./notesTableRowStyle.js";
-import { NoteTableRow, NoteTableRowHeight } from "./notesTableRowHeight.js";
+import { NoteTableRowHeight, rowNodeView } from "./notesTableRowHeight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
@@ -166,6 +166,9 @@ const NoteTable = Table.extend({
     };
   },
 });
+
+/** NEW-3: a table row with its own view, so a live height drag survives (lib/notesTableRowHeight.js). */
+const NoteTableRow = TableRow.extend({ addNodeView() { return rowNodeView; } });
 
 export const NOTE_EXTENSIONS = [
   // Document · paragraph · text · bold · italic · strike · code · codeBlock · heading ·

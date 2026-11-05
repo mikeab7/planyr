@@ -21,7 +21,6 @@
  * Mouse only; touch keeps its page pan (the same limit the column drag has).
  */
 import { Extension } from "@tiptap/core";
-import { TableRow } from "@tiptap/extension-table";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { CellSelection, selectedRect } from "@tiptap/pm/tables";
 
@@ -221,27 +220,24 @@ export const NoteTableRowHeight = Extension.create({
   addProseMirrorPlugins() { return [rowHeightPlugin()]; },
 });
 
-/** The row node, with a view of its own: a live drag patches `style.height` on the `<tr>` for a smooth preview, and
- *  without `ignoreMutation` ProseMirror reads that as an edit to the row and redraws it from the document —
- *  wiping the preview on the next mouse move (measured: the stored height stayed null and the row never moved).
- *  `update` re-applies the stored height, so an undo/redo/sync repaints it. */
-export const NoteTableRow = TableRow.extend({
-  addNodeView() {
-    return ({ node: first }) => {
-      let node = first;
-      const dom = document.createElement("tr");
-      const apply = (n) => {
-        const h = n.attrs.rowHeight;
-        if (h) { dom.setAttribute("data-row-height", String(h)); dom.style.height = `${h}px`; }
-        else { dom.removeAttribute("data-row-height"); dom.style.removeProperty("height"); if (!dom.getAttribute("style")) dom.removeAttribute("style"); }
-      };
-      apply(node);
-      return {
-        dom,
-        contentDOM: dom,
-        update(next) { if (next.type !== node.type) return false; node = next; apply(next); return true; },
-        ignoreMutation(m) { return m.type === "attributes" && (m.attributeName === "style" || m.attributeName === "data-row-height"); },
-      };
-    };
-  },
-});
+/** The row's node view (wired onto the table-row extension in `notesExtensions.js`, the ONE declaration of what a note may
+ *  contain): a live drag patches `style.height` on the `<tr>` for a smooth preview, and without `ignoreMutation`
+ *  ProseMirror reads that as an edit to the row and redraws it from the document — wiping the preview on the next mouse
+ *  move (measured: the stored height stayed null and the row never moved). `update` re-applies the stored height, so an
+ *  undo/redo/sync repaints it. */
+export function rowNodeView({ node: first }) {
+  let node = first;
+  const dom = document.createElement("tr");
+  const apply = (n) => {
+    const h = n.attrs.rowHeight;
+    if (h) { dom.setAttribute("data-row-height", String(h)); dom.style.height = `${h}px`; }
+    else { dom.removeAttribute("data-row-height"); dom.style.removeProperty("height"); if (!dom.getAttribute("style")) dom.removeAttribute("style"); }
+  };
+  apply(node);
+  return {
+    dom,
+    contentDOM: dom,
+    update(next) { if (next.type !== node.type) return false; node = next; apply(next); return true; },
+    ignoreMutation(m) { return m.type === "attributes" && (m.attributeName === "style" || m.attributeName === "data-row-height"); },
+  };
+}
