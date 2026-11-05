@@ -74,7 +74,7 @@ const EDIT = {
 /* ---- in-page recorder: every on-device per-plan entry write, parsed down to the facts the verdicts read ---- */
 const RECORDER = () => {
   window.__PLANYR_E2E = true;                          // the read-only E2E hooks (the overlay hook is the Crop… dialog's own write)
-  window.__PLANYR_LEGACY_MIRROR = "idle";
+
   window.__lsw = [];
   const orig = Storage.prototype.setItem;
   Storage.prototype.setItem = function (k, v) {
@@ -131,10 +131,10 @@ const note = (s) => { notes.push(s); console.log("· " + s); };
 
 async function switchPlan(from, to) {                  // the header's own plan switcher: the crumb opens it, the row switches
   await page.keyboard.press("Escape"); await pacedWait(page, 200);
-  for (let i = 0; i < 3 && !(await page.locator('[data-testid="plan-name-input"]:visible').count()); i++) {
+  for (let i = 0; i < 3 && !(await page.locator('[data-testid="plan-footer"]:visible').count()); i++) {
     await page.locator('[data-testid="plan-crumb"]:visible').click(); await pacedWait(page, 600);
   }
-  const row = page.locator("button:visible").filter({ has: page.locator("span", { hasText: new RegExp(`^${to}$`) }) }).first();
+  const row = page.getByTestId("plan-list-scroll").locator("button:visible", { hasText: new RegExp(`^${to}$`) }).first();   // NEW-1 (2026-11-04): the other plans are the list under the current row
   try { await row.click({ timeout: 8000 }); } catch (e) { if (process.env.KA_SHOT) await page.screenshot({ path: process.env.KA_SHOT }); throw new Error(`could not switch ${from} → ${to}: ${e.message.split("\n")[0]}`); }
   await named(to); await pacedWait(page, 1500);
 }
@@ -187,7 +187,8 @@ async function setOverlayOpacity(pct) {
 }
 async function renamePlan(next) {
   await page.locator('[data-testid="plan-crumb"]:visible').click();
-  const input = page.getByTestId("plan-name-input");
+  await page.getByTestId("plan-current-name").dblclick();   // NEW-1 (2026-11-04): the current row is the rename control
+  const input = page.getByTestId("plan-rename-input");
   await input.fill(next); await input.press("Enter"); await page.keyboard.press("Escape"); await pacedWait(page, 400);
 }
 async function hiddenStorm(ms) {                        // everything that can wake a hidden planner, then the wall clock for its timers
@@ -235,7 +236,7 @@ await pacedWait(page, 6000);
 const afterReload = await page.evaluate((ids) => {
   const out = {};
   for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const m = /:p:([^:]+)$/.exec(k); if (!m || !ids.includes(m[1])) continue;
-    try { const r = JSON.parse(localStorage.getItem(k)); out[m[1]] = { key: k, name: r.name, layerOverrides: r.layerOverrides, ops: (r.sheetOverlays || []).map((o) => (o.opacity == null ? null : Math.round(o.opacity * 100))), els: Object.fromEntries((r.els || []).map((e) => [e.id, [e.cx, e.cy]])) }; } catch (_) {} }
+    try { const r = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)); out[m[1]] = { key: k, name: r.name, layerOverrides: r.layerOverrides, ops: (r.sheetOverlays || []).map((o) => (o.opacity == null ? null : Math.round(o.opacity * 100))), els: Object.fromEntries((r.els || []).map((e) => [e.id, [e.cx, e.cy]])) }; } catch (_) {} }
   return out;
 }, [A.id, B.id]);
 

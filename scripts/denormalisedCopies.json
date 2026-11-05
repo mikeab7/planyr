@@ -410,6 +410,14 @@
     }
   ],
   "ownedColumns": {
+    "signin_incidents": [
+      "kind",
+      "alert_emailed_at",
+      "recovery_emailed_at"
+    ],
+    "signin_stop_alerts": [
+      "emailed_at"
+    ],
     "recovery_20261008_parcel_account_snapshot": [
       "site_id"
     ],
@@ -419,6 +427,9 @@
     "ops_ingest_tokens": ["label"],
     "signup_attempts_log": [
       "email_domain"
+    ],
+    "auth_email_link_log": [
+      "email_key"
     ],
     "cad_taxunit_shards": ["county"],
     "comp_import_drafts": [
@@ -479,6 +490,10 @@
       "custom_name",
       "place_id"
     ],
+    "food_place_prefs": [
+      "custom_name",
+      "place_id"
+    ],
     "food_lists": [
       "name"
     ],
@@ -492,7 +507,8 @@
       "place_id"
     ],
     "food_dishes": [
-      "name"
+      "name",
+      "rated_on"
     ],
     "org_model_sheets": [
       "name"
@@ -560,6 +576,9 @@
       "role",
       "team_id"
     ],
+    "mailbox_proofs": [
+      "email"
+    ],
     "jurisdictions": [
       "name"
     ],
@@ -580,6 +599,9 @@
       "file_name",
       "status",
       "total_bytes"
+    ],
+    "project_layer_opacity": [
+      "owner_id"
     ]
   }
 }

@@ -22,6 +22,7 @@ import {
   DEP_PRESENCE,
   LOOP_SUSPECT_RUNS,
 } from "../src/app/renderLoopProbe.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const REACT_ELEMENT = Symbol.for("react.element");
 const el = (type, key = null, props = {}) => ({ $$typeof: REACT_ELEMENT, type, key, ref: null, props, _owner: null });
@@ -166,7 +167,7 @@ describe("createLoopProbe — counting, windowing and the report", () => {
 const readSrc = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 describe("the two effects the #185 crashes threw from stay instrumented", () => {
-  const planner = readSrc("../src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   const crumb = readSrc("../src/shared/ui/ProjectBreadcrumb.jsx");
 
   it("the geo-registration layout effect records its runs", () => {

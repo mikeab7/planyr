@@ -13,6 +13,7 @@
 import { useScrollSafeSlider } from "../lib/sliderScrollGuard.js";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { chipBox } from "../lib/chipStyle.js";
 import {
   RATING_MIN, RATING_MAX, RATING_STEP, RATING_TICKS, RATING_SLIDER_REST, THUMB_PX, ratingFraction, ratingFromClientX,
 } from "../lib/ratingScale.js";
@@ -33,12 +34,12 @@ export default function RatingSlider({
     <div data-testid={ids.root} data-no-sheet-drag="">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", minHeight: 24 }}>
         <span
-          aria-live="polite" data-testid={ids.readout} data-score-state={active ? "set" : "unset"}
+          aria-live="polite" data-testid={ids.readout} data-score-state={active ? "set" : "unset"} data-chip={active ? "" : undefined}
           style={{
-            fontSize: FONT_SIZE.emphasis, fontWeight: 700, lineHeight: 1,
+            // NEW-3 (2026-10-23): the set readout is a chip — explicit height, text centred on both axes (lib/chipStyle.js).
+            ...chipBox(active ? 20 : 14, active ? 8 : 0), fontSize: FONT_SIZE.emphasis, fontWeight: 700, verticalAlign: "baseline",
             color: active ? textColorForRating(shown) : "var(--text-tertiary)",
             background: active ? color : "transparent", borderRadius: 6,
-            padding: active ? "3px 8px" : 0,
           }}
         >
           {active ? `${shown} / ${RATING_MAX}` : "Not rated"}

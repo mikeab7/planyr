@@ -12,6 +12,11 @@
  * that file's own header) rather than hardcoding a file list here, so there is one place to add
  * or remove a required contract, not two that can drift.
  *
+ * ⛔ R3 (B1857905) — THE TWO STALE EXCLUSIONS R2 LEFT HERE ARE GONE. Both were repaired (see
+ * e2e/ctrlz-undo.spec.js and e2e/inspector-key-scope.spec.js's own R3 comments for the current
+ * product contract each now targets) and mutation-proven red-on-regression / green-on-correct
+ * before being let back into this required lane — see the manifest's own header for the account.
+ *
  * ⛔ DELIBERATELY NO "setup" PROJECT / SIGNED-IN DEPENDENCY (per the brief's own R2 instruction:
  * "Isolate the critical project from the global signed-in setup dependency when it is
  * intentionally local-only. A missing account must not prevent useful local interaction
@@ -36,19 +41,11 @@ const manifest = JSON.parse(readFileSync(join(HERE, "e2e", "critical-contracts.j
 // bare filename only.
 const CRITICAL_FILES = manifest.contracts.map((c) => c.file.replace(/^e2e\//, ""));
 
-// Named here rather than duplicated into the config: the two pre-existing, unrelated-to-this-lane
-// stale cases the manifest's own header documents (why they fail, who owns retiring them).
-const KNOWN_STALE_EXCLUSIONS = [
-  "a refused Delete explains where the keystroke went",
-  String.raw`drag the Fill-opacity slider, then Ctrl\+Z WITHOUT deselecting still undoes it`,
-];
-
 const BASE_URL = process.env.BASE_URL || "http://localhost:4173";
 
 export default defineConfig({
   testDir: "./e2e",
   testMatch: CRITICAL_FILES,
-  grepInvert: new RegExp(KNOWN_STALE_EXCLUSIONS.join("|")),
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,

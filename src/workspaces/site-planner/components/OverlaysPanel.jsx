@@ -20,8 +20,15 @@
  *
  * WIDTH: the panel is resizable 240–620 and also floats. Nothing here reads window width. The scale
  * group measures ITS OWN box (ResizeObserver) and is either one row of three equal buttons (all three
- * labels fit unwrapped) or one column of three — never 2 + 1. The rotation row is flex-wrap, so the
- * two 90° buttons drop below only when the panel is genuinely too narrow.
+ * labels fit unwrapped) or one column of three — never 2 + 1. The two quarter-turn buttons under the
+ * rotation row are ALWAYS one compact row, left-aligned, sized to their own text; they shorten to
+ * "90° counterclockwise" / "90° clockwise" when the full labels would not fit, and never stack.
+ *
+ * ROTATION (NEW-1, 2026-10-21): label · round DIAL (drag the needle; Shift snaps 15°; one undo step per drag)
+ * · number box with ▲▼ (+1° / −1°) on the top line; "Turn 90° counterclockwise" / "Turn 90° clockwise" under it, side by side.
+ * CROP (NEW-2, 2026-10-21): a switch in the section heading. Off = the heading alone; on = a picture of the
+ * sheet with the area outside the crop dimmed, the kept area dashed in the Site green, and Adjust. Switching
+ * off keeps the shape (`crop.off`, shared engine) so switching on brings the same shape back.
  *
  * DRAG: rows reorder by HTML5 drag on a fine pointer only. On touch dragging is OFF (the precedent
  * is NotesTree.jsx) and ⋯ → Move up / Move down is the touch and keyboard path. A row drag is a
@@ -39,10 +46,12 @@ import { CONTROL_H, FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js"
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { normalizeDeg, parseRotationInput, formatDeg } from "../../../shared/ui/RotationStepper.jsx";
-import { SCALE_PRESETS, feetPerInchForPreset, feetPerInchFromPair, matchScalePreset, scaleForFtPerPoint, PAGE_UNITS, REAL_UNITS } from "../../../shared/overlay/overlayScale.js";
-import { hasCrop, cropKind, cropEditBlock } from "../../../shared/overlay/overlayCrop.js";
-import { overlayBand, overlayPanelOrder, overlayOrderFlags } from "../lib/overlayOrder.js";
-import { overlaySubline, placementPlan, formatScaleRatio, OV_KIND } from "../lib/overlayPanelModel.js";
+import { SCALE_PRESETS, feetPerInchForPreset, scaleForFtPerPoint, parseTypedScale } from "../../../shared/overlay/overlayScale.js";
+import { hasCrop, hasSavedCrop, cropEditBlock, cropOutlinePath } from "../../../shared/overlay/overlayCrop.js";
+import NumberBox from "../../../shared/ui/NumberBox.jsx";
+import { DIAL_TICKS, dialAngleFromPoint, dialDragAngle, dialKeyAngle, needleEnd, stepRotation, createDialDrag } from "../lib/rotationDial.js";
+import { overlayBand, overlayPanelOrder, overlayOrderFlags, canDropOverlay } from "../lib/overlayOrder.js";
+import { overlaySubline, placementPlan, formatScaleRatio, scaleEntryPlan, OV_KIND } from "../lib/overlayPanelModel.js";
 import { EyeIcon, EyeOffIcon, LockGlyph, UnlockGlyph, MoreIcon, iconBtn as rowIconBtn } from "./ParcelsPanel.jsx";
 
 const LINE = "1px solid var(--border-default)";
@@ -66,8 +75,6 @@ function Ico({ children, size = 14 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" style={{ flex: "none", display: "block" }}>{children}</svg>;
 }
 const SheetIcon = () => <Ico size={16}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></Ico>;
-const RectIcon = () => <Ico><rect x="4" y="6" width="16" height="12" rx="1" strokeDasharray="3 2" /></Ico>;
-const PolyIcon = () => <Ico><path d="M5 17l3-11 9 3 2 8z" strokeDasharray="3 2" /></Ico>;
 const RotL = () => <Ico><path d="M4 12a8 8 0 1 0 3-6.2" /><path d="M4 4v4h4" /></Ico>;
 const RotR = () => <Ico><path d="M20 12a8 8 0 1 1-3-6.2" /><path d="M20 4v4h-4" /></Ico>;
 
@@ -87,40 +94,195 @@ function Thumb({ o }) {
   );
 }
 
-/* [− value° +] — 1° per press, the value typeable (commit on Enter / blur, Esc reverts). */
-function DegStepper({ value, disabled, reason, onCommit, onStep }) {
+/* The ONE "row or column" decision for a group of equal buttons: a row while every label fits unwrapped in an
+ * equal share of THIS box's own width, otherwise a column of full-width buttons — never a partial row. It is a
+ * measurement (ResizeObserver on the group's own box + each button's natural content width), not a CSS guess.
+ * Used by the scale group. */
+function useRowOrStack(ref, key) {
+  const [stacked, setStacked] = useState(false);
+  const GAP = SPACE.sm, PAD_X = 10, BORDER = 2;
+  useIsoLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const kids = Array.from(box.querySelectorAll("button"));
+      if (!kids.length) return;
+      let need = 0;
+      kids.forEach((b) => {
+        if (!b.firstChild) return;
+        const r = document.createRange(); r.selectNodeContents(b);
+        need = Math.max(need, r.getBoundingClientRect().width);
+      });
+      need += 2 * PAD_X + BORDER;
+      const cell = (box.clientWidth - GAP * (kids.length - 1)) / kids.length;
+      setStacked(cell < need - 0.5);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(box);
+    const fonts = document.fonts && document.fonts.ready;
+    if (fonts) fonts.then(measure).catch(() => {});
+    return () => { if (ro) ro.disconnect(); };
+  }, [key]);
+  return { stacked, GAP, PAD_X };
+}
+
+// the spinner arrows are drawn, not typeset: this panel allows exactly two text sizes and a glyph would be a third
+const Chevron = ({ up }) => <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true" focusable="false" style={{ display: "block" }}><path d={up ? "M1 4.2 4 1l3 3.2" : "M1 .8 4 4l3-3.2"} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+
+const DIAL_PX = 32;
+const DIAL_C = DIAL_PX / 2;
+
+/* The rotation DIAL: a circle with four tick dots (0/90/180/270) and a needle in the Site green at the current
+ * rotation (0° = up, clockwise positive). Press anywhere on it and drag to set the rotation live; the drag is ONE
+ * undo step (rotationDial.createDialDrag). Shift snaps to 15°. Focusable slider: ←/↓ −1°, →/↑ +1°, Shift ±15°. */
+function RotationDial({ value, disabled, reason, drag, onKey }) {
+  const ref = useRef(null);
+  const deg = Number.isFinite(value) ? value : 0;
+  const tip = needleEnd(deg, DIAL_C, 10.5);
+  const angleAt = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    return dialDragAngle(dialAngleFromPoint(r.left + r.width / 2, r.top + r.height / 2, e.clientX, e.clientY), { shift: e.shiftKey });
+  };
+  const end = (e) => {
+    try { if (ref.current && ref.current.hasPointerCapture(e.pointerId)) ref.current.releasePointerCapture(e.pointerId); } catch (_) {}
+    drag.up();
+  };
+  return (
+    <span ref={ref} role="slider" tabIndex={disabled ? -1 : 0} aria-label="Rotation dial" aria-valuemin={0} aria-valuemax={360} aria-valuenow={Math.round(deg * 10) / 10}
+      aria-valuetext={`${formatDeg(deg)}°`} aria-disabled={disabled || undefined} title={disabled ? reason : undefined} data-testid="overlay-rot-dial"
+      style={{ flex: "none", width: DIAL_PX, height: DIAL_PX, borderRadius: RADIUS.pill, cursor: disabled ? "default" : "pointer", touchAction: "none", opacity: disabled ? 0.55 : 1, lineHeight: 0 }}
+      onPointerDown={(e) => {
+        if (disabled || e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        try { ref.current.setPointerCapture(e.pointerId); } catch (_) {}
+        try { ref.current.focus({ preventScroll: true }); } catch (_) {}
+        drag.down(angleAt(e));
+      }}
+      onPointerMove={(e) => { if (drag.active) drag.move(angleAt(e)); }}
+      onPointerUp={end} onPointerCancel={end}
+      onKeyDown={(e) => { if (!disabled) onKey(e); }}>
+      <svg width={DIAL_PX} height={DIAL_PX} viewBox={`0 0 ${DIAL_PX} ${DIAL_PX}`} aria-hidden="true" focusable="false" style={{ display: "block", pointerEvents: "none" }}>
+        <circle cx={DIAL_C} cy={DIAL_C} r={DIAL_C - 1} style={{ fill: "var(--surface-raised)", stroke: "var(--border-default)" }} strokeWidth="1" />
+        {DIAL_TICKS.map((t) => { const p = needleEnd(t, DIAL_C, 12.5); return <circle key={t} cx={p.x} cy={p.y} r="1.2" style={{ fill: "var(--text-secondary)" }} />; })}
+        <line data-testid="overlay-rot-needle" x1={DIAL_C} y1={DIAL_C} x2={tip.x} y2={tip.y} strokeWidth="2" strokeLinecap="round" style={{ stroke: ACCENT }} />
+        <circle cx={DIAL_C} cy={DIAL_C} r="2.2" style={{ fill: ACCENT }} />
+      </svg>
+    </span>
+  );
+}
+
+/* The typed rotation: [ value° ▲▼ ] — typed value commits on Enter / blur (Esc reverts, ArrowUp/Down step 1°);
+ * the ▲ turns the sheet +1° (clockwise), the ▼ −1°. */
+function DegBox({ value, disabled, reason, onCommit, onStep }) {
   const committed = Number.isFinite(value) ? value : 0;
   const [draft, setDraft] = useState(formatDeg(committed));
   const editing = useRef(false);
+  const cancelled = useRef(false);   // Esc → the blur that follows must not commit the half-typed draft it still closes over
   useEffect(() => { if (!editing.current) setDraft(formatDeg(committed)); }, [committed]);
   const commit = () => {
     editing.current = false;
+    if (cancelled.current) { cancelled.current = false; setDraft(formatDeg(committed)); return; }
     const p = parseRotationInput(draft);
     if (p == null) { setDraft(formatDeg(committed)); return; }
     if (p !== normalizeDeg(committed)) onCommit(p);
     setDraft(formatDeg(p));
   };
   const step = (d) => { editing.current = false; onStep(d); };
-  const stepBtn = { ...rowIconBtn, width: H, height: "100%", borderRadius: 0, color: "var(--text-primary)", fontSize: C, fontWeight: 400 };
   return (
-    <span role="group" aria-label="Rotation" title={disabled ? reason : undefined} style={{ display: "inline-flex", alignItems: "stretch", boxSizing: "border-box", height: H, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-raised)", overflow: "hidden", opacity: disabled ? 0.55 : 1 }}>
-      <button type="button" style={{ ...stepBtn, borderRight: LINE }} disabled={disabled} aria-label="Rotate 1 degree anticlockwise" data-testid="overlay-rot-minus" onClick={() => step(-1)}>−</button>
-      <span style={{ display: "inline-flex", alignItems: "center", paddingRight: SPACE.md }}>
+    <NumberBox width={92} disabled={disabled} testid="overlay-rot-box" style={{ border: LINE }}
+      onUp={() => step(1)} onDown={() => step(-1)} upLabel="Increase rotation 1 degree" downLabel="Decrease rotation 1 degree"
+      upTitle={disabled ? reason : undefined} downTitle={disabled ? reason : undefined} upTestid="overlay-rot-plus" downTestid="overlay-rot-minus" upGlyph={<Chevron up />} downGlyph={<Chevron />}>
+      <span role="group" aria-label="Rotation" title={disabled ? reason : undefined} style={{ display: "inline-flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, paddingRight: SPACE.xs }}>
         <input value={draft} disabled={disabled} inputMode="decimal" aria-label="Rotation in degrees" data-testid="overlay-rotation"
-          style={{ ...inputStyle, border: "none", background: "transparent", height: "100%", width: 52, padding: "0 1px 0 0", textAlign: "right", outline: "none" }}
+          style={{ ...inputStyle, border: "none", background: "transparent", height: "100%", width: "100%", padding: "0 1px 0 0", textAlign: "right", outline: "none" }}
           onFocus={() => { editing.current = true; }}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
-            else if (e.key === "Escape") { editing.current = false; setDraft(formatDeg(committed)); e.currentTarget.blur(); }
+            else if (e.key === "Escape") { editing.current = false; cancelled.current = true; setDraft(formatDeg(committed)); e.currentTarget.blur(); }
             else if (e.key === "ArrowUp") { e.preventDefault(); step(1); }
             else if (e.key === "ArrowDown") { e.preventDefault(); step(-1); }
           }} />
         <span aria-hidden="true" style={{ ...valueStyle, fontFamily: NUM_FONT }}>°</span>
       </span>
-      <button type="button" style={{ ...stepBtn, borderLeft: LINE }} disabled={disabled} aria-label="Rotate 1 degree clockwise" data-testid="overlay-rot-plus" onClick={() => step(1)}>+</button>
-    </span>
+    </NumberBox>
+  );
+}
+
+/* The two quarter-turn buttons: ONE compact row, left-aligned, each as wide as its own text — never stacked. The label
+ * steps down only as far as the panel's width forces it: "Turn 90° …" (full) → "90° …" (short) → "90° …" with no icon and
+ * tighter padding (compact) → the two turn arrows alone (icons — only where even the compact words would be cut off by the
+ * panel edge: the narrowest panel and a phone). The full words stay in aria-label and title at every step. The decision is a measurement
+ * (ResizeObserver on the row's box + hidden copies of both label sets), not a CSS guess. */
+const QUARTERS = [
+  { testid: "overlay-rot-ccw90", full: "Turn 90° counterclockwise", short: "90° counterclockwise", delta: -90, Icon: RotL },
+  { testid: "overlay-rot-cw90", full: "Turn 90° clockwise", short: "90° clockwise", delta: 90, Icon: RotR },
+];
+const QUARTER_LEVELS = ["full", "short", "compact", "icons"];
+function QuarterTurns({ onTurn, keyId }) {
+  const boxRef = useRef(null);
+  const [level, setLevel] = useState("full");
+  const GAP = SPACE.sm, BORDER = 2, ICON = 14;
+  const padFor = (l) => (l === "full" || l === "short" ? 10 : 8);
+  useIsoLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const width = (kind) => Array.from(box.querySelectorAll(`[data-quarter-probe="${kind}"]`)).map((p) => p.getBoundingClientRect().width);
+      const need = (l) => (l === "icons" ? QUARTERS.length * (ICON + 2 * padFor(l) + BORDER) : width(l === "full" ? "full" : "short").reduce((n, w) => n + w + (l === "compact" ? 0 : ICON + SPACE.xs) + 2 * padFor(l) + BORDER, 0)) + GAP;
+      setLevel(QUARTER_LEVELS.find((l) => box.clientWidth >= need(l) - 0.5) || "icons");
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(box);
+    const fonts = document.fonts && document.fonts.ready;
+    if (fonts) fonts.then(measure).catch(() => {});
+    return () => { if (ro) ro.disconnect(); };
+  }, [keyId]);
+  return (
+    <div ref={boxRef} data-testid="overlay-quarter-group" data-label={level}
+      style={{ position: "relative", display: "flex", flexWrap: "nowrap", justifyContent: "flex-start", gap: GAP, minWidth: 0 }}>
+      {QUARTERS.map(({ testid, full, short: sh, delta, Icon }) => (
+        <Button key={testid} variant="ghost" size="md" style={{ ...btnCompact, flex: "none", padding: `0 ${padFor(level)}px` }} data-testid={testid}
+          aria-label={full} title={full} onClick={() => onTurn(delta)}>{(level === "full" || level === "short" || level === "icons") && <Icon />}{level === "full" ? full : level === "icons" ? null : sh}</Button>
+      ))}
+      {["full", "short"].flatMap((kind) => QUARTERS.map(({ testid, full, short: sh }) => (
+        <span key={`${kind}-${testid}`} aria-hidden="true" data-quarter-probe={kind} style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", whiteSpace: "nowrap", fontSize: C, fontWeight: 400, left: 0, top: 0 }}>{kind === "full" ? full : sh}</span>
+      )))}
+    </div>
+  );
+}
+
+/* Rotation, as one block: label · dial · number box on the top line; the two quarter-turn buttons under it,
+ * spelled out, side by side in one compact row (shortened, never stacked, when the panel is narrow).
+ * Every control writes through the panel's one patch handler and works on a LOCKED overlay (B2262864). */
+function RotationRow({ o, h }) {
+  const oRef = useRef(o); oRef.current = o;
+  const hRef = useRef(h); hRef.current = h;
+  const rot = Number.isFinite(o.rotation) ? o.rotation : 0;
+  const drag = useMemo(() => createDialDrag({
+    getRotation: () => oRef.current.rotation || 0,
+    pushHistory: () => hRef.current.pushHistory(),
+    patch: (deg, hist) => hRef.current.onPatch(oRef.current.id, { rotation: deg }, hist),
+  }), []);
+  const turn = (d) => h.onPatch(o.id, { rotation: stepRotation(rot, d) });
+  return (
+    <div data-testid="overlay-rotation-row" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
+        <span style={{ ...valueStyle, color: "var(--text-secondary)", flex: "none" }}>Rotation</span>
+        <RotationDial value={rot} drag={drag}
+          onKey={(e) => {
+            const next = dialKeyAngle(rot, e.key, e.shiftKey);
+            if (next == null) return;
+            e.preventDefault(); e.stopPropagation();
+            h.onPatch(o.id, { rotation: next }, !e.repeat);   // a held key is ONE undo step
+          }} />
+        <DegBox value={rot} onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={turn} />
+      </div>
+      <QuarterTurns onTurn={turn} keyId={o.id} />
+    </div>
   );
 }
 
@@ -134,32 +296,7 @@ function ScaleGroup({ buttons, active, disabled, onPick, why }) {
     match: { label: "Match 2 points", title: "Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" },
   };
   const ref = useRef(null);
-  const [stacked, setStacked] = useState(false);
-  const GAP = SPACE.sm, PAD_X = 10, BORDER = 2;
-  useIsoLayoutEffect(() => {
-    const box = ref.current;
-    if (!box) return undefined;
-    const measure = () => {
-      const kids = Array.from(box.querySelectorAll("button"));
-      if (!kids.length) return;
-      let need = 0;
-      kids.forEach((b) => {
-        const t = b.firstChild;
-        if (!t) return;
-        const r = document.createRange(); r.selectNodeContents(t);
-        need = Math.max(need, r.getBoundingClientRect().width);
-      });
-      need += 2 * PAD_X + BORDER;
-      const cell = (box.clientWidth - GAP * (kids.length - 1)) / kids.length;
-      setStacked(cell < need - 0.5);
-    };
-    measure();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    if (ro) ro.observe(box);
-    const fonts = document.fonts && document.fonts.ready;
-    if (fonts) fonts.then(measure).catch(() => {});
-    return () => { if (ro) ro.disconnect(); };
-  }, [buttons.join(",")]);
+  const { stacked, GAP, PAD_X } = useRowOrStack(ref, buttons.join(","));
   return (
     <div ref={ref} data-testid="overlay-scale-group" data-layout={stacked ? "stack" : "row"} style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : `repeat(${buttons.length}, 1fr)`, gap: GAP }}>
       {buttons.map((k) => (
@@ -170,52 +307,69 @@ function ScaleGroup({ buttons, active, disabled, onPick, why }) {
   );
 }
 
-/* 'Set scale' — presets, a custom page = real entry (metric too), and the sheet's own scale note
- * as the suggestion. Local draft state; commits through onApply(feetPerInch). */
-function ScaleTools({ o, onApply }) {
-  const curFpi = scaleForFtPerPoint(o.ftPerPx);
-  const matched = matchScalePreset(curFpi);
-  const detected = o.detectedScale > 0 ? o.detectedScale : null;
-  const [mode, setMode] = useState(null);      // null → follow the current size; "custom"
-  const [page, setPage] = useState("1");
-  const [pageUnit, setPageUnit] = useState("in");
-  const [real, setReal] = useState(String(detected && o.unscaled ? detected : Math.round(curFpi * 100) / 100));
-  const [realUnit, setRealUnit] = useState("ft");
-  const [dirty, setDirty] = useState({ page: false, real: false });   // a unit change only commits a distance the person actually typed
-  const selVal = mode === "custom" ? "custom" : (matched ? matched.id : (detected && Math.abs(detected - curFpi) < 1e-6 ? "sheet" : "custom"));
-  const commit = (next = {}) => {
-    const fpi = feetPerInchFromPair({ pageVal: next.page ?? page, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? real, realUnit: next.realUnit ?? realUnit });
-    if (fpi) onApply(fpi);
+/* 'Set scale' — a two-segment switch: PRESET (a dropdown of standard scales, "Read from the sheet" first when there is
+ * one; no "Custom…" entry) | CUSTOM (ONE text box, `1" = [ 40 ] '`; a plain number is feet per inch, and anything
+ * `parseTypedScale` reads — `1:480`, `1/8" = 1'-0"` — works too). Local draft state; commits through onApply(feetPerInch).
+ * Which segment opens first: Preset when the current scale matches a preset or the overlay has none yet; Custom,
+ * pre-filled, when the scale came from Trace / Match / typing and matches no preset. */
+const roundFpi = (v) => String(Math.round(v * 100) / 100);
+function ScaleModeSwitch({ mode, onMode }) {
+  const seg = (key, label) => {
+    const on = mode === key;
+    return (
+      <button key={key} type="button" aria-pressed={on} data-testid={`overlay-scale-mode-${key}`} onClick={() => onMode(key)}
+        style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", height: "100%", padding: "0 10px", borderRadius: RADIUS.sm,
+          background: on ? "var(--text-primary)" : "transparent", color: on ? "var(--surface-raised)" : "var(--text-primary)" }}>{label}</button>
+    );
+  };
+  return (
+    <div role="group" aria-label="Scale entry" style={{ display: "inline-flex", alignSelf: "flex-start", boxSizing: "border-box", height: H, padding: 1, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-raised)" }}>
+      {seg("preset", "Preset")}{seg("custom", "Custom")}
+    </div>
+  );
+}
+
+export function ScaleTools({ o, onApply }) {
+  const { mode: firstMode, selected: selVal, curFpi, detected } = scaleEntryPlan(o);
+  const [mode, setMode] = useState(firstMode);
+  const [draft, setDraft] = useState(() => roundFpi(curFpi));
+  const [bad, setBad] = useState(false);
+  const [dirty, setDirty] = useState(false);   // an idle focus → blur must not re-commit the ROUNDED display value (it would drift the scale)
+  // The warning colour describes the TEXT IN THE BOX and nothing else: unreadable text is kept (so it can be fixed) and flagged; a
+  // readable value is never flagged. Escape, or any edit, clears it — a valid value never wears the warning.
+  const commit = async (raw) => {
+    if (!dirty) return;
+    setDirty(false);   // before the await: Enter's commit and the blur that follows must not both apply
+    const fpi = await parseTypedScale(raw);
+    if (fpi == null) { setBad(true); return; }
+    setBad(false); setDraft(roundFpi(fpi));
+    onApply(fpi);
   };
   return (
     <div data-testid="overlay-scale-tools" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
-      <select data-testid="overlay-scale-preset" aria-label="Scale" style={{ ...inputStyle, fontFamily: "inherit", width: "100%" }} value={selVal}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "custom") { setMode("custom"); return; }
-          setMode(null);
-          if (v === "sheet" && detected) { onApply(detected); return; }
-          const p = SCALE_PRESETS.find((x) => x.id === v);
-          if (p) onApply(feetPerInchForPreset(p));
-        }}>
-        {detected && <optgroup label="Read from the sheet"><option value="sheet">{formatScaleRatio(detected)} (suggested)</option></optgroup>}
-        <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-        <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-        <option value="custom">Custom…</option>
-      </select>
-      {selVal === "custom" && (
-        <div data-testid="overlay-scale-custom" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.xs }}>
-          <input style={{ ...inputStyle, width: 46 }} value={page} aria-label="Distance on the page" placeholder="1 or 1/2" onChange={(e) => { setPage(e.target.value); setDirty((d) => ({ ...d, page: true })); }}
-            onBlur={(e) => commit({ page: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ page: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={pageUnit} aria-label="Page unit" onChange={(e) => { setPageUnit(e.target.value); if (dirty.page || dirty.real) commit({ pageUnit: e.target.value }); }}>
-            {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-          <span style={valueStyle}>=</span>
-          <input style={{ ...inputStyle, width: 76 }} value={real} aria-label="Real-world distance" placeholder="real" onChange={(e) => { setReal(e.target.value); setDirty((d) => ({ ...d, real: true })); }}
-            onBlur={(e) => commit({ real: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ real: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={realUnit} aria-label="Real-world unit" onChange={(e) => { setRealUnit(e.target.value); if (dirty.page || dirty.real) commit({ realUnit: e.target.value }); }}>
-            {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
+      <ScaleModeSwitch mode={mode} onMode={(m) => { setMode(m); setBad(false); setDirty(false); if (m === "custom") setDraft(roundFpi(curFpi)); }} />
+      {mode === "preset" ? (
+        <select data-testid="overlay-scale-preset" aria-label="Scale" style={{ ...inputStyle, fontFamily: "inherit", width: "100%" }} value={selVal}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "sheet" && detected) { onApply(detected); return; }
+            const p = SCALE_PRESETS.find((x) => x.id === v);
+            if (p) onApply(feetPerInchForPreset(p));
+          }}>
+          {!selVal && <option value="" disabled>Choose a scale</option>}
+          {detected && <optgroup label="Read from the sheet"><option value="sheet">{formatScaleRatio(detected)} (suggested)</option></optgroup>}
+          <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+          <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+        </select>
+      ) : (
+        <div data-testid="overlay-scale-custom" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: SPACE.xs, minWidth: 0 }}>
+          <span style={{ ...valueStyle, flex: "none" }}>1" =</span>
+          <input data-testid="overlay-scale-custom-input" aria-label="Feet per inch" aria-invalid={bad || undefined} inputMode="decimal" value={draft}
+            style={{ ...inputStyle, flex: "none", width: 92, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
+            onChange={(e) => { setDraft(e.target.value); setBad(false); setDirty(true); }}
+            onBlur={(e) => commit(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(e.currentTarget.value); else if (e.key === "Escape") { setDraft(roundFpi(curFpi)); setBad(false); setDirty(false); } }} />
+          <span style={{ ...valueStyle, flex: "none" }}>'</span>
         </div>
       )}
     </div>
@@ -237,7 +391,7 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
     if (k === "trace") h.onTrace(o.id); else h.onMatch(o.id);
   };
   const group = plan.scaleButtons.length ? (
-    <ScaleGroup buttons={plan.scaleButtons} active={mine ? (mine.kind === "align" ? "match" : mine.kind) : null} disabled={locked} why="Unlock this overlay to change its scale" onPick={pick} />
+    <ScaleGroup buttons={plan.scaleButtons} active={mine ? (mine.kind === "align" ? "match" : mine.kind) : null} onPick={pick} />
   ) : null;
   const pairs = mine && mine.kind === "align" ? Math.floor(mine.pts.length / 2) : 0;
   return (
@@ -264,7 +418,6 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
         )}
         {group}
       </>)}
-      {o.sheet && !o.sheet.std && plan.kind === OV_KIND.PDF && <div role="note" style={{ ...subStyle, color: WARN }}>Non-standard sheet ({o.sheet.label}) — it may have been shrunk; a scale assumes true plot size.</div>}
       {tool === "set" && plan.scaleButtons.includes("set") && <ScaleTools key={o.id} o={o} onApply={(fpi) => h.onApplyScale(o.id, fpi)} />}
       {mine && (
         <div role="status" data-testid="overlay-calib-status" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
@@ -282,39 +435,64 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
           {!h.pageReady(o) && <span style={subStyle}>re-add to change page</span>}
         </div>
       )}
-      {plan.rotate && (
-        <div data-testid="overlay-rotation-row" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: `${SPACE.xs}px ${SPACE.md}px` }}>
-          <span style={{ ...valueStyle, color: "var(--text-secondary)" }}>Rotation</span>
-          <DegStepper value={o.rotation || 0} disabled={locked} reason="Unlock this overlay to rotate it"
-            onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={(d) => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
-          <span style={{ display: "inline-flex", gap: SPACE.sm }}>
-            <Button variant="ghost" size="md" disabled={locked} style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees anticlockwise" title="Rotate 90° anticlockwise" data-testid="overlay-rot-ccw90"
-              onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) - 90) })}><RotL />90°</Button>
-            <Button variant="ghost" size="md" disabled={locked} style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees clockwise" title="Rotate 90° clockwise" data-testid="overlay-rot-cw90"
-              onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + 90) })}><RotR />90°</Button>
-          </span>
-        </div>
-      )}
+      {plan.rotate && <RotationRow o={o} h={h} />}
     </section>
+  );
+}
+
+/* The Crop on/off switch — a real `role="switch"`: Site green when on, neutral grey when off. */
+function CropSwitch({ id, on, disabled, why, onToggle }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label="Crop" disabled={disabled} title={why || undefined} data-testid={`overlay-crop-switch-${id}`}
+      onClick={onToggle}
+      style={{ flex: "none", position: "relative", width: 32, height: 18, padding: 0, border: "none", borderRadius: RADIUS.pill, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.55 : 1,
+        background: on ? ACCENT : "var(--border-strong)", transition: "background 120ms" }}>
+      <span aria-hidden="true" style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 14, height: 14, borderRadius: RADIUS.pill, background: on ? "var(--on-accent-site)" : "var(--surface-raised)", transition: "left 120ms" }} />
+    </button>
+  );
+}
+
+/* A picture of the sheet with the cropped-away area dimmed and the kept area outlined (dashed, Site green),
+ * drawn from the STORED crop in the sheet's own image pixels — so it is always the real shape, rect or polygon. */
+function CropPicture({ o, onOpen, why }) {
+  const d = cropOutlinePath(o);
+  const W = o.imgW, Hh = o.imgH;
+  return (
+    <button type="button" aria-label="Adjust the crop" disabled={!!why} title={why || undefined} data-testid={`overlay-crop-picture-${o.id}`} onClick={onOpen}
+      style={{ flex: "1 1 0", minWidth: 0, height: 112, padding: SPACE.xs, boxSizing: "border-box", display: "grid", placeItems: "center", border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-page)", cursor: why ? "default" : "pointer", overflow: "hidden" }}>
+      <svg viewBox={`0 0 ${W} ${Hh}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false" style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }}>
+        {o.kind === "dxf" || !o.src ? null : <image href={o.src} x="0" y="0" width={W} height={Hh} preserveAspectRatio="none" />}
+        <rect x="0" y="0" width={W} height={Hh} fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" style={{ stroke: "var(--border-strong)" }} />
+        {d && <path data-testid="overlay-crop-dim" d={`M0 0H${W}V${Hh}H0Z${d}`} fillRule="evenodd" fill="black" fillOpacity="0.55" />}
+        {d && <path data-testid="overlay-crop-outline" d={d} fill="none" strokeWidth="1.5" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" style={{ stroke: ACCENT }} />}
+      </svg>
+    </button>
   );
 }
 
 function CropSection({ o, h }) {
   const why = cropEditBlock(o);
-  const kind = hasCrop(o) ? cropKind(o.crop) : null;
-  const text = kind === "poly" ? `Polygon · ${(o.crop.pts || []).length} points` : kind === "rect" ? "Rectangle" : "Not cropped";
+  const on = hasCrop(o);
+  // OFF → the crop is hidden but its shape is kept; ON with a kept shape brings the same shape back;
+  // ON with no shape yet opens the editor (closing it without a crop leaves the switch off — `on` is derived).
+  const toggle = () => {
+    if (why) return;
+    if (on) h.onCropSwitch(o.id, false);
+    else if (hasSavedCrop(o)) h.onCropSwitch(o.id, true);
+    else h.onCrop(o.id);
+  };
   return (
-    <section data-testid={`overlay-crop-${o.id}`} aria-label="Crop" style={{ display: "flex", flexDirection: "column", gap: SPACE.xs }}>
-      <SectionLabel>Crop</SectionLabel>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm, flex: "1 1 110px", minWidth: 0, color: kind ? "var(--text-primary)" : "var(--text-secondary)" }}>
-          {kind === "poly" ? <PolyIcon /> : <RectIcon />}<span data-testid="overlay-crop-shape" style={valueStyle}>{text}</span>
-        </span>
-        <span style={{ display: "inline-flex", gap: SPACE.sm, flex: "none" }}>
-          <Button variant="ghost" size="md" disabled={!!why} title={why || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"} style={btnCompact} data-testid="overlay-crop-open" onClick={() => h.onCrop(o.id)}>Edit</Button>
-          <Button variant="ghost" size="md" disabled={!!why || !kind} title={why || "Show the whole sheet again"} style={btnCompact} data-testid="overlay-crop-reset" onClick={() => h.onResetCrop(o.id)}>Reset</Button>
-        </span>
+    <section data-testid={`overlay-crop-${o.id}`} aria-label="Crop" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: SPACE.sm, minHeight: 20 }}>
+        <span style={labelStyle}>Crop</span>
+        <CropSwitch id={o.id} on={on} disabled={!!why} why={why} onToggle={toggle} />
       </div>
+      {on && (
+        <div data-testid="overlay-crop-body" style={{ display: "flex", alignItems: "flex-start", gap: SPACE.sm }}>
+          <CropPicture o={o} why={why} onOpen={() => h.onCrop(o.id)} />
+          <Button variant="ghost" size="md" disabled={!!why} title={why || undefined} style={btnCompact} data-testid="overlay-crop-open" onClick={() => h.onCrop(o.id)}>Adjust</Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -408,10 +586,10 @@ function RowMenu({ open, anchorRef, o, flags, hidden, hasParcel, isMap, onClose,
         {it(locked ? "Unlock" : "Lock in place", () => h.onPatch(o.id, { locked: !locked }))}
         {it(hidden ? "Show" : "Hide", () => h.onToggleHide(o))}
         {it("Zoom to", () => h.onZoomTo(o.id))}
-        {it("Size to view", () => h.onSizeToView(o.id), { disabled: isMap || locked, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to resize" : undefined })}
+        {it("Size to view", () => h.onSizeToView(o.id), { disabled: isMap, title: isMap ? "The map capture is already to scale" : undefined })}
         {it("Copy", () => h.onCopy(o.id), { disabled: isMap, title: isMap ? "The map capture can't be copied — it is pinned to this plan" : undefined })}
         {it("Duplicate", () => h.onDuplicate(o.id), { disabled: isMap, title: isMap ? "The map capture can't be duplicated — it is pinned to this plan" : undefined })}
-        {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: locked || !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to align" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
+        {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
         {it("Move up", () => h.onStep(o.id, 1), { disabled: flags.atFront })}
         {it("Move down", () => h.onStep(o.id, -1), { disabled: flags.atBack })}
         <div style={{ borderTop: LINE, margin: `${SPACE.xs}px 0` }} />
@@ -441,14 +619,21 @@ function OverlayRow({ o, on, hidden, flags, menuOpen, renaming, drag, h, isMap, 
   return (
     <div data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isMap ? "1" : undefined} data-overlay-row={o.id}
       style={{ position: "relative", borderBottom: "1px solid var(--planner-border)", borderLeft: `2px solid ${on ? ACCENT : "transparent"}`, opacity: drag.dragging === o.id ? 0.5 : 1 }}
-      onDragOver={(e) => { if (!drag.enabled || !drag.dragging || drag.dragging === o.id) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; const r = e.currentTarget.getBoundingClientRect(); drag.onOver(o.id, e.clientY < r.top + r.height / 2 ? "front" : "behind"); }}
+      onDragOver={(e) => {
+        if (!drag.enabled || !drag.dragging || drag.dragging === o.id) return;
+        const r = e.currentTarget.getBoundingClientRect(), side = e.clientY < r.top + r.height / 2 ? "front" : "behind";
+        e.preventDefault();
+        // a drop the order rules would refuse (another band, or beneath the pinned map capture) shows the browser's no-drop cursor, not a move
+        if (!drag.canDrop(o.id, side)) { e.dataTransfer.dropEffect = "none"; drag.onOver(null, null); return; }
+        e.dataTransfer.dropEffect = "move"; drag.onOver(o.id, side);
+      }}
       onDrop={(e) => { if (!drag.dragging) return; e.preventDefault(); e.stopPropagation(); drag.onDrop(o.id); }}>
       {indicator === "front" && <span aria-hidden="true" style={{ ...line, top: -1 }} />}
       {indicator === "behind" && <span aria-hidden="true" style={{ ...line, bottom: -1 }} />}
-      <div draggable={canDrag} data-overlay-drag-handle={canDrag ? "1" : undefined}
+      <div draggable={canDrag} data-overlay-drag-handle={canDrag ? "1" : undefined} data-cursor={canDrag ? "grab" : undefined}
         onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("application/x-planyr-overlay", o.id); } catch (_) {} drag.onStart(o.id); }}
         onDragEnd={drag.onEnd}
-        style={{ display: "flex", alignItems: "center", gap: SPACE.xs, padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, minHeight: 46, background: on ? `color-mix(in srgb, ${ACCENT} 11%, transparent)` : "transparent" }}>
+        style={{ display: "flex", alignItems: "center", gap: SPACE.xs, padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, minHeight: 46, cursor: canDrag ? "grab" : undefined, background: on ? `color-mix(in srgb, ${ACCENT} 11%, transparent)` : "transparent" }}>
         <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flex: "1 1 0", minWidth: 0 }}>
         <Thumb o={o} />
         {renaming ? (
@@ -522,6 +707,7 @@ export default function OverlaysPanel({
   const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
   const drag = {
     enabled: fine, dragging, over,
+    canDrop: (id, side) => canDropOverlay(local, dragging, id, side),
     onStart: setDragging, onEnd: () => { setDragging(null); setOver(null); },
     onOver: (id, side) => setOver((c) => (c && c.id === id && c.side === side ? c : { id, side })),
     onDrop: (id) => { const side = over && over.id === id ? over.side : "front"; const from = dragging; setDragging(null); setOver(null); if (from) h.onDropRow(from, id, side); },
@@ -530,7 +716,7 @@ export default function OverlaysPanel({
     <div data-testid="overlays-panel" data-fine-pointer={fine ? "1" : "0"}
       style={{ display: "flex", flexDirection: "column", minWidth: 0, outline: fileOver ? `2px dashed ${ACCENT}` : "none", outlineOffset: -2, borderRadius: RADIUS.sm }}
       onDragEnter={(e) => { if (!hasFiles(e)) return; e.preventDefault(); depth.current += 1; setFileOver(true); }}
-      onDragOver={(e) => { if (hasFiles(e)) e.preventDefault(); }}
+      onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
       onDragLeave={(e) => { if (!hasFiles(e)) return; depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setFileOver(false); }}
       onDrop={(e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth.current = 0; setFileOver(false); const fs = e.dataTransfer.files; const f = fs && fs[0]; if (f) h.onDropFile(f, fs.length); }}>
       {/* one accent: the global focus ring is the orange --accent; inside this panel it is the Site green (index.css, "Overlays panel focus") */}

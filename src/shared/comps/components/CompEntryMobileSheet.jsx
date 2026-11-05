@@ -4,11 +4,13 @@
  * desktop table is untouched above the breakpoint.
  *
  * One scrolling column of grouped iOS-Settings-style cards (label left, value right): header card
- * (a Lease|Land|Bldg sale segmented control + the deal name typed in place — deliberately NO hero
- * number), "Deal" (Location first, Size with its unit INSIDE the value, Price + a derived read-back), "Rent"
- * (lease), "Parties", "More details" (filled rows + `＋ label` chips), then a sticky footer with a
- * live one-line read-back and one full-width Save. There is no "Needed to save" section: required-
- * ness is the Location row's accent text and the Save copy.
+ * (a Lease|Land|Bldg Sale segmented control + the deal name typed in place — deliberately NO hero
+ * number), "Deal" (Location, Tenant/Buyer, Landlord/Seller, Size with its unit INSIDE the value, Price +
+ * a derived read-back), "Rent" (lease: one Rate row whose `/mo` and `NNN` are tappable pills, a guessed
+ * period shown as a dashed pill; Term with a `mo`/`yr` pill), "Details" (filled extras) + "Add more"
+ * (`＋ label` chips), then a sticky footer with a read-back (hidden while empty) and one Save that is
+ * never disabled for a missing field — tapping it with a blocker scrolls to and flags the offending row
+ * (round 3, 2026-10-19: NEW-1..NEW-11). There is no "Needed to save" section.
  *
  * Shares state and every mutation path with the desktop sheet — `rows` is the SAME lifted array and
  * every edit goes back through CompEntryGrid's `commitRows`/undo stack via `onCommitField` /
@@ -26,8 +28,9 @@ import { cellState, TYPE_OPTIONS } from "../lib/compSheetColumns.js";
 import { rowStatusText } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
 import {
-  mobileCol, mobilePartyLabels, TERM_UNITS, termToMonths, termForDisplay, termOtherReading,
-  priceReadback, footerReadback, saveState, rowFieldState, hugWidthCh, moreDetailFields, moreFieldHasValue, MORE_AFFIX,
+  mobileCol, mobilePartyLabels, termToMonths, termForDisplay, termOtherReading, TERM_UNIT_SHORT, flipTermUnit,
+  flipPeriod, flipBasis, periodGuessStep, partyNameFallback,
+  priceReadback, footerReadback, saveState, saveTapPlan, rowFieldState, hugWidthCh, moreDetailFields, moreFieldHasValue, MORE_AFFIX,
 } from "../lib/compMobileSheetModel.js";
 
 const ROW_MIN_H = 48;
@@ -38,7 +41,7 @@ const VALUE_FS = 15; // design-exempt: deliberate 15px value size — the one th
 const NAME_FS = 18; // design-exempt: deliberate 18px deal name — the one headline on the sheet, typed in place
 
 // Segmented type order on the phone: the owner's order, Lease first.
-const TYPE_SEG = ["lease", "land", "building_sale"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg sale" }[v] }));
+const TYPE_SEG = ["lease", "land", "building_sale"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg Sale" }[v] }));
 const TYPE_LABEL = Object.fromEntries(TYPE_OPTIONS.map((o) => [o.value, o.label]));
 // Term entry unit is remembered for the session (storage is always months).
 let sessionTermUnit = "months";
@@ -48,6 +51,9 @@ let sessionTermUnit = "months";
 const SHEET_CSS = `
 .cm-input::placeholder{color:var(--accent);opacity:1;font-weight:500}
 .cm-row:focus-within{background:var(--focus-ring-soft)}
+.cm-nudge{background:var(--warn-bg);transition:background .4s}
+.cm-name::placeholder{color:var(--text-secondary);opacity:1;font-weight:500}
+.cm-name:focus{border-bottom-color:var(--accent) !important}
 `;
 
 /** One status dot — a green/amber 6px dot; used by the jump sheet only. */
@@ -79,9 +85,10 @@ function focusNextInput(el) {
   if (next) next.focus(); else el.blur();
 }
 
+const PILL_H = 28;
 const SEG_H = 36; // one height for every segmented control in the sheet (type, rate, basis, term, size unit)
 
-/** A segmented toggle (Lease|Land|Bldg sale, AC|SF, Monthly|Yearly, NNN|Gross, months|years).
+/** A segmented toggle (Lease|Land|Bldg Sale, AC|SF).
  * `fill` stretches it to its container with equal-width segments. */
 function Segmented({ options, value, onChange, label, warn, fill }) {
   return (
@@ -109,9 +116,27 @@ function Segmented({ options, value, onChange, label, warn, fill }) {
   );
 }
 
+/** A small tappable pill that flips a two-state value in place (`/mo`↔`/yr`, `NNN`↔`Gross`, `mo`↔`yr`).
+ * `tone`: `solid` (the person's choice) · `guess` (dashed, soft amber — a guess they can overrule) ·
+ * `warn` (nothing picked yet). The value always reads as text, so the state never rides on colour alone. */
+function Pill({ label, onClick, tone = "solid", ariaLabel, dataPill }) {
+  const tones = {
+    solid: { border: "1px solid var(--border-strong)", background: "var(--focus-ring-soft)", color: "var(--accent)" },
+    guess: { border: "1px dashed var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)" },
+    warn: { border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)" },
+  };
+  return (
+    <button type="button" data-pill={dataPill} data-pill-tone={tone} aria-label={ariaLabel}
+      onClick={(e) => { e.preventDefault(); onClick(); }}
+      style={{ flex: "none", height: PILL_H, padding: "0 10px", borderRadius: RADIUS.pill, fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", marginLeft: 4, ...tones[tone] }}>
+      {label}
+    </button>
+  );
+}
+
 /** One editable field row — a REAL input mounted at rest. `prefix`/`suffix` render only once the
  * input has a value or focus. `display`/`toCommit` let Term show + commit in its chosen unit. */
-function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, display, toCommit, autoFocus, onAutoFocused, today }) {
+function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, trailingIfValue, display, toCommit, autoFocus, onAutoFocused, today, nudge }) {
   const st = rowFieldState(cellState(col, draft));
   const numeric = col.kind === "number";
   const shownRaw = display ? display(col.getValue(draft)) : (st.raw ?? "");
@@ -131,14 +156,15 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
     );
   }
   const hasValue = (focused ? val : shownRest) !== "";
-  const hug = !!(prefix || suffix || trailing); // value + its unit read as one unit at the right edge
+  const hug = !!(prefix || suffix || trailing);
+  const showTrailing = trailing && (!trailingIfValue || hasValue); // value + its unit read as one unit at the right edge
   const commit = () => {
     setFocused(false);
     if (val === shownRaw) return;
     onCommit(col, toCommit ? toCommit(val) : val);
   };
   return (
-    <label className="cm-row" data-field-key={col.key} data-field-editor="text" style={{ ...rowShellStyle, cursor: "text" }}>
+    <label className={nudge ? "cm-row cm-nudge" : "cm-row"} data-field-key={col.key} data-field-editor="text" style={{ ...rowShellStyle, cursor: "text" }}>
       <span style={labelStyle}>{label}</span>
       <span style={{ display: "flex", alignItems: "center", gap: hug ? 2 : 6, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
         {today}
@@ -162,42 +188,51 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
           style={hug ? { ...inputStyle, flex: "0 1 auto", width: `${hugWidthCh(focused ? val : shownRest)}ch`, minWidth: "3ch", maxWidth: "100%" } : inputStyle}
         />
         {suffix && hasValue && <span style={affixStyle}>{suffix}</span>}
-        {trailing}
+        {showTrailing ? trailing : null}
       </span>
     </label>
   );
 }
 
-/** The header's deal name — a large text input, typed straight into (no picker, no fallback to the
- * tenant/buyer: an empty name shows the `Deal name` placeholder). Commits on blur / Enter like InputRow. */
+/** The header's deal name — a typeable field (gray placeholder, a thin underline that turns accent on
+ * focus, dark text once typed). Blank + a Tenant/Buyer entered → a quiet `Will save as "…"` hint; the
+ * name itself is only filled in at save time (`withTitleFallback`), never while typing. Commits on blur /
+ * Enter like InputRow. */
 function DealNameField({ col, draft, onCommit }) {
   const stored = col.getValue(draft) ?? "";
   const [focused, setFocused] = useState(false);
   const [val, setVal] = useState(stored);
   useEffect(() => { if (!focused) setVal(stored); }, [stored, focused]);
   const commit = () => { setFocused(false); if (val !== stored) onCommit(col, val); };
+  const party = partyNameFallback(draft);
+  const shown = focused ? val : stored;
   return (
-    <input
-      className="cm-input" data-sheet-input="" data-deal-name="1" data-field-key="title"
-      value={focused ? val : stored}
-      onFocus={() => { setFocused(true); setVal(stored); }}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") { e.preventDefault(); focusNextInput(e.currentTarget); }
-        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setVal(stored); e.currentTarget.blur(); }
-      }}
-      enterKeyHint="next" aria-label="Deal name" placeholder="Deal name"
-      style={{ ...inputStyle, flex: "none", width: "100%", boxSizing: "border-box", textAlign: "left", fontSize: NAME_FS, fontWeight: 700, padding: "10px 16px 14px" }}
-    />
+    <div style={{ padding: "6px 16px 12px" }}>
+      <input
+        className="cm-input cm-name" data-sheet-input="" data-deal-name="1" data-field-key="title"
+        value={shown}
+        onFocus={() => { setFocused(true); setVal(stored); }}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); focusNextInput(e.currentTarget); }
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setVal(stored); e.currentTarget.blur(); }
+        }}
+        enterKeyHint="next" aria-label="Deal name" placeholder="Add a deal name"
+        style={{ ...inputStyle, flex: "none", width: "100%", boxSizing: "border-box", textAlign: "left", fontSize: NAME_FS, fontWeight: 700, padding: "8px 0 6px", borderBottom: "1px solid var(--border-strong)" }}
+      />
+      {!shown.trim() && party && (
+        <div data-hint="name-fallback" style={{ marginTop: 6, fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>Will save as “{party}”</div>
+      )}
+    </div>
   );
 }
 
 /** The Location row — an action, never typed text. Unplaced: `Place on map ›` in accent; placed: the
  * resolved location in plain text (the words "Place on map" are gone). */
-function LocationRow({ placed, locationText, onTap }) {
+function LocationRow({ placed, locationText, onTap, nudge }) {
   return (
-    <button data-field-key="location" data-field-editor="action" onClick={onTap} style={{ ...rowShellStyle, cursor: "pointer" }}>
+    <button className={nudge ? "cm-nudge" : undefined} data-field-key="location" data-field-editor="action" onClick={onTap} style={{ ...rowShellStyle, cursor: "pointer" }}>
       <span style={labelStyle}>Location</span>
       {placed ? (
         <span style={{ fontSize: VALUE_FS, fontWeight: 500, color: "var(--text-primary)", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -300,9 +335,52 @@ export default function CompEntryMobileSheet({
   const [termUnit, setTermUnitState] = useState(sessionTermUnit);
   const [added, setAdded] = useState({});       // `${rowId}:${key}` -> true (a chip the user mounted)
   const [focusKey, setFocusKey] = useState(null);
+  const [guessed, setGuessed] = useState({});     // rowId -> true while the rate period is a GUESS (NEW-4)
+  const [locked, setLocked] = useState({});       // rowId -> true once the person tapped the period pill
+  const [pendingNudge, setPendingNudge] = useState(null); // a Save tap's route to the first not-ready row
+  const [nudge, setNudge] = useState(null);
+  const [flash, setFlash] = useState(false);
   const prevLen = useRef(rows.length);
 
   const setTermUnit = (u) => { sessionTermUnit = u; setTermUnitState(u); };
+
+  // NEW-4 — pre-pick a period from the rate (under 2 monthly, over 3 yearly, else stay unpicked) as a
+  // VISIBLE guess. One row per pass (each commit rebuilds the lifted `rows`, so a second commit in the
+  // same pass would overwrite the first); the effect re-runs on the rows it just changed.
+  useEffect(() => {
+    for (const r of rows) {
+      if (r.draft.compType !== "lease") continue;
+      const step = periodGuessStep({ rate: r.draft.leaseRate, period: r.draft.leaseRatePeriod, guessed: !!guessed[r._id], locked: !!locked[r._id] });
+      if (!step) continue;
+      if (step.period && r.cellFlags?.leaseRatePeriod?.level === "blocking") onResolvePeriod(r._id, step.period);
+      else onCommitField(r._id, mobileCol("leaseRatePeriod"), step.period);
+      setGuessed((g) => ({ ...g, [r._id]: step.guessed }));
+      return;
+    }
+  }, [rows, guessed, locked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // NEW-9 — after a Save tap with a blocker, go to the first not-ready row once any rows that did save
+  // have left the list, then scroll its offending field into view and flash it.
+  useEffect(() => {
+    if (!pendingNudge) return;
+    const { target, savedIds } = pendingNudge;
+    if (saving && savedIds.length) return;
+    const idx = rows.findIndex((r) => r._id === target.rowId);
+    if (idx < 0) { setPendingNudge(null); return; }
+    setCurrentIndex(idx);
+    setNudge(target);
+    setPendingNudge(null);
+  }, [pendingNudge, rows, saving]);
+  useEffect(() => {
+    if (!nudge) return undefined;
+    setFlash(true);
+    const raf = requestAnimationFrame(() => {
+      const el = nudge.key && document.querySelector(`[data-comp-entry-mobile] [data-field-key="${nudge.key}"]`);
+      el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    });
+    const t = setTimeout(() => setFlash(false), 1600);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [nudge]);
 
   useEffect(() => {
     setCurrentIndex((i) => Math.max(0, Math.min(i, rows.length - 1)));
@@ -336,7 +414,6 @@ export default function CompEntryMobileSheet({
           Paste a comp above to get started.
         </div>
         <div style={{ borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)", padding: "8px 16px 10px" }}>
-          <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>Nothing entered yet</div>
           <button disabled style={saveBtnStyle(true)}>{save.label}</button>
         </div>
       </div>
@@ -354,6 +431,22 @@ export default function CompEntryMobileSheet({
   const periodBlocking = isLease && flag?.level === "blocking";
   const hasRate = isLease && draft.leaseRate !== "" && draft.leaseRate != null;
   const periodMissing = hasRate && !draft.leaseRatePeriod;
+  const periodGuessed = hasRate && !!draft.leaseRatePeriod && !!guessed[currentRow._id] && !locked[currentRow._id];
+  const periodTone = periodMissing ? "warn" : periodGuessed ? "guess" : "solid";
+  const periodLabel = draft.leaseRatePeriod === "monthly" ? "/mo" : draft.leaseRatePeriod === "annual" ? "/yr" : "/mo or /yr?";
+  const nudged = nudge && nudge.rowId === currentRow._id ? nudge : null;
+  const nudgeOn = (kind) => !!(nudged && flash && nudged.kind === kind);
+  const onSaveTap = () => {
+    const plan = saveTapPlan({ rows, isReady: rowIsReady });
+    if (plan.toSave.length) onSave(plan.toSave);
+    if (plan.target) setPendingNudge({ target: { ...plan.target, tick: Date.now() }, savedIds: plan.toSave.map((r) => r._id) });
+  };
+  const tapPeriod = () => {
+    const next = flipPeriod(draft.leaseRatePeriod);
+    setLocked((l) => ({ ...l, [currentRow._id]: true }));
+    setGuessed((g) => ({ ...g, [currentRow._id]: false }));
+    if (periodBlocking) onResolvePeriod(currentRow._id, next); else commit(cl("leaseRatePeriod"), next);
+  };
 
   const commit = (col, v) => onCommitField(currentRow._id, col, v);
   const onLocationTap = () => {
@@ -369,6 +462,8 @@ export default function CompEntryMobileSheet({
   const shownMore = more.filter((m) => moreFieldHasValue(m.col, draft) || added[`${currentRow._id}:${m.col.key}`]);
   const chips = more.filter((m) => !shownMore.includes(m));
   const common = { draft, onCommit: commit };
+  const readback = footerReadback(draft);
+  const showBlockerLine = nudged && (nudged.kind === "flag" || nudged.kind === "other") && !rowIsReady(currentRow);
 
   if (minimized) {
     return (
@@ -418,7 +513,15 @@ export default function CompEntryMobileSheet({
         </Group>
 
         <Group title="Deal">
-          <LocationRow placed={placed} locationText={locationText} onTap={onLocationTap} />
+          <LocationRow placed={placed} locationText={locationText} onTap={onLocationTap} nudge={nudgeOn("location")} />
+          {!placed && nudged?.kind === "location" && (
+            <button type="button" data-hint="location-warn" onClick={onLocationTap}
+              style={{ ...noteStyle, display: "block", width: "100%", boxSizing: "border-box", border: "none", background: "transparent", fontFamily: "inherit", cursor: "pointer", color: "var(--warn-text)", paddingTop: 8 }}>
+              Place it on the map to save.
+            </button>
+          )}
+          <InputRow {...common} col={cl("partyAcquirer")} label={parties.acquirer} />
+          <InputRow {...common} col={cl("partyProvider")} label={parties.provider} />
           <InputRow
             {...common} col={cl("size")} label="Size"
             suffix={isLand ? null : "SF"}
@@ -434,72 +537,78 @@ export default function CompEntryMobileSheet({
 
         {isLease && (
           <Group title="Rent">
-            <InputRow {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" />
-            <div style={{ display: "flex", gap: 16, padding: "0 16px 10px", borderBottom: "1px solid var(--border-default)" }}>
-              <Segmented fill label="Rate period" warn={periodMissing || periodBlocking} value={draft.leaseRatePeriod || ""}
-                options={[{ value: "monthly", label: "Monthly" }, { value: "annual", label: "Yearly" }]}
-                onChange={(v) => (periodBlocking ? onResolvePeriod(currentRow._id, v) : commit(cl("leaseRatePeriod"), v))} />
-              <Segmented fill label="Rate basis" value={draft.leaseRateExpense || ""}
-                options={[{ value: "nnn", label: "NNN" }, { value: "gross", label: "Gross" }]}
-                onChange={(v) => commit(cl("leaseRateExpense"), v)} />
-            </div>
-            {periodBlocking && (
-              <div style={{ ...noteStyle, color: "var(--danger-text)" }}>No period stated — monthly and annual differ by 12x.</div>
+            <InputRow
+              {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" nudge={nudgeOn("period")}
+              trailingIfValue
+              trailing={(
+                <>
+                  <Pill dataPill="period" ariaLabel="Rate period" label={periodLabel} tone={periodTone} onClick={tapPeriod} />
+                  <Pill dataPill="basis" ariaLabel="Rate basis" label={draft.leaseRateExpense === "gross" ? "Gross" : "NNN"}
+                    onClick={() => commit(cl("leaseRateExpense"), flipBasis(draft.leaseRateExpense))} />
+                </>
+              )}
+            />
+            {periodMissing && (
+              <div data-hint="period-warn" style={{ ...noteStyle, color: "var(--warn-text)" }}>Monthly or yearly? They differ by 12x.</div>
+            )}
+            {periodGuessed && (
+              <div data-hint="period-guess" style={noteStyle}>
+                Guessed {draft.leaseRatePeriod === "monthly" ? "monthly" : "yearly"} from the rate. Tap {periodLabel} to change.
+              </div>
             )}
             <InputRow
               {...common} col={termCol} label="Term"
               display={(m) => termForDisplay(m, termUnit)}
               toCommit={(v) => termToMonths(v, termUnit)}
-              trailing={<Segmented label="Term unit" value={termUnit} options={TERM_UNITS.map((u) => ({ value: u, label: u }))} onChange={setTermUnit} />}
+              trailingIfValue
+              trailing={<Pill dataPill="term-unit" ariaLabel="Term unit" label={TERM_UNIT_SHORT[termUnit]} onClick={() => setTermUnit(flipTermUnit(termUnit))} />}
             />
             {termReading && <div data-readback="term" style={noteStyle}>{termReading}</div>}
           </Group>
         )}
 
-        <Group title="Parties">
-          <InputRow {...common} col={cl("partyProvider")} label={parties.provider} />
-          <InputRow {...common} col={cl("partyAcquirer")} label={parties.acquirer} />
-        </Group>
+        {shownMore.length > 0 && (
+          <Group title="Details">
+            {shownMore.map((m) => {
+              const aff = MORE_AFFIX[m.col.key] || {};
+              return (
+                <InputRow
+                  key={`${currentRow._id}:${m.col.key}`} {...common} col={m.col} label={m.label}
+                  prefix={aff.prefix} suffix={aff.suffix}
+                  autoFocus={focusKey === m.col.key} onAutoFocused={() => setFocusKey(null)}
+                  today={m.col.key === "compDate" ? (
+                    <button type="button" onClick={(e) => { e.preventDefault(); onSetToday(currentIndex); }}
+                      style={{ flex: "none", border: "none", borderRadius: RADIUS.sm, padding: "3px 8px", background: "var(--focus-ring-soft)", color: "var(--accent)", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      Today
+                    </button>
+                  ) : null}
+                />
+              );
+            })}
+          </Group>
+        )}
 
-        <Group title="More details">
-          {shownMore.map((m) => {
-            const aff = MORE_AFFIX[m.col.key] || {};
-            return (
-              <InputRow
-                key={`${currentRow._id}:${m.col.key}`} {...common} col={m.col} label={m.label}
-                prefix={aff.prefix} suffix={aff.suffix}
-                autoFocus={focusKey === m.col.key} onAutoFocused={() => setFocusKey(null)}
-                today={m.col.key === "compDate" ? (
-                  <button type="button" onClick={(e) => { e.preventDefault(); onSetToday(currentIndex); }}
-                    style={{ flex: "none", border: "none", borderRadius: RADIUS.sm, padding: "3px 8px", background: "var(--focus-ring-soft)", color: "var(--accent)", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                    Today
-                  </button>
-                ) : null}
-              />
-            );
-          })}
-          {chips.length > 0 && (
-            <div style={{ padding: "10px 16px 12px" }}>
-              <div style={{ fontSize: FONT_SIZE.micro, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 8 }}>Add more</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {chips.map((m) => (
-                  <button key={m.col.key} type="button" data-add-chip={m.col.key}
-                    onClick={() => { setAdded((a) => ({ ...a, [`${currentRow._id}:${m.col.key}`]: true })); setFocusKey(m.col.key); }}
-                    style={{ border: "1px solid var(--border-strong)", borderRadius: RADIUS.pill, background: "transparent", color: "var(--accent)", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, padding: "6px 12px", minHeight: 32, cursor: "pointer" }}>
-                    ＋ {m.label}
-                  </button>
-                ))}
-              </div>
+        {chips.length > 0 && (
+          <Group title="Add more">
+            <div style={{ padding: "10px 16px 12px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {chips.map((m) => (
+                <button key={m.col.key} type="button" data-add-chip={m.col.key}
+                  onClick={() => { setAdded((a) => ({ ...a, [`${currentRow._id}:${m.col.key}`]: true })); setFocusKey(m.col.key); }}
+                  style={{ border: "1px solid var(--border-strong)", borderRadius: RADIUS.pill, background: "transparent", color: "var(--accent)", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, padding: "6px 12px", minHeight: 32, cursor: "pointer" }}>
+                  ＋ {m.label}
+                </button>
+              ))}
             </div>
-          )}
-        </Group>
+          </Group>
+        )}
       </div>
 
       {/* FOOTER, sticky — one live read-back, one full-width Save. */}
       <div style={{ borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)", padding: "8px 16px 10px" }}>
-        <div data-footer-readback="1" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>{footerReadback(draft)}</div>
+        {readback && <div data-footer-readback="1" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>{readback}</div>}
+        {showBlockerLine && <div data-hint="save-blocker" style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginBottom: 8 }}>{nudged.text}</div>}
         {saveError && <div style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginBottom: 8 }}>{saveError}</div>}
-        <button data-save-button="1" onClick={() => onSave(readyRows)} disabled={save.disabled} style={saveBtnStyle(save.disabled)}>
+        <button data-save-button="1" onClick={onSaveTap} disabled={save.disabled} style={saveBtnStyle(save.disabled)}>
           {save.label}
         </button>
       </div>

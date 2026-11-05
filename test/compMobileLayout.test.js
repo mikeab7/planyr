@@ -171,7 +171,8 @@ describe("compMobileLayout: every field is reachable and tappable (NEW-1 → NEW
       expect(html).not.toMatch(/data-field-key="landSizeUnit"/);
       if (t === "land") expect(html).toContain('aria-label="Size unit"');
       else expect(html).not.toContain('aria-label="Size unit"');
-      if (t === "lease") { expect(html).toContain('aria-label="Rate period"'); expect(html).toContain('aria-label="Term unit"'); }
+      // NEW-3/NEW-5 (round 3): the period / basis / term-unit pills appear once a rate / term is typed
+      if (t === "lease") { expect(html).not.toContain('data-pill="period"'); expect(html).not.toContain('data-pill="term-unit"'); }
     });
     it(`${t}: an edit on every editable column lands in the draft via applyCellEdit`, () => {
       const cols = [...neededToSaveColumns(t), ...mobileSections(t).flatMap((s) => s.cols)]

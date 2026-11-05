@@ -42,7 +42,7 @@ page.on("pageerror", (e) => { if (!/infinite number of tiles/.test(String(e))) e
 await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
-const stored = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
+const stored = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
 const rowIds = () => page.locator('[data-testid^="parcel-table-row-"]').evaluateAll((e) => e.map((n) => n.getAttribute("data-testid").replace("parcel-table-row-", "")));
 const toast = () => page.locator('text=/^(Deleted|Locked|Unlocked) /').first();
 
@@ -62,7 +62,7 @@ try {
   if (typed.text !== "Typed Lot") throw new Error("VOID: known-good arm — the typed-name lot does not read its name: " + typed.text);
   ok("known-good arm: a typed name still reads as typed", true, typed.text);
   const un = await nameOf("u1");
-  ok("the unnamed lot reads \"Unnamed\" in the list (not its owner/street)", un.text === "Unnamed", un.text);
+  ok("the unnamed COUNTY lot reads by its account in the list (Layout C) — never its owner/street, and never the word Unnamed (a drawn / other lot reads \"Parcel N\", see verify-parcel-list-layout)", /^Acct \d+$/.test(un.text), un.text);
   ok("…and in a quieter (grey) colour than a typed name", un.color !== typed.color, `${un.color} vs ${typed.color}`);
   ok("the list never shows the owner or street as a name", !/BAUER|KILGORE/i.test(await T("parcel-row-u1").innerText().then((t) => t.split("\n")[0])));
   await shot("list");
@@ -81,7 +81,7 @@ try {
 } catch (e) {
   console.log("ERROR", e.message); results.push({ name: "harness error: " + e.message, pass: false });
 } finally {
-  if (SIGNED) { try { await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }, [SITE_ID, UID]); } catch (_) {} }
+  if (SIGNED) { try { await page.evaluate(([id, uid]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }, [SITE_ID, UID]); } catch (_) {} }
   await browser.close();
 }
 const failed = results.filter((r) => !r.pass);

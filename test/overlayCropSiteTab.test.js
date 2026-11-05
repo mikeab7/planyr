@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  cropClipShapeScreen, cropClipRectScreen, cropEditBlock, recropForRaster, effectiveCropRect, cropTrimFeet,
+  cropClipShapeScreen, cropClipRectScreen, cropEditBlock, recropForRaster, effectiveCropRect,
   normalizeCropShape,
 } from "../src/shared/overlay/overlayCrop.js";
 
@@ -51,8 +51,8 @@ describe("cropClipShapeScreen", () => {
 
 describe("cropEditBlock — the ONE lock/eligibility predicate (asked by the panel AND by the write)", () => {
   it("an ordinary loaded overlay may be cropped", () => expect(cropEditBlock(base)).toBeNull());
-  it("a LOCKED overlay refuses, with a plain reason", () => {
-    expect(cropEditBlock({ ...base, locked: true })).toMatch(/Unlock/);
+  it("a LOCKED overlay may still be cropped — Lock only blocks direct map drags (NEW-6, 2026-10-11)", () => {
+    expect(cropEditBlock({ ...base, locked: true })).toBeNull();
   });
   it("the pinned map capture refuses (it prints via its own aerial path — a crop would not export)", () => {
     expect(cropEditBlock({ ...base, fromMap: true })).toMatch(/map capture/);
@@ -80,17 +80,16 @@ describe("recropForRaster — a PDF page change re-fits the crop to the new rast
   });
 });
 
-describe("effectiveCropRect / cropTrimFeet are poly-safe (never NaN)", () => {
+describe("effectiveCropRect is poly-safe (never NaN)", () => {
   it("a polygon crop reads as its bounding box", () => {
     const o = { ...base, crop: { kind: "poly", pts: [[100, 50], [700, 60], [400, 720]] } };
     expect(effectiveCropRect(o)).toEqual({ x: 100, y: 50, w: 600, h: 670 });
-    const t = cropTrimFeet(o);
-    for (const v of Object.values(t)) expect(Number.isFinite(v)).toBe(true);
+    for (const v of Object.values(effectiveCropRect(o))) expect(Number.isFinite(v)).toBe(true);
   });
 });
 
-describe("the trim fields' output is kind-stamped on write (normalizeCropShape)", () => {
-  it("a legacy no-kind rect from cropFromTrimFeet becomes {kind:'rect', …}", () => {
+describe("a legacy no-kind rect is kind-stamped on write (normalizeCropShape)", () => {
+  it("a legacy no-kind rect becomes {kind:'rect', …}", () => {
     expect(normalizeCropShape({ x: 10, y: 10, w: 100, h: 100 }, 1000, 800)).toEqual({ kind: "rect", x: 10, y: 10, w: 100, h: 100 });
   });
 });

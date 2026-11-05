@@ -15,11 +15,13 @@
  */
 
 import ClipperLib from "clipper-lib";
-import { siteState } from "./siteRegion.js";
+import { siteState, TEXAS_OUTLINE } from "./siteRegion.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { classifyWell } from "./wellStatus.js";
-import { toGrid, screenProximity } from "./proximityScreen.js";
+import { toGrid, screenProximity, planeForRings } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
+import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -64,24 +66,9 @@ export const TRUSTED_CHECKS = Object.freeze([
 ]);
 
 /* ── 3. region gate ──────────────────────────────────────────────────────────────────────────── */
-/* A coarse Texas OUTLINE. `siteState`'s "TX" is a generous BOX (it also holds Shreveport, Roswell and
- * Lawton), which is right for "which rules may apply" and WRONG for "may the RRC clear this site": the
- * RRC knows nothing about Louisiana, so a Shreveport parcel would read a green "None". So the RRC
- * checks additionally require the point to sit inside this outline. It is hand-simplified [lng, lat],
- * a hair INSIDE the borders (rivers) and padded seaward on the coast: a border-town site falling out of
- * it only ever loses a verdict (the layer pill is still offered) — it can never gain a false one. */
-export const TEXAS_OUTLINE = Object.freeze([
-  [-103.04, 36.49], [-100.03, 36.49], [-100.03, 34.60], [-99.60, 34.40], [-99.20, 34.19], [-98.60, 34.13],
-  [-98.10, 34.04], [-97.40, 33.80], [-96.80, 33.80], [-96.00, 33.67], [-95.30, 33.87], [-94.50, 33.67],
-  [-94.07, 33.54], [-94.07, 31.99], [-93.90, 31.80], [-93.76, 31.45], [-93.62, 31.10], [-93.70, 30.75],
-  [-93.70, 30.30], [-93.72, 30.05], [-93.82, 29.70], [-93.80, 29.55], [-94.45, 29.35], [-94.95, 29.15],
-  [-95.35, 28.80], [-96.00, 28.45], [-96.55, 28.20], [-97.05, 27.80], [-97.30, 27.20], [-97.25, 26.60],
-  [-97.15, 25.96], [-97.50, 25.87], [-97.65, 25.93], [-98.00, 26.05], [-98.26, 26.08], [-98.82, 26.36], [-99.02, 26.40],
-  [-99.27, 26.88], [-99.53, 27.50], [-99.95, 27.90], [-100.30, 28.45], [-100.50, 28.71], [-100.90, 29.36], [-101.40, 29.75],
-  [-101.55, 29.80], [-102.30, 29.88], [-102.70, 29.70], [-102.95, 29.15], [-103.15, 28.98], [-103.60, 29.17], [-103.78, 29.26],
-  [-104.37, 29.56], [-104.70, 30.15], [-105.00, 30.65], [-105.85, 31.30], [-106.53, 31.77], [-106.62, 31.80], [-106.62, 32.00],
-  [-103.05, 32.00],
-]);
+/* The coarse Texas OUTLINE now lives in `siteRegion.js` (B2479568 amendment — `siteState` needs it as its "surely inside Texas" guard);
+ * re-exported here because the RRC trust gate below still reads it. */
+export { TEXAS_OUTLINE };
 
 function inPolygon(lng, lat, poly) {
   let inside = false;
@@ -93,8 +80,11 @@ function inPolygon(lng, lat, poly) {
 }
 export const inTexas = (lat, lng) => inPolygon(lng, lat, TEXAS_OUTLINE);
 
-/* The region ("TX" | "CO" | "GA" | "CA" | "FL" | null) a single point belongs to FOR TRUST PURPOSES: "TX"
- * only when the box AND the outline agree. */
+/* The region ("TX" | "CO" | "GA" | "CA" | "FL" | "TN" | "NJ" | "NY" | null) a single point belongs to FOR TRUST PURPOSES: "TX"
+ * only when the state answer AND the outline agree. `siteState` answers all 50 states since B2479568, but a verdict is trusted only in
+ * the eight regions this screen was built and checked for — every other state stays "outside every region we can name" (null), exactly
+ * as before; widening the Analysis verdict beyond them is a separate product decision. */
+const TRUST_REGIONS = new Set(["TX", "CO", "GA", "CA", "FL", "TN", "NJ", "NY"]);
 /* The Texas claim also covers a quarter-mile buffer (a check says "None within a quarter mile"), and the RRC has
  * nothing across the line, so "Texas" requires the point AND a ~0.4 mi ring around it (four offsets) inside the
  * outline: a site closer than that to a border loses its verdict rather than gaining a false one. */
@@ -105,7 +95,7 @@ export function trustRegionOf(lat, lng) {
     const d = TX_MARGIN_DEG;
     return inTexas(lat, lng) && inTexas(lat + d, lng) && inTexas(lat - d, lng) && inTexas(lat, lng + d) && inTexas(lat, lng - d) ? "TX" : null;
   }
-  return st;
+  return TRUST_REGIONS.has(st) ? st : null;
 }
 
 /* Up to `cap` sample points over every ring (all vertices when the set is small), plus each ring's bbox
@@ -147,13 +137,15 @@ export function isTrustedFor(check, regions) {
 const SCALE = 100; // clipper works on integers: centi-feet, the same scale polyClip / pondOffset use
 const Clipper = ClipperLib.Clipper;
 
-function ringsToFt(rings) {
-  return (rings || []).map((r) => (r || []).map(toGrid).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).filter((r) => r.length >= 3);
+/* ⛔ NEW-1 (STATE-PLANE-AUDIT): `plane` is the SITE's state plane zone (proximityScreen.planeForRings of the site rings) and rides the
+ * frame, so the site, its holes and every feature polygon are projected on ONE grid — never on Texas South Central by default. */
+function ringsToFt(rings, plane) {
+  return (rings || []).map((r) => (r || []).map((q) => toGrid(q, plane)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).filter((r) => r.length >= 3);
 }
-function makeFrame(ringsFt) {
+function makeFrame(ringsFt, plane) {
   let ox = 0, oy = 0, n = 0;
   for (const r of ringsFt) for (const p of r) { ox += p.x; oy += p.y; n++; }
-  return n ? { ox: ox / n, oy: oy / n } : { ox: 0, oy: 0 };
+  return n ? { ox: ox / n, oy: oy / n, plane } : { ox: 0, oy: 0, plane };
 }
 const toPath = (ringFt, f) => ringFt.map((p) => ({ X: Math.round((p.x - f.ox) * SCALE), Y: Math.round((p.y - f.oy) * SCALE) }));
 const pathsArea = (paths) => {
@@ -176,9 +168,10 @@ const union = (paths) => exec(ClipperLib.ClipType.ctUnion, paths, null);
 /* The SITE as a solid: every active parcel unioned (all rings forced one orientation first, or two
  * oppositely-wound neighbours cancel to a hole), save-and-except HOLES subtracted. Returns clipper paths. */
 export function siteSolid(rings, holes, frame) {
-  const parts = ringsToFt(rings).map((r) => orient(toPath(r, frame)));
+  const plane = frame.plane || planeForRings(rings) || undefined;
+  const parts = ringsToFt(rings, plane).map((r) => orient(toPath(r, frame)));
   let solid = union(parts);
-  const holePaths = ringsToFt(holes || []).map((r) => orient(toPath(r, frame)));
+  const holePaths = ringsToFt(holes || [], plane).map((r) => orient(toPath(r, frame)));
   if (holePaths.length) solid = exec(ClipperLib.ClipType.ctDifference, solid, union(holePaths));
   return solid;
 }
@@ -187,7 +180,7 @@ export function siteSolid(rings, holes, frame) {
  * the feature so its INTERIOR rings stay holes; the normalised output is oriented for the cross-feature
  * union that follows. Never vertex sampling — real area. */
 function featurePaths(esriRings, frame) {
-  const paths = ringsToFt(esriRings).map((r) => toPath(r, frame));
+  const paths = ringsToFt(esriRings, frame.plane || undefined).map((r) => toPath(r, frame));
   if (!paths.length) return [];
   return exec(ClipperLib.ClipType.ctUnion, paths, null, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftEvenOdd);
 }
@@ -224,18 +217,25 @@ export function compassFrom(dx, dy, inside = false) {
 }
 
 /* ── measurements ────────────────────────────────────────────────────────────────────────────── */
+/* ⛔ WINDOW FIRST (problem report 6cea9895): every polygon is cut to a window around the site before it is measured —
+ * one county-scale FEMA polygon measured whole held the owner's main thread for 6 s. The rule and its proof live in
+ * featureWindow.js; re-exported here for the measurement's callers. */
+export { windowFeatures, WINDOW_PAD_M };
+
 /* FLOOD. `features` = [{ rings (lng/lat), zone, subtype }]. Three disjoint classes are formed BEFORE any
  * area is read: SFHA (the 1% / 100-yr, floodway included), shaded X (the 0.2% / 500-yr) MINUS the SFHA
  * — so an AE area that a shaded-X polygon also covers is counted once, in the 100-year only — and Zone D
  * (undetermined). `mappedFrac` is how much of the site ANY polygon covers: FEMA publishes the all-clear
  * as polygons, so uncovered ground is unmapped, and a row may not read "None" over it. */
-export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOLDS) {
-  const ringsFt = ringsToFt(rings);
-  const frame = makeFrame(ringsFt);
+/* `opts.windowPadM` exists ONLY so a test can replay the pre-fix whole-polygon measurement (Infinity) against the window. */
+export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
+  const plane = planeForRings(rings) || undefined;
+  const ringsFt = ringsToFt(rings, plane);
+  const frame = makeFrame(ringsFt, plane);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
   if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
-  const feats = features || [];
+  const feats = windowFeatures(rings, features, windowPadM);
   const sfha = feats.filter((f) => isSfhaZone(f.zone));
   const shaded = feats.filter((f) => !isSfhaZone(f.zone) && String(f.zone || "").trim().toUpperCase() === "X" && isShadedXSubtype(f.subtype));
   const undetermined = feats.filter((f) => /^D$|NOT INCLUDED/i.test(String(f.zone || "").trim()));
@@ -258,28 +258,29 @@ export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOL
     sfhaZones: zonesOf(sfha), floodway: sfha.some((f) => /floodway/i.test(String(f.subtype || ""))),
     sfhaSide: clean(sfhaSqft) ? sideWord(sfhaOn, solid) : null,
     shadedSide: clean(shadedSqft) ? sideWord(shadedOn, solid) : null,
-    featureCount: feats.length,
+    featureCount: (features || []).length,
   };
 }
 
 /* WETLANDS. `features` = [{ rings, type }]. Acres is the area of the union ON the site; count is the
  * number of mapped wetlands that put real ground on it (a polygon merely touching the ring is not one). */
-export function measureWetlands(rings, holes, features, thresholds = CHECK_THRESHOLDS) {
-  const ringsFt = ringsToFt(rings);
-  const frame = makeFrame(ringsFt);
+export function measureWetlands(rings, holes, features, thresholds = CHECK_THRESHOLDS, { windowPadM = WINDOW_PAD_M } = {}) {
+  const plane = planeForRings(rings) || undefined;
+  const ringsFt = ringsToFt(rings, plane);
+  const frame = makeFrame(ringsFt, plane);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
   if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
   let count = 0;
   const types = new Set();
   const kept = [];
-  for (const f of features || []) {
+  for (const f of windowFeatures(rings, features, windowPadM)) {
     const on = clipToSite(featurePaths(f.rings, frame), solid);
     if (pathsArea(on) >= thresholds.overlapDustSqft) { count++; kept.push(f); if (f.type) types.add(String(f.type)); }
   }
   const onAll = clipToSite(unionOfFeatures(kept, frame), solid);
   const sqft = pathsArea(onAll);
-  return { siteSqft, sqft, acres: sqft / 43560, count, types: [...types], side: sqft >= thresholds.overlapDustSqft ? sideWord(onAll, solid) : null };
+  return { siteSqft, sqft, acres: sqft / SQFT_PER_ACRE, count, types: [...types], side: sqft >= thresholds.overlapDustSqft ? sideWord(onAll, solid) : null };
 }
 
 /* LINES / POINTS (pipelines, wells): distance of each feature from the real rings (0 when a line
@@ -288,7 +289,8 @@ export function measureWetlands(rings, holes, features, thresholds = CHECK_THRES
  * plus the compass word for the nearest one. */
 export function measureProximity(rings, features, { keep = 60 } = {}) {
   const scr = screenProximity(rings, features || []);
-  const ringsFt = ringsToFt(rings);
+  const plane = planeForRings(rings) || undefined;   // the same plane screenProximity measured on
+  const ringsFt = ringsToFt(rings, plane);
   let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
   for (const r of ringsFt) for (const p of r) { if (p.x < a) a = p.x; if (p.y < b) b = p.y; if (p.x > c) c = p.x; if (p.y > d) d = p.y; }
   const cx = (a + c) / 2, cy = (b + d) / 2, spanX = (c - a) || 1, spanY = (d - b) || 1;
@@ -308,7 +310,7 @@ export function measureProximity(rings, features, { keep = 60 } = {}) {
     } else if (f.lngLat) pts.push(f.lngLat);
     let best = null, bd = Infinity;
     for (const q of pts) {
-      const g = toGrid(q);
+      const g = toGrid(q, plane);
       const dd = Math.hypot(g.x - cx, g.y - cy);
       if (Number.isFinite(dd) && dd < bd) { bd = dd; best = g; }
     }

@@ -16,6 +16,7 @@ import {
 } from "../src/workspaces/site-planner/lib/siblingOverlays.js";
 import { collectAssetRefs, releasePlanForOverlay } from "../src/workspaces/site-planner/lib/sharedAssetRefs.js";
 import { mergeSiteContent } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const PDF = "u1/site-overlays/A/ov1.pdf";
 const ov = (o = {}) => ({
@@ -226,7 +227,7 @@ describe("remove = this plan only; bytes released only when nothing references t
 });
 
 describe("wiring guard — SitePlanner never writes a sibling and releases only after the sibling read", () => {
-  const src = fs.readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+  const src = plannerSource();
   const block = src.slice(src.indexOf("NEW-1 — overlays flow between sibling plans"), src.indexOf("const removeOverlay = (id)"));
   it("the sibling block has no saveSite / push / write", () => {
     expect(block.length).toBeGreaterThan(1000);

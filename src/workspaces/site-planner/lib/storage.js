@@ -13,12 +13,13 @@ import { plainCopy } from "./planStore.js";
 import { elsProven, recordElsProof } from "./elsProof.js";
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeManifest, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbPutVerified, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { buildPurgeEvent } from "./projectPurgeRecord.js";
 import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared/projects/projectModel.js";
 // B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
 // caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
@@ -1115,8 +1116,18 @@ export async function backupNowVerified(id) {
   try { return writeHistoryAll(historyMem) === true; } catch (_) { return false; }
 }
 /** planStore's make-room hook (B2200385): free localStorage that is PROVEN safe to free, in order, only as far as needed. Resolves { freedChars, steps }. */
-export async function makeRoomForPlanStore({ reason, shortBy } = {}) {
+export async function makeRoomForPlanStore({ base, reason, shortBy } = {}) {
   const steps = []; let freed = 0;
+  /* B2200384 — FIRST: the whole-library entry, if one is still on the device and every plan in it verifies as its own entry. It is by far the biggest thing
+   * that can be freed and the only one that is a duplicate of what the entries already hold. */
+  if (base) {
+    try { const r = planStore.retireLegacy(base); steps.push("legacy:" + r.reason + ":" + r.freedChars); freed += r.freedChars || 0; }
+    catch (e) { steps.push("legacy:error"); }
+  }
+  if (freed >= (shortBy || 0) && freed > 0) {
+    reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan move", { reason, shortByBefore: shortBy, freedChars: freed, enough: true, steps: steps.join(" · ") });
+    return { freedChars: freed, steps };
+  }
   const h = await relocateHistoryToIdb();
   steps.push("history:" + (h.ok ? "moved" : h.reason) + ":" + h.freedChars); freed += h.freedChars || 0;
   if (freed < (shortBy || 0)) {                       // still short → re-fetchable caches (rebuild source declared in the storage census)
@@ -1194,6 +1205,10 @@ function dropIdbBackedSrc(m) {
  * B217540's byte-exact whole-store snapshot still serves a store that could not be split (planStore "blob" mode). */
 /** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
 export function siteExistsLocally(id) { return planStore.has(sitesKey(), id); }
+/** Why the device last refused to store plan `id` ({ reason: "quota" | <error name> | "unavailable", … }), or null. NEW-1 (2026-11-03). */
+export function lastSaveRefusal(id) { return planStore.lastRefusal(id); }
+/** Make room in this device's plan storage ONCE per page load (shared with the automatic attempt); `force` = an explicit user Retry. */
+export function requestPlanStoreRoom({ force = false } = {}) { return planStore.requestRoom({ base: sitesKey(), reason: "quota", force }); }
 /** The stored record for `id` as the persistence verifier needs it (its drawn collections). */
 export function readBackSite(id) { return planStore.readBack(sitesKey(), id) || loadSite(id); }
 function readSharedStore() { return planStore.readShared(sitesKey()); }
@@ -1202,8 +1217,15 @@ export function sitesWriteStillCurrent(stamp) { return planStore.writeStillCurre
 const writeSites = (map) => planStore.writeMap(sitesKey(), map);
 const writeSite = (id, rec) => planStore.writeOne(sitesKey(), id, rec);
 const removeSite = (id) => planStore.removeOne(sitesKey(), id);
+/** A durable tombstone (signed-in stores) says this plan was deleted on this device — a legacy whole-library entry may never resurrect it (B2200384). */
+function planStoreIsDeleted(base, id) {
+  const pre = "planarfit:sites:cloud:";
+  if (!base || !base.startsWith(pre)) return false;
+  return id in readSiteTombs(base.slice(pre.length));
+}
 planStore.configure({
   makeRoom: (a) => makeRoomForPlanStore(a),
+  isDeleted: planStoreIsDeleted,
   persistForm: dropIdbBackedSrc,
   slim: stripDataUrls,
   merge: (mine, theirs) => {
@@ -1892,6 +1914,19 @@ async function purgeProjectFoldersFor(groupId) {
   }
 }
 
+// NEW-4 (data-risk 2026-10-29) — a permanently deleted project leaves a client_errors row saying which one, who
+// owned it, when it was trashed and what went with it. Observability ONLY: it runs after the purge is proven,
+// never changes the result, and can never throw into the purge (reportClientEvent is fire-and-forget).
+async function snapshotForPurge(ids, groupId) {
+  try { return await cloudPurgeManifest(activeUid(), ids, groupId); } catch (_) { return null; } // never blocks or fails a purge
+}
+function recordProjectPurge(manifest, outcome) {
+  try {
+    const ev = buildPurgeEvent(manifest, outcome);
+    if (ev) reportClientEvent("project-purged", "a project was permanently deleted", ev);
+  } catch (_) { /* observability must never affect the purge */ }
+}
+
 // "Delete forever" — the only user-facing HARD delete. The site_elements cascade firing here is
 // correct: this is the point at which permanent destruction was actually asked for. `groupId`
 // (the project id `project_folders` is keyed on) defaults to the first purged plan id — true for
@@ -1900,7 +1935,9 @@ async function purgeProjectFoldersFor(groupId) {
 export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
+  const manifest = await snapshotForPurge(list, groupId || list[0]); // NEW-4 — read-only, before the rows are gone
   const v = await hardDeleteVerified(list);
+  recordProjectPurge(manifest, v);
   if (v.confirmedGone) await purgeProjectFoldersFor(groupId || list[0]);
   return { ok: v.ok, purged: v.gone.length, error: v.error };
 }
@@ -1997,7 +2034,9 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
       reportClientEvent("plan-purge-skipped-live-group", "a soft-deleted plan's project still has live plans in its group — it was left in place instead of being auto-purged, since it was never offered back through the account-wide bin", { id: row.id, groupId: gid });
       continue;
     }
+    const manifest = await snapshotForPurge([row.id], gid); // NEW-4 — read-only, before the row is gone
     const out = await hardDeleteVerified([row.id]).catch(() => ({ ok: false }));
+    recordProjectPurge(manifest, out);
     if (out && out.ok) {
       purged += 1;
       if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }
@@ -2303,6 +2342,13 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   lastSeenAt[partial.id] = model.updatedAt;
   lastSeenHeader[partial.id] = headerSlice(model); // B1953797 — this tab's own write is its new base
   const ok = writeSite(partial.id, model);          // B2165120: this plan's entry only — never the library
+  if (!ok) {
+    /* ⛔ NEW-1 (2026-11-03) — A REFUSED DEVICE WRITE IS NEVER SILENT. `planStore` already reported WHY (`plan-store-write-refused`: reason, sizes, the cap
+     * inventory); this is the plan-level twin so a caller that ignores the boolean still leaves a trace naming the plan. Callers on a path the user
+     * watches (the three plan mints, rename, status/dates) read the boolean and say so — see lib/planMint.js. */
+    const why = planStore.lastRefusal(partial.id);
+    reportClientEvent("site-save-refused", "the device refused to store this plan — nothing was saved to this device", { id: partial.id, reason: (why && why.reason) || "unknown", existing: !!existing });
+  }
   if (ok) {
     notifySiteModelChanged(partial.id);
     // B1525088 (NEW-1) — announce an identity change (name/status/role/which group) on the

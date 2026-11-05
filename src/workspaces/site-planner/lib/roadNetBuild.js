@@ -8,10 +8,14 @@ import {
   roadNetworkStats, dissolveRingsSteps, clipPolylineOutside, clusterIds, regionEdgeSegments, rectOutlineCutSegments, polygonOutlineCutSegments,
 } from "./roadNetwork.js";
 import { teeJunctionsOf, driveJunctionsOf } from "./roadJunctions.js";
+import { fieldInsidesOf } from "./parkingApproach.js";
+import { junctionMouthCuts, stripeRunsNearOutline, trimPolylineOutsideRings, snapPieceEnd } from "./roadDeco.js";
 import {
-  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes,
+  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes, teeJunctionCurbStripes,
 } from "./siteGeometry.js";
 
+/* how far from a return's tangent point a straight stripe's end may lie and still be the one that return continues (the wedge's backing can clip a stripe ~20 ft short of an acute approach's tangent) */
+const STRIPE_JOIN_REACH_FT = 80;
 // B960/NEW-2 — road↔road END-TO-END weld junctions for the seamless-weld render. A weld = one
 // road's ENDPOINT coincident with ANOTHER road's ENDPOINT (a plain weld or the two ends of a loop),
 // as opposed to a tee (endpoint on an interior vertex, handled by teeJunctionsOf). Each such join
@@ -87,10 +91,13 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   const strip = new Map();
   for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))); yield; }
+  /* NEW-1 (road → parking) — what each car field does about the roads around it (lib/parkingApproach.js): the stalls a drive takes, a road through the field, a
+   * drive running ALONG its aisle-mouth face. Decided once here (VIEW-INDEPENDENT-ONCE); `stallClips` / the outline cuts / the mouths below are read from it. */
+  const inside = fieldInsidesOf({ els, settings, junctions: driveJunctions.filter((dj) => byId.has(dj.sideId)), roads, stripOf: (r) => strip.get(r.id), halfOf: roadOuterHalf, isHidden: (T) => elHidden(hiddenGroups, T) });
   // Extra pavement contributed by each junction, indexed by the road that owns the junction.
   const extra = new Map(roads.map((r) => [r.id, []]));
   // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -100,6 +107,11 @@ export function* roadNetSteps(inp) {
   const stripeCut = [];
   const pairs = [];
   const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
+  /* The curb-return wedges each SIDE road's own junctions add. A wedge's thick backing reaches back along the side road's own edge past its tangent point (a drive's
+   * is a hull out to the road's end-cap corner — up to ~20 ft on an acute approach), so clipping the road's OWN face-of-curb stripe against its OWN wedges ended
+   * that stripe well short of the tangent its return continues from. They still clip every OTHER road's stripes; the road's own end at its tangent is made exact by
+   * the per-tangent cut (roadDeco) and the join (below). */
+  const ownWedges = new Map(roads.map((r) => [r.id, new Set()]));
   for (const tj of teeJunctions) {
     /* A junction between two roads is only a junction while BOTH are on the drawing. `addExtra`
      * already no-ops for a hidden side road (it has no `extra` entry), but `stripeCut` below is
@@ -107,12 +119,16 @@ export function* roadNetSteps(inp) {
      * is not there, which reads as a gap in the kerb for no visible reason. */
     if (!byId.has(tj.sideId) || !byId.has(tj.throughId)) continue;
     addExtra(tj.sideId, tj.geom.wedges);
+    for (const w of tj.geom.wedges || []) ownWedges.get(tj.sideId).add(w);
     pairs.push([tj.sideId, tj.throughId]);
     const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
     const depth = G ? roadOuterHalf(G) : 0;                 // back-of-curb → centerline: near stripe only
     if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
   }
-  for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+  for (const dj of driveJunctions) {
+    addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    for (const w of dj.geom.wedges || []) if (ownWedges.has(dj.sideId)) ownWedges.get(dj.sideId).add(w);
+  }
   /* 2026-09-22 — the pad a road tees into is SUBTRACTED from that road's cluster (see
      dissolveRings' `subtract`): the road's pavement ends at the court face instead of running
      under (now: over) the court. Map<roadId, [pad rings]>, pad rings in world feet. */
@@ -128,7 +144,20 @@ export function* roadNetSteps(inp) {
     if (!ring) continue;
     if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
     padCut.get(dj.sideId).push(ring);
+    if (dj.keepOut) padCut.get(dj.sideId).push(dj.keepOut);   // NEW-1 — and nothing of the drive runs on past the face plane beside the field (roadJunctions `keepOut`)
   }
+  /* NEW-1 — a drive running ALONG a field's aisle-mouth face is cut against that field exactly like a drive that ends at one: its pavement stops at the face, and its
+   * outline / curb stripe is not ruled along it. At each aisle's opening the near curb stripe is also taken out (a curb CUT), so the aisle opens onto the drive. */
+  for (const [fid, r] of inside) {
+    const ring = padRingOf((els || []).find((e) => e.id === fid));
+    for (const m of r.perimeter) {
+      if (ring) { if (!padCut.has(m.roadId)) padCut.set(m.roadId, []); if (!padCut.get(m.roadId).includes(ring)) padCut.get(m.roadId).push(ring); }
+      const depth = (m.half || 0) + 0.5, n = m.outN;
+      stripeCut.push([m.a, m.b, { x: m.b.x + n.x * depth, y: m.b.y + n.y * depth }, { x: m.a.x + n.x * depth, y: m.a.y + n.y * depth }]);
+    }
+  }
+  /* NEW-1 (2026-10-15) — where each road's decoration ENDS at a junction (roadDeco.js). Computed here because the stripes below honour the side-road cuts too. */
+  const mouth = junctionMouthCuts({ teeJunctions: teeJunctions.filter((tj) => byId.has(tj.sideId) && byId.has(tj.throughId)), driveJunctions, byId });
   // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
   // the same sense a tee's wedges are, so they go through the SAME union: one region, one
   // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
@@ -173,29 +202,88 @@ export function* roadNetSteps(inp) {
     const subtract = ids.flatMap((id) => padCut.get(id) || []);
     const full = yield* dissolveRingsSteps(parts);
     const painted = subtract.length ? yield* dissolveRingsSteps(parts, { subtract }) : full;
-    for (const region of painted) regions.push({ region, styleEl, zKey, ids, edge: regionEdgeSegments(region, subtract) });
+    /* The roads of this cluster and the rings each owns (its strip + the wedges its junctions add): what a render needs to stroke each piece of the outline in the
+     * style of the road it belongs to — only ever asked for when the members' edge styles differ (`splitEdgeByOwner`). References, nothing copied. */
+    const members = ids.map((id) => byId.get(id)).filter(Boolean);
+    const ownerRings = new Map(ids.map((id) => [id, { strip: strip.get(id) && strip.get(id).length >= 3 ? strip.get(id) : null, extra: extra.get(id) || [] }]));
+    for (const region of painted) regions.push({ region, styleEl, zKey, ids, members, ownerRings, edge: regionEdgeSegments(region, subtract) });
     for (const region of full) fullRegions.push({ region, ids });
     // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
     // ends where it runs into the junction instead of drawing a curb straight through the intersection.
+    const pieces = new Map();    // road id → its straight face-of-curb pieces
+    const arcJobs = [];          // the curb-return stripes, joined to those pieces once every road of the cluster has its own (below)
+    const fullRings = full.flatMap((q) => [q.outer, ...q.holes]);
     for (const id of ids) {
       const others = [];
       for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
-      for (const oid of ids) others.push(...extra.get(oid));
+      for (const oid of ids) others.push(...(oid === id ? extra.get(oid).filter((w) => !ownWedges.get(id).has(w)) : extra.get(oid)));
       others.push(...stripeCut);
       others.push(...(padCut.get(id) || []));   // a curb stripe stops at the court face too
-      const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
-      // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
-      // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
-      // body carried its curb detail, the curb-return fillet carried none, so the two painted as
-      // visibly different treatments of what PR 1763 already proved is one continuous dissolved
-      // surface — a seam of decoration, not of geometry. `driveJunctionCurbStripes`
-      // (siteGeometry.js) continues the same line around the return; see its header.
-      const filletStripes = driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), roadCurbWidth(byId.get(id)));
-      stripes.set(id, [...clipped, ...filletStripes]);
+      /* NEW-1 — and a SIDE road's own face-of-curb stripes end where THEIR OWN return leaves the edge (the per-tangent throat cut). Left to run on, the straight
+       * stripe carried along the strip edge THROUGH the interior of the merged pavement beside the fillet — a line between the road's body and its curve. The
+       * return's own stripe (below) takes over from that point. (A through road's far stripe is NOT in this set — it runs on across the mouth.) */
+      others.push(...(mouth.side.get(id) || []));
+      pieces.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
+      /* NEW-1 (B1783376 ×3) — the face of curb CONTINUES around every curb return (`siteGeometry.driveJunctionCurbStripes` / `teeJunctionCurbStripes`, see their
+       * header): a true-circle arc a curb-width inside the pavement, oriented side-road end first. A DRIVE's arc is cut exactly at the pad face (it used to run on
+       * one curb-width INTO the pad — the tick at the top of each arc); then, either way, only the runs a curb-width inside the pavement's OUTLINE are kept
+       * (see stripeRunsNearOutline). The joins to the straight stripes are made below, once every road of the cluster has its pieces. */
+      const cwId = roadCurbWidth(byId.get(id));
+      const pads = padCut.get(id) || [];
+      for (const arc of driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), cwId)) {
+        arcJobs.push({ id, throughId: null, start: arc[0], end: arc[arc.length - 1], runs: trimPolylineOutsideRings(arc, pads).flatMap((r) => stripeRunsNearOutline(r, fullRings, cwId)) });
+      }
+      for (const tj of teeJunctions) {
+        if (tj.sideId !== id || !byId.has(tj.throughId)) continue;
+        for (const arc of teeJunctionCurbStripes([tj], cwId)) arcJobs.push({ id, throughId: tj.throughId, start: arc[0], end: arc[arc.length - 1], runs: stripeRunsNearOutline(arc, fullRings, cwId) });
+      }
       yield;
     }
+    /* THE JOIN. Each return's stripe starts EXACTLY on its side road's straight stripe (at the tangent point's own along-position) and — on a tee — ends exactly
+     * on the through road's. Bring each straight piece's end onto that point (trim what overshoots it, lengthen what stops short — whatever clipped it, a through
+     * road's throat cut or another road's wedge, stopped it somewhere near the tangent, not on it) and make the side road's piece + the arc ONE polyline, so a side of
+     * the curb is one line whose heading turns smoothly instead of a stripe, an arc and a hand-tuned overlap. The through road's piece is only snapped — it belongs to
+     * another road, with its own style. */
+    const nearestEnd = (list, pt) => {
+      let best = null;
+      list.forEach((pc, i) => [true, false].forEach((atStart) => {
+        const e = atStart ? pc[0] : pc[pc.length - 1], d = Math.hypot(e.x - pt.x, e.y - pt.y);
+        if (d <= STRIPE_JOIN_REACH_FT && (!best || d < best.d)) { const snapped = snapPieceEnd(pc, atStart, pt); if (snapped) best = { d, i, atStart, snapped }; }
+      }));
+      return best;
+    };
+    const lonely = new Map(ids.map((id) => [id, []]));   // arc runs that joined nothing
+    for (const job of arcJobs) {
+      const own = pieces.get(job.id), runs = job.runs;
+      const lastRun = runs[runs.length - 1];
+      const reachesFar = !!lastRun && Math.hypot(lastRun[lastRun.length - 1].x - job.end.x, lastRun[lastRun.length - 1].y - job.end.y) < 1e-6;
+      if (runs.length && Math.hypot(runs[0][0].x - job.start.x, runs[0][0].y - job.start.y) < 1e-6) {
+        const hit = nearestEnd(own, job.start);
+        if (hit) {
+          const straight = hit.atStart ? hit.snapped.slice().reverse() : hit.snapped;      // far from the junction → the tangent point
+          own[hit.i] = [...straight, ...runs[0].slice(1)];
+          runs.shift();
+        }
+      }
+      if (job.throughId && reachesFar) {
+        const thr = pieces.get(job.throughId), hit = thr && nearestEnd(thr, job.end);
+        if (hit) thr[hit.i] = hit.snapped;
+      }
+      lonely.get(job.id).push(...runs);
+    }
+    for (const id of ids) stripes.set(id, [...pieces.get(id), ...lonely.get(id)]);
   }
   regions.sort((a, b) => a.zKey - b.zKey);
+  /* NEW-1 (2026-10-15) — WHERE EACH ROAD'S DECORATION MAY PAINT (see roadDeco.js): the road's own strip with the junction throats (and any pad it ends at)
+   * taken out. Only roads that actually have a cut or a pad get an entry; every other road keeps its plain strip ring. Rings in world feet, evenodd. */
+  const decoDomains = new Map();
+  for (const r of roads) {
+    const s = strip.get(r.id);
+    const cut = [...(mouth.all.get(r.id) || []), ...(padCut.get(r.id) || [])];
+    if (!cut.length || !s || s.length < 3) continue;
+    const dom = yield* dissolveRingsSteps([s], { subtract: cut });
+    decoDomains.set(r.id, dom.flatMap((d) => [d.outer, ...d.holes]));
+  }
   // NEW-4 — a road that TEES INTO A RECT (a parking field, a truck court) leaves that rect's own
   // outline drawn straight across the drive opening: the owner's screenshot, and the same defect the
   // road↔road case already fixed, one layer out. A junction reads as one continuous curb around the
@@ -208,7 +296,43 @@ export function* roadNetSteps(inp) {
     if (!cutters.length) continue;
     outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
   }
-  return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  /* NEW-1 (road → parking) — the cutters for the field's STALL-ROW band outlines are the PAINTED pavement (pad already subtracted), not the uncut dissolve above.
+   * The uncut region carries the road strip's flat end cap, which at an OBLIQUE approach reaches a few feet INTO the field past its face; a band outline inside
+   * the field was clipped by that invisible triangle and began feet from the face as a floating stub ("a stall row's outline ruled across the mouth" at 60°).
+   * Only edges collinear with the face need the uncut region (that is what `mouths` is for); every other band edge lies inside the field, where no painted
+   * pavement ever is. Map<targetId, cutter rings>. */
+  const bandCuts = new Map();
+  for (const dj of driveJunctions) {
+    const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+    if (!cutters.length) continue;
+    bandCuts.set(dj.targetId, [...(bandCuts.get(dj.targetId) || []), ...cutters]);
+  }
+  /* NEW-1 (B1783376 ×3) — the pad-face run each drive's pavement opens on the field it enters: between the two curb-return tangent points, which lie ON the field's edge.
+   * The field's own ink (its outline and its stall rows' outlines) is cut by exactly this span (roadNetwork's `edgeInkPieces`), not by a polygon clip. Map<targetId, [{a,b}]>. */
+  const mouths = new Map(), seams = [];
+  for (const dj of driveJunctions) {
+    const [a, b] = (dj.geom && dj.geom.throughTangents) || [];
+    if (!a || !b || !byId.has(dj.sideId)) continue;
+    if (!mouths.has(dj.targetId)) mouths.set(dj.targetId, []);
+    mouths.get(dj.targetId).push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
+    seams.push({ sideId: dj.sideId, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } });
+  }
+  /* NEW-1 (road → parking) — THE FIELD'S OWN INSIDE (lib/parkingApproach.js): the stalls a drive takes, the field's outline where a road crosses it or runs along
+   * its aisle-mouth face. All of it is a function of (els, settings) — decided here, ONCE per model change, never per frame (VIEW-INDEPENDENT-ONCE).
+   * `stallClips` Map<fieldId, { base, count, removed, set, corridors }> — what `renderElPx` skips when it draws the stalls and what the Yield total subtracts. */
+  const stallClips = new Map();
+  for (const [fid, r] of inside) {
+    if (r.clip) stallClips.set(fid, r.clip);
+    if (r.through.length) {
+      const cutters = fullRegions.filter((reg) => r.through.some((t) => reg.ids.includes(t.roadId))).map((reg) => reg.region.outer).filter(Boolean);
+      outlineCuts.set(fid, [...(outlineCuts.get(fid) || []), ...cutters]);
+    }
+    if (r.perimeter.length) {
+      if (!outlineCuts.has(fid)) outlineCuts.set(fid, []);          // an (empty) cut list still routes the field through the interrupted-outline render
+      mouths.set(fid, [...(mouths.get(fid) || []), ...r.perimeter.map(({ a, b }) => ({ a, b }))]);
+    }
+  }
+  return { regions, stripes, outlineCuts, bandCuts, stallClips, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 
@@ -235,7 +359,8 @@ export async function warmRoadNetFromEls(els, settings, tick) {
     for (const [id, cutters] of net.outlineCuts) {
       const el = byId.get(id);
       if (!el) continue;
-      if (el.points) polygonOutlineCutSegments(el, cutters); else rectOutlineCutSegments(el, cutters);
+      const mouths = net.mouths && net.mouths.get(id);
+      if (el.points) polygonOutlineCutSegments(el, cutters, mouths); else rectOutlineCutSegments(el, cutters, mouths);
       await tick();
     }
   }

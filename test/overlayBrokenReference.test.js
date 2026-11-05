@@ -22,8 +22,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 
 describe("(1) the on-canvas placeholder offers Remove alongside re-add/retry", () => {
   const renderStart = src.indexOf('const ovErr = overlayLoadErr[o.id];');

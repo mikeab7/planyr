@@ -28,9 +28,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "../src/workspaces/site-planner/lib/buildingGrid.js";
 import { dockSidesFor, footprintAxes, footprintDepth, footprintLength } from "../src/workspaces/site-planner/lib/dockZones.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 
 const building = (over = {}) => ({ id: "b1", type: "building", cx: 500, cy: 400, w: 620, h: 240, rot: 0, dock: "cross", ...over });
 const settings = { showDocks: true, showGrid: true, speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, doorWidth: 9, doorOC: 12 };
@@ -99,7 +100,7 @@ const resolveBlock = SP.slice(resolveStart, SP.indexOf("\n/* element renderer wo
 describe("the wiring — a re-introduced per-frame solve is invisible to every other kind of test", () => {
   it("resolveDockPlan exists and is called from the per-model-change resolver", () => {
     expect(SP).toContain("function resolveDockPlan(");
-    expect(resolveBlock).toContain("resolveDockPlan(el, settings, dogEars)");
+    expect(resolveBlock).toContain("resolveDockPlan(el, settings, dogEars, ramps)"); // NEW-1 (2026-10-30): the resolver also hands the building's drive-in ramps to the door solve
   });
 
   it("the neighbour memo is keyed on BOTH els and settings", () => {

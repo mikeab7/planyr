@@ -20,8 +20,9 @@ describe("ModelApp.jsx — org prop + derived state", () => {
     expect(SRC).toMatch(/const orgMode = !!org && !crossProject && !projectId;/);
   });
 
-  it("openWorkbook is the umbrella of openProject OR openOrgWorkbook — the one gate the render/persistence effects share", () => {
-    expect(SRC).toMatch(/const openWorkbook = openProject \|\| openOrgWorkbook;/);
+  it("openWorkbook is the umbrella of file mode OR openProject OR openOrgWorkbook — the one gate the render/persistence effects share", () => {
+    // NEW-1 (open an uploaded Excel): a Library file open in Spreadsheet is the third way a workbook is "open".
+    expect(SRC).toMatch(/const openWorkbook = fileMode \|\| openProject \|\| openOrgWorkbook;/);
   });
 
   it("storageKey is the project id in project mode, the workbook id in org mode — never both, never a fallback that mixes them", () => {
@@ -48,7 +49,7 @@ describe("ModelApp.jsx — the load/save effects key on storageKey, not the raw 
     const start = SRC.indexOf("/* Write-through local save");
     const end = SRC.indexOf("/* Best-effort, debounced cloud push", start);
     const body = SRC.slice(start, end);
-    expect(body).toMatch(/if \(!ready \|\| !openWorkbook\) return;/);
+    expect(body).toMatch(/if \(!ready \|\| !openWorkbook \|\| fileMode\) return;/);
     expect(body).toMatch(/writeLocalSheet\(userId, storageKey, workbook\)/);
   });
 
@@ -63,7 +64,8 @@ describe("ModelApp.jsx — the load/save effects key on storageKey, not the raw 
 
 describe("ModelApp.jsx — the render branches on openWorkbook first, then orgMode, then the plain empty state", () => {
   it("openWorkbook shows the grid; orgMode-with-nothing-open shows the picker; otherwise the plain empty state", () => {
-    const openWorkbookAt = SRC.indexOf("\n      {openWorkbook ? (");
+    // NEW-1: a file that is opening / failed to open takes the slot first; the grid branch is `) : openWorkbook ? (`.
+    const openWorkbookAt = SRC.indexOf(") : openWorkbook ? (");
     const orgBranchAt = SRC.indexOf(") : orgMode ? (");
     const pickerAt = SRC.indexOf("<OrgWorkbookPicker");
     const emptyBranchAt = SRC.indexOf("<EmptyProjectState onGoDashboard={onGoDashboard} />");

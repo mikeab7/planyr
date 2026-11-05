@@ -37,11 +37,11 @@ jobs:
       # before "Install dependencies" (needs no node_modules) so it fails fast either way.
       - name: Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)
         run: node scripts/generated-doc-touch-guard.mjs
-      # Ledger layout guard (NEW-1, 2026-10-05): ledger/ holds ONE FILE PER backlog/verification entry
-      # so two PRs that each file an entry can never conflict. Fails on a misplaced/misnamed entry file,
-      # a heading that disagrees with its filename, or a frame missing a state marker. No node_modules needed.
-      - name: Ledger layout guard (one file per entry — NEW-1)
-        run: node scripts/ledger.mjs check
+      # NEW-1 (2026-11-05): the ledger lives on its OWN branch (`ledger`) with no required checks, so none of its
+      # data checks gate this build any more — a malformed record must never be able to fail an unrelated code PR.
+      # They moved, unchanged, to .github/workflows/ledger-health.yml (scheduled; `npm run test:ledger` + `node
+      # scripts/ledger.mjs check` + the tag-legend and verification-queue guards). Missing records are surfaced,
+      # never blocked, by .github/workflows/ledger-record-check.yml.
       - name: Install dependencies
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
@@ -69,36 +69,26 @@ jobs:
       # MAP.md's own drift-vs-source-tree check (B637) is no longer a per-PR gate — see the
       # Generated-index touch guard above and .github/workflows/regen-derived-docs.yml. It still
       # exists (`node scripts/build-map.mjs --check`) for that scheduled job and for local use.
-      - name: BACKLOG.md tag-legend guard (every #tag must be in the legend — B638; narrowed by NEW-1)
-        run: node scripts/build-backlog-index.mjs --tags-only
       # Per-folder CLAUDE.md pointer freshness (CLAUDE.md's "Keep the per-folder pointers fresh").
       # Previously reachable only through `npm test` (test/docPointers.test.js) — pulled out as its
       # own gate (2026-09-02, the GitHub Actions cost cut) so the docs-only fast path below can run
       # it directly without paying for the whole app test suite just to reach this one check.
       - name: Doc pointer freshness guard (per-folder CLAUDE.md references — ui-audit/doc-pointer-audit.mjs)
         run: node ui-audit/doc-pointer-audit.mjs
-      # Verification-queue ceiling guard (B825233). CLAUDE.md already said a pending V# with no
-      # Blocker: wall is a mis-classification, not a to-do — nothing ever checked it. This is a
-      # ratchet, not a retroactive fail: it only reds out if the no-Blocker or stale-pending count
-      # GROWS past today's recorded ceiling (scripts/verification-queue-ceiling.json), so today's
-      # existing debt doesn't wedge every future PR. Regenerate the ceiling with
-      # `node scripts/verification-queue-audit.mjs --write-ceiling` once the counts genuinely improve.
-      - name: Verification-queue ceiling guard (no-Blocker / stale V# items — B825233)
-        run: node scripts/verification-queue-audit.mjs --check
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
-      # Mint gate (B779 second pass). The uniqueness tests below catch a collision once both items
-      # are in the same tree; this catches one whose twin is still on an UNMERGED branch, which no
-      # static check of this repo can see. A proven collision fails the build (renumbering is a
-      # few heading lines); an infrastructure problem warns loudly rather than wedging merges —
-      # `--ci` draws exactly that line, and the pre-push hook is the strict first line of defence.
+      # Mint gate (B779 second pass). RETIRED IN PRACTICE since 2026-11-05 (NEW-1): the ledger lives on its own branch and ids are
+      # minted atomically by `npm run ledger -- add`, so a branch adds no ledger entries and this exits 0 at once
+      # (scripts/check-mint.mjs, `isBranchMode`). It stays as a step so that if the marker file `.github/ledger-branch.json` is ever
+      # removed — the ledger moved back into the tree — the original collision gate re-engages instead of silently vanishing.
       - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
         run: node scripts/check-mint.mjs --ci
       # Ops digest dry run (B2159504). The `ops-digest` job in build.yml pushes the ledger digest to the admin
       # Ops page after every merge to main; this proves on every PR that the payload still builds and validates
       # and the request is well formed, without sending anything or needing the OPS_INGEST_TOKEN secret.
+      # Dry-runs against the tiny FIXTURE ledger (test/fixtures/ledger-mini), not the live one — the live ledger is another branch.
       - name: Ops digest dry run (payload builds + validates, nothing sent — B2159504)
-        run: node scripts/ops-snapshot.mjs --push --dry-run
+        run: node scripts/ops-snapshot.mjs --push --dry-run --ledger=test/fixtures/ledger-mini
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build
@@ -202,6 +192,48 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-copy-paste.mjs
+      # Notes PASTE OPTIONS gate (NEW-1, B2494096, 2026-10-29). Owner: make the paste badge look and work like Word / Excel's own
+      # Paste Options. A bordered "(Ctrl)" tab, a square flyout with our own drawings, Word's three options for text and Excel's
+      # eight for a table (Keep Source Formatting · Merge Formatting · Keep Source Column Widths · Transpose · Values · Values and
+      # Source Formatting · Formatting only · Picture), each ONE undo step and repeatable. Real Ctrl / clicks / the committed
+      # Excel, Sheets, Word, OneNote and Outlook clipboards, judged on the STORED document: every option and its undo, switching
+      # twice, a grid pasted into existing cells, the right-click menu, phone fit + 44-px targets, the dark-theme halo. Known-good
+      # arms VOID the run (a plain paste raises no tab; the Excel clipboard lands as a table). Reuses the preview server and Chromium.
+      - name: Notes paste options (Office-style tab + flyout, Excel's table set, every option one undo step — NEW-1, B2494096)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-paste-options.mjs
+      # Notes WORD / ONENOTE OUTLINE paste gate (NEW-1/NEW-2, B2557984 + B2142464 x4, 2026-10-30). Owner: bullets pasted from
+      # Word came in as a literal "o", "§" and a square, and a small table nested in the outline came in as loose lines.
+      # The committed Word / OneNote outline fixtures (test/fixtures/clipboard-lists - SYNTHETIC models of those products'
+      # markup) pasted into a real box on two landings and inside an existing bullet, judged on the STORED document: real
+      # nested lists, the table under its bullet, numbered lists numbered, no glyph left in the text. Known-good arms VOID
+      # the run (plain text lands; Google Docs' list lands). 19 of 38 red on pre-fix main. Reuses the preview server and Chromium.
+      - name: Notes Word/OneNote outline paste (real nested bullets, table under its bullet, no glyph characters - NEW-1/NEW-2, 2026-10-30)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-list-paste.mjs
+      # Notes ENTER-AFTER-A-PASTED-BULLET gate (follow-up NEW-1, B2557985, 2026-10-30). Owner screenshot: Enter at the end of a
+      # pasted level-2 item made a flush-left plain paragraph. Real keys on pasted Word / OneNote outlines at levels 1-4 and a
+      # numbered one (sibling at the same level and marker, Enter on the empty item steps out one level, Ctrl+Z, Tab / Shift+Tab,
+      # split, Backspace) AND on a note holding the shape the OLD paste stored (text bullets) - normalised to real lists on read,
+      # Enter works, a page nobody edits is not rewritten, the result survives a reload. Known-good arm VOIDS the run. 10 of 31
+      # red on pre-fix main. Reuses the preview server and Chromium.
+      - name: Notes Enter after a pasted bullet (continues the list at every level, old text-bullet notes too - follow-up NEW-1, 2026-10-30)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-list-enter.mjs
+      # Notes header row on ANY row + cell fill gate (NEW-1/NEW-2, 2026-10-28). Owner report: a table's SECOND row was
+      # all header cells (bold + grey), the B button read off, and "Header" only ever touched row 1. Real clicks/keys,
+      # judged on the STORED document and computed style: Header row pressed / Bold lit in a header cell, the toggle
+      # on the caret's row (undo/redo one step), Row ↑/↓ beside a header row, Fill on a row / cell range / header row,
+      # "No fill", reload, dark theme ink, right-click menu, clipboard HTML + paste + print carrying the fill, and the
+      # phone More sheet. Known-good arm (a real bold mark) VOIDS the run. 11 ✗ on the pre-fix build. Reuses the preview
+      # server and Chromium the gates above already paid for.
+      - name: Notes header row on any row, Bold lit in a header, and cell fill (NEW-1/NEW-2, 2026-10-28)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-table-fill.mjs
       # Notes drag-pans-from-anywhere gate (NEW-1 / B2156912, 2026-10-06). Owner: "click-and-drag should
       # ALWAYS pan the page, from any spot" — a drag that began on a table selected it instead. Trusted
       # `page.mouse` only; table cell / header / border, box text and picture each must move the workspace
@@ -212,6 +244,17 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-drag-pan.mjs
+      # Notes box BORDER move handle (B2426788, owner decision 2026-10-27). The striped grip is retired: a box is
+      # moved by grabbing its outline, PowerPoint / Bluebeam-style. Real mouse + stored-document reads: the ring
+      # (just outside / on / just inside each edge resolves to the move band with the move cursor; the middle does
+      # not), hover feedback, a border drag moves the box and a click only selects, a middle drag still pans, a
+      # resize handle keeps priority, a box with the caret is still movable by its edge, a two-box selection moves
+      # together, a picture box has the same handle. 31 ✗ on pre-fix main; known-good arms VOID the run. The touch
+      # twin uses Chromium touch emulation (WebKit cannot be installed on the runner). Reuses the preview server.
+      - name: Notes box border move handle (the outline moves a box; the middle still pans — B2426788)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-box-edge.mjs && node ui-audit/verify-notes-box-edge-touch.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at
@@ -228,11 +271,22 @@ jobs:
       # looked wrong on the owner's real plans, so this measures it on plans shaped like his (Silvestri Concept D, the
       # 11-parcel plan with a wrapping name, a 30-row stress plan, a one-parcel plan) at the narrowest / default / widest
       # panel in light AND dark: no clipped text, one acres right edge, no icon over text, uniform row heights, summary
-      # number = body size, AA contrast. Signed out (hermetic); the same script runs signed in on live planyr.io (SIGNED_IN=1).
+      # number = body size, AA contrast — and (owner 2026-10-16) the TABLE: one heading row, a lock + eye column on every row, no "Unnamed".
+      # verify-parcel-numbers-stable rides the same step: an unnamed lot's "Parcel N" stays N when another is deleted (B2289936).
+      # Signed out (hermetic); the same scripts run signed in on live planyr.io (SIGNED_IN=1).
       - name: Parcels list layout (no clip / one acres edge / no overlap, light + dark, every panel width — B2243424)
         env:
           BASE_URL: "http://localhost:4173/"
-        run: node ui-audit/verify-parcel-list-layout.mjs
+        run: node ui-audit/verify-parcel-list-layout.mjs && node ui-audit/verify-parcel-numbers-stable.mjs
+      # Planner per-pointer-move rule (the Site Planner speed round, NEW-3, 2026-10-31). Owner: "improve the speed of the software."
+      # The rule: no feature may add per-pointer-move work to the planner — a zoom step, a pan or a building drag rebuilds no
+      # grading surface, posts no worker job and re-encodes no picture, and a pan commits React about once per move. Judged as
+      # COUNTS (a shared runner cannot be trusted with a millisecond; the 4x-throttled timing budgets are `npm run perf:planner`,
+      # on demand) on the owner's Concept A with grading, contours, cut/fill and paper on. It builds and serves its own copy of
+      # the grading harness (port 5198) and runs a KNOWN-SLOW arm that must fail, or the run is VOID. Red on the pre-fix engine
+      # (10 picture re-encodes in 10 drag moves). Uses the Chromium installed above; ~30 s.
+      - name: Planner per-pointer-move rule (zoom / pan / drag rebuild and re-encode nothing — speed round NEW-3)
+        run: node ui-audit/verify-planner-perf.mjs --counts
       # Critical interaction lane (B1857904/B1857905, reliability programme R2). A SMALL,
       # deterministic subset of e2e/ — reused, not duplicated — wired into the required build so a
       # real interaction regression can no longer merge silently, closing the gap the reliability

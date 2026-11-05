@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import CompEntryMobileSheet from "../src/shared/comps/components/CompEntryMobileSheet.jsx";
-import { saveState, rowBlocker, rowFieldState, hugWidthCh } from "../src/shared/comps/lib/compMobileSheetModel.js";
+import { saveState, saveTapPlan, rowBlocker, rowBlockerInfo, rowFieldState, hugWidthCh } from "../src/shared/comps/lib/compMobileSheetModel.js";
 import { activeCellFlags, cellState, SHEET_COLUMNS, columnIndex } from "../src/shared/comps/lib/compSheetColumns.js";
 import { emptyDraft, draftToComp, validateComp } from "../src/shared/comps/lib/comps.js";
 import { rowHasBlockingFlags } from "../src/shared/comps/lib/compParse.js";
@@ -14,36 +14,56 @@ const ready = (r) => !rowHasBlockingFlags(activeCellFlags(r.cellFlags, r.draft.c
 const label = (r) => saveState({ rows: [r], readyCount: ready(r) ? 1 : 0 }).label;
 const PERIOD_FLAG = { leaseRatePeriod: { level: "blocking", reason: "12x" } };
 
-describe("NEW-3 — Save copy names the REAL blocker (every type × blocker)", () => {
+describe("NEW-3 (round 1) / NEW-9 (round 3) — the REAL blocker, reported by saveTapPlan not by the Save label", () => {
+  const info = (r) => rowBlockerInfo(r);
   for (const t of ["lease", "land", "building_sale"]) {
-    it(`${t}: unplaced → the map`, () => expect(label(row(t))).toBe("Place it on the map to save"));
-    it(`${t}: placed, size + price empty → saveable (size/price are not required)`, () => {
-      expect(label(row(t, { anchor: PIN, ...(t === "lease" ? { leaseRatePeriod: "annual" } : {}) }))).toBe("Save 1 comp");
-    });
-    it(`${t}: never says "mo or yr" unless it is a lease with the period blocker`, () => {
-      for (const r of [row(t), row(t, { anchor: PIN })]) expect(label(r)).not.toMatch(/mo or yr/i);
+    it(`${t}: unplaced → location`, () => expect(info(row(t))?.kind).toBe("location"));
+    it(`${t}: placed, size + price + rate empty → saveable (size/price/rate are not required)`, () => {
+      expect(info(row(t, { anchor: PIN }))).toBe(null);
+      expect(ready(row(t, { anchor: PIN }))).toBe(true);
     });
   }
-  it("lease placed with no period → monthly/yearly copy (validate error AND blocking flag)", () => {
-    expect(label(row("lease", { anchor: PIN }))).toBe("Pick monthly or yearly to save");
-    expect(label(row("lease", { anchor: PIN, leaseRatePeriod: "annual" }, PERIOD_FLAG))).toBe("Pick monthly or yearly to save");
+  it("NEW-1: a BLANK lease with a pin saves — a missing period only blocks when a rate is present", () => {
+    const r = row("lease", { anchor: PIN });
+    expect(ready(r)).toBe(true);
+    const plan = saveTapPlan({ rows: [r], isReady: ready });
+    expect(plan.toSave).toHaveLength(1);
+    expect(plan.target).toBe(null);
   });
-  it("lease unplaced AND no period → the map first", () => expect(label(row("lease"))).toBe("Place it on the map to save"));
-  it("a land comp carrying a STALE lease-period flag is saveable and never says mo/yr (the owner's case)", () => {
+  it("lease with a rate, no period and no guess → period blocker, routed to the Rate row", () => {
+    const r = row("lease", { anchor: PIN, leaseRate: "2.5" });
+    expect(info(r)).toMatchObject({ kind: "period", key: "leaseRate" });
+    const plan = saveTapPlan({ rows: [r], isReady: ready });
+    expect(plan.toSave).toHaveLength(0);
+    expect(plan.target).toMatchObject({ rowId: "r", kind: "period" });
+    expect(row("lease", { anchor: PIN, leaseRate: "2.5", leaseRatePeriod: "annual" })).toBeTruthy();
+    expect(ready(row("lease", { anchor: PIN, leaseRate: "2.5", leaseRatePeriod: "annual" }))).toBe(true);
+  });
+  it("a blocking period flag (paste ambiguity) with a rate and no period routes to the Rate row", () => {
+    expect(info(row("lease", { anchor: PIN, leaseRate: "6.25" }, PERIOD_FLAG))).toMatchObject({ kind: "period" });
+  });
+  it("lease unplaced AND rate without period → the map first", () => expect(info(row("lease", { leaseRate: "2.5" }))?.kind).toBe("location"));
+  it("a land comp carrying a STALE lease-period flag is saveable (the owner's case)", () => {
     const r = row("land", { anchor: PIN }, PERIOD_FLAG);
     expect(activeCellFlags(r.cellFlags, "land")).toEqual({});
-    expect(label(r)).toBe("Save 1 comp");
+    expect(info(r)).toBe(null);
     expect(rowBlocker(r)).toBe(null);
   });
-  it("a live non-period blocking flag still blocks, with its own copy", () => {
+  it("a live non-period blocking flag still blocks, routed to the flagged field", () => {
     const r = row("building_sale", { anchor: PIN }, { bldgPrice: { level: "blocking", reason: "x" } });
-    expect(label(r)).toBe("Fix the flagged field to save");
+    expect(info(r)).toMatchObject({ kind: "flag", key: "bldgPrice" });
   });
   it("a stale land-price flag does not block a building sale; an unclassifiable key is never hidden", () => {
     expect(activeCellFlags({ landPrice: { level: "blocking" } }, "building_sale")).toEqual({});
     expect(Object.keys(activeCellFlags({ mystery: { level: "blocking" } }, "land"))).toEqual(["mystery"]);
   });
-  it("no rows / saving / ready keep their copy", () => {
+  it("batch: ready rows save, and the walk starts at the FIRST not-ready row", () => {
+    const rows = [{ ...row("land", { anchor: PIN }), _id: "a" }, { ...row("lease"), _id: "b" }, { ...row("land"), _id: "c" }];
+    const plan = saveTapPlan({ rows, isReady: ready });
+    expect(plan.toSave.map((r) => r._id)).toEqual(["a"]);
+    expect(plan.target).toMatchObject({ rowId: "b", kind: "location" });
+  });
+  it("no rows / saving keep their copy", () => {
     expect(saveState({ rows: [], readyCount: 0 }).label).toBe("Nothing to save yet");
     expect(saveState({ rows: [row("land")], readyCount: 0, saving: true }).label).toBe("Saving…");
   });
@@ -81,25 +101,27 @@ describe("NEW-1/2 — header + layout (rendered markup)", () => {
     onResolvePeriod: () => {}, armedRowId: null, onArm: () => {}, onFocusAnchor: () => {}, onSave: () => {},
     onCancel: () => {}, saving: false, saveError: null, readyRows: [], rowIsReady: () => false, pasteBox: null,
   }));
-  it("a segmented Lease|Land|Bldg sale control replaces the hidden <select>; the name is a text input", () => {
+  it("a segmented Lease|Land|Bldg Sale control replaces the hidden <select>; the name is a text input", () => {
     for (const t of ["lease", "land", "building_sale"]) {
       const h = html(t);
       expect(h).not.toContain("<select");
       expect(h).toContain('aria-label="Comp type"');
       expect(h.indexOf("Lease")).toBeLessThan(h.indexOf("Land"));
-      expect(h.indexOf("Land")).toBeLessThan(h.indexOf("Bldg sale"));
-      expect(h).toMatch(/<input[^>]*data-deal-name="1"[^>]*placeholder="Deal name"/);
+      expect(h.indexOf("Land")).toBeLessThan(h.indexOf("Bldg Sale"));
+      expect(h).toMatch(/<input[^>]*data-deal-name="1"[^>]*placeholder="Add a deal name"/);
     }
   });
-  it("no Name row in the Deal group, and an empty name never falls back to the tenant/buyer", () => {
+  it("no Name row in the Deal group; the header input sits above Location", () => {
     const h = html("lease");
     expect(h).not.toMatch(/aria-label="Name"/);
     expect(h).not.toContain("Untitled");
-    expect(h.indexOf("Deal name")).toBeLessThan(h.indexOf("Location"));
+    expect(h.indexOf("Add a deal name")).toBeLessThan(h.indexOf("Location"));
   });
-  it("the Rate row's two toggles are full-width equal groups", () => {
+  it("the Rate row's period and basis are pills, not a toggle row (NEW-3)", () => {
     const src = readFileSync("src/shared/comps/components/CompEntryMobileSheet.jsx", "utf8");
-    expect(src).toMatch(/<Segmented fill label="Rate period"/);
-    expect(src).toMatch(/<Segmented fill label="Rate basis"/);
+    expect(src).not.toMatch(/<Segmented[^>]*label="Rate period"/);
+    expect(src).not.toMatch(/<Segmented[^>]*label="Rate basis"/);
+    expect(src).toMatch(/dataPill="period"/);
+    expect(src).toMatch(/dataPill="basis"/);
   });
 });

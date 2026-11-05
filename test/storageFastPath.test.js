@@ -3,6 +3,8 @@
  * The e2e half (a real drag, counted writes, the settled position saved) is e2e/gesture-save-deferral.spec.js. */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { saveSite, loadSite, siteExistsLocally, readBackSite } from "../src/workspaces/site-planner/lib/storage.js";
+import { plannerSource } from "./helpers/plannerSource.js";
+import { sitesObject } from "./helpers/sitesView.js";
 
 const KEY = "planarfit:sites:v1";
 const bld = (id, cx = 0) => ({ id, type: "building", cx, cy: 0, w: 100, h: 100 });
@@ -38,9 +40,9 @@ describe("siteExistsLocally", () => {
   it("FALLS BACK to the real read when another writer has touched the store — it never serves a stale yes", () => {
     saveSite({ id: "p1", els: [bld("a")] });
     expect(siteExistsLocally("p1")).toBe(true);
-    localStorage.setItem(KEY, JSON.stringify({}));              // another tab / a cloud pull removed it
+    localStorage.removeItem(KEY + ":p:p1");                     // another tab / a cloud pull removed its entry
     expect(siteExistsLocally("p1")).toBe(false);
-    localStorage.setItem(KEY, JSON.stringify({ p1: { id: "p1", els: [] }, p2: { id: "p2", els: [] } }));
+    localStorage.setItem(KEY, JSON.stringify({ p1: { id: "p1", els: [] }, p2: { id: "p2", els: [] } }));   // an older tab's whole-library write (adopted per plan)
     expect(siteExistsLocally("p2")).toBe(true);                 // and never a stale no either
   });
 });
@@ -60,7 +62,7 @@ describe("readBackSite — the persistence verifier's read", () => {
   });
   it("sees ANOTHER writer's change (the cross-tab case the check exists for) — it reads the real entry then", () => {
     saveSite({ id: "p1", els: [bld("a"), bld("b")] });
-    const stored = JSON.parse(localStorage.getItem(KEY));       // an older-build tab deletes "b" and writes the legacy entry whole
+    const stored = sitesObject(KEY);                            // an older-build tab deletes "b" and writes the legacy entry whole
     stored.p1.els = stored.p1.els.filter((e) => e.id === "a");
     stored.p1.deletedIds = ["b"];
     stored.p1.updatedAt = (stored.p1.updatedAt || 0) + 5000;
@@ -77,7 +79,7 @@ describe("wiring", () => {
   it("the autosave effect uses both", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
-    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const src = plannerSource();
     expect(src).toContain("const fresh = !siteExistsLocally(siteId);");
     expect(src).toContain("const back = readBackSite(siteId);");
   });

@@ -75,6 +75,8 @@ const ALL_NOTES_FILES = [
   // retired sketch canvas's own boxes-and-arrows model.
   "lib/notesArrows.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
+  // NEW-1 (2026-10-29) — Office-style paste options: the sets + transforms, the table → picture renderer, the drawings.
+  "lib/notesPasteModes.js", "lib/notesTablePicture.js", "components/PasteIcons.jsx",
   "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js",
   "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
   "lib/notesToggleNode.js",
@@ -105,8 +107,8 @@ const ALL_NOTES_FILES = [
   "lib/notesFormatPalette.js",
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
-  "lib/notesTablePaste.js",
-  "lib/notesTableClipboard.js",
+  "lib/notesTablePaste.js", "lib/notesOfficeLists.js", "lib/notesFakeBullets.js",
+  "lib/notesTableClipboard.js", "lib/notesTableFill.js", "lib/notesTableMultiSelect.js", "lib/notesTableRowHeight.js", "lib/notesTableRowStyle.js",
   // NEW-1/NEW-2 (B1554272/B1554273) — widening a table column must not squeeze its neighbours,
   // and a column may never be squeezed below a readable floor. Pure decision + the editor command.
   "lib/notesTableWidth.js", "lib/notesTableColumns.js",
@@ -520,10 +522,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *     "More" panel, neither of which can mirror the editor: `moreOpen` (the panel is open) and
      *     `moreBox` (where it hangs — `{ top, max }` measured off the bar's own
      *     `getBoundingClientRect()` and `visualViewport`, so it never exceeds the visible area).
+     *   ⛔ RAISED 18 → 19 (NEW-2, 2026-10-28) — `FillPopover`'s `open` (the table Fill swatch dropdown), the
+     *     same transient popover flag every other picker here carries; the fill it shows is read from
+     *     the document (`currentFill(editor.state)`), never stored in React.
      * If a future change makes any of these read `editor.` at init, the sharp assertion above
      * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(18);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(19);
   });
 });
 
@@ -561,8 +566,19 @@ describe("the mirrored control scale still matches the shared one", () => {
   });
 
   it("no notes file imports controls.jsx — that hoists a THIRD shared chunk onto the Site route", () => {
+    /* ONE sanctioned exception (B2426784, cursor convention 2026-10-20): `pinDragCursor`, the app's single drag-cursor pin, is
+     * imported by the two LAZY editor files only. Measured, not assumed: ui-audit/perf-bundle-audit.mjs reads the same 27
+     * Site-route chunks with and without the import (controls.jsx already lives in the AppHeader chunk the Notes route shares).
+     * Nothing else from controls.jsx may be imported, and no other file may import it. */
+    const PIN_ONLY = new Set(["components/NoteEditor.jsx", "lib/notesAnchorNode.js"]);
     for (const f of ALL_NOTES_FILES) {
-      expect(code(f), `${f} imports controls.jsx; the Site route's chunk allowlist goes red`).not.toMatch(/shared\/ui\/controls/);
+      const src = code(f);
+      if (PIN_ONLY.has([...PIN_ONLY].find((n) => f.endsWith(n)) || "")) {
+        const lines = src.split("\n").filter((l) => /shared\/ui\/controls/.test(l));
+        for (const l of lines) expect(l, `${f} may import ONLY pinDragCursor from controls.jsx`).toMatch(/^\s*import \{ pinDragCursor \} from "[./]+\/shared\/ui\/controls\.jsx";/);
+        continue;
+      }
+      expect(src, `${f} imports controls.jsx; the Site route's chunk allowlist goes red`).not.toMatch(/shared\/ui\/controls/);
     }
   });
 });
@@ -1310,12 +1326,12 @@ describe("the project a notebook belongs to", () => {
      * being grip-only was the owner's "dragging the note by its BODY does nothing at all,
      * silently" — with a 9x14px grip at zero opacity as the only alternative. The grip is now
      * decoration and takes no presses at all, which also retires instrument trap #9. */
-    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: false \}\)\)/);
-    /* ⛔ …AND THE GRIP STILL DOES TOO, unconditionally. The body stands down while the caret is
-     * inside the box (a press-and-travel there is somebody selecting a phrase), so without this
-     * the one box you are typing in would be the one box you cannot move. */
-    expect(node, "the grip drags too, and owns its press outright")
-      .toMatch(/grip\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ immediate: true \}\)\)/);
+    expect(node, "the box body carries the drag").toMatch(/dom\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: false \}\)\)/);
+    /* ⛔ …AND THE BORDER BAND DOES TOO, caret or not (B2426788 — it replaced the striped grip). The body
+     * stands down while the caret is inside the box (a press-and-travel there is somebody selecting
+     * a phrase), so without this the one box you are typing in would be the one box you cannot move. */
+    expect(node, "the border band drags too, caret or not")
+      .toMatch(/edge\.addEventListener\("pointerdown", \(e\) => beginDrag\(e, \{ band: true \}\)\)/);
     const print = read(NOTES, "lib", "notesPrint.js");
     /* ⛔ MATCHED ON THE SHARED HANDLE CLASS (NEW-PICTURE-CANVAS). There are eight resize handles
      * now, and pinning the exact selector LIST would mean this guard has to be edited every time
@@ -1323,7 +1339,7 @@ describe("the project a notebook belongs to", () => {
      * that catches anything. `.planyr-anchor-h` is the class they all carry, so a ninth handle is
      * covered by construction and cannot start printing by omission. */
     expect(print, "no chrome on paper").toMatch(/\.note-body \.planyr-anchor-h \{ display: none; \}/);
-    expect(print, "…and the grip still does not print either").toMatch(/\.note-body \.planyr-anchor-grip/);
+    expect(print, "…and the border band does not print either").toMatch(/\.note-body \.planyr-anchor-edge/);
     /* ⛔ AND A PICTURE BOX PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides the
      * node's own style attribute exactly as the position does, but BOTH DOM shapes have to be
      * named here: the node view builds a figure wrapping the img, while `renderHTML` — which is
@@ -1553,14 +1569,19 @@ describe("the project a notebook belongs to", () => {
     expect(keys, "typing '- ' then Backspace still takes the bullet back").toMatch(/undoInputRule\(\)/);
   });
 
-  it("the three paste glyphs are OUR drawings, and there are three of them", () => {
-    const ed = code("components/NoteEditor.jsx");
-    expect(ed).toMatch(/const PASTE_ICONS = \{/);
-    for (const mode of ["source", "merge", "text"]) expect(ed).toMatch(new RegExp(`${mode}: \\(`));
-    expect(ed, "each mode is named with its Word access key").toMatch(/key: "K"/);
-    expect(ed).toMatch(/key: "M"/);
-    expect(ed).toMatch(/key: "T"/);
-    expect(ed, "inline SVG on currentColor, like every other icon in the module").toMatch(/stroke="currentColor"/);
+  it("the paste-option glyphs are OUR drawings — one per option, a full-height clipboard under each mark (NEW-1)", () => {
+    const icons = code("components/PasteIcons.jsx");
+    const modes = code("lib/notesPasteModes.js");
+    for (const mode of ["source", "merge", "text", "widths", "transpose", "values", "valuesFormat", "formatting", "picture"]) {
+      expect(icons, `a drawing for ${mode}`).toMatch(new RegExp(`\\n  ${mode}: [(<]`));
+      expect(modes, `${mode} is named`).toMatch(new RegExp(`  ${mode}: \\{ label: "`));
+    }
+    expect(icons, "the clipboard BASE is drawn in every icon, at full height").toMatch(/<rect x="2\.5" y="3\.5" width="13" height="17"/);
+    expect(icons, "no Microsoft asset: the art is inline SVG in this file").not.toMatch(/\.(png|svg|ico)["']/);
+    for (const [label, key] of [["Keep Source Formatting", "K"], ["Merge Formatting", "M"], ["Keep Text Only", "T"], ["Keep Source Column Widths", "W"],
+      ["Transpose", "T"], ["Values", "V"], ["Values and Source Formatting", "E"], ["Formatting only", "R"], ["Picture", "U"]]) {
+      expect(modes, `${label} carries its access key`).toContain(`label: "${label}", key: "${key}"`);
+    }
   });
 
   it("a notebook's 'Belongs to' panel offers each destination exactly once", () => {

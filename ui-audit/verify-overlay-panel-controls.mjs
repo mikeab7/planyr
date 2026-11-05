@@ -3,7 +3,7 @@
  *  B574 (NEW-1): the hide / lock / remove header buttons render at IDENTICAL sizes (one shared
  *    square icon-button style + inline SVG icons — no more emoji-vs-SVG metric mismatch).
  *  B575 (NEW-2): a numeric percent input sits beside the opacity slider, two-way bound + clamped 10–100%.
- *  B576 (NEW-3): the scale control is a Bluebeam-style preset dropdown; picking "Custom…" reveals
+ *  B576 (NEW-3): the scale control is a Bluebeam-style preset dropdown; the Custom segment reveals
  *    editable [page][unit] = [real][unit] fields; 0.5" = 60' resolves to 1"=120' (impossible before).
  *  B577 (NEW-4): the Width row, the Reset-rotation button, and the obsolete drop-hint text are gone.
  *  B578 (NEW-5): the filename has its OWN full-width row and WRAPS (no mid-name ellipsis truncation).
@@ -114,22 +114,20 @@ check("B576 — round-trips to eng-30 (1\"=30') for the seeded size", (await pre
 // pick an architectural preset → 1/4" = 1' → 4 ft/in
 await presetSel.selectOption("arch-1-4"); await page.waitForTimeout(250);
 check("B576 — selecting 1/4\"=1'-0\" applies 1\"=4'", (await panelText()).includes("1″=4′"), "(arch preset)");
-// now Custom… → reveal the paired fields, enter 0.5" = 60' → 1"=120'
-await presetSel.selectOption("custom"); await page.waitForTimeout(250);
+// now the Custom segment → ONE box (1" = [N] '): typing 120 → 1"=120'
+check("B576 — the preset dropdown has no Custom… entry", (await presetSel.locator('option[value="custom"]').count()) === 0);
+await page.locator('[data-testid="overlay-scale-mode-custom"]').click(); await page.waitForTimeout(250);
 const custom = page.locator('[data-testid="overlay-scale-custom"]');
-check("B576 — picking Custom… reveals the paired page=real fields", await custom.count() === 1);
-const pageInput = custom.locator("input").nth(0);
-const realInput = custom.locator("input").nth(1);
-await pageInput.fill("0.5"); await page.waitForTimeout(120);
-await realInput.fill("60"); await realInput.press("Enter"); await page.waitForTimeout(300);
+const typed = page.locator('[data-testid="overlay-scale-custom-input"]');
+check("B576 — the Custom segment shows ONE text box", (await custom.count()) === 1 && (await custom.locator("input").count()) === 1 && (await custom.locator("select").count()) === 0);
+await typed.fill("120"); await typed.press("Enter"); await page.waitForTimeout(300);
 const afterText = await panelText();
-check("B576 — 0.5\" = 60' resolves to 1\"=120' (the impossible-before scale)", afterText.includes("1″=120′"), afterText.includes("1″=120′") ? "" : "no 1″=120′ in panel");
+check("B576 — typing 120 resolves to 1\"=120'", afterText.includes("1″=120′"), afterText.includes("1″=120′") ? "" : "no 1″=120′ in panel");
 // width feet = imgW(2592) * ftPerPx(120/72=1.6667) = 4320
 check("B576 — sheet now reads ~4320' wide at that scale", afterText.includes("4320′ wide"), afterText.includes("4320′ wide") ? "" : "no 4320′ wide");
-// a fraction works too: 1/2 → same 120
-await pageInput.fill("1/2"); await page.waitForTimeout(120);
-await realInput.fill("60"); await realInput.press("Enter"); await page.waitForTimeout(300);
-check("B576 — fraction '1/2' in the page field also resolves to 1\"=120'", (await panelText()).includes("1″=120′"));
+// the sheet-scale forms work too: 1:480 → 40 ft/in
+await typed.fill("1:480"); await typed.press("Enter"); await page.waitForTimeout(300);
+check("B576 — '1:480' in the custom box resolves to 1\"=40'", (await panelText()).includes("1″=40′"));
 await page.screenshot({ path: OUT + "overlay-panel-scale-custom.png" });
 
 // ---- B577: removed cruft is gone ----
@@ -194,7 +192,8 @@ async function bootScenario(seedSite, expandMatch) {
   const widthOf = async () => { const m = (await p.evaluate(() => document.body.innerText)).match(/(\d+)′ wide/); return m ? m[1] : null; };
   const before = await widthOf();
   check("B576 fix — non-round metric scale renders ~118' wide before the idle blur", before === "118", `before=${before}`);
-  const realC = p.locator('[data-testid="overlay-scale-custom"] input').nth(1);
+  await p.locator('[data-testid="overlay-scale-mode-custom"]').click(); await p.waitForTimeout(150);
+  const realC = p.locator('[data-testid="overlay-scale-custom-input"]');
   await realC.focus(); await p.waitForTimeout(100); await realC.blur(); await p.waitForTimeout(250);
   const after = await widthOf();
   check("B576 fix — idle focus+blur on the custom real field does NOT quantize the scale", before === after, `before=${before} after=${after}`);

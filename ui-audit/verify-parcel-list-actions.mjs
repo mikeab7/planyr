@@ -1,8 +1,7 @@
 /* verify-parcel-list-actions — B2194741–B2194743: the Parcels LIST row actions, driven live at the real panel width.
- *   delete — ⋯ menu -> Delete… -> inline confirm -> row gone + an Undo toast -> Undo brings it back · the Delete key on a
- *            focused row opens the same confirm · Cancel deletes nothing
+ *   delete — covered by ui-audit/verify-parcel-delete-flow.mjs since NEW-1 (2026-10-22: one delete path, no confirm step, Undo everywhere)
  *   icons  — on EVERY row (incl. combined / renamed ones) no icon's box overlaps the name text's box (measured)
- *   lock   — the padlock is a click target on each row (unlocked rows show it on hover), toggles Lock with an Undo toast,
+ *   lock   — the padlock is a click target on each row (always shown — closed when locked, open when not), toggles Lock with an Undo toast,
  *            and the state survives a reload
  * KNOWN-GOOD ARM: VOID unless the seeded 6 rows (incl. 3 combined/renamed + 1 locked) are present.
  * Modes: BASE_URL (default local preview) · SIGNED_IN=1 -> ui-audit/lib/signedInSession.mjs.
@@ -50,7 +49,7 @@ page.on("pageerror", (e) => { if (!/infinite number of tiles/.test(String(e))) e
 await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
-const stored = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
+const stored = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || []; }, [SITE_ID, UID]);
 const rowIds = () => page.locator('[data-testid^="parcel-table-row-"]').evaluateAll((e) => e.map((n) => n.getAttribute("data-testid").replace("parcel-table-row-", "")));
 const toast = () => page.locator('text=/^(Deleted|Locked|Unlocked) /').first();
 
@@ -66,7 +65,7 @@ try {
   await T("parcels-panel").waitFor({ timeout: 15000 });
   const ids0 = await rowIds();
   if (ids0.length !== 6) throw new Error(`VOID: expected 6 seeded rows, saw ${ids0.length}`);
-  ok("known-good arm: the 6 seeded rows (3 combined/renamed, 1 locked) are listed", /Parcel 3/.test(await T("parcel-row-c3").innerText()) && (await T("parcel-row-lock-k2").count()) === 1);
+  ok("known-good arm: the 6 seeded rows (3 combined/renamed, 1 locked) are listed", /Parcel 3/.test(await T("parcel-row-c3").innerText()) && (await T("parcel-row-lock-k2").getAttribute("data-locked")) === "1");
 
   // ---- icons never overlap a name (every row, plus each icon pair)
   const panelW = (await T("parcels-panel").boundingBox()).width;
@@ -87,40 +86,26 @@ try {
   ok(`measured at the real panel width (${Math.round(panelW)} px wide)`, panelW > 200);
   await shot("rows");
 
-  // ---- lock: the padlock exists only while locked (Layout C); locking is in the ⋯ menu, unlocking is one click on it
+  // ---- lock: the padlock is ALWAYS shown (closed = locked, open = not — the table's lock column, owner 2026-10-16); one click on it toggles, with an Undo toast; ⋯ → Lock does the same
   const lockBtn = (id) => T("parcel-row-lock-" + id);
-  ok("an unlocked row shows no padlock at all", (await lockBtn("k1").count()) === 0);
-  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-lock-k1").click(); await sleep(400);
-  ok("⋯ → Lock locks it: a padlock appears, state stored, toast with Undo", (await lockBtn("k1").getAttribute("aria-pressed")) === "true" && (await page.getByRole("button", { name: "Undo" }).count()) >= 1 && (await stored()).find((p) => p.id === "k1").locked === true);
+  const isLocked = async (id) => (await lockBtn(id).getAttribute("data-locked")) === "1";
+  ok("an unlocked row shows an OPEN padlock (always there, not hover-only)", (await lockBtn("k1").count()) === 1 && !(await isLocked("k1")) && (await lockBtn("k1").locator('[data-lock-glyph="open"]').count()) === 1);
+  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-k1-lock").click(); await sleep(400);
+  ok("⋯ → Lock locks it: the padlock closes, state stored, toast with Undo", (await isLocked("k1")) && (await lockBtn("k1").getAttribute("aria-pressed")) === "true" && (await lockBtn("k1").locator('[data-lock-glyph="locked"]').count()) === 1 && (await page.getByRole("button", { name: "Undo" }).count()) >= 1 && (await stored()).find((p) => p.id === "k1").locked === true);
   await page.getByRole("button", { name: "Undo" }).first().click(); await sleep(400);
-  ok("Undo unlocks it again (the padlock goes away)", (await lockBtn("k1").count()) === 0 && !(await stored()).find((p) => p.id === "k1").locked);
+  ok("Undo unlocks it again (the padlock opens)", !(await isLocked("k1")) && !(await stored()).find((p) => p.id === "k1").locked);
   await lockBtn("k2").click(); await sleep(400);
-  ok("clicking a locked row's padlock unlocks it (with Undo)", (await lockBtn("k2").count()) === 0 && (await page.getByRole("button", { name: "Undo" }).count()) >= 1);
-  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-lock-k1").click(); await sleep(600); // leave k1 LOCKED for the reload check
+  ok("clicking a locked row's padlock unlocks it (with Undo)", !(await isLocked("k2")) && (await page.getByRole("button", { name: "Undo" }).count()) >= 1);
+  await lockBtn("k2").click(); await sleep(400);
+  ok("clicking an open padlock locks it (the padlock closes, state stored)", (await isLocked("k2")) && (await stored()).find((p) => p.id === "k2").locked === true);
+  await lockBtn("k2").click(); await sleep(400); // back to unlocked for the reload check
+  await T("parcel-row-more-k1").click(); await T("parcel-row-menu-k1-lock").click(); await sleep(600); // leave k1 LOCKED for the reload check
   await page.reload({ waitUntil: "load" }); await sleep(2500);
   if (!(await T("planner-canvas").isVisible().catch(() => false))) { await page.getByText("ZZ Row Actions", { exact: false }).first().click(); await T("planner-canvas").waitFor({ timeout: 25000 }); }
   await page.locator('[data-rail-tab="parcel"]').first().click(); await T("parcels-panel").waitFor();
-  ok("lock round-trips through a reload (k1 locked, k2 unlocked)", (await T("parcel-row-lock-k1").count()) === 1 && (await T("parcel-row-lock-k2").count()) === 0);
+  ok("lock round-trips through a reload (k1 locked, k2 unlocked)", (await isLocked("k1")) && !(await isLocked("k2")));
 
-  // ---- delete: menu -> confirm -> gone -> Undo
-  await T("parcel-row-more-c4").click();
-  await T("parcel-row-menu-delete-c4").click();
-  ok("Delete… asks first (inline confirm naming the parcel)", /Delete Parcel 4\?/.test(await T("parcel-row-delete-confirm-c4").innerText()));
-  await T("parcel-row-delete-no-c4").click(); await sleep(300);
-  ok("Cancel deletes nothing", (await rowIds()).length === 6);
-  await T("parcel-row-more-c4").click(); await T("parcel-row-menu-delete-c4").click(); await T("parcel-row-delete-yes-c4").click(); await sleep(500);
-  ok("confirming removes the row and stores the removal", !(await rowIds()).includes("c4") && !(await stored()).some((p) => p.id === "c4"));
-  ok("an Undo toast names it", (await page.locator("text=/Deleted Parcel 4/").count()) >= 1);
-  await shot("deleted");
-  await page.getByRole("button", { name: "Undo" }).first().click(); await sleep(600);
-  ok("Undo brings the parcel back, in the list and in storage", (await rowIds()).includes("c4") && (await stored()).some((p) => p.id === "c4"));
-
-  // ---- the Delete key on a focused row opens the same confirm
-  await T("parcel-row-c5").focus();
-  await page.keyboard.press("Delete"); await sleep(300);
-  ok("the Delete key on a focused row asks to confirm (nothing deleted yet)", (await T("parcel-row-delete-confirm-c5").count()) === 1 && (await rowIds()).includes("c5"));
-  await page.keyboard.press("Escape"); await sleep(200);
-  ok("Escape closes it without deleting", (await T("parcel-row-delete-confirm-c5").count()) === 0 && (await rowIds()).includes("c5"));
+  // ---- delete moved to verify-parcel-delete-flow.mjs (NEW-1, 2026-10-22: no confirm step any more).
   ok("no page errors", errors.length === 0, errors.join(" | ").slice(0, 300));
 } catch (e) {
   console.log("ERROR", e.message); results.push({ name: "harness error: " + e.message, pass: false });

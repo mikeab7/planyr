@@ -184,6 +184,63 @@ export function unionAreaSqM(polys, ref) {
   return pathsArea(normalizePolys(polys, ref));
 }
 
+/* `a` minus `b`, both already dissolved by `normalizePolys` (so they share one ref and one SCALE). Returns clipper paths in the same
+ * form `normalizePolys` does, so the result drops straight into `areaShare`'s `clipNorm`. This is how an ETJ is NETTED against the
+ * city limits that sit on top of it: an extraterritorial jurisdiction is, by definition, the ground OUTSIDE every city's limits
+ * (Local Gov't Code ch. 42), so whatever part of a published ETJ polygon lies under a city's limits is not ETJ — it is the
+ * publishers' two layers disagreeing, and the limits win. */
+export function subtractNorm(a, b) {
+  if (!a || !a.length) return new ClipperLib.Paths();
+  if (!b || !b.length) return a;
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(a, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(b, ClipperLib.PolyType.ptClip, true);
+  const out = new ClipperLib.Paths();
+  c.Execute(ClipperLib.ClipType.ctDifference, out, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return out;
+}
+
+/* ═══ B2472945 — THE SAME NETTING, RETURNED AS DRAWABLE RINGS ═══════════════════════════════════════════════════
+ * `subtractNorm` answers an AREA question (the header's share pass). The drawn ETJ layer needs the GEOMETRY of "this ETJ polygon
+ * minus every city's limits" back in lon/lat ESRI form, so the map and the header apply one rule to the same two layers.
+ *
+ * ⛔ SLIVERS ARE EXPECTED AND ARE REMOVED, NOT HIDDEN. An ETJ's edge IS a city's limit line, and the two layers are generalised
+ * independently at the zoom tier (the server snaps each to `offsetDeg`), so after the subtraction a thin ribbon of "ETJ" remains
+ * along every shared border — a long dashed line the data never contained. `minWidthM` opens the result (shrink by w/2, grow by
+ * w/2): any part narrower than `minWidthM` goes, everything wider keeps its shape. Pass the tier's own generalisation distance.
+ * Pure. */
+export function netPolysToEsriRings(subjectPolys, clipPolys, ref, { minWidthM = 0 } = {}) {
+  const subject = normalizePolys(subjectPolys, ref);
+  if (!subject.length) return [];
+  let diff = (clipPolys && clipPolys.length) ? subtractNorm(subject, normalizePolys(clipPolys, ref)) : subject;
+  if (diff.length && minWidthM > 0) {
+    const half = (minWidthM / 2) * SCALE;
+    const shrunk = new ClipperLib.Paths();
+    const o1 = new ClipperLib.ClipperOffset(2, SCALE / 20);
+    o1.AddPaths(diff, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+    o1.Execute(shrunk, -half);
+    diff = new ClipperLib.Paths();
+    if (shrunk.length) {
+      const o2 = new ClipperLib.ClipperOffset(2, SCALE / 20);
+      o2.AddPaths(shrunk, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+      o2.Execute(diff, half);
+    }
+  }
+  const m = metresPerDegree(ref[1]);
+  const rings = [];
+  for (const path of diff) {
+    if (!path || path.length < 3) continue;
+    const ring = path.map((pt) => [ref[0] + pt.X / SCALE / m.lon, ref[1] + pt.Y / SCALE / m.lat]);
+    // ESRI: outer rings clockwise (negative signed area), holes counter-clockwise. Clipper's outers are CCW in its y-up frame.
+    const isOuter = ClipperLib.Clipper.Orientation(path);
+    const a = signedArea(ring);
+    if (isOuter ? a > 0 : a < 0) ring.reverse();
+    ring.push(ring[0].slice());
+    rings.push(ring);
+  }
+  return rings;
+}
+
 /* Area (m²) of subject ∩ clip. Both sides are dissolved first, so overlapping subject parcels and
  * a jurisdiction published as several adjacent polygons both measure once. */
 export function intersectionAreaSqM(subject, clipPolys, ref, clipNorm) {

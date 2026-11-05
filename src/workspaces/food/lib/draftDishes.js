@@ -6,16 +6,17 @@
  * A rated-but-unnamed row is an ERROR (LOUD-FAILURE), never silently dropped; a completely blank
  * row (no name, no score) is just an unused slot and is ignored. */
 let seq = 0;
-export const newDraftDish = () => ({ key: `dd-${++seq}`, name: "", score: null, order_again: null });
+export const newDraftDish = () => ({ key: `dd-${++seq}`, name: "", score: null, order_again: null, note: "" });
 
 export function cleanDraftDishes(rows) {
   const dishes = [];
   for (const r of rows || []) {
     const name = (r.name || "").trim();
     const again = r.order_again || null;
-    if (!name && r.score == null && !again) continue;
+    const note = (r.note || "").trim();
+    if (!name && r.score == null && !again && !note) continue;
     if (!name) return { dishes: [], error: "Name the dish you rated, or clear its rating." };
-    dishes.push({ name, score: r.score == null ? null : Number(r.score), ...(again ? { order_again: again } : {}) });
+    dishes.push({ name, score: r.score == null ? null : Number(r.score), ...(again ? { order_again: again } : {}), ...(note ? { note } : {}) });
   }
   return { dishes, error: null };
 }

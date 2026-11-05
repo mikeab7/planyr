@@ -128,6 +128,19 @@ export function needsScheduleCarryIn(projects, siteId, activeId, section) {
   return true;
 }
 
+// NEW-1 (B1080547 ×3, V934064 FAIL 2026-10-29) — the ONCE-PER-ARRIVAL select. `needsScheduleCarryIn` above
+// (correctly) treats ANY of a site's linked schedules being active as "already showing it", so a FRESH tab —
+// whose embed boots on the oldest schedule (`pickActivePid`) — never posted planar:nav-select-by-site at all,
+// and the durable `lastActiveBySite` memory (which that handler consults) was never asked. Result: the saved
+// preference was correct in the database and ignored on every fresh tab. This asks the embed ONCE per arrival
+// at a routed site that has SEVERAL linked schedules; the embed then resolves the remembered one (and no-ops if
+// it is already active). `postedFor` is the site id this mount already asked for — so a deliberate switch among
+// the linked schedules afterwards is never fought. Pure + null-safe.
+export function needsArrivalSelect(projects, siteId, postedFor) {
+  if (siteId == null || postedFor === siteId) return false;
+  return findAllBySiteId(projects, siteId).length > 1;
+}
+
 /* ---- B1050 / NEW-1 / NEW-2: leaving the Schedule tab's empty state ------------------------
  *
  * The original trap (B1050): pressing Dashboard used to ONLY post planar:nav-dashboard into the

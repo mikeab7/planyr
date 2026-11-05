@@ -50,6 +50,13 @@ jobs:
           BASE_URL: ${{ github.event.inputs.base_url || secrets.E2E_BASE_URL || 'https://planyr.io' }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          # NEW-1 (2026-11-02, after B2619760): THE SESSION DOOR. Since captcha went on (2026-10-04) the password route goes
+          # through the real Turnstile form, which a datacenter browser may be refused — so this run was trying the real panel
+          # and nothing here could tell whether it ever got in. e2e/helpers.js prefers this key when set (POST
+          # /api/auth/e2e-session, a route that can only mint a session for the test account). It proves the SUITE, not
+          # sign-in: sign-in itself is watched by .github/workflows/signin-health.yml. Absent secret → empty string → the
+          # password route, exactly as before; the "sign-in state" step below says which one this run used.
+          E2E_LOGIN_KEY: ${{ secrets.E2E_LOGIN_KEY }}
           # B266080 — also emit a MACHINE-READABLE result. The list reporter's text is what the
           # @claude issue quoted for 17 red runs, and text is the reason nothing could tell a new
           # regression from the standing 30: it reads identically either way.
@@ -68,10 +75,11 @@ jobs:
           echo "--- report ---"
           cat e2e-report.txt
 
-      # B266080 — THE DRIFT GATE. The raw suite exit code has been 1 every weekday since
-      # 2026-07-22 and will stay 1 until the 30 known-red cases in e2e/known-red.json are fixed
-      # (owner: B266081). A signal that is always red carries no information, so the JOB's
-      # verdict is now the DIFF against that committed ledger, not the raw exit code:
+      # B266080 — THE DRIFT GATE. The raw suite exit code was 1 every weekday from 2026-07-22
+      # until B266081 (the ledger's own stopping-rule item) paid the known-red debt to zero on
+      # 2026-10-11 (R3, B1857905) — e2e/known-red.json's `entries` is now `[]`. A signal that is
+      # always red carries no information, so the JOB's verdict is the DIFF against that
+      # committed ledger, not the raw exit code — unchanged now that the ledger is empty:
       #   • a failure that is not on the ledger  → NEW regression → red, named.
       #   • a ledger entry that PASSED           → the ledger is stale → red, so it must shrink.
       # The ledger is in the repo, in a diff, reviewable — not in a comment on a muted thread.
@@ -83,6 +91,21 @@ jobs:
           node scripts/e2e-drift-gate.mjs --report e2e-results.json --lane ci > e2e-drift.txt 2>&1
           echo "code=$?" >> "$GITHUB_OUTPUT"
           cat e2e-drift.txt
+      # NEW-1 (2026-11-02) — THE SIGNED-IN SUITE'S REAL STATE, stated instead of buried. "authenticate once" skips cleanly
+      # without an account (and a skip reads like a pass), and fails alongside hundreds of unrelated cases when sign-in
+      # breaks. This names the door used and whether setup passed / failed / was skipped; a FAILED setup is its own red.
+      - name: e2e sign-in state (NEW-1)
+        id: signin
+        if: always()
+        env:
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_LOGIN_KEY: ${{ secrets.E2E_LOGIN_KEY }}
+        run: |
+          set +e
+          node scripts/e2e-signin-state.mjs --report e2e-results.json > e2e-signin.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat e2e-signin.txt
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -158,10 +181,11 @@ jobs:
       # the ledger's size is printed by the gate on every run, so the debt is never invisible —
       # it is just no longer the thing that cries wolf.
       - name: Reflect the e2e drift verdict in the job status
-        if: steps.drift.outputs.code != '0'
+        if: steps.drift.outputs.code != '0' || steps.signin.outputs.code != '0'
         run: |
-          echo "raw suite exit: ${{ steps.e2e.outputs.code }} · drift gate: ${{ steps.drift.outputs.code }}"
-          echo "The drift gate is red — a NEW failure, or a ledger entry that has started passing."
+          echo "raw suite exit: ${{ steps.e2e.outputs.code }} · drift gate: ${{ steps.drift.outputs.code }} · sign-in state: ${{ steps.signin.outputs.code }}"
+          if [ "${{ steps.signin.outputs.code }}" != "0" ]; then echo "SIGN-IN SETUP FAILED (or no report) — see the 'e2e sign-in state' step; every signed-in spec depends on it."; fi
+          if [ "${{ steps.drift.outputs.code }}" != "0" ]; then echo "The drift gate is red — a NEW failure, or a ledger entry that has started passing."; fi
           exit 1
 
   # ── B266082 — THE LANE THAT HAS NEVER RUN IN CI ───────────────────────────────────────────

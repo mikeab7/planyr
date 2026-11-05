@@ -35,12 +35,18 @@
  * Pure: no React, no Leaflet, no DOM.
  */
 
+import { OK_LAYER_TIERS } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
+
 export const TIERS = ["constraint", "reference", "context"];
 
 /* Opacity ceiling per tier. A layer may ship QUIETER than its ceiling (several do — a big
  * translucent wash like the FEMA zones or the MUD boundaries would be overbearing at its
  * ceiling); it may never ship LOUDER. */
-export const TIER_MAX_OPACITY = { constraint: 0.85, reference: 0.55, context: 0.4 };
+export const TIER_MAX_OPACITY = { constraint: 1, reference: 1, context: 1 };
+/* ⛔ SUPERSEDED 2026-10-29 (owner, B2507060, constraint #42): the opacity ceilings above used to be 0.85 / 0.55 / 0.4 ("reference recedes").
+ * The owner reversed it — every layer now STARTS at 100% ("at lower defaults it isn't clear the layer is even there") — so the opacity
+ * ceilings are all 1 and layers.js sets every row's default to 1. The tiers stay: they still govern STROKE WEIGHT below and the ordering
+ * language elsewhere. Do not lower an opacity ceiling again without a new owner decision. */
 
 /* Stroke-weight ceiling per tier, in the same units the layer configs use. The second half of
  * "shouting at the same volume": a 3 px reference centreline reads louder than a 1.5 px
@@ -111,23 +117,191 @@ export const LAYER_TIER = {
   bts_truck_network: "reference",  // B2081249 — federal truck-route reference
   hpms_aadt: "reference",          // B2081249 — federal traffic volumes       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
   ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
+  // Georgia due-diligence gaps (NEW-1, 2026-10-29) — constraint = it takes land or binds the parcel; reference = a fact you look up; context = orientation / incentive wash
+  ga_protected_rivers: "constraint",     // the 100 ft protected-river buffer is land taken off each bank
+  ga_protected_mountains: "constraint",  // O.C.G.A. 12-2-8 mountain protection limits clearing and grading on the slope
+  ga_mrpa_corridor: "constraint",        // the Metropolitan River Protection Act corridor — ARC review of every land-disturbing proposal
+  ga_mrpa_buffer_150: "constraint",      // 150 ft structure / impervious setback
+  ga_mrpa_buffer_50: "constraint",       // 50 ft undisturbed river buffer
+  ga_mrpa_buffer_35: "constraint",       // 35 ft undisturbed tributary buffer
+  ga_conservation: "constraint",         // an easement or covenant binds the land; protected neighbours limit access and buffers
+  ga_recharge: "reference",              // a county ordinance, adopted locally, restricts some uses here
+  ga_gw_susceptibility: "reference",
+  ga_swsw: "reference",                  // the watershed; the buffers it triggers are the county's
+  ga_swsw_protected: "reference",
+  ga_karst: "reference",                 // a geologic-map proxy — a geotechnical boring is the real check
+  ga_solid_waste: "reference",           // a neighbouring landfill: Phase I, odour, methane
+  ga_brownfields: "reference",
+  ga_dams: "reference",
+  ga_impaired_streams: "reference",
+  ga_spalding_zoning: "reference",       // county zoning — a look-up, like the DeSoto zoning row
+  ga_road_ownership: "reference",        // who permits the driveway — a look-up
+  ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
+  ga_mineral: "reference",               // a 2005 register of pits and quarries
+  ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
+  ga_opportunity_zones: "context",       // a tax-incentive wash
+  ga_jtc_tiers: "context",
+  // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
+  ms_ob_water_main: "reference",
+  ms_ob_hydrants: "reference",
+  // City of Sugar Land (NEW-1, 2026-11-02): a height zone around the airport binds the parcel; the rest are look-ups or orientation / incentive wash.
+  sl_airport_zoning: "constraint",
+  sl_thoroughfare: "reference",
+  sl_zoning: "reference",
+  sl_public_land: "reference",
+  sl_hydrants: "reference",
+  sl_flu: "context",
+  sl_zoning_cup: "context",
+  sl_zoning_exception: "context",
+  sl_zoning_variance: "context",
+  sl_capital_projects: "context",
+  sl_tirz: "context",
+  sl_available_sites: "context",
+  sl_dev_projects: "context",
+  ms_ob_water_service: "reference",
+  ms_ob_sewer_gravity: "reference",
+  ms_ob_sewer_force: "reference",
+  ms_ob_manholes: "reference",
+  ms_ob_lift_stations: "reference",
+  ms_ob_wwtp: "reference",
+  ms_ob_sewer_service: "reference",
+  ms_ob_gas_main: "reference",
+  ms_dcrua_main: "reference",
+  ms_dcrua_structures: "reference",
+  ms_desoto_zoning: "reference",
+  ms_psc_electric: "reference",
+  ms_psc_gas: "reference",
+  ms_psc_water: "reference",
+  ms_psc_sewer: "reference",
+  ms_dcrua_easements: "reference",
+  ms_dcrua_service_area: "reference",
+  // Colorado due-diligence layers (B2528688): a legal restriction or a physical stop is a constraint; a look-up fact is reference; a boundary is context.
+  co_ecmc_flowlines: "constraint",  // a registered (or abandoned) line across the tract
+  co_undermined: "constraint",      // ground over old mine workings
+  co_inst_controls: "constraint",   // a recorded land-use restriction that runs with the land
+  co_superfund: "constraint",
+  co_ecmc_wells: "reference",
+  co_ecmc_locations: "reference",
+  co_ecmc_facilities: "reference",
+  co_rcra_ca: "reference",
+  co_closed_landfills: "reference",
+  co_solid_waste: "reference",
+  co_prairie_dog: "reference",
+  co_eagle_nests: "reference",
+  co_crit_habitat: "reference",
+  co_nrhp: "reference",
+  co_weld_ogla: "reference",
+  co_adams_landfills: "reference",
+  co_weld_zoning: "reference",
+  co_adams_zoning: "reference",
+  co_aurora_zoning: "reference",
+  co_weld_airport: "reference",
+  co_adams_aviation: "reference",
+  co_aurora_noise: "reference",
+  co_aurora_apz: "reference",
+  co_weld_row: "reference",
+
+  // Florida due-diligence layers (B2452976)
+  fl_wellfield_broward: "reference", // a use restriction to confirm with the county, not a land-taking line
+  fl_wellfield_miamidade: "reference",
+  fl_erp_sfwmd: "reference",         // permitted footprints around / on the site — look-up context
+  fl_conservation_lands: "reference",
+  fl_contamination_sites: "reference", // a tracked cleanup — a pull-the-file flag (Phase I), like the Georgia HSI
+  fl_brownfield_areas: "reference",
+  fl_institutional_controls: "constraint", // a recorded use restriction on the land
+  fl_sinkhole_reports: "reference",
+  fl_sinkhole_areas: "reference",
+  fl_outstanding_florida_waters: "reference",
+  fl_panther_consultation: "reference",
+  fl_eagle_nesting: "reference",
+  fl_fll_noise: "reference",
+  fl_sfwmd_canals: "reference",
+  fl_sfwmd_row_permits: "constraint",   // a canal / levee right-of-way takes land off the site
+  fl_sfwmd_conservation_easements: "constraint", // an easement takes land off the site
+  fl_udb_miamidade: "reference",
+  fl_sis_highways: "reference",      // a state designation to confirm with FDOT
+  fl_evac_zones: "reference",        // an insurance / comp-plan flag, not the floodplain
+  fl_natural_lands_broward: "reference",
+  fl_wetlands_broward: "constraint", // a wetland takes land off the site and brings a county license
+  fl_drainage_districts_broward: "reference",
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
+  co_enterprise_zones: "context",   // B2528688
+  co_weld_ugb: "context",
+  co_weld_iga: "context",
+  ms_ob_planning_area: "context",   // B2507059 — a planning line
+  ms_desoto_city: "context",
+  ms_desoto_flu: "context",
+  ms_desoto_thoroughfare: "context",
+  ms_desoto_future_subd: "context",
+  /* NEW-1 (Mississippi due-diligence layers) — declared per layer, never inferred. */
+  ms_county_state: "context",
+  ms_city: "context",
+  ms_tribal: "constraint",          // federal / tribal jurisdiction — county zoning does not govern on it
+  ms_deq_gard: "constraint",        // a cleanup site can stop or reprice a deal
+  ms_deq_ust: "constraint",
+  ms_epa_brownfields: "reference",
+  ms_deq_landfills: "constraint",
+  ms_deq_mines: "reference",
+  ms_ogb_wells: "constraint",       // an orphaned or plugged well on the site is a setback / re-entry issue
+  ms_deq_og_fields: "reference",
+  ms_deq_spa: "reference",
+  ms_nrcs_easements: "constraint",  // a federal easement bars development on its area
+  ms_nrhp: "reference",
+  ms_cemeteries: "constraint",
+  ms_crit_habitat: "constraint",
+  ms_303d: "reference",
+  ms_dams: "reference",
+  ms_dam_inundation: "reference",
+  ms_desoto_drainage: "constraint", // a drainage district can review and restrict work in its channels
+  ms_desoto_levee: "constraint",
+  ms_desoto_lomr: "reference",
+  ms_desoto_loma: "reference",
+  ms_desoto_cemeteries: "constraint",
   jur_city: "context",
   jur_etj: "context",
   jur_isd: "context",
   co_city: "context",              // NEW-2
-  ga_county: "context",            // NEW-1 (Georgia)
+  ga_county: "context",
+  tn_county: "context",            // B2507065 (NEW-10)
+  ms_county: "context",            // NEW-1 (Georgia)
   ga_city: "context",
+  fl_county: "context",            // NEW-1 (Florida)
+  fl_city: "context",
+  fl_wmd: "context",
   ca_county: "context",            // NEW-1 (California)
   ca_city: "context",
+  nj_county: "context",            // NEW-1 (New Jersey + New York)
+  nj_city: "context",
+  ny_county: "context",
+  ny_city: "context",
+  ny_town: "context",
+  ny_village: "context",
+  // Tennessee (B2521584): the county / city lines are orientation furniture; every other Tennessee row is a look-up fact — a flag to pull a file,
+  // never louder than the plan (the computed buffer bands, when present, are the constraint)
+  tn_city: "context",
+  tn_ms4: "reference",
+  tn_wqa: "reference",
+  tn_pws: "reference",
+  tn_drycleaners: "reference",
+  tn_sna: "reference",
+  tn_scenic: "reference",
+  tn_nrhp: "reference",
+  tn_nrhp_bounds: "reference",
+  tn_thc_sites: "reference",
+  tn_landfills: "reference",
+  tn_remediation: "reference",
+  tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
+  tn_cemeteries: "reference",
+  tn_crit_habitat: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",
   txdot_aadt: "context",
   co_aadt: "context",
   faa_airports: "context",
+  ...OK_LAYER_TIERS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
 };
 
 /* Terrain is exempt from the VOLUME ceilings — it is the ground the plan sits on, and a contour

@@ -104,8 +104,10 @@ describe("deedAlign — grid convergence (no-parcel theoretical fallback)", () =
   it("vanishes on the zone's central meridian (99°W) and flips sign west of it", () => {
     expect(Math.abs(gridConvergenceDeg(29.80, -99.0))).toBeLessThan(0.02);
     expect(gridConvergenceDeg(29.80, -99.5)).toBeLessThan(0);
-    // Outside every modelled zone → an honest unknown, never a wrong-zone number.
-    expect(gridConvergenceDeg(29.80, -101.5)).toBeNull();
+    // Outside every modelled zone → an honest unknown, never a wrong-zone number. (-101.5 used to be the example — it is West Texas,
+    // which has a zone since NEW-1 STATE-PLANE-AUDIT; Sonora, Mexico does not.)
+    expect(gridConvergenceDeg(29.80, -111.0)).toBeNull();
+    expect(gridConvergenceDeg(29.80, -101.5)).not.toBeNull();
   });
 
   it("sign is consistent with the projection: a true-north line reads −convergence in grid", () => {

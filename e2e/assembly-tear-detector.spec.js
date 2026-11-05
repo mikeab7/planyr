@@ -28,7 +28,7 @@ const SITE_KEY = "planarfit:sites:v1";
 // The persisted plan, straight off the device — on-disk truth, not pixels.
 function readPlan(page) {
   return page.evaluate((key) => {
-    const map = JSON.parse(localStorage.getItem(key) || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
     const id = Object.keys(map)[0];
     return { id, els: (map[id] || {}).els || [] };
   }, SITE_KEY);
@@ -138,7 +138,7 @@ test.describe("bonded assembly: measured before any reload, and healed loudly af
      * which is the only window where the stored bytes are ours. */
     await page.addInitScript(({ key, ids }) => {
       try {
-        const map = JSON.parse(localStorage.getItem(key) || "{}");
+        const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
         const id = Object.keys(map)[0];
         if (!map[id] || !Array.isArray(map[id].els)) return;
         map[id].els = map[id].els.map((e) => (ids.includes(e.id) ? { ...e, cx: e.cx + 267.03, cy: e.cy - 4 } : e));

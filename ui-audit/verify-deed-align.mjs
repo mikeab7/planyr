@@ -78,7 +78,7 @@ const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log
 
 const persistedMarkups = (page) => page.evaluate(() => {
   try {
-    const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").s_deed;
+    const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").s_deed;
     return (s && s.markups) || [];
   } catch (e) { return []; }
 });
@@ -140,8 +140,8 @@ async function run() {
   const alignBtn = page.getByRole("button", { name: /Align to county parcel/i });
   const alignVisible = await alignBtn.isVisible().catch(() => false);
   expect("selecting the deed shows an 'Align to county parcel' button", alignVisible);
-  const rotLabelVisible = await page.getByText("Rotate°", { exact: false }).first().isVisible().catch(() => false);
-  expect("the deed panel exposes a manual Rotate° control", rotLabelVisible);
+  const rotLabelVisible = await page.getByText("Rotation", { exact: false }).first().isVisible().catch(() => false);
+  expect("the deed panel exposes a manual Rotation control", rotLabelVisible);
 
   if (alignVisible) {
     await alignBtn.click();

@@ -28,10 +28,12 @@ import { HOST_ROLE_TAGS, carryHostRoleTags } from "../src/workspaces/site-planne
 import { sideParkStack } from "../src/workspaces/site-planner/lib/dogEar.js";
 import { createIdMinter } from "../src/shared/ids.js";
 import { loadSite } from "../src/workspaces/site-planner/lib/storage.js";
+import { plannerSource } from "./helpers/plannerSource.js";
+import { sitesObject } from "./helpers/sitesView.js";
 
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/orphanWallPads.json", import.meta.url), "utf8"));
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const SRC = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const SRC = plannerSource();
 
 const clone = (els) => JSON.parse(JSON.stringify(els));
 const minter = () => createIdMinter("zztest");
@@ -323,7 +325,7 @@ describe("NEW-3 — a repair that moves nothing is still written back to disk", 
   beforeEach(() => mockLocalStorage());
   // The on-device store, read straight off the stub — the point of these three cases is what is
   // ON DISK, so they must not go back through the read path that does the repairing.
-  const stored = (id) => JSON.parse(globalThis.localStorage.getItem("planarfit:sites:v1"))[id].els;
+  const stored = (id) => sitesObject("planarfit:sites:v1")[id].els;   // B2200384: the per-plan entry, not a whole-library key
   /* ⛔ PLANT THE RAW BYTES, never via `saveSite` — `saveSite` renormalizes on WRITE, so seeding
      through it stores an already-repaired record and the load path is never exercised at all.
      (The first version of these three cases did exactly that and passed against the pre-fix code,

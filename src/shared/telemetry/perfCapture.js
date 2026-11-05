@@ -48,6 +48,8 @@ export const CAPTURE_NUMERIC_KEYS = [
   /* NEW-3 — the boot-window judgment's own facts (perfTrigger.feedBootTask). Absent from every
    * ordinary steady-state capture; present only when a boot capture fired. */
   "bootTaskMs", "bootTaskCount",
+  /* B2319137 ×2 — the freeze judgment's own fact (perfTrigger.feedFreeze): how long the one frame that never came lasted. */
+  "freezeMs",
   /* NEW-2 (this session) — the WORST window found anywhere in the retained frame history, not
    * just the live sustain window above. See perfTrigger.js's worstWindow() header for why this
    * exists: a manual capture pressed just after a lag ends must not report a clean "right now"
@@ -55,9 +57,19 @@ export const CAPTURE_NUMERIC_KEYS = [
   "worstWindowMeanMs", "worstWindowSlowFraction", "worstWindowRatio", "worstWindowFrames", "worstWindowAtMs",
   "p50Ms", "p95Ms", "p99Ms", "maxMs", "jankFrames",
   "longTasks", "longTaskMs", "longTaskMaxMs",
+  /* NEW-1 (2026-11-01) — of `longTaskMs`, how much the main thread was actually BLOCKED (LoAF blockingDuration summed). A long
+   * animation frame's duration includes waiting for the frame to be drawn; on a machine that draws slowly that wait is most of it,
+   * so `longTaskMs` alone cannot tell "the page's code was busy" from "frames came slowly". 0 where the browser has no LoAF. */
+  "longTaskBlockMs",
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
+  /* NEW-1/NEW-3 (2026-10-22, work-laptop report) — "is the page's own DOM sound while the picture is wrong?". `hdrH` is the
+   * header's laid-out height in CSS px (0 = no header box in the DOM at all), `hdrHit` is 1 when the topmost element at the
+   * header's centre belongs to the header (0 = something else covers it), `hasFocus` is 1 when the document has focus.
+   * A press on "Something was slow" while the header paints as a dark band reads hdrH>0, hdrHit=1 — which says the app's
+   * DOM is intact and the fault is in painting, not in app logic. */
+  "hdrH", "hdrHit", "hasFocus",
   /* NEW-2 (B1317824) — the SUPPLEMENT rows' own facts (see encodeSupplements): how many continuation
    * rows this capture sent, which one this is, how many of its series it carries, and where its
    * frame chunk starts in the full track. Present only on a capture the one-row budget could not hold. */
@@ -77,6 +89,7 @@ export const CAPTURE_ENUM_KEYS = [
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
   "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
+  "freezeVia",   // B2319137 ×2/×4 — "frame" | "task" | "sustained" | "render" (NEW-1), which signal saw the freeze; see FREEZE_VIA_VOCAB
   "part",        // NEW-2 (B1317824) — a supplement row's series: "f" frames | "c" counters | "t" tasks; see PART_VOCAB
 ];
 
@@ -85,6 +98,9 @@ export const PART_VOCAB = ["f", "c", "t"];
 
 /* A capture's `bootTrigger` may only ever be one of these — same discipline as NOTE_VOCAB. */
 export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
+
+/* A capture's `freezeVia` may only ever be one of these. */
+export const FREEZE_VIA_VOCAB = ["", "frame", "task", "sustained", "render"];   // "render" — NEW-1 2026-11-01, a long frame the main thread did NOT block   // "sustained" — B2319137 ×4, a run of slow frames (perfTrigger.feedSlowRun)
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
  * about itself ("baseline never sealed") without opening a free-text channel.
@@ -182,6 +198,9 @@ export function buildCapture(parts) {
   num("bootTaskMs", p.bootTaskMs, 1);
   num("bootTaskCount", p.bootTaskCount);
   enu("bootTrigger", p.bootTrigger);
+  /* B2319137 ×2 — present only on a freeze capture (perfTrigger.feedFreeze's verdict). */
+  num("freezeMs", p.freezeMs);
+  enu("freezeVia", p.freezeVia);
   /* NEW-2 — the worst sub-window found anywhere in the retained frame history. Omitted (not just
    * zero) when there wasn't enough retained history to find one — `num()` already does that for
    * any non-finite value, so a capture with no worst window simply carries none of these keys. */
@@ -203,6 +222,7 @@ export function buildCapture(parts) {
   num("longTasks", p.longTasks);
   num("longTaskMs", p.longTaskMs);
   num("longTaskMaxMs", p.longTaskMaxMs);
+  num("longTaskBlockMs", p.longTaskBlockMs);
 
   /* The scene, at the moment of capture. */
   num("heapMB", p.heapMB, 1);
@@ -227,6 +247,9 @@ export function buildCapture(parts) {
   num("deviceMemoryGB", p.deviceMemoryGB, 1);
   num("recorderSelfUs", p.recorderSelfUs, 2);
   num("counterSamples", p.counterSamples);
+  num("hdrH", p.hdrH);
+  num("hdrHit", p.hdrHit);
+  num("hasFocus", p.hasFocus);
   num("suppRows", p.suppRows);   // NEW-2 (B1317824) — set by the recorder AFTER it has built the supplements
 
   /* Series. Arrays of NUMBERS only — never of records, never of strings except the interned
@@ -237,6 +260,10 @@ export function buildCapture(parts) {
   cap.ltNames = Array.isArray(p.taskNames) ? p.taskNames.map(sanitizeAttribution) : [];
   cap.c = Array.isArray(p.counters) ? p.counters.map((row) => row.map((x) => (Number.isFinite(x) ? r2(x) : null))) : [];
   cap.cCols = Array.isArray(p.counterColumns) ? p.counterColumns.slice() : [];
+  /* NEW-1/NEW-3 — environment marks inside the window, [ms into the window, code, a, b] (perfRecorder.ENV_*): the page going
+   * hidden/visible, the window or pixel ratio changing, and the timer that drives the counters running LATE. Absent when
+   * nothing happened — a quiet window carries no key. */
+  if (Array.isArray(p.envMarks) && p.envMarks.length) cap.em = p.envMarks.map((m) => m.map((x) => Math.round(x)));
 
   enu("note", NOTE_VOCAB.includes(p.note) ? p.note : "");
   if (cap.note === "") delete cap.note;
@@ -289,7 +316,7 @@ export function assertCaptureClean(cap) {
   const bad = [];
   const numeric = new Set(CAPTURE_NUMERIC_KEYS);
   const enums = new Set(CAPTURE_ENUM_KEYS);
-  const series = new Set(["f", "g", "lt", "ltNames", "c", "cCols"]);
+  const series = new Set(["f", "g", "lt", "ltNames", "c", "cCols", "em"]);
   for (const [k, v] of Object.entries(cap || {})) {
     if (numeric.has(k)) {
       if (typeof v !== "number" || !Number.isFinite(v)) bad.push(`${k}: not a finite number`);
@@ -298,6 +325,7 @@ export function assertCaptureClean(cap) {
       else if (v.length > 48) bad.push(`${k}: over-long`);
       else if (k === "note" && !NOTE_VOCAB.includes(v)) bad.push(`note: outside the fixed vocabulary`);
       else if (k === "bootTrigger" && !BOOT_TRIGGER_VOCAB.includes(v)) bad.push(`bootTrigger: outside the fixed vocabulary`);
+      else if (k === "freezeVia" && !FREEZE_VIA_VOCAB.includes(v)) bad.push(`freezeVia: outside the fixed vocabulary`);
       else if (k === "part" && !PART_VOCAB.includes(v)) bad.push(`part: outside the fixed vocabulary`);
       else if (k === "plan" && !/^[A-Za-z0-9_-]*$/.test(v)) bad.push(`plan: unsanitised`);
       else if (k === "layers" && !/^[a-z0-9_,+]*$/i.test(v)) bad.push(`layers: unsanitised`);

@@ -93,7 +93,7 @@ const panelText = (page) => page.evaluate(() => {
 
 /* What is actually PERSISTED for this plan — the collections and the view state, read apart. */
 const saved = (page) => page.evaluate((siteId) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const rec = all[siteId] || {};
   const collections = {
     els: rec.els || [], parcels: rec.parcels || [], markups: rec.markups || [],

@@ -1,0 +1,26 @@
+{
+ "build": "e5d81d0",
+ "dpr": 1,
+ "gesture": "wheel notch out",
+ "frame": 13,
+ "ms": 837,
+ "worstPx": 2.63,
+ "at": {
+  "offset": 2.6256157635467616,
+  "horizontal": true,
+  "x": 687.6256157635468,
+  "y": 271
+ },
+ "verdict": "imagery-vs-imagery",
+ "why": "one straight band along the whole length and the outline beside it",
+ "steps": 53,
+ "inkSpread": 0,
+ "bandSpread": 0,
+ "edgeSpread": 0,
+ "onBandShare": 0,
+ "worstOffset": 2.63,
+ "doubledSteps": 0,
+ "firstPassVerdict": "outline-off-imagery",
+ "byEye": "full frame: top-left tile still the previous level 837 ms in (new tile not yet loaded); the stub beside the lot is that tile; outline on the new level",
+ "currentJudge": "imagery-vs-imagery (re-judged from the crop with the final slideCrop rules)"
+}

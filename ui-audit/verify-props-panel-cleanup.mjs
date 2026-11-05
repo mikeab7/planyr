@@ -164,7 +164,7 @@ try {
   ok("Cloud: More opens to show Subject, Comment, Status, Label, Layer, Author, Created, Modified", ["Subject", "Comment", "Status", "Label", "Layer", "Author", "Created", "Modified"].every((w) => mt.includes(w)));
   const subj = panelEl().locator('input[placeholder="Cloud"]');
   await subj.fill("Revise grading"); await subj.blur(); await sleep(300);
-  const stored = await page.evaluate(() => { const o = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const k = Object.keys(o).find((x) => /zz-props-cleanup/.test(x)); const m = (o[k]?.markups || []).find((x) => x.id === "cl1"); return m ? { subject: m.subject, arcFt: m.arcFt, comment: m.comment } : null; })
+  const stored = await page.evaluate(() => { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const k = Object.keys(o).find((x) => /zz-props-cleanup/.test(x)); const m = (o[k]?.markups || []).find((x) => x.id === "cl1"); return m ? { subject: m.subject, arcFt: m.arcFt, comment: m.comment } : null; })
     .catch(() => null);
   ok("Cloud: an edit inside More round-trips into the saved plan; comment untouched", stored ? stored.subject === "Revise grading" && stored.comment === "kept note" : true, JSON.stringify(stored));
   await shot("props-cloud-more-open");

@@ -51,7 +51,7 @@ proof harness: ui-audit verify-admin-surfaces (repo-root ui-audit folder).
 the repo-root ops-snapshot script (`--push`) after each successful Build on main, through the token-gated `ops_ingest_snapshots()` door
 (`db/admin_ops_ingest.sql`; needs the `OPS_INGEST_TOKEN` secret + a one-time hash insert); header reads "Updated … after <commit>".
 Support has the shared "Hide internal" switch (`lib/adminSupport.js` `filterTickets`; badge + Overview tile follow it). Deploy-reload
-rule for a user's recent errors = `adminIssues.splitDeployReloads`. The weekly sweep records via `window.pfAdminRecordSweep`
+rule for a user's recent errors = `adminIssues.splitDeployReloads`. The Ops page also carries a **Sign-in health** card (NEW-1) reading the `signin` snapshot the hourly check writes — the shared sign-in-health module's `snapshotHealth` decides ok / broken / **stopped** at read time; the repo-root ops-snapshot script run with `--signin` gives the daily sweep the same verdict. The weekly sweep records via `window.pfAdminRecordSweep`
 (`lib/sweepHook.js`). Harnesses that file reports clean up with the repo-root ui-audit report-cleanup helper.
 
 **Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**
@@ -101,3 +101,13 @@ parcel-coverage verify script under the repo's ui-audit folder.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
+
+**Parcel coverage map, interaction pass (B2270992–B2270994, 2026-10-15).** A plain wheel / two-finger scroll over the map is the PAGE's —
+the map zooms only on Ctrl/Cmd+wheel (a pinch), +/−, or a touch pinch (`lib/coverageMapInteraction.js`: `wheelIntent`, `wheelZoomFactor`,
+`isTap`, `placeNear`, `mapHeightCap`); its height is capped to what is left under the header + legend. Hover = a tooltip at the cursor; a
+zero-movement click/tap opens a details card (`parcelCoverage.countyDetail` / `openRequestsFor`; pointer capture is taken only once a press
+becomes a drag, so a click keeps its own target). City-level sources are placed on the county they sit in (the city-scope module's `counties` →
+`cityParcels` / `cityOnly`, counted apart in `totals.cityOnly`); anything unplaceable logs to the console, never the page. Guards: repo-root
+`test/` **coverageMapInteraction**, **parcelCoverage**; ui-audit **verify-admin-parcel-coverage** (local, real Chromium) and
+**verify-admin-parcel-coverage-live** (deployed build, mocked `is_admin`, V1696128).
+

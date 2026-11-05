@@ -124,11 +124,15 @@ describe("ops-snapshot --push (B2159504)", () => {
 
 describe("workflow + SQL wiring", () => {
   const wf = readFileSync(".github/workflows/ops-digest.yml", "utf8");
-  it("runs only after a SUCCESSFUL Build on a push to main, with the secret by reference, no schedule", () => {
+  it("runs after a SUCCESSFUL Build on a push to main (never on a PR), with the secret by reference; ALSO on a schedule since the ledger moved off main (NEW-1, 2026-11-05)", () => {
     expect(wf).toMatch(/workflow_run:\n\s+workflows: \["Build"\]\n\s+types: \[completed\]\n\s+branches: \[main\]/);
     expect(wf).toMatch(/conclusion == 'success' && github\.event\.workflow_run\.event == 'push'/);
     expect(wf).toMatch(/OPS_INGEST_TOKEN: \$\{\{ secrets\.OPS_INGEST_TOKEN \}\}/);
-    expect(wf).not.toMatch(/^\s*schedule:/m);
+    // The original design had NO schedule because every ledger change arrived as a merge to main. Since 2026-11-05 the ledger
+    // lives on its own branch and changes without a merge, so a merge-triggered refresh alone leaves the digest stale: a
+    // schedule is now required — but a build-FAILED workflow_run must still never refresh it (the `if:` above).
+    expect(wf).toMatch(/^\s*schedule:/m);
+    expect(wf).toMatch(/ref: ledger/);
   });
   it("build.yml is untouched: still the single required `build` job", () => {
     expect(readFileSync(".github/workflows/build.yml", "utf8")).not.toMatch(/ops-digest/);

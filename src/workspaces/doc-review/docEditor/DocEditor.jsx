@@ -132,9 +132,9 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
           <b data-testid="doc-readonly-label">{file.versionLabel || "Earlier version"}</b>
           <span>Read-only — editing tools are hidden.</span>
           <span style={{ flex: 1 }} />
-          {versionBar && <Button size="sm" variant="primary" disabled={versionBar.busy} onClick={versionBar.onRestore} data-testid="ro-restore">Restore this version</Button>}
-          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} onClick={versionBar.onCopy} data-testid="ro-copy">Save a copy</Button>}
-          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} onClick={versionBar.onBack} data-testid="ro-back">Back to latest</Button>}
+          {versionBar && <Button size="sm" variant="primary" disabled={versionBar.busy} aria-busy={versionBar.busy ? "true" : undefined} onClick={versionBar.onRestore} data-testid="ro-restore">Restore this version</Button>}
+          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} aria-busy={versionBar.busy ? "true" : undefined} onClick={versionBar.onCopy} data-testid="ro-copy">Save a copy</Button>}
+          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} aria-busy={versionBar.busy ? "true" : undefined} onClick={versionBar.onBack} data-testid="ro-back">Back to latest</Button>}
         </div>
       )}
       <Toolbar ro={ro} onHistory={onHistory} editor={editor} plain={plain} trackOn={trackOn} setTrackOn={setTrackOn} findOpen={findOpen} setFindOpen={setFindOpen}
@@ -233,7 +233,7 @@ function Toolbar({ ro, onHistory, editor, plain, trackOn, setTrackOn, findOpen, 
       <div className="dre-group">
         {onHistory && <Btn title="Version history — see earlier saved versions" onClick={onHistory} testid="doc-history">Version history</Btn>}
         {!ro && onSaveAsWord && <Btn title="Save a copy as a Word document (formatting, comments)" onClick={onSaveAsWord} testid="save-as-word">Save as Word document</Btn>}
-        {!ro && <Button size="sm" variant="primary" disabled={saving} onClick={onSave} data-testid="doc-save">{saving ? "Saving…" : saveLabel}</Button>}
+        {!ro && <Button size="sm" variant="primary" disabled={saving} aria-busy={saving ? "true" : undefined} onClick={onSave} data-testid="doc-save">{saving ? "Saving…" : saveLabel}</Button>}
       </div>
     </div>
   );

@@ -16,6 +16,7 @@
  * and a sweep leaves nothing orphaned behind.
  */
 import { test, expect } from "@playwright/test";
+import { openPlannerLayers, setLayer } from "./lib/layersPanel.js";
 // B276450 — the hover tolerance is read from the SOURCE OF TRUTH, never restated here: the
 // reachability guard below is expressed in terms of it, so a change to the tolerance moves the
 // assertion with it instead of silently invalidating it.
@@ -174,9 +175,8 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
 
     // Turn the contour layer on through the real Layers panel (the visible planner copy —
     // the map finder stays mounted behind it and renders its own row).
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const row = page.getByRole("checkbox", { name: /contour/i }).filter({ visible: true }).first();
-    await row.check({ force: true });
+    await openPlannerLayers(page);
+    await setLayer(page, "contours", true);
     await page.keyboard.press("Escape").catch(() => {});
     // Wait for the real trace: the permanent every-5-ft index labels appearing means the
     // DEM tile fetched, the worker traced it, and the layer painted.
@@ -310,9 +310,8 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await openSite(page, { terrain: true });
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const row = page.getByRole("checkbox", { name: /contour/i }).filter({ visible: true }).first();
-    await row.check({ force: true });
+    await openPlannerLayers(page);
+    await setLayer(page, "contours", true);
     await page.keyboard.press("Escape").catch(() => {});
     await expect(async () => {
       expect(await contourLabels(page).count()).toBeGreaterThan(0);

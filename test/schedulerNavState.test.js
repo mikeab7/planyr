@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import {
   sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, findAllBySiteId,
   needsScheduleCarryIn, dashboardNavActions, isPickShowing, isGridMismatched, newProjectAction,
-  shouldNeutralizeToReports, resolveReportRowNavigation,
+  shouldNeutralizeToReports, resolveReportRowNavigation, needsArrivalSelect,
 } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
@@ -951,3 +951,23 @@ describe("Scheduler.jsx — pendingRouteProjectIdRef bridges the route-write rac
 // by two independent breadcrumb crumbs — see test/schedulerNavState.test.js's own updated Scheduler.jsx
 // source guards above, and e2e/schedule-ownership.spec.js's "B1435888" describe block for the
 // browser-driven proof.
+
+describe("needsArrivalSelect — a fresh tab asks once so the remembered last-active schedule wins (V934064)", () => {
+  const SEVERAL = [{ id: 1, linkedSiteId: "s" }, { id: 2, linkedSiteId: "s" }, { id: 3, linkedSiteId: "s" }, { id: 4, linkedSiteId: "other" }];
+  it("asks on arrival when the site has several linked schedules, even though the active one is a member", () => {
+    expect(needsScheduleCarryIn(SEVERAL, "s", 1)).toBe(false);          // the old gate stays silent...
+    expect(needsArrivalSelect(SEVERAL, "s", null)).toBe(true);         // ...so this is the one that asks
+  });
+  it("asks only once per arrival, never again for the same site", () => {
+    expect(needsArrivalSelect(SEVERAL, "s", "s")).toBe(false);
+  });
+  it("asks again for a different site", () => {
+    expect(needsArrivalSelect(SEVERAL, "s", "other")).toBe(true);
+  });
+  it("does nothing for a single linked schedule, no route, or nothing loaded yet", () => {
+    expect(needsArrivalSelect(SEVERAL, "other", null)).toBe(false);
+    expect(needsArrivalSelect(SEVERAL, null, null)).toBe(false);
+    expect(needsArrivalSelect([], "s", null)).toBe(false);
+    expect(needsArrivalSelect(undefined, "s", null)).toBe(false);
+  });
+});

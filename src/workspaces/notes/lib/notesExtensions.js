@@ -36,6 +36,8 @@ import { addArrow, removeArrow } from "./notesArrows.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
+import { NoteTableFill } from "./notesTableFill.js";
+import { NoteTableMultiSelect } from "./notesTableMultiSelect.js";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
@@ -56,6 +58,8 @@ import NoteSearchHighlight from "./notesSearchHighlight.js";
 import NoteTableToText from "./notesTableToText.js";
 import NoteTableColumns, { NoteTableView } from "./notesTableColumns.js";
 import { TABLE_COL_MIN_WIDTH } from "./notesTableWidth.js";
+import { adoptEmptyBlockSize, rowCarryPlugin, seedMark, sizeEmptyBlocks } from "./notesTableRowStyle.js";
+import { NoteTableRowHeight, rowNodeView } from "./notesTableRowHeight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
@@ -163,6 +167,9 @@ const NoteTable = Table.extend({
   },
 });
 
+/** NEW-3: a table row with its own view, so a live height drag survives (lib/notesTableRowHeight.js). */
+const NoteTableRow = TableRow.extend({ addNodeView() { return rowNodeView; } });
+
 export const NOTE_EXTENSIONS = [
   // Document · paragraph · text · bold · italic · strike · code · codeBlock · heading ·
   // blockquote · bullet/ordered lists · hardBreak · horizontalRule · underline · link ·
@@ -238,7 +245,10 @@ export const NOTE_EXTENSIONS = [
    * `TableRow` ride in unmodified (imported directly rather than through `TableKit`, which only
    * bundles the four for convenience and offers no hook to swap one out). */
   NoteTable.configure({ resizable: true, allowTableNodeSelection: true, cellMinWidth: TABLE_COL_MIN_WIDTH }),
-  TableCell, TableHeader, TableRow,
+  TableCell, TableHeader, NoteTableRow,
+  // Header row on ANY row + cell fill (NEW-1/NEW-2, 2026-10-28) — see lib/notesTableFill.js.
+  NoteTableFill,
+  NoteTableMultiSelect,   // B2530690 — Ctrl+click adds table cells to the selection
 
   // "Convert table to text" (NEW-2) — a right-click command that pulls a table's rows out as
   // plain lines, keeping every cell's marks. See lib/notesTableToText.js for the whole rule,
@@ -256,6 +266,12 @@ export const NOTE_EXTENSIONS = [
    * called once on editor mount (Tiptap's initial `setContent` never runs `appendTransaction`, so
    * an already-squeezed table needs a separate on-load recovery path). */
   NoteTableColumns,
+
+  /* NEW-2: a new row / column takes its neighbour's size (and a row its height). */
+  Extension.create({ name: "noteTableRowCarry", addProseMirrorPlugins() { return [rowCarryPlugin()]; } }),
+
+  /* NEW-3: drag the line under a row to change its height (adds `rowHeight` to tableRow). */
+  NoteTableRowHeight,
 
   // ⛔ HOW FAR APART THE LINES ARE (NEW-7). A BLOCK property, extending paragraph and heading
   // rather than riding textStyle — half a line cannot be one-and-a-half spaced. The value is
@@ -280,7 +296,12 @@ export const NOTE_EXTENSIONS = [
         appendTransaction: (trs, _old, newState) => {
           if (!trs.some((t) => t.docChanged)) return null;
           const tr = newState.tr;
-          if (!deriveBlockSizes(newState.doc, tr)) return null;
+          /* ⛔ ADOPT BEFORE DERIVE (NEW-1/NEW-2): text typed into an EMPTY block that carries a size must
+           * take that size as a mark first, or the derivation below would read "unsized run" and reset the
+           * block — the cell looked 9 and the word typed into it came out default. */
+          const adopted = adoptEmptyBlockSize(trs, _old, newState, tr);
+          const derived = deriveBlockSizes(tr.doc, tr);
+          if (!adopted && !derived) return null;
           /* ⛔ AND IT MUST HAND THE STORED MARKS BACK (NEW-ENTER-INHERIT). ProseMirror clears
            * `storedMarks` on any transaction that does not restate them, so this housekeeping
            * pass was silently stripping the marks a split had just carried to the new line — the
@@ -377,6 +398,8 @@ export const NOTE_EXTENSIONS = [
            * shorter than its own font's strut — measured: every word set to 11px still rendered
            * in the 24.75px row the 15px paragraph above it used. See lib/notesSpacing.js. */
           fontSize: { default: null, parseHTML: (el) => spacingFromElement(el).fontSize, renderHTML: () => ({}) },
+          /* NEW-1: marks an EMPTY block hands to the first text typed into it (lib/notesTableRowStyle.js). */
+          seed: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
           spaceBefore: { default: null, parseHTML: (el) => spacingFromElement(el).spaceBefore, renderHTML: () => ({}) },
           spaceAfter: {
             default: null,
@@ -479,6 +502,10 @@ export const NOTE_EXTENSIONS = [
           if (dispatch) dispatch(tr.setDocAttribute("pageHeight", next));
           return true;
         },
+
+        /* ⛔ SIZE THE EMPTY BLOCKS IN THE SELECTION (NEW-1) — see lib/notesTableRowStyle.js. */
+        sizeEmptyBlocks: (px) => sizeEmptyBlocks(px),
+        seedMark: (name, patch, mode) => seedMark(name, patch, mode),
 
         syncBlockFontSize: () => ({ state, tr, dispatch }) => {
           const touched = deriveBlockSizes(state.doc, tr);

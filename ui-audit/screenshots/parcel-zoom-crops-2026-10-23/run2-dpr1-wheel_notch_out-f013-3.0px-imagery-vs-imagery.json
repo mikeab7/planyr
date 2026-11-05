@@ -1,0 +1,25 @@
+{
+ "build": "e5d81d0",
+ "dpr": 1,
+ "gesture": "wheel notch out",
+ "frame": 13,
+ "ms": 762,
+ "worstPx": 2.96,
+ "at": {
+  "offset": 2.960732984293145,
+  "horizontal": true,
+  "x": 687.9607329842931,
+  "y": 271
+ },
+ "verdict": "imagery-vs-imagery",
+ "why": "one straight band along the whole length and the outline beside it",
+ "steps": 53,
+ "inkSpread": 0,
+ "bandSpread": 0,
+ "onBandShare": 0,
+ "worstOffset": 2.96,
+ "doubledSteps": 0,
+ "firstPassVerdict": "outline-off-imagery",
+ "byEye": "a narrower piece of the neighbouring tile (previous level) runs past the corner; outline on this tile level band",
+ "currentJudge": "imagery-vs-imagery (re-judged from the crop with the final slideCrop rules)"
+}

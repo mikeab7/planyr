@@ -1,0 +1,83 @@
+{
+ "_note": "One point inside a real lot per newly wired Arizona county (centroid re-found by a point query on the live layer 2026-10-20 and resolved to the right county). For the live click harness (--az-all).",
+ "points": [
+  {
+   "county": "Apache County",
+   "lat": 34.845516,
+   "lng": -109.326609,
+   "id": "20512053E"
+  },
+  {
+   "county": "Cochise County",
+   "lat": 31.544943,
+   "lng": -110.242153,
+   "id": "10779191"
+  },
+  {
+   "county": "Coconino County",
+   "lat": 35.243172,
+   "lng": -111.684029,
+   "id": "30045022J"
+  },
+  {
+   "county": "Gila County",
+   "lat": 33.798387,
+   "lng": -111.248235,
+   "id": "20117059G"
+  },
+  {
+   "county": "Graham County",
+   "lat": 32.844105,
+   "lng": -109.742437,
+   "id": "104-33-026D"
+  },
+  {
+   "county": "Greenlee County",
+   "lat": 32.74355,
+   "lng": -109.083733,
+   "id": "50003016"
+  },
+  {
+   "county": "La Paz County",
+   "lat": 33.780843,
+   "lng": -113.616299,
+   "id": "30459043"
+  },
+  {
+   "county": "Mohave County",
+   "lat": 34.722887,
+   "lng": -114.069481,
+   "id": "242-18-017"
+  },
+  {
+   "county": "Navajo County",
+   "lat": 34.701262,
+   "lng": -110.585043,
+   "id": "111-22-100"
+  },
+  {
+   "county": "Pima County",
+   "lat": 32.203896,
+   "lng": -110.915982,
+   "id": "130081820"
+  },
+  {
+   "county": "Santa Cruz County",
+   "lat": 31.57306,
+   "lng": -111.01594,
+   "id": "11522277"
+  },
+  {
+   "county": "Yavapai County",
+   "lat": 34.718085,
+   "lng": -112.008042,
+   "id": "406-59-262"
+  },
+  {
+   "county": "Yuma County",
+   "lat": 32.826663,
+   "lng": -113.441423,
+   "id": "17712004"
+  }
+ ]
+}

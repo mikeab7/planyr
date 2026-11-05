@@ -67,6 +67,56 @@ export const ANCHOR_WIDTH = 180;
  *  the block's position. `verify-notes-anchor-zoom` is that test and it still passes. */
 export const ANCHOR_MIN_WIDTH = 160;
 
+/** ⛔ A NEW BOX STARTS WIDE (NEW-2, owner report 2026-10-11: "new text boxes start too skinny"). The start
+ *  width is the text column's width or the room to the right of the press, whichever is smaller — but never
+ *  below `ANCHOR_START_MIN` (a usable line of writing, so a press near the right edge still gets a box
+ *  worth typing in and the page grows the rest of the way, exactly as `ANCHOR_MIN_WIDTH` always did) and
+ *  never above `ANCHOR_START_MAX` (a "Full width" page's column is wider than any line reads well). The
+ *  width is only the STARTING point: a box made this way carries `fit`, and shrinks to its words when the
+ *  person clicks out (`fitWidthFor`). */
+export const ANCHOR_START_MIN = 240;
+export const ANCHOR_START_MAX = 720;
+
+/** The widest a new box starts at on a column `column` wide (the room check is `placeAnchor`'s). */
+export function anchorStartPreferred(column) {
+  const c = num(column);
+  return Math.round(Math.min(ANCHOR_START_MAX, c > 0 ? c : ANCHOR_START_MAX));
+}
+
+/** ⛔ THE SMALLEST A BOX SHRINKS TO ON CLICK-OUT: small, but still a thing you can grab and re-enter
+ *  (the grip is 12px and the corner handles 12px — see `ANCHOR_MIN_HEIGHT`). */
+export const ANCHOR_FIT_MIN = 96;
+
+/** ⛔ WHAT WIDTH A SELF-SIZING BOX SETTLES AT (NEW-2). `natural` is the content's own widest line (or a
+ *  table's width) measured with the box allowed to be as wide as it likes; `pad` is the box's own
+ *  horizontal padding + border, which the content width does not include. Only ever SHRINKS: content
+ *  wider than the box (a long unbroken line, a wide table) leaves it alone — click-out never makes a
+ *  box bigger, and never narrower than `ANCHOR_FIT_MIN`. Returns `null` when no change is owed. */
+export function fitWidthFor({ current, natural, pad = 0 }) {
+  const cur = Math.round(num(current));
+  const nat = num(natural);
+  if (!(cur > 0) || !(nat > 0)) return null;
+  const want = Math.max(ANCHOR_FIT_MIN, Math.ceil(nat + num(pad)));
+  return want < cur ? want : null;
+}
+
+/** ⛔ TYPING PAST A SHRUNK BOX'S EDGE GROWS IT BACK TO ITS START WIDTH BEFORE ANY WRAPPING (NEW-2).
+ *  `natural` is the content's unwrapped width. Returns the width to grow to, or `null` if the content
+ *  still fits (or the box is already at least as wide as it would start). */
+export function growWidthFor({ current, natural, pad = 0, start }) {
+  const cur = Math.round(num(current));
+  const nat = num(natural);
+  const st = Math.round(num(start));
+  if (!(cur > 0) || !(nat > 0) || !(st > 0)) return null;
+  if (nat + num(pad) <= cur + 1) return null;      // still fits on its line
+  return st > cur ? st : null;
+}
+
+/** The box's own horizontal padding + border (16 left + 6 right + 1 + 1), which sit OUTSIDE the content it
+ *  holds. Mirrors the `.planyr-anchor` rule in NoteEditor.jsx's `EDITOR_CSS` — a box that must hold N
+ *  pixels of table is N + this wide. */
+export const ANCHOR_BOX_PAD_X = 24;
+
 /** How far from the editor's RIGHT edge a block keeps clear. */
 export const ANCHOR_EDGE_PAD = 4;
 

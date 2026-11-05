@@ -67,7 +67,7 @@ describe("the Food forms actually use it (a refactor back to bare useState would
   it("the add-a-dish editor and which dish row is open are kept too", () => {
     for (const f of ["name", "course", "score", "orderAgain", "price", "note"]) expect(dishes, `DishEditRow field ${f}`).toMatch(new RegExp(`\\[${f}, set\\w+\\] = useDraftField\\(draftKey, "${f}"`));
     expect(dishes).toMatch(/\[addingNew, setAddingNew\] = useDraftField\(/);
-    expect(dishes).toMatch(/\[editingKey, setEditingKey\] = useDraftField\(/);
+    for (const f of ["name", "score", "orderAgain", "note", "rerate"]) expect(dishes, `DishSheet field ${f}`).toMatch(new RegExp(`\\[${f}, set\\w+\\] = useDraftField\\(draftKey, "${f}"`)); // NEW-2: the dish sheet too
   });
   it("VisitPanel provides ONE store above all three layouts (side dock, bottom sheet, desktop rail)", () => {
     expect((panel.match(/<DraftStoreContext\.Provider value=\{drafts\}>/g) || []).length).toBe(3);

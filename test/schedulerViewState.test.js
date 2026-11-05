@@ -74,13 +74,13 @@ const BASE_DOC = {
 };
 const FULL_DOC = (over = {}) => ({ ...BASE_DOC, ...over });
 
-describe("VIEW_STATE_KEYS — the exact 13 keys measured on the real production hs-v1 row", () => {
+describe("VIEW_STATE_KEYS — the 13 keys measured on the real production hs-v1 row", () => {
   it("matches the enumerated jsonb_object_keys list from the B1107680 measurement", () => {
     const { VIEW_TAB_KEYS, VIEW_PREF_KEYS, VIEW_TRANSIENT_KEYS } = makeSandbox();
     const all = [...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS].sort();
     expect(all).toEqual([
       "aPid", "editProjId", "gridColWidths", "gridZoom", "healthColStyle", "masterCols",
-      "masterColWidths", "masterGroupBy", "masterHealthFilter", "masterLevelFilter",
+      "masterColWidths", "masterGroupBy", "masterHealthFilter", "masterLevelFilter", "masterProjectFilter",
       "masterSort", "section", "view",
     ].sort());
   });

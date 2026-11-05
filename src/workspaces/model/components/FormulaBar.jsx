@@ -5,19 +5,20 @@
  * commit contract as the in-cell editor — typing "=…" here and pressing Enter sets the cell's
  * formula exactly as it would in-cell.
  */
-import { useEffect, useRef, useState } from "react";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
-import { RADIUS } from "../../../shared/ui/radius.js";
+import { wholeSelectionLabel, parseWholeAddress } from "../lib/selection.js";
+import { colLetterName } from "../lib/sheetModel.js";
+import { hasPendingFormulaText } from "../lib/pendingEntry.js";
 
-function colLabel(colIndex) {
-  let n = colIndex + 1, s = "";
-  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
-  return s;
-}
+const colLabel = colLetterName; // one letters function for the whole module (the grid header uses it too)
 
-export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxRef, focusGrid }) {
-  const address = `${colLabel(col)}${row + 1}`;
+const FormulaBar = forwardRef(function FormulaBar({ sheet, row, col, selRange, onCommit, onGoTo, nameBoxRef, focusGrid }, ref) {
+  // A whole-column / whole-row / whole-sheet selection reads "C:C" / "5:5" / "A:Z" (NEW-2, 2026-10-29);
+  // any other selection reads its active cell, as before.
+  const address = (selRange && wholeSelectionLabel(sheet, selRange)) || `${colLabel(col)}${row + 1}`;
   const [value, setValue] = useState(() => formulaBarText(sheet, row, col));
   const [nameValue, setNameValue] = useState(address);
   const [nameFocused, setNameFocused] = useState(false);
@@ -39,11 +40,23 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
 
   const commit = () => onCommit(row, col, value);
 
+  // NEW-1 (2026-10-29) — text typed here but not yet committed is saved to its own cell when the
+  // sheet is about to change; the re-seed effect above used to silently throw it away. Must run
+  // BEFORE the active sheet changes (see SheetView's commitPending).
+  useImperativeHandle(ref, () => ({
+    commitPending: () => {
+      if (!hasPendingFormulaText(value, formulaBarText(sheet, row, col))) return false;
+      onCommit(row, col, value);
+      return true;
+    },
+  }), [value, sheet, row, col, onCommit]);
+
   // Returns whether the jump succeeded, so the Enter handler knows whether to hand focus to the
   // grid (a rejected entry stays focused here, visibly flagged, so the user can fix it in place,
   // matching Excel's own Name Box — never hand focus away from an error the user hasn't seen yet).
   const goToTyped = () => {
-    const target = parseNameBoxAddress(nameValue, sheet.rowCount, sheet.columns.length);
+    const whole = parseWholeAddress(nameValue, sheet); // "C:C", "A:C", "5:5", "2:7" -> a whole column / row run
+    const target = whole || parseNameBoxAddress(nameValue, sheet.rowCount, sheet.columns.length);
     if (target) { onGoTo(target.r1, target.c1, target.r2, target.c2); return true; }
     // An address that doesn't resolve reverts rather than navigating blindly — and now says so.
     setNameValue(address);
@@ -54,11 +67,12 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
   };
 
   return (
-    // Round 3 (B1087904) — sits as the SECOND row inside ModelApp's toolbar card now (the
-    // ribbon is the first, divided from this one by the ribbon's own bottom border); no border or
-    // background of its own any more, since the card supplies both.
-    <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 10px" }}>
+    // NEW-1 (2026-10-29) — a flat, full-width strip flush under the toolbar: the name box on the left,
+    // divided from the fx field by one thin line; no shaded pills or inset boxes (the Round 3 card's
+    // bordered, rounded inputs are gone). One hairline bottom border separates it from the grid.
+    <div style={{ flex: "none", display: "flex", alignItems: "stretch", height: 28, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
       <input
+        {...NO_AUTOFILL}
         ref={nameBoxRef}
         data-testid="model-name-box"
         data-invalid={invalid ? "true" : undefined}
@@ -78,15 +92,17 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
         }}
         onBlur={() => { setNameFocused(false); setNameValue(address); }}
         style={{
-          flex: "none", width: 64, textAlign: "center", fontSize: 11, fontWeight: 700,
+          flex: "none", width: 84, boxSizing: "border-box", textAlign: "center", fontSize: 11, fontWeight: 700,
           color: "var(--text-primary)", fontVariantNumeric: "tabular-nums",
-          border: `1px solid ${invalid ? "var(--danger)" : "var(--border-default)"}`,
-          borderRadius: RADIUS.sm, padding: "3px 4px", background: "var(--surface-page)",
-          transition: "border-color 0.15s ease",
+          border: "none", borderRight: "1px solid var(--border-default)", padding: "0 6px", background: "transparent",
+          // A rejected address still flashes red (B1007280) — an inset outline now, since there is no box border to recolour.
+          outline: invalid ? "1px solid var(--danger)" : undefined, outlineOffset: -1,
+          transition: "outline-color 0.15s ease",
         }}
       />
-      <span aria-hidden="true" style={{ flex: "none", fontSize: 12, fontWeight: 700, fontStyle: "italic", color: "var(--text-tertiary)" }}>fx</span>
+      <span aria-hidden="true" style={{ flex: "none", display: "flex", alignItems: "center", padding: "0 8px 0 10px", fontSize: 12, fontWeight: 700, fontStyle: "italic", color: "var(--text-tertiary)" }}>fx</span>
       <input
+        {...NO_AUTOFILL}
         data-testid="model-formula-bar"
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -95,8 +111,10 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
           else if (e.key === "Escape") { e.preventDefault(); setValue(formulaBarText(sheet, row, col)); e.currentTarget.blur(); }
         }}
         onBlur={commit}
-        style={{ flex: 1, minWidth: 0, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "3px 8px", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "var(--surface-page)", color: "var(--text-primary)" }}
+        style={{ flex: 1, minWidth: 0, border: "none", padding: "0 8px 0 0", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "transparent", color: "var(--text-primary)" }}
       />
     </div>
   );
-}
+});
+
+export default FormulaBar;

@@ -25,6 +25,7 @@
  * on-screen face, so line extents match the sheet.
  */
 
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 /* ---------------------------------------------------------------- numbers */
 const n3 = (v) => { const s = String(Math.round(v * 1000) / 1000); return s === "-0" ? "0" : s; };
 
@@ -277,6 +278,14 @@ function isHitCompanion(a, fill, stroke) {
   return !sInk && !fInk;
 }
 
+/** The mean colour of an SVG gradient's stops (null when it has none). */
+function gradientMean(g) {
+  const stops = (g.kids || []).filter((k) => String(k.tag || "").toLowerCase() === "stop").map((k) => parseColor((k.a || {})["stop-color"] || "black")).filter(Boolean);
+  if (!stops.length) return null;
+  const rgb = [0, 1, 2].map((i) => stops.reduce((s, c) => s + c.rgb[i], 0) / stops.length);
+  return { rgb, a: stops.reduce((s, c) => s + c.a, 0) / stops.length };
+}
+
 /**
  * Flatten `tree` into draw items in PDF page space. `M0` maps tree user units → PDF points
  * (y already flipped). `patterns` is an id→tree lookup for `fill="url(#id)"`.
@@ -322,6 +331,7 @@ export function flattenTree(tree, M0, patterns = {}) {
         fill: fillC, fillA: fillC.a * (parseFloat(cur["fill-opacity"] ?? 1) || 1) * cur.opacity,
         halo, haloA: cur.opacity * (strokeC ? strokeC.a : 1),
         underline: /underline/.test(cur["text-decoration"] || ""),
+        strike: /line-through/.test(cur["text-decoration"] || ""),
       });
       return;
     }
@@ -340,16 +350,23 @@ export function flattenTree(tree, M0, patterns = {}) {
     if (!segs || !segs.length) return;
 
     const sw = strokeC ? (parseFloat(cur["stroke-width"] ?? 1) || 0) : 0;
-    const pat = patId && patterns[patId[1]] ? patterns[patId[1]] : null;
+    let pat = patId && patterns[patId[1]] ? patterns[patId[1]] : null;
+    let fillUse = fillC;
+    if (pat && /gradient$/i.test(String(pat.tag || ""))) {
+      /* A GRADIENT (a detention pond's water, NEW-1 2026-10-20) is not a tiling pattern: drawn as one, it painted
+         nothing and the water vanished. It is written as the mean of its stops — the closest flat colour (a pond's
+         gentle two-stop blue; not listed as a simplification, since it reads the same at print size). */
+      fillUse = gradientMean(pat); pat = null;
+    }
     if (patId && !pat) degraded.add("pattern fill unavailable");
-    if (!pat && isHitCompanion(cur, fillC, strokeC)) return;
-    if (!pat && !(strokeC && sw > 0) && !fillC) return;
+    if (!pat && isHitCompanion(cur, fillUse, strokeC)) return;
+    if (!pat && !(strokeC && sw > 0) && !fillUse) return;
     const da = String(cur["stroke-dasharray"] || "");
     const dash = /[\d]/.test(da) && da !== "none" ? da.split(/[\s,]+/).filter(Boolean).map(parseFloat).filter((v) => Number.isFinite(v)) : [];
     const k = scaleOf(NM);
     items.push({
       t: "path", src: nsrc, segs: mapSegs(segs, NM),
-      fill: pat ? null : fillC, fillA: fillC ? fillC.a * (parseFloat(cur["fill-opacity"] ?? 1) || 1) * cur.opacity : 0,
+      fill: pat ? null : fillUse, fillA: fillUse ? fillUse.a * (parseFloat(cur["fill-opacity"] ?? 1) || 1) * cur.opacity : 0,
       pat: pat ? { id: patId[1], tree: pat, M: NM, op: cur.opacity } : null,
       stroke: strokeC && sw > 0 ? strokeC : null, sw: sw * k,
       strokeA: strokeC ? strokeC.a * (parseFloat(cur["stroke-opacity"] ?? 1) || 1) * cur.opacity : 0,
@@ -444,6 +461,12 @@ export function itemsToStream(items) {
       const fillOps = () => { out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} rg`); draw(0); out.push("Q"); };
       const haloOps = () => { out.push("q", `/${gsName(it.haloA, it.haloA)} gs`, `${rg(it.halo.c)} RG`, `${n3(it.halo.w)} w`, "1 j"); draw(1); out.push("Q"); };
       if (it.halo && it.halo.under) { haloOps(); fillOps(); } else { fillOps(); if (it.halo) haloOps(); }
+      if (it.strike) {
+        // NEW-1 (layout "A") — strikethrough: a rule through the x-height, offset along the text's own normal so it follows a rotated box.
+        const off = it.size * 0.3, sx = it.x - s * off, sy = it.y + c * off;
+        out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} RG`, `${n3(Math.max(0.3, it.size * 0.06))} w`,
+          `${n3(sx)} ${n3(sy)} m ${n3(sx + c * it.w)} ${n3(sy + s * it.w)} l S`, "Q");
+      }
       if (it.underline) {
         const ux = it.x + (c * 0), uy = it.y - it.size * 0.12;
         out.push("q", `/${gsName(it.fillA, it.fillA)} gs`, `${rg(it.fill)} RG`, `${n3(Math.max(0.3, it.size * 0.06))} w`,
@@ -504,23 +527,74 @@ const aligned = (it, tol = 0.5) => {
 };
 
 /**
+ * The /Measure dictionary for a measurement (ISO 32000-1 §12.9.2, rectilinear "RL"). `ftPerPt` = feet per PDF point
+ * on this sheet; the units and precision follow Planyr's own label (lib/measureLabel.js): feet to whole feet, area in
+ * SF below an acre and AC (two decimals) above — read off the label so the value a viewer recomputes reads the same.
+ * Returns null (and the caller writes no /IT) when the scale is unknown, rather than a dictionary that would misreport.
+ */
+export function measureDictFor(mode, chipLines, ftPerPt) {
+  if (!(ftPerPt > 0) || !Number.isFinite(ftPerPt) || mode === "count") return null;
+  const head = (chipLines || []).find((l) => /\d/.test(l) && /(SF|AC|′|')\s*$/i.test(String(l).trim())) || "";
+  const acres = /\bAC\s*$/i.test(head.trim());
+  const inchFt = ftPerPt * 72;
+  const r = inchFt >= 10 ? Math.round(inchFt) : Math.round(inchFt * 100) / 100;
+  return {
+    R: `1 in = ${r} ft`,
+    X: { U: "ft", C: ftPerPt, D: 1 },
+    D: { U: "ft", C: 1, D: 1 },
+    A: acres ? { U: "ac", C: 1 / SQFT_PER_ACRE, D: 100 } : { U: "sq ft", C: 1, D: 1 },
+  };
+}
+const numberFormat = (f) => `<< /Type /NumberFormat /U (${f.U}) /C ${n6(f.C)} /F /D /D ${f.D} /RT (,) /RD (.) /SS ( ) /O /S >>`; // "2,100 ft", "5.74 ac" — Planyr's own grouping
+const n6 = (v) => { const s = String(Math.round(v * 1e9) / 1e9); return s === "-0" ? "0" : s; };
+export function measureDictString(m) {
+  return `<< /Type /Measure /Subtype /RL /R (${m.R}) /X [${numberFormat(m.X)}] /Y [${numberFormat(m.X)}] /D [${numberFormat(m.D)}] /A [${numberFormat(m.A)}] /O [0 0] /CYX 1 >>`;
+}
+
+const SITE_MARKUP_KINDS = new Set(["easement", "encumbrance", "utilRoute", "traced", "infwater"]);
+/** The largest closed (or filled) subpath among `ink`, on-curve vertices, PDF space — or null. */
+function largestRing(ink) {
+  let best = null, bestA = 0;
+  for (const it of ink) {
+    let cur = null; const subs = [];
+    for (const s of it.segs) {
+      if (s[0] === "M") { cur = { v: [[s[1], s[2]]], z: false }; subs.push(cur); }
+      else if (s[0] === "L" && cur) cur.v.push([s[1], s[2]]);
+      else if (s[0] === "C" && cur) cur.v.push([s[5], s[6]]);
+      else if (s[0] === "Z" && cur) cur.z = true;
+    }
+    for (const sp of subs) {
+      if (!(sp.z || it.fill || it.pat) || sp.v.length < 3) continue;
+      let a = 0; for (let i = 0, j = sp.v.length - 1; i < sp.v.length; j = i++) a += (sp.v[j][0] + sp.v[i][0]) * (sp.v[j][1] - sp.v[i][1]);
+      if (Math.abs(a) > bestA) { bestA = Math.abs(a); best = sp.v; }
+    }
+  }
+  if (best && best.length > 3 && Math.hypot(best[0][0] - best[best.length - 1][0], best[0][1] - best[best.length - 1][1]) < 1e-6) best = best.slice(0, -1);
+  return best;
+}
+
+/**
  * Build one annotation spec per descriptor.
  *
- * descriptor = { family: "markup"|"callout"|"measure", id, kind, tree, hints?, meta? }
+ * descriptor = { family: "markup"|"callout"|"measure"|"building"|"element"|"parcel-label", id, kind, tree, hints?, meta? }
+ *              (a building's hints.verts is the ONE outline through its corner bump-outs — lib/buildingOutline.js)
+ *              family "sheet-furniture" (the Buildings table, the scale bar, the north arrow): a Stamp, so each is its own
+ *              object the recipient can select, move or delete; `d.M0` / `d.frame` override opts.M0 / opts.frame.
  * opts       = { M0: user→PDF matrix, frame: [x0,y0,x1,y1] PDF rect the sheet's plan window occupies,
  *                patterns: id→tree, now: ISO string, author: string }
  * Returns { annots: [...], skipped: [{id, why}], degraded: [...] }.
  */
 export function buildAnnotations(descriptors, opts) {
-  const { M0, frame, patterns = {}, now = new Date().toISOString(), author = "Planyr" } = opts;
+  const { M0, frame, patterns = {}, now = new Date().toISOString(), author = null, ftPerPt = null } = opts;
   const annots = [], skipped = [], degraded = [];
   for (const d of descriptors) {
-    const flat = flattenTree(d.tree, M0, patterns);
+    // a descriptor may carry its OWN matrix and window (the sheet's Buildings table lives on the page, outside the plan window)
+    const flat = flattenTree(d.tree, d.M0 || M0, patterns);
     const items = flat.items;
     flat.degraded.forEach((g) => degraded.push(`${d.family} ${d.id}: ${g}`));
     if (!items.length) { skipped.push({ id: d.id, family: d.family, why: "nothing drawn" }); continue; }
     const full = unionBox(items.map(itemBBox));
-    const rect = intersectBox(full, frame);
+    const rect = intersectBox(full, d.frame || frame);
     if (!rect) { skipped.push({ id: d.id, family: d.family, why: "outside the plan window" }); continue; }
     const ink = items.filter((i) => i.t === "path");
     const main = ink.find((i) => !/leader|callout-box/.test(i.src || "")) || ink[0];
@@ -545,8 +619,8 @@ export function buildAnnotations(descriptors, opts) {
 
     if (d.family === "markup") {
       base.subj = base.subj || SUBJECT[d.kind] || "Markup";
-      const label = items.filter((i) => i.t === "text").map((i) => i.str).join(" ");
-      if (!base.contents && label) base.contents = label;
+      // /Contents is ONLY a comment the person typed (NEW-1, 2026-10-22): the drawn label already lives in /AP, and any
+      // /Contents makes Chrome's and Edge's viewer pop a note box on hover
       if (d.kind === "line" && main) {
         const v = pathVertices(main);
         annots.push({ ...base, subtype: "Line", L: [v[0][0], v[0][1], v[v.length - 1][0], v[v.length - 1][1]], LE: ["None", "None"] });
@@ -573,6 +647,11 @@ export function buildAnnotations(descriptors, opts) {
           for (let i = 0; i < 72; i++) { const t = (i / 72) * 2 * Math.PI; poly.push(...ellipseApprox(main, t)); }
           annots.push({ ...base, subtype: "Polygon", vertices: poly, subj: base.subj + " (rotated)" });
         }
+      } else if (SITE_MARKUP_KINDS.has(d.kind) && main) {
+        // easements / encumbrances / utility routes: drawn site data, editable like any other shape (NEW-1, 2026-10-20)
+        const sp = largestRing(ink);
+        if (sp) annots.push({ ...base, subtype: "Polygon", vertices: sp.flat() });
+        else annots.push({ ...base, subtype: "PolyLine", vertices: pathVertices(main).flat(), LE: ["None", "None"] });
       } else {
         // never silently drop: anything unmapped becomes a Stamp that carries its appearance
         annots.push({ ...base, subtype: "Stamp", subj: base.subj + " (unmapped)" });
@@ -615,26 +694,81 @@ export function buildAnnotations(descriptors, opts) {
         extraLeaders: Math.max(0, runs.length - 1),
         rotated: !!(d.meta && d.meta.rot && d.meta.rot % 90 !== 0) || (d.meta && d.meta.rot % 90 === 0 && d.meta.rot !== 0),
       });
+      // NEW-1 (layout "A") — what a regenerating viewer (Bluebeam/Acrobat editing the annotation) cannot express: a FreeText
+      // has no strikethrough and no vertical alignment. The appearance stream (what shows until then) is correct for both.
+      if (d.meta && (d.meta.strike || d.meta.valignFixed)) degraded.push(`${cl ? "callout" : "text box"} ${d.id}: ${[d.meta.strike ? "strikethrough" : null, d.meta.valignFixed ? "vertical alignment" : null].filter(Boolean).join(" and ")} ${d.meta.strike && d.meta.valignFixed ? "are" : "is"} in the appearance only (a PDF FreeText annotation cannot store ${d.meta.strike && d.meta.valignFixed ? "them" : "it"}; a viewer that regenerates the box will drop ${d.meta.strike && d.meta.valignFixed ? "them" : "it"})`);
       if (runs.length > 1) degraded.push(`callout ${d.id}: ${runs.length - 1} extra leader(s) are drawn in the appearance only (a PDF callout carries one native leader)`);
+    } else if (d.family === "parcel-label") {
+      // a parcel's acreage chip that a lifted site element would otherwise cover: its own small label, never a building's
+      base.subj = base.subj || "Parcel label";
+      annots.push({ ...base, subtype: "Stamp" });
+    } else if (d.family === "sheet-furniture") {
+      /* NEW-1 (2026-10-27) — sheet furniture as its own annotation. Page content is painted UNDER every annotation, so a
+         table / scale bar / north arrow left in the page can be covered by the site's annotations (the owner's Buildings
+         table, "ng 3") and cannot be removed in Bluebeam. A Stamp carries its drawn appearance and is selectable, movable
+         and deletable; it takes no /Contents (a hover note box) and none of the shape fields a Stamp ignores. */
+      base.subj = base.subj || "Sheet furniture";
+      base.color = null; base.ic = null; base.bw = 0; base.dash = []; base.ca = 1;
+      annots.push({ ...base, subtype: "Stamp" });
+    } else if (d.family === "building" || d.family === "element") {
+      /* NEW-2 (2026-10-19) — a building footprint as a native Polygon. The vertices are the model's footprint ring
+         (hints.verts, clone units → PDF through M0, the same path a cloud's real vertices take); the appearance
+         is the whole building group exactly as the flattened sheet paints it (fill, outline, dock doors,
+         dimension, label). Regeneration inputs come from the footprint's own fill and outline, not from the first
+         ink item, which in a dock-door group is a door. */
+      const verts = d.hints && d.hints.verts ? d.hints.verts.map((p) => apply(M0, p.x, p.y)) : null;
+      const outline = ink.find((i) => i.stroke && i.sw > 0 && !i.fill) || ink.find((i) => i.stroke && i.sw > 0) || null;
+      const body = ink.find((i) => i.fill && i.fillA > 0.02) || null;
+      base.subj = base.subj || (d.family === "building" ? "Building" : "Site element");
+      base.color = outline ? rgbOf(outline.stroke) : null; base.bw = outline ? outline.sw : 0; base.dash = outline ? outline.dash || [] : [];
+      base.ic = body ? rgbOf(body.fill) : null;
+      base.ca = body ? body.fillA : outline ? outline.strokeA : 1;
+      if (d.hints && Array.isArray(d.hints.detachedBumpOuts) && d.hints.detachedBumpOuts.length) degraded.push(`building ${d.id}: bump-out(s) ${d.hints.detachedBumpOuts.join(", ")} do not touch the building — drawn in the appearance, outside the Polygon's vertices`);
+      const ring = verts && verts.length >= 3 ? verts : d.family === "element" ? largestRing(ink) : null;
+      if (ring && ring.length >= 3) annots.push({ ...base, subtype: "Polygon", vertices: ring.flat() });
+      else { annots.push({ ...base, subtype: "Stamp", subj: base.subj + " (unmapped)" }); degraded.push(`${d.family} ${d.id}: no outline — written as a Stamp`); }
     } else {
       const mode = d.kind;
       const chip = items.filter((i) => i.t === "text" && /chip|tally/.test(i.src || "") || (i.t === "text" && d.meta && d.meta.chipTexts && d.meta.chipTexts.includes(i.str)));
       const chipLines = (d.meta && d.meta.chipTexts) || [];
       void chip;
       base.subj = base.subj || MEASURE_SUBJECT[mode] || "Measurement";
-      base.contents = base.contents || chipLines.join("\n");
-      if (mode === "area" && main) annots.push({ ...base, subtype: "Polygon", vertices: pathVertices(main).flat() });
+      /* NEW-2 (2026-10-20) — a NATIVE measurement: /IT names the measurement kind and /Measure carries the sheet's scale
+         and Planyr's units (ISO 32000-1 §12.9 + the /IT values of §12.5.6.7/12.5.6.9), so a viewer that regenerates the
+         appearance on a move or reshape (Bluebeam does) can compute and draw the value itself instead of losing it —
+         the area label disappearing on a move was exactly that regeneration with nothing to compute from. */
+      const measureDict = measureDictFor(mode, chipLines, ftPerPt);
+      /* NEW-1 (2026-10-22) — /Contents is the viewer's NOTE (Chrome's and Edge's viewer pops a yellow box for any non-empty
+         one), so a measurement writes the person's own note only. The value is the drawn label in /AP and, for a viewer
+         that regenerates, /Measure. Only when there is no /Measure to compute it from (scale unknown) is the number kept
+         as the caption — the one case where /Contents is the only way to carry it. */
+      const keepValue = !measureDict && mode !== "count" && chipLines.length > 0;
+      if (keepValue) base.contents = chipLines.join("\n");
+      if (mode === "area" && main) {
+        /* NEW-2 (2026-10-22) — Bluebeam REGENERATES a measurement from its dictionary on a move and paints /IC as a SOLID
+           fill: it does not honour /CA as the fill's opacity there (Michael, Bluebeam, area measurement: translucent as
+           exported, an opaque block after the move). A dictionary that names a fill therefore cannot be trusted to stay
+           see-through, so a translucent measurement fill is written to the appearance only (what shows until the viewer
+           rebuilds) and the dictionary carries the outline: a rebuilt measurement is outline + value, never a block over
+           the plan. /CA is then the outline's opacity, not the fill's. Opaque fills (>= 0.95) are unaffected. */
+        if (measureDict && base.ic && base.ca < 0.95) {
+          base.ic = null;
+          base.ca = st.stroke ? st.strokeA : 1;
+          degraded.push(`measure ${d.id}: its translucent fill is in the appearance only (a viewer that rebuilds a measurement, like Bluebeam, paints a stored fill opaque) — after an edit there it keeps the outline and the value`);
+        }
+        annots.push({ ...base, subtype: "Polygon", vertices: pathVertices(main).flat(), IT: measureDict ? "PolygonDimension" : null, measure: measureDict });
+      }
       else if (mode === "count") { annots.push({ ...base, subtype: "Stamp" }); degraded.push(`measure ${d.id}: a count has no native subtype — written as a Stamp`); }
       else if (main) {
         const v = pathVertices(main);
-        // /Cap puts /Contents on the line as a caption, so the number survives a viewer rebuilding the appearance
+        // /Cap puts /Contents on the line as a caption — only when /Measure cannot supply the number (see keepValue)
         if (v.length === 2) {
           // The caption IS /Contents, set in WinAnsi Helvetica by the viewer (no ′ ″) — so write the AP's own stand-ins,
           // and fold a typed note in after the number rather than losing either.
-          const cap = chipLines.length > 0;
+          const cap = keepValue;
           const contents = cap ? winAnsi([chipLines.join(" "), meta.comment].filter(Boolean).join(" — ")).text : base.contents;
-          annots.push({ ...base, contents, subtype: "Line", L: [v[0][0], v[0][1], v[1][0], v[1][1]], LE: ["None", "None"], cap });
-        } else annots.push({ ...base, subtype: "PolyLine", vertices: v.flat(), LE: ["None", "None"] });
+          annots.push({ ...base, contents, subtype: "Line", L: [v[0][0], v[0][1], v[1][0], v[1][1]], LE: ["None", "None"], cap, IT: measureDict ? "LineDimension" : null, measure: measureDict });
+        } else annots.push({ ...base, subtype: "PolyLine", vertices: v.flat(), LE: ["None", "None"], IT: measureDict ? "PolyLineDimension" : null, measure: measureDict });
       } else { annots.push({ ...base, subtype: "Stamp" }); degraded.push(`measure ${d.id}: no line geometry — written as a Stamp`); }
     }
   }
@@ -645,7 +779,18 @@ export function buildAnnotations(descriptors, opts) {
     a.ap = { bbox: a.rect, ...body, patternStreams: body.patterns.map((p) => ({ name: p.name, ...patternStream(p) })) };
     delete a.items;
   }
-  return { annots, skipped, degraded };
+  /* NEW-2 (2026-10-22) — the PAGE's scale. Bluebeam calibrates from a page-level viewport (ISO 32000-1 §12.9.2 /VP): without
+     one, moving or editing a measurement makes it ask the person to set a scale even though every annotation carries
+     /Measure. One viewport over the plan window, carrying the same /Measure the annotations do (feet; areas in sq ft). The
+     page writes it only when a measurement is on it and the sheet's scale is known. */
+  const viewport = ftPerPt > 0 && annots.some((a) => a.measure) ? { bbox: frame.slice(), measure: measureDictFor("area", [], ftPerPt) } : null;
+  return { annots, skipped, degraded, viewport };
+}
+
+/** The page's /VP array text for `viewport` ({bbox, measure}) — empty when there is none. */
+export function viewportEntry(viewport) {
+  if (!viewport || !viewport.measure) return "";
+  return ` /VP [<< /Type /Viewport /BBox ${arr(viewport.bbox)} /Name (Plan) /Measure ${measureDictString(viewport.measure)} >>]`;
 }
 
 function ellipseApprox(it, t) {
@@ -675,8 +820,12 @@ export const pdfTextString = textString;
  * /F 4 = Print only — never ReadOnly (64) or Locked (128): the recipient must be able to edit.
  */
 export function annotationDict(a, apRef) {
-  const f = [`/Type /Annot`, `/Subtype /${a.subtype}`, `/Rect ${arr(a.rect)}`, `/F 4`, `/NM ${textString(a.nm)}`,
-    `/T ${textString(a.title)}`, `/Contents ${textString(a.contents)}`];
+  const f = [`/Type /Annot`, `/Subtype /${a.subtype}`, `/Rect ${arr(a.rect)}`, `/F 4`, `/NM ${textString(a.nm)}`];
+  // NEW-1 (2026-10-22) — Chrome's and Edge's viewer (PDFium) raises its own yellow note box on hover for any annotation of
+  // a text-markup/shape type with a non-empty /Contents, titled by /T. A file's own /Popup annotations are ignored by it, so
+  // the only lever is to not write them: /Contents is the person's typed comment (or a callout's text), /T the author if known.
+  if (a.title) f.push(`/T ${textString(a.title)}`);
+  if (a.contents) f.push(`/Contents ${textString(a.contents)}`);
   if (a.subj) f.push(`/Subj ${textString(a.subj)}`);
   if (a.modified) f.push(`/M (${a.modified})`);
   if (a.created) f.push(`/CreationDate (${a.created})`);
@@ -698,6 +847,7 @@ export function annotationDict(a, apRef) {
     f.push(`/DS ${textString(`font: Helvetica ${n3(a.DA.size)}pt; text-align:${["left", "center", "right"][a.Q]}`)}`);
     if (a.CL) f.push(`/CL ${arr(a.CL)}`, `/LE /${a.LE}`);
   }
+  if (a.measure && a.IT && a.subtype !== "FreeText") f.push(`/IT /${a.IT}`, `/Measure ${measureDictString(a.measure)}`);
   if (a.subtype === "Stamp") f.push(`/Name /Planyr`);
   f.push(`/AP << /N ${apRef} >>`);
   return `<< ${f.join(" ")} >>`;

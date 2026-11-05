@@ -229,12 +229,13 @@ describe("HARD RULE — coverage never alters a layer's request", () => {
 
 // ---------------------------------------------------------------------------
 describe("relevance prefs — normalize/clamp (NEW-2)", () => {
-  it("mode normalizes to a known mode, defaulting to dim", () => {
-    expect(RELEVANCE_MODES).toEqual(["all", "dim", "hide"]);
-    expect(DEFAULT_RELEVANCE).toBe("dim");
+  it("mode normalizes to a known mode, defaulting to Show; a stored 'dim' reads as Show (NEW-2)", () => {
+    expect(RELEVANCE_MODES).toEqual(["all", "hide"]);
+    expect(DEFAULT_RELEVANCE).toBe("all");
     expect(normalizeMode("hide")).toBe("hide");
-    expect(normalizeMode("bogus")).toBe("dim");
-    expect(normalizeMode(undefined)).toBe("dim");
+    expect(normalizeMode("dim")).toBe("all");      // the old default, and the old third option
+    expect(normalizeMode("bogus")).toBe("all");
+    expect(normalizeMode(undefined)).toBe("all");
   });
   it("radius clamps to a sane mileage and defaults to ~2.5", () => {
     expect(DEFAULT_RADIUS_MI).toBe(2.5);

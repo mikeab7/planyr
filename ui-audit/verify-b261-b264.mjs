@@ -6,7 +6,7 @@
  *   B264 — per-plan delete (inline confirm), never the last plan.
  * Seeds a plan with two separate elements (a building + a parking field), boots the
  * planner logged-out, and drives the SVG canvas + header menus.
- * Plan-style fills: building #f3ece1 · parking #cdd7dd */
+ * Plan-style fills: building #f3ece1 · parking #d6e5f2 */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
@@ -97,20 +97,20 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
   // --- B262: a plain drag flush onto a neighbour must NOT bond them ---
   await fit();
-  let b = await centerOf("#f3ece1"), p = await centerOf("#cdd7dd");
+  let b = await centerOf("#f3ece1"), p = await centerOf("#d6e5f2");
   log(!!b && !!p, `two separate elements present (building ${!!b}, parking ${!!p})`);
   // drag the building toward the parking (flush), then drag it back away; parking must stay put
-  const pBefore = await centerOf("#cdd7dd");
+  const pBefore = await centerOf("#d6e5f2");
   await drag(b, { x: p.x - 140, y: p.y });           // building snaps flush near parking
   b = await centerOf("#f3ece1");
   await drag(b, { x: b.x - 220, y: b.y - 120 });      // pull the building away again
-  const pAfter = await centerOf("#cdd7dd");
+  const pAfter = await centerOf("#d6e5f2");
   const parkMoved = Math.hypot(pAfter.x - pBefore.x, pAfter.y - pBefore.y);
   log(parkMoved < 8, `B262 flush drag did NOT bond — parking stayed put while building moved away (parking Δ=${parkMoved.toFixed(1)}px)`);
 
   // --- B261: Group two elements → move as one unit → ungroup ---
   await fit();
-  b = await centerOf("#f3ece1"); p = await centerOf("#cdd7dd");
+  b = await centerOf("#f3ece1"); p = await centerOf("#d6e5f2");
   await page.keyboard.press("Escape"); await page.waitForTimeout(150); // clear any selection
   await shiftClick(b); await shiftClick(p);
   const grpBtn = await clickByTitle(/Group the selected items/);
@@ -122,9 +122,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
   // move the group as one unit: click empty, then drag the building — BOTH should move
   await page.keyboard.press("Escape"); await page.waitForTimeout(150);
-  const b0 = await centerOf("#f3ece1"), p0 = await centerOf("#cdd7dd");
+  const b0 = await centerOf("#f3ece1"), p0 = await centerOf("#d6e5f2");
   await drag(b0, { x: b0.x + 60, y: b0.y + 90 });
-  const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#cdd7dd");
+  const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#d6e5f2");
   const bMoved = Math.hypot(b1.x - b0.x, b1.y - b0.y), pMoved = Math.hypot(p1.x - p0.x, p1.y - p0.y);
   log(bMoved > 30 && pMoved > 30, `B261 dragging one member moved the WHOLE group (building Δ=${bMoved.toFixed(0)}px, parking Δ=${pMoved.toFixed(0)}px)`);
 
@@ -134,9 +134,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   const unBtn = await clickByTitle(/Ungroup/);
   log(!!unBtn && !(await hasGroupBox()), `B261 Ungroup removes the group box (clicked "${unBtn}")`);
   await page.keyboard.press("Escape"); await page.waitForTimeout(150);
-  const ub0 = await centerOf("#f3ece1"), up0 = await centerOf("#cdd7dd");
+  const ub0 = await centerOf("#f3ece1"), up0 = await centerOf("#d6e5f2");
   await drag(ub0, { x: ub0.x - 70, y: ub0.y });
-  const up1 = await centerOf("#cdd7dd");
+  const up1 = await centerOf("#d6e5f2");
   log(Math.hypot(up1.x - up0.x, up1.y - up0.y) < 8, "B261 after Ungroup, members move independently again");
 
   await page.screenshot({ path: OUT + "b261-groups.png" });
@@ -170,19 +170,23 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   const rows0 = await planRows();
   log(rows0 >= 2, `B264 two plans listed in the Plan menu (${rows0})`);
 
-  // click the ✕ delete on a plan row → inline confirm appears, then click Delete
-  const armed = await page.evaluate(() => { const x = [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").startsWith("Delete plan")); if (x) { x.click(); return true; } return false; });
+  // NEW-1 (2026-11-04): the ✕ on a plan row is gone — Delete plan is in the row's ⋯ menu. Open the ⋯ of a plan in the list → Delete plan → inline confirm appears, then click Delete
+  const armed = await page.evaluate(() => { const m = document.querySelector('[data-testid="plan-list-scroll"] [data-testid^="plan-more-"]'); if (m) { m.click(); return true; } return false; });
+  await page.waitForTimeout(250);
+  const armed2 = await page.evaluate(() => { const d = document.querySelector('[data-testid="plan-ctx-delete"]'); if (d) { d.click(); return true; } return false; });
   await page.waitForTimeout(250);
   const hasConfirm = await page.evaluate(() => [...document.querySelectorAll("*")].some((n) => /Delete .“|Delete “/.test(n.textContent || "") && n.children.length < 6));
-  log(armed && hasConfirm, `B264 ✕ shows an inline "Delete …?" confirm (no browser dialog)`);
+  log(armed && armed2 && hasConfirm, `B264 ⋯ → Delete plan shows an inline "Delete …?" confirm (no browser dialog)`);
   await page.evaluate(() => { const d = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Delete"); if (d) d.click(); });
   await page.waitForTimeout(700);
   await openPlanMenu();
   const rows1 = await planRows();
   log(rows1 === rows0 - 1, `B264 a single plan was deleted (rows ${rows0} → ${rows1}); the app stayed alive`);
-  // the only remaining plan must have NO ✕ (can't delete the last plan)
-  const lastHasX = await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => (b.getAttribute("aria-label") || "").startsWith("Delete plan")));
-  log(!lastHasX, "B264 the last remaining plan has no delete affordance (can't delete the only plan)");
+  // the only remaining plan's ⋯ must NOT offer Delete plan (can't delete the last plan)
+  await page.evaluate(() => { const m = document.querySelector('[data-testid^="plan-more-"]'); if (m) m.click(); });
+  await page.waitForTimeout(250);
+  const lastHasDelete = await page.evaluate(() => !!document.querySelector('[data-testid="plan-ctx-delete"]'));
+  log(!lastHasDelete, "B264 the last remaining plan has no delete affordance (can't delete the only plan)");
 
   await page.screenshot({ path: OUT + "b264-plan-delete.png" });
   console.log(errors.length ? `PHASE2 page errors:\n${errors.slice(0, 6).join("\n")}` : "(phase2: no page errors)");

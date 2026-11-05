@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import { mayHealMissingOverlay, overlayLoadReason, overlayKeyOwner } from "../src/workspaces/site-planner/lib/overlayHeal.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const OWNER = "b0000000-0000-4000-8000-000000000001";
 const MATE = "b0000000-0000-4000-8000-000000000002";
@@ -55,7 +56,7 @@ describe("heal guard — the reader's OWN folder only", () => {
 });
 
 describe("the planner uses the guard — the old ungated heal cannot come back", () => {
-  const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("the only storageMissing heal is gated on mayHealMissingOverlay", () => {
     const heals = src.match(/storageKey:\s*null,\s*storageMissing:\s*true/g) || [];
     expect(heals.length).toBe(1);

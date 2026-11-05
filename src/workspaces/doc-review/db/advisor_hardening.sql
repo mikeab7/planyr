@@ -19,16 +19,25 @@
 -- real owner (user_id/team_id) and requires an authenticated, owner-or-team-scoped request,
 -- same as every other table in this app. Do not re-add an anon policy to any of the three.
 
+-- B2404337 (2026-10-21): body kept byte-identical to project_folders.sql / project_folders_insert_guard.sql
+-- — the guard now also fires on INSERT; re-running this file must never downgrade it to UPDATE-only.
 create or replace function public.project_folders_guard_drive_cols()
 returns trigger language plpgsql set search_path = pg_catalog as $$
 begin
-  if current_user = 'authenticated' and (
-       new.drive_folder_id is distinct from old.drive_folder_id
-    or new.drive_parent_id is distinct from old.drive_parent_id
-    or new.drive_name      is distinct from old.drive_name
-    or new.drive_trashed   is distinct from old.drive_trashed
-  ) then
-    raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+  if current_user = 'authenticated' then
+    if tg_op = 'INSERT' then
+      if new.drive_folder_id is not null
+         or new.drive_parent_id is not null
+         or new.drive_name is not null
+         or new.drive_trashed then
+        raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+      end if;
+    elsif new.drive_folder_id is distinct from old.drive_folder_id
+       or new.drive_parent_id is distinct from old.drive_parent_id
+       or new.drive_name      is distinct from old.drive_name
+       or new.drive_trashed   is distinct from old.drive_trashed then
+      raise exception 'drive_* columns are server-managed (use folder_set_drive_meta)';
+    end if;
   end if;
   return new;
 end $$;

@@ -14,6 +14,7 @@ import {
 import { gridRequest, pixelToLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { channelCell, flowBearing, gridCellFt, siteMaskFromLatLngRings } from "../src/workspaces/site-planner/lib/channelSection.js";
 import { flowAccumulation } from "../src/workspaces/site-planner/lib/upstreamArea.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* Does the fine grid genuinely have NO D8 direction at the crossing it would pick INSIDE THE SITE?
  * Used to prove the pit fixture below actually reproduces the real-data defect rather than passing
@@ -378,7 +379,7 @@ describe("screeningDeclined — the named state + reason-specific implication", 
  * The combination that produced the silence: study attempted + honest unknown + an elevation ALREADY
  * COMMITTED. */
 describe("B1089 regression — a committed estimate cannot suppress the decline", () => {
-  const jsx = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+  const jsx = plannerSource();
 
   it("the decline line's render condition does NOT depend on bfeFt being absent", () => {
     // The old bug shape, verbatim, must be gone from the est-BFE line: it gated the whole fact on
@@ -391,7 +392,7 @@ describe("B1089 regression — a committed estimate cannot suppress the decline"
   });
 
   it("SitePlanner actually calls screeningDeclined — the engine state reaches the panel", () => {
-    expect(jsx).toMatch(/screeningDeclined,/);                 // imported
+    expect(jsx).toMatch(/import \{[^}]*\bscreeningDeclined\b[^}]*\}/);  // imported (the Drainage panel's own import list since B1064)
     expect(jsx).toMatch(/screeningDeclined\(fm\.screening\)/); // and called on the live result
   });
 

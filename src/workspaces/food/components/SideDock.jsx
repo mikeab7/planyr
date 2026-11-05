@@ -22,8 +22,8 @@ import { currentKeyboardInset, visualViewportBox } from "../lib/keyboardInset.js
 import { SIDE_CARD_CSS_WIDTH } from "../lib/phoneLayout.js";
 import { publishSideDockWidth } from "../../../shared/ui/bottomSheetTracker.js";
 import { TYPING_CSS, FORM_OPEN_CSS } from "./BottomSheet.jsx";
+import { opensKeyboard } from "../lib/textEntry.js";
 
-const TEXT_ENTRY = /^(INPUT|TEXTAREA|SELECT)$/;
 const REVEAL_MARGIN = 12;
 const WATCH_MS = 120;
 // The four score tiles (Food / Ambiance / Visits / Cost) need ~70 px each; in a card narrower than ~4 of them they
@@ -51,7 +51,7 @@ export default function SideDock({ children, onWidthChange }) {
 
   const reveal = useCallback((el) => {
     const sc = scrollRef.current;
-    if (!sc || !el || !sc.contains(el) || !TEXT_ENTRY.test(el.tagName)) return;
+    if (!sc || !el || !sc.contains(el) || !opensKeyboard(el)) return;
     const b = sc.getBoundingClientRect();
     const vv = window.visualViewport;
     const lo = Math.max(b.top, vv ? vv.offsetTop : b.top) + REVEAL_MARGIN;
@@ -66,7 +66,7 @@ export default function SideDock({ children, onWidthChange }) {
 
   const measure = useCallback(() => {
     const a = document.activeElement;
-    const kb = a && TEXT_ENTRY.test(a.tagName) && currentKeyboardInset() > 0;
+    const kb = a && opensKeyboard(a) && currentKeyboardInset() > 0;
     const next = kb ? visualViewportBox() : null;
     const prev = boxRef.current;
     if (next && prev ? next.top === prev.top && next.height === prev.height : next === prev) return;
@@ -89,14 +89,14 @@ export default function SideDock({ children, onWidthChange }) {
   }, [typing, measure]);
 
   const onFocusIn = useCallback((e) => {
-    if (!TEXT_ENTRY.test(e.target.tagName)) return;
+    if (!opensKeyboard(e.target)) return;
     setTyping(true);
     for (const ms of [0, 120, 350, 700]) setTimeout(() => { if (document.activeElement === e.target) { measure(); reveal(e.target); } }, ms);
   }, [measure, reveal]);
   const onFocusOut = useCallback(() => {
     setTimeout(() => {
       const a = document.activeElement;
-      setTyping(!!(a && TEXT_ENTRY.test(a.tagName) && rootRef.current?.contains(a)));
+      setTyping(!!(a && opensKeyboard(a) && rootRef.current?.contains(a)));
       measure();
     }, 0);
   }, [measure]);

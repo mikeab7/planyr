@@ -174,7 +174,7 @@ describe("planPageSeed — which copy wins", () => {
       state: state({ pages: { p1: { rev: 4, dirty: false, purged: false } } }),
       localIds: ["p1"],
     });
-    expect(plan).toEqual({ adopt: [], conflicts: [], upload: [], purged: [] });
+    expect(plan).toEqual({ adopt: [], conflicts: [], upload: [], repurge: [], purged: [] });
   });
 
   it("a page the SERVER HAS NEVER SEEN: LOCAL wins and is uploaded with no base revision", () => {

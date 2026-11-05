@@ -3,6 +3,7 @@
  * Walks: 2 points -> Done off, reason shown · 3 points -> Done on · Done saves the triangle drawn ·
  * 6 points -> Done saves the hexagon · undo 3->2 -> Done off again · explicit Enter-close still works. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { openCropEditor, clearCrop, cropOff, cropState } from "./lib/overlayCropPanel.mjs";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -48,20 +49,20 @@ const openPlan = async (url) => {
   await page.waitForTimeout(500);
 };
 const stored = () => page.evaluate(() => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.W1 && raw.W1.sheetOverlays.find((x) => x.id === "ovW");
   return o ? (o.crop ?? null) : undefined;
 });
 const waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 const openCrop = async () => {
-  if (!(await page.locator('[data-testid="overlay-crop-open"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
-  await page.locator('[data-testid="overlay-crop-open"]').click();
+  if (!(await page.locator('[data-testid^="overlay-crop-switch-"]').count())) await page.locator("button", { hasText: ov.name }).first().click();
+  await openCropEditor(page);
   await page.waitForTimeout(600);
 };
 const imgBox = () => dlg.locator("img").first().boundingBox();
 const viewBox = () => dlg.locator("img").first().evaluate((img) => { const r = img.parentElement.parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
-const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-pct"]').textContent(), 10);
+const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-100"]').textContent(), 10);
 const vertexCount = () => dlg.locator('[data-testid^="crop-poly-vertex-"]').count();
 // screen position of an IMAGE FRACTION, read from the image's own live box — valid at any pan/zoom
 const at = async (fx, fy) => { const b = await imgBox(); return { x: b.x + fx * b.width, y: b.y + fy * b.height }; };
@@ -72,6 +73,16 @@ const clickAt = async (fx, fy, label) => {
   await page.mouse.click(p.x, p.y); await page.waitForTimeout(250);
 };
 const done = () => dlg.locator('[data-testid="crop-done"]');
+/* Clear polygon is gone: to get a fresh EMPTY trace from an overlay that already has a saved crop,
+ * open it, "Reset to full page", Done (saves crop null), reopen, then choose Polygon (an empty open draw). */
+const freshPolyTrace = async () => {
+  await openCrop();
+  await dlg.locator('[data-testid="crop-reset"]').click(); await page.waitForTimeout(200);
+  await done().click();
+  await waitStored((c) => c === null);
+  await openCrop();
+  await dlg.getByRole("button", { name: "Polygon", exact: true }).click(); await page.waitForTimeout(200);
+};
 
 await openPlan(BASE);
 
@@ -107,7 +118,7 @@ let s = await waitStored((c) => c && c.kind === "poly");
 check("Done saved a closed 3-point polygon in image px = the triangle drawn", s && s.kind === "poly" && matches(s.pts, T), JSON.stringify(s && s.pts && s.pts.map((p) => p.map(Math.round))));
 
 /* six points */
-await openCrop(); await dlg.locator('[data-testid="crop-clear-polygon"]').click(); await page.waitForTimeout(200);
+await freshPolyTrace();
 const HEX = [[0.08, 0.30], [0.30, 0.08], [0.70, 0.08], [0.92, 0.30], [0.92, 0.85], [0.08, 0.85]];
 for (let i = 0; i < 6; i++) await clickAt(HEX[i][0], HEX[i][1], `h${i + 1}`);
 check("six points: Done on, six open circles", (await done().isEnabled()) && (await dlg.locator("svg circle").count()) === 6);
@@ -116,7 +127,7 @@ s = await waitStored((c) => c && c.kind === "poly" && c.pts.length === 6);
 check("Done saved the 6-point hexagon", s && matches(s.pts, HEX), JSON.stringify(s && s.pts && s.pts.length));
 
 /* explicit close paths still work */
-await openCrop(); await dlg.locator('[data-testid="crop-clear-polygon"]').click(); await page.waitForTimeout(200);
+await freshPolyTrace();
 for (const p of T) await clickAt(p[0], p[1], "e");
 await page.keyboard.press("Enter"); await page.waitForTimeout(250);
 check("Enter still closes explicitly (3 draggable vertex handles)", (await vertexCount()) === 3);

@@ -37,7 +37,7 @@ try {
   console.log("served build:", JSON.stringify(s.build));
   if (want && !JSON.stringify(s.build).includes(want)) throw new Error(`deployed build does not contain ${want} yet`);
   await page.evaluate(async ([a, b, gid]) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     for (const r of [a, b]) {
       all[r.id] = r;
       const e = await window.pfSupabase.from("sites").upsert({ id: r.id, group_id: gid, site: r.site, name: r.name, county: "harris", updated_at: new Date().toISOString(), data: r });
@@ -96,7 +96,7 @@ try {
   /* ---- plan B: listed hidden, not drawn ---- */
   await openPlan(B);
   await until(async () => (await F("status")) !== undefined, "planner hook present on B", 30000).catch(async (e) => { console.log("URL:", page.url(), "canvas:", await page.getByTestId("planner-canvas").count(), "body:", (await page.locator("body").innerText()).slice(0, 300).replace(/\n/g, " | ")); await page.screenshot({ path: "/tmp/claude-0/sib-fail.png" }); throw e; });
-  console.log("B status before wait:", JSON.stringify(await F("status")), "A in db:", (await dbOverlays(A) || []).length, "B grp:", JSON.stringify(await page.evaluate(() => { try { const o = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return o["zz-sibling-ovl-b"] && o["zz-sibling-ovl-b"].groupId; } catch (e) { return String(e); } })));
+  console.log("B status before wait:", JSON.stringify(await F("status")), "A in db:", (await dbOverlays(A) || []).length, "B grp:", JSON.stringify(await page.evaluate(() => { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return o["zz-sibling-ovl-b"] && o["zz-sibling-ovl-b"].groupId; } catch (e) { return String(e); } })));
   await openPanel();
   await until(async () => (await foreignRowsUI().count()) >= 2, "foreign rows render in the real panel");
   const r1 = (await F("rows")) || [];
@@ -175,7 +175,7 @@ finally {
           await new Promise((r) => setTimeout(r, 1500));
         }
         if (keys.length) { const r = await window.pfSupabase.storage.from("doc-review-files").remove(keys); out.storage = r.error ? String(r.error.message) : "removed"; }
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const left = await window.pfSupabase.from("sites").select("id").in("id", ids);
         out.remaining = (left.data || []).length;

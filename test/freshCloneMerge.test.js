@@ -33,7 +33,7 @@ const softGit = (cwd, ...args) => { try { return git(cwd, ...args); } catch { re
 const porcelain = (dir) => spawnSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" }).stdout;
 
 /* Real, dependency-free generator scripts, copied byte-for-byte — no fixture reimplementation. */
-const SCRIPT_FILES = ["lib/ledger.mjs", "build-map.mjs", "build-backlog-index.mjs"];
+const SCRIPT_FILES = ["lib/ledger.mjs", "lib/ledgerBranch.mjs", "build-map.mjs", "build-backlog-index.mjs"];
 
 /** A bare fresh clone: `git init`, the REAL committed `.gitattributes`, and the real generator
  *  scripts. Deliberately NOTHING else — no `.githooks`, no `installHooks`/`installMergeDriver`/

@@ -4,16 +4,16 @@
  * typed in bulk, Structure folding, and the new outline width/opacity (drawn, persisted, exported).
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-rethink.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks, panelPlus } from "./helpers.js";
+import { armPlannerHooks, panelPlus, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const buildings = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.type === "building" && !e.dogEar);
 });
 const kids = (page, id) => page.evaluate((hid) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.attachedTo === hid);
 }, id);
@@ -133,22 +133,27 @@ test("wall picker at a non-zero rotation: labels, clicks and the painted aprons 
   await expect.poll(() => buildings(page).then((x) => x[0].dock)).toBe("single");
 });
 
-test("dock row: add layers with the +, edit a depth in the chip's editor, Remove takes that layer and everything outside it", async ({ page }) => {
+test("dock row: add layers with the +, edit a trailer row's depth in the piece's edit box, the bin takes ONLY that piece (the buffer outside it stays)", async ({ page }) => {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
   await expect.poll(() => buildings(page).then((b) => b.length)).toBe(1);
   const [b] = await buildings(page);
   await openProps(page, b.id);
   const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
-  for (const key of ["court", "trailer", "buffer"]) { await dock.getByTestId("wall-add").click(); await page.getByTestId(`wall-add-${key}`).click(); }
-  await expect(dock.getByTestId("wall-chip")).toHaveCount(3);
-  await dock.getByTestId("wall-chip").nth(1).click();                       // the trailer chip opens its editor
-  const depth = page.getByLabel("Depth", { exact: true });
+  for (const key of ["court", "trailer", "buffer"]) await addWallLayer(dock, key);
+  await expect(dock.getByTestId("wall-piece")).toHaveCount(3);
+  await dock.getByTestId("wall-piece").nth(1).click();                       // the trailer piece opens its edit box
+  const depth = page.getByLabel("Trailer depth");
   await depth.fill("70"); await depth.press("Enter");
   await expect.poll(async () => (await kids(page, b.id)).find((k) => k.type === "trailer")?.zd).toBe(70);
-  await page.getByTestId("wall-editor-remove").click();                      // trailer + the buffer outside it
-  await expect(dock.getByTestId("wall-chip")).toHaveCount(1);
-  expect((await kids(page, b.id)).filter((k) => k.truckCourt || k.forCourt || k.forTrailer).length).toBe(1);
+  await page.getByTestId("wall-piece-remove").click();                       // ONLY the trailer: the buffer keeps its depth and moves in
+  await expect(dock.getByTestId("wall-piece")).toHaveCount(2);
+  const after = await kids(page, b.id);
+  expect(after.some((k) => k.type === "trailer")).toBe(false);
+  const court = after.find((k) => k.truckCourt), buf = after.find((k) => k.buffer);
+  expect(court && buf).toBeTruthy();
+  expect(buf.prevZone).toBe(court.id);
+  expect(buf.forTrailer).toBeUndefined();
 });
 
 test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove clears; Structure folds", async ({ page }) => {
@@ -158,14 +163,14 @@ test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove cle
   const [b] = await buildings(page);
   await openProps(page, b.id);
   const rear = page.locator('[data-testid="wall-row"][data-role="rear"]');
-  await rear.getByTestId("wall-add").click(); await page.getByTestId("wall-add-parking").click();
+  await addWallLayer(rear, "parking");
   const rows = page.getByLabel("Parking rows");
   await rows.fill("8"); await rows.press("Enter");
   await expect(rows).toHaveValue("8");
   const park = async () => (await kids(page, b.id)).filter((k) => k.type === "parking" && k.sideParkSide);
   await expect.poll(async () => (await park()).length).toBeGreaterThan(0);
   // 8 rows: 8 stall rows + ceil(8/2) aisles (poll — the add lands one row first, the typed 8 replaces it)
-  const cfg = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
+  const cfg = await page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
   const sd = cfg.stallDepth ?? 18, ai = cfg.aisle ?? 24;
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * sd + 4 * ai);
   // one commit: a single undo takes all of it back (blur the field first — Enter keeps focus, and a focused field owns Ctrl+Z)
@@ -174,7 +179,7 @@ test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove cle
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(sd + ai);           // back to the one row the + added
   await page.keyboard.press("Control+Shift+z");
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * sd + 4 * ai);
-  await page.getByTestId("wall-editor-remove").click();
+  await page.getByTestId("wall-piece-remove").click();
   await expect.poll(async () => (await park()).length).toBe(0);
   // Structure is closed by default and summarises; opening shows the rows and the Standards pointer
   const structure = page.getByRole("button", { name: /Structure/ });

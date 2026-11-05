@@ -23,6 +23,7 @@
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
 import { useProjectName } from "../../shared/names/names.js";
+import { isFileDrag, dropWasHandled, markDropHandled } from "../../shared/files/fileDrag.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
@@ -251,6 +252,23 @@ export default function Library({
   // signed-out / pick-a-project states, so the rail simply doesn't mount there.
   const folderMode = !crossProject && !!projectId && signedIn;
 
+  // A file dropped on the Library HOME (no project open, so no FileBrowser to take it) is refused
+  // out loud — the browser's own drop action (a download) is already blocked by the shared guard,
+  // and a silent no-op would read as the drop being lost (NEW-1).
+  const atHome = signedIn && !projectId && !crossProject && !orgScope;
+  const [homeDrop, setHomeDrop] = useState(null);
+  useEffect(() => {
+    if (!atHome || !isActive) { setHomeDrop(null); return undefined; }
+    const h = (e) => {
+      if (!isFileDrag(e) || dropWasHandled(e)) return;
+      markDropHandled(e);
+      const names = Array.from(e.dataTransfer?.files || []).map((f) => f.name).filter(Boolean);
+      setHomeDrop(`Couldn't add ${names.length === 1 ? `“${names[0]}”` : names.length ? `${names.length} files` : "that"} — open a project first (pick one below), then drop it there.`);
+    };
+    window.addEventListener("drop", h);
+    return () => window.removeEventListener("drop", h);
+  }, [atHome, isActive]);
+
   return (
     <div data-testid="library-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--surface-page)", position: "relative" }}>
       <AppHeader
@@ -276,6 +294,16 @@ export default function Library({
         // must not show. (multiEditOk = the caller supports concurrent editing; see AppHeader.)
         multiEditOk
       />
+
+      {homeDrop && (
+        <div role="alert" data-testid="library-home-drop-notice" style={{
+          flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12,
+          borderBottom: "1px solid var(--warn-border)", color: "var(--warn-text)", background: "var(--warn-bg)",
+        }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{homeDrop}</span>
+          <button onClick={() => setHomeDrop(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "none", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
 
       {migrate.status !== "idle" && (
         <div role={migrate.status === "error" ? "alert" : "status"} style={{

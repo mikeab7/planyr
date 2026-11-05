@@ -28,8 +28,8 @@ import { bandedStorage, bermFillVolume } from "./pondGeom.js";
 import { maxInwardOffset } from "./pondOffset.js";
 import { BERM_MAX_RAISE_FT } from "./ledgerBalancer.js";
 import { mitigationCredit } from "./pondLedger.js";
+import { CF_PER_ACFT } from "../../../shared/units/areaUnits.js";
 
-const AC_FT = 43560;
 const EST_PROVIDERS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]); // B882 — every estimate provider stamps
 
 const detOf = (det = {}) => ({
@@ -102,7 +102,7 @@ export function solveMitigationGrow({ ring, det, wseFt, targetCf, maxFactor = 3,
     if (candAt(mid) >= targetCf) hi = mid; else lo = mid;
   }
   const baseSf = ringAreaSf(ring);
-  return { ok: true, factor: hi, addAcres: (baseSf * (hi * hi - 1)) / AC_FT };
+  return { ok: true, factor: hi, addAcres: (baseSf * (hi * hi - 1)) / CF_PER_ACFT };
 }
 
 /* Solve the smallest TOB raise h (floor HELD: depth grows with the TOB, the
@@ -272,7 +272,7 @@ export function sizePondForTargets({
   // NEW-21 — the pond has a below-flood cut but it earns NO mitigation credit (role or berm seal).
   // No dig closes it; the caller names the reason + the ungate options (never a false "sized toward").
   if (mitShort > 0 && mitGated) {
-    actions.push({ kind: "mitigation-gated", reason: mitGated, candidateAcFt: mit0 / AC_FT, targetAcFt: mitTarget / AC_FT });
+    actions.push({ kind: "mitigation-gated", reason: mitGated, candidateAcFt: mit0 / CF_PER_ACFT, targetAcFt: mitTarget / CF_PER_ACFT });
   }
 
   return {

@@ -110,3 +110,33 @@ describe("source guards", () => {
     expect(tr).toMatch(/EL\.request\(url, params, wrapped, svc\)/);
   });
 });
+
+/* NEW-1 (Select parcels drew ONE lot in Tennessee) — RED-PROOF: before `ensureFeatureIds`, Rutherford County's hosted FeatureServer `f=geojson` answer
+ * (features with NO top-level `id`, recorded shape) left every feature's id undefined, so `layer._layers[gj.id]` held one lot for the whole view. */
+import { ensureFeatureIds, geometryKey } from "../src/workspaces/site-planner/lib/parcelQueryWire.js";
+describe("ensureFeatureIds — a lot is never keyed `undefined`", () => {
+  const ring = (x) => ({ type: "Polygon", coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 0]]] });
+  const rutherford = () => [
+    { type: "Feature", geometry: ring(0), properties: { OBJECTID: 60186, ParcelID: "151-087.01-000" } },
+    { type: "Feature", geometry: ring(5), properties: { OBJECTID: 88320, ParcelID: "156-003.00-000" } },
+  ];
+  it("gives an id-less geojson feature its OBJECTID, one distinct id per lot", () => {
+    const f = ensureFeatureIds(rutherford());
+    expect(f.map((x) => x.id)).toEqual([60186, 88320]);
+  });
+  it("a server-supplied id is never touched", () => {
+    const f = ensureFeatureIds([{ id: 7, geometry: ring(0), properties: { OBJECTID: 9 } }]);
+    expect(f[0].id).toBe(7);
+  });
+  it("no id-like property either: a stable geometry hash, distinct per lot and equal for the same lot", () => {
+    const mk = () => [{ geometry: ring(0), properties: { ParcelID: "a" } }, { geometry: ring(5), properties: { ParcelID: "b" } }];
+    const a = ensureFeatureIds(mk()), b = ensureFeatureIds(mk());
+    expect(a[0].id).not.toBe(a[1].id);
+    expect(a[0].id).toBe(b[0].id);
+    expect(a[0].id).toBe(geometryKey(ring(0)));
+  });
+  it("every id in a batch of 50 id-less lots is distinct", () => {
+    const f = ensureFeatureIds(Array.from({ length: 50 }, (_, i) => ({ geometry: ring(i * 3), properties: {} })));
+    expect(new Set(f.map((x) => x.id)).size).toBe(50);
+  });
+});

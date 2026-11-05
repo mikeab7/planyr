@@ -13,7 +13,13 @@
  * NOT flattened; there is exactly one rule ("active control fill = the surface's interactive
  * accent, --accent unless the host overrides").
  */
-import { forwardRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useState } from "react";
+import { NO_AUTOFILL } from "./noAutofill.js";
+import { stepListIndex, listboxKeyAction, listboxOptionId } from "./listboxNav.js";
+// B2499520 — the typeahead-list behaviour is a control primitive like the rest, and it is DEFINED here on purpose (not in a module of its
+// own): a module reached by the Site and Food routes but not by the same set as `controls` becomes a Site-route chunk of its own and the
+// chunk is then NAMED after it — a new name fails the Site-route allowlist. Pure rules: listboxNav.js; highlight style re-exported below.
+export { listboxRowStyle } from "./listboxNav.js";
 // The single source of the control scale. Radius 8 is the median of the pre-convergence
 // spread (6/7/8/9) and already the Site Planner chip/iconBtn value — the smallest net move.
 /* ⛔ B427411 — THESE THREE AGREE WITH `shared/ui/radius.js` BY VALUE, AND THEY STAY LITERAL.
@@ -129,7 +135,7 @@ export const Button = forwardRef(function Button({ variant = "primary", size = "
 export function ToggleChip({ active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
   return (
     <button style={{
-      padding: "6px 11px", fontSize: FONT.sm, borderRadius: CONTROL_RADIUS.pill, cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
+      padding: "6px 11px", fontSize: FONT.sm, borderRadius: CONTROL_RADIUS.pill, cursor: rest.disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)",
@@ -154,7 +160,7 @@ export function ToggleChip({ active = false, accent = "var(--accent)", onAccent 
  * `--on-accent-*`, never a bare colour). Options: { key, label, title?, testid? }. */
 // nestedIn(8, 2) — the concentric inner radius for a segment inside the md shell (= RADIUS.sm, 6).
 const SEGMENT_RADIUS = 6;
-export function SegmentedControl({ options, value, onChange, accent = "var(--accent)", onAccent = "var(--on-accent)", style, ...rest }) {
+export function SegmentedControl({ options, value, onChange, accent = "var(--accent)", onAccent = "var(--on-accent)", style, segmentStyle, ...rest }) {
   return (
     <div role="group" style={{
       display: "inline-flex", flex: "none", boxSizing: "border-box", height: SIZE.md.height, padding: 1,
@@ -164,11 +170,11 @@ export function SegmentedControl({ options, value, onChange, accent = "var(--acc
         const on = o.key === value;
         return (
           <button
-            key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={on} title={o.title} data-testid={o.testid}
+            key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={on} title={o.title} data-testid={o.testid} disabled={!!o.disabled}
             style={{
-              border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: FONT.md, fontWeight: on ? 700 : 600,
+              border: "none", cursor: o.disabled ? "default" : "pointer", opacity: o.disabled ? 0.5 : 1, fontFamily: "inherit", fontSize: FONT.md, fontWeight: on ? 700 : 600,
               height: "100%", padding: "0 12px", borderRadius: SEGMENT_RADIUS,
-              background: on ? accent : "transparent", color: on ? onAccent : "var(--text-primary)",
+              background: on ? accent : "transparent", color: on ? onAccent : "var(--text-primary)", ...segmentStyle,
             }}
           >
             {o.label}
@@ -179,6 +185,41 @@ export function SegmentedControl({ options, value, onChange, accent = "var(--acc
   );
 }
 
+/* FloatingToolbar / FloatingToolButton / FloatingToolDivider — the DARK variant (NEW-1, 2026-10-15, owner-approved crop
+ * mockup): a small pill of tools that floats OVER a photo or drawing (the crop dialog's undo / reset / pan / zoom row).
+ * Like the crop tool's scrim and handles, its skin is deliberately fixed dark and does NOT follow the app theme — it
+ * has to read over an arbitrary uploaded picture, not over the app's own surfaces, so no theme token applies. The
+ * caller positions it (absolute, bottom-centre); these only own the look. A button is icon-only (aria-label required
+ * at the call site) or icon + word; `active` is a pressed toggle; a disabled button dims its icon colour. */
+const FT_BG = "rgba(24,26,32,0.95)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_BORDER = "1px solid rgba(255,255,255,0.10)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_SHADOW = "0 4px 16px rgba(0,0,0,0.4)"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_TEXT = "#E8EAED"; // design-exempt: fixed over-the-drawing chrome — see header
+const FT_TEXT_OFF = "#6B7079"; // design-exempt: fixed over-the-drawing chrome — dimmed icon colour for a disabled tool
+const FT_ON = "rgba(255,255,255,0.18)"; // design-exempt: fixed over-the-drawing chrome — a pressed toggle
+const FT_RULE = "rgba(255,255,255,0.16)"; // design-exempt: fixed over-the-drawing chrome — divider hairline
+export const FloatingToolbar = forwardRef(function FloatingToolbar({ style, children, ...rest }, ref) {
+  return (
+    <div ref={ref} role="toolbar" style={{
+      display: "flex", alignItems: "center", gap: 2, padding: 4, background: FT_BG, border: FT_BORDER,
+      borderRadius: 10, boxShadow: FT_SHADOW, ...style, // design-exempt: 10 = the pill's own shell, one step over the 8 control radius it holds (nested 7)
+    }} {...rest}>{children}</div>
+  );
+});
+export const FloatingToolButton = forwardRef(function FloatingToolButton({ active = false, disabled = false, compact = false, style, children, ...rest }, ref) {
+  const h = compact ? 30 : 34;
+  return (
+    <button ref={ref} type="button" disabled={disabled} aria-pressed={active ? true : undefined} style={{
+      minWidth: h, height: h, padding: "0 8px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, flex: "none",
+      border: "none", borderRadius: 7, background: active ? FT_ON : "transparent", color: disabled ? FT_TEXT_OFF : FT_TEXT, // design-exempt: 7 = concentric inner radius of the pill shell
+      fontFamily: "inherit", fontSize: FONT.md, fontWeight: 500, fontVariantNumeric: "tabular-nums", cursor: disabled ? "default" : "pointer", ...style,
+    }} {...rest}>{children}</button>
+  );
+});
+export function FloatingToolDivider() {
+  return <span aria-hidden="true" style={{ width: 1, height: 20, background: FT_RULE, margin: "0 6px", flex: "none" }} />;
+}
+
 /* IconButton — the square icon slot (the Site Planner iconBtn, token-only). Ref-forwarding so
  * it can anchor an AnchoredMenu directly, like any other trigger element. */
 export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, className, children, ...rest }, ref) {
@@ -187,7 +228,7 @@ export const IconButton = forwardRef(function IconButton({ size = 30, active = f
     // regardless of `size`, without growing its visible box. See that class's own header.
     <button ref={ref} className={className ? `tap-target ${className}` : "tap-target"} style={{
       width: size, height: size, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
-      borderRadius: CONTROL_RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
+      borderRadius: CONTROL_RADIUS.control, cursor: rest.disabled ? "default" : "pointer", boxShadow: REST_SHADOW,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)", ...style,
@@ -230,6 +271,67 @@ export function Field({ label, children, stacked = false, required = false, tigh
     <div style={{ display: "flex", justifyContent: tight ? "flex-start" : "space-between", alignItems: tight ? "baseline" : "center", gap: 10, marginBottom: 8 }}>
       {labelNode}
       {tight ? <span style={{ flex: "1 1 auto", minWidth: 0 }}>{children}</span> : children}
+    </div>
+  );
+}
+
+/* RangeFields — a labelled Min–Max pair of numeric inputs (NEW-1, Records filters, 2026-10-19): the one
+ * shape for "between A and B" so a filter panel never hand-builds two boxes and a dash. Either end may be
+ * blank (an open range). Values are STRINGS held by the caller; input is digits and one decimal point only,
+ * and a resting value is shown with thousands separators ("100,000") while a focused one is raw, so a
+ * typed digit never has its caret jumped by a live reformat. `single` renders just the Min box (a "at least"
+ * filter) with `unit` after it. Browser autofill is opted out on both boxes. Module scope. */
+function groupDigits(v) {
+  if (v === "" || v == null) return "";
+  const [i, f] = String(v).split(".");
+  return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${f != null ? `.${f}` : ""}`;
+}
+function RangeBox({ value, onChange, placeholder, label, unit, grouped = true, fontSize = FONT.md }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <span style={{ flex: "1 1 0", minWidth: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        {...NO_AUTOFILL} type="text" inputMode="decimal" aria-label={label} placeholder={placeholder}
+        value={focused || !grouped ? (value ?? "") : groupDigits(value)}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, "").replace(/^(\d*\.\d*)\./, "$1"))}
+        style={{
+          flex: "1 1 auto", minWidth: 0, boxSizing: "border-box", height: SIZE.sm.height, padding: "0 8px", fontSize,
+          border: `1px solid ${value !== "" && value != null ? "var(--accent)" : "var(--border-default)"}`, borderRadius: CONTROL_RADIUS.control, background: "var(--surface-raised)",
+          color: "var(--text-primary)", fontFamily: "inherit", textAlign: "right",
+        }}
+      />
+      {unit ? <span style={{ flex: "none", fontSize: FONT.sm, color: "var(--text-secondary)" }}>{unit}</span> : null}
+    </span>
+  );
+}
+export function RangeFields({ label, min, max, onChange, unit, single = false, grouped = true, minPlaceholder = "Min", maxPlaceholder = "Max" }) {
+  return (
+    <Field label={label} stacked>
+      <span role="group" aria-label={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <RangeBox value={min} onChange={(v) => onChange({ min: v, max })} placeholder={single ? "Min" : minPlaceholder} label={`${label} ${single ? "minimum" : "min"}`} unit={single ? unit : null} grouped={grouped} />
+        {single ? null : (
+          <>
+            <span aria-hidden="true" style={{ flex: "none", color: "var(--text-secondary)" }}>–</span>
+            <RangeBox value={max} onChange={(v) => onChange({ min, max: v })} placeholder={maxPlaceholder} label={`${label} max`} unit={unit} grouped={grouped} />
+          </>
+        )}
+      </span>
+    </Field>
+  );
+}
+
+/* RangeRow — the one-line form of RangeFields (Records filter panel, 2026-10-23): a fixed-width label on the
+ * left, then Min, the word "to", Max, so a column of ranges reads as a table with every Min box under the one
+ * above. An active (non-blank) box takes the accent border. Same input rules as RangeFields (digits and one
+ * point, thousands separators at rest, NO_AUTOFILL). `labelWidth` (a number of px or any CSS width) is the one thing a host may tune; the default scales with the row so a narrow rail keeps room for six-digit numbers. */
+export function RangeRow({ label, min, max, onChange, minPlaceholder = "Min", maxPlaceholder = "Max", grouped = true, labelWidth = "clamp(84px, 30%, 112px)", fontSize = FONT.md }) {
+  return (
+    <div role="group" aria-label={label} data-range-row style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize }}>
+      <span style={{ flex: `0 0 ${typeof labelWidth === "number" ? `${labelWidth}px` : labelWidth}`, minWidth: 0, color: "var(--text-secondary)", fontSize: "inherit" }}>{label}</span>
+      <RangeBox value={min} onChange={(v) => onChange({ min: v, max })} placeholder={minPlaceholder} label={`${label} min`} grouped={grouped} fontSize={fontSize} />
+      <span aria-hidden="true" style={{ flex: "none", color: "var(--text-secondary)" }}>to</span>
+      <RangeBox value={max} onChange={(v) => onChange({ min, max: v })} placeholder={maxPlaceholder} label={`${label} max`} grouped={grouped} fontSize={fontSize} />
     </div>
   );
 }
@@ -288,7 +390,7 @@ export function Tab({
         color: active || hover ? textColor : idleColor,
         fontFamily: "inherit", fontSize: FONT.md,
         fontWeight: active ? 600 : 500,
-        cursor: "pointer", whiteSpace: "nowrap",
+        cursor: rest.disabled ? "default" : "pointer", whiteSpace: "nowrap",
         transition: "color 0.15s, border-color 0.15s",
       }}
       {...rest}
@@ -335,7 +437,7 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
         height: s.height, padding: s.padding, maxWidth: 220,
         borderRadius: CONTROL_RADIUS.control, border: "1px solid var(--chrome-divider)",
         background: "var(--chrome-bg-elev)", color: textColor,
-        cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: s.fontSize,
+        cursor: rest.disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: s.fontSize,
         whiteSpace: "nowrap",
       }}
       {...rest}
@@ -381,4 +483,109 @@ export function MenuItem({ active = false, disabled = false, style, children, ..
       cursor: disabled ? "default" : "pointer", ...(disabled ? { opacity: 0.5 } : {}), ...style,
     }} {...rest}>{children}</button>
   );
+}
+
+/* CURSOR VOCABULARY (lives in controls.jsx, not its own module: a separate file became its own Site-route chunk and tripped the chunk allowlist) — the ONE home for the app's cursor vocabulary (owner convention 2026-10-20, docs/DESIGN.md
+ * "Cursor convention"). Two exports other surfaces share:
+ *   ROTATE_CURSOR  — the single custom rotate cursor every rotate grip uses (an SVG data-URI with a
+ *                    `grab` fallback so a browser that rejects the URI still shows a hand).
+ *   pinDragCursor  — pins a cursor at the document root for the LIFE of a drag, so the cursor does not
+ *                    flip back to whatever the pointer happens to be over once it leaves the grip.
+ *                    Cleared on every exit path: pointerup, pointercancel, Escape, window blur.
+ */
+
+const ROTATE_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>" +
+  "<g fill='none' stroke-linecap='round' stroke-linejoin='round'>" +
+  "<path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4'/><path d='M19 4v4h-4' stroke='white' stroke-width='4'/>" +
+  "<path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='black' stroke-width='2'/><path d='M19 4v4h-4' stroke='black' stroke-width='2'/>" +
+  "</g></svg>";
+
+export const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(ROTATE_SVG)}") 12 12, grab`;
+
+let pinned = null; // { el, release }
+
+/** Pin `cursor` over the whole page until the returned release() runs (idempotent). A second call
+ *  while one is live replaces it. Safe to call outside a browser (returns a no-op). */
+export function pinDragCursor(cursor) {
+  if (typeof document === "undefined") return () => {};
+  if (pinned) pinned.release();
+  const el = document.createElement("style");
+  el.setAttribute("data-pinned-cursor", cursor);
+  el.textContent = `html, html * { cursor: ${cursor} !important; }`;
+  document.head.appendChild(el);
+  const done = (e) => { if (e && e.type === "keydown" && e.key !== "Escape") return; release(); };
+  const release = () => {
+    if (!pinned || pinned.el !== el) return;
+    pinned = null;
+    el.remove();
+    window.removeEventListener("pointerup", done, true);
+    window.removeEventListener("pointercancel", done, true);
+    window.removeEventListener("keydown", done, true);
+    window.removeEventListener("blur", done);
+  };
+  pinned = { el, release };
+  window.addEventListener("pointerup", done, true);
+  window.addEventListener("pointercancel", done, true);
+  window.addEventListener("keydown", done, true);
+  window.addEventListener("blur", done);
+  return release;
+}
+
+/* useListboxNav — one highlight state + the keydown handler + the a11y props for a typeahead suggestion list, so every list in the app
+ * (map address search, party names, Food restaurant search) behaves identically. Rules: listboxNav.js.
+ *   const nav = useListboxNav({ count: rows.length, open, setOpen, onCommit: (i) => pick(rows[i]), listboxId });
+ *   <input {...nav.inputProps} onKeyDown={(e) => { if (nav.onKeyDown(e)) return; …own Enter fallback… }} onChange={() => nav.reset()} />
+ *   <li {...nav.optionProps(i)} style={{ …, ...listboxRowStyle(i === nav.activeIndex) }} onClick={…} />
+ * - The caret never jumps: Up/Down are preventDefault-ed whenever the list has rows.
+ * - The highlighted row scrolls into view (nearest edge) when the list scrolls.
+ * - Hover and keyboard share ONE highlight. Hover uses mousemove, not mouseenter: a list that scrolls under a stationary pointer fires
+ *   mouseenter for the row that slid beneath it and would steal the keyboard highlight.
+ * - A mousedown on a row is prevented, so the input keeps focus and its blur-close timer cannot eat the click. */
+export function useListboxNav({ count, open, setOpen, onCommit, listboxId }) {
+  const [rawIndex, setRawIndex] = useState(-1);
+  // The row set shrinks as results change; a stale index past the end reads as "nothing highlighted".
+  const activeIndex = rawIndex >= 0 && rawIndex < count ? rawIndex : -1;
+  const reset = useCallback(() => setRawIndex(-1), []);
+
+  const onKeyDown = (e) => {
+    const action = listboxKeyAction(e, { open, count, active: activeIndex });
+    if (!action) return false;
+    e.preventDefault();
+    if (action === "next" || action === "prev") {
+      if (setOpen) setOpen(true);
+      setRawIndex((i) => stepListIndex(i < count ? i : -1, action === "next" ? 1 : -1, count));
+    } else if (action === "commit") {
+      onCommit(activeIndex);
+    } else if (action === "close") {
+      if (setOpen) setOpen(false);
+      setRawIndex(-1);
+    }
+    return true;
+  };
+
+  useEffect(() => {
+    if (!open || activeIndex < 0 || typeof document === "undefined") return;
+    const el = document.getElementById(listboxOptionId(listboxId, activeIndex));
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, listboxId]);
+
+  const showing = !!open && count > 0;
+  const inputProps = {
+    role: "combobox",
+    "aria-expanded": showing,
+    "aria-controls": listboxId,
+    "aria-activedescendant": showing && activeIndex >= 0 ? listboxOptionId(listboxId, activeIndex) : undefined,
+    "aria-autocomplete": "list",
+    autoComplete: "off",
+  };
+  const optionProps = (i) => ({
+    id: listboxOptionId(listboxId, i),
+    role: "option",
+    "aria-selected": i === activeIndex,
+    onMouseDown: (e) => e.preventDefault(),
+    onMouseMove: () => { if (i !== activeIndex) setRawIndex(i); },
+  });
+
+  return { activeIndex, setActiveIndex: setRawIndex, reset, onKeyDown, inputProps, optionProps };
 }

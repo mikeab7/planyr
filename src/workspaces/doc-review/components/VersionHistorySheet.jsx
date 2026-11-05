@@ -49,11 +49,11 @@ export default function VersionHistorySheet({ fileName, versions, isDoc, viewing
               {can && (
                 <div className="vh-acts">
                   {v.isCurrent
-                    ? (viewingSrcId ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onBackToLatest && onBackToLatest()} data-testid="vh-latest">Back to latest</Button> : null)
+                    ? (viewingSrcId ? <Button size="sm" variant="ghost" disabled={busy} aria-busy={busy ? "true" : undefined} onClick={() => onBackToLatest && onBackToLatest()} data-testid="vh-latest">Back to latest</Button> : null)
                     : (<>
-                        <Button size="sm" variant="ghost" disabled={busy || !v.readable} onClick={act("open", v, onOpen)} data-testid="vh-open">{lbl("open", v, "Open (read-only)")}</Button>
-                        <Button size="sm" variant="primary" disabled={busy || !v.readable} onClick={act("restore", v, onRestore)} data-testid="vh-restore">{lbl("restore", v, "Restore")}</Button>
-                        <Button size="sm" variant="ghost" disabled={busy || !v.readable || !signedIn} onClick={act("copy", v, onCopy)} data-testid="vh-copy">{lbl("copy", v, "Save a copy")}</Button>
+                        <Button size="sm" variant="ghost" disabled={busy || !v.readable} aria-busy={busy ? "true" : undefined} onClick={act("open", v, onOpen)} data-testid="vh-open">{lbl("open", v, "Open (read-only)")}</Button>
+                        <Button size="sm" variant="primary" disabled={busy || !v.readable} aria-busy={busy ? "true" : undefined} onClick={act("restore", v, onRestore)} data-testid="vh-restore">{lbl("restore", v, "Restore")}</Button>
+                        <Button size="sm" variant="ghost" disabled={busy || !v.readable || !signedIn} aria-busy={busy ? "true" : undefined} onClick={act("copy", v, onCopy)} data-testid="vh-copy">{lbl("copy", v, "Save a copy")}</Button>
                       </>)}
                 </div>
               )}
@@ -63,7 +63,7 @@ export default function VersionHistorySheet({ fileName, versions, isDoc, viewing
         {!isDoc && <div className="vh-note" data-testid="vh-pdf-note">Drawings keep one stored file. A re-issued drawing is filed as its own Library file and the older one is marked superseded, so there are no earlier saves to open here.</div>}
         {isDoc && versions.length <= 1 && <div className="vh-note" data-testid="vh-single-note">Only one version so far. Each time you Save, the earlier one is kept and shows up here.</div>}
         {isDoc && can && !signedIn && <div className="vh-note warn">Signed out: a restore stays on this device only. Sign in to save a copy to the Library.</div>}
-        {busy && <div className="vh-note" role="status">Working…</div>}
+        {busy && <div className="vh-note" role="status" style={{ cursor: "progress" }}>Working…</div>}
         {message && <div className="vh-note" role="status" data-testid="vh-message">{message}</div>}
         {error && <div className="vh-note err" role="alert" data-testid="vh-error">{error}</div>}
         {isDoc && can && <div className="vh-note">Restoring saves that content as a new latest version. Nothing is ever deleted.</div>}

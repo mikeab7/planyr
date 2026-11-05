@@ -28,7 +28,7 @@
  */
 
 import { dogEarGeom, dogEarSize, isDogEarSide,
-  wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
+  wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun, sideParkStack,
   SIDE_PARK_PIN_TOL_FT } from "./dogEar.js";
 import { isBuilding } from "../../../shared/projects/projectModel.js";
@@ -36,6 +36,7 @@ import { createIdMinter, randomIdSalt } from "../../../shared/ids.js";
 import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
+import { followDrives } from "./driveFollow.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
@@ -161,6 +162,47 @@ export function withLockSemantics(parcels) {
   return changed ? out : parcels;
 }
 
+/* NEW-1 (owner 2026-10-16, B2289936) — A LOT'S NUMBER IS STABLE: "Parcel 4" stays "Parcel 4" when "Parcel 2" is deleted.
+ * The number a ROOT parcel (one that is nobody's child) shows on the canvas and in the list used to be its POSITION in the
+ * array, so removing a lot renumbered every lot after it. A number is now the parcel's own stamped `parcelNo`.
+ * `parcelNumbers` is THE one answer (a Map of id → number) and is a pure function of the list:
+ *   · a stamped number is kept — unless an earlier root already holds it (a pasted copy carries its source's number), in
+ *     which case the later one is treated as unstamped;
+ *   · every other root takes the next number above the highest one held, in array order.
+ * On a plan nobody has stamped yet that rule gives 1..n by array order — exactly the numbers the positional rule showed — so no
+ * existing plan changes what it reads. `stampParcelNumbers` writes the answer into the records (identity-preserving when there
+ * is nothing to write), so the number freezes the first time the plan is read by someone who may write it. Additive: no
+ * migration, an older build ignores the field. A parcel with a typed name still holds a number — a position is a position. */
+export function parcelNumbers(parcels) {
+  const list = arr(parcels);
+  const byId = new Set(list.map((p) => p && p.id));
+  const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
+  const out = new Map();
+  const taken = new Set();
+  let max = 0;
+  for (const p of list) {
+    if (!p || !isRoot(p)) continue;
+    const n = p.parcelNo;
+    if (Number.isInteger(n) && n > 0 && !taken.has(n)) { taken.add(n); out.set(p.id, n); if (n > max) max = n; }
+  }
+  for (const p of list) {
+    if (!p || !isRoot(p) || out.has(p.id)) continue;
+    out.set(p.id, ++max);
+  }
+  return out;
+}
+export function stampParcelNumbers(parcels) {
+  const list = arr(parcels);
+  const nums = parcelNumbers(list);
+  let changed = false;
+  const out = list.map((p) => {
+    if (!p || !nums.has(p.id) || p.parcelNo === nums.get(p.id)) return p;
+    changed = true;
+    return { ...p, parcelNo: nums.get(p.id) };
+  });
+  return changed ? out : parcels;
+}
+
 /* B2225425 (round 3) — THE READ NORMALIZERS, as ONE table, because there are two read paths and
  * only one of them ran these. `createSiteModel` (the on-device copy) applies them on every read; the
  * rows seed (`SitePlanner.refetchReplace` over `elementRows.rowsToModel`) did not. So a plan whose
@@ -174,7 +216,7 @@ export function withLockSemantics(parcels) {
  * converge. Each entry is identity-preserving on an already-normal list (no churn, no write). */
 export const READ_NORMALIZE = Object.freeze({
   els: (list) => ensureZ(migrateBandForce(list)),
-  parcels: (list) => ensureZ(withLockSemantics(withStableParcelIds(list))),
+  parcels: (list) => ensureZ(stampParcelNumbers(withLockSemantics(withStableParcelIds(list)))),
   markups: (list) => ensureZ(list),
   measures: (list) => ensureZ(list),
   callouts: (list) => ensureZ(list),
@@ -277,6 +319,10 @@ function normalizeBondedRotations(list, onHeal) {
     const host = byId.get(e.attachedTo);
     if (!host || host.points ||
         typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    // A drive-in ramp (NEW-1, 2026-10-30) keeps its box in step with its host at the planner's one element-write seam (lib/driveInRamp.js
+    // `refitRamps`); its angle is already host.rot, so there is nothing for this quarter-turn repair to add — and it must not rotate the ramp about
+    // the host on its own terms.
+    if (e.type === "driveInRamp") return e;
     // Corner bump-out (dog-ear): re-flush its WHOLE box to the host's CURRENT edge + angle
     // (NEW-6). Guard the side (a malformed `side` would throw in dogEarGeom's SIDE_N destructure
     // and blank the planner) and require finite host/child w·h (dogEarGeom reads them; a NaN box
@@ -387,7 +433,7 @@ function normalizeWallKids(list, onHeal) {
   // The strip a parking row on `side` of `host` has to clear (first one wins, as on the canvas).
   const stripFor = (host, side) => els.find((x) => {
     const h = hostOf(x);
-    return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && sideOf(h, x) === side;
+    return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && sideOf(h, x) === side;
   });
   const stripDepthFor = (host, side) => {
     const strip = stripFor(host, side);
@@ -425,7 +471,11 @@ function normalizeWallKids(list, onHeal) {
     const depth = isVert ? dimBX : dimBY;
     let box;
     if (WALL_STRIP_TYPES.has(e.type)) {
-      box = wallStripBox(host, side, bumpsOfHost(els, host), depth);
+      // A flush layer (a buffer added through the wall strip) starts where the layers inboard of it end.
+      const inner = isFlushWallLayer(e)
+        ? inboardReach(host, side, els.filter((k) => k !== e && hostOf(k) === host && !isFlushWallLayer(k) && sideOf(host, k) === side))
+        : 0;
+      box = wallStripBoxFor(host, side, bumpsOfHost(els, host), depth, e, inner);
     } else {
       const gap = gapById.has(e.id) ? gapById.get(e.id) : stripDepthFor(host, side);
       const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
@@ -581,7 +631,7 @@ export function normalizeOrphanWallPads(list, onHeal, { mintId = null } = {}) {
     // Anything ALREADY tagged on this wall is part of the same stack and shares the ordering.
     const tagged = els.filter((x) => x && !x.points && x.sideParkSide === side && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x));
-    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
     const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
     const span = sidewalkSpanForBumps(host, side, bumpsOfHost(els, host));
@@ -754,6 +804,7 @@ export function impossibleStacks(list, { tol = ANCHOR_TOL_FT } = {}) {
   const out = [];
   for (const z of els) {
     if (!z || z.points || z.type !== "trailer" || z.attachedTo == null || !finiteBoxEl(z)) continue;
+    if (z.wallTrailer) continue;       // B2268801 — a rear / end wall's trailer row is a wall layer, not a dock-stack member: no court to find
     const host = byId.get(z.attachedTo);
     if (!host || host.type !== "building" || host.points || !finiteBoxEl(host)) continue;
     const side = sideOfBondedBox(host, z);
@@ -1057,7 +1108,7 @@ export function normalizeHostRuns(list, onHeal) {
     const res = sideParkAlongRun({ cur, span, stamp: e.sideParkFit || null, pinAllowed: false, tol: HOST_RUN_TOL_FT });
     if (!res.stale) continue;                                     // only the impossible case is healed
     const isVert = side === "left" || side === "right";
-    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
     const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
     // NEW-1 — an exploded field is a STACK on this wall: clear the strip plus everything inboard.
@@ -1174,7 +1225,7 @@ export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
   // the foreign-host RUN heal (NEW-1) runs after that drop, so it judges a member's length against
   // the chain it will actually be laid on; the stranded re-fit stays last (it re-places whatever is
   // still geometrically impossible).
-  return normalizeStrandedZones(
+  const healed = normalizeStrandedZones(
     normalizeHostRuns(
       normalizeZoneAlongLen(
         normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(
@@ -1185,7 +1236,12 @@ export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
     ),
     onHeal,
   );
+  /* ⛔ B2498961 (owner 2026-10-29) — LAST, because it reads the fields' FINAL positions: a road connected to a field this heal re-seated follows it by the
+   * same offset (heals are small), so the plan opens with the drive still landing where he drew it. Identity on a plan the heal left alone, and a fixed
+   * point (the field is where the heal wants it, so nothing moves the second time). The rows are not rewritten here — see B2498961 on the data-ownership half. */
+  return Array.isArray(els) ? followDrives(els, els, healed, { restrip: restripRoad }) : healed;
 }
+const restripRoad = (r) => ({ ...r, ...roadStripBBox(r.pts, r.vtx, r.travelW, Number.isFinite(r.curb) ? r.curb : 0.5) });
 
 // v14 (B848736) — the fixed id a folded aerial is minted under. FIXED, not random: two
 // independent createSiteModel() calls over the SAME raw legacy record (e.g. mergeSiteContent's
@@ -1410,6 +1466,26 @@ function healSrc(chosen, other) {
   });
 }
 
+/* NEW-1 (follow-on to B2244016) — A NON-NULL `storageKey` BEATS A HEAL FLAG IN EVERY MERGE DIRECTION.
+ * `unionById` is newer-copy-wins per overlay id, so a device copy still carrying the old heal
+ * (`storageKey: null, storageMissing: true`) with the newer stamp erased a restored cloud pointer on
+ * the next save — measured on production 2026-10-15 (plan open → version bump → key gone again, every
+ * time). A heal is a statement that a fresh check found the object gone; it may never outvote a record
+ * that still names one. When the chosen copy is healed and the other copy holds a key for the same id,
+ * the key (and a clear heal flag) is carried back; the next fetch re-checks, so a truly-gone object is
+ * simply healed again by a fresh confirmed-missing answer (lib/overlayHeal.js). */
+function healPointer(chosen, other) {
+  const otherById = {};
+  for (const o of arr(other)) if (o && o.id != null && typeof o.storageKey === "string" && o.storageKey && !o.storageMissing) otherById[o.id] = o;
+  return arr(chosen).map((n) => {
+    if (n && n.id != null && !n.storageKey && n.storageMissing) {
+      const o = otherById[n.id];
+      if (o) return { ...n, storageKey: o.storageKey, storageMissing: false };
+    }
+    return n;
+  });
+}
+
 // Reconcile two copies of the SAME site without ever dropping drawn work: scalar/meta
 // fields come from the NEWER copy; every drawn collection is UNIONED by id, so a
 // building (or markup, parcel, measure, overlay, cross-section) in EITHER copy survives.
@@ -1435,7 +1511,7 @@ export function mergeSiteContent(a, b, opts) {
     markups: live(unionById(newer.markups, older.markups)),
     measures: live(unionById(newer.measures, older.measures)),
     callouts: live(unionById(newer.callouts, older.callouts)),
-    sheetOverlays: live(healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays)),
+    sheetOverlays: live(healPointer(healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays), older.sheetOverlays)),
     parcelDrawings: live(healSrc(unionById(newer.parcelDrawings, older.parcelDrawings), older.parcelDrawings)),
     elevation: { crossSections: live(unionById(
       newer.elevation && newer.elevation.crossSections,
@@ -1579,9 +1655,7 @@ export function parcelDisplayInfo(parcels) {
   const byId = new Map(list.map((p) => [p && p.id, p]));
   const kids = parcelChildrenMap(list);
   const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
-  const rootNum = new Map();
-  let rn = 0;
-  for (const p of list) if (isRoot(p)) rootNum.set(p.id, ++rn);
+  const rootNum = parcelNumbers(list);   // NEW-1 (B2289936): a root's number is its stamped `parcelNo`, never its position
   const memo = new Map();
   const compute = (p, seen) => {
     if (!p) return { tag: "?", depth: 0 };

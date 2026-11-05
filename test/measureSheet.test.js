@@ -19,8 +19,9 @@ import {
 } from "../src/workspaces/site-planner/lib/measureSheet.js";
 import { measureLabelVisible, measureLabelThreshold } from "../src/workspaces/site-planner/lib/measureStyle.js";
 import { DIM_CALLOUT_MIN_PPF } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SP = fs.readFileSync(path.join(process.cwd(), "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+const SP = plannerSource();
 const EXPORT_SHEET = fs.readFileSync(path.join(process.cwd(), "src/workspaces/site-planner/lib/exportSheet.js"), "utf8");
 
 /* ---------------------------------------------------------------- (a) the value is never gated off

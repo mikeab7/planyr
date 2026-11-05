@@ -15,8 +15,9 @@ import {
   defaultRung, defaultRelation, reversal, orderedPairs,
 } from "../src/workspaces/site-planner/lib/paintOrder.js";
 import { ELEMENT_CAPABILITIES, verdict } from "../e2e/elementCapabilities.table.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const SRC = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const SRC = plannerSource();
 
 describe("the enumeration is COMPLETE — this is the whole point of the item", () => {
   it("states a relationship for every ordered pair of distinct families", () => {
@@ -120,7 +121,10 @@ describe("the table matches what the canvas actually paints", () => {
   // so it is not part of this ladder (see paintOrder.js's own header).
   const MARKERS = [
     [0, /\{overlayBands\.below\.map\(/],
-    [1, /\{drawParcels\.map\(/],
+    // NEW-1 (Parcels in front): the parcel tree is BUILT once above the return (`parcelTierNodes`), so `drawParcels.map(` no longer
+    // marks where it paints. Its NORMAL position is the slot expression — the late twin only exists while the Parcels tool is up
+    // (mapStack.parcelsOnTop), and the export puts it back here (test/parcelsInFront.test.js).
+    [1, /\{parcelsFront \? <g \{\.\.\.\{ \[PARCEL_TIER_SLOT_ATTR\]/],
     [2, /\{drawMarkupsZ\.filter\(\(m\) => m\.behindEls\)\.map\(/],
     [3, /\{calloutBands\.below\.map\(/],
     [4, /\{measureBands\.below\.map\(/],

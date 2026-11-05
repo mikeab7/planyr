@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   PARCEL_SURFACES, PARCEL_GROUPS, PARCEL_ACTIONS, parcelMenuModel, boundaryEditHint,
 } from "../src/workspaces/site-planner/lib/parcelActions.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* The module ships no id lookup and no flattener — both were test-only, and string data with no
  * runtime consumer costs real bytes in the Site route's bundle (this change had to pay a budget
@@ -30,7 +31,7 @@ const GESTURE_OR_RIGHT_CLICK_ONLY = ["boundary", "chip", "chipReset", "deleteSel
  *                 exactly the failure mode this item is about.
  */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const menuSrc = read("../src/workspaces/site-planner/components/RailMenus.jsx"); // NEW-1: the menu's render half
 
 /* A plan with plenty of everything, so nothing is gated off by accident. */
@@ -201,7 +202,7 @@ describe("a row reads as the mode you are IN", () => {
   it("Draw mode lights Draw, not Remove", () => {
     expect(active({ ...rich, tool: "parcel", parcelMode: "add" })).toEqual(["draw"]);
   });
-  it("the Parcel tool's click-to-delete sub-mode lights nothing — it has no menu row any more", () => {
+  it("the Parcel tool's click-to-delete sub-mode is RETIRED (NEW-1, 2026-10-22) — a stale 'remove' mode lights nothing", () => {
     expect(active({ ...rich, tool: "parcel", parcelMode: "remove" })).toEqual([]);
   });
   it("the cut tool lights Split; merge pick lights Combine; boundary edit lights Edit boundary", () => {
@@ -258,7 +259,7 @@ describe("the two-sided 'Parcel' collision is resolved", () => {
 
   it("the panel name doesn't collide with another left tab", () => {
     // The element inspector is "Properties" — "Property" would have swapped one collision for another.
-    const tabs = (src.match(/const leftTabs = \[[\s\S]*?\];/) || [""])[0];
+    const tabs = (src.match(/const leftTabs = (?:withGradingTab\()?\[[\s\S]*?\],? ?(?:gradingOn\))?;/) || [""])[0];
     const labels = [...tabs.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
     for (const l of labels) expect(l).not.toBe(PARCEL_SURFACES.panel.name);
     expect(tabs).toMatch(/PARCEL_SURFACES\.panel\.name/); // the Land tab reads its name from the model
@@ -268,7 +269,10 @@ describe("the two-sided 'Parcel' collision is resolved", () => {
     // Parcels rework (NEW-1): the "Draw, split, combine… Parcel tools →" line is gone; the panel carries its own Add / Edit buttons.
     expect(src).not.toMatch(/data-testid="land-to-parcel-tools"/);
     expect(src).toMatch(/data-testid="land-add-btn"/);                // panel → add flows
-    expect(src).toMatch(/setbacks:\s*\(\)\s*=>\s*openLandPanel\(\)/); // rail → panel (setbacks)
+    // rail → panel: the "This parcel" row opens THAT parcel's page in the Land panel (NEW-1, 2026-10-14 —
+    // it used to open the LIST, which is half of why the owner could not find setbacks); the bare panel
+    // is still the fallback when nothing is selected.
+    expect(src).toMatch(/setbacks:\s*\(\)\s*=>\s*\{\s*if \(selPc\) openParcelPage\(selPc\.id\);\s*else openLandPanel\(\);\s*\}/);
   });
 });
 
@@ -290,20 +294,14 @@ describe("wiring: the render site reaches every row (a model nothing calls is wo
 
   it("the handlers arm the EXISTING paths rather than reimplementing them", () => {
     expect(menu).toMatch(/combine:[^\n]*startMergePick\(\)/);
-    // Click-to-delete mode is no longer a menu row, but it must stay reachable from the Parcel tool's banner.
-    expect(src).toMatch(/onClick=\{\(\) => \{ setDraftPoly\(null\); setParcelMode\("remove"\); \}\}/);
-    expect(src).toMatch(/const startRemoveParcels = /);
-    expect(menu).toMatch(/deleteSelected:[^\n]*removeParcelById/);
+    // Click-to-delete mode is RETIRED (NEW-1, 2026-10-22): no banner pill, no sub-mode, no starter — and the rail row is the one delete.
+    expect(src).not.toMatch(/setParcelMode\("remove"\)/);
+    expect(src).not.toMatch(/startRemoveParcels|removeParcelById|deleteParcelById/);
+    expect(menu).toMatch(/deleteSelected:[^\n]*deleteParcels\(/);
     expect(menu).toMatch(/boundary:[^\n]*startBoundaryEdit\(\)/);
     expect(menu).toMatch(/chip:[^\n]*setParcelChipHidden/);
     expect(menu).toMatch(/lock:[^\n]*toggleParcelLock/);
     expect(menu).toMatch(/active:[^\n]*toggleParcelActive/);
-  });
-
-  it("Remove mode sets the sub-mode AFTER the tool switch (selectTool resets it to 'add' — B598)", () => {
-    const fn = (src.match(/const startRemoveParcels = [^\n]*\n?/) || [""])[0];
-    expect(fn.indexOf("selectTool(\"parcel\")")).toBeGreaterThan(-1);
-    expect(fn.indexOf("selectTool(\"parcel\")")).toBeLessThan(fn.indexOf("setParcelMode(\"remove\")"));
   });
 
   it("a disabled row has no click handler at all (it explains itself instead)", () => {

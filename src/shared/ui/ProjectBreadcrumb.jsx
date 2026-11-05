@@ -61,6 +61,7 @@ import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
+import { MenuScroll, MenuFooter, BinBackRow } from "./menuBin.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import { crumbDashboardTitle } from "./dashboardNav.js";
 import {
@@ -76,6 +77,7 @@ import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveContr
 import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts, companyCardsFor } from "../projects/projectSwitcherModel.js";
 import { useOrgName } from "../profile/orgNameStore.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
+import { crumbFloor } from "./crumbScope.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
@@ -1152,7 +1154,7 @@ export default function ProjectBreadcrumb({
         {homeLabel}
       </button>
 
-      <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+      <span data-testid="crumb-sep" style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
 
       {/* Project crumb (B191) — opens the switcher dropdown. In cross-project mode it
           reads "All projects".
@@ -1187,13 +1189,13 @@ export default function ProjectBreadcrumb({
            collapsing this crumb actually buys back the room the last (plan) crumb needs. */
         style={crumbBtn({
           color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto",
-          maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : CRUMB_MIN_W,
+          maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : crumbFloor(projectLabel, CRUMB_MIN_W),
         })}
       >
         {crumbCompact ? (
           <CollapsedCrumbIcon />
         ) : (
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span data-testid="project-crumb-name" title={projectLabel} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
                 to "Select a project" whenever nothing was picked, which is wrong the moment the
                 same menu also offers the Organization. */}
@@ -1207,7 +1209,7 @@ export default function ProjectBreadcrumb({
             root cause was in the save-status mapping itself (see notesSaveState.js's NEW-5 note),
             not in this crumb, but the badge is the ONE sync indicator now, so this second copy is
             gone rather than fixed in place. */}
-        {!crumbCompact && <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
+        {!crumbCompact && <span data-testid="project-caret" style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
       </button>
 
       {/* NEW-4 (B1343203) — an always-mounted, always-FULL, invisible twin of the crumb above,
@@ -1217,7 +1219,7 @@ export default function ProjectBreadcrumb({
       <span
         ref={projectMeasureRef}
         aria-hidden="true"
-        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240, minWidth: CRUMB_MIN_W }) }}
+        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240 }) }}
       >
         <span>{projectLabel}</span>
         <span style={{ fontSize: 11 }}>▾</span>
@@ -1230,7 +1232,7 @@ export default function ProjectBreadcrumb({
           anchor ref, so rendering it twice would fight over both) purely to read its width. */}
       {planSlot && (
         <>
-          <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+          <span data-testid="crumb-sep" style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
           <span ref={planSlotRef} style={{ display: "flex", alignItems: "center", minWidth: 0 }}>{planSlot}</span>
         </>
       )}
@@ -1273,16 +1275,10 @@ export default function ProjectBreadcrumb({
 
         {/* THE ONE SCROLLING ELEMENT. `minHeight: 0` lets it shrink inside the flex column so the
             footer below can never be pushed out of the panel. */}
-        <div data-testid="project-list-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "4px 10px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <MenuScroll testId="project-list-scroll" style={{ padding: "4px 10px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
           {binOpen ? (
             <div data-testid="project-bin" style={CARD}>
-              <button
-                data-testid="project-bin-back"
-                onClick={() => { setBinOpen(false); setPurgeFor(null); }}
-                style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", height: 34, padding: "0 12px", border: "none", borderBottom: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, color: "var(--text-primary)" }}
-              >
-                <span aria-hidden="true">‹</span> Projects
-              </button>
+              <BinBackRow testId="project-bin-back" label="Projects" onClick={() => { setBinOpen(false); setPurgeFor(null); }} />
               <div style={{ padding: "8px 12px 6px", fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.45 }}>
                 {deleted.length === 0 ? "Nothing in Recently deleted." : `Restorable for ${DELETED_RETENTION_DAYS} days — everything in the project comes back with it.`}
               </div>
@@ -1297,6 +1293,7 @@ export default function ProjectBreadcrumb({
                       <button
                         data-testid={`project-purge-confirm-${p.id}`}
                         disabled={binBusy === p.id}
+                        aria-busy={binBusy === p.id ? "true" : undefined}
                         onClick={() => doPurge(p)}
                         style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--danger, #dc2626)", color: "#fff" }}
                       >Delete forever</button>
@@ -1310,6 +1307,7 @@ export default function ProjectBreadcrumb({
                       <button
                         data-testid={`project-restore-${p.id}`}
                         disabled={binBusy === p.id}
+                        aria-busy={binBusy === p.id ? "true" : undefined}
                         onClick={() => doRestore(p)}
                         title={`Restore ${p.name}`}
                         style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--hover-menu)", color: "var(--text-primary)" }}
@@ -1363,10 +1361,10 @@ export default function ProjectBreadcrumb({
               </div>
             </>
           )}
-        </div>
+        </MenuScroll>
 
         {/* FOOTER — always visible, whatever the list length. */}
-        <div data-testid="project-footer" style={{ flex: "none", padding: "6px 10px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <MenuFooter testId="project-footer" style={{ padding: "6px 10px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
           <button
             data-testid="project-new"
             onClick={newProject}
@@ -1389,7 +1387,7 @@ export default function ProjectBreadcrumb({
               Recently deleted ({deleted.length})
             </button>
           )}
-        </div>
+        </MenuFooter>
       </AnchoredMenu>
 
       {/* Per-row manage menu (B439) — Rename / Delete, a SECOND portal layer stacked above the

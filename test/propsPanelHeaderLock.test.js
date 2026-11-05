@@ -9,10 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { propsPanelTitle, kindTitle, measureTitle } from "../src/workspaces/site-planner/lib/propsPanelTitle.js";
 import { CLOUD_ARC_STEP_FT, clampCloudArcFt, CLOUD_ARC_MAX_FT } from "../src/workspaces/site-planner/lib/cloudGeometry.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const root = path.resolve(__dirname, "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
-const SP = read("src/workspaces/site-planner/SitePlanner.jsx");
+const SP = plannerSource();
 
 describe("NEW-1 — one title, the thing's own type name", () => {
   it("names each family in title case with no category prefix", () => {
@@ -20,7 +21,7 @@ describe("NEW-1 — one title, the thing's own type name", () => {
     expect(propsPanelTitle({ markup: { kind: "rect" } })).toBe("Rect");
     expect(propsPanelTitle({ markup: { kind: "easement" } })).toBe("Easement");
     expect(propsPanelTitle({ measureMode: "line" })).toBe("Distance");
-    expect(propsPanelTitle({ measureMode: "area" })).toBe("Area");
+    expect(propsPanelTitle({ measureMode: "area" })).toBe("Area measurement");
     expect(propsPanelTitle({ callout: { noLeader: true } })).toBe("Text box");
     expect(propsPanelTitle({ callout: { noLeader: false } })).toBe("Callout");
     expect(propsPanelTitle({ elementLabel: "Building" })).toBe("Building");
@@ -36,7 +37,7 @@ describe("NEW-1 — one title, the thing's own type name", () => {
     expect(SP).not.toMatch(/Markup · Cloud|`Markup · |`Measurement · |`Selected · |`Easement · /);
     expect(SP).not.toMatch(/Element\{\(\(\) =>/);
     // the per-kind inner Sections render title-less
-    for (const re of [/<Section title=\{null\}>\s*\{\/\* NEW-1 \(B1618656\)/, /<Section title=\{null\}>\s*<StdSubLabel>Text<\/StdSubLabel>/]) {
+    for (const re of [/<Section title=\{null\}>\s*<StdSubLabel section="appearance">Appearance<\/StdSubLabel>/, /<Section title=\{null\}>\s*\{\/\* A plain \(white, normal border\) full-width button at the very top/]) {
       expect(SP).toMatch(re);
     }
   });

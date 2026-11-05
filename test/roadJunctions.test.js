@@ -84,11 +84,15 @@ describe("driveJunctionsOf — GEOMETRIC detection, not just a stored driveTee f
     expect(out).toHaveLength(0);
   });
 
-  it("a target rect element that is itself `attachedTo` a host is never a valid drive target", () => {
+  // NEW-1 (road → employee parking) — REVERSES the old "a bonded target is never a valid drive target". That rule lived ONLY here: the connect gesture
+  // (SitePlanner `driveTargetsOf`) always accepted a field bonded to a building, so a bonded field connected at placement and LOST its junction the moment
+  // the stored tee went stale. Employee parking is very often bonded. Both paths now ask lib/roadJunctions.js `driveTargetKindOf` — one predicate.
+  it("a target rect element that is itself `attachedTo` a host IS a valid drive target (the connect gesture accepts it, so the geometric fallback must too)", () => {
     const bonded = { ...pad, id: "bonded", attachedTo: "host1" };
     const road = roadInto(bonded, 0, { driveTee: null });
     const out = driveJunctionsOf([road, bonded], {});
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(out[0].targetId).toBe("bonded");
   });
 
   it("a free-drawn POLYGON pad (no driveTee stored) also resolves geometrically", () => {

@@ -9,7 +9,7 @@ import { test, expect } from "@playwright/test";
 import { canvas, startBlank, drawBuilding } from "./drawKinds.js";
 
 const buildingsOf = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const rec = Object.values(map).find((r) => r && r.name === "Concept A");
   return ((rec && rec.els) || []).filter((e) => e.type === "building" && !e.dogEar);
 });

@@ -65,11 +65,11 @@ function renderOverpass(els, group, opacity) {
       const pts = el.geometry.map((g) => [g.lat, g.lon]);
       if (tags.power === "substation") {
         L.polygon(pts, { color: COL.substation, weight: 1.5, opacity: op, fillColor: COL.substation, fillOpacity: op * 0.18 })
-          .bindTooltip("Substation (OSM)").addTo(group);
+          .bindPopup("Substation (OSM)").addTo(group);
       } else {
         const minor = tags.power === "minor_line";
         L.polyline(pts, { color: minor ? COL.distribution : COL.transmission, weight: minor ? 1.6 : 2.6, opacity: op, dashArray: minor ? "5 4" : null })
-          .bindTooltip(`${minor ? "Distribution" : "Transmission"} line (OSM)${tags.voltage ? ` · ${tags.voltage} V` : ""}`).addTo(group);
+          .bindPopup(`${minor ? "Distribution" : "Transmission"} line (OSM)${tags.voltage ? ` · ${tags.voltage} V` : ""}`).addTo(group);
       }
     } else if (el.type === "node" && el.lat != null) {
       const isHyd = tags.emergency === "fire_hydrant";
@@ -77,7 +77,7 @@ function renderOverpass(els, group, opacity) {
       const isTower = tags.power === "tower";
       const color = isHyd ? COL.hydrant : isSub ? COL.substation : COL.pole;
       L.circleMarker([el.lat, el.lon], { radius: isHyd ? 4 : isTower ? 3.5 : 2.6, color, weight: 1.2, opacity: op, fillColor: color, fillOpacity: op * 0.85 })
-        .bindTooltip(isHyd ? "Fire hydrant (OSM)" : isSub ? "Substation (OSM)" : isTower ? "Transmission tower (OSM)" : "Power pole (OSM)").addTo(group);
+        .bindPopup(isHyd ? "Fire hydrant (OSM)" : isSub ? "Substation (OSM)" : isTower ? "Transmission tower (OSM)" : "Power pole (OSM)").addTo(group);
     }
   });
 }
@@ -209,7 +209,7 @@ export function mapillaryLayer(onStatus) {
       const [lon, lat] = g.coordinates;
       const isHyd = /hydrant/i.test(f.object_value || "");
       L.circleMarker([lat, lon], { radius: 4, color: COL.mly, weight: 1.4, opacity, fillColor: isHyd ? COL.hydrant : COL.mly, fillOpacity: opacity })
-        .bindTooltip(`${isHyd ? "Hydrant" : "Pole"} · crowdsourced detection (Mapillary)`).addTo(group);
+        .bindPopup(`${isHyd ? "Hydrant" : "Pole"} · crowdsourced detection (Mapillary)`).addTo(group);
     });
   };
   group.abortPending = () => { if (ctrl) { try { ctrl.abort(); } catch (_) {} } };
@@ -231,7 +231,7 @@ function renderBedrock(polys, group, opacity) {
     for (const rings of p.polygons) {
       L.polygon(rings.map((r) => r.map(([lng, lat]) => [lat, lng])), {
         color: p.cls.color, weight: 0.8, opacity: Math.min(1, op + 0.2), fillColor: p.cls.color, fillOpacity: op * 0.7,
-      }).bindTooltip(tip, { sticky: true }).addTo(group);
+      }).bindPopup(tip).addTo(group);
     }
   }
 }

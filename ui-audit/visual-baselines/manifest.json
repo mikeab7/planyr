@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "efa12b85c",
+        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-29",
+        "approvedCommit": "52e1779f4",
+        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-11-02",
+        "approvedCommit": "f351045d3",
+        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
       }
     }
   }

@@ -139,10 +139,22 @@ export default function AnchoredMenu({
       ro = new ResizeObserver(place);
       ro.observe(anchorRef.current);
     }
+    /* ⛔ NEW-2 (2026-10-22, work-laptop report "the question mark help button isn't even working") — THE PANEL'S OWN SIZE
+     * IS AN INPUT TO ITS PLACEMENT, and it was measured exactly once. A bottom-corner menu ("above-left") puts its TOP at
+     * `anchor.top − gap − menuH`; the Help control swaps a 164 px menu for a 366 px Help / report view in the same
+     * portal, so the top stayed where the short menu wanted it and the taller view hung 112 px below a 641 px window
+     * (measured at 1913×641 @2.68: panel bottom 753) — its Back button off-screen, which read as "Help does nothing".
+     * Re-place whenever the panel itself changes size, never only when the anchor or window does. */
+    let panelRo;
+    if (typeof ResizeObserver !== "undefined" && menuRef.current) {
+      panelRo = new ResizeObserver(place);
+      panelRo.observe(menuRef.current);
+    }
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
       ro?.disconnect();
+      panelRo?.disconnect();
     };
   }, [open, placement, gap, width, anchorRef]);
 
@@ -236,6 +248,34 @@ export default function AnchoredMenu({
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
   }, [open, onClose, anchorRef, zIndex, swallowOutsidePress]);
+
+  /* ⛔ NEW-1 (Schedule switcher stays open over the grid) — A PRESS INSIDE AN IFRAME NEVER REACHES THE PARENT
+   * DOCUMENT, so neither dismissal listener above (nor the swallow one below) can see it. The Schedule grid is the
+   * embedded /sequence/ app: clicking a cell, the status / owner popovers, anything in it, left the schedule and
+   * project switchers hanging open over the grid. The one thing the parent CAN observe is that focus moved into the
+   * frame (the window `blur`s and `document.activeElement` becomes the <iframe>), so that is treated as an outside
+   * press (backed by an explicit press/Escape notice from the embedded app, below). The blur path is read after a tick because activeElement settles just after the blur event; and it does not consume
+   * anything — the press already went to the cell, which still does its normal job. */
+  useEffect(() => {
+    if (!open) return undefined;
+    let t;
+    const onBlur = () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const a = document.activeElement;
+        if (a && a.tagName === "IFRAME" && !menuRef.current?.contains(a)) onCloseRef.current?.();
+      }, 0);
+    };
+    // The reliable signal: the embedded Schedule app tells us about every press / Escape inside it
+    // (public/sequence/index.html). Same-origin and source-checked; a notice only, so the cell's own click is untouched.
+    const onMsg = (e) => {
+      if (e.origin !== window.location.origin || !e.data || e.data.source !== "planar-seq") return;
+      if (e.data.type === "planar:press" || e.data.type === "planar:escape") onCloseRef.current?.();
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("message", onMsg);
+    return () => { clearTimeout(t); window.removeEventListener("blur", onBlur); window.removeEventListener("message", onMsg); };
+  }, [open]);
 
   /* opt-in `swallowOutsidePress` (see the prop doc): the press/Esc that dismisses this menu is consumed whole,
    * so it triggers nothing else. Deliberately a SEPARATE effect from the pass-through dismissal above, whose

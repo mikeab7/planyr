@@ -10,7 +10,7 @@
  * Pure: takes already-resolved labels, reads nothing from the planner.
  */
 
-const MEASURE_LABEL = { line: "Distance", polyline: "Polyline length", area: "Area", count: "Count" };
+const MEASURE_LABEL = { line: "Distance", polyline: "Polyline length", area: "Area measurement", count: "Count" };
 
 /** Title-case a markup kind id ("cloud" → "Cloud", "polyline" → "Polyline"). */
 export function kindTitle(kind) {

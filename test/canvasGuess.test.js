@@ -3,6 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { CANVAS_GUESS_KEY, geometryOf, readCanvasGuess, writeCanvasGuess } from "../src/workspaces/site-planner/lib/canvasGuess.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, _m: m }; };
 const geom = { vw: 1722, vh: 700, dpr: 2.15 };
@@ -63,7 +64,7 @@ describe("canvasGuess", () => {
 });
 
 describe("wiring (source guards)", () => {
-  const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const sp = plannerSource();
   it("the module's guess is seeded from the remembered one and persisted from the FULL measurement only", () => {
     expect(sp).toMatch(/let lastMeasuredCanvas = initialCanvasGuess \? initialCanvasGuess\.guess : null/);
     expect(sp).toMatch(/lastMeasuredCanvas = \{ box: canvasBox\(r\), dockX: left, toastCx: cx \}; persistCanvasGuess\(lastMeasuredCanvas\)/);

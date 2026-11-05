@@ -129,15 +129,15 @@ describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate"
     expect(p).toMatch(/mapZoom\s*<\s*PLACE_NAMES_MIN_ZOOM/);
   });
 
-  it("the control is named 'Road names' — the honest label — and 'Place names' is gone", () => {
+  it("the control is named 'Road Names' — the honest label — and 'Place names' is gone", () => {
     const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
-    expect(p).toMatch(/>Road names</);
-    expect(p).not.toMatch(/>Place names</);
+    expect(p).toMatch(/label: "Road Names"/);
+    expect(p).not.toMatch(/Place names/i);
   });
 
   it("the help text says what's drawn and disclaims the city/landmark promise it used to make", () => {
     const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
-    const section = p.slice(p.indexOf('label="Road names"'), p.indexOf('label="Road names"') + 600);
+    const section = p.slice(p.indexOf("const roadNamesInfo"), p.indexOf("const roadNamesInfo") + 700);
     expect(section).toMatch(/road/i);
     expect(section).toMatch(/highway/i);
     expect(section).toMatch(/does not carry city/i);
@@ -167,12 +167,13 @@ describe("PLACE_NAMES_DEFAULT_OPACITY — the owner's crispness fix + his own op
     expect(m).toMatch(/useState\(PLACE_NAMES_DEFAULT_OPACITY\)/);
   });
 
-  it("LayerPanel wires Road names through the SAME opacityControl every other row uses", () => {
+  it("LayerPanel wires Road Names through the SAME Opacity control every other row uses", () => {
     const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
-    // Only one opacityControl DEFINITION may exist (the shared helper) — this asserts the Road
-    // names row is a CALLER of it, not a second widget.
-    expect((p.match(/const opacityControl = \(/g) || []).length).toBe(1);
-    expect(p).toMatch(/opacityControl\("Road names", placeNames\.opacity, placeNames\.onOpacityChange\)/);
+    // Only one Opacity widget may exist (OpacityRow) — Road Names' row is a CALLER of the shared dropdown
+    // (its plan lists "opacity"), fed the placeNames value + setter, never a second slider.
+    expect((p.match(/^function OpacityRow\(/gm) || []).length).toBe(1);
+    expect((p.match(/<OpacityRow /g) || []).length).toBe(1);
+    expect(p).toMatch(/opacity: \{ value: placeNames\.opacity, onChange: placeNames\.onOpacityChange \}/);
   });
 
   it("MapFinder passes the opacity value and setter through the placeNames prop", () => {

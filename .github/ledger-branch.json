@@ -1,0 +1,13 @@
+{
+  "$comment": [
+    "THE LEDGER LIVES ON ITS OWN BRANCH (NEW-1, owner decision 2026-11-05).",
+    "The BACKLOG / VERIFICATION records are NOT in this tree. They are one file per entry under ledger/<kind>/<state>/<ID>.md on the",
+    "`ledger` branch, which has no required checks and no pull requests — a session commits a record straight to it.",
+    "This file is the MARKER: tools that used to gate ledger edits inside a PR (scripts/check-mint.mjs, the touch guard, the git hooks)",
+    "read it via isBranchMode() in scripts/lib/ledger.mjs and stand down; ledgerRoot() then finds the shallow checkout in .ledger/.",
+    "Do not delete it without moving the ledger back. Rules: the LEDGER section of CLAUDE.md. Tool: `npm run ledger -- --help`."
+  ],
+  "branch": "ledger",
+  "checkout": ".ledger",
+  "since": "2026-11-05"
+}

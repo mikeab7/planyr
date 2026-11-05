@@ -27,20 +27,24 @@ const M = (over = {}) => ({
   adjacentCities: [], unclassifiedCities: [], ...over,
 });
 
-describe("NEW-1 — the four shapes, and no others", () => {
+describe("NEW-1 — the shapes, and no others", () => {
   it("1 · in city limits", () => {
     const l = formatJurisdictionLabel(M({ governingCities: ["Houston"], counties: ["Harris"] }));
     expect(l.text).toBe("City of Houston · Harris County");
     expect(l.shape).toBe("in-city");
   });
 
-  it("2 · in city limits AND inside another city's ETJ", () => {
-    const l = formatJurisdictionLabel(M({ governingCities: ["Humble"], etjCities: ["Houston"], counties: ["Harris"] }));
-    expect(l.text).toBe("City of Humble · Houston ETJ · Harris County");
-    expect(l.shape).toBe("in-city-etj");
+  /* ⛔ Concept A (owner, 2026-10-28: "it says Houston ETJ but then also says City of Sugar Land, and it can't be both"). An ETJ is
+   * the ground OUTSIDE every city's limits, so a city that holds the site leaves no ETJ to print — even if a model hands one in. */
+  it("2 · CITY LIMITS OUTRANK ANY ETJ — a city that holds the site never prints another city's ETJ beside it", () => {
+    const l = formatJurisdictionLabel(M({ governingCities: ["Sugar Land"], etjCities: ["Houston"], counties: ["Fort Bend"] }));
+    expect(l.text).toBe("City of Sugar Land · Fort Bend County");
+    expect(l.shape).toBe("in-city");
+    expect(l.text).not.toContain("ETJ");
+    expect(JURISDICTION_SHAPES).not.toContain("in-city-etj");
   });
 
-  it("3 · unincorporated, inside an ETJ — the ETJ leads and 'Unincorporated' is NOT printed", () => {
+  it("2b · unincorporated, inside an ETJ — the ETJ leads and 'Unincorporated' is NOT printed", () => {
     const l = formatJurisdictionLabel(M({ etjCities: ["Houston"], counties: ["Harris"] }));
     expect(l.text).toBe("City of Houston ETJ · Harris County");
     expect(l.shape).toBe("etj");
@@ -61,7 +65,7 @@ describe("NEW-1 — the four shapes, and no others", () => {
 
   it("the shape is decided from the MODEL, before any string exists", () => {
     expect(jurisdictionShapeOf(M({ governingCities: ["Houston"] }))).toBe("in-city");
-    expect(jurisdictionShapeOf(M({ governingCities: ["Humble"], etjCities: ["Houston"] }))).toBe("in-city-etj");
+    expect(jurisdictionShapeOf(M({ governingCities: ["Humble"], etjCities: ["Houston"] }))).toBe("in-city");
     expect(jurisdictionShapeOf(M({ etjCities: ["Houston"] }))).toBe("etj");
     expect(jurisdictionShapeOf(M())).toBe("unincorporated");
     expect(jurisdictionShapeOf(M({ partialCities: ["Baytown"] }))).toBe("split");
@@ -73,8 +77,8 @@ describe("NEW-1 — the four shapes, and no others", () => {
 
 describe("NEW-1 — one separator, one meaning", () => {
   it("`·` joins GOVERNING slots only", () => {
-    const l = formatJurisdictionLabel(M({ governingCities: ["Humble"], etjCities: ["Houston"], counties: ["Harris"], isds: ["Humble ISD"] }));
-    expect(l.text.split(SLOT_SEP)).toEqual(["City of Humble", "Houston ETJ", "Harris County", "Humble ISD"]);
+    const l = formatJurisdictionLabel(M({ etjCities: ["Houston"], counties: ["Harris"], isds: ["Humble ISD"] }));
+    expect(l.text.split(SLOT_SEP)).toEqual(["City of Houston ETJ", "Harris County", "Humble ISD"]);
   });
 
   it("`+` joins CO-EQUAL PEERS inside one slot — two cities, two counties, two districts", () => {
@@ -206,7 +210,9 @@ describe("NEW-2 — governingCityOf reads the model, not the label", () => {
   it("answers on every shape, including the one the old string parse broke", () => {
     const badge = (j) => formatJurisdictionBadge({ sources: [], ...j });
     const inCity = badge({ city: ["Houston"], cityCentroid: ["Houston"], cityAll: ["Houston"], etj: [], county: ["Harris"] });
-    const inCityEtj = badge({ city: ["Humble"], cityCentroid: ["Humble"], cityAll: ["Humble"], etj: ["Houston"], county: ["Harris"] });
+    // A second GOVERNING slot (limited-purpose annexation) is what the old " / " parse could not survive now that a city never prints an ETJ.
+    const inCityEtj = badge({ city: ["Humble"], cityCentroid: ["Humble"], cityAll: ["Humble"], etj: [], county: ["Harris"],
+      cityLimitedAreas: [{ name: "Jersey Village", class: "limited", share: 0.1 }] });
     const etjOnly = badge({ city: [], cityCentroid: [], cityAll: [], etj: ["Houston"], county: ["Harris"] });
     const uninc = badge({ city: [], cityCentroid: [], cityAll: [], etj: [], county: ["Harris"] });
 
@@ -222,7 +228,7 @@ describe("NEW-2 — governingCityOf reads the model, not the label", () => {
      * no city candidate and the site falls to the county's floodplain rule, 1–2 ft lower. */
     const preFix = (b) => (b.cityContainment === "in" ? (b.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null : null);
     expect(preFix(inCity)).toBe("Houston");                    // shape 1 hid the coupling…
-    expect(preFix(inCityEtj)).toBe("Humble · Houston ETJ");    // …shape 2 exposes it.
+    expect(preFix(inCityEtj)).toBe("Humble · Jersey Village limited-purpose annexation (10% by area)");    // …a second governing slot exposes it.
     expect(preFix(inCityEtj)).not.toBe(governingCityOf(inCityEtj));
   });
 

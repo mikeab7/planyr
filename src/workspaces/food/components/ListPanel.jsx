@@ -14,12 +14,13 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { noAutofill } from "../lib/noAutofill.js";
 import { LIST_COLORS, validateListName } from "../lib/foodLists.js";
 import { Swatch, IOS_NO_ZOOM, PANEL_SHADOW } from "./ListChips.jsx";
+import { chipBox } from "../lib/chipStyle.js";
 
 const STATUS_LABEL = { been: "Been", want: "Want to try", none: "Not marked" };
 
 function StatusControl({ status, onToggleWant, disabled }) {
   if (status === "been") {
-    return <span data-testid="food-list-status" data-status="been" style={{ flex: "none", fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: RADIUS.pill, padding: "2px 7px" }}>Been</span>;
+    return <span data-chip="" data-testid="food-list-status" data-status="been" style={{ ...chipBox(18, 7), flex: "none", fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: RADIUS.pill }}>Been</span>;
   }
   const on = status === "want";
   return (

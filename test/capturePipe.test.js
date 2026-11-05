@@ -12,11 +12,12 @@ import { fileURLToPath } from "node:url";
 import { buildPerfRow } from "../src/shared/telemetry/perfInstrument.js";
 import { NOTE_VOCAB, assertCaptureClean, buildCapture, encodeCapture, CAPTURE_MAX_CHARS } from "../src/shared/telemetry/perfCapture.js";
 import { bindPerfDelivery, perfCaptureDelivery, __resetPerfHandle } from "../src/shared/telemetry/perfRecorderHandle.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const srcOf = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const clientErrors = srcOf("../src/shared/telemetry/clientErrors.js");
 const recorder = srcOf("../src/shared/telemetry/perfRecorder.js");
-const planner = srcOf("../src/workspaces/site-planner/SitePlanner.jsx");
+const planner = plannerSource();
 // B1231280/B1231281 — the manual control moved from the planner's own zoom stack into the
 // global help/report control the app shell mounts on every route (see that file's own header).
 const helpControl = srcOf("../src/app/HelpReportControl.jsx");

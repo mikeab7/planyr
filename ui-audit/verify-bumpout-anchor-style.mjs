@@ -54,7 +54,7 @@ await page.waitForTimeout(700);
 let fail = 0;
 const log = (ok, m) => { console.log((ok ? "✓ " : "✗ ") + m); if (!ok) fail++; };
 const near = (a, b, eps = 1.5) => Math.abs(a - b) <= eps;
-const readEls = async () => page.evaluate((id) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; }, DEMO_ID);
+const readEls = async () => page.evaluate((id) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; }, DEMO_ID);
 const bumpRect = async () => page.evaluate(() => {
   const rects = [...document.querySelectorAll("svg rect")].map((r) => ({ r, b: r.getBoundingClientRect() }))
     .filter((o) => { const f = (o.r.getAttribute("fill") || "").toLowerCase(); return (f === "#f3ece1" || f === "#3366cc") && o.b.width * o.b.height > 50; })

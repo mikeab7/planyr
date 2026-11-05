@@ -15,6 +15,14 @@
 //   (4) it holds at every zoom step and for all three alignment settings, so there is no per-row
 //       variation and no zoom at which the rule changes.
 //
+// NEW-1 (2026-11-04, name RANK) adds a third invariant, measured off the real computed font sizes at
+// the owner's row heights (rowHeight 20 / 24 / 34): the higher a task sits in the hierarchy the LARGER
+// its name — at every row height, for every kind (summary / leaf / milestone) — and a milestone name is
+// never smaller than a leaf name at its level. Also saves the before/after crops
+// (ui-audit/screens/gantt-rank-*.png). SEQ_HTML=<path> serves an alternate sequence/index.html (the
+// "before" build) from the same harness; RANK_ONLY=1 skips everything but the rank passes, RANK_TAG=before
+// names the saved crops.
+//
 // Hermetic: the sequence app pulls React/Babel/Supabase off CDNs, so those are routed to local
 // copies exactly as ui-audit/verify-gantt-labels-deps.mjs does.
 import { chromium } from "playwright";
@@ -24,7 +32,7 @@ import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { expandFixture, visibleTasks } from "../e2e/fixtures/schedules/expand.mjs";
+import { expandFixture, visibleTasks, depthOf } from "../e2e/fixtures/schedules/expand.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
@@ -64,6 +72,8 @@ const INJECT = `<script>(function(){try{
   var params=new URLSearchParams(location.search);
   var proj=${JSON.stringify(GRAND_PORT)};
   if(params.get("align")) proj.labelAlign=params.get("align");
+  if(params.get("deps")){ var ts=proj.tasks; for(var i=2;i<ts.length;i++){ if(i%2===0) ts[i].predecessors=[{id:ts[i-1].id,type:"FS"}]; if(i%7===0) ts[i].predecessors=(ts[i].predecessors||[]).concat([{id:ts[i-2].id,type:"SS"}]); } }
+  if(params.get("rowH")) d.settings=Object.assign({},d.settings,{rowHeight:+params.get("rowH")});
   d.projects={"2":proj}; d.aPid=2; d.nPid=3; d.nTid={"2":400};
   d.view=params.get("view")||"split"; d.section="projects";
   window.__PL_ALIGN__=proj.labelAlign;
@@ -74,6 +84,7 @@ const server = createServer(async (req, res) => {
     let p = decodeURIComponent(req.url.split("?")[0]); if (p.endsWith("/")) p += "index.html";
     const fp = normalize(join(ROOT, p)); if (!fp.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
     let body = await readFile(fp);
+    if (fp.endsWith("sequence/index.html") && process.env.SEQ_HTML) body = await readFile(process.env.SEQ_HTML);
     if (fp.endsWith("sequence/index.html"))
       body = body.toString().replace(/(<script id="planar-data">[\s\S]*?<\/script>)/, `$1${INJECT}`);
     res.writeHead(200, { "Content-Type": MIME[extname(fp)] || "application/octet-stream" }); res.end(body);
@@ -101,6 +112,8 @@ const measure = async page => page.evaluate(() => {
     const br = bar ? bar.getBoundingClientRect() : null;
     out.push({
       id: +id, text: norm(el.textContent), mode: el.getAttribute("data-gantt-mode"),
+      fs: parseFloat(getComputedStyle(el).fontSize),
+      barKind: bar ? bar.getAttribute("data-gantt-kind") : null, barH: br ? +br.height.toFixed(2) : null,
       nameTop: +r.top.toFixed(2), nameBottom: +r.bottom.toFixed(2), nameW: +r.width.toFixed(2),
       barTop: br ? +br.top.toFixed(2) : null, barBottom: br ? +br.bottom.toFixed(2) : null,
       plated: getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)",
@@ -203,10 +216,128 @@ async function pass(align, { zoomPct = 33, view = "split" } = {}) {
 
 // ── the owner's exact repro, then the other two alignments and a zoom sweep ────────
 console.log(`Grand Port fixture: ${GRAND_PORT.tasks.length} tasks, ${VISIBLE.length} visible with the saved collapse state; labelAlign="${GRAND_PORT.labelAlign}"`);
+if (!process.env.RANK_ONLY) {
 await pass(GRAND_PORT.labelAlign, { zoomPct: 33 });      // the reported case, verbatim
 for (const a of ["left", "right"]) await pass(a, { zoomPct: 33 });
 for (const z of [17, 50]) await pass(GRAND_PORT.labelAlign, { zoomPct: z });
 await pass(GRAND_PORT.labelAlign, { zoomPct: 33, view: "gantt" });
+}
+
+// ── NEW-1 (name RANK): size follows the hierarchy at every row height ─────────────────────────────
+// Kind/level come from the REAL fixture (the app derives level from the parent chain the same way).
+const KIND_OF = new Map(), LEVEL_OF = new Map();
+{
+  const isP = t => GRAND_PORT.tasks.some(x => x.parentId === t.id);
+  for (const t of GRAND_PORT.tasks) {
+    KIND_OF.set(t.id, isP(t) ? "summary" : t.duration === 0 ? "milestone" : "leaf");
+    LEVEL_OF.set(t.id, depthOf(GRAND_PORT.tasks, t.id));
+  }
+}
+// Expected sizes are deliberately a SECOND, independent statement of the ramp (not read from the app) — NEW-1 amendment (B2656160 ×2): strictly decreasing.
+const RANKED = lv => [10, 9.25, 8.5, 8][Math.min(lv, 3)];
+// The owner's live Grand Port has newer rows (Permits and Platting, Baytown ETJ Permit, Permit Review #3, Final Plat, Bond Acceptance)
+// than this checked-in fixture snapshot; these are the nearest rows covering every level AND kind: L0 summary, L1 summary, L2 summary,
+// L1 task, L2 task, L3 milestone. Ids are looked up by name+level so a duplicated name ("Submit Preliminary Plat" is under two parents) is unambiguous.
+const SHOT_ROWS = [["Permitting/Entitlements", 0], ["Platting", 1], ["Baytown Platting", 2], ["Determine Bonding Amount", 1], ["Draft Preliminary Plat", 2], ["Submit Preliminary Plat", 3]];
+const SHOT_IDS = SHOT_ROWS.map(([n, lv]) => GRAND_PORT.tasks.find(t => t.name === n && depthOf(GRAND_PORT.tasks, t.id) === lv)?.id).filter(Boolean);
+
+async function rankPass(rowH, tag = "after") {
+  console.log(`\n── RANK · rowHeight ${rowH} · split view · 33% zoom (${tag}) ──────────────`);
+  const page = await browser.newPage({ viewport: { width: 1500, height: 950 }, deviceScaleFactor: 3 });
+  await assertMeasurable(page, "verify-gantt-label-above");
+  await routeCDN(page);
+  const real = [];
+  page.on("pageerror", e => { if (!BENIGN.some(r => r.test(e.message))) real.push("PAGEERROR: " + e.message); });
+  await page.goto(`${base}?align=${GRAND_PORT.labelAlign}&view=split&rowH=${rowH}&deps=1`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(e => real.push("GOTO: " + e.message));
+  await page.waitForSelector("[data-gantt-name]", { timeout: 25000 }).catch(() => {});
+  await page.waitForTimeout(900);
+  await zoomTo(page, 33);
+  await page.waitForTimeout(500);
+  const names = await sweepAllRows(page);
+  // known-good arm: the row height the app is really using must be the one asked for (else this run is VOID).
+  const rhSeen = await page.evaluate(() => { const r = document.querySelector("[data-gantt-row]"); const q = [...document.querySelectorAll("[data-gantt-row]")].slice(0, 2).map(e => e.getBoundingClientRect().top); return q.length > 1 ? Math.round(q[1] - q[0]) : null; });
+  ok(rhSeen === rowH, `the chart is really at row height ${rowH} (measured row pitch ${rhSeen})`);
+  const rows = names.map(n => ({ ...n, kind: KIND_OF.get(n.id), level: Math.min(LEVEL_OF.get(n.id) ?? 0, 3) })).filter(n => n.kind);
+  ok(rows.length >= 120, `${rows.length} names measured`);
+  {
+    const by = (k, lv) => rows.filter(n => n.kind === k && n.level === lv).map(n => n.fs);
+    const uniform = (k, lv) => { const a = by(k, lv); return a.length ? Math.max(...a) - Math.min(...a) < 0.01 : true; };
+    // (a) every name of a given kind+level is drawn at exactly its ranked size, at THIS row height
+    const wrong = rows.filter(n => Math.abs(n.fs - RANKED(n.level)) > 0.01);
+    ok(wrong.length === 0, `every name is drawn at its full ranked size (${wrong.length} are not)`);
+    wrong.slice(0, 8).forEach(n => console.log(`      · ${n.kind} L${n.level} "${n.text}" fs ${n.fs} (ranked ${RANKED(n.level)})`));
+    // (b) rank across the measured set: min size at level N >= max size at level N+1; level 0 strictly above level 1
+    const minAt = lv => Math.min(...rows.filter(n => n.level === lv).map(n => n.fs)), maxAt = lv => Math.max(...rows.filter(n => n.level === lv).map(n => n.fs));
+    for (const lv of [0, 1, 2]) if (rows.some(n => n.level === lv) && rows.some(n => n.level === lv + 1))
+      ok(minAt(lv) >= maxAt(lv + 1) - 0.01, `level ${lv} names (min ${minAt(lv)}) are not smaller than level ${lv + 1} names (max ${maxAt(lv + 1)})`);
+    // NEW-1 amendment (B2656160 ×2): STRICT at every depth — a level's smallest name is larger than the next level's largest.
+    for (const lv of [0, 1, 2]) if (rows.some(n => n.level === lv) && rows.some(n => n.level === lv + 1))
+      ok(minAt(lv) > maxAt(lv + 1), `level ${lv} (${minAt(lv)}) is STRICTLY larger than level ${lv + 1} (${maxAt(lv + 1)})`);
+    for (const kind of ["summary", "leaf", "milestone"]) {
+      const sz = [0, 1, 2, 3].map(lv => by(kind, lv)).map(a => a.length ? a[0] : null).filter(v => v != null);
+      ok(sz.every((v, i) => i === 0 || sz[i - 1] > v), `${kind}: sizes by level ${sz.join(" > ")} strictly decrease`);
+    }
+    // (c) a milestone name is never smaller than a leaf name at its level
+    for (const lv of [1, 2, 3]) { const m = by("milestone", lv), l = by("leaf", lv);
+      if (m.length && l.length) ok(Math.min(...m) >= Math.max(...l) - 0.01, `milestone L${lv} name (${Math.min(...m)}) >= leaf L${lv} name (${Math.max(...l)})`); }
+    // (d) bracket rank survives: a level's bracket is at least as tall as the level below it, and it still has legs
+    const brH = lv => { const a = rows.filter(n => n.kind === "summary" && n.level === lv && n.barH != null).map(n => n.barH); return a.length ? Math.min(...a) : null; };
+    for (const lv of [0, 1, 2]) if (brH(lv) != null && brH(lv + 1) != null) ok(brH(lv) >= brH(lv + 1) - 0.01, `bracket L${lv} (${brH(lv)}) >= bracket L${lv + 1} (${brH(lv + 1)})`);
+    ok(brH(0) != null && brH(0) >= 4, `the top bracket still reads as a bracket, span + legs (${brH(0)} tall)`);
+    // (e) nothing sits on its glyph
+    const onBar = rows.filter(n => n.barTop != null && n.nameBottom > n.barTop + 0.5);
+    ok(onBar.length === 0, `every name is above its glyph (${onBar.length} overlap)`);
+    onBar.slice(0, 8).forEach(n => console.log(`      · ${n.kind} L${n.level} "${n.text}" bottom ${n.nameBottom} vs glyph top ${n.barTop}`));
+    ok(uniform("summary", 0) && uniform("leaf", 3), "same kind + level = same size (no per-row variation)");
+  }
+  // (f) dependency arrows still LAND ON the glyphs: every connector endpoint sits on the top or bottom EDGE of a
+  // rendered bar / bracket / diamond (the arrow code and the renderer read ONE shared geometry — this proves it
+  // on the real DOM). Known-good arm: the fixture must actually produce arrows, else the run is VOID.
+  {
+    const scroller = await page.locator("[data-gantt-name]").first().evaluateHandle(el => { let n = el.parentElement; while (n && n.scrollHeight <= n.clientHeight + 4) n = n.parentElement; return n; });
+    let total = 0, landed = 0; const missed = [];
+    for (const frac of [0, 0.35, 0.7]) {
+      await scroller.evaluate((el, f) => { el.scrollTop = Math.max(0, (el.scrollHeight - el.clientHeight) * f); }, frac);
+      await page.waitForTimeout(220);
+      const r = await page.evaluate(() => {
+        const bars = [...document.querySelectorAll("[data-gantt-bar]")].map(e => e.getBoundingClientRect());
+        const out = { total: 0, landed: 0, missed: [] };
+        for (const svg of document.querySelectorAll("svg")) {
+          const sr = svg.getBoundingClientRect();
+          for (const path of svg.querySelectorAll('path[stroke-dasharray="4 3"]')) {
+            const m = /M([-\d.]+),([-\d.]+) C[^L]*? ([-\d.]+),([-\d.]+)$/.exec(path.getAttribute("d").trim());
+            if (!m) continue;
+            for (const [x, y] of [[+m[1], +m[2]], [+m[3], +m[4]]]) {
+              const cx = sr.left + x, cy = sr.top + y; out.total++;
+              // x tolerance 4: every row carries a 3px transparent left border that offsets bars from the arrow layer (long-standing, not this item's); the VERTICAL landing is what the shared geometry owns, held to 0.7.
+              const hit = bars.some(b => cx >= b.left - 4 && cx <= b.right + 4 && (Math.abs(cy - b.top) < 0.7 || Math.abs(cy - b.bottom) < 0.7));
+              if (hit) out.landed++; else if (out.missed.length < 4) out.missed.push([+cx.toFixed(1), +cy.toFixed(1)]);
+            }
+          }
+        }
+        return out;
+      });
+      total += r.total; landed += r.landed; missed.push(...r.missed);
+    }
+    if (process.env.RANK_DEBUG) console.log('   debug', JSON.stringify(await page.evaluate(() => ({ svgs: document.querySelectorAll('svg').length, dashed: document.querySelectorAll('path[stroke-dasharray]').length, sample: [...document.querySelectorAll('path[stroke-dasharray]')].slice(0,2).map(p => [p.getAttribute('d'), p.getAttribute('stroke-dasharray')]) }))));
+    ok(total >= 40, `arrow check is not vacuous (${total} connector endpoints inspected)`);
+    ok(landed === total, `every arrow endpoint lands on a glyph's top/bottom edge (${landed}/${total})${missed.length ? " e.g. " + JSON.stringify(missed) : ""}`);
+    await scroller.evaluate(el => { el.scrollTop = 0; });
+  }
+  // before / after crops for the owner's eye
+  for (const id of SHOT_IDS) {
+    const el = page.locator(`[data-gantt-name="${id}"]`).first();
+    await el.evaluate(e => e.scrollIntoView({ block: "center" })).catch(() => {});
+    await page.waitForTimeout(160);
+    const b = await el.boundingBox().catch(() => null);
+    if (b) await page.screenshot({ path: `${OUT}gantt-rank-${tag}-row${rowH}-t${id}.png`, clip: { x: Math.max(0, b.x - 120), y: Math.max(0, b.y - 36), width: 560, height: 110 } });
+  }
+  ok(real.length === 0, `no uncaught page errors (${real.length})`);
+  await page.close();
+  return rows;
+}
+const RANK_ROWS = (process.env.RANK_ROWS || "20,24,34").split(",").map(Number);
+for (const rh of RANK_ROWS) await rankPass(rh, process.env.RANK_TAG || "after");
 
 // ── PDF-PARITY: the print path must agree ─────────────────────────────────────────
 console.log(`\n── print path (buildGanttSVG) ────────────────────────────────`);
@@ -273,6 +404,38 @@ console.log(`\n── print path (buildGanttSVG) ──────────�
     ok(!r.nan, `print SVG (${align}) has no NaN geometry`);
     ok(r.rows > 100, `print SVG (${align}) measured ${r.rows} rows with both a caption and a glyph`);
     ok(r.onGlyph === 0, `print SVG (${align}) — every caption is ABOVE its glyph (${r.onGlyph} overlap, worst ${r.worst}px)`);
+  }
+  // NEW-1 (name RANK) on the PRINT sheet: each caption's real font size is its ranked print size (9 / 8.5 / 8 / 7.5
+  // by level), the top level is larger than the next, milestones are not at the 6.5 floor, and the sheet is saved as
+  // a before/after crop (tag via RANK_TAG).
+  {
+    const host = await page.evaluate((proj) => {
+      const svg = String(window.buildGanttSVG([proj], 1100, "landscape", { barNames: true, labelAlign: proj.labelAlign, zoomMul: 1 }) || "");
+      const el = document.createElement("div"); el.id = "printHost"; el.style.cssText = "position:absolute;left:0;top:0;width:1100px;background:#fff;z-index:99999";
+      el.innerHTML = svg; document.body.appendChild(el);
+      const caps = [...el.querySelectorAll('text[dominant-baseline="central"]')].map(t => ({ s: t.textContent, fs: parseFloat(t.getAttribute("font-size")) }));
+      return { caps };
+    }, GRAND_PORT);
+    const RANKED_PRINT = lv => [9, 8.5, 8, 7.5][Math.min(lv, 3)];
+    const levelsByName = new Map();
+    for (const t of GRAND_PORT.tasks) { const a = levelsByName.get(t.name) || new Set(); a.add(Math.min(depthOf(GRAND_PORT.tasks, t.id), 3)); levelsByName.set(t.name, a); }
+    const bad = [], seenLv = {};
+    for (const c of host.caps) {
+      const raw = c.s.replace(/&amp;/g, "&"); const lv = levelsByName.get(raw);
+      if (!lv || lv.size !== 1) continue; const L = [...lv][0];
+      (seenLv[L] ||= new Set()).add(c.fs);
+      if (Math.abs(c.fs - RANKED_PRINT(L)) > 0.01) bad.push(`${raw} L${L} fs ${c.fs} (ranked ${RANKED_PRINT(L)})`);
+    }
+    ok(host.caps.length > 100 && Object.keys(seenLv).length >= 4, `print rank check is not vacuous (${host.caps.length} captions, levels seen ${Object.keys(seenLv).join(",")})`);
+    ok(bad.length === 0, `every print caption is drawn at its full ranked size (${bad.length} are not)${bad.length ? " e.g. " + bad.slice(0, 4).join(" | ") : ""}`);
+    for (const lv of [0, 1, 2]) if (seenLv[lv] && seenLv[lv + 1]) ok(Math.min(...seenLv[lv]) > Math.max(...seenLv[lv + 1]), `print: level ${lv} (${[...seenLv[lv]]}) is STRICTLY larger than level ${lv + 1} (${[...seenLv[lv + 1]]})`);
+    const tag = process.env.RANK_TAG || "after";
+    const row = id => GRAND_PORT.tasks.findIndex(t => t.id === id);
+    for (const id of SHOT_IDS) {
+      const y0 = 30 + row(id) * 18 - 22;           // HEADER_H 30 + row pitch 18, a row of air above
+      await page.screenshot({ path: `${OUT}gantt-rank-print-${tag}-t${id}.png`, fullPage: true, clip: { x: 360, y: Math.max(0, y0), width: 740, height: 76 } }).catch(e => console.log("   (print crop failed: " + e.message.split("\n")[0] + ")"));
+    }
+    await page.locator("#printHost").evaluate(e => e.remove());
   }
   await page.close();
 }

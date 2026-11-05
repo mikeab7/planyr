@@ -71,10 +71,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createOperationTracker } from "../src/workspaces/site-planner/lib/operationEnvelope.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SP_PATH = join(here, "../src/workspaces/site-planner/SitePlanner.jsx");
-const SP = readFileSync(SP_PATH, "utf8");
+const SP = plannerSource();
 
 const slice = (fromMarker, toMarker) => {
   const from = SP.indexOf(fromMarker);
@@ -156,7 +156,7 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
   it("mergeParcels passes the real \"merge\" op kind, not the generic \"edit\" fallback", () => {
     const body = slice(
       "const combineParcelsAction = (ids) => {",
-      "\n  // Remove ONE parcel by id (B598)",
+      "\n  /* ---- NEW-1: the right rail's Parcel tools menu, wired",
     );
     expect(body.includes('pushHistory("merge")'), "the one combine (combineParcelsAction, which mergeParcels calls) must call pushHistory(\"merge\") so its rows carry a real op_kind").toBe(true);
     expect(body.includes("pushHistory();"), "mergeParcels must not also fall back to the bare pushHistory()").toBe(false);

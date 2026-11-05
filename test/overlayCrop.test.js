@@ -1,12 +1,12 @@
 /* B719779 — CROP A PLACED OVERLAY. Pure geometry: clamping, the sparse "no crop" convention, the
- * screen clip rect, the PDF.js hi-res render-viewport offset math, and the panel's feet-based trim
- * fields. See src/workspaces/site-planner/lib/overlayCrop.js for the derivation of the viewport
+ * screen clip rect, the PDF.js hi-res render-viewport offset math (the panel's feet-based trim
+ * fields were removed 2026-10-15). See src/workspaces/site-planner/lib/overlayCrop.js for the derivation of the viewport
  * offset formula (worked from PageViewport's own transform construction in pdfjs-dist).
  */
 import { describe, it, expect } from "vitest";
 import {
   MIN_CROP_PX, clampCropRect, isFullCrop, normalizeCrop, hasCrop, effectiveCropRect,
-  cropClipRectScreen, cropTrimFeet, cropFromTrimFeet,
+  cropClipRectScreen,
   MIN_POLY_VERTICES, MAX_POLY_VERTICES, cropKind, polygonAreaPx, clampPolyPoints, isUsablePoly, normalizePolyCrop,
   rectToPolyPoints, polyPointsToRect, isValidCropShape, normalizeCropShape, clipPathValueForCrop,
   constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
@@ -84,32 +84,6 @@ describe("cropClipRectScreen — the SVG <clipPath> rect, same coordinate space 
     const o = { imgW: 1000, imgH: 800, ftPerPx: 1, crop: { x: 10, y: 10, w: 100, h: 100 } };
     const tl = { x: 500, y: 500 };
     expect(cropClipRectScreen(o, tl, o.ftPerPx, 1)).toEqual({ x: 510, y: 510, width: 100, height: 100 });
-  });
-});
-
-describe("cropTrimFeet / cropFromTrimFeet — the panel's four edge fields, round-tripped", () => {
-  const o = { imgW: 1000, imgH: 800, ftPerPx: 0.5 }; // 500 x 400 ft sheet
-  it("zero trim on an uncropped overlay", () => {
-    expect(cropTrimFeet(o)).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
-  });
-  it("reads back the trim implied by a stored crop", () => {
-    const cropped = { ...o, crop: { x: 100, y: 40, w: 700, h: 600 } }; // right/bottom margin: 1000-100-700=200px, 800-40-600=160px
-    expect(cropTrimFeet(cropped)).toEqual({ left: 50, top: 20, right: 100, bottom: 80 });
-  });
-  it("round-trips: trim -> crop -> trim", () => {
-    const trim = { left: 25, top: 10, right: 25, bottom: 10 };
-    const crop = cropFromTrimFeet(trim, o);
-    expect(crop).not.toBe(null);
-    const cropped = { ...o, crop };
-    expect(cropTrimFeet(cropped)).toEqual(trim);
-  });
-  it("all-zero trim normalizes to no crop at all (null), never a stored no-op rect", () => {
-    expect(cropFromTrimFeet({ left: 0, top: 0, right: 0, bottom: 0 }, o)).toBe(null);
-  });
-  it("negative/garbage trims read as zero, never expand past the edge", () => {
-    const crop = cropFromTrimFeet({ left: -50, top: NaN, right: 10, bottom: 5 }, o);
-    expect(crop.x).toBe(0);
-    expect(crop.y).toBe(0);
   });
 });
 

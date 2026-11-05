@@ -108,6 +108,8 @@ export const DECLARATIONS = Object.freeze([
   { name: "onDimNumberDown", verdict: U, why: "A press on a dimension number, which only exists for a drawn element." },
   { name: "renderPanelBody", verdict: U, why: "PANEL content — a list and a set of numbers, never a depiction of the drawing." },
   { name: "markupsZ", verdict: U, why: "The z-ordering pass; `drawMarkupsZ` beside it is the filtered draw set." },
+  { name: "parcelTierNodes", verdict: F,
+    why: "NEW-1 — the plan's setback rings + parcels, moved verbatim out of the render so one tree can paint in either of two slots (Parcels in front). The boundary half reads `drawParcels`, which is EMPTY while the Parcels group is hidden; the setback-ring half read the raw `parcels` and ignored the hide, so a hidden group left its rings on the drawing (B3296's shape). It now asks `isHidden(hiddenGroups, \"parcels\")` itself." },
   { name: "calibPlace", verdict: U, why: "Aerial calibration placement — it reads the model to georeference, not to draw." },
   { name: "createExportSheet", verdict: U,
     why: "The export module's ctx destructure. The PDF/PNG sheet CLONES the live `<svg>`, so hidden content is absent by construction; the model is there for the DATA exports, which decide their own contents." },

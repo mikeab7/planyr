@@ -1,3 +1,6 @@
+-- ⛔ SUPERSEDED (B2559168, 2026-10-30) by food_browse_and_address_disk_io.sql — the browse function below is the
+-- OLD wide-row version that spilled ~13 MB of temp files per call. Re-running THIS file would regress it.
+-- Kept only as the record of the 2026-10-04 operator fix; food.sql carries the current definition.
 -- B<PENDING> (2026-10-04) — migration `food_places_in_bounds_sampled_qualify_gis_operator`,
 -- ALREADY APPLIED to production (planyr_production) on 2026-10-04; kept here so the repo's record
 -- matches the live database. The same definition is folded into food.sql (idempotent: create or

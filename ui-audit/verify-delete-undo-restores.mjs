@@ -48,7 +48,7 @@ const ok = (n, pass, d = "") => { results.push({ n, pass }); console.log(`  ${pa
 
 /** COMMITTED: every element the saved plan holds, keyed by id, with every property. */
 const committed = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return Object.fromEntries((site.els || []).map((e) => [e.id, e]));
 });
@@ -64,7 +64,7 @@ const onScreen = (page) => page.evaluate(() => {
 
 /** How many elements share a `z` with an earlier one — the legacy-migration signal. */
 const dupZ = (page) => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = m[Object.keys(m)[0]] || {};
   const seen = new Set(); let d = 0;
   for (const e of s.els || []) { if (seen.has(e.z)) d++; seen.add(e.z); }

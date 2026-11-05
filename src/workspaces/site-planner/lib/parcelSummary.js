@@ -5,6 +5,7 @@
 // cloudSync.js's slimForCloud, which empties that field on every cloud push since B672).
 // Pure — the network fetch lives in elementApi.js/cloudSync.js.
 import { dissolvedParcelSqft, overlappingParcelPairsSteps } from "./polyClip.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 // rows: [{ site_id, data }], data = the parcel object verbatim (same shape the canvas holds).
 // Returns { [siteId]: { count, acres, parcels } }. A site with zero live rows is simply absent
@@ -19,7 +20,7 @@ export function summarizeParcelRows(rows) {
   }
   const out = {};
   for (const [siteId, parcels] of bySite) {
-    out[siteId] = { count: parcels.length, acres: dissolvedParcelSqft(parcels) / 43560, parcels };
+    out[siteId] = { count: parcels.length, acres: dissolvedParcelSqft(parcels) / SQFT_PER_ACRE, parcels };
   }
   return out;
 }
@@ -52,7 +53,7 @@ export async function summarizeParcelRowsAsync(rows, { budgetMs = 12, yieldFn = 
     const gen = overlappingParcelPairsSteps(parcels);
     let pairs;
     for (;;) { const r = gen.next(); if (r.done) { pairs = r.value; break; } if (now() - sliceStart >= budgetMs) { await yieldFn(); sliceStart = now(); } }
-    out[siteId] = { count: parcels.length, acres: dissolvedParcelSqft(parcels, pairs) / 43560, parcels };
+    out[siteId] = { count: parcels.length, acres: dissolvedParcelSqft(parcels, pairs) / SQFT_PER_ACRE, parcels };
     if (now() - sliceStart >= budgetMs) { await yieldFn(); sliceStart = now(); }
   }
   return out;

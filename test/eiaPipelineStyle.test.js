@@ -43,8 +43,8 @@ describe("EIA pipeline layers — deliberate style (NEW-2)", () => {
       expect(waterBlues().has(st.color.toLowerCase())).toBe(false);
       expect(cfg.color).toBe(b.color); // the Layers-panel swatch reads the same colour
     });
-    it(`${id}: the same default strength as the Texas pipeline layer (0.85) — colour and dash carry the hierarchy`, () => {
-      expect(ALL_LAYERS[id].opacity).toBe(0.85);
+    it(`${id}: the same default strength as the Texas pipeline layer (100% since the owner's 2026-10-29 reversal, B2507060) — colour and dash carry the hierarchy`, () => {
+      expect(ALL_LAYERS[id].opacity).toBe(1);
     });
   }
 

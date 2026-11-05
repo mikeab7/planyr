@@ -550,14 +550,111 @@ function roadSurfaceRingUncached(clean, width) {
  *
  * `cutters` are the dissolved pavement rings of the drive; with none, the full (uninterrupted) outline
  * comes back. Pure: world feet in, world feet out. */
-export function rectOutlineCutSegments(el, cutters) {
+export function rectOutlineCutSegments(el, cutters, mouths) {
   if (!el || el.points || !(el.w > 0) || !(el.h > 0) || typeof el.cx !== "number" || typeof el.cy !== "number") return [];
+  const cs = rectCornersWorld(el, 0, 0, el.w, el.h);
+  const out = [];
+  for (let e = 0; e < 4; e++) for (const seg of edgeInkPieces([cs[e], cs[(e + 1) % 4]], cutters, mouths)) if (seg.length >= 2) out.push(seg);
+  return out;
+}
+/* NEW-1 (B1783376 ×3) — THE INK OF ONE EDGE of a field a drive tees into, with the drive's mouth taken out of it.
+ *
+ * The edge that is the field's FACE (collinear with a mouth) is cut by the mouth's own two tangent points, EXACTLY — never by polygon clipping. The face runs along the
+ * curb-return arcs' tangent line, where a clip is ill-conditioned: a few thousandths of a foot of rounding in the subject line (a pad outline and a stall row's outline
+ * are the same line, built from different end points) moved the crossing by feet, so on a rotated pad the two disagreed and one of them was left drawing a stub of the
+ * face across the mouth. Every other edge keeps the clip against the dissolved pavement, minus anything lying ON the pavement's boundary. */
+function edgeInkPieces(edge, cutters, mouths) {
+  const [a, b] = edge, L = Math.hypot(b.x - a.x, b.y - a.y);
+  // a mouth is on this edge when both its ends lie on the edge's LINE (a face may be several collinear edges — a digitizing vertex mid-face) and its span overlaps the edge
+  const onLine = (p) => Math.abs((p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)) / L < FACE_COLLINEAR_FT;
+  const along = (p) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (L * L);
+  const faceMouths = L > 1e-9 && Array.isArray(mouths)
+    ? mouths.filter((m) => m && m.a && m.b && onLine(m.a) && onLine(m.b) && Math.max(along(m.a), along(m.b)) > 1e-9 && Math.min(along(m.a), along(m.b)) < 1 - 1e-9)
+    : [];
+  if (!faceMouths.length) return dropCoincident(clipPolylineOutside(edge, cutters), cutters);
+  let pieces = [[{ x: a.x, y: a.y }, { x: b.x, y: b.y }]];
+  for (const m of faceMouths) {
+    const tA = ((m.a.x - a.x) * (b.x - a.x) + (m.a.y - a.y) * (b.y - a.y)) / (L * L), tB = ((m.b.x - a.x) * (b.x - a.x) + (m.b.y - a.y) * (b.y - a.y)) / (L * L);
+    const lo = Math.min(tA, tB), hi = Math.max(tA, tB), at = (t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const next = [];
+    for (const pc of pieces) {
+      const t0 = ((pc[0].x - a.x) * (b.x - a.x) + (pc[0].y - a.y) * (b.y - a.y)) / (L * L), t1 = ((pc[1].x - a.x) * (b.x - a.x) + (pc[1].y - a.y) * (b.y - a.y)) / (L * L);
+      if (t0 < lo - 1e-9) next.push([pc[0], at(Math.min(t1, lo))]);
+      if (t1 > hi + 1e-9) next.push([at(Math.max(t0, hi)), pc[1]]);
+    }
+    pieces = next.filter((pc) => Math.hypot(pc[1].x - pc[0].x, pc[1].y - pc[0].y) > 1e-6);
+  }
+  return pieces;
+}
+const FACE_COLLINEAR_FT = 0.05;
+/* The pieces of a field's DERIVED CURB band (the thin band drawn along a paving edge that abuts nothing — `nb.curbEdges`, `axis`/`sign` as the renderer reads them: axis "y" = a
+ * top (sign < 0) / bottom (sign > 0) edge, axis "x" = a left / right edge) that remain once a drive's mouth is cut out of it — a CURB CUT. Without this the band's stroke ran
+ * straight across the drive mouth (the faint line "where the drive meets the pad"; it is the only thing drawn there when the pad and the drive share a fill). Returns
+ * `[from, to]` ranges in feet ALONG the edge, from the field's top-left corner in its own frame; the whole edge when no mouth opens on it. */
+export function curbBandPieces(el, mouths, axis, sign) {
+  if (!el) return [];
+  const len = axis === "y" ? el.w : el.h;
+  if (!(len > 0) || !Array.isArray(mouths) || !mouths.length) return [[0, len]];
+  const rad = (-(el.rot || 0) * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+  const local = (p) => { const dx = p.x - el.cx, dy = p.y - el.cy; return { x: dx * c - dy * s + el.w / 2, y: dx * s + dy * c + el.h / 2 }; };
+  const face = axis === "y" ? (sign > 0 ? el.h : 0) : (sign > 0 ? el.w : 0);
+  const gaps = [];
+  for (const m of mouths) {
+    if (!m || !m.a || !m.b) continue;
+    const a = local(m.a), b = local(m.b), perp = (p) => (axis === "y" ? p.y : p.x), along = (p) => (axis === "y" ? p.x : p.y);
+    if (Math.abs(perp(a) - face) > FACE_COLLINEAR_FT || Math.abs(perp(b) - face) > FACE_COLLINEAR_FT) continue;
+    gaps.push([Math.min(along(a), along(b)), Math.max(along(a), along(b))]);
+  }
+  gaps.sort((x, y) => x[0] - y[0]);
+  const out = [];
+  let at = 0;
+  for (const [g0, g1] of gaps) { if (g0 > at + 1e-9) out.push([at, Math.min(g0, len)]); at = Math.max(at, g1); }
+  if (at < len - 1e-9) out.push([at, len]);
+  return out.filter(([x, y]) => y - x > 1e-6);
+}
+/* The four corners, in WORLD feet with the element's rotation baked in, of the sub-rectangle `x,y,w,h` (feet, measured from the element's top-left corner in its
+ * own unrotated frame — `x,y,w,h` = `0,0,el.w,el.h` is the whole footprint). */
+function rectCornersWorld(el, x, y, w, h) {
   const rad = ((el.rot || 0) * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
   const corner = (lx, ly) => ({ x: el.cx + (lx * c - ly * s), y: el.cy + (lx * s + ly * c) });
-  const cs = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-  const out = [];
-  for (let e = 0; e < 4; e++) for (const seg of clipPolylineOutside([cs[e], cs[(e + 1) % 4]], cutters)) if (seg.length >= 2) out.push(seg);
-  return out;
+  const x0 = -el.w / 2 + x, y0 = -el.h / 2 + y;
+  return [corner(x0, y0), corner(x0 + w, y0), corner(x0 + w, y0 + h), corner(x0, y0 + h)];
+}
+/* NEW-1 (B1783376 ×3) — DETERMINISTIC at the pad face. Where a drive meets a field the field's edge runs EXACTLY along the dissolved pavement's own boundary
+ * (the curb-return wedges' closing edge, then the drive's mouth), and what `clipPolylineOutside` keeps of a segment lying ON a cutter's boundary is whatever the
+ * clipper's rounding happens to decide — so a pad-face run could come back as a line across the mouth. A piece that lies ON the boundary of a cutter (both ends
+ * and its middle within `tol`) is never ink: the drive and the field read as one surface there. */
+const COINCIDENT_FT = 0.1;
+function dropCoincident(segs, cutters, tol = COINCIDENT_FT) {
+  const rings = (cutters || []).filter(isRing);
+  if (!rings.length) return segs;
+  const onBoundary = (p) => rings.some((r) => { for (let i = 0; i < r.length; i++) if (segDist(p, r[i], r[(i + 1) % r.length]) <= tol) return true; return false; });
+  return segs.filter((seg) => {
+    if (seg.length < 2) return true;
+    const a = seg[0], b = seg[seg.length - 1];
+    return !(onBoundary(a) && onBoundary(b) && onBoundary({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
+  });
+}
+/* The INTERRUPTED outline of one stall-row band of a parking / truck-court field a drive tees into (NEW-1, B1783376 ×3). A band's outline rect starts exactly at
+ * the field's face, so the row nearest the entrance drew its top edge straight across the drive's mouth — the faint line "where the drive meets the pad". Same
+ * frame and contract as `rectOutlineCutSegments` (WORLD feet, rotation baked in — counter-rotate by `-el.rot` to draw), with `band` = `{ x, y, w, h }` in feet from
+ * the field's top-left corner, and the pieces that meet end to end CHAINED into one polyline so the corners join instead of notching. */
+export function rectBandOutlineCutPolylines(el, band, cutters, mouths) {
+  if (!el || el.points || !(el.w > 0) || !(el.h > 0) || typeof el.cx !== "number" || typeof el.cy !== "number" || !band || !(band.w > 0) || !(band.h > 0)) return [];
+  const cs = rectCornersWorld(el, band.x, band.y, band.w, band.h);
+  const pieces = [];
+  for (let e = 0; e < 4; e++) for (const seg of edgeInkPieces([cs[e], cs[(e + 1) % 4]], cutters, mouths)) if (seg.length >= 2) pieces.push(seg);
+  const same = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 0.02;
+  const chains = [];
+  for (const seg of pieces) {
+    const last = chains[chains.length - 1];
+    if (last && same(last[last.length - 1], seg[0])) last.push(...seg.slice(1)); else chains.push(seg.map((p) => ({ x: p.x, y: p.y })));
+  }
+  if (chains.length > 1 && same(chains[chains.length - 1][chains[chains.length - 1].length - 1], chains[0][0])) {   // the last chain runs on into the first
+    const tail = chains.pop();
+    chains[0] = [...tail, ...chains[0].slice(1)];
+  }
+  return chains;
 }
 
 /* B1613152 — the INTERRUPTED outline of a POLYGON (freehand-drawn) element a drive tees into.
@@ -575,12 +672,12 @@ export function rectOutlineCutSegments(el, cutters) {
  *
  * Same contract as `rectOutlineCutSegments`: world feet in, world feet out, pure. No rotation to
  * counter — a polygon element's `points` are already world-frame (no separate cx/cy/w/h/rot box). */
-export function polygonOutlineCutSegments(el, cutters) {
+export function polygonOutlineCutSegments(el, cutters, mouths) {
   if (!el || !Array.isArray(el.points) || el.points.length < 3) return [];
   const pts = el.points;
   const n = pts.length;
   const out = [];
-  for (let e = 0; e < n; e++) for (const seg of clipPolylineOutside([pts[e], pts[(e + 1) % n]], cutters)) if (seg.length >= 2) out.push(seg);
+  for (let e = 0; e < n; e++) for (const seg of edgeInkPieces([pts[e], pts[(e + 1) % n]], cutters, mouths)) if (seg.length >= 2) out.push(seg);
   return out;
 }
 

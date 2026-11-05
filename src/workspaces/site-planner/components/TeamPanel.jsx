@@ -4,6 +4,7 @@
  * through lib/teams.js (RLS-scoped). Theme tokens only — no raw hex (owner theming rule).
  * Signed-in only (the Account panel only mounts this when there's a user). */
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { contactField } from "../../../shared/ui/noAutofill.js";
 import {
   listMyTeams, listMembers, listInvites, createTeam, inviteByEmail,
   setRole, removeMember, cancelInvite, leaveTeam, renameTeam, deleteTeam, resendInvite,
@@ -24,7 +25,7 @@ import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs } from "../lib/teamRoster.js";
+import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs, createRosterLoader } from "../lib/teamRoster.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -139,12 +140,23 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   useEffect(() => { if (onTitle) onTitle(currentName); return () => { if (onTitle) onTitle(null); }; }, [onTitle, currentName]);
   const isAdmin = current && current.role === "admin";
 
-  const loadRoster = useCallback(async (teamId) => {
-    if (!teamId) { setMembers([]); setInvites([]); return; }
-    setMembers(await listMembers(teamId));
-    setInvites(await listInvites(teamId));
-  }, []);
-  useEffect(() => { loadRoster(sel); setConfirmLeave(false); setConfirmDelete(false); setMenuOpen(false); setRenaming(false); setPersonMenu(null); setShowInvite(false); }, [sel, loadRoster]);
+  // NEW-4 — see createRosterLoader: a roster result is applied only while its team is still selected
+  // and it is the newest request, so a slow answer for team A can never sit under team B.
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  const rosterLoader = useMemo(() => createRosterLoader({
+    fetchMembers: listMembers, fetchInvites: listInvites,
+    getSelected: () => selRef.current,
+    onApply: (_teamId, m, i) => { setMembers(m); setInvites(i); },
+    onError: () => say("err", "Couldn't load this team's members — check your connection."),
+  }), [say]);
+  const loadRoster = useCallback((teamId) => rosterLoader.load(teamId), [rosterLoader]);
+  useEffect(() => {
+    // Switching team empties the list at once (never the previous team's people under the new name).
+    setMembers([]); setInvites([]);
+    loadRoster(sel); setConfirmLeave(false); setConfirmDelete(false); setMenuOpen(false); setRenaming(false); setPersonMenu(null); setShowInvite(false);
+    return () => rosterLoader.cancel();
+  }, [sel, loadRoster, rosterLoader]);
 
   // How many of my projects are shared with the selected team (local cache; secondary nicety).
   const sharedCount = useMemo(() => {
@@ -242,7 +254,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   const inviteForm = (
     <div>
       <div style={{ display: "flex", gap: 6 }}>
-        <input type="email" autoComplete="off" aria-label="Email address" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doInvite(); }} />
+        <input type="email" {...contactField("email")} aria-label="Email address" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doInvite(); }} />
         <select aria-label="Role" value={role} onChange={(e) => setRoleSel(e.target.value)} style={{ ...field, width: 96, flex: "none" }}>
           <option value="member">Member</option>
           <option value="admin">Admin</option>
@@ -262,6 +274,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
         <span>{label}</span>{opts.check && <span aria-hidden="true" style={{ color: PAL.accent, fontWeight: 700 }}>✓</span>}
       </button>
     );
+    if (row.kind === "invite" && row.declinedAt) return [item("Remove", () => doCancel(row.id), { danger: true })]; // NEW-1: they said no — nothing to resend
     if (row.kind === "invite") return [item("Resend invite", () => doResend(row), { disabled: cooldown(row) > 0 }), item("Cancel invite", () => doCancel(row.id), { danger: true })];
     return [
       item("Admin", () => row.role !== "admin" && doSetRole(row.id, "admin"), { check: row.role === "admin" }),
@@ -289,8 +302,8 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
               {r.email.split("@")[0]}{r.email.includes("@") && <>@<wbr />{r.email.split("@").slice(1).join("@")}</>}
             </div>
             <div style={{ fontSize: 12, color: PAL.muted, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 4 }}>
-              <span>{r.role === "admin" ? "Admin" : "Member"} · not joined yet</span>
-              {canManage(r, isAdmin) && !narrow && (
+              <span>{r.role === "admin" ? "Admin" : "Member"} · {r.declinedAt ? "declined" : "not joined yet"}</span>
+              {canManage(r, isAdmin) && !narrow && !r.declinedAt && (
                 <>
                   <span aria-hidden="true">·</span>
                   <button data-team-resend style={linkBtnStyle} disabled={busy || cooldown(r) > 0} onClick={() => doResend(r)}>Resend invite</button>

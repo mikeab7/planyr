@@ -6,10 +6,12 @@
  * zoom. Lazy-loaded by the shell.
  */
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useFileDragActive } from "../../shared/files/fileDrag.js";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
+import { useBelowHeader } from "./lib/useBelowHeader.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { refineSheetTitles, projectStopTexts } from "../../shared/files/sheetTitleSet.js";
@@ -68,6 +70,9 @@ import { pickMarkup, hitCalloutLeaderIndex, calloutBoxWH, calloutDblZone } from 
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { pinDragCursor } from "../../shared/ui/controls.jsx";
+import { viewportCursor, vertexGripAt, gripCursorFor, gripHoverCursor, fileDropEffect } from "./lib/reviewCursor.js";
+import { commaInt as f0, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -382,6 +387,17 @@ export default function DocReview({
   const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B329)
   const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
+  // NEW-4 — the cursor is DERIVED from state (the overlay SVG is pointer-events:none, so one viewport div owns it):
+  // `dragCursor` = the cursor of a move / group-move / vertex gesture for its WHOLE life (set at the press, cleared on
+  // pointerup / cancel / blur); `hoverGrip` = the cursor of the vertex grip under the pointer (Select, one markup selected).
+  const [dragCursor, setDragCursor] = useState(null);
+  const [hoverGrip, setHoverGrip] = useState(null);
+  useEffect(() => { // a window blur ends the gesture's capture — never leave a held move/resize cursor behind
+    if (!dragCursor) return undefined;
+    const f = () => setDragCursor(null);
+    window.addEventListener("blur", f);
+    return () => window.removeEventListener("blur", f);
+  }, [dragCursor]);
   const [groupPreview, setGroupPreview] = useState(null); // B569: live { id -> pts } while dragging a multi-selection
   const [vtxPreview, setVtxPreview] = useState(null);  // live { id, pts } during vertex-grip drag (B431)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
@@ -428,6 +444,7 @@ export default function DocReview({
   const [docFile, setDocFile] = useState(null);
   // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
   const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
+  const fileDrag = useFileDragActive(isActive && !narrow); // file being dragged over Review (desktop only), Review visible
   const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
   const [docNoticeRec, setDocNoticeRec] = useState({ tab: null, msg: "" }); // NEW-2: a status line belongs to the TAB that produced it
   const setDocNotice = (msg, tab = curIdRef.current) => setDocNoticeRec({ tab, msg }); // one-line outcome carried across the open that follows a "save as new"
@@ -452,8 +469,8 @@ export default function DocReview({
   const syncRef = useRef(null);       // the account-sync controller (null signed out) — tabs follow the account, see lib/tabSync.js
   const localAtRef = useRef(0);       // when THIS device last changed the tab set (last change wins)
   const lastSigRef = useRef(null);
-  const [fileDrag, setFileDrag] = useState(false); // a file is being dragged over Review (desktop) — the drop outline shows only then
-  const dragDepth = useRef(0);
+  // A file is being dragged over Review (desktop) — the drop outline shows only then, and only while Review
+  // is the visible workspace. The shared tracker (NEW-2) clears it on every end-of-drag path; no per-pane counter.
   const setDirtyFor = useCallback((id, d) => setDirtyMap((m) => (!!m[id] === !!d ? m : { ...m, [id]: !!d })), []);
   const docDirty = !!dirtyMap[reviewId];
   const setDocDirty = (d) => setDirtyFor(curIdRef.current, d);
@@ -504,8 +521,10 @@ export default function DocReview({
   const startRailResize = (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = railW;
+    const unpin = pinDragCursor("col-resize"); // NEW-4: the divider cursor holds for the whole drag, past the 160/460 clamp and off the grip
     const move = (ev) => setRailW(Math.max(160, Math.min(460, startW + ev.clientX - startX)));
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => { unpin(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
+    window.addEventListener("pointercancel", up);
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
   // The project the header breadcrumb points at in Markup now comes from the URL route
@@ -522,6 +541,7 @@ export default function DocReview({
     return { id: projectId, name: name || "Untitled project" };
   }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
+  const [belowHeaderRef, belowHeaderTop] = useBelowHeader(); // B2426787 — where the app header ends, for the Compare overlay
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
   const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
 
@@ -1815,6 +1835,7 @@ export default function DocReview({
       return;
     }
     setHoverId(null);     // B156: a press starts a click/drag/draw — drop the hover glow until the pointer idles again
+    setHoverGrip(null);
     const p = toPage(e);
     // Vertex grip hit check — when select tool + a SINGLE markup selected, a click within 8
     // screen-px of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
@@ -1822,13 +1843,12 @@ export default function DocReview({
     if (tool === "select" && sel && selSet.length <= 1 && !hasSelMod(e)) {
       const selM = pageMarks.find((mm) => mm.id === sel);
       if (selM?.pts?.length && selM.kind !== "pen" && selM.kind !== "highlight") {
-        for (let vi = 0; vi < selM.pts.length; vi++) {
-          const q = selM.pts[vi];
-          if (Math.hypot((p.x - q.x) * view.scale, (p.y - q.y) * view.scale) <= 8) {
-            vtxDragRef.current = { id: sel, idx: vi, start: p, origPts: selM.pts.map((r) => ({ ...r })) };
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
-            return;
-          }
+        const vi = vertexGripAt(selM, p, view.scale); // the SAME rule the hover cursor uses — never a grip the cursor did not promise
+        if (vi >= 0) {
+          vtxDragRef.current = { id: sel, idx: vi, start: p, origPts: selM.pts.map((r) => ({ ...r })) };
+          setDragCursor(gripCursorFor(selM.kind, selM.pts, vi));
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+          return;
         }
       }
     }
@@ -1860,6 +1880,7 @@ export default function DocReview({
         const orig = {};
         pageMarks.forEach((m) => { if (selSet.includes(m.id)) orig[m.id] = (m.pts || []).map((q) => ({ x: q.x, y: q.y })); });
         groupDragRef.current = { ids: [...selSet], start: p, orig, moved: false };
+        setDragCursor("move");
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
         return;
       }
@@ -1874,7 +1895,7 @@ export default function DocReview({
       selectOne(hitId);
       if (hitId) { // arm a single move-drag; a sub-threshold drag stays a plain click-select (B293)
         const m = pageMarks.find((mm) => mm.id === hitId);
-        if (m) { dragRef.current = { id: hitId, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
+        if (m) { dragRef.current = { id: hitId, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; setDragCursor("move"); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
       }
       return;
     }
@@ -1986,6 +2007,10 @@ export default function DocReview({
     // B156: highlight the markup a click would land on, using the SAME picker as the click (rawP,
     // pre-snap) so the hover preview always matches what selection actually grabs. Select mode only.
     setHoverId(tool === "select" ? hitTest(rawP) : null);
+    // NEW-4: the vertex grip under the pointer (Select + ONE markup selected, no modifier — the press's own gate) → its cursor.
+    let gripCur = null;
+    if (tool === "select" && sel && selSet.length <= 1 && !hasSelMod(e)) gripCur = gripHoverCursor(pageMarks.find((mm) => mm.id === sel), rawP, view.scale);
+    setHoverGrip(gripCur);
   };
 
   const onUp = (e) => {
@@ -1994,6 +2019,7 @@ export default function DocReview({
       if (touchCountRef.current > 0) return;                // fingers remain — wait for full lift
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
+    setDragCursor(null); // NEW-4: the gesture is over — the cursor goes back to being derived from what is under the pointer
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (marqueeRef.current) { // B570 — resolve the box-select: every markup the box TOUCHES (crossing)
       const a = marqueeRef.current.a, b = toPage(e); marqueeRef.current = null;
@@ -2107,7 +2133,7 @@ export default function DocReview({
       }
       if (touchCountRef.current === 0) touchPinchedRef.current = false;
     }
-    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null);
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null); setDragCursor(null);
     marqueeRef.current = null; setMarquee(null); groupDragRef.current = null; setGroupPreview(null); // B569/B570 — abandon an in-flight box-select / group-move
   };
 
@@ -2353,8 +2379,6 @@ export default function DocReview({
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
-  const f0 = (n) => Math.round(n).toLocaleString();
-  const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Right-hand value for a row in the per-sheet markup list (B376): a measurement shows its
   // measured value; a text note shows its words; a redline shape has none. Every markup is listed
   // so it can always be found + deleted from the panel, independent of clicking it on the canvas.
@@ -2605,11 +2629,7 @@ export default function DocReview({
   ) : null;
 
   return (
-    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
-      onDragEnter={(e) => { if (!narrow && e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) { dragDepth.current += 1; setFileDrag(true); } }}
-      onDragLeave={() => { if (dragDepth.current > 0 && --dragDepth.current === 0) setFileDrag(false); }}
-      onDrop={() => { dragDepth.current = 0; setFileDrag(false); }}
-      onDragEnd={() => { dragDepth.current = 0; setFileDrag(false); }}>
+    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       {fileDrag && <div data-testid="review-drop-outline" aria-hidden="true" style={{ position: "absolute", inset: SPACE.sm, zIndex: 35, pointerEvents: "none", border: "2px dashed var(--accent-review, var(--accent))", borderRadius: RADIUS.md }} />}
       <AppHeader
         module={shellModule || "doc-review"}
@@ -2697,6 +2717,8 @@ export default function DocReview({
           </>
         }
       />
+      {/* B2426787 — zero-height marker straight under the header: Compare's overlay starts here, not under the header. */}
+      <div ref={belowHeaderRef} aria-hidden="true" style={{ flex: "none", height: 0 }} />
 
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
@@ -2736,7 +2758,7 @@ export default function DocReview({
       {docFile ? null : !pdfRef.current ? (
         // NEW-1 (2026-10-04) — with no tab open Review is BLANK: no heading, no buttons, no sheet index. Open… in the
         // toolbar is the way in. Desktop drag-and-drop still opens a file; its outline shows only while a file is dragged over.
-        <div data-testid="review-blank" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); setFileDrag(false); openFile(e.dataTransfer.files?.[0]); }}
+        <div data-testid="review-blank" onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = fileDropEffect(e.dataTransfer.types); } catch (_) {} }} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, position: "relative", minHeight: 0 }}>
           {openingOverlay}
         </div>
@@ -2916,17 +2938,17 @@ export default function DocReview({
               live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
           <div ref={attachWrap}
             onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={(e) => onTouchEndPinch(e, true)}
-            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => { setCursor(null); setHoverId(null); }}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => { setCursor(null); setHoverId(null); setHoverGrip(null); }}
             onContextMenu={onContextMenu}
-            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
+            onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = fileDropEffect(e.dataTransfer.types); } catch (_) {} }} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
             style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
-              cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
+              cursor: viewportCursor({ tool, panning, panMode: panMode(), dragCursor, hoverGrip, hoverMarkup: !!hoverId, addLeader: !!addLeaderFor, calibrating: !!calInput }) }}>
             {/* B660 — while the new sheet rasterises, name what's opening (the dimmed frame behind
                 is the PREVIOUS sheet; without this the switch read as "it held the wrong sheet"). */}
             {openState.opening && (
               <div data-testid="sheet-switching" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 5,
                 fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", background: "var(--surface-raised)",
-                border: "1px solid var(--border-default)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", pointerEvents: "none" }}>
+                border: "1px solid var(--border-default)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", cursor: "progress" }}>
                 Opening {sheetShort(page)}…
               </div>
             )}
@@ -3240,7 +3262,7 @@ export default function DocReview({
       {/* Always-mounted so both the toolbar and empty-state "Compare" buttons can trigger it (B471). */}
       <input ref={compareInputRef} data-testid="compare-input" type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }} onChange={onPickCompare} />
       {compareFiles ? (
-        <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
+        <CompareView a={compareFiles.a} b={compareFiles.b} topInset={belowHeaderTop} onClose={() => setCompareFiles(null)} />
       ) : null}
       {historyOpen && source && (
         <VersionHistorySheet fileName={source.name} versions={versions} isDoc={isDocFile} viewingSrcId={viewingSrcId} busy={histBusy}

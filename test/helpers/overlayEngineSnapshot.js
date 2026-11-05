@@ -73,7 +73,6 @@ crops.forEach((c, i) => {
   rec(`hasCrop.${i}`, () => M.hasCrop(ov(c)));
   rec(`effRect.${i}`, () => M.effectiveCropRect(ov(c)));
   rec(`clipRectScreen.${i}`, () => M.cropClipRectScreen(ov(c), { x: 100, y: 50 }, 0.5, 2.25));
-  rec(`trimFeet.${i}`, () => M.cropTrimFeet(ov(c)));
   rec(`clipShape.${i}`, () => [[0.5, undefined], [0.5, 0.31], [0, 1]].map(([fx, fy]) => M.cropClipShapeScreen(ov(c), { x: 100, y: 50 }, fx, fy, 2.25)));
   rec(`kind.${i}`, () => M.cropKind(c));
   rec(`valid.${i}`, () => M.isValidCropShape(c));
@@ -84,8 +83,6 @@ crops.forEach((c, i) => {
   rec(`polyToRect.${i}`, () => M.polyPointsToRect(c && c.pts));
 });
 [null, { x: 0, y: 0, w: 4, h: 4 }].forEach((r, i) => rec(`rect2poly.${i}`, () => M.rectToPolyPoints(r)));
-rec("trimInv", () => [{ left: 10, top: 5, right: 0, bottom: 0 }, { left: 0, top: 0, right: 0, bottom: 0 }, { left: NaN, top: -1, right: 3, bottom: 1e9 }, null].map((t) => M.cropFromTrimFeet(t, ov(null))));
-rec("trimInvBad", () => M.cropFromTrimFeet({ left: 1 }, { imgW: 0 }));
 rec("editBlock", () => [null, ov(null), ov(null, { fromMap: true }), ov(null, { locked: true }), { ...ov(null), src: "" }, { ...ov(null), imgW: 0 }].map((o) => M.cropEditBlock(o)));
 rec("octant", () => [[{x:0,y:0},{x:10,y:3}],[{x:0,y:0},{x:10,y:9}],[{x:0,y:0},{x:-4,y:10}],[{x:1,y:1},{x:1,y:1}]].map(([a,b]) => M.constrainOctant(a,b)));
 rec("nearest", () => [[{x:5,y:5},{x:0,y:0},{x:10,y:0}],[{x:-5,y:2},{x:0,y:0},{x:10,y:0}],[{x:5,y:5},{x:1,y:1},{x:1,y:1}]].map(([p,a,b]) => M.nearestOnSegment(p,a,b)));

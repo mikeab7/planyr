@@ -27,7 +27,9 @@ test.describe("right tool rail — the scrollbar is visible (painted)", () => {
         const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
         const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
         const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data.slice(0, 3));
-        const out = []; for (let x = 0; x < img.width; x++) out.push(px(x * 1, 300));
+        // The thumb's length follows the rail's length (B2391216 ×2 added a section, so it is shorter and no longer covers one fixed
+        // row): scan the strip's whole height — the claim is unchanged, a thumb-coloured pixel is painted in the strip.
+        const out = []; for (let y = 8; y < img.height - 8; y += 8) for (let x = 0; x < img.width; x++) out.push(px(x, y));
         return out;
       }, buf.toString("base64"));
       const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));

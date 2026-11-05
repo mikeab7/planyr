@@ -130,6 +130,8 @@ export function shapeOps(raw) {
       commit: (verification.payload && verification.payload.commit) || null,
       pending: digest(verification.payload && verification.payload.pending),
     },
+    // NEW-1 (2026-11-02): the hourly sign-in check's snapshot. Staleness is decided at READ time (signinHealth.snapshotHealth).
+    signin: snaps.signin && snaps.signin.payload ? { ...snaps.signin.payload, savedAt: snaps.signin.updated_at || null } : null,
     sweeps: (Array.isArray(raw && raw.sweeps) ? raw.sweeps : []).map((s) => ({
       id: s.id, at: s.at, archived: n(s.archived), note: s.note || "",
       stillOpen: (Array.isArray(s.still_open) ? s.still_open : []).map((o) => ({ title: String(o.title || ""), waitingOn: String(o.waiting_on || "") })),

@@ -10,8 +10,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bandedStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 const at = (needle) => { const i = src.indexOf(needle); if (i < 0) throw new Error(`marker not found: ${needle}`); return i; };
 const dp = src.slice(at("const designPond = () => {"), at("// (B789: drainChannelRelevant now computed up"));
 
@@ -133,14 +134,14 @@ describe("G1(c/d) — the tailwater + max-excavation inputs exist in the inspect
 
 describe("G4 — the Optimize success-toast sweep", () => {
   it("the grammar fix: the raise message is the owner's exact sentence", () => {
-    expect(dp).toContain("This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.");
+    expect(dp).toContain("This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / CF_PER_ACFT)} AC-FT of detention.");
     // the broken shared verb-prefix is gone
     expect(dp.includes('${isNew ? "Placed a pond — " : "This pond was "}')).toBe(false);
     expect(dp).toContain('${isNew ? "Placed a pond. " : ""}');
   });
   it("the '0.0 AC-FT of mitigation' filler is dropped when the requirement rounds to 0", () => {
-    expect(dp).toContain("const mitReqShown = mitTargetCf / 43560 >= 0.05;");
-    expect(dp).toContain('mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.` : "";');
+    expect(dp).toContain("const mitReqShown = mitTargetCf / CF_PER_ACFT >= 0.05;");
+    expect(dp).toContain('mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / CF_PER_ACFT)} AC-FT of mitigation.` : "";');
   });
   it("the overlap note is NEUTRAL — no 'drag it clear' action (the footprint never moves)", () => {
     expect(dp).toContain("Note: the footprint overlaps");

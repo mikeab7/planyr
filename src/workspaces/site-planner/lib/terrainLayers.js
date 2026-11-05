@@ -53,12 +53,13 @@ import {
   latticeCover, latticeTileAt, LATTICE_MAX_BAND, LATTICE_MIN_BAND,
 } from "./demGrid.js";
 import {
-  composeContourPaint, contourLabelText, buildContourIndex, hitContour,
+  composeContourPaint, contourLabelText, hoverMarkerPaneOptions, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
   hoverLabelPlacement, hoverLabelSize,
   contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 import { runBudgeted, drainBudgeted, PAINT_FRAME_BUDGET_MS } from "./paintSchedule.js";
+import { planAllContourLabels, CONTOUR_LABEL_ALL } from "./contourLabelPlan.js";
 
 const paintNowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
 
@@ -74,29 +75,68 @@ const MAX_CONCURRENT_TILES = 4;              // a wide view wants ~12 tiles; don
 // ---------------------------------------------------------------------------
 // Singleton worker with lazy rebuild after a crash (a crashed worker stays crashed —
 // every pending job fails LOUDLY, the next refresh spins a fresh one).
-let worker = null, seq = 0;
-const pending = new Map(); // id -> {resolve, reject}
-function getWorker() {
-  if (worker) return worker;
-  worker = new TerrainWorker();
-  worker.onmessage = (e) => {
-    const d = e.data || {};
-    const p = pending.get(d.id);
-    if (!p) return;
-    pending.delete(d.id);
-    if (d.ok) p.resolve(d);
-    else p.reject(new Error(d.error || "terrain worker error"));
+//
+// ⛔ B2319137 ×3 — TWO workers, one per kind of work. The existing contour layer traces a lattice TILE per job and a zoom step
+// at the building zoom queues a fresh set of them; the owner-only grading jobs (the ground sweep, the pad mask, the slope-band
+// outline, the proposed contours) shared the same first-come-first-served queue and sat behind every tile — after three zoom
+// steps the grading panel read "Reading the ground…" for over 75 s with nothing painted (V1950033 FAILED, 2026-10-29). Grading
+// has its own worker now (same module, same code), created only when grading first asks, so map tiles never stand in front of
+// it and nothing changes for an account that never grades.
+let seq = 0;
+function workerSlot(label) {
+  let worker = null;
+  const pending = new Map(); // id -> {resolve, reject}
+  const get = () => {
+    if (worker) return worker;
+    worker = new TerrainWorker();
+    worker.onmessage = (e) => {
+      const d = e.data || {};
+      const p = pending.get(d.id);
+      if (!p) return;
+      pending.delete(d.id);
+      if (d.ok) p.resolve(d);
+      else p.reject(new Error(d.error || `${label} worker error`));
+    };
+    worker.onerror = (e) => {
+      const err = new Error(`${label} worker crashed${e && e.message ? `: ${e.message}` : ""}`);
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      try { worker.terminate(); } catch (_) { /* already dead */ }
+      worker = null;
+    };
+    return worker;
   };
-  worker.onerror = (e) => {
-    const err = new Error(`terrain worker crashed${e && e.message ? `: ${e.message}` : ""}`);
-    for (const p of pending.values()) p.reject(err);
-    pending.clear();
-    try { worker.terminate(); } catch (_) { /* already dead */ }
-    worker = null;
-  };
-  return worker;
+  // post one job → a promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash)
+  const post = (msg, transfer = []) => new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    try { get().postMessage({ id, ...msg }, transfer); }
+    catch (e) { pending.delete(id); reject(e); }
+  });
+  const dispose = () => { try { worker && worker.terminate(); } catch (_) {} worker = null; };
+  return { post, dispose };
 }
-if (import.meta.hot) import.meta.hot.dispose(() => { try { worker && worker.terminate(); } catch (_) {} worker = null; });
+const tileWorker = workerSlot("terrain");
+const gradingWorker = workerSlot("grading");
+if (import.meta.hot) import.meta.hot.dispose(() => { tileWorker.dispose(); gradingWorker.dispose(); });
+
+/* NEW-1 (owner-only grading layer) — a buildable-ground job (buildableGround.js / buildableLattice.js run inside
+ * terrainWorker.js) on the GRADING worker. Structured-clones the payload (the DEM grid stays in the site-grid cache here);
+ * resolves with the worker's reply, rejects LOUDLY. */
+export function runBuildableJob(payload) {
+  return gradingWorker.post({ kind: "buildable", ...payload });
+}
+/* ROUND 7 (NEW-1) — trace the slope band's outline on the grading worker: { values: Float32Array (the band field), nx, ny }
+ * → { rings, holes } in lattice pixels. The values buffer is TRANSFERRED. */
+export function runBandOutlineJob(payload) {
+  return gradingWorker.post({ kind: "band-outline", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []);
+}
+/* ROUND 4 (B2349122) — trace the PROPOSED surface's contours on the grading worker: { values: Float32Array (NaN = none),
+ * nx, ny, interval } → { interval, levels: [{ level, isIndex, lines: [[[px, py]…]] }], labels }. The values buffer is
+ * TRANSFERRED (the caller builds it for this call). */
+export function runProposedContoursJob(payload) {
+  return gradingWorker.post({ kind: "contours-proposed", ...payload }, payload.values && payload.values.buffer ? [payload.values.buffer] : []);
+}
 
 // ---------------------------------------------------------------------------
 // Grid registry (B706): the last few decoded grids, newest last. Distinguishes
@@ -226,9 +266,15 @@ function reportTileTiming(band, legs, error) {
   } catch (_) { /* telemetry must never throw into the fetch it measures */ }
 }
 
-const inflight = new Map(); // req.key -> Promise<artifact>
-function computeTile(req, { fetchImpl } = {}) {
-  const cur = inflight.get(req.key);
+const inflight = new Map(); // req.key (+ chosen contour interval) -> Promise<artifact>
+/* NEW-1 (Imagery & Layers) — `contourInterval` is the owner's 1/2/5/10 ft choice, handed to the worker as the
+ * FLOOR under its automatic pick. A tile traced at one interval is a different artifact from the same tile
+ * at another, so the in-flight table and the cache (below) are keyed on it; the default (1 ft) keeps the
+ * historic key byte for byte. */
+const tileJobKey = (key, ci) => (ci > 1 ? `${key}:ci${ci}` : key);
+function computeTile(req, { fetchImpl, contourInterval = 1 } = {}) {
+  const jobKey = tileJobKey(req.key, contourInterval);
+  const cur = inflight.get(jobKey);
   if (cur) return cur;
   const tStart = Date.now();
   const job = (async () => {
@@ -246,11 +292,7 @@ function computeTile(req, { fetchImpl } = {}) {
     }
     releaseSlot();
     const tAfterFetch = Date.now();
-    const id = ++seq;
-    const res = await new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      getWorker().postMessage({ id, req, buffer: buf }, [buf]);
-    });
+    const res = await tileWorker.post({ req, buffer: buf, opts: { contourInterval } }, [buf]);
     rememberGrid(req.key, req, res.grid);
     reportTileTiming(req.band, {
       queueMs: tAfterQueue - tStart, fetchMs: tAfterFetch - tAfterQueue,
@@ -258,9 +300,9 @@ function computeTile(req, { fetchImpl } = {}) {
     }, null);
     return { contours: res.contours, arrows: res.arrows };
   })();
-  const clean = () => { if (inflight.get(req.key) === job) inflight.delete(req.key); };
+  const clean = () => { if (inflight.get(jobKey) === job) inflight.delete(jobKey); };
   job.then(clean, clean);
-  inflight.set(req.key, job);
+  inflight.set(jobKey, job);
   return job;
 }
 
@@ -312,6 +354,7 @@ const CONTOUR_COL = "#7C3F12";        // topo brown, readable on green imagery
 const CONTOUR_INDEX_COL = "#5B2E0D";
 const ARROW_COL = "#0369A1";          // drainage blue (not the status palette)
 export const CONTOUR_HOVER_CLASS = "planyr-contour-hover"; // marks the ONE transient hover label
+
 
 /* `offset` (NEW-1) shifts the tag off the anchor by an exact number of SCREEN pixels, with
  * the span's TOP-LEFT at the offset instead of its centre on the anchor — that is what
@@ -374,21 +417,56 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
  * label can never outlive the geometry it names (still true — composeContourPaint keys
  * both from the SAME atomic composition) without re-building the ones that haven't
  * moved. */
-function renderContours(parts, { opacity, canvas, onComposed, labelPane = null }) {
+/* ROUND 5 (NEW-3) — while the owner-only proposed contours are on, the EXISTING lines are drawn only OUTSIDE the graded
+ * area (`gradingClip`), dashed and muted so the two families read apart; the cut itself is contours.js's
+ * clipContourLinesOutside (the SAME clipper the worker cuts the proposed lines with, so the two meet at the line). No clip
+ * ⇒ byte-for-byte the historic paint (every account that cannot see grading). */
+const CONTOUR_EXISTING_DASH = "6 5";
+const CONTOUR_EXISTING_MUTED_OPACITY = 0.8;
+/* ROUND 10 (NEW-2) — the existing lines' labels at working zoom: contourLabelPlan over the lines as map PIXELS (map.project at the
+ * current zoom — pan-invariant), trimmed to the view plus a margin, then back to lat/lng for the label markers. null = below the
+ * labelling zoom (the caller keeps its index labels). Horizontal markers: the box is the label's own, no rotation. */
+export const LABEL_VIEW_MARGIN = 0.25;
+export const LABEL_CLIP_CLEAR_PX = 16;
+function allLineLabels(lines, map, clip = null) {
+  if (!map || !lines || !lines.length) return null;
+  const z = map.getZoom(), c = map.getCenter();
+  const ftPerPx = (156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / Math.pow(2, z) * 3.280839895;
+  const ppf = 1 / ftPerPx;
+  if (!(ppf >= CONTOUR_LABEL_ALL.minPpf)) return null;
+  const b = map.getPixelBounds(), w = b.max.x - b.min.x, h = b.max.y - b.min.y;
+  const rect = { minX: b.min.x - w * LABEL_VIEW_MARGIN, maxX: b.max.x + w * LABEL_VIEW_MARGIN, minY: b.min.y - h * LABEL_VIEW_MARGIN, maxY: b.max.y + h * LABEL_VIEW_MARGIN };
+  const proj = lines.map((ln, i) => ({ key: contourLineKey(ln) + "#" + i, level: ln.level, isIndex: ln.isIndex, text: contourLabelText(ln.level), pts: ln.coords.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return { x: p.x, y: p.y }; }) }));
+  // stay clear of the daylight line (the clip's rings), where the proposed family's own labels run up to it
+  const ringPx = clip && clip.rings ? [...clip.rings, ...(clip.holes || [])].map((r) => r.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return [p.x, p.y]; })) : [];
+  const keepOut = ringPx.length ? (x, y) => { for (const r of ringPx) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1; let t = ((x - a[0]) * dx + (y - a[1]) * dy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t; if (Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) < LABEL_CLIP_CLEAR_PX) return true; } return false; } : null;
+  return planAllContourLabels(proj, 1, { rect, opts: { minPpf: 0, keepOut } }).map((lab) => {
+    const ll = map.unproject(L.point(lab.pt.x, lab.pt.y), z);
+    return { ll: [ll.lat, ll.lng], level: lab.level, text: lab.text, key: lab.key };
+  });
+}
+function renderContours(parts, { opacity, canvas, onComposed, map = null, labelPane = null, gradingClip = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
   // its output into keyed Leaflet-build recipes.
-  const { lines, labels } = composeContourPaint(parts);
+  const composed = composeContourPaint(parts);
+  const lines = gradingClip ? clipContourLinesOutside(composed.lines, gradingClip) : composed.lines;
+  let labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
+  // ROUND 10 (NEW-2): while the owner's grading picture is on and the zoom is working zoom, EVERY existing line in view carries its
+  // elevation (the index-only labels above are what the owner's 50-ft view had none of). Only on this branch — every other account
+  // keeps the historic labels byte for byte.
+  if (gradingClip && map) { const all = allLineLabels(lines, map, gradingClip); if (all) labels = all; }
   if (onComposed) onComposed({ lines, labels });
   const items = [];
   for (const ln of lines) {
     // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
     items.push({
-      key: contourLineKey(ln),
+      key: gradingClip ? `${contourLineKey(ln)}|clip` : contourLineKey(ln),
       build: () => L.polyline(ln.coords, {
         renderer: canvas, color: ln.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
-        weight: ln.isIndex ? 2.2 : 1.1, opacity, interactive: false,
+        weight: ln.isIndex ? 2.2 : 1.1, opacity: gradingClip ? opacity * CONTOUR_EXISTING_MUTED_OPACITY : opacity, interactive: false,
+        ...(gradingClip ? { dashArray: CONTOUR_EXISTING_DASH } : null),
       }),
     });
   }
@@ -449,10 +527,17 @@ function coarseNote(cover) {
  * Contours are declared a LINE role, so on the planner they render in the band ABOVE the
  * site elements: the whole point of the owner's report — place a building, still see the
  * ground it sits on. Absent → Leaflet's default overlay/marker panes (the map finder). */
-function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null } = {}) {
+function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null, interval = null } = {}) {
   const group = L.layerGroup();
+  /* NEW-1 (Imagery & Layers) — `interval` is `{ get(), subscribe(cb) }`: the device's chosen contour interval. BOTH
+   * terrain layers take it (a tile is one worker job producing contours AND arrows, so sharing the key keeps
+   * "toggling both costs ONE fetch + one worker job"); only the contour render reads it. A change re-keys the
+   * tiles and repaints — the previous lines stay until the new ones diff in (no blank flash). */
+  let ci = interval ? interval.get() : 1, unsubInterval = null;
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
-  let busy = false, pendingMove = false, lastPainted = null;
+  let busy = false, pendingMove = false, lastPainted = null, lastTs = null, lastNote = null;
+  // ROUND 5 (NEW-3) — the graded area the EXISTING lines stay out of ({ rings, holes } in lat/lng pairs, or null)
+  let gradingClip = null, gradingClipKey = "";
   // NEW-1 — the hover readout's OWN sublayer. It is a child group so the transient label
   // is cleared (and re-parented) independently of the geometry, and so a repaint can
   // never leave one stranded over lines it no longer names.
@@ -529,6 +614,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       scheduleMacrotask(() => drivePaint(myEpoch));
     }
   };
+  /* ROUND 5 (NEW-3) — set / clear the graded-area clip and repaint what is already on screen from the cached parts (no
+   * fetch, no worker job): the keys carry the clip, so every line is rebuilt once per clip change and never per pan. */
+  group.setGradingClip = (clip) => {
+    const key = clip && clip.rings && clip.rings.length ? `${clip.rings.length}:${clip.rings.map((r) => r.length).join(",")}:${clip.rings[0][0].join(",")}:${(clip.holes || []).length}` : "";
+    if (key === gradingClipKey) return;
+    gradingClipKey = key; gradingClip = key ? clip : null;
+    if (map && lastPainted) paint(lastPainted, lastTs, { note: lastNote });
+  };
   group.setOpacity = (o) => {
     opacity = o;
     group.eachLayer((l) => {
@@ -544,8 +637,15 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   const paint = (parts, ts, opts = {}) => {
     flushPaintRunner(); // settle any still-trickling batch before diffing against `painted`
     const { items, n } = render(parts, {
-      map, opacity, canvas, labelPane,
-      onComposed: (c) => { composed = c; hoverIndex = null; },
+      map, opacity, canvas, labelPane, gradingClip,
+      onComposed: (c) => {
+        composed = c; hoverIndex = null;
+        // E2E-only, read-only (NEW-1, Imagery & Layers): what the contour layer last composed and at which interval — the instrument that
+        // lets a spec assert "a coarser Interval draws fewer lines" without counting canvas pixels. Inert in production.
+        if (typeof window !== "undefined" && window.__PLANYR_E2E && c && c.lines) {
+          window.__terrainStats = { interval: ci, lines: c.lines.length, index: c.lines.filter((l) => l.isIndex).length, labels: (c.labels || []).length };
+        }
+      },
     });
     const { add, remove } = diffKeyedPaint(items, painted);
     const ops = [];
@@ -557,7 +657,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       // permanent labels follow (B1087). Cheap: hoverGroup is a single child, not the
       // whole painted set, and addLayer on an already-present layer is a no-op.
       if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
-      lastPainted = parts;
+      lastPainted = parts; lastTs = ts; lastNote = opts.note || null;
       const msg = opts.note || (n ? null : emptyMsg);
       // B802400 round 4 — `opts.partial` marks a paint of only the ALREADY-CACHED tiles in the
       // current cover while the rest are still fetching. Reporting "loaded" here is a LIE: the
@@ -596,12 +696,12 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     );
     // The key is the ground the view covers, not the view — pan inside one tile and
     // nothing recomputes; pan back across a boundary and the tiles are cache hits.
-    const key = cover.tiles.map((t) => t.key).join("|");
+    const key = cover.tiles.map((t) => t.key).join("|") + (ci > 1 ? `|ci${ci}` : "");
     if (key === lastKey && lastPainted) return;
     lastKey = key;
     const mySeq = ++paintSeq;
     const entries = cover.tiles.map((tile) => ({
-      tile, ...gisCache.swr(`terrain:${tile.key}`, () => computeTile(tile), { ttl: TERRAIN_TTL }),
+      tile, ...gisCache.swr(`terrain:${tileJobKey(tile.key, ci)}`, () => computeTile(tile, { contourInterval: ci }), { ttl: TERRAIN_TTL }),
     }));
     const coarse = cover.coarsened ? coarseNote(cover) : null;
     const cachedParts = entries.filter((e) => e.cached).map((e) => ({ tile: e.tile, data: e.cached.data }));
@@ -696,6 +796,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       // index labels — a ghost or a stacked pair is otherwise invisible to a DOM check
       icon: labelIcon(text, CONTOUR_HOVER_CLASS, place),
       interactive: false, keyboard: false,
+      ...hoverMarkerPaneOptions(labelPane),
     }).addTo(hoverGroup);
     return hit;
   };
@@ -705,6 +806,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     canvas = L.canvas(pane ? { pane } : {});
     if (hover) { group.addLayer(hoverGroup); hoverGroups.add(group); }
     m.on("moveend", refresh);
+    if (interval) {
+      ci = interval.get();
+      unsubInterval = interval.subscribe((n) => {
+        if (n === ci) return;
+        ci = n; lastKey = null;
+        if (map) { if (busy) pendingMove = true; else refresh(); }
+      });
+    }
     refresh();
     return this;
   };
@@ -712,6 +821,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     paintSeq++; // invalidate every in-flight compute — nothing may paint into a removed group
     abandonPaintRunner(); // a torn-down layer must not keep chunking work into a detached group
     m.off("moveend", refresh);
+    if (unsubInterval) { unsubInterval(); unsubInterval = null; }
     hoverGroups.delete(group);
     hoverGroup.clearLayers(); hoverKey = null; composed = null; hoverIndex = null;
     painted.clear(); // this instance is done; a later onAdd starts a fresh paint from scratch

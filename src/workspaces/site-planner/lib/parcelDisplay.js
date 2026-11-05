@@ -33,15 +33,19 @@
  * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
+import { holdNewZoomLevels } from "../../../shared/map/steadyZoomLevels.js";
 import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField } from "./counties.js";
 import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
+import { pruneVerdict, PRUNE_IDLE_CAP_MS } from "./parcelHandoff.js";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
 import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
+import { ensureFeatureIds } from "./parcelQueryWire.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
-import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
+import { wideLayerNow } from "./parcelAreaFieldsLazy.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers, outlineFieldsFor } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
@@ -85,6 +89,9 @@ const ParcelTiles = L.GridLayer.extend({
     this._dirty = null;
     this._flushTimer = null;
     this._pool = []; // canvases from tiles Leaflet dropped — a zoom settle reuses them instead of allocating ~dozens
+    /* B2426464 ×2 — our canvases are painted the moment a level is built, so Leaflet's mid-zoom level started its zoom frames late
+     * and slid off the imagery (measured up to 27 px). The new zoom's level is kept out of sight until the zoom lands. */
+    holdNewZoomLevels(this);
   },
   createTile(coords) {
     const tile = this._pool.pop() || L.DomUtil.create("canvas", "leaflet-tile");
@@ -94,17 +101,30 @@ const ParcelTiles = L.GridLayer.extend({
   _removeTile(key) {
     const t = this._tiles[key];
     L.GridLayer.prototype._removeTile.call(this, key);
-    if (t && t.el && this._pool.length < 64) this._pool.push(t.el);
+    /* NEW-1 (2026-10-22) — a pooled canvas gives its pixels back. Each tile is 1024×1024 (4 MB at any pixel ratio ≥ 2), and up to 64 of
+     * them used to be KEPT FULL-SIZE after Leaflet dropped their tiles — up to 256 MB of backing store that no census of the live DOM
+     * could see, held for the next zoom settle to reuse. Reuse is a re-allocation (`_paint` sizes a canvas whose width differs), which
+     * is cheap next to holding them; the pool is a pool of empty shells. */
+    if (t && t.el && this._pool.length < 64) { try { t.el.width = 0; t.el.height = 0; } catch (_) { /* not a canvas */ } this._pool.push(t.el); }
   },
   _paint(tile, coords) {
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__parcelTileStats = Object.assign(window.__parcelTileStats || { paints: 0, dirty: 0, flushes: 0 }, { paints: ((window.__parcelTileStats || {}).paints || 0) + 1 }); // E2E-only counter: the settle harness asserts a no-op moveend repaints nothing
     const size = this.getTileSize();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    /* NEW-1 (2026-10-22, work-laptop report) — A TILE WITH NO LOTS IN IT HOLDS NO PIXELS. Measured on live ff7be38 at the laptop's
+     * 2.6775 pixel ratio over the Epps Mill lot (Select parcels, z18): 45 parcel tile canvases, 43 of them COMPLETELY BLANK, each a
+     * 1024×1024 backing store — 180 MB of the tab's 238.6 MB of canvas memory, on an integrated GPU, for nothing on screen. A blank
+     * tile is now left at 0×0 (a canvas with no pixels draws nothing — the picture is identical); when lots arrive `markDirty` repaints
+     * the tiles they touch and this allocates it then. The density is untouched: a tile that HAS lots is still 1024×1024. */
+    const items = this._parcelIndex.query(tileLngLatBounds(coords.x, coords.y, coords.z, size.x));
+    if (!items.length) { if (tile.width) { tile.width = 0; tile.height = 0; } return; }
     if (tile.width !== size.x * dpr) { tile.width = size.x * dpr; tile.height = size.y * dpr; }
     const ctx = tile.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x });
+    drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x, items });
   },
+  /** A repaint is queued or in progress (lots arrived and a tile has not been redrawn with them yet). */
+  repaintPending() { return !!(this._dirty || this._flushTimer || (this._todo && this._todo.size)); },
   /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, a few per frame. */
   markDirty(bbox) {
     if (!bbox) return;
@@ -149,12 +169,32 @@ const ParcelTiles = L.GridLayer.extend({
 
 // `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
 // `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
+/* NEW-1 (Memphis line band) — for a layer with NO lot-number gate: hold its first feature requests until its own metadata
+ * says what its id field is called (`outlineFieldsFor`), then release. A failed metadata read still releases. The lot-number
+ * gate in parcelLotLabelLayer.js does the same swap for layers that carry numbers. */
+function holdForIdField(layer) {
+  const orig = layer._requestFeatures;
+  if (typeof orig !== "function" || typeof layer.metadata !== "function") return;
+  let open = false, asked = false;
+  const held = [];
+  const release = () => { if (open) return; open = true; const todo = held.splice(0); if (layer._map) todo.forEach((a) => orig.apply(layer, a)); };
+  layer._requestFeatures = function (...args) {
+    if (open) return orig.apply(this, args);
+    held.push(args);
+    if (asked) return;
+    asked = true;
+    try { layer.metadata((err, meta) => { if (!err && meta) layer.options.fields = outlineFieldsFor(meta, layer.options.fields); release(); }); }
+    catch (_) { release(); }
+  };
+  layer.on("remove", () => { open = false; asked = false; held.length = 0; });
+}
+
 export function makeParcelLayer(url, opts) {
   /* NEW-1 (2026-10-04) — Planyr draws the lot NUMBERS too. `lotNumberHint` (default: the county's
    * `lotNumberField`/`idField` for this URL) names the attribute; `labels:false` opts out;
    * `getObstacles` hands the label engine the screen boxes a number must clear (the Site planner's
    * parcel chips). None of these are esri-leaflet options, so they are split off before the spread. */
-  const { lotNumberHint, labels, getObstacles, getInset, ...layerOpts } = opts || {};
+  const { lotNumberHint, labels, getObstacles, getInset, pane, labelPane, wide, snapshotCounty, ...layerOpts } = opts || {};
   const lotHint = labels === false ? null : (lotNumberHint !== undefined ? lotNumberHint : lotNumberFieldForUrl(url));
   /* B1976336 — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave` only removes when
    * `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse) just before calling it, so
@@ -176,7 +216,31 @@ export function makeParcelLayer(url, opts) {
     style: () => PARCEL_OUTLINE_STYLE,
     ...layerOpts,
   });
-  if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset });
+  /* NEW-1 (wide view) — ONE metadata read per layer, shared by everything that asks for the field list (the id/lot-number gates below and
+   * the wide-view tile query), instead of one each. A failed read is not remembered. */
+  if (typeof layer.metadata === "function") {
+    const baseMetadata = layer.metadata;
+    let metaCache = null, metaWait = null;
+    layer.metadata = function (cb, ctx) {
+      if (metaCache) { cb.call(ctx, null, metaCache); return this; }
+      if (metaWait) { metaWait.push([cb, ctx]); return this; }
+      metaWait = [[cb, ctx]];
+      baseMetadata.call(this, (err, m) => {
+        const w = metaWait; metaWait = null;
+        if (!err && m) metaCache = m;
+        w.forEach(([c, x]) => c.call(x, err, m));
+      });
+      return this;
+    };
+    layer.on("remove", () => { metaCache = null; });
+  }
+  if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset, pane: labelPane });
+  else holdForIdField(layer); // NEW-1 — a source with no lot number still needs its real id field name (MARIS: FID)
+  /* NEW-1 (Select parcels, wide view) — from two zoom steps out of today's cutoff, the larger lots only, fetched by fixed tiles through the
+   * gis-cache relay. Off unless the host asks (`wide: true` — the Map's Select parcels) AND the source has a verified size column
+   * (parcelAreaFields.js); anything else keeps today's cutoff exactly. See parcelWideLayer.js. */
+  const wideMod = wide ? wideLayerNow() : null; // loaded by MapFinder (wideViewReady) before the first display is built; null = no wide stage
+  if (wideMod) layer._wide = wideMod.attachWideOutlines(layer, { url, GhostClass: ParcelGhost, TilesClass: ParcelTiles, IndexClass: ParcelIndex, lotHint, getObstacles, getInset, pane, labelPane, snapshotCounty });
   // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })
@@ -233,12 +297,17 @@ export function makeParcelLayer(url, opts) {
   };
   layer.addLayers = function (ids) { for (let i = ids.length - 1; i >= 0; i--) { const g = this._layers[ids[i]]; if (g) g.attach(); } };
   layer.removeLayers = function (ids, permanent) {
+    /* NEW-1 (parcel outlines lag the map when zooming) — a zoom OUT past this layer's floor removed every line at `zoomend` and drew nothing until the
+     * wide/mid stage had fetched its own tiles (a county round trip). The lots this layer lets go of while the view is out of range are handed to the
+     * wide layer, which keeps them drawn until its own lines are (parcelHandoff.js). No wide stage (`_wide` null) = today's behaviour exactly. */
+    const hold = this._wide && this._map && !this._visibleZoom() ? [] : null;
     for (let i = ids.length - 1; i >= 0; i--) {
       const g = this._layers[ids[i]];
       if (!g) continue;
-      g.detach();
+      if (hold && g.isDrawn()) hold.push(g); else g.detach();
       if (permanent) delete this._layers[ids[i]];
     }
+    if (hold && hold.length && !this._wide.carry(hold)) hold.forEach((g) => g.detach());
   };
   /* NEW-1 — esri-leaflet's `_addFeatures` dedupes each arriving id with `Array.indexOf` over EVERYTHING
    * held (`_currentSnapshot`) and the cell's id list: O(held × arriving) — 225 ms across a handful of
@@ -246,6 +315,7 @@ export function makeParcelLayer(url, opts) {
   const baseAddFeatures = layer._addFeatures;
   if (typeof baseAddFeatures === "function") {
     layer._addFeatures = function (features, coords) {
+      ensureFeatureIds(features); // ONE rule (parcelQueryWire.ensureFeatureIds, B2416496): the worker applies it to every answer; this second call covers an answer that reached the layer WITHOUT the worker (its no-Worker fallback). A server that answers GeoJSON with no top-level `id` collapsed every lot onto ONE key (B2409408)
       if (!Array.isArray(this._currentSnapshot) || !this._cache || this.options.timeField) return baseAddFeatures.call(this, features, coords);
       let key;
       if (coords) { key = this._cacheKey(coords); this._cache[key] = this._cache[key] || []; }
@@ -274,14 +344,32 @@ export function makeParcelLayer(url, opts) {
   }
   let mapRef = null;
   let timer = null;
-  const prune = () => { timer = null; if (layer._map) pruneToLiveCells(layer); };
+  /* NEW-1 (parcel outlines lag the map when zooming) — the prune used to run at EVERY `zoomend`, and after a zoom every lot held belongs to a cell that
+   * "is no longer current" (the new zoom's cells have not answered yet), so it dropped them ALL and the map drew no lines until the new cells' queries
+   * came back. The lots it was about to drop are on the same ground at the same coordinates, so they are kept while answers are on the way and pruned
+   * when the layer is idle (`load`), with a cap so a request that never answers cannot pin every lot ever seen. */
+  let pruneWait = null, pruneCap = null;
+  const runPrune = () => { timer = null; if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; } pruneWait = null; if (layer._map) pruneToLiveCells(layer); };
+  const prune = () => {
+    timer = null;
+    if (!layer._map) return;
+    const verdict = pruneVerdict({ visibleZoom: layer._visibleZoom(), activeRequests: layer._activeRequests, ingestPending: queue.pending });
+    if (verdict === "now") { runPrune(); return; }
+    if (pruneWait) return; // already waiting for the layer to go idle
+    pruneWait = () => { layer.off("load", pruneWait); timer = setTimeout(runPrune, 0); if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; } };
+    layer.on("load", pruneWait);
+    pruneCap = setTimeout(() => { if (pruneWait) layer.off("load", pruneWait); runPrune(); }, PRUNE_IDLE_CAP_MS);
+  };
   const onMoved = () => { if (timer) clearTimeout(timer); timer = setTimeout(prune, 0); };
   layer.on("add", () => {
     mapRef = layer._map;
     if (!mapRef) return;
     mapRef.on("moveend zoomend", onMoved);
-    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
+    // minZoom: a GridLayer drops ALL its canvases the moment the view leaves [minZoom, maxZoom], so a tile layer floored at the close stage would wipe the lines it is
+    // carrying through a zoom-out (parcelHandoff.js). Lots only enter the index inside the layer's own range, so a lower floor draws nothing extra — it just lets the carried ones stay.
+    tiles = new ParcelTiles(index, { pane: pane || "overlayPane", zIndex: 0, minZoom: layer._wide ? Math.min(layer.options.minZoom, layer._wide.wideFloor) : layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 }); // `pane`: the planner's Parcels-in-front host (mapStack PANE_PARCEL_PICK); everyone else keeps the overlay pane
     tiles._busy = () => queue.pending > 0;
+    tiles._dataPending = () => layer._activeRequests > 0 || queue.pending > 0 || tiles.repaintPending(); // B2426464 ×3 — old zoom levels stay until the new one is drawn
     tiles.addTo(mapRef);
   });
   layer.on("remove", () => {
@@ -293,6 +381,8 @@ export function makeParcelLayer(url, opts) {
     releaseLoads(); // keeps esri-leaflet's request counter honest
     mapRef = null;
     if (timer) { clearTimeout(timer); timer = null; }
+    if (pruneCap) { clearTimeout(pruneCap); pruneCap = null; }
+    if (pruneWait) { layer.off("load", pruneWait); pruneWait = null; }
   });
   return layer;
 }
@@ -321,7 +411,7 @@ export function parcelDisplayIsImageOnly(url) {
  * `dynamicLayers` is the whole layer definition for the request.) */
 export function makeParcelImageLayer(url, opts) {
   const m = MAPSERVER_LAYER_RE.exec(trimUrl(url));
-  if (!m) return makeParcelLayer(url);
+  if (!m) return makeParcelLayer(url, opts);
   const [, service, id] = m;
   const layer = guardRasterOpacity(EL.dynamicMapLayer({
     url: service,
@@ -364,7 +454,9 @@ export function makeParcelAdaptiveLayer(url, opts) {
  * every zoom, not just a wide one), every queryable CAD as the three-regime adaptive
  * layer above (which also backs the instant client-side click highlight while close-in). */
 export function makeParcelDisplayLayer(url, opts) {
-  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url, opts);
+  /* `pane` is the one option the image-only source honours (the planner's Parcels-in-front host); the rest of `opts`
+   * is the vector layer's label plumbing, which an image has no use for and must not spread into the esri request. */
+  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url, opts && opts.pane ? { pane: opts.pane } : undefined) : makeParcelAdaptiveLayer(url, opts);
 }
 
 /* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629). `optimisticHitAt` (which iterates `eachFeature`)
@@ -453,6 +545,7 @@ export function makeSnapshotLayer(county, { getObstacles } = {}) {
     mapRef = map;
     tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: PARCEL_MINZOOM, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
     tiles._busy = () => queue.pending > 0;
+    tiles._dataPending = () => queue.pending > 0 || tiles.repaintPending();
     tiles.addTo(map);
     map.on("moveend zoomend", refresh);
     unsub = onSnapshotChange((c) => { if (c === county) { dropAll(); refresh(); } }); // a fresher copy: new lots, new keys

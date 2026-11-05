@@ -30,7 +30,7 @@ function fullYear(y) {
 
 // Round-trips through a real Date to reject a calendar-impossible day (Feb 31, Apr 31, ...)
 // rather than silently storing it.
-function isoFrom(y, mo, d) {
+export function isoFrom(y, mo, d) {
   if (!Number.isFinite(y) || !(mo >= 1 && mo <= 12) || !(d >= 1 && d <= 31)) return null;
   const dt = new Date(y, mo - 1, d);
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;

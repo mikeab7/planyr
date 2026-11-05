@@ -395,7 +395,7 @@ try {
         await section(`${tagp} 6 ${start}`, async () => {
           const { ctx, page } = await open(browser, phone, mode);
           await openAburi(page);
-          const hb = await page.locator('[data-testid="food-sheet-drag-handle"]').boundingBox();
+          const hb = await page.locator('[data-testid="food-sheet-drag-handle"] > span').boundingBox(); // the visible bar (NEW-1, 2026-10-23)
           const x = hb.x + hb.width / 2, y = hb.y + hb.height / 2;
           await page.mouse.move(x, y); await page.mouse.down();
           await page.waitForTimeout(600); // let the open animation settle before grabbing the handle

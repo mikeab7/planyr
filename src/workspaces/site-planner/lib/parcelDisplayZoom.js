@@ -138,3 +138,24 @@ export function layerInDrawRange(layer) {
   if (!Number.isFinite(z) || !Number.isFinite(floor)) return true;
   return z >= floor;
 }
+
+/* NEW-1 (Memphis line band, B2289168 ×3) — the outline layer asks for its row id by NAME, and that name is not always
+ * "OBJECTID". MARIS (Mississippi's statewide cadastral, 24 Memphis-radius counties) calls it `FID` and answers ANY query naming
+ * OBJECTID with HTTP 200 + `{"error":{"code":400,"message":"Failed to execute query."}}` — measured on planyr.io's relay
+ * 2026-10-16. So every Marshall/Tate/… outline request failed, the 8 s hang-guard pulled the layer, the next move re-added it,
+ * and after three failures the circuit breaker dropped the county from CLICKS too ("No lot here" on a real Marshall lot).
+ * Given the layer's own metadata, swap an absent OBJECTID for the layer's real id field (`objectIdField`, else the field
+ * typed esriFieldTypeOID). Pure; returns the list unchanged when OBJECTID exists or nothing better is known. */
+export function outlineFieldsFor(meta, fields) {
+  const list = Array.isArray(fields) ? fields : ["OBJECTID"];
+  const metaFields = meta && Array.isArray(meta.fields) ? meta.fields : null;
+  if (!metaFields || list[0] === "*") return list;
+  const names = metaFields.map((f) => f && f.name).filter(Boolean);
+  if (names.includes("OBJECTID")) return list;
+  const oid = (meta.objectIdField && names.includes(meta.objectIdField) && meta.objectIdField)
+    || (metaFields.find((f) => f && f.type === "esriFieldTypeOID") || {}).name;
+  if (!oid) return list;
+  const out = list.map((f) => (f === "OBJECTID" ? oid : f));
+  return out.filter((f, i) => out.indexOf(f) === i);
+}
+

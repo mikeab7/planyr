@@ -55,7 +55,8 @@ describe("the layer row", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/lib/vectorOverlay.js", import.meta.url), "utf8");
     expect(src).toMatch(/if \(cfg\.bufferRule === "ga_streams"\) return cachedStreamBufferLayer\(/);
     // loud on a failed supporting source — a missing District outline must never silently draw 25 ft as the answer
-    expect(src).toMatch(/couldn't load \$\{lost\.join\(" and "\)\}/);
+    expect(src).toMatch(/streamBufferLossNote\(cfg\.label, failed\)/);
+    expect(src).toMatch(/report\("failed", lossNote\)/);
   });
 });
 

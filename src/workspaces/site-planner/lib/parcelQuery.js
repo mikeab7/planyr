@@ -9,9 +9,10 @@
  * can't leak into a neighbouring county.
  */
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
-import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
+import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue, countyRecord } from "./appraisal.js";
+import { normalizeIdFor } from "./tnParcelId.js";
 
 // A field name gets interpolated into the where-clause and may come from a live (or a
 // user-pasted) layer's metadata, so it must be a plain identifier — reject anything
@@ -84,7 +85,16 @@ export function idAttrFor(county, attrs) {
    * pinned id column has to be read from there too: without this, `ca_statewide`'s pin was inert and the card
    * showed the layer's OBJECTID row number as the parcel's account id. */
   const c = COUNTIES[county] || COUNTIES_MAP[county];
-  const field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  let field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  /* NEW-2 (Kentucky, 2026-10-21) — a layer built from a JOIN (Scott County's Georgetown-Scott Planning service) returns its
+   * columns TABLE-PREFIXED ("gscrep.DBO.Parcels_P.GIS_MapID"), so the configured `idField` ("GIS_MapID") is not a key of the
+   * attribute bag and the card showed no parcel id at all (measured live on planyr.io 2026-10-21, V1747776). When the resolved
+   * column is not an exact key, take the key whose LAST dotted segment is that column. */
+  if (field && !(field in attrs)) {
+    const want = String(field).toLowerCase();
+    const k = Object.keys(attrs).find((n) => n.replace(/^.*\./, "").toLowerCase() === want);
+    if (k) field = k;
+  }
   /* B2194740 — a layer's own ROW NUMBER (OBJECTID/FID) is never a parcel's account. The detector falls back to
    * it when no id-shaped column matches (measured on real rows: Bernalillo NM `UPC`, Macomb MI `TAX_ID`, whose
    * stored account was "1"); the county record's resolvers know more column spellings, so ask them, and store
@@ -99,13 +109,19 @@ export function idAttrFor(county, attrs) {
 
 // Run one ID/address query against a single layer; returns the matched features plus
 // the resolved layer + detected field names (so the caller can import a result).
-async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr }) {
-  const layerUrl = await resolveLayerUrl(rawUrl);
-  const meta = await getLayerInfo(layerUrl);
+async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr, timeoutMs }) {
+  const layerUrl = await resolveLayerUrl(rawUrl, { timeoutMs });
+  const meta = await getLayerInfo(layerUrl, { timeoutMs });
   const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
   const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
   const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
-  const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
+  // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot (counties.js `pointOrderBy`) is asked newest-first, and one lot is listed once.
+  const orderBy = pointOrderByForUrl(layerUrl);
+  let feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs, ...(orderBy ? { orderBy } : {}) }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
+  if (orderBy && idField) {
+    const seen = new Set();
+    feats = feats.filter((f) => { const k = String((f.attributes || {})[idField]); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
   return { feats, layerUrl, idField, addrField };
 }
 
@@ -115,7 +131,10 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere
  * TxGIO layer scoped to that county. Records the primary's circuit-breaker health.
  * Returns { feats, layerUrl, idField, addrField, backup, backupCounty }. A config
  * error (no id field, bad field name) is rethrown as-is — it isn't an outage. */
-export async function lookupParcels({ county, lookupUrl, mode, value }) {
+export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs }) {
+  /* NEW-2 (TN, 2026-10-21) — an id typed with spaces / dots / dashes in any mix is rebuilt into the form the county stores it in, so
+   * "156 027.00 000" finds `156-027.00-000`. Only a county that declares an `idNormalizer` is touched, and only an id search. */
+  if (mode === "id" && COUNTIES[county]?.idNormalizer) value = normalizeIdFor(COUNTIES[county].idNormalizer, value);
   try {
     const r = await queryOneLayer(lookupUrl, {
       mode, value,
@@ -124,6 +143,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
       scopeWhere: COUNTIES[county]?.scopeWhere,
       pinId: !!COUNTIES[county]?.pinIdField,
       pinAddr: !!COUNTIES[county]?.pinAddrField,
+      timeoutMs,
     });
     recordSourceResult(county, true);
     return { ...r, backup: false, backupCounty: null };
@@ -136,9 +156,24 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
     const fb = isDefaultUrl ? statewideFallbackFor(county) : null;
     if (!fb) throw err;
     const r = await queryOneLayer(fb.layerUrl, {
-      mode, value, idHint: fb.idField, addrHint: fb.addrField, scopeWhere: fb.scopeWhere,
+      mode, value, idHint: fb.idField, addrHint: fb.addrField, scopeWhere: fb.scopeWhere, timeoutMs,
     });
-    return { ...r, backup: true, backupCounty: fb.countyName };
+    return { ...r, backup: true, backupCounty: fb.countyName, backupLabel: fb.label };
+  }
+}
+
+/* NEW-2 (Tennessee, all 95 counties) — a lookup whose where-clause the caller has already built from a PARSED id (tnParcelId.js `linkWhere` / Shelby's PAID), run on one layer with the
+ * same health bookkeeping as `lookupParcels`. No field detection and no statewide fallback: the clause names the columns it needs, and a source that does not answer is `unavailable`
+ * (a typed ParcelFetchError), never an empty list. Returns { feats, layerUrl }. */
+export async function lookupParcelsWhere({ county, lookupUrl, where, timeoutMs }) {
+  const layerUrl = await resolveLayerUrl(lookupUrl, { timeoutMs });
+  try {
+    const feats = await queryFeatures(layerUrl, { where, count: 50, outSR: 4326, timeoutMs });
+    recordSourceResult(county, true);
+    return { feats, layerUrl };
+  } catch (err) {
+    if (err && err.unavailable) recordSourceResult(county, false);
+    throw err;
   }
 }
 

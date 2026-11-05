@@ -14,6 +14,7 @@
  */
 import { useRef, useState } from "react";
 import { deleteReview, restoreReview, purgeReview } from "../../doc-review/lib/reviewStore.js";
+import { deleteReviewOutcome, deleteFailureEvent } from "../../doc-review/lib/deleteOutcome.js";
 import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -27,8 +28,12 @@ export const FileTypeIcon = ({ kind }) => (
   </svg>
 );
 
-/* `titleOf(id)` names the file for the undo toast; `refresh()` re-reads the caller's lists afterwards. */
-export function useReviewTrash({ titleOf, refresh }) {
+const tele = (ev) => { if (ev) import("../../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent(ev.kind, ev.message, ev.extra)).catch(() => {}); };
+
+/* `titleOf(id)` names the file for the undo toast; `refresh()` re-reads the caller's lists afterwards.
+ * `surface` names the caller in telemetry ("library" | "reviews-menu") — NEW-1: the "Reviews ▾" menu
+ * (doc-review/components/ReviewsBar.jsx) mounts this SAME hook, so there is one delete path. */
+export function useReviewTrash({ titleOf, refresh, surface = "library" }) {
   const [pendingDel, setPendingDel] = useState(null);     // two-step arm for the ✕
   const [pendingPurge, setPendingPurge] = useState(null); // two-step arm for "Delete forever"
   const [delNotice, setDelNotice] = useState(null);
@@ -41,13 +46,19 @@ export function useReviewTrash({ titleOf, refresh }) {
     setPendingDel(null);
     const title = titleOf(id) || "file";
     const r = await deleteReview(id);
-    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
-    if (r && r.ok && r.soft && r.removed > 0) { // undo toast ONLY for a delete that really landed (B757 removed-count honesty)
+    // NEW-1 — the verdict is the shared `deleteReviewOutcome` (doc-review/lib/deleteOutcome.js), so
+    // this hook and the Reviews ▾ menu read "it worked" identically: landed = soft + ≥1 row (B757
+    // removed-count honesty → undo toast); failed = no result / error / 0 rows (never a silent
+    // dead click, NEW-4) + a telemetry row; cleanup = a hard delete that stranded bytes.
+    const out = deleteReviewOutcome(r);
+    if (out.cleanup) setDelNotice(out.cleanup);
+    if (out.landed) {
       if (undoTimer.current) clearTimeout(undoTimer.current);
       setUndoDel({ id, title });
       undoTimer.current = setTimeout(() => setUndoDel(null), 10000);
-    } else if (!r || !r.ok || (r.soft && r.removed === 0)) {
-      setDelNotice({ deleteFailed: true }); // a failed/0-row delete is never a silent dead click (NEW-4)
+    } else if (out.failed) {
+      setDelNotice({ deleteFailed: true });
+      tele(deleteFailureEvent(out, { surface, id }));
     }
     refresh();
   };
@@ -94,12 +105,14 @@ export function TrashNotice({ notice, onDismiss, style }) {
   );
 }
 
-export function UndoToast({ undo, onUndo, onDismiss }) {
+/* `style` overrides the floating placement — the Reviews ▾ menu (NEW-1) renders this INLINE in its
+ * own panel (`position: "static"`), so an undo is offered where the delete was made. */
+export function UndoToast({ undo, onUndo, onDismiss, style }) {
   if (!undo) return null;
   return (
     <div role="status" data-testid="trash-undo" style={{ position: "absolute", bottom: 14, right: 14, zIndex: 6, display: "flex", alignItems: "center", gap: 10,
       padding: "9px 14px", borderRadius: 9, background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-      boxShadow: "0 4px 16px rgba(0,0,0,0.18)", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
+      boxShadow: "0 4px 16px rgba(0,0,0,0.18)", fontSize: FONT_SIZE.control, color: "var(--text-primary)", ...style }}>
       <span style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         Moved “{undo.title}” to Recently deleted.
       </span>

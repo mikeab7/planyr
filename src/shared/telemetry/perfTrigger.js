@@ -75,6 +75,16 @@ export const TRIGGER_DEFAULTS = {
   bootWindowMs: 10_000,       // matches the owner's own "5 to 10 seconds" report, plus margin
   bootTaskBudgetMs: 400,      // cumulative long-task/LoAF blocking time inside the boot window…
   bootSingleTaskMs: 250,      // …OR one task alone at least this slow (an unambiguous single stall)
+
+  /* ── the FREEZE judgment (B2319137 ×2) — see the header block above `feedFreeze`. */
+  freezeMs: 1_000,            // one frame that never came, or one long frame, at least this long
+
+  /* ── the SUSTAINED-SLOW judgment (B2319137 ×4) — see the header block above `feedSlowRun`. */
+  slowRunFrameMs: 250,        // a frame this slow or slower is part of a slow run (4 fps or worse)…
+  slowRunMinFrames: 3,        // …and a run of at least this many such frames in a row…
+  slowRunTotalMs: 3_000,      // …adding up to at least this long is a capture, whatever the baseline
+  slowRunMaxFrameMs: 30_000,  // one gap longer than this is a suspended page, not a frame — it breaks the run
+  slowWatchMaxMs: 60_000,     // the recorder keeps watching through a slow run for at most this long
 };
 
 /* Create the trigger state. All storage is allocated here and never again. */
@@ -100,6 +110,9 @@ export function createTrigger(overrides) {
     /* boot-window judgment (NEW-3) */
     bootTaskMs: 0,
     bootTaskCount: 0,
+    /* sustained-slow judgment (B2319137 ×4) */
+    slowRunN: 0,
+    slowRunMs: 0,
   };
 }
 
@@ -246,6 +259,71 @@ function fireBoot(s, t, trigger) {
     taskCount: s.bootTaskCount,
     bootWindowMs: s.cfg.bootWindowMs,
   };
+}
+
+/* ── the FREEZE judgment (B2319137 ×2) ───────────────────────────────────────────────────────
+ * ⛔ WHY THE TWO JUDGMENTS ABOVE WERE BOTH BLIND TO THE OWNER'S 30-SECOND FREEZE (2026-10-29, tab
+ * 5abb4ba7: an interaction that waited 31 s for its next paint, and only 135 ms of long tasks).
+ * The grading build ran as hundreds of SHORT slices back to back (`runChunked`), each well under any
+ * long-task bar, with no frame between them — the page never painted, yet no single task was long.
+ *   · `feedFrame` drops any delta past `maxFrameMs` (1.5 s) as "not a frame — a debugger, a
+ *     throttle, a sleep" — which is exactly what a 30 s starved frame looks like from inside.
+ *   · `feedBootTask` sums task time, and only in the first ten seconds.
+ * A freeze is the one case where a SINGLE sample IS the evidence the sustained test exists to
+ * demand: nobody's GC, antivirus or screenshot holds a visible page for a second. So this is an
+ * ABSOLUTE bar, deliberately (the self-relative argument does not apply — a second without a frame is
+ * a freeze on any display), fed from two places that are NOT the sustained window:
+ *   · "frame" — a frame delta from the RUNNING frame loop (the user was interacting, the first frame
+ *     after an idle gap is already dropped at the source) with the page visible the whole time;
+ *   · "task"  — one long-animation-frame / long-task entry, which is how a starved render is
+ *     reported where the platform groups the tasks into the frame they held off.
+ * Same `fires`/`maxAuto`/`cooldownMs` budget as every other auto capture. */
+export function feedFreeze(s, t, ms, via) {
+  const cfg = s.cfg;
+  if (!(ms >= cfg.freezeMs)) return false;
+  if (s.fires >= cfg.maxAuto) return false;
+  if (t - s.lastFireAt < cfg.cooldownMs) return false;
+  fireFreeze(s, t, ms, via);
+  return true;
+}
+
+/* ── the SUSTAINED-SLOW judgment (B2319137 ×4, owner live check 2026-10-30) ────────────────────
+ * The owner's tab ran at about ONE frame per second for 30–45 s after every zoom step — measured with
+ * a requestAnimationFrame gap monitor: 15 consecutive gaps of ~1000 ms — and no capture was written.
+ * Every judgment above missed it by construction: `feedFrame` needs `sustainMinFrames` (8) frames
+ * inside a 2 s window, which a 1 fps page can never supply; `feedFreeze` needs ONE frame of a full
+ * second, and these were a hair under; and the recorder stopped watching `idleStopMs` after the
+ * click, two frames in. A run of slow frames is its own evidence: `slowRunMinFrames` consecutive
+ * frames each at least `slowRunFrameMs`, adding up to `slowRunTotalMs`, fire a freeze capture
+ * (`via: "sustained"`, `freezeMs` = the run's length, `frames` = its count) whatever the baseline,
+ * any time. A fast frame (or one past `slowRunMaxFrameMs`) ends the run. Same budget as every
+ * other auto capture. Allocation-free on the no-fire path. Returns TRUE on the frame to capture. */
+export function feedSlowRun(s, t, dt) {
+  const cfg = s.cfg;
+  if (!(dt >= cfg.slowRunFrameMs) || dt > cfg.slowRunMaxFrameMs) { s.slowRunN = 0; s.slowRunMs = 0; return false; }
+  s.slowRunN++;
+  s.slowRunMs += dt;
+  if (s.slowRunN < cfg.slowRunMinFrames || s.slowRunMs < cfg.slowRunTotalMs) return false;
+  if (s.fires >= cfg.maxAuto) return false;
+  if (t - s.lastFireAt < cfg.cooldownMs) return false;
+  s.fires++;
+  s.lastFireAt = t;
+  s.lastVerdict = { source: "freeze", via: "sustained", freezeMs: Math.round(s.slowRunMs), frames: s.slowRunN };
+  s.slowRunN = 0; s.slowRunMs = 0;
+  return true;
+}
+/* Is a slow run in progress (the recorder keeps watching while it is, up to `slowWatchMaxMs`)? */
+export const inSlowRun = (s) => s.slowRunN > 0 && s.slowRunMs < s.cfg.slowWatchMaxMs;
+
+/* The freeze FIRE branch, split out for the same reason `fire()` is: it is the only part that allocates. */
+function fireFreeze(s, t, ms, via) {
+  s.fires++;
+  s.lastFireAt = t;
+  /* NEW-1 (2026-11-01) — "render": a long animation frame whose main thread was NOT blocked (LoAF blockingDuration small) — the
+   * frame waited on drawing / the compositor while the page's code was idle. Kept apart from "task" so a slow-DRAWING episode can
+   * never again read as the page's JavaScript holding the main thread (the 2026-10-31 owner capture: 127 "long tasks", every one
+   * blockingDuration 0, no script attributed). */
+  s.lastVerdict = { source: "freeze", via: via === "task" || via === "render" ? via : "frame", freezeMs: Math.round(ms) };
 }
 
 /* Seal the baseline as the MEDIAN of the collected frames. Median, not mean: a collection pause

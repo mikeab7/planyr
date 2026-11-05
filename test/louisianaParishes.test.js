@@ -214,8 +214,9 @@ describe("parcel-card resolvers on the real Louisiana schemas (NEW-1)", () => {
   });
 
   it("Lafayette (LED copy) — `Name` is the PARCEL NUMBER there; the wired ES2 layer has a real `owner`", () => {
-    // Documents why the LED layer was rejected: the shared resolver WOULD show a parcel number as the owner.
-    expect(ownerKey({ Name: "6158073", Ownership: "Trs B-1, B-3 & C" })).toBe("Name");
+    // Documents why the LED layer was rejected. It used to be because the shared resolver WOULD show a parcel number as the owner; since Missouri
+    // (B2317680) a digits-only bare `Name` is never an owner, so the resolver now reads the layer's own `Ownership` column instead (and the wired ES2 layer is still the right one).
+    expect(ownerKey({ Name: "6158073", Ownership: "Trs B-1, B-3 & C" })).toBe("Ownership");
     expect(ownerKey({ parcelnumb: "6158073", owner: "THIBODEAUX STEVEN M / THIBODEAUX", address: "500 BLK CHAMBERLAIN" })).toBe("owner");
     expect(COUNTIES.la_lafayette.layerUrl).not.toMatch(/2023_Parcels_Lafayette_Parish/);
   });
@@ -234,8 +235,9 @@ describe("pinned id/address columns (NEW-1)", () => {
 
   it("only the shared service is scoped, and its scope names the parish's own FIPS code", () => {
     const scoped = LA_KEYS.filter((k) => COUNTIES[k].scopeWhere);
-    expect(scoped).toEqual(["la_lafayette"]);
+    expect(scoped.sort()).toEqual(["la_lafayette", "la_vermilion"]); // the ES2 Regrid-schema service holds exactly these two parishes
     expect(COUNTIES.la_lafayette.scopeWhere).toBe("geoid='22055'"); // Lafayette Parish FIPS 22055
+    expect(COUNTIES.la_vermilion.scopeWhere).toBe("geoid='22113'"); // Vermilion Parish FIPS 22113
   });
 });
 

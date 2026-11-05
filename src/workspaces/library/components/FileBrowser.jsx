@@ -19,6 +19,8 @@
  */
 import { subscribeLibraryChanged } from "../../../shared/library/libraryChanged.js";
 import { docKindOf } from "../../doc-review/docEditor/docKind.js";
+import { isSpreadsheetName } from "../../model/lib/spreadsheetKind.js";
+import { useFileDragActive, isFileDrag, markDropHandled, dropWasHandled } from "../../../shared/files/fileDrag.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchProjects, fetchReviews, fetchFileFacts, fileNewReview,
@@ -26,7 +28,11 @@ import {
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
-import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton, FileTypeIcon } from "./ReviewTrash.jsx";
+import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, FileTypeIcon } from "./ReviewTrash.jsx";
+import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
+import { menuPanelStyle, MenuItem } from "../../../shared/ui/controls.jsx";
+import { FILE_MOVE_TYPE, isFileMoveDrag, readFileMoveId, moveDecision, disciplineForMove, applyOptimisticFolder, fileMenuItems } from "../lib/fileMove.js";
+import { renameReviewTitle } from "../lib/renameFile.js";
 import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
@@ -34,14 +40,15 @@ import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
 import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
 import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
-  categoryOf, subcategoryOf, stateOf, FILE_STATES, onMap, isReference, isSpatial,
+  categoryOf, categoryFor, subcategoryOf, stateOf, FILE_STATES, onMap, isReference, isSpatial,
   searchFiles, sortFiles, SORTS,
 } from "../../../shared/files/fileFacts.js";
 import {
   resolveDrawingTarget, subtreeIds, displayLabel, matchDropPathToFolder,
 } from "../../../shared/folders/folderTree.js";
+import { resolvePlacement, folderChoices, refileDefault, disciplineForCategory } from "../../../shared/folders/filingTarget.js";
 import {
-  QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
+  QUEUE_STATUS, makeQueueItems, splitQueue, runPool, reconcileQueueWithFacts,
   dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName, fileRelDirs,
 } from "../../../shared/files/uploadQueue.js";
 import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
@@ -108,8 +115,13 @@ export default function FileBrowser({
   const [openCats, setOpenCats] = useState(() => loadIdSet(CATS_OPEN_KEY)); // Set of open categories
   const [searchQ, setSearchQ] = useState("");               // type-to-filter (B702)
   const [sort, setSort] = useState(() => { try { return localStorage.getItem(SORT_KEY) || "recency"; } catch (_) { return "recency"; } });
-  const [dropOver, setDropOver] = useState(false);
+  const rootRef = useRef(null);
+  // ONE shared file-drag tracker (NEW-2): the overlay shows while a file is really being dragged over
+  // the window and this view is the visible one — never a per-pane enter/leave counter that can strand.
+  const dropOver = useFileDragActive(isActive);
+  const [dropNotice, setDropNotice] = useState(null);       // a drop that could not be taken — named, never silent (NEW-1)
   const [queue, setQueue] = useState([]);
+  const [refiling, setRefiling] = useState({});            // fileId -> true while a File is in flight
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [loadNotice, setLoadNotice] = useState(null);      // a refresh FAILED — keeping the last loaded list (NEW-F5)
@@ -122,13 +134,13 @@ export default function FileBrowser({
   // confirmation instead of calling downloadFile directly, so the file only reaches disk on the
   // banner's own explicit Download click.
   const [pendingDl, setPendingDl] = useState(null);         // the file row awaiting an explicit Download click
+  const [fileMenu, setFileMenu] = useState(null);         // { f, x, y } — the row's right-click / ⋯ menu (NEW-2)
+  const [renaming, setRenaming] = useState(null);         // { id, value } — inline title edit on the row
+  const [movePick, setMovePick] = useState(null);         // { id, folderId } — the "Move to…" picker open under a row
+  const [moving, setMoving] = useState({});               // fileId -> true while a move is in flight
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
-  // Whole-pane drop target (B699): a DEPTH COUNTER, not a naive dragleave — entering any
-  // child fires enter/leave pairs, and the naive `currentTarget === target` check made the
-  // highlight flicker. The counter only clears when every enter has matched a leave.
-  const dragDepth = useRef(0);
   // B1205297 — a queue item parked at QUEUE_STATUS.DUPLICATE keeps the (targetFolderId, opts)
   // its processItem() call was made with here, so the Replace/Keep-both button can re-run the
   // EXACT SAME routing decision with a resolved dupChoice, instead of re-deriving it.
@@ -148,24 +160,6 @@ export default function FileBrowser({
   // list ignores those filters, so leaving it up would make the click look dead. `node` is a
   // fresh object on every tree click, so re-filtering always fires this.
   useEffect(() => { setShowDeleted(false); }, [node, showHolding, searchQ, selectedFolderId]);
-
-  // A cancelled drag (Esc, or an OS-file drag released outside the window — which fires
-  // NO drop/dragend in the page) would strand the depth counter above zero and pin the
-  // overlay on; so would an element unmounting under the cursor mid-drag (its dragleave
-  // never fires). Reset on window-level drag end / drop, AND when the drag leaves the
-  // window itself (dragleave with no relatedTarget) — the counter self-heals (B699).
-  useEffect(() => {
-    const reset = () => { dragDepth.current = 0; setDropOver(false); };
-    const onWinLeave = (e) => { if (e.relatedTarget == null) reset(); };
-    window.addEventListener("dragend", reset);
-    window.addEventListener("drop", reset);
-    window.addEventListener("dragleave", onWinLeave);
-    return () => {
-      window.removeEventListener("dragend", reset);
-      window.removeEventListener("drop", reset);
-      window.removeEventListener("dragleave", onWinLeave);
-    };
-  }, []);
 
   const refresh = async () => {
     if (!signedIn) return;
@@ -225,6 +219,12 @@ export default function FileBrowser({
 
   const tree = useMemo(() => deriveTree(facts, { includeSuperseded: showSuperseded }), [facts, showSuperseded]);
   const holding = useMemo(() => holdingArea(facts), [facts]);
+  // NEW-2 — the bottom tray's "Needs filing" row is session state, the view above is server state: reconcile them
+  // whenever the facts change so filing a document (File button, Review, a folder drop) clears its tray row.
+  useEffect(() => {
+    const needsById = new Map(facts.map((x) => [x.id, stateOf(x) === FILE_STATES.NEEDS_FILING]));
+    setQueue((q) => reconcileQueueWithFacts(q, needsById));
+  }, [facts]);
   const filed = useMemo(() => facts.filter((f) => stateOf(f) !== FILE_STATES.NEEDS_FILING).length, [facts]);
 
   // Folder mode: place every filed fact into the real tree (superseded → 02. Archive) — one
@@ -237,8 +237,8 @@ export default function FileBrowser({
       if (stateOf(f) === FILE_STATES.NEEDS_FILING) continue; // holding-area files aren't in the tree
       // Explicit folder pick wins (B686): the file sits in the folder the user dropped it into,
       // overriding the discipline-derived placement (as long as that folder still exists).
-      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; }
-      const t = resolveDrawingTarget(folderRows, f.discipline, { archive: stateOf(f) === FILE_STATES.SUPERSEDED });
+      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; } // (same rule as resolvePlacement; kept for the byId guard)
+      const t = resolvePlacement(folderRows, { folderId: f.folderId, discipline: f.discipline, archive: stateOf(f) === FILE_STATES.SUPERSEDED });
       if (t) m.set(f.id, t.row.id);
     }
     return m;
@@ -471,7 +471,11 @@ export default function FileBrowser({
   const dropTargetFolder = () => (folderMode ? (selectedFolderId || null) : null);
 
   const ingest = async (fileList, targetFolderId = null, opts = undefined) => {
-    if (!projectId && !cross && !orgScope) return; // drop gated until a project/scope is chosen (no auto-guess)
+    const names = Array.from(fileList || []).map((f) => f?.name).filter(Boolean);
+    if (!projectId && !cross && !orgScope) { // drop gated until a project/scope is chosen (no auto-guess) — but never silently
+      if (names.length) setDropNotice(`Couldn't add ${names.length === 1 ? `“${names[0]}”` : `${names.length} files`} — ${signedIn ? "pick a project first, then drop again" : "sign in and open a project first"}.`);
+      return;
+    }
     const items = makeQueueItems(fileList);
     if (!items.length) return;
     setQueue((q) => [...items, ...q]);
@@ -489,7 +493,11 @@ export default function FileBrowser({
    * auto-file-by-title-block path. An explicit target (folder-row drop / selected folder)
    * still wins for the whole drop, same as B686/B687. */
   const ingestFolder = async (allFiles, targetFolderId = null) => {
-    if (!projectId && !cross && !orgScope) return;
+    if (!projectId && !cross && !orgScope) {
+      const n = (allFiles || []).length;
+      if (n) setDropNotice(`Couldn't add ${n} file${n === 1 ? "" : "s"} from that folder — ${signedIn ? "pick a project first, then drop again" : "sign in and open a project first"}.`);
+      return;
+    }
     const { accepted, skipped } = partitionAccepted(allFiles);
     if (!accepted.length) { setFolderNote(skipped.length ? { filed: 0, skipped: skipped.length } : null); return; }
     // No explicit target + no published tree rows (still loading) → classic auto-file for
@@ -536,16 +544,39 @@ export default function FileBrowser({
   };
 
   const onDrop = (e) => {
+    if (isFileMoveDrag(e.dataTransfer)) { e.preventDefault(); return; } // an in-app file row dropped on the pane itself: nothing to ingest
     e.preventDefault(); e.stopPropagation();
-    dragDepth.current = 0; setDropOver(false);
+    markDropHandled(e);
     dropInto(dropTargetFolder(), e.dataTransfer);
   };
+
+  // A drop ANYWHERE on the Library view (header, rail gutter, empty space) goes through the same
+  // path as the Upload button — otherwise the browser's own drop action runs and Chrome downloads
+  // the file (NEW-1). Window-level so it covers what the pane's own handler never sees; skipped
+  // when a pane/row already took it, and when another view is the one showing.
+  const dropAnywhereRef = useRef(null);
+  dropAnywhereRef.current = (e) => {
+    if (!isActive || dropWasHandled(e) || !isFileDrag(e)) return;
+    markDropHandled(e);
+    dropInto(dropTargetFolder(), e.dataTransfer);
+  };
+  useEffect(() => {
+    const h = (e) => dropAnywhereRef.current?.(e);
+    window.addEventListener("drop", h);
+    return () => window.removeEventListener("drop", h);
+  }, []);
 
   // The folder rail's rows route their drops here (registered up through the parent):
   // a row drop targets THAT folder explicitly; the "All files" row (null) is the auto path.
   const treeDropImpl = useRef(null);
   treeDropImpl.current = (folderId, e) => {
-    dragDepth.current = 0; setDropOver(false);
+    markDropHandled(e);
+    if (isFileMoveDrag(e.dataTransfer)) { // an in-app file row dropped on a folder → the ONE move path (NEW-1)
+      const id = readFileMoveId(e.dataTransfer);
+      const f = id && facts.find((x) => x.id === id);
+      if (f && folderId) moveFileToFolder(f, folderId); // "All files" (null) refuses: nothing happens
+      return;
+    }
     dropInto(folderId || null, e.dataTransfer);
   };
   useEffect(() => { registerTreeDrop?.((folderId, e) => treeDropImpl.current?.(folderId, e)); }, [registerTreeDrop]);
@@ -563,8 +594,10 @@ export default function FileBrowser({
   const isPdfFile = (f) => !f.sourceFile || isPdfName(f.sourceFile);
   // NEW-1: Word and text files open in Review's document editor, so they are no longer a download-only dead end.
   const isDocFile = (f) => !!f.sourceFile && !!docKindOf(f.sourceFile);
+  // NEW-1: Excel/CSV files open in the Spreadsheet module (the Shell routes the row there), so they are no longer a download-only dead end either.
+  const isSheetFile = (f) => !!f.sourceFile && isSpreadsheetName(f.sourceFile);
   const open = (f) => {
-    if (!isPdfFile(f) && !isDocFile(f)) { setPendingDl(f); return; }
+    if (!isPdfFile(f) && !isDocFile(f) && !isSheetFile(f)) { setPendingDl(f); return; }
     const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
   };
   // B2022929 — "Version history": opens the file in Review with the history sheet already showing.
@@ -591,7 +624,7 @@ export default function FileBrowser({
     } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
   };
   // Delete / undo / restore / delete-forever: ONE implementation, shared with the no-project Home (ReviewTrash.jsx, B2086368).
-  const { pendingDel, setPendingDel, pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
+  const { pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
     useReviewTrash({ titleOf: (id) => (reviews.find((x) => x.id === id) || {}).title, refresh: () => refresh() });
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
   // review's sources (not the file-fact row), so load the record on demand.
@@ -608,32 +641,117 @@ export default function FileBrowser({
       setShare((s) => ({ ...s, [f.id]: r.ok ? { status: "done", url: r.url } : { status: "error", error: r.error || "Couldn’t create a link." } }));
     } catch (e) { setShare((s) => ({ ...s, [f.id]: { status: "error", error: (e && e.message) || "Couldn’t create a link." } })); }
   };
-  const doRefile = async (f) => {
+  // The folder the File row targets: the owner's explicit pick, else the category/discipline suggestion (null =
+  // nothing honest to suggest, so the owner must pick). ONE function for the row and the click, so they can't drift.
+  const refileTarget = (f) => {
     const sel = refileSel[f.id] || {};
+    const discipline = (sel.discipline ?? f.discipline ?? "").trim();
+    const d = refileDefault(folderRows, { discipline, item: f.item, title: f.title, category: sel.category || "" }, categoryFor);
+    const folderId = sel.folderId !== undefined ? (sel.folderId || null) : (d.row ? d.row.id : null);
+    return { sel, category: d.category, suggested: d.row, folderId };
+  };
+  const doRefile = async (f) => {
+    if (refiling[f.id]) return;
+    const { sel, category, folderId } = refileTarget(f);
+    const hasTree = folderMode && folderRows.length > 0;
+    if (hasTree && !folderId) { setMoveNotice(`Pick a folder for "${f.title || "this file"}" first — nothing was changed.`); return; }
     // Normalize a typed discipline onto the canonical list case-insensitively ("civil" →
     // "Civil") so a typo/case variant can't mint a duplicate subcategory node in the tree;
     // a genuinely new name still passes through untouched (concurrent sheet-title batch).
-    const typed = (sel.discipline || f.discipline || "Civil").trim();
+    // An unclassified file filed under a category takes that category's discipline (Surveys → Survey).
+    const own = (sel.discipline || f.discipline || "").trim();
+    const typed = (own && own !== "Other" ? own : disciplineForCategory(category) || own || "Civil");
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
-    const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category });
-    if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
-      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
-      return;
+    setRefiling((r) => ({ ...r, [f.id]: true }));
+    try {
+      const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category || category || undefined, folderId: hasTree ? folderId : null });
+      if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
+        setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
+        return;
+      }
+      if (res.notice) setMoveNotice(res.notice);
+      setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+      // Same tick as the server write: the tray row for this document is no longer "Needs filing" (NEW-2).
+      setQueue((q) => reconcileQueueWithFacts(q, new Map([[f.id, false]])));
+      refresh();
+    } catch (e) { // LOUD-FAILURE: an unhandled rejection used to look like "it did something" and then nothing
+      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${(e && e.message) || "unexpected error"}. Nothing was changed.`);
+    } finally {
+      setRefiling((r) => { const n = { ...r }; delete n[f.id]; return n; });
     }
-    if (res.notice) setMoveNotice(res.notice);
-    setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+  };
+
+  // NEW-1 — move ONE file to a folder: drag onto a tree row OR "Move to…". Both end here, in the SAME
+  // `fileReviewIntoProject` the File picker uses (record + file_facts + Drive bytes — one placement rule).
+  // Optimistic: the row leaves/arrives at once; a failure snaps it back and names the file + the error.
+  const moveFileToFolder = async (f, folderId) => {
+    if (moving[f.id]) return;
+    const hasTree = folderMode && folderRows.length > 0;
+    const cur = placedFolder.get(f.id) || f.folderId || null;
+    const dec = moveDecision({ targetFolderId: folderId, currentFolderId: cur, folderRows });
+    if (!hasTree || dec.action !== "move") { if (dec.action === "noop") setMovePick((m) => (m && m.id === f.id ? null : m)); return; }
+    const folder = folderRows.find((r) => r.id === folderId);
+    const label = f.title || f.item || "this file";
+    const pid = f.projectId || projectId;
+    const { next, restore } = applyOptimisticFolder(reviews, f.id, folderId);
+    setReviews(next);
+    setMovePick(null);
+    setMoving((m) => ({ ...m, [f.id]: true }));
+    try {
+      const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline: disciplineForMove(f, folder), folderId });
+      if (!res.ok) { setReviews((rs) => restore(rs)); setMoveNotice(`Couldn't move "${label}" — ${res.error}. It's back where it was.`); return; }
+      setMoveNotice(res.notice || null);
+      refresh();
+    } catch (e) { // LOUD-FAILURE: never a silent snap-back
+      setReviews((rs) => restore(rs));
+      setMoveNotice(`Couldn't move "${label}" — ${(e && e.message) || "unexpected error"}. It's back where it was.`);
+    } finally {
+      setMoving((m) => { const n = { ...m }; delete n[f.id]; return n; });
+    }
+  };
+  // NEW-2 — inline rename of the stored title (the one source every list/header/pin reads). Enter / click-away
+  // commit, Escape abandons the typed text (EDITOR-EXIT-CONTRACT, text class). Empty is refused with a notice.
+  const commitRename = async (f) => {
+    const r = renaming;
+    if (!r || r.id !== f.id) return;
+    setRenaming(null);
+    if (!r.value.trim()) { setMoveNotice(`A name can't be empty — "${f.title || "this file"}" kept its name.`); return; }
+    if (r.value.trim() === (f.title || "")) return;
+    const res = await renameReviewTitle(f.id, r.value);
+    if (!res.ok) setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}`);
     refresh();
   };
+  const openFileMenu = (f, x, y) => setFileMenu({ f, x, y });
+  const runMenuAction = (id, f) => {
+    const spatial = isSpatial(f);
+    if (id === "open" || (id === "place" && spatial)) open(f);
+    else if (id === "download") setPendingDl(f);
+    else if (id === "move") setMovePick({ id: f.id, folderId: placedFolder.get(f.id) || f.folderId || null });
+    else if (id === "rename") setRenaming({ id: f.id, value: f.title || f.item || "" });
+    else if (id === "share") { if (!share[f.id]) startShare(f.id); }
+    else if (id === "versions") openHistory(f);
+    else if (id === "pin") onTogglePinFile?.(f);
+    else if (id === "delete") del(f.id);
+  };
+
+  // A refused drop is named wherever the browser is showing — including the two empty states below (NEW-1).
+  const dropNoticeNode = dropNotice ? (
+    <div role="alert" data-testid="library-drop-notice" style={{ margin: "8px 14px 0", padding: "7px 10px", borderRadius: RADIUS.sm, display: "flex", alignItems: "center", gap: 8,
+      border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+      <span style={{ flex: 1 }}>{dropNotice}</span>
+      <button onClick={() => setDropNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+    </div>
+  ) : null;
 
   // ---- empty / no-project states ------------------------------------------
   if (!signedIn) {
-    return <Centered title="Sign in to see your files"
-      body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." />;
+    return <>{dropNoticeNode}<Centered title="Sign in to see your files"
+      body="Document files live in your account — use Sign in at the top right. Until then, open a PDF directly to mark it up." /></>;
   }
   if (!projectId && !cross && !orgScope) {
-    return <Centered title="Pick a project to see its files"
-      body="Choose a project from the breadcrumb above to open its file browser. (Dropping a file needs a project so it never has to guess where it belongs.)" />;
+    return <>{dropNoticeNode}<Centered title="Pick a project to see its files"
+      body="Choose a project from the breadcrumb above to open its file browser. (Dropping a file needs a project so it never has to guess where it belongs.)" /></>;
   }
 
   const holdingCount = holding.length;
@@ -648,12 +766,13 @@ export default function FileBrowser({
   // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
   const dropFolderRow = folderMode && selectedFolderId ? folderRows.find((r) => r.id === selectedFolderId) : null;
   const dropFolderLabel = dropFolderRow ? displayLabel(dropFolderRow.name) : null;
+  const canDrag = folderMode && folderRows.length > 0; // a file row drags onto a tree folder (touch uses ⋯ › Move to…)
 
   return (
     <div
-      onDragEnter={(e) => { if (!hasFilesDrag(e)) return; e.preventDefault(); dragDepth.current += 1; setDropOver(true); }}
-      onDragOver={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
-      onDragLeave={(e) => { if (!hasFilesDrag(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDropOver(false); }}
+      ref={rootRef}
+      onDragEnter={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
+      onDragOver={(e) => { if (hasFilesDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
       onDrop={onDrop}
       style={{ flex: 1, display: "flex", minHeight: 0, position: "relative", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
 
@@ -802,7 +921,7 @@ export default function FileBrowser({
         {pendingDl && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: RADIUS.sm, display: "flex", alignItems: "center", gap: 8,
             border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)", fontSize: FONT_SIZE.control, lineHeight: 1.45 }}>
-            <span style={{ flex: 1 }}>“{pendingDl.sourceFile || pendingDl.title || pendingDl.item || "This file"}” isn’t a PDF, so it can’t be previewed here.</span>
+            <span style={{ flex: 1 }}>“{pendingDl.sourceFile || pendingDl.title || pendingDl.item || "This file"}” {isPdfFile(pendingDl) || isDocFile(pendingDl) ? "will be saved to this device." : "isn’t a PDF, so it can’t be previewed here."}</span>
             <button onClick={() => { const f = pendingDl; setPendingDl(null); downloadFile(f); }}
               style={{ flex: "none", padding: "4px 9px", fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)" }}>Download</button>
             <button onClick={() => setPendingDl(null)} title="Cancel" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 700, padding: 2 }}>✕</button>
@@ -810,6 +929,7 @@ export default function FileBrowser({
         )}
 
         {/* non-PDF download — in-flight + honest failure (B685; never a dead click) */}
+        {dropNoticeNode}
         {dlNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
             border: `1px solid ${dlNotice.error ? "var(--warn-border)" : "var(--border-default)"}`,
@@ -870,8 +990,28 @@ export default function FileBrowser({
             const docRow = isDocFile(f);
             const ext = (String(f.sourceFile || "").match(/\.([a-z0-9]+)$/i) || [])[1];
             return (
-              <div key={f.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
+              <div key={f.id} className="file-row" data-testid="library-file-row" data-review-id={f.id} data-menu-open={fileMenu && fileMenu.f.id === f.id ? "1" : undefined}
+                tabIndex={0}
+                draggable={canDrag && !renaming}
+                onDragStart={canDrag ? (e) => { e.dataTransfer.setData(FILE_MOVE_TYPE, f.id); e.dataTransfer.setData("text/plain", f.title || f.item || ""); e.dataTransfer.effectAllowed = "move"; } : undefined}
+                onContextMenu={(e) => { if (e.target.closest && e.target.closest("input,textarea,select")) return; e.preventDefault(); openFileMenu(f, e.clientX, e.clientY); }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return; // keys inside the row's own controls/inputs are theirs
+                  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left + 24, r.bottom - 6); }
+                }}
+                style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)", cursor: canDrag && !renaming ? "grab" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  {renaming && renaming.id === f.id ? (
+                    <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
+                      <FileTypeIcon kind={f.kind} />
+                      <input autoFocus data-testid="library-rename-input" aria-label={`Rename ${f.title || "file"}`} value={renaming.value}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setRenaming({ id: f.id, value: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRename(f); } else if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); } }}
+                        onBlur={() => commitRename(f)}
+                        style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", padding: "3px 7px", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--surface-page)", color: "var(--text-primary)", outline: "none" }} />
+                    </span>
+                  ) : (
                   <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : docRow ? "Open in the document editor" : "Not a PDF — click for a Download option"}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                     <FileTypeIcon kind={f.kind} />
@@ -891,6 +1031,7 @@ export default function FileBrowser({
                       </span>
                     </span>
                   </button>
+                  )}
                   {onTogglePinFile && (
                     <button onClick={() => onTogglePinFile(f)}
                       title={pinnedFileIds && pinnedFileIds.has(f.id) ? "Unpin from the Library home" : "Pin to the Library home"}
@@ -901,16 +1042,19 @@ export default function FileBrowser({
                   )}
                   {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
-                  {onOpenHistory && (pdfRow || docRow) && <button onClick={() => openHistory(f)} title="Version history — see earlier saved versions" data-testid="library-version-history"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
-                  <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
-                  <DeleteButton id={f.id} armed={pendingDel === f.id} label={f.title || f.item || f.sfile || "file"} onArm={setPendingDel} onCancel={() => setPendingDel(null)} onConfirm={del} />
+                  <button className="file-kebab" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left, r.bottom); }}
+                    aria-label={`More actions for ${f.title || f.item || "file"}`} aria-haspopup="menu" data-testid="library-file-kebab" title="More actions"
+                    style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: FONT_SIZE.display, fontWeight: 700, lineHeight: 1, padding: "2px 7px", borderRadius: RADIUS.md }}>⋯</button>
                 </div>
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
                 {(needs || refileSel[f.id]) && (
                   <RefileRow value={refileSel[f.id]} discipline={f.discipline}
+                    choices={folderMode ? folderChoices(folderRows) : null} folderId={refileTarget(f).folderId} busy={!!refiling[f.id]}
                     onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />
+                )}
+                {movePick && movePick.id === f.id && folderMode && (
+                  <MoveRow choices={folderChoices(folderRows)} folderId={movePick.folderId} currentId={placedFolder.get(f.id) || f.folderId || null} busy={!!moving[f.id]}
+                    onChange={(v) => setMovePick({ id: f.id, folderId: v })} onMove={() => moveFileToFolder(f, movePick.folderId)} onCancel={() => setMovePick(null)} />
                 )}
                 {/* share-by-link — inline, two-step (confirm → link); failure never silent */}
                 {share[f.id] && (
@@ -936,12 +1080,19 @@ export default function FileBrowser({
           type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
       </div>
 
+      {fileMenu && (() => {
+        const f = fileMenu.f;
+        const items = fileMenuItems({ pdfRow: isPdfFile(f), docRow: isDocFile(f), sheetRow: isSheetFile(f), spatial: isSpatial(f), mapped: onMap(f), pinned: !!(pinnedFileIds && pinnedFileIds.has(f.id)),
+          canPin: !!onTogglePinFile, canHistory: !!onOpenHistory, canMove: folderMode && folderRows.length > 0 });
+        return <FileRowMenu x={fileMenu.x} y={fileMenu.y} title={f.title || f.item || "file"} items={items} onClose={() => setFileMenu(null)} onPick={(id) => { setFileMenu(null); runMenuAction(id, f); }} />;
+      })()}
+
       <UndoToast undo={undoDel} onUndo={undoDelete} onDismiss={() => setUndoDel(null)} />
 
       {/* drop-anywhere overlay hint — the pill names the REAL target: the hovered folder row
           (rail drop), else the selected folder, else the auto-file path. */}
       {dropOver && (
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
+        <div data-testid="library-drop-overlay" style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
           <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>
             Drop to file into {treeDragTarget || dropFolderLabel || (cross ? "the matched project" : orgScope ? "Organization" : (projName(projectId) || "this project"))}
           </span>
@@ -967,21 +1118,90 @@ function TreeRow({ label, count, active, indent, bold, caret, onCaret, onClick }
   );
 }
 
+/* The ONE folder <select> (tree order, indented) — the File row and the "Move to…" row both render it, so the list
+ * is built in exactly one place (`folderChoices`). `currentId` marks where the file already is. */
+function FolderPicker({ choices, value, currentId = null, onChange, ariaLabel, testId, ctl }) {
+  return (
+    <select value={value || ""} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel} data-testid={testId}
+      style={{ ...ctl, flex: "1 1 160px", minWidth: 140, maxWidth: "100%" }} title="The folder this document is filed into">
+      <option value="">Pick a folder…</option>
+      {choices.map((c) => <option key={c.id} value={c.id}>{"\u00A0\u00A0".repeat(c.depth)}{c.name}{c.id === currentId ? " (current)" : ""}</option>)}
+    </select>
+  );
+}
+
+/* "Move to…" — the inline picker under a row (NEW-1b): the same FolderPicker the File row uses, current folder
+ * pre-selected and marked. Confirming runs the one move path. */
+function MoveRow({ choices, folderId, currentId, busy, onChange, onMove, onCancel }) {
+  const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
+  const same = !folderId || folderId === currentId;
+  return (
+    <div data-testid="library-move-row" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}
+      style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Move to:</span>
+      <FolderPicker choices={choices} value={folderId} currentId={currentId} onChange={onChange} ariaLabel="Folder to move into" testId="library-move-folder" ctl={ctl} />
+      <button onClick={onMove} disabled={busy || same} aria-busy={busy ? "true" : undefined} data-testid="library-move-confirm" title={same ? "Pick a different folder" : "Move this file"}
+        style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: busy || same ? "default" : "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Moving…" : "Move"}</button>
+      <button onClick={onCancel} style={miniBtn}>Cancel</button>
+    </div>
+  );
+}
+
+/* The file row's context menu — the shared ContextMenu primitive (portal, viewport-aware, Escape / outside-click
+ * close) plus roving focus: the first item takes focus, ↑/↓ move, Enter/Space activate (native buttons). */
+function FileRowMenu({ x, y, title, items, onClose, onPick }) {
+  const ref = useRef(null);
+  // ContextMenu keeps its panel `visibility:hidden` until it has measured + placed it, and a hidden element cannot take
+  // focus — so focus the first item once the panel is visible (a frame later), not at mount.
+  useEffect(() => {
+    let raf = 0, tries = 0;
+    const go = () => {
+      const b = ref.current && ref.current.querySelector('[role="menuitem"]');
+      if (b) { b.focus(); if (document.activeElement === b) return; }
+      if (tries++ < 20) raf = requestAnimationFrame(go);
+    };
+    raf = requestAnimationFrame(go);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const onKeyDown = (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const els = Array.from(ref.current.querySelectorAll('[role="menuitem"]'));
+    const i = els.indexOf(document.activeElement);
+    const n = e.key === "Home" ? 0 : e.key === "End" ? els.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + els.length) % els.length;
+    els[n]?.focus();
+  };
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose} minWidth={210} zIndex={5000} className="" role="menu" ariaLabel={`Actions for ${title}`} testId="library-file-menu" panelStyle={menuPanelStyle}>
+      <div ref={ref} onKeyDown={onKeyDown}>
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{title}</div>
+        {items.map((it, i) => it.sep
+          ? <div key={`sep${i}`} role="separator" style={{ height: 1, margin: "4px 6px", background: "var(--border-default)" }} />
+          : <MenuItem key={it.id} role="menuitem" data-testid={it.id === "versions" ? "library-version-history" : `file-menu-${it.id}`} onClick={() => onPick(it.id)}
+              style={it.danger ? { color: "var(--danger-text)" } : undefined}>{it.label}</MenuItem>)}
+      </div>
+    </ContextMenu>
+  );
+}
+
 /* Re-file a file: pick a category + discipline (subcategory). A NEW subcategory can be
  * typed, not just chosen. Never auto-guesses. */
-function RefileRow({ value = {}, discipline, onChange, onFile }) {
+function RefileRow({ value = {}, discipline, choices = null, folderId = null, busy = false, onChange, onFile }) {
   const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span style={{ fontSize: 10.5, color: "var(--warn-text)", fontWeight: 700, flex: "none" }}>File as:</span>
-      <select value={value.category || ""} onChange={(e) => onChange({ ...value, category: e.target.value })} style={{ ...ctl, flex: "none" }} title="Category (top-level folder)">
+      <select value={value.category || ""} onChange={(e) => onChange({ ...value, category: e.target.value, folderId: undefined })} style={{ ...ctl, flex: "none" }} title="Category (top-level folder)">
         <option value="">Auto</option>
         {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
       </select>
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
-        onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
+        onChange={(e) => onChange({ ...value, discipline: e.target.value, folderId: undefined })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
+      {choices && choices.length > 0 && (
+        <FolderPicker choices={choices} value={folderId} onChange={(v) => onChange({ ...value, folderId: v })} ariaLabel="Folder to file into" testId="library-refile-folder" ctl={ctl} />
+      )}
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
-      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
+      <button onClick={onFile} disabled={busy || (choices && choices.length > 0 && !folderId)} title={busy ? "Filing…" : choices && choices.length > 0 && !folderId ? "Pick a folder first" : "File this document"} style={{ flex: "none", opacity: busy ? 0.6 : 1, fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Filing…" : "File"}</button>
     </div>
   );
 }

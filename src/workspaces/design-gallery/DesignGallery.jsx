@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, SegmentedControl, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { Button, ToggleChip, SegmentedControl, RangeFields, RangeRow, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
@@ -134,6 +134,25 @@ function GalleryBody() {
       <Row title="ToggleChip — active × rest">
         <Specimen label="rest" tokens="CONTROL_RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>
+        <Specimen label="disabled (arrow cursor, never pointer)" tokens="cursor convention"><ToggleChip disabled>Off</ToggleChip></Specimen>
+      </Row>
+
+      <Row title="RangeFields — a Min–Max pair (either end may be blank)">
+        <Specimen label="range" tokens="CONTROL_RADIUS.control · SIZE.sm height · FONT.md">
+          <div style={{ width: 220 }}><RangeFields label="Size" min="100000" max="250000" unit="SF" onChange={() => {}} /></div>
+        </Specimen>
+        <Specimen label="at least (single)" tokens="min box + unit">
+          <div style={{ width: 220 }}><RangeFields label="Power" single min="2000" unit="A" onChange={() => {}} /></div>
+        </Specimen>
+      </Row>
+
+      <Row title="RangeRow — one line: label, Min, to, Max (Records filter panel)">
+        <Specimen label="blank and active" tokens="fixed label column · accent border when a box has a value">
+          <div style={{ width: 300 }}>
+            <RangeRow label="Size SF" min="100000" max="" onChange={() => {}} />
+            <RangeRow label="Year built" min="" max="" grouped={false} minPlaceholder="From" maxPlaceholder="To" onChange={() => {}} />
+          </div>
+        </Specimen>
       </Row>
 
       <Row title="Switch — applies the moment it flips">
@@ -144,6 +163,7 @@ function GalleryBody() {
         <Specimen label="rest, 30px (default)" tokens="CONTROL_RADIUS.control"><IconButton>★</IconButton></Specimen>
         <Specimen label="active, 30px" tokens="accent fill"><IconButton active>★</IconButton></Specimen>
         <Specimen label="rest, 22px (size=22)" tokens="CONTROL_H.sm-scale"><IconButton size={22}>★</IconButton></Specimen>
+        <Specimen label="disabled (arrow cursor, never pointer)" tokens="cursor convention"><IconButton disabled aria-label="Disabled specimen">★</IconButton></Specimen>
       </Row>
 
       <Row title="Field — label + control row">
@@ -156,7 +176,7 @@ function GalleryBody() {
         <Specimen label={`Section (${collapsed ? "collapsed" : "open"} — click to toggle)`} tokens="CONTROL_RADIUS.panel">
           <div style={{ width: 260 }}>
             <Section title="Assumptions & method" collapsed={collapsed} accent="var(--accent)">
-              <div style={{ fontSize: 12 }} onClick={() => setCollapsed((c) => !c)}>Body content goes here.</div>
+              <div style={{ fontSize: 12, cursor: "pointer" }} onClick={() => setCollapsed((c) => !c)}>Body content goes here.</div>
             </Section>
           </div>
         </Specimen>

@@ -88,7 +88,7 @@ test.describe("B1934528 — the exhibit follows a rename made while this plan si
     // Rename via the Map's own project crumb — the door that bypasses commitSiteLabel.
     await renameViaRowMenu(page, NEW_NAME);
     await expect.poll(() => page.evaluate((gid) => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       return map[Object.keys(map).find((k) => map[k].groupId === gid)]?.site;
     }, GID)).toBe(NEW_NAME);
 
@@ -108,7 +108,7 @@ test.describe("B1934528 — the exhibit follows a rename made while this plan si
     await goToMap(page);
     await renameViaRowMenu(page, NEW_NAME);
     await expect.poll(() => page.evaluate((gid) => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       return map[Object.keys(map).find((k) => map[k].groupId === gid)]?.site;
     }, GID)).toBe(NEW_NAME);
     await backToPlan(page);

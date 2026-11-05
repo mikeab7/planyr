@@ -6,6 +6,7 @@ import {
   designatedRowFt, rowMarginFt, bandExtents, rowMarginsBySide, imperviousCorrectionWidths,
   XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "../src/workspaces/site-planner/lib/roadCrossSection.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const OWNER_EXAMPLE = [
   { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "median", w: 20 },
@@ -486,7 +487,7 @@ describe("NEW-1 — no yellow in any road cross-section renderer (source guard)"
     for (const f of ["src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx", "src/workspaces/site-planner/lib/roadCrossSection.js"]) {
       expect(readFileSync(f, "utf8"), f).not.toMatch(/e6b800|"yellow-/i);
     }
-    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     const at = sp.indexOf("const drawSeam = (offFt");
     expect(at).toBeGreaterThan(0);
     expect(sp.slice(at, at + 1500)).not.toMatch(/e6b800|yellow/i);

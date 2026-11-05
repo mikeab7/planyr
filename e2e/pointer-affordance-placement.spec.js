@@ -41,7 +41,7 @@ const cursorAt = (page, x, y) => page.evaluate(([px, py]) => {
 }, [x, y]);
 
 const siteRecord = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const id = localStorage.getItem("planarfit:currentSite:v1");
   return map[id] || null;
 });
@@ -283,7 +283,7 @@ test.describe("NEW-1 (B1253248) — placement mode owns the cursor and the press
     // against the count BEFORE the drag rather than assuming a fresh count of one.
     const buildingCount = async () => {
       const rec = await page.evaluate((id) => {
-        const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+        const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
         return m[id];
       }, SITE_ID);
       return (rec.els || []).filter((e) => e.type === "building").length;

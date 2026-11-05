@@ -14,7 +14,7 @@ export default function CloseX({ onClick, label = "Close", testId, size = 44, st
         ...style,
       }}
     >
-      ✕
+      <span aria-hidden="true">✕</span>{/* an icon, not text: the button's own aria-label names it (and the type-scale harness skips glyph icons) */}
     </button>
   );
 }
