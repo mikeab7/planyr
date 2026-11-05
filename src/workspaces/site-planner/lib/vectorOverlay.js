@@ -297,10 +297,25 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   // boundaryLabels.js; bigger polygons win, collisions drop).
   /* B2507065 (NEW-10): COUNTY names go alongside the line on each county's own side, turned to run parallel to it ("DeSoto Co." / "Shelby Co., TN"), instead of at the middle
    * of the county. Pure placement in countyLineLabels.js; this only projects and draws. */
-  const mapPx = (m) => (lng, lat) => { try { return m.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } };
+  /* NEW-1 — the part of the map a PERSON CAN SEE. The planner's backdrop map is deliberately bigger than the canvas it sits behind (overscan: tiles are kept past every edge so a pan never shows
+   * blank), so names placed against the map's own box landed off screen at working zoom (found live: a name at y = 984 in a 950-px window). Every name is placed in the rectangle of the
+   * nearest clipping ancestor, in coordinates local to it, and put back into map pixels only when the marker is made. A map that is not overscanned (the Map view) is its own rectangle. */
+  const visibleRect = (m) => {
+    const c = m.getContainer(), cr = c.getBoundingClientRect();
+    let x0 = cr.left, y0 = cr.top, x1 = cr.right, y1 = cr.bottom;
+    for (let el = c.parentElement, n = 0; el && n < 4; el = el.parentElement, n++) {
+      let ov = ""; try { const cs = getComputedStyle(el); ov = `${cs.overflow} ${cs.overflowX} ${cs.overflowY} ${cs.clipPath || ""}`; } catch (_) { /* detached */ }
+      if (!/hidden|clip|scroll|auto/.test(ov)) continue;
+      const r = el.getBoundingClientRect();
+      x0 = Math.max(x0, r.left); y0 = Math.max(y0, r.top); x1 = Math.min(x1, r.right); y1 = Math.min(y1, r.bottom);
+    }
+    if (!(x1 - x0 > 20 && y1 - y0 > 20)) return { x: 0, y: 0, w: cr.width, h: cr.height };
+    return { x: x0 - cr.left, y: y0 - cr.top, w: x1 - x0, h: y1 - y0 };
+  };
+  const mapPx = (m, r) => (lng, lat) => { try { const p = m.latLngToContainerPoint([lat, lng]); return { x: p.x - r.x, y: p.y - r.y }; } catch (_) { return null; } };
   const mapBounds = (m) => { const b = m.getBounds(); return { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() }; };
-  const addLabel = (m, px, py, html) => {
-    let ll = null; try { ll = m.containerPointToLatLng([px, py]); } catch (_) { return; }
+  const addLabel = (m, r, px, py, html) => {
+    let ll = null; try { ll = m.containerPointToLatLng([px + r.x, py + r.y]); } catch (_) { return; }
     const icon = L.divIcon({ className: "", html, iconSize: [0, 0] });
     const mk = L.marker([ll.lat, ll.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
     group.addLayer(mk);
@@ -308,22 +323,23 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   };
   const refreshCountyLabels = () => {
     if (!map || !lastFc || !labelsVisible(placeLabelZoom(source), map.getZoom())) return;
-    const size = map.getSize(), c = map.getCenter(), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
+    const r = visibleRect(map), c = map.getCenter(), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
     const home = siteState({ lat: c.lat, lng: c.lng });
     const feats = lastFc.features || [];
     const textOf = (f) => countyLabelText(nameOf(f), source.stateAbbr, home);
+    const project = mapPx(map, r);
     const labels = countyLineLabels(feats, {
-      textOf, project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
-      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x, y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
-      viewW: size.x, viewH: size.y, fontPx,
+      textOf, project,
+      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x + r.x, y + r.y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
+      viewW: r.w, viewH: r.h, fontPx,
     });
-    for (const p of labels) addLabel(map, p.x, p.y, labelHtml(p.text, { uppercase: false, angle: p.angle, fontPx }));
+    for (const p of labels) addLabel(map, r, p.x, p.y, labelHtml(p.text, { uppercase: false, angle: p.angle, fontPx }));
     /* NEW-1 (owner 2026-11-05): a county whose boundary is NOT on screen (the whole view is inside it — the working zoom of a site plan) still names itself, once, near the
      * bottom of the view; "Fort Bend Co." must not vanish just because you zoomed in past its line. */
     const placedTexts = new Set(labels.map((p) => p.text));
-    const anchors = viewAnchors(feats, { nameOf: textOf, project: mapPx(map), viewW: size.x, viewH: size.y, bounds: mapBounds(map), band: [0.76, 0.9] }).filter((a) => !placedTexts.has(a.name));
+    const anchors = viewAnchors(feats, { nameOf: textOf, project, viewW: r.w, viewH: r.h, bounds: mapBounds(map), band: [0.76, 0.9] }).filter((a) => !placedTexts.has(a.name));
     const taken = labels.map((p) => ({ x: p.x, y: p.y, box: labelBoxPx(p.text, fontPx) }));
-    for (const a of placeNames(anchors, { textOf: (x) => x.name, fontPx, viewW: size.x, viewH: size.y, taken })) addLabel(map, a.x, a.y, labelHtml(a.name, { uppercase: false, fontPx }));
+    for (const a of placeNames(anchors, { textOf: (x) => x.name, fontPx, viewW: r.w, viewH: r.h, taken })) addLabel(map, r, a.x, a.y, labelHtml(a.name, { uppercase: false, fontPx }));
   };
 
   /* NEW-1 (owner 2026-11-05) — city / ETJ names at EVERY zoom, in the part of each polygon that is on screen (placeLabelAnchors.js): the old rule put the name at the polygon's
@@ -332,17 +348,17 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     clearLabels();
     if (isCountyLinesId(source.id)) { refreshCountyLabels(); return; }
     if (!map || !lastFc || !source.labelField || !labelsVisible(placeLabelZoom(source), map.getZoom())) return;
-    const size = map.getSize(), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
+    const r = visibleRect(map), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
     /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already
      * drawing (see placeNamesGate.js). Filtered BEFORE placement so the names that remain get the freed room. */
     const drawnElsewhere = isCityLimitsId(source.id) ? placeNamesShown(map) : null;
-    let anchors = viewAnchors(lastFc.features || [], { nameOf, project: mapPx(map), viewW: size.x, viewH: size.y, bounds: mapBounds(map) });
+    let anchors = viewAnchors(lastFc.features || [], { nameOf, project: mapPx(map, r), viewW: r.w, viewH: r.h, bounds: mapBounds(map) });
     if (drawnElsewhere && drawnElsewhere.size) anchors = anchors.filter((a) => !drawnElsewhere.has(placeNameKey(a.name)));
     // NEW-2 — a disputed strip and a release area already carry their full wording; never "… ETJ ETJ".
     const textFor = (name) => (source.id === "jur_etj" ? (/^Undetermined/.test(name) ? "ETJ undetermined (disputed)" : /release area/.test(name) ? name : `${name} ETJ`) : name);
-    for (const p of placeNames(anchors, { textOf: (a) => textFor(a.name), fontPx: etjLine ? fontPx * 0.92 : fontPx, viewW: size.x, viewH: size.y })) {
+    for (const p of placeNames(anchors, { textOf: (a) => textFor(a.name), fontPx: etjLine ? fontPx * 0.92 : fontPx, viewW: r.w, viewH: r.h })) {
       const pill = placeLine ? (sharedColorBook.colorOf(placeKey(p.name)) || lineColor) : null;
-      addLabel(map, p.x, p.y, labelHtml(textFor(p.name), { uppercase: false, fontPx: etjLine ? fontPx * 0.92 : fontPx, pill, dashed: etjLine }));
+      addLabel(map, r, p.x, p.y, labelHtml(textFor(p.name), { uppercase: false, fontPx: etjLine ? fontPx * 0.92 : fontPx, pill, dashed: etjLine }));
     }
   };
 

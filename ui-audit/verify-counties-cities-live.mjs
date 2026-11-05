@@ -69,7 +69,8 @@ const turnOnCountiesCities = async () => {
 };
 /* What the map prints right now: every name pill with its text, colour and whole box, plus the map's own box. */
 const readNames = () => page.evaluate(() => {
-  const m = window.__geoMap, r = m && m.getContainer().getBoundingClientRect();
+  /* the VISIBLE box: the planner's backdrop map is overscanned (bigger than the canvas it sits behind), so a name is judged against the canvas the person sees, never the map's own box */
+  const m = window.__geoMap, r = m && m.getContainer().parentElement.getBoundingClientRect();
   /* `.leaflet-marker-icon > span` exists on every build (the name markers), so the SAME read answers on main and on the fix */
   const labels = [...document.querySelectorAll(".leaflet-marker-icon > span")].filter((e) => e.textContent.trim() && getComputedStyle(e).whiteSpace === "nowrap").map((e) => { const b = e.getBoundingClientRect(), cs = getComputedStyle(e); return { text: e.textContent.trim(), bg: cs.backgroundColor, dashed: /dashed/.test(cs.borderStyle), l: b.left, t: b.top, r: b.right, b: b.bottom }; });
   return { zoom: m && m.getZoom(), box: r ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null, labels };
@@ -102,6 +103,7 @@ try {
   console.log(`B · working zoom ${n.zoom}: names =`, n.labels.map((l) => l.text).join(" | "));
   check("B · at the plan's OWN zoom the map names the city (Sugar Land)", n.labels.some((l) => l.text === "Sugar Land"), `zoom ${n.zoom}`);
   check("B · …and the county in full (Fort Bend Co.)", n.labels.some((l) => l.text === "Fort Bend Co."));
+  { const cutW = n.labels.filter((l) => !insideMap(l, n.box)); check("B · at the plan's own zoom every name is whole inside the VISIBLE canvas", n.labels.length > 0 && cutW.length === 0, cutW.map((l) => `${l.text}@${Math.round(l.l)},${Math.round(l.t)}`).join(", ")); }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-working-zoom.png` });
   for (const z of [15, 13, 12]) {
     await page.evaluate(([a, b, zz]) => window.__geoMap.setView([a, b], zz, { animate: false }), [ACADEMY.lat, ACADEMY.lng, z]);
