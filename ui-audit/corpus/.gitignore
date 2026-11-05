@@ -1,4 +1,0 @@
-# The owner's extracted title-block text is private — never commit it. Track only the docs.
-*
-!.gitignore
-!README.md
