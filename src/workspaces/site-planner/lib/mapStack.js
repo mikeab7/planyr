@@ -236,6 +236,10 @@ export const layerOverPlan = (cfg, above = false) => {
 
 /* Canonical pane names. One pane per BAND — never one pane per layer, which would be a
  * free-form z-order picker by another name. */
+/* NEW-1 (2026-11-05) — the pinned map SNAPSHOT of a located plan (the "Aerial backdrop" kept when the live basemap is Off) is the aerial, so it is the BOTTOM of the backdrop map: its pane sits
+ * under every GIS pane (area 350, area labels 360) and above nothing but the paper. It used to be an SVG image above the whole backdrop map and painted over every fill (lib/aerialSnapshot.js). */
+export const PANE_SNAPSHOT = "aerialSnapshotPane";
+export const PANE_SNAPSHOT_Z = 150;
 export const PANE_AREA = "gisAreaPane";
 export const PANE_AREA_FRONT = "gisAreaFrontPane"; // NEW-1 — the lifted band, hosted inside the plan SVG
 export const PANE_LINE = "gisLinePane";
