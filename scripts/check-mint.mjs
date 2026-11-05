@@ -43,7 +43,7 @@
  *     branch counts, and the peer fetch staying affordable.
  */
 import { readFileSync, existsSync } from "node:fs";
-import { readText, existsText } from "./lib/ledger.mjs";
+import { readText, existsText, isBranchMode } from "./lib/ledger.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -354,6 +354,15 @@ function main(argv) {
   // collision in the field, which is what B779 already tried and lost a second time.
   const repoFlag = argv.find((a) => a.startsWith("--repo="));
   const repo = repoFlag ? resolve(repoFlag.split("=")[1]) : REPO;
+  // NEW-1 (2026-11-05): the ledger lives on its own branch and ids are minted ATOMICALLY by `npm run ledger -- add`
+  // (the push is the compare-and-swap), so a branch no longer adds ledger entries and has nothing to collide. The
+  // gate's job is gone; it stays in this file only because the legacy-layout tests drive it. The replacement for its
+  // "announced id was never filed" half is the non-blocking record check (`npm run ledger -- record-check`).
+  if (isBranchMode(repo)) {
+    if (!argv.includes("--json")) process.stdout.write("✅ Mint gate: retired — the ledger lives on the `ledger` branch; ids are minted atomically by `npm run ledger -- add` (see CLAUDE.md LEDGER).\n");
+    else process.stdout.write(JSON.stringify({ ok: true, retired: true }) + "\n");
+    return 0;
+  }
   const res = runGate(repo, {
     peerDays: Number((argv.find((a) => a.startsWith("--peer-days=")) || "=" + DEFAULT_PEER_DAYS).split("=")[1]),
     fetch: !argv.includes("--no-fetch"),

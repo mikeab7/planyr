@@ -214,3 +214,9 @@ ui-audit/discover-county-parcels-results.json
 # closing at the root now that it's been seen twice.
 /critical-results.json
 dist-univer-sandbox
+
+# The ledger lives on its own branch (NEW-1, 2026-11-05); a shallow checkout of it goes here. Never commit it.
+/.ledger/
+# Generated views of the ledger (`npm run ledger -- render`) — local reading only, never committed.
+/BACKLOG.md
+/VERIFICATION.md

@@ -200,7 +200,7 @@ catch) → rebuilt → both contracts read `"failed"`, gate exit 2 → reverted,
 again. `checkRequiredContracts()` itself mutation-proven at the unit level too.
 
 Full evidence, file list, and verification commands are on **B1923456** in
-`docs/archive/BACKLOG-DONE.md`.
+the ledger's `done` folder (`npm run ledger -- show <id>`).
 
 ## R3 — retire known-red + source-assertion triage: **SHIPPED 2026-10-11 (B1857905)**
 

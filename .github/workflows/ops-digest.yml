@@ -18,6 +18,11 @@ on:
     workflows: ["Build"]
     types: [completed]
     branches: [main]
+  # NEW-1 (2026-11-05): the ledger now changes WITHOUT a merge to main (it is its own branch), so a merge-triggered refresh
+  # alone would leave the digest stale between merges. Refresh on a schedule too.
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,13 +33,18 @@ concurrency:
 
 jobs:
   digest:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the merged commit
+      - name: Checkout the merged commit (or main, on a scheduled run)
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || 'main' }}
+      - name: Checkout the ledger branch
+        uses: actions/checkout@v7
+        with:
+          ref: ledger
+          path: .ledger
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -42,7 +52,7 @@ jobs:
       - name: Push the ledger digest to the admin Ops page
         run: node scripts/ops-snapshot.mjs --push
         env:
-          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           OPS_INGEST_TOKEN: ${{ secrets.OPS_INGEST_TOKEN }}

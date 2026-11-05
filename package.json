@@ -16,6 +16,7 @@
     "sweep:parcel-health": "node ui-audit/parcel-source-health-sweep.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ledger": "vitest run --config vitest.ledger.config.js",
     "e2e": "playwright test",
     "perf:ratchet": "node scripts/perf-ratchet.mjs",
     "perf:baseline-verify": "node scripts/perf-baseline-verify.mjs",

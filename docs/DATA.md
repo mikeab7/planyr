@@ -362,7 +362,7 @@ bump). Readers still verify: `scheduleLiveness.dropSchedulesOfDeletedProjects` (
 **NEW-2 (isOwnWrite consolidation)** — already shipped. `git log` / the archived backlog show
 `B712224 (×3)` (owner chat block 2026-08-23) diagnosing exactly the delete-authorship hole the
 dispatch describes, live on production data, fixed in `elementSync.js`'s `reconcile()`, and moved
-to `docs/archive/BACKLOG-DONE.md`. `test/elementSyncOwnWriteGate.test.js` — dated the same day —
+to the ledger's `done` folder (`npm run ledger -- show <id>`). `test/elementSyncOwnWriteGate.test.js` — dated the same day —
 is the machine-enforced guard the dispatch asks for, and its own header quotes the *identical*
 sentence the dispatch's brief quotes: *"as long as fifty call sites each re-derive this question,
 round eight is already scheduled."* The exact regression the dispatch's NEW-2 asks to be added

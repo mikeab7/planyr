@@ -160,7 +160,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   added", backwards from what really happened. `ConflictReview.jsx` now orders the two copies by
   recency FIRST and always passes the newer one as revised, so "added"/"removed" reads as a true
   old → new story whenever recency is knowable — see `lib/notesVersionOrder.js`'s header for the
-  full mechanism and `docs/archive/BACKLOG-DONE.md`'s B1076177 for the reproduction.
+  full mechanism and the ledger's `done` folder (`npm run ledger -- show <id>`)'s B1076177 for the reproduction.
   ⛔ **AND THE LEGEND ONLY DOCUMENTED HALF THE ENCODINGS THE RENDERER EMITS (B849107).**
   `NoteRedline.jsx`'s whole-block insert/delete already got a tint + border; an OPAQUE block (a
   table) additionally carried a text suffix ("— added"/"— removed") but a whole PLAIN-TEXT
@@ -197,7 +197,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   so the two panes can only look alike when the documents genuinely do. **B1077682 checked the
   reported side-by-side clipping at the owner's exact viewport (1600 CSS px) and could not
   reproduce it** — reported as most likely his screenshot being cropped, not a real defect; see
-  that item in `docs/archive/BACKLOG-DONE.md` for the full headless proof.
+  that item in the ledger's `done` folder (`npm run ledger -- show <id>`) for the full headless proof.
   ⛔ **B842944–B842948 (owner redlines, five in one screenshot on his own LIVE conflict, 2026-09-03)
   — A FOLLOW-UP LAYER, not a rebuild.** None of the redlines touched the redline direction, the
   key's existence, or decide-later; all stayed. **B842944/NEW-1** — *"why are both copies safe? …

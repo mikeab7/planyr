@@ -37,11 +37,11 @@ jobs:
       # before "Install dependencies" (needs no node_modules) so it fails fast either way.
       - name: Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)
         run: node scripts/generated-doc-touch-guard.mjs
-      # Ledger layout guard (NEW-1, 2026-10-05): ledger/ holds ONE FILE PER backlog/verification entry
-      # so two PRs that each file an entry can never conflict. Fails on a misplaced/misnamed entry file,
-      # a heading that disagrees with its filename, or a frame missing a state marker. No node_modules needed.
-      - name: Ledger layout guard (one file per entry — NEW-1)
-        run: node scripts/ledger.mjs check
+      # NEW-1 (2026-11-05): the ledger lives on its OWN branch (`ledger`) with no required checks, so none of its
+      # data checks gate this build any more — a malformed record must never be able to fail an unrelated code PR.
+      # They moved, unchanged, to .github/workflows/ledger-health.yml (scheduled; `npm run test:ledger` + `node
+      # scripts/ledger.mjs check` + the tag-legend and verification-queue guards). Missing records are surfaced,
+      # never blocked, by .github/workflows/ledger-record-check.yml.
       - name: Install dependencies
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
@@ -69,36 +69,26 @@ jobs:
       # MAP.md's own drift-vs-source-tree check (B637) is no longer a per-PR gate — see the
       # Generated-index touch guard above and .github/workflows/regen-derived-docs.yml. It still
       # exists (`node scripts/build-map.mjs --check`) for that scheduled job and for local use.
-      - name: BACKLOG.md tag-legend guard (every #tag must be in the legend — B638; narrowed by NEW-1)
-        run: node scripts/build-backlog-index.mjs --tags-only
       # Per-folder CLAUDE.md pointer freshness (CLAUDE.md's "Keep the per-folder pointers fresh").
       # Previously reachable only through `npm test` (test/docPointers.test.js) — pulled out as its
       # own gate (2026-09-02, the GitHub Actions cost cut) so the docs-only fast path below can run
       # it directly without paying for the whole app test suite just to reach this one check.
       - name: Doc pointer freshness guard (per-folder CLAUDE.md references — ui-audit/doc-pointer-audit.mjs)
         run: node ui-audit/doc-pointer-audit.mjs
-      # Verification-queue ceiling guard (B825233). CLAUDE.md already said a pending V# with no
-      # Blocker: wall is a mis-classification, not a to-do — nothing ever checked it. This is a
-      # ratchet, not a retroactive fail: it only reds out if the no-Blocker or stale-pending count
-      # GROWS past today's recorded ceiling (scripts/verification-queue-ceiling.json), so today's
-      # existing debt doesn't wedge every future PR. Regenerate the ceiling with
-      # `node scripts/verification-queue-audit.mjs --write-ceiling` once the counts genuinely improve.
-      - name: Verification-queue ceiling guard (no-Blocker / stale V# items — B825233)
-        run: node scripts/verification-queue-audit.mjs --check
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
-      # Mint gate (B779 second pass). The uniqueness tests below catch a collision once both items
-      # are in the same tree; this catches one whose twin is still on an UNMERGED branch, which no
-      # static check of this repo can see. A proven collision fails the build (renumbering is a
-      # few heading lines); an infrastructure problem warns loudly rather than wedging merges —
-      # `--ci` draws exactly that line, and the pre-push hook is the strict first line of defence.
+      # Mint gate (B779 second pass). RETIRED IN PRACTICE since 2026-11-05 (NEW-1): the ledger lives on its own branch and ids are
+      # minted atomically by `npm run ledger -- add`, so a branch adds no ledger entries and this exits 0 at once
+      # (scripts/check-mint.mjs, `isBranchMode`). It stays as a step so that if the marker file `.github/ledger-branch.json` is ever
+      # removed — the ledger moved back into the tree — the original collision gate re-engages instead of silently vanishing.
       - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
         run: node scripts/check-mint.mjs --ci
       # Ops digest dry run (B2159504). The `ops-digest` job in build.yml pushes the ledger digest to the admin
       # Ops page after every merge to main; this proves on every PR that the payload still builds and validates
       # and the request is well formed, without sending anything or needing the OPS_INGEST_TOKEN secret.
+      # Dry-runs against the tiny FIXTURE ledger (test/fixtures/ledger-mini), not the live one — the live ledger is another branch.
       - name: Ops digest dry run (payload builds + validates, nothing sent — B2159504)
-        run: node scripts/ops-snapshot.mjs --push --dry-run
+        run: node scripts/ops-snapshot.mjs --push --dry-run --ledger=test/fixtures/ledger-mini
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build
