@@ -55,6 +55,7 @@ import {
   NJ_MUNICIPAL_NOTE, NY_MUNICIPAL_NOTE,
 } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 /* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
+import { limitLineFlags, limitLineNote } from "./limitLineFlags.js";
 import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
  * before touching how membership is decided here: point/vertex sampling measured 75% where the
@@ -1696,6 +1697,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
         // A clip below the floor is real (it touched) but never a governing peer — named on its own
         // field so a consumer (the badge's non-governing tail) can say so rather than drop it silent.
         const edge = uniq(stated.filter((r) => r.share < CITY_SHARE_MIN && r.rawShare > 0).map((r) => r.name));
+        if (role === "etj") out.etjAreas = stated.map((r) => ({ name: r.name, share: r.share })); // NEW-1 (2026-11-05): the shares themselves, so the chip can flag a site that crosses an ETJ line
         if (governing.length || edge.length || (role === "etj" && merged.netted)) {
           out[role] = governing;
           out[role + "Edge"] = edge;
@@ -2124,12 +2126,20 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const multiCore = (j.state === "NJ" || j.state === "NY")
     ? Object.values(coreCities.reduce((m, c) => { const t = municipalType(c) || "?"; m[t] = (m[t] || 0) + 1; return m; }, {})).some((n) => n > 1)
     : coreCities.length > 1;
+  /* NEW-1 (owner 2026-11-05) — a site that crosses (or merely touches) a limits / ETJ LINE is flagged, so the chip can never name one jurisdiction for a split tract. */
+  const lineFlags = limitLineFlags({
+    partialCities: partCities, coreCities, edgeCities: edgeParts, etjRows: j.etjAreas || [], etjEdge: j.etjEdge || [],
+    cityShareOf: (n) => shareOfCity(n),
+  });
   const straddle = counties.length > 1 || isds.length > 1 || multiCore
     // NEW-1 — a genuinely SPLIT site is the straddle this mark was made for.
     || partCities.length > 0
+    || lineFlags.some((f) => f.kind === "crosses")
     || (allCities === null && !containmentUnknown && cities.length > 1);
   return {
     text, jur, county, isd, straddle,
+    // NEW-1 (2026-11-05) — the limits / ETJ lines this site crosses or touches, as data + one plain sentence each (the chip's ⚑ tooltip).
+    limitLines: lineFlags, limitLineNote: limitLineNote(lineFlags),
     // NEW-1 — the non-governing tail as its own field, and WHICH of the six shapes this is. A
     // consumer that wants one of them never has to take the label apart to get it.
     tail, shape,

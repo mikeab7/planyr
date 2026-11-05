@@ -32,6 +32,15 @@ export const isCityLimitsId = (id) => id === "jur_city" || id === "ok_city" || i
   || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village" // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
   || id === "tn_city" || id === "fl_city"; // B2521584 (Tennessee)
 
+/* NEW-1 (owner 2026-11-05, Counties & Cities): the names of a county / city / ETJ layer stay on at EVERY zoom above their floor — they used to switch off at 13 / 14, which is
+ * exactly the working zoom of a site plan, where nothing then named the ground the site stood on. The floor (`labelZoom.min`) is unchanged. */
+export const PLACE_LABEL_MAX_ZOOM = 22;
+export const placeLabelZoom = (source) => {
+  const z = source && source.labelZoom;
+  if (!z) return z;
+  return isCountyLinesId(source.id) || isCityLimitsId(source.id) || source.id === "jur_etj" ? { min: z.min, max: PLACE_LABEL_MAX_ZOOM } : z;
+};
+
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
 import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";

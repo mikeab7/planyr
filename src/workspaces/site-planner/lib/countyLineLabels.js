@@ -44,6 +44,21 @@ function clipSeg(a, b, x0, y0, x1, y1) {
   return { ax: a.x + t0 * dx, ay: a.y + t0 * dy, bx: a.x + t1 * dx, by: a.y + t1 * dy };
 }
 
+/* The point `frac` (0..1) of the way along a chain of clipped segments, and the direction there. */
+function pointAlong(pieces, len, frac) {
+  const want = len * frac;
+  let acc = 0;
+  for (const p of pieces) {
+    const L = Math.hypot(p.bx - p.ax, p.by - p.ay);
+    if (acc + L >= want || p === pieces[pieces.length - 1]) {
+      const t = L ? Math.max(0, Math.min(1, (want - acc) / L)) : 0;
+      return { mx: p.ax + t * (p.bx - p.ax), my: p.ay + t * (p.by - p.ay), dx: (p.bx - p.ax) / (L || 1), dy: (p.by - p.ay) / (L || 1) };
+    }
+    acc += L;
+  }
+  return { mx: 0, my: 0, dx: 1, dy: 0 };
+}
+
 /* The best run of boundary for one feature: consecutive segments clipped to the view (plus `margin`) and chained while the line stays nearly straight (≤ 18° turn).
  * The longest chain wins. Returns { mx, my, dx, dy, len } (the point half-way along the visible chain and the direction there) or null. */
 function bestRun(featureRings, project, viewW, viewH, margin) {
@@ -51,16 +66,7 @@ function bestRun(featureRings, project, viewW, viewH, margin) {
   const x0 = -margin, y0 = -margin, x1 = viewW + margin, y1 = viewH + margin;
   const finish = (pieces, len) => {
     if (!pieces.length || (best && len <= best.len)) return;
-    let half = len / 2, acc = 0;
-    for (const p of pieces) {
-      const L = Math.hypot(p.bx - p.ax, p.by - p.ay);
-      if (acc + L >= half || p === pieces[pieces.length - 1]) {
-        const t = L ? Math.max(0, Math.min(1, (half - acc) / L)) : 0;
-        best = { len, mx: p.ax + t * (p.bx - p.ax), my: p.ay + t * (p.by - p.ay), dx: (p.bx - p.ax) / (L || 1), dy: (p.by - p.ay) / (L || 1) };
-        return;
-      }
-      acc += L;
-    }
+    best = { len, pieces: pieces.slice(), ...pointAlong(pieces, len, 0.5) };
   };
   for (const ring of featureRings) {
     const pts = [];
@@ -85,27 +91,41 @@ function bestRun(featureRings, project, viewW, viewH, margin) {
  *   project(lng,lat)→ {x,y} container pixels
  *   unproject(x,y)  → {lat,lng} (optional — the PDF only needs pixels)
  * Returns [{ text, lat, lng, angle, x, y }] — angle in degrees, upright (−90…90). */
-export function countyLineLabels(features, { textOf, project, unproject, viewW, viewH, margin = 24, offsetPx = 13, minRunPx = 70, charW = 6.6, boxH = 14, gap = 6 } = {}) {
+export function countyLineLabels(features, { textOf, project, unproject, viewW, viewH, offsetPx = 13, minRunPx = 70, charW: charWIn, boxH: boxHIn, fontPx = 11, gap = 6 } = {}) {
+  /* NEW-1 (owner 2026-11-05: "the county line is identifiable only by a clipped 'Fort Bend Co…' label"): the name's WHOLE (rotated) box must lie inside the view — it slides along
+   * the visible line until it does, and a line with no such stretch carries no name (the county then names itself near the bottom of the view instead — vectorOverlay). */
+  const charW = charWIn || fontPx * 0.6, boxH = boxHIn || fontPx + 4;
   const cands = [];
   for (const f of features || []) {
     const text = textOf ? textOf(f) : "";
     if (!text) continue;
     const rs = rings(f && f.geometry);
     if (!rs.length) continue;
-    const run = bestRun(rs, project, viewW, viewH, margin);
-    if (!run || run.len < Math.max(minRunPx, text.length * charW * 0.8)) continue;
-    // which side is INSIDE this county? Test a point nudged to each side against the feature's own rings in pixel space.
-    const nx = -run.dy, ny = run.dx;
+    const textW = Math.max(30, text.length * charW);
+    const run = bestRun(rs, project, viewW, viewH, 0);
+    if (!run || run.len < Math.max(minRunPx, textW * 0.8)) continue;
     const pxRings = rs.map((r) => r.map(([lng, lat]) => project(lng, lat)).filter(Boolean));
     const inside = (x, y) => pxRings.reduce((c, ring) => (ring.length > 2 && inPoly(ring, x, y) ? !c : c), false);
-    let sgn = inside(run.mx + nx * 6, run.my + ny * 6) ? 1 : inside(run.mx - nx * 6, run.my - ny * 6) ? -1 : 0;
-    if (!sgn) continue; // the run is not on this county's own edge (degenerate) — say nothing rather than guess
-    const x = run.mx + sgn * nx * offsetPx, y = run.my + sgn * ny * offsetPx;
-    let angle = (Math.atan2(run.dy, run.dx) * 180) / Math.PI;
-    if (angle > 90) angle -= 180; else if (angle < -90) angle += 180;
-    const ll = unproject ? unproject(x, y) : { lat: null, lng: null };
+    // slide the name along the visible line until its WHOLE (rotated) box is inside the view — a name beside a line at the edge is never cut off; none fits → no name on the line
+    let pick = null;
+    for (const frac of [0.5, 0.38, 0.62, 0.26, 0.74, 0.14, 0.86]) {
+      const at = pointAlong(run.pieces, run.len, frac);
+      const nx = -at.dy, ny = at.dx;
+      const sgn = inside(at.mx + nx * 6, at.my + ny * 6) ? 1 : inside(at.mx - nx * 6, at.my - ny * 6) ? -1 : 0;
+      if (!sgn) continue; // the run is not on this county's own edge (degenerate) — say nothing rather than guess
+      const x = at.mx + sgn * nx * offsetPx, y = at.my + sgn * ny * offsetPx;
+      let angle = (Math.atan2(at.dy, at.dx) * 180) / Math.PI;
+      if (angle > 90) angle -= 180; else if (angle < -90) angle += 180;
+      const r = (angle * Math.PI) / 180, co = Math.abs(Math.cos(r)), si = Math.abs(Math.sin(r));
+      const hw = (textW * co + boxH * si) / 2 + 2, hh = (textW * si + boxH * co) / 2 + 2;
+      if (x - hw < 0 || x + hw > viewW || y - hh < 0 || y + hh > viewH) continue;
+      pick = { x, y, angle };
+      break;
+    }
+    if (!pick) continue;
+    const ll = unproject ? unproject(pick.x, pick.y) : { lat: null, lng: null };
     if (!ll) continue;
-    cands.push({ text, lat: ll.lat, lng: ll.lng, angle, x, y, w: Math.max(30, text.length * charW), h: boxH, len: run.len });
+    cands.push({ text, lat: ll.lat, lng: ll.lng, angle: pick.angle, x: pick.x, y: pick.y, w: textW, h: boxH, len: run.len });
   }
   // longest runs first; drop anything whose (rotated) box would overlap one already placed
   cands.sort((a, b) => b.len - a.len);
