@@ -22,13 +22,13 @@ const check = (n, p, d = "") => { results.push({ n, p }); console.log(`  ${p ? "
 
 // Total drawn items across collections in the store (robust to which collection the edit lands in).
 const storeSummary = (page) => page.evaluate((k) => {
-  let obj = {}; try { obj = JSON.parse(localStorage.getItem(k) || "{}"); } catch (_) {}
+  let obj = {}; try { obj = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); } catch (_) {}
   const ids = Object.keys(obj);
   const n = (x) => (Array.isArray(x) ? x.length : 0);
   const rows = ids.map((id) => { const s = obj[id]; return { id, items: n(s.els) + n(s.markups) + n(s.measures) + n(s.callouts) + n(s.parcels), origin: !!s.origin }; });
   return { count: ids.length, rows };
 }, SITES_KEY);
-const currentSite = (page) => page.evaluate((k) => { try { return localStorage.getItem(k); } catch (_) { return null; } }, CUR_KEY);
+const currentSite = (page) => page.evaluate((k) => { try { return (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k); } catch (_) { return null; } }, CUR_KEY);
 const domMarkups = (page) => page.evaluate(() => document.querySelectorAll("svg rect[stroke], svg polygon[stroke], svg path[stroke]").length);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });

@@ -20,13 +20,14 @@ import {
   KEY_CONTRACT, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, REFUSAL, SCOPE_GUARD_HINT,
   CONTROL_CONSUMES,
 } from "../src/workspaces/site-planner/lib/keyContract.js";
+import { plannerSource, PLANNER_EXTRACTED } from "./helpers/plannerSource.js";
 
 const src = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
 /* The planner's window keydown handler, sliced out of the component by its own comment banner and
  * its listener registration — so the sweep reads the REAL dispatch and not a copy of it. */
 function plannerKeyHandlerSource() {
-  const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+  const s = plannerSource();
   const start = s.indexOf("/* ------------ keyboard ------------ */");
   expect(start, "the planner keyboard effect banner moved — re-point this sweep").toBeGreaterThan(0);
   const end = s.indexOf('window.addEventListener("keydown", onKey);', start);
@@ -491,14 +492,14 @@ describe("SOURCE SWEEP — the real handler may not branch on an undeclared key"
   });
 
   it("the value-row marker in the components matches the one the latch reads", () => {
-    const sp = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     expect(FIELD_GROUP_ATTR).toBe("data-field-group");
     // The <Field> row (label + input + steppers) and NumInput's own stepper wrapper.
     expect((sp.match(/data-field-group="1"/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
   it("NumInput's Enter commits IN PLACE — the blur() that started this is gone", () => {
-    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const s = plannerSource();
     const i = s.indexOf("function NumInput(");
     expect(i).toBeGreaterThan(0);
     /* Slice to the NEXT top-level declaration rather than a fixed byte count — a character budget
@@ -536,6 +537,9 @@ describe("no component keydown handler routes around keyScope", () => {
   const BANNED = /onKeyDown=\{[^}]*?=>\s*\{\s*e\.stopPropagation\(\);/;
   const filesToSweep = [
     "../src/workspaces/site-planner/SitePlanner.jsx",
+    // B1064 — the modules extracted from SitePlanner.jsx are still SitePlanner code: an unconditional stopPropagation in
+    // the Yield/Drainage panels or NumInput must not escape this sweep because it moved.
+    ...PLANNER_EXTRACTED.map((f) => `../src/workspaces/site-planner/${f}`),
     "../src/workspaces/site-planner/components/ParcelPage.jsx",
     "../src/workspaces/site-planner/components/SetLocationDialog.jsx",
     // NEW-1 (B1012832) — the project-breadcrumb's inline rename editor (RenameInput) and the
@@ -560,7 +564,7 @@ describe("no component keydown handler routes around keyScope", () => {
   });
 
   it("the callout editor still answers Escape and Alt+Z, just scoped to those keys", () => {
-    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const s = plannerSource();
     const editorStart = s.indexOf("<textarea autoFocus");
     expect(editorStart).toBeGreaterThan(0);
     const body = s.slice(editorStart, editorStart + 2600);
@@ -624,13 +628,22 @@ describe("⛔ B1012832 — the plan-name field and every AnchoredMenu-portalled 
       .not.toMatch(/tag === "INPUT" \|\| tag === "TEXTAREA" \|\| tag === "SELECT" \|\| tag === "BUTTON" \|\| \(ae && ae\.isContentEditable\)/);
   });
 
-  it("the plan-name field's own onKeyDown never stops propagation — the guard depends on it reaching window", () => {
-    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
-    const i = s.indexOf('data-testid="plan-name-input"');
-    expect(i, "the plan-name input moved — re-point this test").toBeGreaterThan(0);
-    const nearby = s.slice(Math.max(0, i - 400), i + 40);
-    expect(nearby).toMatch(/onKeyDown=\{\(e\) => \{ if \(e\.key === "Enter"\) e\.target\.blur\(\); \}\}/);
-    expect(nearby).not.toMatch(/stopPropagation/);
+  it("the plan-name field's own onKeyDown never stops propagation of an arrow-family key — the guard depends on it reaching window", () => {
+    /* NEW-1 (2026-11-04): the separate "Plan name" input is gone; the plan name is edited IN PLACE in the current row
+       (components/PlanMenu.jsx `RenameField`). The guarantee is unchanged: a key that is not Enter / Escape (Left / Right /
+       Home / End / Shift+Arrow …) is not handled by the field at all, so it reaches the planner's window listener, which
+       resolves FIELD scope off document.activeElement. Escape is the one key it consumes (cancel the rename, keep the menu). */
+    const pm = src("../src/workspaces/site-planner/components/PlanMenu.jsx");
+    const i = pm.indexOf('data-testid="plan-rename-input"');
+    expect(i, "the rename field moved — re-point this test").toBeGreaterThan(0);
+    const field = pm.slice(i, i + 1400);
+    const onKey = field.slice(field.indexOf("onKeyDown="), field.indexOf("style="));
+    expect(onKey).toMatch(/e\.key === "Enter"/);
+    expect(onKey).toMatch(/e\.key === "Escape"/);
+    // …and nothing else is intercepted: the only stopPropagation is inside the Escape branch.
+    expect((onKey.match(/stopPropagation/g) || []).length).toBe(1);
+    expect(onKey.indexOf("stopPropagation")).toBeGreaterThan(onKey.indexOf('"Escape"'));
+    expect(onKey).not.toMatch(/Arrow|Home|End/);
   });
 
   it("AnchoredMenu hides an unplaced panel with opacity, never visibility — visibility:hidden is unfocusable", () => {
@@ -641,7 +654,7 @@ describe("⛔ B1012832 — the plan-name field and every AnchoredMenu-portalled 
   });
 
   it("nudgeSel refuses (and reports) a mutating arrow if a real text control somehow still has focus", () => {
-    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const s = plannerSource();
     const i = s.indexOf("const nudgeSel = (key, step) => {");
     expect(i).toBeGreaterThan(0);
     const body = s.slice(i, i + 1600);

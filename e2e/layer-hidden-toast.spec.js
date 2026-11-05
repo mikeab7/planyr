@@ -4,6 +4,7 @@
  * this spec proves the rendered toast, its Zoom in action, and the re-arm on the real app.
  * Hermetic: logged out, the gate is answered from the live zoom. */
 import { test, expect } from "@playwright/test";
+import { panelSel, openPlannerLayers, layerRow } from "./lib/layersPanel.js";
 
 /* A tract whose whole-site fit lands BELOW the z16 terrain gate — the owner's situation restated
  * as geometry ("he was zoomed out"). Waller County, as on his real plan. */
@@ -21,7 +22,6 @@ const site = {
 };
 
 const PANEL = '[data-testid="layer-panel"][data-surface="planner"]';
-const CONTOURS = `${PANEL} [data-testid="layer-row-contours"]`;
 
 async function openPlanner(page) {
   await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
@@ -37,7 +37,7 @@ async function openPlanner(page) {
   await page.waitForTimeout(1500);
   // BOTH hosts stay mounted (the finder's copy is hidden), so click the VISIBLE control and assert
   // against the planner SURFACE, never against page text.
-  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+  await openPlannerLayers(page);
   await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
   await page.waitForTimeout(400);
 }
@@ -48,7 +48,7 @@ const TOAST = '[data-testid="sync-toast-host"] [data-testid="sync-toast"]';
 test("layer-hidden toast: on load out of range, Zoom in draws, zoom out toasts once", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 860 });
   await openPlanner(page);
-  const row = page.locator(CONTOURS);
+  const row = await layerRow(page, "contours");
   await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
 
   // 1. initial load, layer already on, map out of range → exactly one combined-style toast
@@ -82,11 +82,10 @@ test("overview map: turning contours on zoomed out toasts; Zoom in draws; zoomin
   });
   await page.goto("/#/site", { waitUntil: "load" });
   await page.waitForTimeout(2500);
-  const finder = '[data-testid="layer-panel"][data-surface="finder"]';
-  const toggle = page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first();
-  if (await toggle.count()) await toggle.click().catch(() => {});
-  await expect(page.locator(finder)).toBeVisible({ timeout: 20000 });
-  const row = page.locator(`${finder} [data-testid="layer-row-contours"]`);
+  const chip = page.getByTestId("finder-layers-expand").filter({ visible: true });
+  if (await chip.count()) await chip.first().click();
+  await expect(page.locator(panelSel("finder"))).toBeVisible({ timeout: 20000 });
+  const row = await layerRow(page, "contours", { surface: "finder" });
   const t = page.locator(TOAST, { hasText: "hidden at this zoom" });
   await expect(t).toHaveCount(0);
   await row.locator('input[type="checkbox"]').first().check();

@@ -10,6 +10,14 @@
 const DEPLOY_RE = /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|unable to preload css|loading (css )?chunk [\w-]+ failed|failed to load module script/i;
 export const isDeployReload = (g) => DEPLOY_RE.test(g.rawMessage ?? g.message ?? "") || g.source === "vite:preloadError";
 
+/** A user's recent-error rows (admin_recent_errors_for_user) minus the expected after-deploy chunk misses — the SAME rule
+ * Issues uses (isDeployReload). Returns the real errors (first `limit`) and how many deploy reloads were left out (B2159506). */
+export function splitDeployReloads(rows, limit = 8) {
+  const list = Array.isArray(rows) ? rows : [];
+  const isDeploy = (r) => isDeployReload({ rawMessage: r.message, source: r.source });
+  return { errors: list.filter((r) => !isDeploy(r)).slice(0, limit), deployReloads: list.filter(isDeploy).length };
+}
+
 /** The chunk's file name with the content hash removed ("Chunk" for …/assets/Chunk-ab12CD34.js). */
 export function chunkFile(message) {
   const m = /([A-Za-z0-9_.@~-]+?)-[A-Za-z0-9_-]{6,12}\.(js|css|mjs)\b/.exec(String(message || ""));

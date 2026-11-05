@@ -15,6 +15,7 @@
  * EXHIBIT, and a tap off the band opens nothing.
  */
 import { test, expect } from "@playwright/test";
+import { openPlannerLayers, setLayer } from "./lib/layersPanel.js";
 
 // The Tsakiris tract (Waller County, inside BKDD) — the exact coordinates of the report.
 const LAT = 29.77938, LON = -95.89503;
@@ -74,16 +75,9 @@ test.describe("canvas GIS identify (B1092)", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(900); // fit-on-load + first commit settle
 
-    // Turn the easement layer on through the real Layers panel.
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    // Target the VISIBLE checkbox by role, not the first matching text node: the map finder
-    // stays mounted behind the planner and renders its own copy of this row, so `.first()`
-    // can resolve into that zero-sized panel. (Before B1091(×2) the finder's copy was demoted by
-    // the district scoping and there was only ever one node — this spec was quietly relying
-    // on that bug.)
-    const easementRow = page.getByRole("checkbox", { name: "District drainage easements", exact: true });
-    await expect(easementRow).toBeVisible({ timeout: 10000 });
-    await easementRow.click();
+    // Turn the easement layer on through the real Layers panel (NEW-1, Imagery & Layers: the row lives in Flood & Drainage › Drainage District).
+    await openPlannerLayers(page);
+    await setLayer(page, "bkdd_easements", true);
     await page.waitForTimeout(1500); // the (stubbed) pull + paint
 
     // A tap ON the band: inside the stubbed easement polygon, and inside the parcel BODY
@@ -141,10 +135,8 @@ test.describe("canvas GIS identify (B1092)", () => {
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
     await page.waitForTimeout(900);
 
-    await page.getByRole("button", { name: /Layers/ }).first().click();
-    const easementRow = page.getByRole("checkbox", { name: "District drainage easements", exact: true });
-    await expect(easementRow).toBeVisible({ timeout: 10000 });
-    await easementRow.click();
+    await openPlannerLayers(page);
+    await setLayer(page, "bkdd_easements", true);
     await page.waitForTimeout(1500);
 
     // The planner's own click slop, in feet at the CURRENT zoom — read off the canvas rather

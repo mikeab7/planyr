@@ -21,11 +21,11 @@
  * whenever either side is unknown (a delta against a guess is a lie).
  */
 import { FILL_RAMP, HEAT_RAMP, binIndex, ZERO_BAND_FT } from "./mitigationHeatmap.js";
+import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 // A grid cell wider than this is coarse enough that the point sample deserves a "≈".
 export const COARSE_CELL_FT = 12;
 
-const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
 /* The chip sits on a dark translucent panel over aerial imagery, so the delta takes the
  * READABLE end of each ramp — the same warm-fill / cool-cut families the cut/fill
@@ -75,7 +75,12 @@ export function groundReadout({ el = null, prop = null } = {}) {
   }
   if (prop) {
     if (prop.status === "value") {
-      parts.push({ key: "prop", text: `Prop ${f1(prop.ft)}`, numeric: true });
+      // B2585313 ×2 (V2042032, owner live 2026-10-31): on UNDISTURBED ground Prop IS the existing grade, so it prints the very figure
+      // the Exist segment shows (the chip's own sample, ≈ included) — not the surface's finer DEM reading, whose rounding against the
+      // coarse "≈" figure read as "Fill 0.1" / "Cut 0.1" on ground nobody touches.
+      const same = prop.undisturbed && st === "value";
+      parts.push({ key: "prop", text: same ? `Prop ${coarse ? "≈" : ""}${f1(el.ft)}` : `Prop ${f1(prop.ft)}`, numeric: true });
+      if (prop.undisturbed) notes.push("Past the graded area — the grading leaves this ground as it is, so the proposed grade is the existing grade.");
     } else {
       parts.push({ key: "prop", text: "Prop —", numeric: false });
       const r = PROP_REASON[prop.reason] || PROP_REASON.outside;
@@ -83,7 +88,7 @@ export function groundReadout({ el = null, prop = null } = {}) {
     }
     // The delta is the point of showing both — but only when BOTH sides are real.
     if (prop.status === "value" && st === "value") {
-      const dz = prop.ft - el.ft;
+      const dz = prop.undisturbed ? 0 : prop.ft - el.ft;   // undisturbed: nothing cut or filled, whatever the two samples round to
       parts.push(Math.abs(dz) < ZERO_BAND_FT
         ? { key: "delta", text: "On grade", numeric: false, color: deltaColor(dz) }
         : { key: "delta", text: `${dz > 0 ? "Fill" : "Cut"} ${f1(Math.abs(dz))}`, numeric: true, color: deltaColor(dz) });

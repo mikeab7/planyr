@@ -241,6 +241,22 @@ export function collapseRingSpikes(ring, opts = {}) {
   const orig = ring.map((p) => ({ x: p.x, y: p.y }));
   let pts = ring.slice();
   let guard = ring.length + 8; // one removal per pass — this can never run long
+  /* ⛔ NEW-1 (B217540 ×3) — THE DRIFT BOUND IS MAINTAINED INCREMENTALLY, NOT RE-MEASURED FROM SCRATCH.
+   * Every candidate removal used to be tested with `ringDrift(orig, next)`: for every ORIGINAL vertex, scan every segment of
+   * the candidate ring — O(n·m) per candidate, per pass. On a dissolved road cluster that is thousands of vertices, and it
+   * was the single largest self-time in a profile of dragging a drive-connected parking field on the owner's Richfield plan
+   * (`yD`/segDist 4.9 s over 24 edits; tasks of 0.5-1.2 s, repeating once per pointer frame). It is the one-sided Hausdorff
+   * distance, and removing ONE vertex changes only TWO segments: an original vertex whose nearest segment is neither of
+   * them keeps exactly its distance (the segment is still there), and can only be pulled CLOSER by the one new segment. So
+   * `best[i]` (distance to the current ring) and `owner[i]` (which segment is nearest — named by the id of its START vertex)
+   * are carried across passes, and a candidate costs O(n) plus a full rescan for the few vertices whose owner was one of the
+   * two removed segments. Same per-pair `segDist`, same max-of-min, so the numbers are IDENTICAL to `ringDrift`'s — asserted
+   * against it, removal for removal, in test/ringDriftIncremental.test.js. */
+  const n0 = orig.length;
+  let ids = ring.map((_, i) => i);
+  let best = new Float64Array(n0);                // every original vertex sits ON the starting ring
+  let owner = new Int32Array(n0);
+  for (let i = 0; i < n0; i++) owner[i] = i;
   while (guard-- > 0 && pts.length > 3) {
     const spikes = ringSpikes(pts, opts);
     if (!spikes.length) break;
@@ -254,11 +270,34 @@ export function collapseRingSpikes(ring, opts = {}) {
     // an unrelated genuine spike elsewhere on the same ring still goes.
     let removed = false;
     for (const s of spikes) {
-      const next = pts.slice();
-      next.splice(s.i, 1);
-      if (next.length < 3) continue;
-      if (ringDrift(orig, next) > passDriftFt) continue;
-      pts = next; removed = true; break;
+      if (pts.length - 1 < 3) continue;
+      const m = pts.length, q = s.i, pi = (q - 1 + m) % m, ni = (q + 1) % m;
+      const idA = ids[pi], idB = ids[q];            // the two segments that disappear: pi→q (start idA) and q→ni (start idB)
+      const next = pts.slice(); next.splice(q, 1);
+      const nb = new Float64Array(n0), no = new Int32Array(n0);
+      const A = pts[pi], B = pts[ni];
+      let worst = 0;
+      for (let i = 0; i < n0; i++) {
+        let b, o;
+        if (owner[i] === idA || owner[i] === idB) {
+          // its nearest segment is gone: the real question again, against the candidate ring
+          b = Infinity; o = -1;
+          const nm = next.length, nids = ids; // ids of `next` = ids without position q
+          for (let j = 0; j < nm; j++) {
+            const d = segDist(orig[i], next[j], next[(j + 1) % nm]);
+            if (d < b) { b = d; o = j < q ? nids[j] : nids[j + 1]; }
+          }
+        } else {
+          b = best[i]; o = owner[i];
+          const d = segDist(orig[i], A, B);          // the one NEW segment can only pull it closer
+          if (d < b) { b = d; o = idA; }
+        }
+        nb[i] = b; no[i] = o;
+        if (b > worst) worst = b;
+      }
+      if (worst > passDriftFt) continue;
+      pts = next; best = nb; owner = no; ids = ids.slice(0, q).concat(ids.slice(q + 1));
+      removed = true; break;
     }
     if (!removed) break;
   }
@@ -269,7 +308,7 @@ export function collapseRingSpikes(ring, opts = {}) {
  * Returns [{ outer, holes: [ring…] }, …] — one entry per resulting region, holes separated so a caller
  * can emit an even-odd path. Returns [] for no valid input; on any clipper failure it degrades to the
  * input rings as separate regions (a visible but honest fallback — never a blank canvas). */
-function dissolveRingsUncached(rings, opts = {}) {
+function* dissolveRingsUncachedSteps(rings, opts = {}) {
   const valid = (rings || []).filter(isRing);
   if (!valid.length) return [];
   if (valid.length === 1 && !(opts.subtract && opts.subtract.length)) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
@@ -290,9 +329,12 @@ function dissolveRingsUncached(rings, opts = {}) {
     }
     const merged = new ClipperLib.Paths();
     clip.Execute(ClipperLib.ClipType.ctUnion, merged, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    yield;   // round 5 — a slice boundary for the plan-open warm-up (the sync driver ignores it)
     // Re-union the closed result so holes/outers come back as a proper PolyTree.
     const clip2 = new ClipperLib.Clipper();
-    clip2.AddPaths(closePaths(merged, close), ClipperLib.PolyType.ptSubject, true);
+    const closed = closePaths(merged, close);
+    yield;
+    clip2.AddPaths(closed, ClipperLib.PolyType.ptSubject, true);
     /* 2026-09-22 — `opts.subtract`: rings the pavement must END AT rather than run into. A road that
      * tees into a paving pad / truck court used to keep its strip (its overshoot past the face, its
      * flat end cap, the wedge's tangent cusp) and rely on the PAD painting over all of it — which
@@ -311,24 +353,27 @@ function dissolveRingsUncached(rings, opts = {}) {
     }
     const tree = new ClipperLib.PolyTree();
     clip2.Execute(subtract.length ? ClipperLib.ClipType.ctDifference : ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    yield;
     const out = [];
     // Walk the PolyTree so holes stay attached to the region that owns them (a road loop encircling
     // an island is a real case: the pond loop road). Depth 0/2/4… are outers, 1/3/5… are holes.
-    const walk = (node) => {
+    const walk = function* (node) {
       for (const child of node.Childs()) {
         if (child.IsHole()) continue;
         const outer = collapseRingSpikes(fromPath(child.Contour()));
+        yield;
         const holes = [];
         for (const h of child.Childs()) {
           if (!h.IsHole()) continue;
           const hr = collapseRingSpikes(fromPath(h.Contour()));
           if (hr.length >= 3 && ringArea(hr) >= RING_MICRO_AREA_FLOOR_SQFT) holes.push(hr);
-          walk(h); // an island inside the hole is its own region
+          yield;
+          yield* walk(h); // an island inside the hole is its own region
         }
         if (outer.length >= 3 && ringArea(outer) >= RING_MICRO_AREA_FLOOR_SQFT) out.push({ outer, holes });
       }
     };
-    walk(tree);
+    yield* walk(tree);
     // An empty result is honest when a subtract was asked for (pavement wholly inside the pad);
     // otherwise it is a clipper failure and the inputs are shown as-is rather than a blank canvas.
     return out.length || subtract.length ? out : valid.map((r) => ({ outer: r, holes: [] }));
@@ -357,21 +402,28 @@ function dissolveRingsUncached(rings, opts = {}) {
  * road, is a different key and is recomputed. Returned arrays are SHARED and read-only, like every memo in this
  * tree (B236592); both consumers only measure them or map them to a path string. */
 const ringsSig = (rs) => (Array.isArray(rs) ? rs.map(pointsSignature).join(";") : "-");
-const dissolveCache = boundedCache(48);
-const clipCache = boundedCache(400);
+const dissolveCache = boundedCache(200);   // round 5: was 48 — a plan the size of Richfield dissolves ~2 entries per cluster, and a clear at the cap would throw a warm-up away
+const clipCache = boundedCache(800);
 export const roadNetworkStats = { dissolveCalls: 0, dissolveHits: 0, clipCalls: 0, clipHits: 0 };
 export function resetRoadNetworkCaches() {
-  dissolveCache.clear(); clipCache.clear();
+  dissolveCache.clear(); clipCache.clear(); surfaceRingCache.clear();
   roadNetworkStats.dissolveCalls = roadNetworkStats.dissolveHits = roadNetworkStats.clipCalls = roadNetworkStats.clipHits = 0;
 }
 
-export function dissolveRings(rings, opts = {}) {
+/* B2233521 (round 5) — the dissolve as STEPS: the same body, with a `yield;` between its units of work (the union, the morphological close, the final tree, each ring's spike
+ * collapse). `dissolveRings` below drives it to completion in one go, so every existing caller is byte-for-byte what it was; the plan-open warm-up drives it through
+ * `yield*` in ~8 ms slices, so one cluster's dissolve (150 ms at 2× on Richfield) no longer has to be one task. */
+export function* dissolveRingsSteps(rings, opts = {}) {
   roadNetworkStats.dissolveCalls++;
   const close = Number.isFinite(opts.close) ? opts.close : "d";
   const key = `${close}#${ringsSig(rings)}#${ringsSig(opts.subtract)}`;
   const hit = dissolveCache.get(key);
   if (hit) { roadNetworkStats.dissolveHits++; return hit; }
-  return dissolveCache.set(key, dissolveRingsUncached(rings, opts));
+  return dissolveCache.set(key, yield* dissolveRingsUncachedSteps(rings, opts));
+}
+export function dissolveRings(rings, opts = {}) {
+  const gen = dissolveRingsSteps(rings, opts);
+  for (;;) { const r = gen.next(); if (r.done) return r.value; }
 }
 
 export function clipPolylineOutside(line, rings) {
@@ -447,9 +499,21 @@ function clipAgainst(line, near, whole) {
  * silently dropped road surface). Pure: world feet in, world feet out. Unit-tested
  * (test/roadSurfaceJoin.test.js — the angle sweep + every adjacent case the item names). */
 export const ROAD_JOIN_MITER_LIMIT = 2;    // matches this repo's existing ClipperOffset convention (pondOffset.js's MITER)
+/* B2233521 (round 5) — BY-VALUE CACHE. The same road's ring was offset by clipper up to three times per render (the dissolved network's memo, `siteMetrics`' paved-area
+ * pass, and the road's own ElNode) and once more per edit for every untouched road; on a plan this device has never drawn it is ~40 ms of the first render, ~90 ms on
+ * Richfield. Keyed on the exact points (a ten-thousandth of a foot, `pointsSignature`) plus the width, so a road that really moved is a different key. The returned
+ * ring is SHARED and read-only like every memo here (all callers measure it, path-string it or hand it to the dissolve). `null` results are cached too (a degenerate
+ * road is degenerate every time). */
+const surfaceRingCache = boundedCache(400);
 export function roadSurfaceRing(pts, width) {
   const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
   if (clean.length < 2 || !(width > 0)) return null;
+  const key = `${width}#${pointsSignature(clean)}`;
+  const hit = surfaceRingCache.get(key);
+  if (hit !== undefined) return hit;
+  return surfaceRingCache.set(key, roadSurfaceRingUncached(clean, width));
+}
+function roadSurfaceRingUncached(clean, width) {
   try {
     const path = toPath(clean);
     const co = new ClipperLib.ClipperOffset(ROAD_JOIN_MITER_LIMIT, CLEAN_DELTA);
@@ -486,14 +550,111 @@ export function roadSurfaceRing(pts, width) {
  *
  * `cutters` are the dissolved pavement rings of the drive; with none, the full (uninterrupted) outline
  * comes back. Pure: world feet in, world feet out. */
-export function rectOutlineCutSegments(el, cutters) {
+export function rectOutlineCutSegments(el, cutters, mouths) {
   if (!el || el.points || !(el.w > 0) || !(el.h > 0) || typeof el.cx !== "number" || typeof el.cy !== "number") return [];
+  const cs = rectCornersWorld(el, 0, 0, el.w, el.h);
+  const out = [];
+  for (let e = 0; e < 4; e++) for (const seg of edgeInkPieces([cs[e], cs[(e + 1) % 4]], cutters, mouths)) if (seg.length >= 2) out.push(seg);
+  return out;
+}
+/* NEW-1 (B1783376 ×3) — THE INK OF ONE EDGE of a field a drive tees into, with the drive's mouth taken out of it.
+ *
+ * The edge that is the field's FACE (collinear with a mouth) is cut by the mouth's own two tangent points, EXACTLY — never by polygon clipping. The face runs along the
+ * curb-return arcs' tangent line, where a clip is ill-conditioned: a few thousandths of a foot of rounding in the subject line (a pad outline and a stall row's outline
+ * are the same line, built from different end points) moved the crossing by feet, so on a rotated pad the two disagreed and one of them was left drawing a stub of the
+ * face across the mouth. Every other edge keeps the clip against the dissolved pavement, minus anything lying ON the pavement's boundary. */
+function edgeInkPieces(edge, cutters, mouths) {
+  const [a, b] = edge, L = Math.hypot(b.x - a.x, b.y - a.y);
+  // a mouth is on this edge when both its ends lie on the edge's LINE (a face may be several collinear edges — a digitizing vertex mid-face) and its span overlaps the edge
+  const onLine = (p) => Math.abs((p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)) / L < FACE_COLLINEAR_FT;
+  const along = (p) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (L * L);
+  const faceMouths = L > 1e-9 && Array.isArray(mouths)
+    ? mouths.filter((m) => m && m.a && m.b && onLine(m.a) && onLine(m.b) && Math.max(along(m.a), along(m.b)) > 1e-9 && Math.min(along(m.a), along(m.b)) < 1 - 1e-9)
+    : [];
+  if (!faceMouths.length) return dropCoincident(clipPolylineOutside(edge, cutters), cutters);
+  let pieces = [[{ x: a.x, y: a.y }, { x: b.x, y: b.y }]];
+  for (const m of faceMouths) {
+    const tA = ((m.a.x - a.x) * (b.x - a.x) + (m.a.y - a.y) * (b.y - a.y)) / (L * L), tB = ((m.b.x - a.x) * (b.x - a.x) + (m.b.y - a.y) * (b.y - a.y)) / (L * L);
+    const lo = Math.min(tA, tB), hi = Math.max(tA, tB), at = (t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const next = [];
+    for (const pc of pieces) {
+      const t0 = ((pc[0].x - a.x) * (b.x - a.x) + (pc[0].y - a.y) * (b.y - a.y)) / (L * L), t1 = ((pc[1].x - a.x) * (b.x - a.x) + (pc[1].y - a.y) * (b.y - a.y)) / (L * L);
+      if (t0 < lo - 1e-9) next.push([pc[0], at(Math.min(t1, lo))]);
+      if (t1 > hi + 1e-9) next.push([at(Math.max(t0, hi)), pc[1]]);
+    }
+    pieces = next.filter((pc) => Math.hypot(pc[1].x - pc[0].x, pc[1].y - pc[0].y) > 1e-6);
+  }
+  return pieces;
+}
+const FACE_COLLINEAR_FT = 0.05;
+/* The pieces of a field's DERIVED CURB band (the thin band drawn along a paving edge that abuts nothing — `nb.curbEdges`, `axis`/`sign` as the renderer reads them: axis "y" = a
+ * top (sign < 0) / bottom (sign > 0) edge, axis "x" = a left / right edge) that remain once a drive's mouth is cut out of it — a CURB CUT. Without this the band's stroke ran
+ * straight across the drive mouth (the faint line "where the drive meets the pad"; it is the only thing drawn there when the pad and the drive share a fill). Returns
+ * `[from, to]` ranges in feet ALONG the edge, from the field's top-left corner in its own frame; the whole edge when no mouth opens on it. */
+export function curbBandPieces(el, mouths, axis, sign) {
+  if (!el) return [];
+  const len = axis === "y" ? el.w : el.h;
+  if (!(len > 0) || !Array.isArray(mouths) || !mouths.length) return [[0, len]];
+  const rad = (-(el.rot || 0) * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+  const local = (p) => { const dx = p.x - el.cx, dy = p.y - el.cy; return { x: dx * c - dy * s + el.w / 2, y: dx * s + dy * c + el.h / 2 }; };
+  const face = axis === "y" ? (sign > 0 ? el.h : 0) : (sign > 0 ? el.w : 0);
+  const gaps = [];
+  for (const m of mouths) {
+    if (!m || !m.a || !m.b) continue;
+    const a = local(m.a), b = local(m.b), perp = (p) => (axis === "y" ? p.y : p.x), along = (p) => (axis === "y" ? p.x : p.y);
+    if (Math.abs(perp(a) - face) > FACE_COLLINEAR_FT || Math.abs(perp(b) - face) > FACE_COLLINEAR_FT) continue;
+    gaps.push([Math.min(along(a), along(b)), Math.max(along(a), along(b))]);
+  }
+  gaps.sort((x, y) => x[0] - y[0]);
+  const out = [];
+  let at = 0;
+  for (const [g0, g1] of gaps) { if (g0 > at + 1e-9) out.push([at, Math.min(g0, len)]); at = Math.max(at, g1); }
+  if (at < len - 1e-9) out.push([at, len]);
+  return out.filter(([x, y]) => y - x > 1e-6);
+}
+/* The four corners, in WORLD feet with the element's rotation baked in, of the sub-rectangle `x,y,w,h` (feet, measured from the element's top-left corner in its
+ * own unrotated frame — `x,y,w,h` = `0,0,el.w,el.h` is the whole footprint). */
+function rectCornersWorld(el, x, y, w, h) {
   const rad = ((el.rot || 0) * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
   const corner = (lx, ly) => ({ x: el.cx + (lx * c - ly * s), y: el.cy + (lx * s + ly * c) });
-  const cs = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-  const out = [];
-  for (let e = 0; e < 4; e++) for (const seg of clipPolylineOutside([cs[e], cs[(e + 1) % 4]], cutters)) if (seg.length >= 2) out.push(seg);
-  return out;
+  const x0 = -el.w / 2 + x, y0 = -el.h / 2 + y;
+  return [corner(x0, y0), corner(x0 + w, y0), corner(x0 + w, y0 + h), corner(x0, y0 + h)];
+}
+/* NEW-1 (B1783376 ×3) — DETERMINISTIC at the pad face. Where a drive meets a field the field's edge runs EXACTLY along the dissolved pavement's own boundary
+ * (the curb-return wedges' closing edge, then the drive's mouth), and what `clipPolylineOutside` keeps of a segment lying ON a cutter's boundary is whatever the
+ * clipper's rounding happens to decide — so a pad-face run could come back as a line across the mouth. A piece that lies ON the boundary of a cutter (both ends
+ * and its middle within `tol`) is never ink: the drive and the field read as one surface there. */
+const COINCIDENT_FT = 0.1;
+function dropCoincident(segs, cutters, tol = COINCIDENT_FT) {
+  const rings = (cutters || []).filter(isRing);
+  if (!rings.length) return segs;
+  const onBoundary = (p) => rings.some((r) => { for (let i = 0; i < r.length; i++) if (segDist(p, r[i], r[(i + 1) % r.length]) <= tol) return true; return false; });
+  return segs.filter((seg) => {
+    if (seg.length < 2) return true;
+    const a = seg[0], b = seg[seg.length - 1];
+    return !(onBoundary(a) && onBoundary(b) && onBoundary({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
+  });
+}
+/* The INTERRUPTED outline of one stall-row band of a parking / truck-court field a drive tees into (NEW-1, B1783376 ×3). A band's outline rect starts exactly at
+ * the field's face, so the row nearest the entrance drew its top edge straight across the drive's mouth — the faint line "where the drive meets the pad". Same
+ * frame and contract as `rectOutlineCutSegments` (WORLD feet, rotation baked in — counter-rotate by `-el.rot` to draw), with `band` = `{ x, y, w, h }` in feet from
+ * the field's top-left corner, and the pieces that meet end to end CHAINED into one polyline so the corners join instead of notching. */
+export function rectBandOutlineCutPolylines(el, band, cutters, mouths) {
+  if (!el || el.points || !(el.w > 0) || !(el.h > 0) || typeof el.cx !== "number" || typeof el.cy !== "number" || !band || !(band.w > 0) || !(band.h > 0)) return [];
+  const cs = rectCornersWorld(el, band.x, band.y, band.w, band.h);
+  const pieces = [];
+  for (let e = 0; e < 4; e++) for (const seg of edgeInkPieces([cs[e], cs[(e + 1) % 4]], cutters, mouths)) if (seg.length >= 2) pieces.push(seg);
+  const same = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 0.02;
+  const chains = [];
+  for (const seg of pieces) {
+    const last = chains[chains.length - 1];
+    if (last && same(last[last.length - 1], seg[0])) last.push(...seg.slice(1)); else chains.push(seg.map((p) => ({ x: p.x, y: p.y })));
+  }
+  if (chains.length > 1 && same(chains[chains.length - 1][chains[chains.length - 1].length - 1], chains[0][0])) {   // the last chain runs on into the first
+    const tail = chains.pop();
+    chains[0] = [...tail, ...chains[0].slice(1)];
+  }
+  return chains;
 }
 
 /* B1613152 — the INTERRUPTED outline of a POLYGON (freehand-drawn) element a drive tees into.
@@ -511,12 +672,12 @@ export function rectOutlineCutSegments(el, cutters) {
  *
  * Same contract as `rectOutlineCutSegments`: world feet in, world feet out, pure. No rotation to
  * counter — a polygon element's `points` are already world-frame (no separate cx/cy/w/h/rot box). */
-export function polygonOutlineCutSegments(el, cutters) {
+export function polygonOutlineCutSegments(el, cutters, mouths) {
   if (!el || !Array.isArray(el.points) || el.points.length < 3) return [];
   const pts = el.points;
   const n = pts.length;
   const out = [];
-  for (let e = 0; e < n; e++) for (const seg of clipPolylineOutside([pts[e], pts[(e + 1) % n]], cutters)) if (seg.length >= 2) out.push(seg);
+  for (let e = 0; e < n; e++) for (const seg of edgeInkPieces([pts[e], pts[(e + 1) % n]], cutters, mouths)) if (seg.length >= 2) out.push(seg);
   return out;
 }
 

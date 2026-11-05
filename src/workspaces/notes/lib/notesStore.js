@@ -164,7 +164,7 @@ import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } fro
 import { safeAttachmentName } from "./notesFileMeta.js";
 import {
   addPage, allPageIds, copyPageTree, countNodes, dropPages, findPage, migrate, newId, subtreePageIds, purgeTrashEntry, searchTitles, pagesInScope,
-  trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
+  trashEntries, walkPages, withTombstones, tombstoneIds, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
 import { parseView, serializeView, viewKey, VIEW_KEY_BASE } from "./notesViewport.js";
 import { ACTIVE_PAGE_KEY_BASE, IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
@@ -1740,7 +1740,20 @@ async function seed({ full }) {
     // NEW-7: an open page's un-flushed keystrokes are written first, so the plan sees them as the
     // pending edit they are (a conflict → per-paragraph merge) instead of "clean → adopt".
     for (const row of idx.index) flushOpenNote(row.id);
-    const plan = c.planPageSeed({ index: idx.index, state: sync, localIds: listStoredPageIds() });
+    const plan = c.planPageSeed({
+      index: idx.index, state: sync, localIds: listStoredPageIds(),
+      tombstoned: [...tombstoneIds(migrate(readTreeRaw()))],
+    });
+
+    /* A row the local tree has tombstoned was never adopted (see planPageSeed). Finish its
+     * cloud purge now. The local `purged` mark is set ONLY on success: a failed call leaves
+     * the row un-purged server-side, and the next seed lists it again — never forgotten. */
+    if (plan.repurge.length) {
+      const rp = await c.purgePagesCloud(client(), plan.repurge);
+      if (rp.ok) {
+        for (const id of plan.repurge) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
+      } else reportSyncFailure(rp.error);
+    }
 
     // Purged elsewhere: clear the bytes here (body AND pictures) and remember the tombstone,
     // so a late local flush can never push the note back up.

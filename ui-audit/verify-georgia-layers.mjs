@@ -40,7 +40,7 @@ const GA_ROWS = ["Hazardous sites (Georgia EPD)", "Historic places (National Reg
 
 async function open(siteId, site, { watch = [] } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ [siteId]: site })}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ [siteId]: site })}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-georgia-layers");
   const seen = {}; for (const w of watch) seen[w] = [];

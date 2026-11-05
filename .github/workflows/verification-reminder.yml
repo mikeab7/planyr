@@ -1,6 +1,7 @@
 name: Verification reminder
 
-# A gentle every-other-day nudge to run VERIFICATION.md (the live-browser test checklist).
+# A gentle every-other-day nudge to run the pending live-browser checks (the verification ledger — on the `ledger`
+# branch since 2026-11-05; list them with `npm run ledger -- list pending --v`).
 # Idempotent: if a "verification due" issue is already open it just bumps it with a
 # comment rather than opening a duplicate. Runs from `main` only (scheduled workflows
 # always do). Trigger manually any time via the Actions tab → Run workflow.
@@ -23,15 +24,15 @@ jobs:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;
             const body = [
-              "Reminder: open **VERIFICATION.md** and run any ⏳ unverified or due items",
-              "on https://planyr.io, then record the result in that file.",
+              "Reminder: list the pending checks (`npm run ledger -- list pending --v`) and run any ⏳ unverified or due items",
+              "on https://planyr.io, then record the result on the ledger branch (no PR: `npm run ledger -- move V<id> done --file …`).",
               "",
               "- **Browser items:** click them through on the live app (signed in where noted).",
               "- **🌐 endpoint-liveness items:** a quick `curl`/REST probe, no browser needed.",
               "",
-              "**⛔ Clear out what you finish (see the 'How to use this' rules at the top of the file):**",
-              "- A **one-off** item (`Cadence: once`) that **fully passes** → MOVE its whole block to",
-              "  **`docs/archive/VERIFICATION-DONE.md`** (don't just mark it ✅ in place — that's what bloats the file).",
+              "**⛔ Clear out what you finish (see the LEDGER section of CLAUDE.md):**",
+              "- A **one-off** item (`Cadence: once`) that **fully passes** → MOVE it to the `done` state:",
+              "  `npm run ledger -- move V<id> done` (don't just mark it ✅ in place).",
               "- A **recurring** item (🌐 / `Cadence: every N days`) STAYS — just update `Last checked` /",
               "  `Next check`. A ❌ stays ❌ until re-fixed.",
               "",
@@ -48,7 +49,7 @@ jobs:
               core.info(`Bumped existing issue #${open[0].number}`);
             } else {
               const { data: created } = await github.rest.issues.create({
-                owner, repo, title: "🔍 Verification due — run VERIFICATION.md",
+                owner, repo, title: "🔍 Verification due — run the pending verification checks",
                 labels: ["verification"], body,
               });
               core.info(`Opened issue #${created.number}`);

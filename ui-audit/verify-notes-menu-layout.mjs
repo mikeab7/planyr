@@ -252,12 +252,12 @@ await pacedWait(page, 300);
 const selCount = await page.locator('.planyr-anchor[data-selected="1"]').count();
 ok("three boxes are selected", selCount === 3, `${selCount} selected`);
 const before = await storedBoxes();
-const grip = page.locator('.planyr-anchor[data-selected="1"] [data-testid="note-anchor-grip"]').first();
+const grip = page.locator('.planyr-anchor[data-selected="1"]').first();   // B2426788: grabbed by its border now
 let moved = null;
 if (await grip.count()) {
   const gb = await grip.boundingBox();
-  const cx = gb.x + gb.width / 2;
-  const cy = gb.y + gb.height / 2;
+  const cx = gb.x + gb.width * 0.3;
+  const cy = gb.y + 0.5;
   await page.mouse.move(cx, cy);
   await page.mouse.down();
   for (let i = 1; i <= 6; i += 1) await page.mouse.move(cx + (90 * i) / 6, cy + (50 * i) / 6);

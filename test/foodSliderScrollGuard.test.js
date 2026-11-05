@@ -25,15 +25,10 @@ describe("isVerticalScroll", () => {
   });
 });
 
-describe("both rating sliders use the guard (a refactor that drops it silently brings the defect back)", () => {
-  it("the visit's Food/Ambiance RatingSlider spreads it onto the range input", () => {
-    const src = read("components/VisitPanel.jsx");
+describe("the one rating slider uses the guard (a refactor that drops it silently brings the defect back)", () => {
+  it("RatingSlider (Food, Ambiance AND dish score) spreads it onto the range input", () => {
+    const src = read("components/RatingSlider.jsx");
     expect(src).toMatch(/const scrollGuard = useScrollSafeSlider\(value, onChange\)/);
-    expect(src).toMatch(/data-testid="rating-slider" \{\.\.\.scrollGuard\}/);
-  });
-  it("the per-dish ScoreMeter spreads it onto its range input", () => {
-    const src = read("components/ScoreMeter.jsx");
-    expect(src).toMatch(/const scrollGuard = useScrollSafeSlider\(value, onChange\)/);
-    expect(src).toMatch(/data-testid="dish-score-slider" \{\.\.\.scrollGuard\}/);
+    expect(src).toMatch(/\{\.\.\.scrollGuard\}/);
   });
 });

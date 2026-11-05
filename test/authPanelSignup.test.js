@@ -9,7 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import AuthPanel from "../src/workspaces/site-planner/components/AuthPanel.jsx";
 import { signupOutcome, passwordHintVisible, checkEmailCopy, PASSWORD_MIN_HINT } from "../src/workspaces/site-planner/lib/signupOutcome.js";
-import { AUTH_SENDER_LABEL } from "../src/workspaces/site-planner/lib/authMail.js";
+import { SIGNUP_CONFIRM_SENDER_LABEL } from "../src/workspaces/site-planner/lib/authMail.js";
 
 const src = readFileSync(new URL("../src/workspaces/site-planner/components/AuthPanel.jsx", import.meta.url), "utf8");
 const authSrc = readFileSync(new URL("../src/workspaces/site-planner/lib/auth.js", import.meta.url), "utf8");
@@ -32,7 +32,7 @@ describe("NEW-1 — signup outcome branches on the response, not a flag", () => 
   it("the success copy names the address and the real sender", () => {
     const c = checkEmailCopy("a@b.co");
     expect(c.sent).toContain("a@b.co");
-    expect(c.sender).toContain(AUTH_SENDER_LABEL);
+    expect(c.sender).toContain(SIGNUP_CONFIRM_SENDER_LABEL); // the sender of THIS mail (Supabase); links come from Planyr
   });
   it("signUp() reports session presence from the response itself", () => {
     expect(authSrc).toMatch(/signedIn: !!\(data && data\.session\)/);
@@ -62,7 +62,7 @@ describe("NEW-2 — the minimum-length hint sits under the password field, signu
   it("is rendered directly after the password input and before the submit button", () => {
     const m = src.indexOf('aria-label="Password"');
     const hint = src.indexOf('data-testid="password-hint"');
-    const submit = src.indexOf('data-testid="auth-submit"');
+    const submit = src.lastIndexOf('data-testid="auth-submit"');   // the logged-out form's button (the recovery form's comes earlier in the file)
     expect(m).toBeGreaterThan(0);
     expect(hint).toBeGreaterThan(m);
     expect(hint).toBeLessThan(submit);
@@ -95,7 +95,8 @@ describe("NEW-3 — controls are scoped to their tab", () => {
       expect(si).not.toContain(label);
     }
   });
-  it("the Turnstile widget is gated on the signup tab", () => {
-    expect(src).toMatch(/mode === "signup" && turnstileEnabled\(\)/);
+  it("the Turnstile widget is shared by every logged-out tab, never recovery (NEW-1 — see authPanelTurnstile)", () => {
+    expect(src).toMatch(/turnstileEnabled\(\) && mode !== "recovery"/);
+    expect(src).not.toMatch(/mode === "signup" && turnstileEnabled\(\)/);
   });
 });

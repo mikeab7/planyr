@@ -58,17 +58,37 @@ export function normalizeCrop(crop, imgW, imgH) {
   return clampCropRect(crop, imgW, imgH);
 }
 
-export const hasCrop = (o) => !!(o && o.crop);
+/* ---- The crop SWITCH (NEW-2, 2026-10-21) --------------------------------------------------
+ * A crop can be switched OFF without losing its shape: `crop.off === true` keeps `kind`/`x,y,w,h`/`pts`
+ * exactly as drawn but every consumer treats the overlay as UNCROPPED. The flag lives on the crop object
+ * itself (the one place all consumers already read), so it persists, syncs and undoes with the crop and
+ * needs no new column — both DB CHECKs only require the active kind's own fields and allow extra keys.
+ * An old record has no `off` key and behaves exactly as before. EVERY reader goes through `activeCrop(o)`
+ * / `hasCrop(o)` or checks `cropIsOff(crop)`; none may test `o.crop` truthiness for "is the sheet clipped". */
+export const cropIsOff = (crop) => !!(crop && crop.off === true);
+// The crop that actually clips the sheet: the stored one, or null when there is none OR it is switched off.
+export const activeCrop = (o) => (o && o.crop && !cropIsOff(o.crop) ? o.crop : null);
+// A crop that exists on the record (on OR off) — the shape the switch can bring back.
+export const hasSavedCrop = (o) => !!(o && o.crop);
+export const hasCrop = (o) => !!activeCrop(o);
+// The same stored shape with the switch flipped. Never touches the geometry; ON drops the key entirely so
+// an enabled crop is byte-identical to one that was never switched.
+export function withCropOff(crop, off) {
+  if (!crop) return null;
+  const { off: _drop, ...rest } = crop;
+  return off ? { ...rest, off: true } : rest;
+}
 
 // The box actually visible/interactive, in image px — the crop rect, or the full image when unset.
 // A polygon crop answers with its bounding box (never the raw `{kind:'poly'}` object, whose
 // missing x/y/w/h would read as NaN in every rect consumer).
 export function effectiveCropRect(o) {
-  if (o && o.crop && cropKind(o.crop) === "poly") {
-    const r = polyPointsToRect(o.crop.pts);
+  const crop = activeCrop(o);
+  if (crop && cropKind(crop) === "poly") {
+    const r = polyPointsToRect(crop.pts);
     if (r) return r;
   }
-  if (o && o.crop) return o.crop;
+  if (crop) return crop;
   return { x: 0, y: 0, w: (o && o.imgW) || 0, h: (o && o.imgH) || 0 };
 }
 
@@ -81,30 +101,8 @@ export function cropClipRectScreen(o, tl, ftPerPx, rppf) {
   return { x: tl.x + c.x * k, y: tl.y + c.y * k, width: c.w * k, height: c.h * k };
 }
 
-// The panel's four trim fields, in FEET (never px — this app is feet-everywhere-internal at the UI
-// boundary), derived from the overlay's current crop (or zero trim, full image, when unset).
-export function cropTrimFeet(o) {
-  const c = effectiveCropRect(o);
-  const ftPerPx = (o && o.ftPerPx) || 0;
-  const imgW = (o && o.imgW) || 0, imgH = (o && o.imgH) || 0;
-  return {
-    left: c.x * ftPerPx,
-    top: c.y * ftPerPx,
-    right: (imgW - c.x - c.w) * ftPerPx,
-    bottom: (imgH - c.y - c.h) * ftPerPx,
-  };
-}
-
-// Inverse of cropTrimFeet: four edge trims in feet -> a normalized crop rect (or null, if the trims
-// amount to no crop at all). Negative/NaN trims read as 0 (never expand past the image edge).
-export function cropFromTrimFeet(trim, o) {
-  const imgW = (o && o.imgW) || 0, imgH = (o && o.imgH) || 0, ftPerPx = (o && o.ftPerPx) || 0;
-  if (!(imgW > 0) || !(imgH > 0) || !(ftPerPx > 0)) return null;
-  const clean = (v) => (Number.isFinite(v) && v > 0 ? v / ftPerPx : 0); // feet -> image px
-  const left = clean(trim && trim.left), top = clean(trim && trim.top);
-  const right = clean(trim && trim.right), bottom = clean(trim && trim.bottom);
-  return normalizeCrop({ x: left, y: top, w: imgW - left - right, h: imgH - top - bottom }, imgW, imgH);
-}
+// NEW-1 (2026-10-15): the panel's four "Trim by feet" fields (cropTrimFeet / cropFromTrimFeet) were REMOVED — the owner
+// wanted the crop drawn on the picture and nothing else. A rect crop is still {kind:'rect',x,y,w,h}; stored crops are untouched.
 
 /* ---- Polygon crop (NEW-1, B1783328) --------------------------------------------------------
  * Discriminated union, additive to the rect shape above: `{kind:'rect', x,y,w,h}` |
@@ -222,6 +220,38 @@ export function nearestOnSegment(p, a, b) {
   return { x: a[0] + abx * t, y: a[1] + aby * t, t };
 }
 
+// ---- Right-click point editing (NEW-4) --------------------------------------------------------
+// Pure so the crop tool's context menu and the unit tests share one rule. All points are image px.
+// Index of the ring edge (i → i+1, wrapping) nearest to `p`, by true point-to-segment distance.
+export function nearestEdgeIndex(pts, p) {
+  if (!Array.isArray(pts) || pts.length < 2 || !p) return -1;
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const n = nearestOnSegment(p, a, b);
+    const d = Math.hypot(p[0] - n.x, p[1] - n.y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+// "Add control point" — the new vertex lands EXACTLY on `p` (not projected onto the edge), spliced
+// between the two vertices of the nearest edge. Returns the same array untouched when it cannot
+// (no usable edge, or already at MAX_POLY_VERTICES).
+export function addPointAtNearestEdge(pts, p, max = MAX_POLY_VERTICES) {
+  if (!Array.isArray(pts) || pts.length >= max) return pts;
+  const i = nearestEdgeIndex(pts, p);
+  if (i < 0) return pts;
+  const next = pts.slice();
+  next.splice(i + 1, 0, [p[0], p[1]]);
+  return next;
+}
+export const canDeletePoint = (pts) => Array.isArray(pts) && pts.length > MIN_POLY_VERTICES;
+// "Delete point" — refuses (returns the same array) at the MIN_POLY_VERTICES floor.
+export function deletePointAt(pts, idx) {
+  if (!canDeletePoint(pts) || !(idx >= 0 && idx < pts.length)) return pts;
+  return pts.filter((_, i) => i !== idx);
+}
+
 // Reversible, one-step conversions between the two shapes. Pure projections only — the CALLER
 // (ImageCropTool) is what keeps each shape's own last-drawn value alive across a mode toggle by
 // holding both drafts in state rather than deriving one from the other on every switch.
@@ -293,6 +323,11 @@ export function isValidCropShape(crop) {
 // fields would silently strip the dormant field the tool had just carried forward.
 export function normalizeCropShape(crop, imgW, imgH) {
   if (!crop) return null;
+  const shape = normalizeCropShapeOn(crop, imgW, imgH);
+  // the switch travels with the shape (NEW-2): an OFF crop that still has a usable shape stays off
+  return shape && cropIsOff(crop) ? { ...shape, off: true } : shape;
+}
+function normalizeCropShapeOn(crop, imgW, imgH) {
   if (cropKind(crop) === "poly") {
     const pts = normalizePolyCrop(crop.pts, imgW, imgH);
     const savedRect = savedRectOf(crop);
@@ -319,7 +354,7 @@ export function normalizeCropShape(crop, imgW, imgH) {
 // natively with no extra self-intersection detection on our part, so it costs nothing here and
 // is the SAME rule the crop tool's own live preview mask uses, so what you draw is what you get.
 export function clipPathValueForCrop(crop, imgW, imgH) {
-  if (!crop) return "";
+  if (!crop || cropIsOff(crop)) return "";
   if (cropKind(crop) === "poly") {
     if (!Array.isArray(crop.pts) || crop.pts.length < MIN_POLY_VERTICES) return "";
     return `polygon(evenodd, ${crop.pts.map(([x, y]) => `${x}px ${y}px`).join(", ")})`;
@@ -344,7 +379,7 @@ export function clipPathValueForCrop(crop, imgW, imgH) {
  * Returns null for "draw the whole image" — no crop, or a stored value that fails
  * `isValidCropShape` (a malformed record must never clip a sheet to nothing and lose it). */
 export function cropClipShapeScreen(o, tl, ftPerPx, ftPerPxY, rppf) {
-  const crop = o && o.crop;
+  const crop = activeCrop(o);   // a switched-off crop draws the whole sheet
   if (!crop || !isValidCropShape(crop)) return null;
   const kx = ftPerPx * rppf, ky = (ftPerPxY || ftPerPx) * rppf;
   if (!(kx > 0) || !(ky > 0) || !tl) return null;
@@ -356,17 +391,24 @@ export function cropClipShapeScreen(o, tl, ftPerPx, ftPerPxY, rppf) {
 }
 
 // Whether the Site-tab panel may edit this overlay's crop, and if not, the plain reason — the ONE
-// predicate the panel button, the trim fields and the commit itself all ask, so a locked overlay
-// refuses the edit at the write, not only by greying a button (B1154369: a lock that only greyed
-// its control failed to stop movement). The pinned map capture is excluded because it exports
+// predicate the panel button, the trim fields and the commit itself all ask. The pinned map capture is excluded because it exports
 // through its own synthesized aerial path, not the cloned `<image>`, so a crop there would draw
 // on screen and silently not print (PDF-PARITY).
 export function cropEditBlock(o) {
   if (!o) return "This overlay is no longer on the plan";
   if (o.fromMap) return "The map capture can't be cropped";
-  if (o.locked) return "Unlock this overlay to crop it";
+  // NEW-6 (owner 2026-10-11) — Lock only stops direct move/resize drags on the map; it never gates a crop.
   if (!o.src || !(o.imgW > 0) || !(o.imgH > 0)) return "Load the drawing first to crop it";
   return null;
+}
+
+// SVG path data (image px) for the ACTIVE crop's shape — the dashed outline of the kept area in the panel's
+// picture. "" when the sheet is not clipped (no crop, a switched-off crop, or a malformed one).
+export function cropOutlinePath(o) {
+  const crop = activeCrop(o);
+  if (!crop || !isValidCropShape(crop)) return "";
+  if (cropKind(crop) === "poly") return `M${crop.pts.map(([x, y]) => `${x} ${y}`).join("L")}Z`;
+  return `M${crop.x} ${crop.y}h${crop.w}v${crop.h}h${-crop.w}Z`;
 }
 
 // A crop carried across a raster change (a PDF page switch re-rasterizes at that page's own size):

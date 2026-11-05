@@ -226,15 +226,20 @@ if (!only || only.includes("onenote-desktop")) {
     ok("Merge formatting keeps the table (rows, columns, text)", !!tm && diffAgainst(tm, { grid: fx.grid, marks: [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]] }).length === 0, JSON.stringify(tm && tm.grid));
     ok("…and drops the source fonts/sizes (no textStyle marks left)", !marksIn(dm).some((m) => m.startsWith("textStyle")), JSON.stringify(marksIn(dm)));
   }
+  /* ⛔ NEW-1 (2026-10-29, Office-style paste options): a pasted TABLE's chip offers EXCEL'S set (Keep Source Formatting ·
+   * Merge Formatting · Keep Source Column Widths · Transpose · Values · Values and Source Formatting · Formatting only ·
+   * Picture), which has no "Keep text only" — plain text of a table is still Ctrl+Shift+V and the right-click menu. This
+   * used to drive Keep text only here; Values is the closest chip option and is asserted instead (the full table set is
+   * ui-audit/verify-notes-paste-options.mjs). */
   await seed(LANDINGS["in-box-text"].doc); await LANDINGS["in-box-text"].act();
   await paste({ html: fx.html, text: fx.text });
   if (await chip.count()) {
     await chip.click(); await pacedWait(page, 250);
-    await page.locator('[data-testid="note-paste-text"]').click(); await pacedWait(page, 1000);
-    const dt = await stored();
-    ok("Keep text only: no table is left", countType(dt, "table") === 0);
-    const paras = []; const w = (n) => { if (!n) return; if (n.type === "paragraph") paras.push((n.content || []).map((c) => c.text || "").join("")); (n.content || []).forEach(w); }; w(dt);
-    ok("…and it is TAB-SEPARATED TEXT, one line per row (the stated choice)", paras.includes("Unit\tArea (SF)\tNotes") && paras.includes("A-100\t12,500\tDock high and cross-docked"), JSON.stringify(paras));
+    ok("a table's chip offers the table set (Values, no Keep text only)", await page.locator('[data-testid="note-paste-values"]').count() === 1 && await page.locator('[data-testid="note-paste-text"]').count() === 0);
+    await page.locator('[data-testid="note-paste-values"]').click(); await pacedWait(page, 1000);
+    const dv = await stored();
+    const tv = summariseTables(dv)[0];
+    ok("Values keeps the table's grid and drops its marks", !!tv && JSON.stringify(tv.grid) === JSON.stringify(fx.grid) && tv.marks.length === 0, JSON.stringify(tv && tv.grid));
   }
 
   console.log("\n=== AFTER THE PASTE THE CARET IS STILL IN THE BOX (a character typed lands in it, not in the hidden page paragraph) ===");

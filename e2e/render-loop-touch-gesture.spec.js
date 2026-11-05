@@ -121,7 +121,7 @@ test.describe("NEW-1/NEW-2 — a touch gesture on a located plan may not pump a 
     // PRECONDITION — a run without a real road is VOID, not green (DRIVER-SCROLL §6's known-good
     // arm, in its refusal form: prove the scene under test exists before scoring anything).
     const roads = await page.evaluate(() => {
-      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = m[Object.keys(m)[0]] || {};
       return (s.els || []).filter((e) => e.type === "road").length;
     });

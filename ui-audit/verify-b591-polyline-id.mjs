@@ -55,7 +55,7 @@ await page.waitForTimeout(600);
 let fail = 0;
 const ok = (label, cond) => { console.log(`  ${cond ? "✓" : "✗"} ${label}`); if (!cond) fail++; };
 const savedMarkups = () => page.evaluate((id) => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1"))[id]; return (s && s.markups) || []; } catch (e) { return []; }
+  try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))[id]; return (s && s.markups) || []; } catch (e) { return []; }
 }, DEMO_ID);
 
 /* ---- draw a polyline: Shift+N → click 3 points → Enter ---- */

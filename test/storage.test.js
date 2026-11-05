@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, setSiteGroupRole, deleteSite, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, resolveOrCreateTrackedSiteForComp, setScheduleLink, scheduleLinkOf } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
+import { sitesObject } from "./helpers/sitesView.js";
 
 // B474 faithfulness guard (#31) — this suite runs with IndexedDB ABSENT (no fake-indexeddb import), which
 // is the WHOLE POINT: it proves the localStorage path is byte-for-byte the pre-B474 behavior. Pin it
@@ -400,19 +401,19 @@ describe("B511 — pruneMigratedLegacy compares timestamps before deleting", () 
   it("keeps a legacy site that is NEWER than the cloud copy", () => {
     localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 200, els: [bld("new")] } }));
     pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 } }); // cloud has an OLDER x
-    const left = JSON.parse(localStorage.getItem(SITES_KEY));
+    const left = sitesObject(SITES_KEY);
     expect(left.x).toBeTruthy();              // newer local work survives
     expect(left.x.els[0].id).toBe("new");
   });
   it("prunes a legacy site the cloud has at the same or newer timestamp (B473 reclamation)", () => {
     localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 100 } }));
     pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 250 } });
-    expect(JSON.parse(localStorage.getItem(SITES_KEY))).toEqual({}); // both reclaimed (cloud same/newer)
+    expect(sitesObject(SITES_KEY)).toEqual({}); // both reclaimed (cloud same/newer)
   });
   it("keeps a legacy site the cloud doesn't have at all", () => {
     localStorage.setItem(SITES_KEY, JSON.stringify({ z: { id: "z", updatedAt: 50 } }));
     pruneMigratedLegacy({});                  // empty cloud
-    expect(JSON.parse(localStorage.getItem(SITES_KEY)).z).toBeTruthy();
+    expect(sitesObject(SITES_KEY).z).toBeTruthy();
   });
 });
 
@@ -752,7 +753,7 @@ describe("renameSiteGroup — renames the whole site by group id OR any plan id 
     saveSite({ id: "b", groupId: "smrp1wrgg6u5", site: "Silvestri", name: "Concept B" });
     saveSite({ id: "c", groupId: "smrp1wrgg6u5", site: "Silvestri", name: "Concept C" });
     // the straggler — written straight into storage so saveSite's own guard can't pre-correct it
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const raw = sitesObject("planarfit:sites:v1");
     raw.d = { id: "d", groupId: "smrp1wrgg6u5", site: "Sylvestri", name: "Concept D", updatedAt: Date.now() + 5000 };
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
 
@@ -765,7 +766,7 @@ describe("renameSiteGroup — renames the whole site by group id OR any plan id 
   it("NEW-3 — the map list shows ONE entry for a split project, even before the repair writes back", () => {
     saveSite({ id: "a", groupId: "g", site: "Silvestri", name: "Concept A" });
     saveSite({ id: "b", groupId: "g", site: "Silvestri", name: "Concept B" });
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const raw = sitesObject("planarfit:sites:v1");
     raw.c = { id: "c", groupId: "g", site: "Sylvestri", name: "Concept D", updatedAt: Date.now() + 5000 };
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
     const names = new Set(loadSitesList().filter((s) => (s.groupId || s.id) === "g").map((s) => s.site));
@@ -858,7 +859,7 @@ describe("saveSite — cross-tab stale-write guard (B127)", () => {
   it("a stale save (store advanced by another tab) folds in — never thins", () => {
     saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] }); // this tab last saw 3
     // simulate ANOTHER tab advancing the same site to 5 buildings with a newer timestamp
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    const raw = sitesObject("planarfit:sites:v1");
     raw.s.els = [bld("a"), bld("b"), bld("c"), bld("d"), bld("e")];
     raw.s.updatedAt = (raw.s.updatedAt || 0) + 100000;
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));

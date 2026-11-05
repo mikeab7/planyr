@@ -129,9 +129,11 @@ const wk = await webkit.launch({});
   const z = await Promise.all(["note-zoom-out", "note-zoom-in"].map((i) => rect(page, `[data-testid="${i}"]`)));
   ok("(d) zoom − / + are at least 44 px on a coarse pointer", z.every((r) => r && r.w >= 44 && r.h >= 44), z.map((r) => r && `${Math.round(r.w)}x${Math.round(r.h)}`).join(" "));
   await page.locator(".planyr-anchor").first().tap(); await pacedWait(page, 400);
-  const g = await page.evaluate(() => { const gr = document.querySelector(".planyr-anchor-grip"); if (!gr) return null; const r = gr.getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2; const probe = (x, y) => !!document.elementFromPoint(x, y)?.closest?.(".planyr-anchor-grip"); return { w: r.width, h: r.height, inside: probe(cx, cy), farUp: probe(cx, cy - 18), farSide: probe(cx - 18, cy), outside: probe(cx, cy - 40) }; });
-  ok("(d) the box grip's visible size is unchanged (small) …", !!g && g.w <= 14 && g.h <= 22, JSON.stringify(g && { w: g.w, h: g.h }));
-  ok("(d) …but a finger 18 px off (above / left, away from the text) still hits it (44 px invisible hit area), 40 px off does not", !!g && g.inside && g.farUp && g.farSide && !g.outside, JSON.stringify(g));
+  /* B2426788: the striped grip is retired — the BORDER band moves a box. On a coarse pointer a SELECTED box's band reaches 15 px
+   * OUTWARD (onto the paper, never over the text) so a finger can catch it; it draws nothing of its own. */
+  const g = await page.evaluate(() => { const b = document.querySelector(".planyr-anchor"); const e = b?.querySelector(".planyr-anchor-edge-n"); if (!e) return null; const r = b.getBoundingClientRect(); const x = r.left + r.width * 0.3; const probe = (y) => !!document.elementFromPoint(x, y)?.closest?.(".planyr-anchor-edge"); return { bg: getComputedStyle(e).backgroundColor, inside: probe(r.top + 0.5), farUp: probe(r.top - 12), outside: probe(r.top - 30) }; });
+  ok("(d) the box's border band draws nothing of its own …", !!g && g.bg === "rgba(0, 0, 0, 0)", JSON.stringify(g));
+  ok("(d) …but a finger 12 px above the line (away from the text) still hits it, 30 px above does not", !!g && g.inside && g.farUp && !g.outside, JSON.stringify(g));
   await page.locator('[data-testid="nt-bold"]').tap(); await pacedWait(page, 500);
   ok("(e) tapping a toolbar button leaves NO tooltip stuck on screen", (await page.locator('[role="tooltip"]').count()) === 0);
   await ctx.close();

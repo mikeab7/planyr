@@ -131,3 +131,40 @@ describe("terrain normalizers (B745)", () => {
     expect(arrowGlyphFeatures({ dir: 0, slope: 0.01 }, { x: NaN, y: 1 })).toEqual([]);
   });
 });
+
+/* V1956865 step 6 (2026-10-30): the pipe-size labels never reached the exported sheet, because the esriFeature branch of the export handed the fragment writer
+ * `{lng,lat,text}` while `labelSvg` only draws labels already placed in sheet pixels (`{x,y,text}`) — and drops anything else without a word. */
+describe("PDF-PARITY: an esriFeature row's line labels print", () => {
+  it("the fragment writer draws a placed label and silently drops an unplaced one (so the caller MUST place them)", async () => {
+    const { buildOverlayVectorFragment } = await import("../src/workspaces/site-planner/lib/overlayVectorSvg.js");
+    const proj = () => ({ x: 0, y: 0 });
+    expect(buildOverlayVectorFragment([], proj, { labels: [{ x: 5, y: 6, text: '8"' }] }).svg).toMatch(/<text[^>]*>8&quot;<\/text>/);
+    expect(buildOverlayVectorFragment([], proj, { labels: [{ lng: -89.8, lat: 34.9, text: '8"' }] }).svg).toBe("");
+  });
+  it("exportSheet places each esriFeature label in sheet pixels before handing it over", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    expect(src).toMatch(/for \(const lb of esriLineLabels\(gj, cfg\)\) \{ const q = projLLtoPx\(\[lb\.lng, lb\.lat\]\); labels\.push\(\{ x: q\.x, y: q\.y, text: lb\.text, rank \}\); \}/); // B2589346: `rank` (polygon area) rides along only so the sheet can declutter like the screen; it is stripped before the fragment writer
+    expect(src).not.toMatch(/labels\.push\(\.\.\.esriLineLabels\(gj, cfg\)\)/);
+  });
+});
+
+describe("B2589346 — GIS layer labels print at a PHYSICAL size, not 11 clone units", () => {
+  it("overlayLabelFontSize / overlayLabelHalo are points on paper: 7 pt text, ~1.8 pt halo, whatever the sheet scale", async () => {
+    const { overlayLabelFontSize, overlayLabelHalo, PT_PER_CENTI_INCH } = await import("../src/workspaces/site-planner/lib/exportStyle.js");
+    for (const sheetScale of [0.05, 0.5, 5, 50]) {
+      // units × scale × 0.72 pt per centi-inch = points
+      expect(overlayLabelFontSize(sheetScale) * sheetScale * PT_PER_CENTI_INCH).toBeCloseTo(7, 5);
+      expect(overlayLabelHalo(sheetScale) * sheetScale * PT_PER_CENTI_INCH).toBeCloseTo(1.8, 5);
+    }
+    // a tight frame (large sheet scale) must give SMALL clone-unit sizes — the bug was one fixed number
+    expect(overlayLabelFontSize(50)).toBeLessThan(overlayLabelFontSize(0.5));
+    expect(overlayLabelFontSize(0)).toBe(11);   // no scale known: the authored size, never NaN
+  });
+  it("exportSheet retargets every <text> inside a [data-export-vector] group through them", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    expect(src).toMatch(/tag === "text"[^\n]*\n\s*node\.setAttribute\("font-size", r6\(overlayLabelFontSize\(sheetScale\)\)\)/);
+    expect(src).toMatch(/overlayLabelHalo\(sheetScale\)/);
+  });
+});

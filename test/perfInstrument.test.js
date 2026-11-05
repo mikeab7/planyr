@@ -10,6 +10,7 @@ import {
 } from "../src/shared/telemetry/perfInstrument.js";
 import { isEnrolled, notePerfEdit, __resetPerfEdits } from "../src/shared/telemetry/perfSampling.js";
 import { SESSION_MAX } from "../src/shared/telemetry/clientErrors.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -254,7 +255,7 @@ describe("installPerfInstrument — installs NOTHING at all when the tab is not 
 
 describe("the instrument stays OFF every route's critical path", () => {
   const MAIN = readFileSync(join(here, "../src/main.jsx"), "utf8");
-  const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const SP = plannerSource();
 
   it("main.jsx does NOT static-import the instrument — it breached the Notes budget when it did", () => {
     /* `main.jsx` is on the critical path of EVERY route, so a static edge charges Notes, Library

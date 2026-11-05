@@ -51,8 +51,14 @@ export function cityLineOf(b) {
   if (b.shape === "split") {
     return { text: `${join(part)}, part ${etj.length ? "ETJ" : "unincorporated"}`, failed: false, note: detail };
   }
-  if (b.shape === "in-city") return { text: join(gov), failed: false, note: detail };
-  if (b.shape === "in-city-etj") return { text: `${join(gov)}, plus ${join(etj)} ETJ`, failed: false, note: detail };
+  /* The ETJ overlap (Concept A) REPLACES the "100% … in city limits" share sentence — that line only restated what the city value
+   * already says when the limits hold the whole site — so the default view gains no line (PANEL-BREVITY rule 2). The long form
+   * is the header badge's tooltip. */
+  if (b.shape === "in-city") {
+    const over = list(b.etjOverlap).map(stripCity);
+    const overlapNote = over.length ? `${join(over, " + ")} ETJ layer overlaps these limits — limits govern` : null;
+    return { text: join(gov), failed: false, note: overlapNote || detail };
+  }
   // No full-purpose city holds the site, but a limited-purpose / strip area does: say so in the value, never "Baytown".
   if (limited.length) {
     const names = [...new Set(limited.map((a) => stripCity(a.name)))];
@@ -116,7 +122,7 @@ export function normalizeRoadName(raw) {
   return s.split(/\s+[-–—]\s+/).map(dedupeSuffix).filter(Boolean).join(" / ");
 }
 
-const AUTH_SHORT = { "State (TxDOT)": "state", County: "county", City: "city", Federal: "federal", Unknown: "unknown", "Toll / managed-lane authority": "toll" };
+const AUTH_SHORT = { "State (TxDOT)": "state", "State (TDOT)": "state", County: "county", City: "city", Federal: "federal", Unknown: "unknown", "Toll / managed-lane authority": "toll" };
 const AUTH_ORDER = ["state", "county", "city", "toll", "federal", "unknown"];
 const authShort = (label) => AUTH_SHORT[label] || String(label).replace(/\s*\(.*?\)\s*/g, " ").trim().toLowerCase();
 export const ROADS_LIST_MAX = 10;

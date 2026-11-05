@@ -78,6 +78,15 @@ function warmSequenceDoc() {
   } catch (_) { /* best-effort */ }
 }
 
+/* NEW-1 (B2587264; every account since the cutover, 2026-10-31) — the Spreadsheet's Univer grid IS the Spreadsheet tab now: it is a
+ * SECOND lazy chunk (1.8 MB compressed) that ModelApp loads once the grid mounts, i.e. after the click. So warming the Model module
+ * warms it too, like any other module's chunk — held to when the browser is idle, because evaluating it costs the page's main thread
+ * a few tenths of a second. The one device it skips is an owner's that chose the regular-grid hatch (lib/univerWarm.js decides). */
+function warmUniverGrid() {
+  const run = () => { import("../workspaces/model/lib/univerWarm.js").then((m) => m.warmUniver()).catch(() => { /* best-effort */ }); };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1500 }); else setTimeout(run, 200);
+}
+
 /** Warm one module's chunk (and its iframe doc, for Schedule). Idempotent.
  *
  * Call this ONLY from a navigation-intent gesture (tab hover / pointerdown). There is
@@ -87,4 +96,25 @@ export function prefetchModule(id) {
   warmed.add(id);
   try { IMPORTERS[id]?.(); } catch (_) { /* best-effort */ }
   if (id === "scheduler") warmSequenceDoc();
+  if (id === "model") warmUniverGrid();
+}
+
+/* NEW-1 (2026-10-22, work-laptop report) — a HOVER is only a hint, so it waits for the page to be quiet. `prefetchModule` is an
+ * `import()`, which fetches at high priority and then EVALUATES a whole workspace chunk on the main thread; fired by a pointer
+ * merely crossing the header while map tiles / parcel outlines are still arriving, it competes for the same frame and the same GPU
+ * upload queue as the picture the user is looking at. So a hover prefetch is held back while Leaflet tiles are still loading
+ * (re-asked every 400 ms, give up after ~4 s — the click path still loads on demand), then runs. `onPointerDown` — real intent,
+ * and the touch path — stays immediate and uses `prefetchModule` directly. */
+export const HOVER_QUIET_RETRY_MS = 400;
+export const HOVER_QUIET_MAX_TRIES = 10;
+export function pageIsBusyLoading(doc = typeof document !== "undefined" ? document : null) {
+  try { return !!(doc && doc.querySelector(".leaflet-tile-container .leaflet-tile:not(.leaflet-tile-loaded)")); } catch (_) { return false; }
+}
+export function prefetchModuleWhenQuiet(id, { busy = pageIsBusyLoading, setTimer = (f, ms) => setTimeout(f, ms) } = {}) {
+  let tries = 0;
+  const attempt = () => {
+    if (busy() && ++tries < HOVER_QUIET_MAX_TRIES) { setTimer(attempt, HOVER_QUIET_RETRY_MS); return; }
+    prefetchModule(id);
+  };
+  attempt();
 }

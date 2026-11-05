@@ -4,7 +4,8 @@
  * exactly where the fingers stop) and this module keeps the DISCRETE inputs stepping one full level:
  *
  *   touch pinch ........ Leaflet's own touchZoom, now unsnapped
- *   trackpad pinch ..... a `wheel` event with ctrlKey and a small delta → continuous zoom here
+ *   trackpad pinch ..... a `wheel` event with ctrlKey and a small delta → continuous zoom here, moved like a touch pinch
+ *                        (`_move` per frame, one settle animation at the end — never a view reset per frame, B2426464 ×2)
  *   mouse wheel notch .. exactly ±1 level per notch (Leaflet's built-in wheel handler would turn a
  *                        notch into a fraction once the snap is 0)
  *   +/− buttons, double-click zoom ... unchanged: `zoomDelta` stays 1
@@ -47,16 +48,42 @@ export function attachFreeWheelZoom(L, map) {
   let pinchPending = 0;
   let pinchFrame = 0;
 
+  /* B2426464 ×2 — a trackpad pinch moves the map the way Leaflet's own TOUCH pinch does: `_move(…, { pinch: true })` per frame, one
+   * `zoomanim` to settle when the fingers stop. It used to call `setZoomAround` with the animation switched off, per frame, which is a full view
+   * reset: every tiled layer (the imagery included) threw away all its tiles and rebuilt them, every frame of the gesture, and every
+   * `zoomend`/`moveend` listener (parcel stages, labels, requests) ran per frame too. Measured on composited frames
+   * (ui-audit/measure-parcel-zoom-slide.mjs): 31–45 frames of a 50-frame pinch showed lines over no imagery. */
+  let pinching = false, pinchEnd = null;
+  const PINCH_SETTLE_MS = 140; // no pinch event for this long = the fingers stopped
+  const endPinch = () => {
+    pinchEnd = null;
+    if (!pinching) return;
+    if (map._animatingZoom) { pinchEnd = setTimeout(endPinch, 40); return; }
+    pinching = false;
+    const c = map.getCenter(), z = map.getZoom();
+    if (map.options.zoomAnimation && map._zoomAnimated) map._animateZoom(c, z, true, map.options.zoomSnap);
+    else map._resetView(c, z);
+  };
   const flushPinch = () => {
     pinchFrame = 0;
+    if (map._animatingZoom) { if (pinchPending) pinchFrame = requestAnimationFrame(flushPinch); return; } // a zoom is still settling
     const d = pinchPending; pinchPending = 0;
     if (!d || !anchor) return;
-    map._stop && map._stop();
-    const z = map._limitZoom(map.getZoom() + d);
-    if (z !== map.getZoom()) map.setZoomAround(anchor, z, { animate: false });
+    const z0 = map.getZoom();
+    const z = map._limitZoom(z0 + d);
+    if (z === z0) return;
+    if (!pinching) { map._stop && map._stop(); map._moveStart(true, false); pinching = true; }
+    // keep the ground under the pointer still (Leaflet's own setZoomAround maths)
+    const scale = map.getZoomScale(z, z0);
+    const half = map.getSize().divideBy(2);
+    const center = map.containerPointToLatLng(half.add(anchor.subtract(half).multiplyBy(1 - 1 / scale)));
+    map._move(center, z, { pinch: true, round: false });
+    if (pinchEnd) clearTimeout(pinchEnd);
+    pinchEnd = setTimeout(endPinch, PINCH_SETTLE_MS);
   };
   const flushNotch = () => {
     timer = null;
+    if (pinching) { accum = 0; return; } // a stray plain wheel event inside a pinch is part of the pinch, not a notch
     const lv = notchLevels(accum); accum = 0;
     if (!lv || !anchor) return;
     map._stop && map._stop();
@@ -81,5 +108,6 @@ export function attachFreeWheelZoom(L, map) {
     el.removeEventListener("wheel", onWheel);
     if (timer) clearTimeout(timer);
     if (pinchFrame) cancelAnimationFrame(pinchFrame);
+    if (pinchEnd) clearTimeout(pinchEnd);
   };
 }

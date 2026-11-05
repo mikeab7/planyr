@@ -3,7 +3,8 @@ import { expect } from "@playwright/test";
 
 export const E2E_EMAIL = process.env.E2E_EMAIL || "";
 export const E2E_PASSWORD = process.env.E2E_PASSWORD || "";
-/* NEW-1: when set, sign-in goes through /api/auth/e2e-session (captcha blocks password sign-in). */
+/* NEW-1: when set, sign-in goes through /api/auth/e2e-session — a headless browser cannot pass Cloudflare's Turnstile
+ * check the app's own sign-in panel now sends (the panel works for real users; only automation needs this door). */
 export const E2E_LOGIN_KEY = process.env.E2E_LOGIN_KEY || "";
 export const hasAccount = !!(E2E_LOGIN_KEY || (E2E_EMAIL && E2E_PASSWORD));
 
@@ -235,3 +236,102 @@ export const netSurfaces = (p) => p.locator('[data-testid="road-network-surface"
 export const netEdges = (p) => p.locator('[data-testid="road-network-edge"]');
 /* |ring| area, for "did a sliver survive the dissolve" assertions. */
 export const ringArea = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i + 1) % r.length]; return s + p.x * q.y - q.x * p.y; }, 0) / 2);
+
+/* ---- Building panel v2 (the Loading rows) ---------------------------------------------------
+ * The old "Dock zones ＋ / Car parking ＋ / Bump-outs ＋" steppers are gone: a building's layers are now
+ * per-wall rows with chips and a dashed "+" (src/workspaces/site-planner/SitePlanner.jsx, WallRows).
+ * `panelPlus(page, label).click()` gives specs that only need "a building with bonded children" the same
+ * three one-step additions in the new UI — a truck court (then trailer parking), a sidewalk on every
+ * non-dock wall (then parking), and a corner bump-out from the wall picker. */
+/* Add ONE layer to a wall row through the NEW-1 (2026-11-03) control: the named button adds the NEXT layer (its `data-kind`
+ * says which); anything else is in the ▾ list under its full name. `row` is the `wall-row` locator. */
+export async function addWallLayer(row, key) {
+  await row.getByTestId(`wall-add-${key}`).click();     // every option is its own icon on the row (no ▾)
+}
+/* One row, measured (not eyeballed): one line, the strip and the add group never overlap, no icon squeezed below its size, none past the row's right edge. */
+export const rowFit = (row) => row.evaluate((r) => {
+  const line = r.firstElementChild, lr = line.getBoundingClientRect(), g = r.querySelector('[data-testid="wall-add-group"]'), strip = r.querySelector('[data-testid="wall-strip"]');
+  const out = [];
+  if (line.scrollWidth > line.clientWidth + 1) out.push(`row overflows (${line.scrollWidth} > ${line.clientWidth})`);
+  if (lr.height > 30) out.push(`row wrapped (height ${Math.round(lr.height)})`);
+  if (g) {
+    const gr = g.getBoundingClientRect(), bs = [...g.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
+    if (gr.right > lr.right + 0.5) out.push(`add group ends at ${Math.round(gr.right)}, past the row's ${Math.round(lr.right)}`);
+    bs.forEach((b, i) => {
+      if (b.width < 21.5 || b.height < 21.5) out.push(`icon ${i} squeezed to ${Math.round(b.width)}×${Math.round(b.height)}`);
+      if (b.left < lr.left - 0.5 || b.right > lr.right + 0.5) out.push(`icon ${i} clipped`);
+      if (i && b.left < bs[i - 1].right - 0.5) out.push(`icon ${i} overlaps icon ${i - 1}`);
+      if (Math.abs(b.top - bs[0].top) > 1) out.push(`icon ${i} is on another line`);
+    });
+    if (strip && strip.getBoundingClientRect().right > gr.left + 0.5) out.push("the strip runs into the add group");
+    const sw = strip ? strip.getBoundingClientRect().width : 0, planned = strip ? Number(strip.dataset.barW) : 0;
+    if (strip && sw < planned - 0.5 && !strip.dataset.grown) out.push(`strip squeezed from its planned ${Math.round(planned)} to ${Math.round(sw)}`);
+    if (strip && Math.abs(strip.getBoundingClientRect().top + strip.getBoundingClientRect().height / 2 - (gr.top + gr.height / 2)) > 6) out.push("strip and icons are not on one line");
+  }
+  return out;
+});
+
+export function panelPlus(page, label) {
+  return {
+    click: async () => {
+      if (label === "Dock zones") {
+        const row = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
+        await addWallLayer(row, (await row.getByTestId("wall-add-court").count()) ? "court" : "trailer");
+      } else if (label === "Car parking") {
+        const rows = page.locator('[data-testid="wall-row"]:not([data-role="dock"])');
+        for (let i = 0, n = await rows.count(); i < n; i++) {
+          const row = rows.nth(i);
+          if (!(await row.getByTestId("wall-add-group").count())) continue;
+          await addWallLayer(row, (await row.getByTestId("wall-add-sidewalk").count()) ? "sidewalk" : "parking");
+        }
+      } else if (label === "Bump-outs") {
+        await page.getByTestId("picker-corner-add").first().click({ force: true });
+      }
+    },
+  };
+}
+
+// a layer's length + centre ALONG its wall, in the host's frame
+export const alongOf = (host, side, k) => {
+  const r = (host.rot * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const dx = k.cx - host.cx, dy = k.cy - host.cy, lx = dx * c + dy * s, ly = -dx * s + dy * c;
+  const rel = (((k.rot - host.rot) % 360) + 360) % 360, cross = Math.min(Math.abs(rel - 90), Math.abs(rel - 270)) < 45;
+  const bx = cross ? k.h : k.w, by = cross ? k.w : k.h, horiz = side === "top" || side === "bottom";
+  return { len: horiz ? bx : by, centre: horiz ? lx : ly };
+};
+/* Select the layer on the map and drag its along-wall grip on the chosen end ("plus" = the end toward +x / +y of the wall's own
+ * frame) inward by `feet`. The view is centred on THAT END first (a 5-ft Walk is under 2 px tall at the default zoom, where a
+ * click selects the building — the owner works zoomed in), and the layer is picked a few feet inboard of the end. */
+export async function dragWallLayerEnd(page, host, side, el, end, feet) {
+  const rot = (host.rot * Math.PI) / 180;
+  const horiz = side === "top" || side === "bottom";
+  const uw = horiz ? { x: Math.cos(rot), y: Math.sin(rot) } : { x: -Math.sin(rot), y: Math.cos(rot) };   // along-wall unit (world feet = screen directions)
+  const sgn = end === "plus" ? 1 : -1, len = alongOf(host, side, el).len, PPF = 2.5;
+  await page.evaluate(([x, y, p]) => window.__plannerView.centerOn(x, y, p), [el.cx + sgn * uw.x * len / 2, el.cy + sgn * uw.y * len / 2, PPF]);
+  await page.waitForTimeout(250);
+  const box = await page.getByTestId("planner-canvas").boundingBox(), c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.click(c.x - sgn * uw.x * 5 * PPF, c.y - sgn * uw.y * 5 * PPF);
+  // A road wears an END circle at each end of its w-axis AND two squares on its h-axis (which the code calls "width grips" but which
+  // are the along-wall ends on an end wall); every other layer wears four edge squares. Take whichever sits at this end of the wall.
+  const isRoad = el.type === "road";
+  const grips = isRoad ? page.locator('[data-handle-layer="1"] circle, [data-handle-layer="1"] rect') : page.locator('rect[data-handle="edge"]');
+  await expect(grips).not.toHaveCount(0, { timeout: 1500 });
+  const pos = await grips.evaluateAll((n) => n.map((g) => { const r = g.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+  const near = pos.map((p) => ({ p, d: Math.hypot(p.x - c.x, p.y - c.y) })).sort((a, b) => a.d - b.d)[0];
+  if (near.d > 12) throw new Error(`no grip at the ${end} end (nearest ${Math.round(near.d)}px)`);
+  const to = { x: near.p.x - sgn * uw.x * feet * PPF, y: near.p.y - sgn * uw.y * feet * PPF };
+  await page.mouse.move(near.p.x, near.p.y); await page.mouse.down();
+  await page.mouse.move((near.p.x + to.x) / 2, (near.p.y + to.y) / 2, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 }); await page.mouse.up();
+}
+
+
+/* After dragging a wall layer's handle the side panel is that LAYER's Properties; bring the building's own panel (Docks & walls)
+ * back: centre the view on the building at the app's working scale and double-click it. */
+export async function reopenBuildingPanel(page, host) {
+  await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 0.3), [host.cx, host.cy]);
+  await page.waitForTimeout(300);
+  const box = await page.getByTestId("planner-canvas").boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("building-header")).toBeVisible();
+}

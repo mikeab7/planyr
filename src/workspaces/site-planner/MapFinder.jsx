@@ -1,19 +1,25 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useFileDragActive, isFileDrag, markDropHandled } from "../../shared/files/fileDrag.js";
 import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { parcelGapNotice } from "./lib/parcelGaps.js";
+import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
+import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
+import { selectParcelsHintFor } from "./lib/selectParcelsHint.js";
+import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
-import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
+import { decideTargetOf, escapeClearsDecideBar, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, snapshotHitAt as snapshotHitAtLib, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
+import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
 import { isDiagArmed } from "./lib/diagArm.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
-import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { boundTileCache, capTileCache, armBlankTileHeal, throttleTilePruning } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions, siteStack } from "../../shared/basemaps/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
@@ -29,6 +35,7 @@ import { CONTROL_H, FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 // "Imagery & layers" corner chip is NOT rehomed onto `MenuTrigger` — measured, its own
 // MAP_CORNER_CHIP_STYLE is already byte-for-byte SIZE.md; see that constant's own note.)
 import { Button } from "../../shared/ui/controls.jsx";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 /* LAZY (B1064 tranche c). Converted in the same commit as SitePlanner.jsx's copy — see that
  * file's header comment. On THIS host the card defaults OPEN on desktop (`layersPanelOpen`'s
@@ -56,6 +63,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
+import { calibrationAfterClick, calibrationUndo, calibrationPrompt, matchPairsOf } from "../../shared/sitePlans/lib/overlayCalibration.js";
 import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
@@ -74,6 +82,8 @@ import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
+// NEW-1 (Imagery & Layers) — what the MAP draws: the saved overlays minus Hide Layers (session-only) minus rows that cannot serve where the map is looking.
+import { useDrawnOverlays } from "./lib/useDrawnOverlays.js";
 import { GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 // NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
@@ -82,7 +92,6 @@ import { CompIcon, SitePlanIcon, NoteIcon } from "./components/icons.jsx";
 import DealDatesForm from "./components/DealDatesForm.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelEager,
   outerRingsLngLat,
   geoJsonToEsriFeature,
   lngLatRingToFeet,
@@ -95,6 +104,7 @@ import { STATUSES, STATUS_META, statusOf, roleOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
 import { idAttrFor } from "./lib/parcelQuery.js";
+import { looksLikeTnParcelId } from "./lib/tnParcelId.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
  * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
  * no layout to reserve (the card is absolutely positioned over the map, which is also why the
@@ -103,6 +113,11 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { setMapCursor, installPlannerCursorStyle } from "./lib/plannerCursors.js";
+import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js";
+import { watchSlow, stillLookingMessage } from "./lib/slowSource.js"; // NEW-1 (2026-10-22) — one "still looking" + retry rule for a slow parcel server
+import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
+import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { skipWhileHidden } from "./lib/hiddenRenderGate.js";
@@ -131,6 +146,8 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { attachPlaceNames } from "./lib/placeNamesGate.js";
+import { cityNamesEffective, countiesCitiesOn } from "./lib/placeNamesSuppress.js";
+import { setStateLineEmphasis } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -138,7 +155,8 @@ import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarker
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
 // (src/workspaces/notes) — see shared/mapNotes/db/map_notes.sql's header for why that split holds.
-import { mapNoteMarkerSvg, mapNoteMarkerSize } from "../../shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { mapNoteMarkerSvg, mapNoteMarkerSize, NOTE_MARKER_COLOR } from "../../shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { noteTargetLabel, selectionLabel, composerBox, panToFitRect, keyboardInset } from "../../shared/mapNotes/lib/noteTarget.js";
 import { sitePinSvg, pinHitBox, pinHtml, PIN_KEYLINE_R } from "../../shared/mapNotes/lib/mapPinSymbol.js";
 import { emptyMapNote, mapNoteHeadline } from "../../shared/mapNotes/lib/mapNotes.js";
 import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from "../../shared/mapNotes/lib/mapNotesStore.js";
@@ -149,6 +167,9 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
+import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
+import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
+import { SQFT_PER_ACRE } from "../../shared/units/areaUnits.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -170,8 +191,8 @@ const NO_SITES_MATCH_STYLE = { fontSize: 11.5, color: PAL.muted, padding: "10px 
 const COMP_ACCENT = "#2f6fb0";
 const ON_COMP_ACCENT = PALETTES.light.onAccent; // white — see the palette.js import above
 
-// The right-click map menu (B684) and the right-click comp-marker menu (B711329) share this one
-// panel style — a single module-scope literal rather than each JSX block carrying its own copy.
+// The right-click comp-marker menu (B711329) panel style — a module-scope literal (the empty-map menu that used to share
+// it, B684, was removed 2026-10-22).
 const COMP_MAP_MENU_PANEL_STYLE = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" };
 
 /* NEW-1 (2026-09-08) — the ON-MAP chips: a selection's acreage, and a dropped decide pin. These
@@ -446,7 +467,7 @@ function computeAssembly(selected, exportBase) {
   const padLat = Math.max((latMax - latMin) * 0.4, 0.001);
   const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
   const underlay = { ...aerialPlacement(bbox, lon0, lat0, { exportBase }), opacity: 1, locked: true, fromMap: true };
-  return { parcels, underlay, totalAc: totalSqft / 43560, origin: { lat: lat0, lon: lon0 } };
+  return { parcels, underlay, totalAc: totalSqft / SQFT_PER_ACRE, origin: { lat: lat0, lon: lon0 } };
 }
 
 // Total acreage across every outer ring of a lon/lat parcel feature (multipart-safe).
@@ -454,7 +475,7 @@ function ringsAcres(rings) {
   if (!rings || !rings.length) return null;
   try {
     const lon0 = rings[0][0][0], lat0 = rings[0][0][1];
-    return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / 43560;
+    return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / SQFT_PER_ACRE;
   } catch (_) { return null; }
 }
 
@@ -509,6 +530,15 @@ const PinGlyph = ({ size = 12 }) => (
  * gap to the panel's RADIUS.lg=12 edge): a literal that already equals a token's pixel value still
  * drifts independently of it (docs/DESIGN.md's radius section, exception 3) — this ties it to the
  * panel it actually nests inside instead. */
+/* NEW-1 — the two glyphs of the Select-parcels bottom hint (selectParcelsHint.js names which): a magnifier with + (zoom in) and a
+ * pointer arrow (click). Tabler-style outline strokes in the current text colour. Module scope. */
+function SelectParcelsHintIcon({ kind }) {
+  const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, style: { flex: "none" } };
+  return kind === "zoom-in"
+    ? <svg {...common}><circle cx="10" cy="10" r="7" /><path d="M7 10h6M10 7v6M21 21l-6-6" /></svg>
+    : <svg {...common}><path d="M7.904 17.563a1.2 1.2 0 0 0 2.228 .308l2.09 -3.093l4.907 4.907a1.067 1.067 0 0 0 1.509 0l1.047 -1.047a1.067 1.067 0 0 0 0 -1.509l-4.907 -4.907l3.113 -2.09a1.2 1.2 0 0 0 -.309 -2.228l-13.582 -3.904l3.904 13.563z" /></svg>;
+}
+
 function RailTab({ label, count, active, onClick, title }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} title={title} style={{
@@ -560,6 +590,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const pendingNotesRebuildRef = useRef(null); // deferred notes-layer rebuild, same as the comps one
   const onCompClickRef = useRef(onCompClick);
   useEffect(() => { onCompClickRef.current = onCompClick; }, [onCompClick]);
+  const visibleNowRef = useRef(visible); visibleNowRef.current = visible;   // read by effects that must not re-run on a visibility flip
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
   const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
   const pendingCompsRebuildRef = useRef(null); // ditto, but its OWN slot — sharing pendingRebuildRef
@@ -603,11 +634,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
+  /* B2451472 — SELECTION EPOCH. Bumped every time the selection is dropped (`clearSel`, returning to the map). A lot lookup
+   * (`handleClick`, `selectParcelAt`) is async and captures the epoch it started in; when it lands in a LATER epoch the
+   * selection was cleared meanwhile, so it must not re-add the lot (or toast about it). The ✕ hid this — a click on it
+   * outlasts the lookup — and Escape, being instant, exposed it: measured live, 5 of 6 Escapes brought a lot back. */
+  const selectEpochRef = useRef(0);
   const draggingRef = useRef(false);
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
   // (or a health dot flipping) never re-binds a Leaflet listener.
   const overlaysRef = useRef(overlays);
-  overlaysRef.current = overlays;
   const layerStatusRef = useRef(layerStatus);
   layerStatusRef.current = layerStatus;
   const [addr, setAddr] = useState("");
@@ -615,6 +650,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [err, setErr] = useState("");
   const errRef = useRef("");
   useEffect(() => { errRef.current = err; }, [err]);
+  /* NEW-1 (2026-10-22) — a county with no parcel data says WHY and carries an "Email Michael to request it" link. The link belongs
+   * to exactly the message it was raised with (the `errRetry` pattern): `gapRequest.message === err` is what shows it, so any
+   * later `setErr` — a different message, or "" — drops the link without anyone having to remember to clear it. */
+  const [gapRequest, setGapRequest] = useState(null);
+  const gapToast = (gap) => {
+    const text = `${gap.message} You can still trace the lot from the Aerial underlay.`;
+    setGapRequest({ message: text, href: gap.href });
+    return text;
+  };
   /* NEW-1 (the Texarkana/Chambers bug) — which place a currently-shown parcel-SOURCE-outage
    * notice is ABOUT: `{ county }` (a real county's bbox — the hang-guard's two banners) or
    * `{ state }` (the statewide composite's own banner, which names no county). `message` is the
@@ -623,6 +667,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * a locate error…) is left alone even though nothing here resets this ref for those call sites.
    * Null once nothing outage-shaped is being shown (or once it's been cleared). */
   const sourceNoticeRef = useRef(null);
+  /* NEW-1 (B2288560 amendment, owner 2026-10-16: "it should be at the center bottom, and be removable") — the ✕ on a
+   * parcel-source notice sets this; while it is set no parcel-source notice is raised again, so a slow tile a second
+   * later cannot bring it back. It is the SESSION of the tool: `clearDisplays` (Select parcels ended) resets it, and a
+   * reload starts it false — never persisted, because the warning is useful the next time it is new. */
+  const sourceNoticeDismissedRef = useRef(false);
   /* NEW-1 — could the map's CURRENT view plausibly reach whatever this notice names? Read the
    * map live (never React state) so it's correct whether asked the instant a notice is about to
    * be shown or, later, on every pan/zoom settle. A county notice checks its bbox; a state-scoped
@@ -648,6 +697,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * `onMove`. Per the bug's EXPECTED behavior: a notice naming somewhere the view isn't near
    * simply isn't shown — never a corrected-but-still-wrong location, never a generic substitute. */
   const setSourceNotice = (notice, message) => {
+    if (sourceNoticeDismissedRef.current) return; // NEW-1 (B2288560 amendment) — the owner closed it; it stays closed for this Select-parcels session
     if (!sourceNoticeStillPlausible(notice)) return;
     setErr(message);
     sourceNoticeRef.current = { ...notice, message };
@@ -683,8 +733,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // the camera. "Far" reuses the SAME 50-mile market radius `landingView` already uses to decide
   // whether two sites are the same market (CLUSTER_RADIUS_MI) — no new distance policy to keep in sync.
   const [locateFar, setLocateFar] = useState(false);
-  const failUnavailable = (msg, at) => {
+  /* NEW-1/NEW-2 (2026-10-22) — a lookup whose server never answered is not an answer. The message that says so carries a "Try again" that re-runs the SAME lookup
+   * (`{message, run}`; shown only while that exact message is up, so a later error never inherits a stale button), and while a lookup runs long `lookupNote`
+   * says it is still going — a slow server must never read as "not found" or as nothing happening. */
+  const [errRetry, setErrRetry] = useState(null);
+  const [lookupNote, setLookupNote] = useState("");
+  const failUnavailable = (msg, at, retry = null) => {
     setErr(msg);
+    setErrRetry(retry ? { message: msg, run: retry } : null);
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
     setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
   };
@@ -720,6 +776,19 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [mapNotes, setMapNotes] = useState([]);
   const [mapNotesErr, setMapNotesErr] = useState("");
   const [editingNote, setEditingNote] = useState(null); // the note in the editor card, or null
+  /* NEW-1 (2026-10-08) — WHILE THE COMPOSER IS OPEN THE MAP IS HOLDING A PROMISE: the thing being
+   * annotated stays selected and visible, and nothing underneath can silently retarget or discard
+   * the note. `editingNoteRef` is read by every once-bound map handler (a stray tap on the map, a
+   * site / comp / note marker, an identify popup) so each of them yields to the composer; Save or
+   * Cancel is the only way out. `notePulseId` rings the just-saved note's marker for a few seconds
+   * so the owner sees where it landed. */
+  const editingNoteRef = useRef(null);
+  useEffect(() => { editingNoteRef.current = editingNote; }, [editingNote]);
+  const [notePulseId, setNotePulseId] = useState(null);
+  const [kbInset, setKbInset] = useState(0);        // px of the map's bottom the on-screen keyboard covers
+  const [mapBoxH, setMapBoxH] = useState(0);
+  const noteCardRef = useRef(null);
+  const noteTargetRef = useRef(null);               // the highlight layer drawn on the note's target
   const [showNotesLayer, setShowNotesLayer] = useState(() => {
     try { return localStorage.getItem("planarfit:mapShowNotes:v1") !== "0"; } catch (_) { return true; }
   });
@@ -741,6 +810,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const res = draft.id ? await updateMapNote(draft.id, draft) : await insertMapNote(draft);
     if (res.error) return res;
     setMapNotes((prev) => [res.data, ...prev.filter((n) => n.id !== res.data.id)]);
+    /* NEW-1 (2026-10-08) — the ground the note was begun on (parcel selection / dropped pin) is held
+     * for the whole time the composer is open, so Cancel puts the owner back exactly where they
+     * were. It is released HERE, on a successful Save only, and the new note's marker is ringed so
+     * the owner lands on the same ground with the note visible on it. */
+    if (!draft.id) { finishGroundAction(); clearDecidePin(); }
+    if (res.data?.id != null) setNotePulseId(res.data.id);
     return res;
   };
   const removeMapNote = async (id) => {
@@ -791,14 +866,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // wanted): {lat, lon} | null. The decide bar's second target, beside a parcel selection.
   const [droppedPin, setDroppedPin] = useState(null);
   useEffect(() => {
-    if (!mapRef.current) return;
-    if (placingCompPin) mapRef.current.getContainer().style.cursor = ADD_CURSOR;
-    else if (!selectMode) mapRef.current.getContainer().style.cursor = "";
-    // selectMode's OWN cursor is owned by its own effect elsewhere in this file; this effect only
-    // needs to react to placingCompPin toggling, reading selectMode's current value to avoid
-    // stomping on that other effect's cursor when comp-placing mode turns off.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placingCompPin]);
+    // The cursor for every armed mode is written in ONE place (`mapBaseCursor`, above) — this effect once raced the select-mode
+    // effect and the pin ended on the open hand. Runs after every render (idempotent) so a map built later still gets it.
+    const map = mapRef.current;
+    if (!map || draggingRef.current) return;
+    const c = map.getContainer(), applied = mapCursorAppliedRef.current;
+    if (applied && applied.c === c && applied.v === mapCursorBaseRef.current) return; // unchanged — leave the hover-driven +/− alone
+    mapCursorAppliedRef.current = { c, v: mapCursorBaseRef.current };
+    setMapCursor(c, mapCursorBaseRef.current);
+  });
 
   /* ⛔ B850016 (NEW-11) — the `mode` state THAT USED TO LIVE HERE IS GONE (NEW-1, 2026-09-08),
    * along with its `planarfit:mapMode:v1` key. It answered "what does an address search create?"
@@ -850,6 +926,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // lets the Comps list's own "+ Site plan" button (no comp open yet — order (a), upload-first)
   // reach SitePlansSection's upload flow the same way `commitPlacementRef`/`dropIntakeRef` do.
   const [focusedComp, setFocusedComp] = useState(null);
+  const [docsSlot, setDocsSlot] = useState(null); // NEW-1: the node inside CompsPanel's scroller the Documents section portals into
   const startOverlayUploadRef = useRef(null);
   // NEW-6 (bug fix, 2026-09-27) — "+ Site plan" → "Place on map" with no project chosen used to
   // mint a tracked ("market record") site asynchronously with nothing here ever learning its id,
@@ -894,6 +971,30 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   };
 
   const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
+  // NEW-7 (owner 2026-10-11) — click-by-click scale calibration for ONE site plan ("Trace a length" /
+  // "Match 2 points", started from the Adjust panel). The map only COLLECTS the clicks (every click while
+  // this is set belongs to the calibration — see the once-bound onClick) and draws them; the panel owns the
+  // inputs and the Apply, so this is plain state + three tiny setters, nothing to desync.
+  useEffect(() => { installPlannerCursorStyle({ add: ADD_CURSOR, remove: REMOVE_CURSOR }); }, []);
+  const [calibration, setCalibration] = useState(null); // { kind, id, pts: [{lat, lng}] } | null
+  /* Cursor convention (owner-approved 2026-10-20) — the Map view has ONE cursor owner. Whichever surface is armed decides what the
+   * map shows, over EVERYTHING it can be clicked on (pins, site shapes, boundary fills, GIS layers, a placed plan image): a pin
+   * drop and a calibration click are crosshair, Select parcels is the +/− cursor, and a pan shows grabbing and then goes back to
+   * whatever mode is armed — it used to fall back to the open hand while the next click still dropped the pin. Written by the
+   * layout effect below and the pan/hover handlers; never assigned directly (see `setMapCursor`). */
+  const mapBaseCursor = (placingCompPin || !!calibration || !!clickableOverlayId) ? "crosshair" : selectMode ? ADD_CURSOR : "";
+  const mapCursorBaseRef = useRef("");
+  const mapCursorAppliedRef = useRef(null);
+  mapCursorBaseRef.current = mapBaseCursor;
+  // While a pin / note / select-parcels mode is armed, site pins and shapes are inert (the click belongs to the armed mode).
+  const sitesInert = selectMode || placingCompPin || !!editingNote;
+  const calibRef = useRef(null);
+  calibRef.current = calibration;
+  const startCalibration = (kind, id) => { setActiveOverlayId(null); setClickableOverlayId(null); setCalibration({ kind, id, pts: [] }); };
+  const clearCalibration = () => setCalibration(null);
+  const undoCalibration = () => setCalibration((c) => calibrationUndo(c));
+  const calibClickRef = useRef(null);
+  calibClickRef.current = (latlng) => setCalibration((c) => calibrationAfterClick(c, { lat: latlng.lat, lng: latlng.lng }));
   // B1167713 (NEW-2) — "pinning is optional and offered from the comp." Re-pinning an ALREADY
   // OPEN comp routes the very next overlay click into `repinCompAnchorRef` (CompsPanel's own
   // comp-update logic) instead of `onPlaceComp` (which always creates a NEW comp — see
@@ -938,7 +1039,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [rasterFailedIds, setRasterFailedIds] = useState(() => new Set());
   const onRasterUnavailable = (id) => setRasterFailedIds((s) => (s.has(id) ? s : new Set(s).add(id)));
   useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, {
-    pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay,
+    pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay, calibrating: !!calibration,
+    blockSelect: sitesInert, // while a pin is armed / Select parcels is on / a note is being written, a plan image must not swallow the click to "select" itself
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
     onRasterUnavailable,
   });
@@ -1038,34 +1140,27 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // or the schedule's row drag — none of which use the browser's HTML5 Drag and Drop API, so
   // none of them can trip this gate.
   const dropIntakeRef = useRef(null); // set by SitePlansSection; called with (fileList, dropPlacement)
-  const [fileDragActive, setFileDragActive] = useState(false);
-  const fileDragDepth = useRef(0); // dragenter/dragleave fire per element crossed, not per drag — a counter avoids flicker
+  // NEW-2: the overlay follows the ONE shared file-drag tracker (cleared by every end-of-drag path,
+  // incl. leaving the window, a failed drop, Escape, blur, a view change) and shows only while the
+  // portfolio map is the visible view — no per-element enter/leave counter to strand.
+  // ⛔ `visible` is only the map↔plan MODE inside the Site workspace; the workspace itself stays mounted
+  // behind display:none, so it must ALSO be the active workspace — otherwise this window-level handler
+  // swallowed every file dropped on the Library/Review/Notes and routed it into the site-plan intake
+  // (NEW-1/NEW-2: the Map pill and the Library overlay "appearing together").
+  const dropLive = !!(visible && isActive);
+  const fileDragActive = useFileDragActive(dropLive);
   const onRejectDroppedFile = (name, reason) => setErr(`Couldn't add "${name}" — ${reason}.`);
 
   useEffect(() => {
-    const isFileDrag = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
-    const onDragEnter = (e) => {
-      if (!visible || !isFileDrag(e)) return;
-      e.preventDefault();
-      fileDragDepth.current += 1;
-      setFileDragActive(true);
-    };
     const onDragOver = (e) => {
-      if (!visible || !isFileDrag(e)) return;
+      if (!dropLive || !isFileDrag(e)) return;
       e.preventDefault(); // the whole point — without this the browser navigates the tab to the file
       e.dataTransfer.dropEffect = "copy";
     };
-    const onDragLeave = (e) => {
-      if (!visible || !isFileDrag(e)) return;
-      e.preventDefault();
-      fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
-      if (fileDragDepth.current === 0) setFileDragActive(false);
-    };
     const onDrop = (e) => {
-      if (!visible || !isFileDrag(e)) return;
+      if (!dropLive || !isFileDrag(e)) return;
       e.preventDefault(); // stop the tab-navigation gotcha on the actual drop too, not just dragover
-      fileDragDepth.current = 0;
-      setFileDragActive(false);
+      markDropHandled(e);
       const files = e.dataTransfer.files;
       if (!files || !files.length) return;
       // B850016 (NEW-11) — dropping a file is a direct enough action that the Comps tab should
@@ -1083,17 +1178,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { lat: ll.lat, lng: ll.lng }; }
       dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
     };
-    window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
     window.addEventListener("drop", onDrop);
     return () => {
-      window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [visible, sitesPanelOpen]);
+  }, [dropLive, sitesPanelOpen]);
 
   // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
   // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.
@@ -1181,6 +1272,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [showCompsLayer, setShowCompsLayer] = useState(() => {
     try { return localStorage.getItem("planarfit:mapShowComps:v1") !== "0"; } catch (_) { return true; }
   });
+  // NEW-1 (Records filter) — the ids the Records list currently shows, or null when nothing narrows it.
+  // The comp MARKERS follow it; `comps` itself (the KMZ export, everything else) stays the full list.
+  const [visibleCompIds, setVisibleCompIds] = useState(null);
+  const mapComps = useMemo(() => (visibleCompIds ? comps.filter((c) => visibleCompIds.has(c.id)) : comps), [comps, visibleCompIds]);
   const toggleShowSitesLayer = (v) => { setShowSitesLayer(v); try { localStorage.setItem("planarfit:mapShowSites:v1", v ? "1" : "0"); } catch (_) {} };
   const toggleShowCompsLayer = (v) => { setShowCompsLayer(v); try { localStorage.setItem("planarfit:mapShowComps:v1", v ? "1" : "0"); } catch (_) {} };
   const [hoverRow, setHoverRow] = useState(null);
@@ -1189,6 +1284,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // Colorado-only account never flashes a Harris County panel before the first `moveend`.
   const [viewCounty, setViewCounty] = useState(() => { const c = landingView(sites).center; return countyForView(c[0], c[1]); });
   const [viewState, setViewState] = useState(null); // NEW-2 — the state the map centre is in (see the LayerPanel prop below)
+  /* NEW-1 (Imagery & Layers) — where the map is looking, rounded to ~3 miles so a pan only re-renders when it crosses a cell: the declared
+   * region scope (Houston-only sources) reads it. Null until the first move settles = unknown = every row shows (fail open). */
+  const [viewLoc, setViewLoc] = useState(null);
+  /* …and WHAT THE MAP DRAWS from the saved choice (Hide Layers + a layer left on where its source cannot serve are not drawn). The saved
+   * `overlays` stays what the checkboxes show; everything that paints or identifies reads `overlaysDrawn`. */
+  const overlaysDrawn = useDrawnOverlays(overlays, viewState, viewLoc);
+  overlaysRef.current = overlaysDrawn; // the once-bound raster hover handlers read the DRAWN set
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by name
   // LOCATIONS-MAP-CARD FIX — the Dashboard's "N projects' location(s) need fixing" line lands
@@ -1277,7 +1379,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const setSitesSort = (sort) => patchSitesPanel({ sort });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [dateEditor, setDateEditor] = useState(null); // {site, x, y} — B1161793 (NEW-2) "Deal dates…" popover
-  const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [compMenu, setCompMenu] = useState(null);     // {comp, x, y} — right-click-on-a-comp-marker menu (KMZ site-record export) (B711329)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
   // B706 / NEW-2: always a STATE, never silence. `zoom` picks the lattice band the cursor
@@ -1384,13 +1485,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [statusMenu]);
-  // Escape also closes the right-click map (KMZ export) menu.
-  useEffect(() => {
-    if (!mapMenu) return;
-    const onKey = (e) => { if (e.key === "Escape") setMapMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mapMenu]);
   // Escape also closes the right-click comp-marker menu (site-record KMZ export, B711329).
   useEffect(() => {
     if (!compMenu) return;
@@ -1398,6 +1492,34 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [compMenu]);
+  // NEW-7 — Escape leaves calibration; the clicked points are drawn on the map (drawing points in the comp
+  // accent, their map spots in a contrasting ring, joined by a line) and the cursor says "click here".
+  useEffect(() => {
+    if (!calibration) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setCalibration(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [calibration?.id, calibration?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !calibration) return undefined;
+    const g = L.layerGroup().addTo(map);
+    const pts = calibration.pts;
+    const dot = (p, fill, ring) => L.circleMarker([p.lat, p.lng], { radius: 6, color: ring, weight: 2, fillColor: fill, fillOpacity: 1, interactive: false }).addTo(g);
+    if (calibration.kind === "trace") {
+      pts.forEach((p) => dot(p, COMP_ACCENT, ON_COMP_ACCENT));
+      if (pts.length === 2) L.polyline([[pts[0].lat, pts[0].lng], [pts[1].lat, pts[1].lng]], { color: COMP_ACCENT, weight: 3, interactive: false }).addTo(g);
+    } else {
+      matchPairsOf(pts).forEach((pr) => {
+        dot(pr.from, COMP_ACCENT, ON_COMP_ACCENT);
+        if (pr.to) {
+          dot(pr.to, ON_COMP_ACCENT, COMP_ACCENT);
+          L.polyline([[pr.from.lat, pr.from.lng], [pr.to.lat, pr.to.lng]], { color: COMP_ACCENT, weight: 2, dashArray: "5 5", interactive: false }).addTo(g);
+        }
+      });
+    }
+    return () => { g.remove(); };
+  }, [calibration]); // eslint-disable-line react-hooks/exhaustive-deps
   // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
   // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
   // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
@@ -1411,47 +1533,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeOverlayId]);
-  // Export the sites currently on the map — plus any selected parcels — to a Google Earth .kmz
-  // (B684). Each visible site becomes its own folder; its boundary + drawn layout are reprojected
-  // to WGS84 via the SAME feetToLatLng the map render uses (KML is lon,lat, so we flip [lat,lng]).
-  // Selected parcels are already lon/lat. Honors the status-chip filter. LOUD-FAILURE: siteToFeatures
-  // throws on a non-finite reprojection → caught, surfaced via setErr, no partial file written.
-  const exportSitesKmz = async (extrude = false) => {
-    setMapMenu(null);
-    try {
-      // B1042 — the KMZ writer loads only when a Google Earth export is actually asked for,
-      // so it never rides the planner's boot bundle. It is the one dependency here.
-      const { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } = await import("./lib/kmzExport.js");
-      const projectFor = (o) => (pt) => { const [la, ln] = feetToLatLng(pt, o.lat, o.lon); return [ln, la]; };
-      const features = [];
-      sites.forEach((site) => {
-        if (!site.origin) return;
-        // Dimension lines off. Dock doors always export, as one run per dock side — and neither
-        // is read off each saved site's own settings, so a multi-site file cannot vary with what
-        // someone happened to have shown on screen when they last saved plan #3.
-        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, includeDimensions: false, prefix: [site.site || site.name || "Site"] }));
-      });
-      selected.forEach((sp, i) => {
-        (sp.rings || []).forEach((ring) => {
-          if (!ring || ring.length < 3) return;
-          const closed = ring.map(([lon, lat]) => [lon, lat]);
-          const a = closed[0], b = closed[closed.length - 1];
-          if (a[0] !== b[0] || a[1] !== b[1]) closed.push([a[0], a[1]]);
-          features.push({ geom: "polygon", name: sp.addr || sp.acct || `Parcel ${i + 1}`, folder: ["Selected parcels"], rings: [closed], style: { line: "#0E7490", fill: "#0E7490", fillOpacity: 0.08 } });
-        });
-      });
-      if (!features.length) { setErr("Nothing to export yet — save a site or select a parcel first."); return; }
-      const blob = new Blob([buildKmz("Planyr sites", features)], { type: KMZ_MIME });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = kmzFilename("planyr-sites");
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch (e) {
-      setErr(`Couldn't build the Google Earth file: ${(e && e.message) || "unexpected error"}.`);
-    }
-  };
-
   // A comp's county key -> "County, ST" (mirrors CompsPanel.jsx's own countyEntry/countyDisplayName
   // — kept as a small local copy rather than a cross-component import, same as that file's own
   // note on why this stays self-contained).
@@ -1678,12 +1759,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const a = siteAnchorLatLon(s, siteDrawParcels(s, parcelSummary)) || s.origin;
       pts.push({ id: `site:${s.id}`, lat: a.lat, lon: a.lon });
     }
-    if (showCompsLayer) for (const c of comps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
+    if (showCompsLayer) for (const c of mapComps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
     if (showNotesLayer) for (const n of mapNotes) if (n?.anchor) pts.push({ id: `note:${n.id}`, lat: n.anchor.lat, lon: n.anchor.lon });
     const next = pinClusterOffsets(pts);
     return pinOffsetsSig(next) === pinOffsetsSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pursuitSites, parcelSummary, comps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
+  }, [pursuitSites, parcelSummary, mapComps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
   pinOffsetsRef.current = pinOffsets;
   const shiftAnchor = (anchor, id) => { const o = pinOffsets.get(id); return o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; };
 
@@ -1727,8 +1808,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // Mercator for the whole world). At z8 the view spans a few counties, so there was no way to
     // pull back and see another state at all — you could only jump by picking a site.
     // z3 puts the continent on screen, which is what a two-state product needs.
-    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
+    /* B2426464 ×2 — fadeAnimation:false: a tile level revealed while its tiles are still fading in is not drawn, so the NEXT zoom
+       (the next wheel notch) started its frames late and slid off the imagery; see shared/map/steadyZoomLevels.js. */
+    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, fadeAnimation: false, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
     const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1 — pinch lands where the fingers stop; a wheel notch stays one level
+    const detachLockstep = lockstepZoomAnimation(map); // B2426464 ×3 — every layer moves together through a zoom (shared/map/lockstepZoom.js)
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__mapFinderMap = map;
     // "Locate me" (NEW — mobile pinch/locate/telemetry lap): a 3rd button stacked directly below
     // the zoom control (same `bottomleft` corner — every OTHER corner is already claimed, per
@@ -1762,6 +1846,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => {
+      // NEW-1 (2026-10-08) — a tap on the map while the note composer is open is NOT a new pick: it
+      // must neither re-aim the note (select a parcel, mark a pin) nor discard it. Save / Cancel are
+      // the only exits; panning and zooming still work because they are not clicks.
+      if (editingNoteRef.current) return;
+      // NEW-7 — while a site plan is being calibrated EVERY map click is a calibration point (on the
+      // drawing or off it: "Match 2 points" needs both), never a deselect / parcel pick / pin.
+      if (calibRef.current) { calibClickRef.current && calibClickRef.current(e.latlng); return; }
       // NEW-1 (2026-09-08) — one armed pin, two callers, and they want different things from the
       // same click. The toolbar's "Drop a pin" is ground-first: the click MARKS the point and the
       // decide bar then asks what it is. The comps panel's armed Location cell is not a question —
@@ -1772,7 +1863,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         return;
       }
       // NEW-1 — ring at the cursor the moment the click lands; handleClick clears it on every exit.
-      if (selectModeRef.current) { handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY) : null); return; }
+      if (selectModeRef.current) {
+        // B2335056 — the ring rides the tapped LAT/LNG, re-projected on every map move/zoom, not the screen pixel.
+        const track = {
+          project: () => { const r = containerEl.getBoundingClientRect(); const pt = map.latLngToContainerPoint(e.latlng); return [r.left + pt.x, r.top + pt.y]; },
+          subscribe: (cb) => { map.on("move zoom viewreset", cb); return () => map.off("move zoom viewreset", cb); },
+        };
+        handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY, track) : null);
+        return;
+      }
       // A background click (nothing else claimed it) deselects a site plan armed for editing —
       // its own image click already stops propagation before this ever runs (B848496 NEW-2).
       // B2163346 — …but not the click a handle drag's own release produces (it would disarm the plan mid-edit).
@@ -1794,6 +1893,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // math). It has to hold when every GIS endpoint is down, which is exactly when a site
       // falls through to a default — the same reason coloradoRegions.js is network-free.
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
+      setViewLoc((prev) => {
+        const lat = Math.round(c.lat * 20) / 20, lng = Math.round(c.lng * 20) / 20;
+        return prev && prev.lat === lat && prev.lng === lng ? prev : { lat, lng };
+      });
       // NEW-1 (the Texarkana/Chambers bug) — a parcel-source outage banner is a snapshot of
       // wherever the map WAS when the failing layer's request settled; nothing else ever
       // reconsiders it, so it can (and did, on the owner's own account) sit there naming a place
@@ -1842,12 +1945,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // Leaflet's `movestart`/`zoomstart`, which our own programmatic `setView` also fires.
     const markUserMoved = () => { userMovedRef.current = true; landedRef.current = true; };
     const onMouseMove = (e) => {
-      if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
+      // don't fight the grab cursor while panning; and only when Select parcels itself is what owns the cursor (not a pin drop)
+      if (!selectModeRef.current || draggingRef.current || mapCursorBaseRef.current !== ADD_CURSOR && mapCursorBaseRef.current !== REMOVE_CURSOR) return;
       const inside = selectedRef.current.some((s) => (s.latlngsList || []).some((ll) => pointInPoly(e.latlng.lat, e.latlng.lng, ll)));
-      map.getContainer().style.cursor = inside ? REMOVE_CURSOR : ADD_CURSOR;
+      setMapCursor(map.getContainer(), inside ? REMOVE_CURSOR : ADD_CURSOR);
     };
-    const onDragStart = () => { draggingRef.current = true; map.getContainer().style.cursor = "grabbing"; };
-    const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
+    const onDragStart = () => { draggingRef.current = true; setMapCursor(map.getContainer(), "grabbing"); };
+    const onDragEnd = () => { draggingRef.current = false; setMapCursor(map.getContainer(), mapCursorBaseRef.current); };
     // Live "you are here" GPS readout (B683): the cursor's WGS84 lat/long, coalesced to one
     // update per animation frame so a fast mousemove can't thrash React. Cleared on mouse-out.
     // NEW-1 rides THIS handler — the contour under the cursor is answered from the same
@@ -1865,22 +1969,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       });
     };
     const onCoordOut = () => { setHoverLL(null); contourHover(map, null); };
-    // Right-click on EMPTY map → the KMZ export menu (B684). A right-click ON a site keeps its own
-    // status menu: skip when the DOM target is an interactive site layer / marker, so the two never fight.
-    const onMapCtx = (e) => {
-      const oe = e.originalEvent;
-      if (oe && oe.target && oe.target.closest && oe.target.closest(".leaflet-interactive, .leaflet-marker-pane")) return;
-      if (oe) { oe.preventDefault(); oe.stopPropagation(); }
-      setStatusMenu(null);
-      setMapMenu({ x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
-    };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
     map.on("moveend", onMove);
     map.on("mousemove", onMouseMove);
     map.on("mousemove", onCoordMove);
     map.on("mouseout", onCoordOut);
-    map.on("contextmenu", onMapCtx);
+    // Owner decision 2026-10-22 (B2380112): NO right-click menu on the EMPTY map — the Google Earth export that lived
+    // there (B684) is gone (the Site Planner's File ▾ is its one home), so the browser keeps its own right-click.
     map.on("dragstart", onDragStart);
     map.on("dragend", onDragEnd);
     // B64: track whether a pointer is currently pressed on the map, so the saved-site
@@ -1922,9 +2018,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       layerHealthy: (id) => (layerStatusRef.current?.[id]?.state ?? null) !== "failed",
       // Parcel-select owns the pointer while it's on (the B98 rule) — the same gate the
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
-      identifyOk: () => !selectModeRef.current,
+      identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); detachLockstep(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1991,12 +2087,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B220)
     // NEW-1 (B2018608): the density rule (detectRetina + ceiling-1) is ONE shared function now, and the
     // on-screen aerial carries the tone grade class (exports stitch their own canvas — never graded).
-    const layer = withTileRetry(L.tileLayer(bm.tiles, {
+    // B2426464 ×2 — the new zoom's imagery level waits out of sight until the zoom lands (a cached tile level otherwise slides; shared/map/steadyZoomLevels.js)
+    const layer = holdNewZoomLevels(withTileRetry(L.tileLayer(bm.tiles, {
       maxZoom: 21, attribution: bm.attr, // NOT graded: the Site map keeps its own look (the grade is Hybrid-only)
      
       ...densityTileOptions(bm.maxNative, window.devicePixelRatio || 1),
-    }));
+    })));
     layer.setZIndex(1);
+    throttleTilePruning(layer); // B854832's coalescing: with fadeAnimation off every loaded tile prunes, once per tile otherwise
     layer.addTo(map);
     // Seam fix (NEW-1): dark gap colour behind the aerial — added only once a REAL tile has painted, so an
     // empty/blocked map keeps the ordinary light backdrop it always had.
@@ -2059,7 +2157,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { mode: "site", includePois: false });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, decorateFallback: (layer) => throttleTilePruning(layer) }); // NEW-1: one prune per burst
       labelsRef.current = handle;
     }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };
@@ -2092,19 +2190,21 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      lib/placeNamesGate.js), the layer + datasets behind a dynamic import so nothing rides the
      boot bundle and nothing is fetched at site working zoom. `cityWantRef` closes the race where
      the row is switched off while the chunk is still loading. */
+  // B2507065: while Counties & Cities is on, state lines are drawn heavier than its county / city lines
+  useEffect(() => { setStateLineEmphasis(countiesCitiesOn(overlaysDrawn)); return () => setStateLineEmphasis(false); }, [overlaysDrawn]);
   const cityVisible = siteStack(zoom).includes("cityNames"); // the same gate /food reads (placeNamesVisible inside siteStack)
   const cityRef = useRef(null);
   const cityWantRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
-    cityWantRef.current = cityNames && cityVisible;
+    cityWantRef.current = cityNamesEffective(cityNames, overlaysDrawn) && cityVisible; // B2507065: one set of place names — hidden while Counties & Cities shows its own
     if (!map) return;
     if (cityWantRef.current) {
       attachPlaceNames(map).then((c) => { if (c) { cityRef.current = c; c.setEnabled(cityWantRef.current); } });
     } else if (cityRef.current) {
       cityRef.current.setEnabled(false);
     }
-  }, [cityNames, cityVisible]);
+  }, [cityNames, cityVisible, overlaysDrawn]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
@@ -2115,7 +2215,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      rise above the drawing — but AREA still paints under LINE, so a floodplain fill can't
      bury the stream running through it. syncOverlayLayers creates the panes it is named. */
   useEffect(() => {
-    const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(mapRef.current, overlaysDrawn, overlayRefs.current, {
       /* NEW-1 — the map finder has NO site plan, so there is nothing for a layer to be "above":
          the lifted band collapses back onto the area band here. `overlays` is app-shared, so a
          layer the user lifted on the planner arrives with its flag set — pointing `areaFront` at
@@ -2130,7 +2230,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
       // Boundary hover/click identify (B695) — read live per event; parcel-select mode
       // owns the map's clicks, so the identify yields while it's on (the B98 rule).
-      identifyOk: () => !selectModeRef.current,
+      identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
     sync();
     /* NEW-6 — the re-probe is gated on VISIBLE. This map is never unmounted (SitePlannerApp hides
@@ -2143,7 +2243,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // periodic re-probe so stopped services self-heal when the City/County restart
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
-  }, [overlays, visible]); // eslint-disable-line
+  }, [overlaysDrawn, visible]); // eslint-disable-line
 
   /* NEW-1 (B2112576) — the SAME "layer hidden at this zoom" toast the project canvas shows, on the
      overview map (this is where a layer is first turned on). One shared rule + hook
@@ -2153,7 +2253,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   useLayerHiddenToast({
     enabled: !!(visible && isActive),
     zoom,
-    overlays, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
+    overlays: overlaysDrawn, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
     zoomTo: (target, label) => {
       const m = mapRef.current; if (!m) return;
       try { m.setZoom(label === "Zoom out" ? Math.floor(target + GATE_CLEARANCE) : Math.ceil(target - GATE_CLEARANCE)); } catch (_) {}
@@ -2190,6 +2290,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
   }, [visible]);
 
+  /* E2E-only, read-only: the opacity each live layer on THIS map is really drawn at (the finder twin of `__plannerLayers().opacities`). */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
+    const hook = () => ({ opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])), features: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefFeatureCount(overlayRefs.current[k])])) }); // B2528688: + features painted per layer
+    window.__finderLayers = hook;
+    return () => { if (window.__finderLayers === hook) window.__finderLayers = null; };
+  }, []);
   /* ⛔ NEW-1 (B1933584) — read-only overlay-leak diagnostic (STANDING RULE #2 disposition:
    * "instrument it so it captures itself when he hits it"). The leak above was found by reading the
    * source, not by reproducing it live, so the next time Michael sees a layer painting over a
@@ -2223,6 +2330,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       return {
         surface: "map",
         on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+        drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
         tracked,
         pending: tracked.filter((k) => overlayRefs.current[k] === "pending"),
         orphanCount: orphans.length,
@@ -2231,7 +2339,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     };
     window.__mapOverlayAudit = hook;
     return () => { if (window.__mapOverlayAudit === hook) window.__mapOverlayAudit = null; };
-  }, [overlays]);
+  }, [overlays, overlaysDrawn]);
 
   /* Hover identify for the RASTER-painted layers (NEW-2). The vector overlays answer a hover
      from their own features (a tooltip bound as they draw — see featureHover.js / vectorOverlay.js),
@@ -2249,7 +2357,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      nearby-range pref changes. Picker-only — never touches the map's requests. */
   useEffect(() => {
     let t;
-    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlays, getNearbyRadiusMiles()));
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlaysDrawn, getNearbyRadiusMiles()));
     const debounced = () => { clearTimeout(t); t = setTimeout(recompute, 250); };
     // Read each regional service's extent from its health probe (no extra request), then compute.
     prefetchExtents(ALL_LAYERS, probeService).then(recompute);
@@ -2258,7 +2366,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (map) map.on("moveend", debounced);
     const unsub = subscribeRelevance(recompute);
     return () => { clearTimeout(t); if (map) map.off("moveend", debounced); unsub(); };
-  }, [overlays]);
+  }, [overlaysDrawn]);
 
   /* keep the map sized correctly when shown after being hidden — both when the Site
      workspace flips map↔plan (`visible`) AND when the whole workspace returns from a
@@ -2296,7 +2404,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      existing "clears a committed selection on return" contract above. */
   useEffect(() => {
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
-    if (visible) { clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
+    if (visible) { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -2373,10 +2481,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const boundary = siteBoundaryInfo(site, parcelSummary);
       const acreText = !boundary.known ? "checking boundary…" : boundary.hasBoundary ? `${boundary.acres.toFixed(1)} AC` : "no boundary";
       const tip = `${name} · ${acreText} · ${STATUS_META[status]?.label || status}`;
-      const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
+      const openSiteNow = () => { if (editingNoteRef.current) return; /* the composer owns the map (NEW-1, 2026-10-08) */ return onOpenSiteRef.current && onOpenSiteRef.current(site.id); };
       // Right-click anywhere on a site → status picker at the cursor. (Suppress
       // the browser's native menu via the underlying DOM event.)
-      const onCtx = (e) => { if (selectModeRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
+      const onCtx = (e) => { if (selectModeRef.current || editingNoteRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
 
       // B849344 — the same canonical parcels the acreage number above was built from, not
       // `site.parcels`: drawing the boundary from a different source than the number describes
@@ -2399,14 +2507,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // hovering ANY parcel or element polygon opens this one tooltip, without each of up to ~157
         // polygons per site carrying (and independently opening/closing) its own copy.
         const siteGroup = L.featureGroup();
-        if (!selectMode) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
+        if (!sitesInert) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
         siteGroup.addTo(group); // cheap: siteGroup is still empty here, so this projects nothing
         drawParcels.forEach((p) => {
           if (!p.points?.length) return;
           ops.push(() => {
             L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
               color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
-              fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
+              fillColor: lineColor, fillOpacity: 0.05, interactive: !sitesInert,
               className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
             }).addTo(siteGroup);
           });
@@ -2424,7 +2532,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             L.polygon(ring.map((pt) => feetToLatLng(pt, lat, lon)), {
               color: st.stroke, weight: strokeW, fillColor: st.fill,
               fillOpacity: Math.min(MAP_ELEMENT_FILL_OPACITY_CAP, st.fillOpacity ?? 1),
-              interactive: !selectMode,
+              interactive: !sitesInert,
               className: "map-site-feature",
             }).addTo(siteGroup);
           });
@@ -2443,8 +2551,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
         // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
-        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
-        if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
+        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !sitesInert, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
+        if (!sitesInert) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
 
         // B1923744 — at PARCEL_ZOOM and above, also draw the record's OWN active/selected
@@ -2494,9 +2602,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     };
     // Defer the rebuild if a press is in flight (B64); otherwise build now.
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
+    /* B2233521 (round 5) — and while this map is HIDDEN (the planner is the visible mode) a rebuild waits for the map to be shown: a pin per saved plan (Leaflet creates and adds
+     * each marker — ~80 ms at 2× for the owner's 143 plans) for a map nobody is looking at sat inside every cold load and every sites-list refresh. The newest build is the
+     * one kept (this effect re-runs on every dependency change and overwrites the slot), and the `visible` flip below runs it before paint, so the first frame of the
+     * map is complete. The layer that was already built (map shown earlier) stays up until then, exactly as before. */
+    if (!visibleNowRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
+  }, [sites, parcelSummary, activeSiteId, sitesInert, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
+  useLayoutEffect(() => {
+    if (!visible || pressedRef.current || !pendingRebuildRef.current) return;
+    const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; fn();
+  }, [visible]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
@@ -2513,7 +2630,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const group = L.layerGroup();
       // B831778 (NEW-3) — gated ONLY on the "Comps" checkbox, never on `mode` or the rail tab —
       // the same decoupling rule as the sites layer above.
-      (showCompsLayer ? comps : []).forEach((c) => {
+      (showCompsLayer ? mapComps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
         const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
@@ -2524,11 +2641,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           // site record to Google Earth. Same "select mode wins every click" discipline the site
           // pins' own onCtx uses, via the same open-state-menu shape (compMenu / ContextMenu).
           const onCompCtx = (e) => {
+            if (editingNoteRef.current) return;
             const oe = e.originalEvent;
             if (oe) { oe.preventDefault(); oe.stopPropagation(); }
             setCompMenu({ comp: c, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
           };
-          marker.on("click", () => onCompClickRef.current && onCompClickRef.current(c.id)).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
+          marker.on("click", () => { if (editingNoteRef.current) return; return onCompClickRef.current && onCompClickRef.current(c.id); }).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
         }
         marker.addTo(group);
       });
@@ -2538,7 +2656,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
+  }, [mapComps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -2555,7 +2673,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const group = L.layerGroup();
       (showNotesLayer ? mapNotes : []).forEach((n) => {
         if (!n?.anchor || typeof n.anchor.lat !== "number" || typeof n.anchor.lon !== "number") return;
-        const isOpen = editingNote?.id != null && editingNote.id === n.id; // ring on the note being edited
+        const isOpen = (editingNote?.id != null && editingNote.id === n.id) || (notePulseId != null && notePulseId === n.id); // ring on the note being edited / just saved
         const { size, anchor: iconAnchor } = mapNoteMarkerSize(isOpen);
         // The marker carries its own note id so a check (or a future "focus this note" path) can
         // address ONE note rather than guessing from marker order. Deliberately `data-note-id` and
@@ -2568,7 +2686,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         });
         const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         if (!selectMode && !placingCompPin) {
-          marker.on("click", () => setEditingNote(n)).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
+          marker.on("click", () => { if (editingNoteRef.current) return; /* never silently swap or drop the open composer (NEW-1, 2026-10-08) */ setEditingNote(n); }).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
         }
         marker.addTo(group);
       });
@@ -2578,7 +2696,117 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, pinOffsets]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, notePulseId, pinOffsets]);
+
+  /* ── NEW-1 (2026-10-08): THE NOTE COMPOSER KEEPS ITS TARGET IN VIEW ─────────────────────────────
+   * Owner report (iPhone): choosing "Add a note" made the thing he had clicked disappear and left a
+   * card that said only "On a parcel". Four pieces, each a decision rather than drawing:
+   *   1. the composer NAMES its target (`noteTargetLabel`: saved site → parcel address/account → pin);
+   *   2. the target is OUTLINED / RINGED in the notes colour for as long as the composer is open;
+   *   3. the map pans the smallest amount that puts the target in the part of the map the card (and
+   *      the on-screen keyboard) is NOT covering, and re-does it when the card or keyboard resizes;
+   *   4. the composer is capped to the room above the keyboard and scrolls inside that cap.
+   * The ground itself (parcel selection / dropped pin) is held by the verb and released on Save. */
+  const noteTarget = useMemo(
+    () => (editingNote ? noteTargetLabel(editingNote.anchor, sites) : null),
+    [editingNote?.anchor, sites], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [noteCardH, setNoteCardH] = useState(0);
+  const noteOpen = !!editingNote;
+
+  // The target outline / ring. Redrawn only when the ANCHOR changes, never on a keystroke.
+  const nAnchor = editingNote?.anchor || null;
+  const nKind = nAnchor?.kind || "", nLat = nAnchor?.lat, nLon = nAnchor?.lon, nGeom = nAnchor?.parcelGeom || null, nIsNew = noteOpen && !editingNote.id;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (noteTargetRef.current) {
+      try { map && map.removeLayer(noteTargetRef.current); } catch (_) { /* map already torn down */ }
+      noteTargetRef.current = null;
+    }
+    if (!map || !nAnchor || typeof nLat !== "number" || typeof nLon !== "number") return undefined;
+    const group = L.layerGroup();
+    if (nKind === "parcel" && nGeom) {
+      try {
+        L.geoJSON(nGeom, {
+          interactive: false,
+          style: () => ({ color: NOTE_MARKER_COLOR, weight: 4, fillColor: NOTE_MARKER_COLOR, fillOpacity: 0.2, interactive: false, className: "map-note-target-outline" }),
+        }).addTo(group);
+      } catch (e) { console.warn("[map-notes] could not outline the note's parcel", e); }
+    }
+    if (nIsNew && nKind === "pin") {
+      const html = `<div data-testid="map-note-target-pin" style="width:30px;height:30px;border-radius:${RADIUS.pill}px;transform:translate(-50%,-50%);`
+        + `border:3px solid ${NOTE_MARKER_COLOR};background:${NOTE_MARKER_COLOR}2e;box-shadow:${MAP_PIN_SHADOW};"></div>`;
+      L.marker([nLat, nLon], { icon: L.divIcon({ className: "", html, iconSize: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: 650 }).addTo(group);
+    }
+    group.addTo(map);
+    noteTargetRef.current = group;
+    return () => {
+      try { map.removeLayer(group); } catch (_) { /* map already torn down */ }
+      if (noteTargetRef.current === group) noteTargetRef.current = null;
+    };
+  }, [nKind, nLat, nLon, nGeom, nIsNew]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The on-screen keyboard: its overlap with the map's bottom edge, from the visual viewport.
+  useEffect(() => {
+    if (!noteOpen) { setKbInset(0); return undefined; }
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const upd = () => {
+      const host = mapHostRef.current;
+      if (!host) return;
+      setMapBoxH(host.clientHeight);
+      if (!vv) return;
+      setKbInset(keyboardInset({ mapBottom: host.getBoundingClientRect().bottom, vvTop: vv.offsetTop, vvHeight: vv.height, innerHeight: window.innerHeight }));
+    };
+    upd();
+    if (vv) { vv.addEventListener("resize", upd); vv.addEventListener("scroll", upd); }
+    window.addEventListener("resize", upd);
+    return () => {
+      if (vv) { vv.removeEventListener("resize", upd); vv.removeEventListener("scroll", upd); }
+      window.removeEventListener("resize", upd);
+    };
+  }, [noteOpen]);
+
+  const noteTypingKb = noteOpen && kbInset > 0;   // phone, keyboard up: compact card, no address bar
+  const noteBox = composerBox({ containerH: mapBoxH || 600, kbInset });
+
+  // The card's own height, so the pan below leaves exactly its footprint clear.
+  useEffect(() => {
+    const el = noteCardRef.current;
+    if (!noteOpen || !el || typeof ResizeObserver === "undefined") { if (!noteOpen) setNoteCardH(0); return undefined; }
+    const ro = new ResizeObserver(() => setNoteCardH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    setNoteCardH(Math.round(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, [noteOpen]);
+
+  // Pan (never zoom) the target into the visible part of the map. Re-runs when the card or the
+  // keyboard changes the covered area, NOT on a user's own pan afterwards.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !noteOpen || !noteCardH || typeof nLat !== "number" || typeof nLon !== "number") return;
+    const size = map.getSize();
+    let a = map.latLngToContainerPoint([nLat, nLon]);
+    let rect = { left: a.x, right: a.x, top: a.y, bottom: a.y };
+    if (nKind === "parcel" && nGeom) {
+      try {
+        const b = L.geoJSON(nGeom).getBounds();
+        const p1 = map.latLngToContainerPoint(b.getNorthWest()), p2 = map.latLngToContainerPoint(b.getSouthEast());
+        rect = { left: Math.min(p1.x, p2.x), right: Math.max(p1.x, p2.x), top: Math.min(p1.y, p2.y), bottom: Math.max(p1.y, p2.y) };
+      } catch (_) { /* fall back to the anchor point */ }
+    }
+    const { dx, dy } = panToFitRect(rect, { w: size.x, h: size.y }, {
+      // margins are pin-aware: the target ring is 30 px across, so its far edge must clear the card too
+      top: noteTypingKb ? 18 : 76, left: 16, right: 16, bottom: noteBox.bottom + noteCardH + (noteTypingKb ? 20 : 28),
+    });
+    if (dx || dy) map.panBy([-dx, -dy], { animate: true, duration: 0.25 });
+  }, [noteOpen, noteCardH, noteBox.bottom, noteTypingKb, nKind, nLat, nLon, nGeom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The just-saved note keeps its ring for a few seconds so the owner sees where it landed.
+  useEffect(() => {
+    if (notePulseId == null) return undefined;
+    const t = setTimeout(() => setNotePulseId(null), 6000);
+    return () => clearTimeout(t);
+  }, [notePulseId]);
 
   const flyToSite = (site) => {
     if (!site.origin || !mapRef.current) return;
@@ -2628,7 +2856,32 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * own comment above) without flickering on every ordinary pan. */
   const SLOW_DISPLAY_NOTICE_MS = 2500;
   const [slowDisplayKeys, setSlowDisplayKeys] = useState(() => new Set());
+  /* NEW-1 (wide view) — the cutoff and wide-view eligibility of each parcel source the view needs (`outlineHoldForView` turns them into
+   * "everything draws" / "only the larger lots" / "nothing yet"), and whether any source's wide tiles are backing off from a busy county server. */
+  const [outlineSources, setOutlineSources] = useState([]);
+  const [wideBusy, setWideBusy] = useState(false);
+  const [wideRefused, setWideRefused] = useState(false); // a tile the county REFUSED (not a busy server): part of the view has no outlines, and the hint says so
+  const wideBusyRef = useRef({});
   const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
+  /* NEW-1 — the ONE gate every parcel outage / "slow" banner passes (see lib/parcelOutageGate.js): Select parcels is on,
+   * the reporting layer is still a live display, and it is inside the zoom range it can draw in. A layer's hang / slow
+   * timers outlive the layer (turning the tool off removes it, not its timers), so they ask this when they FIRE. */
+  const parcelNoticeAllowed = (fl) => parcelNoticeMayRaise({
+    selectMode: selectModeRef.current,
+    layerLive: isLiveDisplayLayer(displaysRef.current, fl),
+    inDrawRange: layerInDrawRange(fl),
+  });
+  /* NEW-1 — a banner raised by a parcel source belongs to the parcel tool: when the tool ends, so does it. Retracts only
+   * the exact text this ref set (an unrelated message, e.g. an address-search failure, is left alone). */
+  const retractSourceNotice = () => {
+    const n = sourceNoticeRef.current;
+    if (n && errRef.current === n.message) setErr("");
+    sourceNoticeRef.current = null;
+  };
+  const dismissSourceNotice = () => {
+    sourceNoticeDismissedRef.current = true;
+    retractSourceNotice();
+  };
   const markDisplaySlow = (key, slow) => {
     setSlowDisplayKeys((prev) => {
       if (prev.has(key) === slow) return prev; // no-op — never a fresh Set (and a render) for nothing
@@ -2727,7 +2980,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // also backs the instant click highlight while close-in. What you SEE stays == what you
     // can SELECT (the B137 rule) in every regime: the click path (queryAtPoint) always
     // identifies via a live point query, never against what happened to be drawn.
-    const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles });
+    const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles, wide: true, snapshotCounty: CLIENT_SNAPSHOT_COUNTIES.includes(key) ? key : undefined });
+    // NEW-1 (wide view) — a source whose wide-view tiles are backing off from a busy county server says so (the bottom hint), instead of a silently blank patch
+    fl.on("widestate", (st) => { wideBusyRef.current[key] = { busy: !!(st && st.busy), error: !!(st && st.error) }; const all = Object.values(wideBusyRef.current); setWideBusy(all.some((x) => x.busy)); setWideRefused(all.some((x) => x.error)); });
     // B1427664 — NEW-3: `fl.addTo(map)` is deferred to the END of this function, after every
     // listener below is wired. `onAdd` (fired synchronously inside `addTo`) is what actually
     // KICKS OFF this layer's first request — a vector FeatureLayer's own metadata fetch fires
@@ -2769,7 +3024,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (everDrew || slowTimer) return;
         slowTimer = setTimeout(() => {
           slowTimer = null;
-          if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
+          if (parcelNoticeAllowed(fl) && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
         }, SLOW_DISPLAY_NOTICE_MS);
       };
       const onDrew = () => { everDrew = true; clearSlowTimer(); markDisplaySlow(key, false); };
@@ -2779,6 +3034,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // banner, silently overwrites the correct message with a less accurate one.
       const onFail = () => {
         clearSlowTimer(); markDisplaySlow(key, false);
+        if (!parcelNoticeAllowed(fl)) return; // NEW-1 — tool off / layer gone / below its draw range: silence
         if (CLIENT_SNAPSHOT_COUNTIES.some((c) => downDisplaysRef.current.has(c) && getSnapshot(c))) return;
         // NEW-1 — the composite is scoped to one STATE (txgio_statewide → TX, co_statewide → CO);
         // don't say "statewide" is slow while the view has since moved to the other one.
@@ -2796,7 +3052,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
     const clearSlowTimer = () => { if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; } };
     const markDown = () => {
-      if (settled) return; settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false);
+      if (settled) return;
+      // NEW-1 — a timer armed while the tool was on can fire after it was turned off (or after the view left this
+      // county): the layer is already gone, so there is nothing to pull, record or announce. Retire quietly.
+      if (!parcelNoticeAllowed(fl)) {
+        // Gone (tool off / layer removed) → retire for good. Merely below its draw range → leave it armed-able for zoom-in.
+        if (!(selectModeRef.current && isLiveDisplayLayer(displaysRef.current, fl))) { settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false); }
+        return;
+      }
+      settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false);
       // A real county's outline request hung/errored → pull the dead layer (so the map
       // stops spinning), record the host as failing so CLICKS skip it too, and rely on
       // the TxGIO statewide outlines for this area (keep what you SEE == what you can
@@ -2825,7 +3089,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // county in view; never let it clobber that message with the generic one (the same
       // ordering problem the statewide handler above guards against).
       if (CLIENT_SNAPSHOT_COUNTIES.some((c) => downDisplaysRef.current.has(c) && getSnapshot(c))) return;
-      setSourceNotice({ county: key }, "That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.");
+      setSourceNotice({ county: key }, countyOutageMessage(statewideKeysForState(COUNTIES_MAP[key] && COUNTIES_MAP[key].state).length > 0, sourceDisplayName(key)));
     };
     // Arm the hang-timer only once a request to the host is actually in flight, so we
     // never false-flag a county just because we're zoomed out below the outline zoom
@@ -2847,7 +3111,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (!settled && !slowTimer) {
           slowTimer = setTimeout(() => {
             slowTimer = null;
-            if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
+            if (parcelNoticeAllowed(fl) && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
           }, SLOW_DISPLAY_NOTICE_MS);
         }
       });
@@ -2871,7 +3135,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // A county whose own live layer failed is backed by its state's statewide composite (the
     // composite is otherwise drawn only where no county source exists — one source per area).
     downDisplaysRef.current.forEach((k) => {
-      if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
+      if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).filter((sk) => stateLayerCoversCounty(sk, k)).forEach((sk) => want.add(sk)); // NEW-2 — only a state layer that holds the failed county
     });
     wantedDisplaysRef.current = want;
     /* B2092656 ×3 — warm a county's whole-county saved copy only when the view needs that county. It used to warm
@@ -2882,6 +3146,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       ensureSnapshot(c).catch(() => {});
     });
     setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
+    setOutlineSources([...want].filter((k) => COUNTIES_MAP[k] && !COUNTIES_MAP[k].statewide).map((k) => ({ floor: Math.max(PARCEL_MINZOOM, displayMinZoomOf(k)), wide: wideSupportedForUrl(layerUrlsRef.current[k] || COUNTIES_MAP[k].layerUrl) })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     // A statewide BACKUP draws only the counties whose own live source failed, never the whole view (V1475200 follow-up).
     const base = displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() });
@@ -2915,12 +3180,30 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         seen.add(fl);
         let held = 0, drawn = 0;
         try { if (typeof fl.eachFeature === "function") fl.eachFeature((l) => { held++; if (typeof l.isDrawn === "function" ? l.isDrawn() : (mapRef.current && mapRef.current.hasLayer(l))) drawn++; }); } catch (_) {}
-        layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn });
+        layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn, wide: fl._wide ? { ...fl._wide.info(), ...(fl._wide.stats() || {}) } : null }); // NEW-1 (wide view): the larger-lots stage's own state — stage, lots held, requests made/aborted/retried
       });
       return { sources: layers.map((l) => l.key), layers, held: layers.reduce((n, l) => n + l.held, 0), drawn: layers.reduce((n, l) => n + l.drawn, 0) };
     };
     window.__mapParcelDisplay = hook;
     return () => { if (window.__mapParcelDisplay === hook) window.__mapParcelDisplay = null; };
+  }, []);
+  /* NEW-1 (Memphis radius ×2) — READ-ONLY: the lots Select parcels is holding, as the app holds them (county key, the id the
+   * card shows, the attribute bag, the WGS84 rings). The live audit reads owner / parcel id / acreage from HERE rather than
+   * guessing from network traffic. Answers only under automation, checked at CALL time; writes nothing. */
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? selectedRef.current.map((x) => ({ county: x.county, acct: x.acct, addr: x.addr, attrs: x.attrs, rings: x.rings })) : null);
+    window.__mapSelectedParcels = hook;
+    return () => { if (window.__mapSelectedParcels === hook) window.__mapSelectedParcels = null; };
+  }, []);
+  /* NEW-1 (Memphis line band) — READ-ONLY: what the LAST lot click asked, in which round, and what answered. Under automation
+   * only, checked at CALL time; the live line-band audit reads it to say WHICH county a refused click went to. */
+  const lastIdentifyRef = useRef(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? lastIdentifyRef.current : null);
+    window.__mapLastIdentify = hook;
+    return () => { if (window.__mapLastIdentify === hook) window.__mapLastIdentify = null; };
   }, []);
   const clearDisplays = () => {
     wantedDisplaysRef.current = null;
@@ -2934,6 +3217,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     });
     displaysRef.current = {};
     displaySrcRef.current = {};
+    wideBusyRef.current = {}; setWideBusy(false); setWideRefused(false);
+    retractSourceNotice(); // NEW-1 — the tool is off; a parcel-source banner must not outlive it
+    sourceNoticeDismissedRef.current = false; // NEW-1 (amendment) — the session ended; a later outage is a new occasion
     // B1427664 — every layer is gone, so nothing is "still loading" until select mode reopens
     // them fresh; leaving stale keys here would light the tip immediately on re-entry.
     setSlowDisplayKeys((prev) => (prev.size ? new Set() : prev));
@@ -3017,14 +3303,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       /* B2092656 — turning Select parcels on ran React's commit AND the whole display sync (two county-polygon
        * sweeps, layer construction) in ONE task: 43–85 ms measured, 283 ms on Michael's Chrome. The sync is
        * its own task now (next tick) so the toggle's commit paints first; nothing reads the displays between. */
-      let t = setTimeout(() => syncDisplaysToView(true), 0);
-      map.getContainer().style.cursor = ADD_CURSOR;
+      let t = null, off = false;
+      // NEW-1 (wide view) — the verified size-column table is its own small chunk, read only now; a layer built before it arrived would never get a wide stage.
+      wideViewReady().then(() => { if (!off) t = setTimeout(() => syncDisplaysToView(true), 0); });
       const onViewMoved = () => { clearTimeout(t); t = setTimeout(syncDisplaysToView, 200); };
       map.on("moveend", onViewMoved);
-      return () => { clearTimeout(t); map.off("moveend", onViewMoved); };
+      return () => { off = true; clearTimeout(t); map.off("moveend", onViewMoved); };
     } else {
       clearDisplays();
-      map.getContainer().style.cursor = "";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectMode]);
@@ -3101,6 +3387,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      query point used only for the Chambers→true-county relabel. Returns
      { key, attrs, rings } or null if the record has no polygon. */
   const addParcelHit = (hit, at) => {
+    if (editingNoteRef.current) return null; // a stray pick must not re-aim an open note (NEW-1, 2026-10-08)
     const { county, feature: feat } = hit;
     // ALL outer parts: a multipart parcel ("TRS 3 & 5" = two tracts) must highlight +
     // plan every piece, not just the largest (B36c).
@@ -3148,6 +3435,33 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
     return { candidates, realPrimaries };
   };
+  /* NEW-1 (Memphis line band, B2289168 ×3) — the sources of every county whose line passes near this point (and, when the
+     outline under the cursor came from a county's live display, that county too — what is DRAWN there is evidence of who owns
+     it). Asked only after the routed county found no lot; see lib/identifyWithFallback.js. */
+  const neighbourCandidates = (latlng, extraKeys = []) => {
+    const keys = [...extraKeys.filter(Boolean), ...lineNeighbourKeysForPoint(latlng.lat, latlng.lng)];
+    const list = [...new Set(keys)]
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
+      .filter((c) => c.url);
+    return filterHealthyCandidates(list, STATEWIDE_KEYS);
+  };
+  /* NEW-1 (Memphis line band) — the sources this point could be in whose breaker is OPEN (so the rounds above skipped them):
+     asked once, last, before the app says "No lot here". */
+  const skippedCandidates = (latlng, extraKeys = []) => {
+    const keys = [...new Set([...candidateCountiesForPoint(latlng.lat, latlng.lng), ...extraKeys.filter(Boolean), ...lineNeighbourKeysForPoint(latlng.lat, latlng.lng)])];
+    return keys.filter((k) => isSourceOpen(k))
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
+      .filter((c) => c.url);
+  };
+  /* NEW-2 (2026-10-28) — COUNTY FIRST, THE STATE'S LAYER WHEN THE COUNTY DOES NOT ANSWER (owner: "wire it to the county one, but then default it
+     to the state one"). Asked by lib/identifyWithFallback.js right after a first round in which a county was SILENT; what it returns is decided
+     by the pure lib/parcelFallbacks.js (the state layer only where it really holds the county, then any town layer the county row declares). */
+  const fallbackSourcesFor = (latlng) => async ({ silent }) => {
+    const list = await fallbackCandidates(fallbackSpecsFor({ failed: silent, lat: latlng.lat, lng: latlng.lng }), (k) => layerUrlsRef.current[k]);
+    return filterHealthyCandidates(list, STATEWIDE_KEYS);
+  };
+  /* The notice for a lot that came from a fallback (or null): the words come from the fallback's own label, never a hardcoded "TxGIO". */
+  const fallbackBackup = (hit) => (hit && hit.fallback ? { kind: hit.fallback.kind, text: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : null);
   // A statewide-backup answer reports the parcel's true county in its `county` attr
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
   const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -3168,12 +3482,16 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const snapshotHitAt = (lng, lat) => snapshotHitAtLib(lng, lat, SNAPSHOT_COUNTIES);
 
   const handleClick = async (latlng, ack = null) => {
+    const epoch = selectEpochRef.current; // B2451472 — a clear while this lookup is in flight abandons it (see selectEpochRef)
+    const cleared = () => epoch !== selectEpochRef.current;
+    await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
     // No county pre-selection required; a border straddle queries both and we take
     // the first hit. Candidates with an unresolved URL (service still loading or
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
+    const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band) — a county across a nearby line may own it
     /* ⛔ B1597232 — "STILL LOADING" IS ONE OF *TWO* REASONS THERE IS NOTHING TO QUERY, AND SAYING IT
      * FOR THE OTHER ONE IS A LIE THAT NEVER RESOLVES. Since the Wayne→Oakland fix,
      * `candidateCountiesForPoint` returns an EMPTY list for a point whose county is confidently
@@ -3183,12 +3501,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * and pending cases keep their existing wording untouched. Same shape as the no-hits branch
      * below, which has named the county since B209502. */
     if (!candidates.length) {
-      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      setErr(gap
-        ? `${gap} You can still trace the lot from the Aerial underlay.`
-        : "Parcel services are still loading — give it a second and click again.");
-      ack?.empty("No lot here");
-      return;
+      const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
+      if (!nearSources.length && !skippedCandidates(latlng).length) { // NEW-1 (Memphis line band) — else a county across a nearby line (or a breaker-skipped one) is still asked below
+        setErr(gap
+          ? gapToast(gap)
+          : "Parcel services are still loading — give it a second and click again.");
+        ack?.empty("No lot here");
+        return;
+      }
     }
     setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null); setLocateFar(false);
 
@@ -3217,14 +3537,21 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
 
     setBusy(true);
+    const stopSlow = watchSlow(() => setLookupNote(stillLookingMessage(null)));
     try {
       // Eager identify: take the first source that returns a lot (≈2-3s via the
       // statewide layer) instead of stalling on a hung county server's full 8s timeout.
       // The breaker is fed for EVERY source via onSettled once they all finish — even
       // the slow ones we didn't wait for — so the next click skips a dead host (B244).
-      const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+      const res = await identifyWithLineFallback({
+        primary: candidates, lng: latlng.lng, lat: latlng.lat,
+        fallbacks: fallbackSourcesFor(latlng),
+        neighbours: () => neighbourCandidates(latlng, [opt && opt.county]),
+        skipped: () => skippedCandidates(latlng, [opt && opt.county]),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
       });
+      if (cleared()) return; // B2451472 — cleared (Escape / ✕) while the lookup ran: nothing to add, nothing to say
+      lastIdentifyRef.current = { at: [latlng.lat, latlng.lng], routed: candidateCountiesForPoint(latlng.lat, latlng.lng).map((k) => ({ key: k, url: !!layerUrlsRef.current[k], open: isSourceOpen(k) })), primary: candidates.map((c) => c.county), queried: res.queried.map((c) => c.county), via: res.via, hits: res.hits.map((h) => h.county), silent: res.silent };
       if (!res.hits.length) {
         // Live returned nothing. If the optimistic highlight came from a loaded Drive snapshot
         // (the county server is down but our cached copy HAS this lot), KEEP it as the selection —
@@ -3247,6 +3574,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * path already uses — regardless of what's currently painted on the map. */
         if (res.responded === 0) {
           const cached = await snapshotHitAt(latlng.lng, latlng.lat);
+          if (cleared()) return;
           if (cached) {
             const added = addParcelHit(cached, latlng);
             if (added) {
@@ -3262,17 +3590,23 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * blames the user for a gap in our coverage. `countyIdentity` knows the difference: it
          * names the county from real geometry and reports `no-source` when nothing is wired there.
          * Naming the wrong county is worse than admitting a gap — and so is naming none at all. */
-        const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+        const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
         /* NEW-4 — an OUTAGE carries the fallback; the other two do not. "No parcel right there" is a
          * real answer about this point, and a county with no wired source (`gap`) is a coverage fact
          * — neither is a reason to offer "start the plan here anyway", which exists for the case
          * where the service that WOULD have answered is down. */
-        ack?.empty(res.responded === 0 ? "Couldn't reach the county server" : "No lot here");
-        if (res.responded === 0) failUnavailable("The county parcel server isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.", latlng);
+        // NEW-1 (Memphis line band) — when the county itself has no source, only a NEIGHBOUR was asked: its silence is not
+        // this county's outage, so the county's own gap sentence stands.
+        if (gap && candidates.length === 0) { ack?.empty("No lot here"); setErr(gapToast(gap)); return; }
+        /* NEW-2 (2026-10-22) — "No lot here" is only ever said when EVERY server asked answered. One that never did (timed out, errored) may be the one holding the lot, so its silence is
+         * reported as silence, with a Try again — never as an empty point, whether or not a neighbour across a line did answer. */
+        const silentCount = res.responded === 0 || res.errors > 0;
+        ack?.empty(silentCount ? "Couldn't reach the county server" : "No lot here");
+        if (silentCount) failUnavailable(`${silentServerPhrase(res.silent)} didn't answer, so this point couldn't be checked. Try again, or start the plan here and draw the boundary yourself.`, latlng, () => handleClick(latlng));
         else setErr(gap
-          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          ? gapToast(gap)
           : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
@@ -3287,7 +3621,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // healthy CAD was queried but statewide merely won the parallel race (B630). And
       // with B643's eager preference, a healthy CAD normally WINS the race, so hit.county
       // is the CAD itself here and this is false.
-      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
+      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: res.queried, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -3298,26 +3632,59 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
         addParcelHit(hit, latlng);
-        if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
+        const fbk = fallbackBackup(hit);
+        if (fbk) setBackupNotice({ county: null, ...fbk });
+        else if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
-      failUnavailable(humanizeError(e), latlng); // NEW-4 — a thrown lookup is an outage too
+      if (cleared()) return;
+      failUnavailable(humanizeError(e), latlng, () => handleClick(latlng)); // NEW-4 — a thrown lookup is an outage too
     } finally {
+      stopSlow(); setLookupNote("");
       setBusy(false);
       ack?.done(); // no-op when a "no lot here" tag already took over the ring
     }
+  };
+
+  /* NEW-1 (TN, 2026-10-21) — the lot a geocoded ADDRESS names, as a point inside it, or null. Only counties whose layer declares a situs column are asked,
+   * each through the one id/address query; a failure or a timeout is simply "no snap" (the caller then says what it always said). */
+  const snapToAddressLot = async (latlng, label, candidates) => {
+    try {
+      const [{ houseAndStreet, pickAddressSnap }, { interiorPointOf }, { lookupParcels }] = await Promise.all([
+        import("./lib/addressSnap.js"), import("./lib/parcelIdSearch.js"), import("./lib/parcelQuery.js"),
+      ]);
+      const want = houseAndStreet(label);
+      if (!want) return null;
+      const keys = candidates.filter((c) => !c.statewide && COUNTIES[c.county] && COUNTIES[c.county].addrField);
+      for (const c of keys) {
+        const r = await Promise.race([
+          lookupParcels({ county: c.county, lookupUrl: COUNTIES[c.county].layerUrl || "", mode: "address", value: `${want.house} ${want.street}` }),
+          new Promise((res) => setTimeout(() => res(null), 6000)),
+        ]).catch(() => null);
+        if (!r || !r.feats || !r.feats.length) continue;
+        const pick = pickAddressSnap(r.feats, label, latlng, {
+          addrOf: (f) => situsAddress(f.attributes || {}),
+          centreOf: (f) => interiorPointOf(f),
+        });
+        if (pick) return interiorPointOf(pick);
+      }
+    } catch (_) { /* a snap that cannot run is no snap */ }
+    return null;
   };
 
   /* NEW-2 (B233): identify + select the parcel at a geocoded point and surface its
      info card. Reuses the SAME identify/select pipeline as a click. Distinguishes
      "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
      (none) — they mean different things and must read differently. */
-  const selectParcelAt = async (latlng, label, tok) => {
+  const selectParcelAt = async (latlng, label, tok, noSnap = false) => {
     // B545: when called from a search, `tok` is that search's generation; a newer search makes
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
-    const live = () => tok == null || tok === addrTokRef.current;
+    const epoch = selectEpochRef.current; // B2451472 — a clear while the lookup is in flight supersedes it too
+    const live = () => (tok == null || tok === addrTokRef.current) && epoch === selectEpochRef.current;
+    await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2)
     const { candidates, realPrimaries } = resolveCandidates(latlng);
+    const nearSources = neighbourCandidates(latlng); // NEW-1 (Memphis line band)
     /* ⛔ B1597232 — A COVERAGE GAP IS NOT AN OUTAGE, AND THIS IS THE SURFACE THE WAYNE COUNTY REPORT
      * CAME IN THROUGH ("search the address, let the automatic lot lookup run"). With no candidates
      * this card used to read `unavailable` — "the county parcel service couldn't be reached for
@@ -3329,17 +3696,17 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * rule the click path already follows: an OUTAGE carries the fallback, a coverage fact does not
      * (the aerial trace, offered in the copy, is the way forward for this one). */
     if (!candidates.length) {
-      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
-      if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label });
-      return;
+      const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
+      if (!nearSources.length && !skippedCandidates(latlng).length) { if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap.message, request: gap.href } : { status: "unavailable", label }); return; }
     }
     let res;
     try {
-      res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+      res = await identifyWithLineFallback({
+        primary: candidates, lng: latlng.lng, lat: latlng.lat, fallbacks: fallbackSourcesFor(latlng), neighbours: () => nearSources, skipped: () => skippedCandidates(latlng),
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })), // feed the circuit breaker
       });
     } catch (_) {
-      if (live()) setParcelInfo({ status: "unavailable", label }); return;
+      if (live()) setParcelInfo({ status: "unavailable", label, at: latlng }); return;
     }
     if (!live()) return; // a newer search superseded this one — don't add a stale parcel or info
     if (!res.hits.length) {
@@ -3360,18 +3727,31 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       }
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
-      setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
+      if (candidates.length === 0) {
+        // NEW-1 — only a neighbour was asked (the routed county has no source) and it had nothing: the county's own gap stands.
+        const gap = parcelGapNotice(countyIdentity(latlng.lat, latlng.lng), latlng);
+        if (gap) { setParcelInfo({ status: "no-source", label, note: gap.message, request: gap.href }); return; }
+      }
+      /* NEW-1 (TN, 2026-10-21) — a healthy server answered and the geocoded point is in the road: before the "no parcel" card, ask the county's own
+       * layer for the lot the ADDRESS names (house number + street, within a short walk of the point). Narrow by design — see lib/addressSnap.js. */
+      if (res.responded > 0 && label && !noSnap) {
+        const snapped = await snapToAddressLot(latlng, label, candidates);
+        if (!live()) return;
+        if (snapped) { await selectParcelAt(snapped, label, tok, true); return; }
+      }
+      setParcelInfo({ status: res.responded === 0 || res.errors > 0 ? "unavailable" : "none", label, at: latlng }); return;
     }
     const hit = res.hits[0];
     // See handleClick (B630): a statewide answer flags a "backup" only when the real CAD
     // was actually unavailable, not when it lost the parallel race to a faster TxGIO.
-    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
+    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: res.queried, statewideKeys: STATEWIDE_KEYS });
     const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
       addr: situsAddress(added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
-      backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
+      backup: viaBackup || hit.fallback ? backupCountyLabel(hit.feature.attributes || {}) : null,
+      ...(hit.fallback ? { backupNote: fallbackBackup(hit).text, backupKind: hit.fallback.kind } : {}),
     });
   };
 
@@ -3387,7 +3767,32 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (text != null && text !== addr) setAddr(text);
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
     setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
+    let stopSlow = () => {}; // NEW-1 (2026-10-22) — the "still looking" watch spans the id lookup AND the lot selection that follows it (same slow server)
     try {
+      /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel ID ("156-027.00-000", "156 027.00 000", an 11-digit Metro Nashville
+       * number) is looked up on the counties' own layers and lands on THAT lot, selected. A miss is a plain sentence naming where it looked
+       * (never a silent no-op, never a geocoder guess at a number); an address or place never reaches this branch (`looksLikeTnParcelId`). */
+      if (looksLikeTnParcelId(q)) {
+        const { resolveParcelId, parcelIdMessage } = await import("./lib/parcelIdSearch.js");
+        const mc = mapRef.current ? mapRef.current.getCenter() : null; // an id repeated across counties lands on the one nearest the map
+        stopSlow = watchSlow(() => { if (tok === addrTokRef.current) setLookupNote(stillLookingMessage("Tennessee")); });
+        const r = await resolveParcelId(q, { near: mc ? { lat: mc.lat, lng: mc.lng } : null });
+        if (tok !== addrTokRef.current) return;
+        /* An empty first answer that the confirming re-ask turned into a find is the intermittent "came back empty, worked on retry" Michael saw (V1853888) — it cannot be reproduced on demand,
+         * so the app reports it the moment it happens (public.client_errors, kind parcel-id-empty-then-found) instead of the report being dismissed as unreproducible. */
+        if (r.recheckedEmpty) reportClientEvent("parcel-id-empty-then-found", `parcel ID search came back empty on the first ask and found the lot on the re-ask (${r.county})`, { county: r.county, typed: q });
+        if (r.status === "found") {
+          mapRef.current.flyTo([r.point.lat, r.point.lng], 18, { duration: 0.75 });
+          await selectParcelAt(r.point, r.label, tok);
+          return;
+        }
+        if (r.status === "notfound" || r.status === "unavailable") {
+          const msg = parcelIdMessage(r, q);
+          setErr(msg);
+          setErrRetry(r.status === "unavailable" ? { message: msg, run: () => goAddress(q) } : null); // a server that never answered gets a Try again; a real "not found" does not
+          return;
+        }
+      }
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
       if (tok !== addrTokRef.current) return; // a newer search started — drop this stale result
@@ -3398,7 +3803,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     } catch (_) {
       if (tok === addrTokRef.current) failUnavailable("Address search is unavailable right now — pan/zoom the map to your site, or start the plan where the map is looking and draw the boundary.");
     } finally {
-      if (tok === addrTokRef.current) setBusy(false);
+      stopSlow();
+      if (tok === addrTokRef.current) { setLookupNote(""); setBusy(false); }
     }
   };
 
@@ -3427,7 +3833,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     markDecidePin({ lat: c.lat, lng: c.lng });
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
+  /* NEW-2 (2026-10-22) — "Try again" on the parcel card: the same lookup for the same point, with the loading treatment and the still-looking line. */
+  const retryLotAt = async (at, label) => {
+    setBusy(true); setParcelInfo(null);
+    const stopSlow = watchSlow(() => setLookupNote(stillLookingMessage(null)));
+    try { await selectParcelAt(at, label, null, true); } finally { stopSlow(); setLookupNote(""); setBusy(false); }
+  };
+
+  const clearSel = () => { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
 
   /* NEW-1 (2026-09-24) — a decide-bar verb that finishes WITHOUT leaving the map (Log a comp, Add a
    * note) must exit select mode ITSELF, not just empty the selection. "Plan this site" gets that for
@@ -3445,6 +3858,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * bar always has exactly ONE target and can never present three verbs whose meaning depends on
    * which of two things you thought you had selected. */
   const markDecidePin = (latlng) => {
+    if (editingNoteRef.current) return; // the note composer owns the ground until Save / Cancel (NEW-1, 2026-10-08)
     setPlacingCompPin(false);
     setPinDecideArmed(false);
     setSelectMode(false);
@@ -3456,6 +3870,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // NEW-1 — leaving the decide bar without answering it. Never destructive: a pin is a point the
   // user marked, nothing has been written anywhere yet.
   const clearDecidePin = () => setDroppedPin(null);
+  /* The decide bar's ✕ AND its Escape key (B2451472): clears whichever ground the bar is about. The ✕ keeps the
+   * selection-clearing contract of `clearSel()` — NOT `finishGroundAction` — so clearing to re-pick stays in
+   * select mode (test/decideBarDismiss). `decideTarget` is the per-render value, defined further down. */
+  const clearDecide = () => { if (decideTargetOf({ selectedCount: selectedRef.current.length, hasPin: !!droppedPin }) === "parcels") clearSel(); else clearDecidePin(); };
 
   /* NEW-4 — THE FALLBACK. Start a plan with no parcel, LOCATED at `at` (or wherever the map is
    * looking), so the owner can draw the boundary himself and still get the aerial, the flood
@@ -3727,20 +4145,20 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       onAccent: "var(--on-accent-notes)",
       title: "Pin a note to this ground",
       run: (target) => {
+        /* NEW-1 (2026-10-08) — THIS VERB NO LONGER CLEARS THE GROUND IT WAS PRESSED ON. It used to
+         * `finishGroundAction()` / `clearDecidePin()` the instant the composer opened, so the parcel
+         * highlight and the decide bar vanished and the owner (on a phone, the composer covering the
+         * map) could no longer tell what the note was for. The selection / pin now stays on the map,
+         * outlined, for as long as the composer is open: Cancel returns to the decide bar as it was,
+         * Save releases the ground (`saveMapNote`). The anchor carries a `label` so the composer can
+         * name its target even when no saved site sits there. */
         if (target === "parcels") {
           const anchor = parcelAnchorFromSelection(selected, asm);
           if (!anchor) return;
-          beginNoteAt(anchor);
-          // NEW-1 (2026-09-24) — `finishGroundAction`, not a bare `clearSel()`: this verb finishes
-          // without leaving the map, so it must exit select mode itself or the toolbar falls back
-          // to "Selecting…" with nothing selected instead of its normal AT-REST row (the reported
-          // "Add a note doesn't dismiss the parcel selection bar" defect). See that helper's own
-          // comment, beside `clearSel`.
-          finishGroundAction();
+          beginNoteAt({ ...anchor, label: selectionLabel(selected) });
           return;
         }
         const pin = droppedPin;
-        clearDecidePin();
         if (pin) beginNoteAtPoint({ lat: pin.lat, lng: pin.lon });
       },
     },
@@ -3893,6 +4311,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (!decideTarget || !orderedVerbs.length) return undefined;
     const onKey = (e) => {
       if (e.key !== "Enter") return;
+      if (editingNoteRef.current) return; // the note composer is open — Enter belongs to it
       const ae = document.activeElement;
       const tag = ae && ae.tagName;
       // NEW-1 (B1012832) — the text-entry half reads the ONE shared authority
@@ -3913,6 +4332,40 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [decideTarget, selected, droppedPin, lastVerb]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* B2451472 — ESCAPE DOES WHAT THE BAR'S ✕ DOES: `clearDecide` is the ONE clearing path (the ✕ calls the same
+   * function), so every selected parcel — or the dropped pin — goes, with the outline, the acreage chip and the
+   * bar. The rule for WHEN is the pure `escapeClearsDecideBar`; this listener only reads the live facts.
+   * One listener for the component's life (a ref carries the facts, so no re-subscribe per render and none left
+   * behind on unmount). It is registered at mount, so it runs BEFORE any menu's own Escape listener of the same
+   * keypress — which is why an open Record info menu is read from the ref (still open) and left alone: the
+   * first Escape closes only the menu, the next one clears. The finder stays mounted but hidden behind an open
+   * project / another workspace, so it also demands `visible && isActive`. */
+  const escapeFactsRef = useRef(null);
+  escapeFactsRef.current = {
+    decideTarget,
+    mapShown: !!(visible && isActive),
+    ownedElsewhere: !!(
+      recordMenuOpen || statusMenu || compMenu || dateEditor || locateNotice || editingNote || renaming ||
+      calibration || activeOverlayId || clickableOverlayId || placingCompPin || pinDecideArmed
+    ),
+    clear: clearDecide,
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const f = escapeFactsRef.current;
+      if (!f) return;
+      const ae = document.activeElement;
+      const typing = isTextControl(ae) || (!!ae && PICKER_TAGS.includes(ae.tagName));
+      // A modal dialog (any surface's) keeps its own Escape.
+      const modalOpen = !!document.querySelector('[aria-modal="true"]');
+      if (!escapeClearsDecideBar({ decideTarget: f.decideTarget, mapShown: f.mapShown, typing, ownedElsewhere: f.ownedElsewhere || modalOpen })) return;
+      f.clear();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
 
   /* B427410 — the `field` style object that used to live here dressed ONE control: the Imagery
@@ -4124,6 +4577,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
 
   // (The parcel card's own label/value row moved to components/ParcelInfoCard.jsx — NEW-1.)
 
+  /* NEW-1 (B2288560 amendment) — is the text now in `err` a parcel-SOURCE notice (the slow / outage banner `setSourceNotice`
+   * raised, matched by its exact message so an address-search failure sharing `err` is left where it was)? Those float
+   * bottom-centre with a ✕; every other `err` stays in the bottom-left stack. A banner that carries an action button
+   * (`fallbackOffer`) or shares the slot with the locate offer keeps the stack, which owns those buttons. */
+  const retryShown = !!err && !!errRetry && errRetry.message === err; // NEW-1/NEW-2 — the "Try again" belongs to exactly the message it was raised with
+  const gapShown = !!err && !!gapRequest && gapRequest.message === err; // NEW-1 (2026-10-22) — the "Email Michael to request it" link rides only with the message it was raised for
+  const sourceNoticeFloats = !!err && !fallbackOffer && !locateFar && !retryShown
+    && !!sourceNoticeRef.current && sourceNoticeRef.current.message === err;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
       {/* map — B1168128 (×2): touchAction/overscrollBehavior on the Leaflet host itself so a
@@ -4161,6 +4623,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             position: "absolute", inset: 0, zIndex: MAP_CHROME_Z.control, pointerEvents: "none",
             boxShadow: `inset 0 0 0 3px ${COMP_ACCENT}, inset 0 0 26px -8px ${COMP_ACCENT}`,
           }} />
+        )}
+
+        {/* NEW-7 — the live prompt for a scale calibration, same pill the pin-a-comp mode uses. */}
+        {calibration && (
+          <div data-testid="map-calibration-prompt" style={{
+            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.control + 1,
+            background: COMP_ACCENT, color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+            display: "flex", alignItems: "center", gap: 10, maxWidth: "calc(100% - 40px)",
+          }}>
+            <span>{calibrationPrompt(calibration)}</span>
+            <button onClick={() => clearCalibration()} style={{ border: `1px solid ${ON_COMP_ACCENT}`, background: "transparent", color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, width: 18, height: 18, lineHeight: "16px", padding: 0, cursor: "pointer", flex: "none" }} aria-label="Cancel">×</button>
+          </div>
         )}
 
         {/* B948496 — "pin a comp to this plan" (a click on the plan's own rendered image) gets
@@ -4212,10 +4686,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             a modal). Lazy, like every other panel here, so a user who never places a note downloads
             none of it. */}
         {editingNote && (
-          <div style={{ position: "absolute", left: "50%", bottom: 44, transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.alert }}>
+          <div ref={noteCardRef} data-testid="map-note-card" style={{ position: "absolute", left: "50%", bottom: noteBox.bottom, transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.alert }}>
             <Suspense fallback={null}>
               <MapNoteEditor
                 note={editingNote}
+                targetLabel={noteTarget}
+                maxHeight={noteBox.maxHeight}
+                compact={noteTypingKb}
                 onSave={saveMapNote}
                 onDelete={removeMapNote}
                 onClose={() => setEditingNote(null)}
@@ -4234,22 +4711,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           }}>Notes couldn't load — {mapNotesErr}</div>
         )}
 
-        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684), and the
-            right-click-on-a-comp-marker menu → export that comp's owning SITE RECORD (B711329).
-            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge; the two menus
-            share one panel style (COMP_MAP_MENU_PANEL_STYLE) rather than each carrying its own
-            copy of the same shadow literal. */}
-        {mapMenu && (
-          <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={() => setMapMenu(null)} minWidth={236} zIndex={3999}
-            className="" ariaLabel="Map actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
-            <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
-            <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
-            <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
-          </ContextMenu>
-        )}
-
+        {/* Right-click-on-a-comp-marker menu → export that comp's owning SITE RECORD (B711329). There is NO
+            empty-map right-click menu any more (owner decision 2026-10-22, B2380112: the Google Earth export of
+            all sites that lived there, B684, was removed — the Site Planner's File ▾ is the one home).
+            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge. */}
         {compMenu && (
           <ContextMenu x={compMenu.x} y={compMenu.y} onClose={() => setCompMenu(null)} minWidth={236} zIndex={3999}
             className="" ariaLabel="Comp actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
@@ -4269,9 +4734,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             different number from the corner chips' MAP_OVERLAY_CHIP_H_PX (this is a compound
             cluster, not a single-label toggle — see mapChromeStack.js's own header), named so it
             reads as an intentional choice rather than a fourth hand-picked literal. */}
-        <div style={{
+        <div data-testid="map-toolbar" style={{
           position: "absolute", zIndex: narrow ? 1100 : 1000,
-          display: "flex", alignItems: "center",
+          // NEW-1 (2026-10-08) — typing a note with the on-screen keyboard up leaves a sliver of map;
+          // the address bar is not needed for that and its strip is what lets the note's target stay visible.
+          display: noteTypingKb ? "none" : "flex", alignItems: "center",
           background: PAL.chrome,
           borderRadius: RADIUS.lg,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
@@ -4457,7 +4924,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               note — see `recordVerbs` above). Four buttons wide was reported back as reading
               cluttered next to the count it follows; two reads at a glance as "design it, or just
               write something down about it" — the same choice, one fold deep for the second half. */}
-          {decideTarget && (
+          {decideTarget && !editingNote && (
             <>
               <span data-testid="map-decide-dot" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: PAL.chromeMuted, flex: "none" }} />
               {/* NEW-1 (B1892544) — a headless probe used to read the sticky order straight off the
@@ -4475,7 +4942,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   : "Pin dropped"}
               </span>
               <button
-                onClick={() => { if (decideTarget === "parcels") clearSel(); else clearDecidePin(); }}
+                onClick={clearDecide}
                 title={decideTarget === "parcels" ? "Clear selection" : "Remove the pin"}
                 data-testid="map-decide-clear"
                 style={{
@@ -4603,6 +5070,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             compAccent={COMP_ACCENT}
             // NEW-4 — the unavailable state offers the fallback instead of dead-ending.
             onStartBlank={parcelInfo.status === "unavailable" ? () => { const m = mapRef.current; startBlankHere(m ? m.getCenter() : null); setParcelInfo(null); } : null}
+            onRetry={parcelInfo.status === "unavailable" && parcelInfo.at ? () => retryLotAt(parcelInfo.at, parcelInfo.label) : null}
           />
           </Suspense></PanelErrorBoundary>
         )}
@@ -4724,7 +5192,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 labels needed shortening too. Shrink stays enabled on the select as a defensive
                 backstop for a narrower case than this fixed panel ever actually presents. */}
             <div style={{ display: "flex", gap: 6, padding: "0 8px 8px" }}>
-              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
+              <input {...NO_AUTOFILL} value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
                 style={{ flex: "1 1 auto", minWidth: FILTER_MIN_PX, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
               {/* NEW-1 (signature-budget convergence, B1038016) — padding "5px 6px" → "5px 8px",
                   matching the filter input beside it exactly (was the flagged sibling mismatch
@@ -4846,6 +5314,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}
+                  onVisibleCompsChange={setVisibleCompIds}
                   overlaysById={overlaysById}
                   onOpenBrochure={openOverlayBrochure}
                   reloadToken={compsReloadToken}
@@ -4871,6 +5340,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   // SitePlansSection's OverlayRow, not here) writes back into; the ref-triggered
                   // upload for the list's own "+ Site plan" button (no comp open yet).
                   onDetailCompChange={setFocusedComp}
+                  docsSlotRef={setDocsSlot}
                   repinCompAnchorRef={repinCompAnchorRef}
                   startUploadRef={startOverlayUploadRef}
                 />
@@ -4894,7 +5364,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                     onRejectFile={onRejectDroppedFile}
                     onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
                     rasterFailedIds={rasterFailedIds}
-                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    docsSlot={docsSlot}
                     onZoomToOverlay={zoomToOverlay}
                     focusedProjectId={focusedComp?.projectId ?? focusedTrackedProjectId ?? null}
                     focusedCompId={focusedComp?.id ?? null}
@@ -4903,6 +5373,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                     startUploadRef={startOverlayUploadRef}
                     mapHostRef={mapHostRef}
                     onAdjustOpenChange={setSitePlanAdjustOpen}
+                    calibration={calibration}
+                    onStartCalibration={startCalibration}
+                    onClearCalibration={clearCalibration}
+                    onUndoCalibration={undoCalibration}
                   />
                 </Suspense>
               </PanelErrorBoundary>
@@ -4942,7 +5416,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                point of it. */
             : { top: MAP_OVERLAY_TOP_PX, right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: "min(384px, calc(100vw - 20px))", maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }),
           ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
         }}>
@@ -4953,16 +5427,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               it all together." Same defect shape as the zoom control in B427408 — the phone path
               was built and the desktop path was left behind — and it is fixed the same way, by
               removing the branch rather than adding a second control. */}
-          {(
+          {/* NEW-1 (Imagery & Layers) — OPEN, the panel's own header row carries the ▾ + title (click collapses), the Hide Layers pill and the ⋯ menu
+              (LayerPanel's `onCollapse`); COLLAPSED, this chip is the one control that brings it back. */}
+          {!layersPanelOpen && (
             // B831776 (NEW-5) — sentence case, matching every neighbouring control in this
             // cluster (the switch, the rail tabs, the checkboxes below); this OPEN-state header
             // used to be the one holdout still in UPPERCASE + letterspacing, which is exactly
             // what read as "a section header" rather than "a sibling control."
-            <button onClick={toggleLayersPanel}
+            <button onClick={toggleLayersPanel} data-testid="finder-layers-expand"
               // NEW-1 (regression from B1310209) — while the docked Adjust panel is open this is
               // forced collapsed and refuses to reopen (see `sitePlanAdjustOpen` above); say why
               // rather than leaving a control that looks clickable and silently does nothing.
-              title={sitePlanAdjustOpen ? "Close Adjust to reopen Imagery & layers" : (layersPanelOpen ? "Collapse layers" : "Imagery & layers")}
+              title={sitePlanAdjustOpen ? "Close Adjust to reopen Imagery & Layers" : "Imagery & Layers"}
               style={layersPanelOpen ? {
                 display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
                 fontSize: 12, color: PAL.ink, fontWeight: 700, padding: "0 0 6px",
@@ -4977,7 +5453,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 ...(sitePlanAdjustOpen ? { opacity: 0.4, cursor: "default" } : null),
               }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: layersPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
-              <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
+              <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; Layers</span>
             </button>
           )}
           {/* B1064 tranche c — gated on `visible` too, not just `layersPanelOpen`: this component
@@ -4993,26 +5469,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               machine. The divider and the "LAYERS" heading went with it: LayerPanel renders its
               own group headers, and Base & terrain is the first of them, so the heading was
               labelling a list that already labels itself. */}
-          {/* B831778 (NEW-3) — THE LOAD-BEARING DECOUPLING, made VISIBLE: what's drawn is decided
-              HERE, by these two checkboxes, and nowhere else. Both default ON. Switching the
-              Site/Comp mode or the rail tab never touches either — see the map-layer effects'
-              own comments for the enforcement half. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 2px 8px", marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showSitesLayer} onChange={(e) => toggleShowSitesLayer(e.target.checked)} data-testid="map-show-sites" />
-              <span>Sites{pursuitSites.length ? ` (${pursuitSites.length})` : ""}</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showCompsLayer} onChange={(e) => toggleShowCompsLayer(e.target.checked)} data-testid="map-show-comps" />
-              <span>Comps{comps.length ? ` (${comps.length})` : ""}</span>
-            </label>
-            {/* B1372144 — map notes, the third drawn thing on this map, hidden and shown by exactly
-                the same rule as its two neighbours. */}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
-              <input type="checkbox" checked={showNotesLayer} onChange={(e) => toggleShowNotesLayer(e.target.checked)} data-testid="map-show-notes" />
-              <span>Notes{mapNotes.length ? ` (${mapNotes.length})` : ""}</span>
-            </label>
-          </div>
+          {/* B831778 (NEW-3) — THE LOAD-BEARING DECOUPLING, now in the panel's Map Base › Your Data group (NEW-1, Imagery & Layers): what's drawn is
+              decided by these three checkboxes and nowhere else (Sites · Comps · Notes — all default ON). Switching the Site/Comp mode or the rail tab never
+              touches any of them — see the map-layer effects' own comments for the enforcement half. Hide Layers never touches them either. */}
           {/* NEW-3 — the list takes whatever height the card has left instead of a flat 260px
               (about four rows of a twenty-eight layer list). The card itself is bounded by
               panelMaxHeight above, so this can never run off the bottom of the map. */}
@@ -5043,6 +5502,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                  empty map. The view centre is the best state fact the finder has (there is no
                  site here), and an unresolved one hides nothing. */
               siteState={viewState}
+              siteLocation={viewLoc}
+              onCollapse={toggleLayersPanel}
+              /* NEW-1 (Imagery & Layers) — Sites · Comps · Notes moved INTO the panel (Map Base › Your Data) from the strip above the list.
+                 Same three state hooks and handlers, same test ids; Hide Layers never touches them. */
+              yourData={[
+                { id: "sites", label: "Sites", count: pursuitSites.length, value: showSitesLayer, onChange: toggleShowSitesLayer, testId: "map-show-sites" },
+                { id: "comps", label: "Comps", count: comps.length, value: showCompsLayer, onChange: toggleShowCompsLayer, testId: "map-show-comps" },
+                { id: "notes", label: "Notes", count: mapNotes.length, value: showNotesLayer, onChange: toggleShowNotesLayer, testId: "map-show-notes" },
+              ]}
               /* NEW-1 — the live zoom every row's gate is reported against, and the fix. On this
                  surface the map is the interactive one, so `setZoom` IS the whole action. */
               mapZoom={zoom}
@@ -5077,9 +5545,16 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         <div style={{ position: "absolute", left: 12, top: narrow ? SEARCH_BAR_CLEARANCE_PX : 0, bottom: ZOOM_CONTROL_CLEARANCE_PX, maxWidth: 380, zIndex: 1000, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 8, pointerEvents: "none", overflow: "hidden" }}>
         {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
-        {(err || locateFar) && (
-          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
+        {((err && !sourceNoticeFloats) || locateFar) && (
+          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar || retryShown || gapShown) ? "auto" : "none" }}>
             {err}
+            {gapShown && <ParcelRequestLink href={gapRequest.href} testId="map-gap-request" />}
+            {retryShown && (
+              <button onClick={() => { const run = errRetry.run; setErrRetry(null); setErr(""); setFallbackOffer(null); run(); }} data-testid="map-try-again"
+                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Try again
+              </button>
+            )}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}
             {fallbackOffer && (
@@ -5096,6 +5571,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                 ◂ Back to your sites
               </button>
             )}
+          </div>
+        )}
+        {/* NEW-1/NEW-2 (2026-10-22) — a lookup that has run long says it is still going (the loading treatment alone read as "nothing happening" for the 20+ seconds a cold state server can take). */}
+        {busy && !err && lookupNote && (
+          <div role="status" data-testid="map-lookup-slow" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+            {lookupNote}
           </div>
         )}
         {/* NEW-2 — share/unshare confirmation (same slot as the error toast, mutually
@@ -5136,10 +5617,28 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
         {visible && isActive && <ToastHost toasts={hiddenToasts} onDismiss={dismissHiddenToast} />}
+        {/* NEW-1 (B2288560 amendment, owner 2026-10-16: "it should be at the center bottom, and be removable") — the
+            parcel-source slow / outage banner. It was the bottom-LEFT `err` toast, just above the zoom +/-; it now rides
+            the shared bottom-centre slot (docs/DESIGN.md "Floating notifications") like its sibling notices, with a ✕.
+            The Sites / Layers panels OVERLAY this map (they do not narrow it), so the window centre IS the visible map's
+            centre. maxWidth is symmetric — the zoom stack (bottom-left) and scale bar (bottom-right) each need ~60 px —
+            so on a narrow window it WRAPS between them instead of covering either. The ✕ is the same glyph as the
+            locate notice's; its hit area is 28 px. Dismissal: see `sourceNoticeDismissedRef`. */}
+        {visible && isActive && sourceNoticeFloats && (
+          <FloatingNotice testId="parcel-source-notice" maxWidth="min(420px, calc(100vw - 120px))">
+            <div data-testid="map-status-toast" role="status" style={{ display: "flex", alignItems: "flex-start", gap: 4, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 4px 6px 11px", fontSize: FONT_SIZE.control, color: PAL.accent, lineHeight: 1.45 }}>
+              <span style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>{err}</span>
+              <button type="button" data-testid="map-status-toast-dismiss" onClick={dismissSourceNotice} aria-label="Dismiss" title="Dismiss"
+                style={{ flex: "none", width: 28, height: 28, display: "grid", placeItems: "center", cursor: "pointer", background: "transparent", color: PAL.muted, border: "none", borderRadius: RADIUS.sm, fontSize: FONT_SIZE.control, fontWeight: 800, padding: 0, lineHeight: 1, fontFamily: "inherit" }}>✕</button>
+            </div>
+          </FloatingNotice>
+        )}
         {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
-              <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
+              {backupNotice.text
+                ? <><b>{backupNotice.kind === "town" ? "Backup source." : "Statewide backup source."}</b> {backupNotice.text}</>
+                : <><b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.</>}
             </div>
           </FloatingNotice>
         )}
@@ -5181,11 +5680,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {zoom != null && zoom < outlineFloor
-                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : slowDisplayKeys.size > 0
-                ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."
-                : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+              {(() => {
+                const h = selectParcelsHintFor({ zoom, outlineSources, outlineFloor, wideBusy, wideRefused, slowLoading: slowDisplayKeys.size > 0 });
+                return (
+                  <span data-hint-stage={h.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: h.strong ? 600 : 400 }}>
+                    <SelectParcelsHintIcon kind={h.icon} />
+                    <span>{h.text}</span>
+                  </span>
+                );
+              })()}
             </div>
           </FloatingNotice>
         )}

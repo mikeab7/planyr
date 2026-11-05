@@ -138,10 +138,15 @@
   --control-h-touch: 44px; /* B1215682 — the touch-target floor; see designTokens.js's CONTROL_H header */
 
   --border-default: #E1E5EB;
+  --border-hairline: #EEF1EF; /* NEW-1 site-record panel — the faint rule between rows of one section */
   --border-strong:  #CDD3DC;
   --text-primary:   #1B1E26;
   --text-secondary: #353B49;
   --text-tertiary:  #4B5263;
+  /* The ONE greyscale lock (shared/ui/LockToggle.jsx, NEW-2 2026-10-08): neutral greys, never tinted/yellow.
+     State is shape (solid vs outline), these only set how dark. */
+  --lock-locked: #404040;
+  --lock-open:   #6E6E6E;
 
   /* Site Planner inspector surfaces (B686 → B689). B689: the LIGHT-mode inspector now
      uses the cool app surfaces — the owner rejected the warm "parchment" cream; the open
@@ -345,6 +350,8 @@
   --hover-chrome-danger: rgba(220, 38, 38, .12);
   --scroll-thumb:        #c8cfd9;
   --scroll-thumb-hover:  #b3bcc9;
+  --rail-scroll-thumb:   #7A8494;
+  --rail-scroll-track:   #E1E6ED;
   --scroll-track-border: #F3F5F8;
   --kbd-bg:   #e7ebf1;
   --kbd-text: #565E6E;
@@ -392,10 +399,13 @@
   --surface-overlay: rgb(24, 27, 33);
   --surface-base: #0A0C0F; /* see the light-theme definition's header for why this alias exists */
   --border-default: #2A2E37;
+  --border-hairline: #20242B;
   --border-strong:  #3A3F4B;
   --text-primary:   #E8EBF0;
   --text-secondary: #CAD0DA;
   --text-tertiary:  #A4ABB8;
+  --lock-locked: #D6D6D6;
+  --lock-open:   #A0A0A0;
 
   /* Site Planner "drafting parchment" surfaces (B686) — dark-slate variants. */
   --planner-panel:  #15171D;   /* backdrop, darkest (behind the raised cards) */
@@ -489,6 +499,8 @@
   --hover-chrome-danger: rgba(248, 113, 113, .14);
   --scroll-thumb:        #3d4250;
   --scroll-thumb-hover:  #4c5260;
+  --rail-scroll-thumb:   #6B7384;
+  --rail-scroll-track:   #1A1D25;
   --scroll-track-border: #14161B;
   --kbd-bg:   #262A33;
   --kbd-text: #CAD0DA;
@@ -587,6 +599,17 @@ button { transition: filter .12s ease, background-color .12s ease, border-color 
 button:hover:not(:disabled) { filter: brightness(.97); }
 button:active:not(:disabled) { transform: translateY(0.5px); }
 button:disabled { opacity: .45; cursor: default; }
+/* CURSOR CONVENTION (docs/DESIGN.md "Cursor convention"): a disabled control shows the default arrow — never a
+   pointer, never not-allowed. !important so an INLINE `cursor: pointer` on a caller's button can't survive disabled
+   (inline beats a plain stylesheet rule — the most common defect in the 2026-10-19 audit). A control that is disabled
+   because it is WORKING says so with aria-busy="true" and shows progress. */
+button:disabled, input:disabled, select:disabled, textarea:disabled, [aria-disabled="true"], label:has(> input:disabled) { cursor: default !important; }
+button:disabled[aria-busy="true"], [aria-disabled="true"][aria-busy="true"] { cursor: progress !important; }
+/* Native checkbox / radio / select / range show the pointer app-wide (enabled only; the disabled rule above wins). */
+input[type="checkbox"]:enabled, input[type="radio"]:enabled, input[type="range"]:enabled, select:enabled, input[type="color"]:enabled, input[type="file"]:enabled { cursor: pointer; }
+input[type="range"]:enabled:active { cursor: grabbing; }
+/* Food: Drop-a-pin is armed — crosshair over the map and the pins on it (the armed mode owns the cursor). */
+.food-pin-mode, .food-pin-mode * { cursor: crosshair !important; }
 /* Menu items express "disabled" through a muted TEXT TOKEN (set inline), never a fade — the
    house rule forbids opacity-as-hierarchy (B925). Reset the global disabled fade for menu rows
    so the token color isn't double-dimmed into illegibility. */
@@ -632,6 +655,32 @@ select[aria-invalid="true"]:focus, textarea[aria-invalid="true"]:focus {
   box-shadow: 0 0 0 3px var(--invalid-ring-soft);
   outline: none;
 }
+/* NumberBox (Building panel v3) — the ONE bordered number box (value · unit · ▲▼). The input inside is
+   borderless, so the FRAME carries the focus ring and the invalid state. The input-level rules above are
+   cancelled for it by SPECIFICITY (they use a `:not()` chain; so does this), not by `!important`. */
+[data-numbox] > input[data-numbox-input]:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus {
+  box-shadow: none;
+  outline: none;
+  border: none !important;
+}
+[data-numbox]:focus-within { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--focus-ring-soft); }
+[data-numbox]:has(input[aria-invalid="true"]) { border-color: var(--danger) !important; box-shadow: 0 0 0 3px var(--invalid-ring-soft); }
+[data-numbox]:hover:not(:focus-within) { border-color: var(--text-tertiary); }
+[data-numbox] [data-num-stepper] button:hover:not(:disabled) { background: var(--hover-chrome); color: var(--text-primary); }
+
+/* The building header's number box (Building panel v3): a small field that reads as editable — the stronger
+   outline always, darker on hover, an accent ring on focus (the global input focus rule). */
+.bldg-num-box { border: 1px solid var(--border-strong); background: var(--surface-field); }
+.bldg-num-box:hover:not(:focus) { border-color: var(--text-tertiary); }
+/* Borderless header icon buttons (lock · ⋯ · ✕): no box, a hover wash only. */
+.bldg-hdr-btn { border: none; background: transparent; }
+.bldg-hdr-btn:hover:not(:disabled) { background: var(--hover-chrome); color: var(--text-primary); }
+.bldg-hdr-btn.danger:hover:not(:disabled) { background: var(--hover-chrome-danger); }
+/* The wall-strip bin: muted, red on hover. */
+.wall-bin { color: var(--text-tertiary); }
+.wall-bin:hover:not(:disabled) { color: var(--danger-text, var(--danger)); background: var(--hover-chrome-danger); }
+/* A wall-strip piece: keyboard focus ring inside the bar. */
+.wall-piece:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
 /* B156 — pre-click hover preview on a markup (Site Planner + Document Review). A soft two-tone
@@ -689,13 +738,17 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .rbtn:hover:not(:disabled):not(.on) .rbtn-hint { color: var(--chrome-text) !important; }
 
 /* NEW-1 — RIGHT TOOL RAIL (see components/RailSplit.jsx, lib/toolRailModel.js).
-   The rail's scrollbar is hidden (still scrolls by wheel / touch / keyboard) instead of taking a
-   permanent strip on the right: with the strip, every row sat closer to the left edge than the right.
+   The rail shows a THIN scrollbar whenever it overflows (always visible, not hover-only; B2237072 brought it back
+   after the first redesign hid it and nothing told the owner the rail scrolls). `scrollbar-gutter: stable` keeps
+   the strip's width reserved so rows never shift when the rail starts or stops overflowing.
    `.rail-hdr` is the ONE heading rule: label + hairline to the right edge; its margins are the model's
-   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). */
-.rail-scroll { scrollbar-width: none; }
-.rail-scroll::-webkit-scrollbar { display: none; }
-.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 11px;
+   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). Its left inset
+   (--rail-hdr-inset) puts the heading text on the icon column. */
+.rail-scroll { scrollbar-width: thin; scrollbar-color: var(--rail-scroll-thumb) var(--rail-scroll-track); scrollbar-gutter: stable; }
+.dark-scroll.rail-scroll::-webkit-scrollbar { width: 7px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-track { background: var(--rail-scroll-track); border-radius: 4px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-thumb, .dark-scroll.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--rail-scroll-thumb); border: 0; border-radius: 4px; }
+.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 var(--rail-hdr-inset, 7px);
   font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--chrome-muted); }
 .rail-hdr::after { content: ""; flex: 1; height: 1px; background: var(--chrome-divider); }
 .rail-scroll > .rail-hdr:first-child { margin-top: 4px; }
@@ -816,6 +869,11 @@ input[type="range"] { height: 18px; }
    Leaflet's `.leaflet-interactive { cursor: pointer }` on the (viewport-covering)
    county/city fills must not override the +/− select cursor — the tool wins (B98). */
 .pf-select-mode path.pf-boundary-hit { cursor: inherit; }
+/* B2507065 (NEW-10): a county line carries a light halo so the dashed grey reads on any aerial. */
+/* A boundary's fill (city tint, the faint county / ETJ hit fill) must not catch a click meant for the layer UNDER it — click-only identify (B2507061) otherwise opened
+ * "City limits" / a county card for every click inside a city, hiding the zoning polygon the person aimed at. Only the outline answers. */
+.leaflet-pane > svg path.pf-boundary-hit.leaflet-interactive { pointer-events: visibleStroke; } /* beats Leaflet's `.leaflet-pane > svg path.leaflet-interactive { pointer-events: auto }` */
+path.pf-county-line { filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 3px rgba(255, 255, 255, 0.55)); }
 
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -867,6 +925,14 @@ kbd {
    the same scale as everything else rather than from a vendor default. Scoped to the control we
    place; Leaflet's other widgets are untouched. */
 .leaflet-control-zoom.leaflet-bar { border-radius: var(--radius-md); overflow: hidden; }
+/* NEW-1 (DeSoto / Olive Branch, B2507057) — the pipe-size label on a utility line (layers.js buildFeatureLayer, cfg.lineLabel): bare text with a halo of the
+   surface colour so it reads over aerial imagery in both themes; no box, no pointer events. */
+.leaflet-tooltip.pf-line-label {
+  background: transparent; border: 0; box-shadow: none; padding: 0; pointer-events: none;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px; color: var(--text-primary); /* design-exempt: map ink, sized to sit on a 2px line */
+  text-shadow: 0 0 2px var(--planner-raised), 0 0 2px var(--planner-raised), 0 0 3px var(--planner-raised), 0 0 3px var(--planner-raised);
+}
+.leaflet-tooltip.pf-line-label::before { display: none; }
 /* The buttons keep NO radius of their own — the container is rounded and clips them, so one
    curve is defined in one place. Leaflet's own 2px on each button is invisible under that clip
    but still reads as an off-scale value to anything auditing computed style, and a corner that
@@ -975,6 +1041,13 @@ kbd {
 @media (hover: none) { .psw-row .psw-pin[data-pinned="0"] { visibility: hidden; } }
 .psw-row .psw-pin:hover { background: var(--hover-menu); color: var(--text-primary); }
 .psw-panel button:hover:not(:disabled) { filter: none; }
+/* NEW-2 (2026-10-30, owner: the Layers panel "shakes" when the pointer moves over its left group list) — the global button rules above put a `filter: brightness(.97)` on
+   every hovered button and a 0.5px `transform` on every pressed one. A filter makes the button its own effect surface: its text drops out of the panel's text rendering
+   and back as the pointer crosses each group, and a half-pixel nudge is a glyph re-snap — on a display at a fractional pixel ratio that reads as the list trembling. Nothing in
+   this panel may change size, position, text rendering or a half pixel on hover: the group tabs and the row chevrons get a plain background tint instead (colour only). */
+.layer-panel-steady button:hover:not(:disabled), .layer-panel-steady button:active:not(:disabled) { filter: none; transform: none; }
+.layer-panel-steady [role="tab"][aria-selected="false"]:hover:not(:disabled),
+.layer-panel-steady [data-testid^="layer-row-"] button:hover:not(:disabled) { background-color: var(--hover-ghost) !important; }
 
 
 /* NEW-1 — instant click acknowledgement (src/shared/ui/clickAck.js). Anchored at the cursor, holds
@@ -1078,3 +1151,62 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
 @media (pointer: coarse) {
   .trash-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
+
+/* Library file row ⋯ (NEW-2): shown on hover / keyboard focus / while its menu is open; ALWAYS shown (and a full
+ * touch target) on a coarse pointer, where there is no right-click. visibility, not opacity — no fades. */
+.file-row .file-kebab { visibility: hidden; }
+.file-row:hover .file-kebab, .file-row:focus-within .file-kebab, .file-row[data-menu-open] .file-kebab { visibility: visible; }
+.file-row .file-kebab:hover { background: var(--hover-menu); }
+@media (pointer: coarse) {
+  .file-row .file-kebab { visibility: visible; min-width: 44px; min-height: 44px; }
+}
+
+/* Overlays panel focus (B2215024): ONE accent in that panel — the global focus rules above use the orange
+   --accent; here they are the Site green. The doubled attribute out-ranks the global !important border rule. */
+[data-testid="overlays-panel"][data-fine-pointer] :is(button, input, select):focus-visible {
+  outline: 2px solid var(--accent-site);
+  outline-offset: 1px;
+}
+[data-testid="overlays-panel"][data-fine-pointer] input:not([type="range"], [type="checkbox"], [type="color"]):focus,
+[data-testid="overlays-panel"][data-fine-pointer] select:focus {
+  border-color: var(--accent-site) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-site) 18%, transparent) !important;
+}
+
+/* Food rating slider (NEW-2/NEW-3, 2026-10-11) — ONE control for Food, Ambiance and every dish score. The input box is the
+   whole tall grab target; the visible track is a slim bar drawn in its background. The thumb is --rs-thumb wide and travels
+   between ends inset by half of it, so a tick at the same inset sits exactly under the thumb centre (components/RatingSlider.jsx). */
+.food-rating-slider {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; margin: 0; padding: 0;
+  background: transparent; cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent;
+}
+/* NEW-6 (2026-10-23): the visit sheet's Date field. iOS Safari draws a native date control whose inner "value" box has its own minimum width
+   and centres its text, so inside a narrow sheet it could run past the right edge (owner screenshot). Take the native chrome off, pin the box
+   to the column (width/max-width 100%, min-width 0), left-align the value like every other field, and keep an empty value one line tall. */
+.food-date-input { -webkit-appearance: none; appearance: none; display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; text-align: left; overflow: hidden; }
+.food-date-input::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; margin: 0; }
+.food-date-input::-webkit-datetime-edit { padding: 0; }
+.food-rating-slider:focus-visible { outline: 2px solid var(--accent-food); outline-offset: 2px; border-radius: 8px; }
+.food-rating-slider::-webkit-slider-runnable-track {
+  height: 100%; border-radius: 8px;
+  background:
+    linear-gradient(to right,
+      var(--rs-color) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb))),
+      var(--border-default) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb)))) center / 100% 6px no-repeat;
+}
+.food-rating-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%;
+  margin-top: calc((var(--rs-h) - var(--rs-thumb)) / 2);
+  background: var(--surface-page); border: 3px solid var(--rs-color); box-sizing: border-box;
+}
+.food-rating-slider::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border-default); }
+.food-rating-slider::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--rs-color); }
+.food-rating-slider::-moz-range-thumb {
+  width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%; box-sizing: border-box;
+  background: var(--surface-page); border: 3px solid var(--rs-color);
+}
+
+/* NEW-1 (2026-11-04) — the "Regrading…" banner's indeterminate step (a worker trace that cannot say how far along it is):
+   a short bar slides across the track. transform-only, so it runs on the compositor — no JavaScript, no rAF. */
+@keyframes regrade-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+@media (prefers-reduced-motion: reduce) { .regrade-indeterminate { animation: none !important; transform: translateX(0) !important; opacity: .5; } }

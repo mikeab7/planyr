@@ -44,7 +44,9 @@ mkdirSync(OUT, { recursive: true });
  * matching, and importing the expectation from the code under test would make that impossible. */
 const EXPECT = {
   "in-city": { shape: "in-city", text: "City of Houston · Harris County" },
-  "in-city-etj": { shape: "in-city-etj", text: "City of Humble · Houston ETJ · Harris County" },
+  /* Concept A (2026-10-28): city limits OUTRANK any ETJ. Will Clayton's recorded answers are Humble's limits AND Houston's ETJ polygon
+   * over the same ground — two published layers overlapping, not a place — so the pill reads the city alone. */
+  "in-city-overlap": { shape: "in-city", text: "City of Humble · Harris County" },
   "etj": { shape: "etj", text: "City of Houston ETJ · Fort Bend County — touches City of Katy", adjacent: ["Katy"] },
   "etj-clean": { shape: "etj", text: "City of Houston ETJ · Harris County" },
   "split": { shape: "split", text: "Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ · Harris County" },
@@ -70,7 +72,7 @@ const WAS = {
   "longest-tsakiris": "Part in City of Katy limits (full purpose, 2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County",
   "longest-goosecreek": "Part in City of Baytown limits (full purpose, 6 of 14 lots) / rest in its ETJ · Harris County",
   "in-city": "City of Houston · Harris County",
-  "in-city-etj": "City of Humble / City of Houston · ETJ · Harris County",
+  "in-city-overlap": "City of Humble / City of Houston · ETJ · Harris County",
   "etj": "Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County",
   "etj-clean": "Unincorporated / City of Houston · ETJ · Harris County",
   "split": "Part in City of Baytown limits (full purpose, 6 of 14 lots) / rest in its ETJ · Harris County",

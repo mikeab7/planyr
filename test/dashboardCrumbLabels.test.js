@@ -28,6 +28,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), "utf8");
 
@@ -35,7 +36,7 @@ describe("NEW-3 — every leading crumb's label matches its real destination", (
   it("Site Planner: homeLabel \"Map\" pairs with the in-module goMap/onBackToMap action, never onGoDashboard", () => {
     const app = read("src/workspaces/site-planner/SitePlannerApp.jsx");
     expect(app).toMatch(/homeLabel="Map"\s*\n\s*onDashboard=\{goMap\}/);
-    const planner = read("src/workspaces/site-planner/SitePlanner.jsx");
+    const planner = plannerSource();
     expect(planner).toMatch(/homeLabel="Map"/);
     expect(planner).toMatch(/onDashboard=\{onBackToMap\}/);
   });

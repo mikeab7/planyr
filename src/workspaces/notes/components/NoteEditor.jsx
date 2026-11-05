@@ -38,14 +38,15 @@ import { TextSelection } from "@tiptap/pm/state";
 import { contentOfBoxes } from "../lib/notesTableClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
-import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
-import { tableOwnsClipboard, tableBoxWidth } from "../lib/notesTablePaste.js";
+import { ANCHOR_WIDTH, ANCHOR_FIT_MIN, ANCHOR_START_MIN, anchorStartPreferred, fitWidthFor, growWidthFor } from "../lib/notesBoxResize.js";
+import { tableOwnsClipboard, tableBoxWidth, tableShapeOfNode } from "../lib/notesTablePaste.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
   isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
-import { MIGRATED_BOX_WIDTH, migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { normalizeFakeBullets } from "../lib/notesFakeBullets.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -56,7 +57,13 @@ import {
   VIEW_ZOOM_DEFAULT, visibleBand, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
-import { PASTE_MODES } from "../lib/notesPastePlain.js";
+import { PASTE_MODES, textOfNode, plainTextToContent } from "../lib/notesPastePlain.js";
+import {
+  PASTE_MODE_META, pasteSetFor, modeForKey, analyzePaste, applyPasteModeToTr, revertToBase, withSourceFills,
+} from "../lib/notesPasteModes.js";
+import { prepareTablePicture } from "../lib/notesTablePicture.js";
+import { newId } from "../lib/notesModel.js";
+import { PasteGlyph, ClipboardGlyph, PASTE_ICON_CSS } from "./PasteIcons.jsx";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
@@ -70,12 +77,14 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView, applyExternalToOpenNote,
+  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "../lib/notesMarkdown.js";
 import { docToHtml } from "../lib/notesDocHtml.js";
+import { FILL_INK } from "../lib/notesFormatPalette.js";
+import { TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
 import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
@@ -85,6 +94,9 @@ import NoteToolbar from "./NoteToolbar.jsx";
 import NoteSlashMenu from "./NoteSlashMenu.jsx";
 import NoteOutline from "./NoteOutline.jsx";
 import NoteHistory from "./NoteHistory.jsx";
+/* The ONE shared drag-cursor pin (owner convention 2026-10-20). Importing it here, in the lazy editor chunk, adds no
+ * shared chunk to the Site route — verified by ui-audit/perf-bundle-audit.mjs. */
+import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
 /* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
@@ -235,6 +247,20 @@ function wheelOwnerUnder(target, boundary, axis) {
 }
 
 const EDITOR_CSS = `
+${PASTE_ICON_CSS}
+/* ⛔ THE PASTE-OPTIONS FLYOUT (NEW-1, Office-style): square corners, a thin grey border, a small shadow; square icon
+   buttons that go light blue when applied; a tooltip that names the option the way Word does. The halo behind each
+   mark follows the button's own background (--paste-halo), so a hover or the pressed blue never leaves a white
+   ring. Thumb-sized targets on a touch screen. No backticks in this comment. */
+.planyr-paste-tab { display: flex; align-items: center; gap: 3px; padding: 1px 5px 1px 3px; border: none; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; --paste-halo: var(--surface-raised); }
+.planyr-paste-head { font-size: 12px; font-weight: 600; color: var(--text-primary); padding: 0 0 5px; }
+.planyr-paste-group { font-size: 10.5px; font-weight: 700; color: var(--text-primary); padding: 5px 0 3px; }
+.planyr-paste-row { display: flex; gap: 2px; flex-wrap: nowrap; }
+.planyr-paste-btn { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--text-primary); cursor: pointer; --paste-halo: var(--surface-raised); }
+.planyr-paste-btn:hover, .planyr-paste-btn:focus-visible { background: var(--surface-page); border-color: var(--border-strong); outline: none; --paste-halo: var(--surface-page); }
+.planyr-paste-btn[aria-pressed="true"] { background: var(--info-bg); border-color: var(--info-text); --paste-halo: var(--info-bg); }
+.planyr-paste-tip { position: absolute; margin-top: 4px; padding: 3px 7px; background: var(--surface-raised); border: 1px solid var(--border-strong); color: var(--text-primary); font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 41; }
+@media (pointer: coarse) { .planyr-paste-btn { width: 44px; height: 44px; } .planyr-paste-tab { min-height: 44px; padding-left: 6px; padding-right: 8px; } }
 /* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
    It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
    Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
@@ -339,6 +365,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
+/* A CELL FILL (NEW-2) is a solid content colour — the same in every theme — so a cell that carries one forces a
+   dark ink on its unmarked text, or light-theme-pale-on-dark-theme-light-text would be unreadable. Text with its
+   own colour mark is untouched (the mark is more specific than inheritance). "transparent" is not a fill. */
+.planyr-note .ProseMirror table td[data-cell-fill]:not([data-cell-fill="transparent"]), .planyr-note .ProseMirror table th[data-cell-fill]:not([data-cell-fill="transparent"]) { color: ${FILL_INK}; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
 .planyr-note .ProseMirror .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: var(--accent-notes); cursor: col-resize; }
 .planyr-note .ProseMirror .tableWrapper { overflow-x: auto; }
@@ -377,11 +407,13 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    the same spot landed inside the first attempt's leftover and appeared to do nothing at all.
    It is outlined whenever it is empty, and while the caret is in it, it says what to do. The
    words are content, not a node — nothing here reaches the document, the Markdown or the PDF. */
-/* ⛔ SELECTED IS OBVIOUS AT A GLANCE (B421494) — a solid accent ring and a faint wash, so a set
-   of nine reads as one thing. It is a BORDER COLOUR on the existing border rather than an outline
+/* ⛔ SELECTED IS A BORDER AND HANDLES, NEVER A FILL (NEW-3, owner 2026-10-30: clicking a box tinted
+   the whole thing pink; he wants only the border and the handles). B421494 had added a faint wash
+   so a set of nine read as one thing; the solid ring alone does that, and a wash also tinted the
+   text under the selection highlight. It is a BORDER COLOUR on the existing border rather than an outline
    or a box-shadow: both of those paint outside the element's box, which would put chrome over the
    neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; background: color-mix(in srgb, var(--accent-notes) 8%, transparent); }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; }
 /* ⛔ SELECTED AND EDITING MUST NOT LOOK IDENTICAL (B1555152 part 1, owner report 2026-09-11:
    "sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd").
    Measured: before this rule, selected-alone and selected-plus-editing painted the exact same
@@ -389,33 +421,52 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    mouse cursor glyph (grab vs text), which needs the pointer hovering the box to see and says
    nothing once the mouse has moved on. A box picked up (stage 1, Delete removes it) and a box you
    are actively typing in (stage 2) are two different things to be IN, and a glance has to be able
-   to tell them apart without touching anything. Editing gets a visibly heavier wash and border —
-   never outline/box-shadow (see the note above: both paint outside the box and would swallow a
+   to tell them apart without touching anything. Since NEW-3 (no fill on a selected box) editing is
+   told apart by its heavier border alone — never a fill, never outline/box-shadow (see the note above: both paint outside the box and would swallow a
    neighbour's controls). */
-.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; background: color-mix(in srgb, var(--accent-notes) 16%, transparent); }
+.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"] { border-color: var(--border-default); border-style: dashed; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
 .planyr-note .ProseMirror .planyr-anchor-content { position: relative; }
-/* ⛔ THE GRIP IS AN AFFORDANCE, NOT A TARGET (NOTES-FREE-PLACEMENT / NEW-2). It used to be the
-   ONLY way to move a box — 9×14px, at opacity 0 until the box was selected, and dragging the box
-   by its body did nothing at all and said nothing about it. The whole body drags now (see the
-   node view), so this exists purely to SAY so: it appears on hover as well as on selection, at a
-   size somebody can actually see. It stays a REAL target rather than becoming decoration for one
-   reason: a box you have just typed into must still be movable without pressing Escape first, and
-   the body's own drag deliberately stands down while the caret is inside (see the node view). It
-   sits inside the box's own 16px left padding, so it covers no text — instrument trap #9's hazard
-   was a harness aiming at a fixed offset from the corner, which is a harness rule, not a reason to
-   remove the affordance. */
-.planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 4px; width: 12px; height: 20px; cursor: grab; border-radius: 3px; opacity: 0; transition: opacity 90ms linear; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
-.planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
-.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip,
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip { opacity: 1; }
-/* ⛔ AND THE CURSOR READS grab OVER THE WHOLE DRAGGABLE AREA, not over a sliver of chrome —
-   his third point on NEW-2. It flips to a text cursor for the one state where a press is about
+/* ⛔ THE BORDER IS THE MOVE HANDLE (B2426788, owner decision 2026-10-27, "A" of four mockups: *"I
+   like it that it only interacts by the edges"*). Four strips, one per side, each straddling the
+   outline: 5 px outside the line, the line, 3 px inside it. A RING, never a filled rectangle — the
+   middle of the box keeps select / enter / pan exactly as before — and the inside depth stays
+   within the box's own padding (3 px top and bottom, 6 right, 16 left), so no strip ever covers a
+   letter. The cursor is move (four arrows) over the whole band. It is there whether or not the box
+   is selected or has the caret, which is the grip's whole old job: a box you have just typed into
+   is still movable without pressing Escape. The resize handles paint ABOVE the strips (z-index 2
+   vs 1), so each handle keeps its press and its directional cursor; everywhere else along the edge
+   moves. Nothing is drawn off hover — the box looks as clean as before. touch-action: none so a
+   finger on the band is a drag, not a page scroll. */
+.planyr-note .ProseMirror .planyr-anchor-edge { position: absolute; z-index: 1; cursor: move; touch-action: none; }
+.planyr-note .ProseMirror .planyr-anchor-edge-n { left: -6px; right: -6px; top: -6px; height: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-s { left: -6px; right: -6px; bottom: -6px; height: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-w { top: -6px; bottom: -6px; left: -6px; width: 9px; }
+.planyr-note .ProseMirror .planyr-anchor-edge-e { top: -6px; bottom: -6px; right: -6px; width: 9px; }
+/* Hover feedback: the pointer is on the band, so the outline thickens and darkens in the accent
+   colour — "you have caught the edge". An INSET shadow adds the second pixel INSIDE the border
+   box, so nothing reflows and nothing paints outside the box over a neighbour's controls (the
+   reason outline / outer box-shadow are banned in this file). Held for the whole drag too. */
+.planyr-note .ProseMirror .planyr-anchor:has(> .planyr-anchor-edge:hover),
+.planyr-note .ProseMirror .planyr-anchor[data-edge-press="1"] { border-color: var(--accent-notes); border-style: solid; box-shadow: inset 0 0 0 1px var(--accent-notes); }
+/* ⛔ THE CURSOR SAYS WHAT A PRESS ON THE BOX WILL DO (owner convention 2026-10-20, docs/DESIGN.md
+   "Cursor convention"; it REPLACES NEW-2 point 3's open hand for a box's body). The four-arrow MOVE
+   cursor belongs to a body that really drags, and keeps it for the whole drag (notesAnchorNode.js
+   and NoteEditor pin it): that is a member of a MULTI-SELECTION (data-movable, painted beside
+   data-selected). A single box's body does not drag on this build — press 1 selects, press 2 enters
+   it, and a drag from an unselected body pans the page (B2156912, "click and drag should ALWAYS
+   pan") — so an unselected box keeps the open hand, and it is the BORDER band (B2426788; always a drag,
+   always a move) that carries the four-arrow cursor. The text cursor is for the one state where a press is about
    words rather than position: while the caret is inside this box. data-editing is painted from
-   the editor's own two-stage state, beside data-selected. */
+   the editor's own two-stage state, and a box being edited is never also drawn as movable. */
 .planyr-note .ProseMirror .planyr-anchor { cursor: grab; }
+/* A SELECTED single box with words in it: the next press ENTERS it and puts the caret where it lands. */
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-movable="1"]):has(.planyr-anchor-content p) { cursor: text; }
+.planyr-note .ProseMirror .planyr-anchor[data-movable="1"] { cursor: move; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-movable="1"]):has(.planyr-anchor-content p) .planyr-anchor-content { cursor: text; }
+.planyr-note .ProseMirror .planyr-anchor[data-movable="1"] .planyr-anchor-content { cursor: move; }
 .planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { cursor: text; }
 .planyr-note .ProseMirror .planyr-anchor[data-editing="1"] .planyr-anchor-content { cursor: text; }
 /* ⛔ THE BOX'S OWN CHROME SITS ABOVE THE BOX'S OWN TEXT, AND THAT z-index IS THE WHOLE FIX
@@ -426,7 +477,7 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    enabled, correctly labelled, and impossible to click. This is CHROME-NEVER-EATS-A-PRESS with the
    sides reversed — the content ate the chrome. The rule the z-index encodes: a control drawn ON the
    box belongs to the box's chrome layer. */
-.planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-h { z-index: 1; }
+.planyr-note .ProseMirror .planyr-anchor-h { z-index: 2; }   /* above the border band (z-index 1): a handle keeps its own press */
 /* ⛔ THE CONNECT DOT — DRAG-FROM-THE-DOT, ONE OF THE TWO WAYS TO DRAW AN ARROW (NEW-2). Visible
    only once selected (same rule as the resize handles above: an affordance shown on every box
    all the time is noise). A box marked as the live drop target while a connect-drag is in
@@ -443,7 +494,11 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor[data-arrow-target="1"] { outline: 2px solid var(--accent-notes); outline-offset: 2px; }
 /* Click-to-connect's own source highlight — a box waiting to be the arrow's start point. */
 .planyr-note .ProseMirror .planyr-anchor[data-arrow-source="1"] { border-color: var(--accent-notes); border-style: dashed; }
-.planyr-note [data-testid="note-mat"][data-arrow-mode="1"] { cursor: crosshair; }
+/* ⛔ ARMED CLICK-TO-CONNECT OWNS THE CURSOR OVER EVERYTHING IT CAN BE CLICKED ON — the mat, the sheet
+   and every box on it (convention 2026-10-20). The rule used to name the mat alone, so the moment the
+   pointer crossed onto a box or the page it read the box's own move/text/auto: crosshair on grey only. */
+.planyr-note [data-testid="note-mat"][data-arrow-mode="1"],
+.planyr-note [data-testid="note-mat"][data-arrow-mode="1"] * { cursor: crosshair !important; }
 /* ⛔ EIGHT HANDLES, PAINTED FROM ONE RULE PLUS EIGHT POSITIONS (NEW-PICTURE-CANVAS / NEW-2).
    Bluebeam's and Office's convention: small square grips on every corner and every edge, visible
    only while the box is SELECTED — never on hover, which B434418 removed for good reasons. The
@@ -487,9 +542,6 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image { margin: 0; height: 100%; }
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image img,
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] > img.planyr-note-img { display: block; width: 100%; height: 100%; object-fit: fill; max-width: none; }
-/* The grip has to read over any picture, so on an image box it carries its own backdrop rather
-   than relying on the page behind it. */
-.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-grip { left: 2px; top: 2px; padding: 0 1px; border-radius: 3px; background-color: color-mix(in srgb, var(--surface-raised) 82%, transparent); }
 
 /* ⛔ THE ONE STRUCTURAL TRAILING PARAGRAPH IS NEVER SHOWN (NEW-1, 2026-09-22). ProseMirror
    restores a real textblock at the end of the document whenever the last child would
@@ -604,32 +656,45 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    changed into something else. */
 .planyr-note [data-testid="note-mat"] { cursor: grab; }
 .planyr-note [data-testid="note-sheet"] { cursor: auto; }
+/* ⛔ SPACE HELD = THE HAND, BEFORE THE DRAG STARTS. data-space-pan was set on the mat and nothing read
+   it, so the cursor stayed whatever the pointer was over until the first movement. Important, because
+   the mat's descendants (boxes, sheet, edge grips) each set their own cursor. */
+.planyr-note [data-testid="note-mat"][data-space-pan="1"],
+.planyr-note [data-testid="note-mat"][data-space-pan="1"] * { cursor: grab !important; }
 .planyr-note [data-testid="note-mat"][data-panning="1"],
-.planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing !important; }
+/* A TABLE'S COLUMN BORDER. ProseMirror-tables toggles resize-cursor on the editor root while the
+   pointer is inside the border's hit zone, but nothing styled it, so the only cue was the 4px
+   handle sliver (which also lost to the box's own cursor). Important: the box and its cells each
+   set their own cursor. Not while a pan/arrow mode owns the pointer (their rules above are
+   important too and come later in source order for panning; arrow mode never resizes). */
+.planyr-note .ProseMirror.resize-cursor, .planyr-note .ProseMirror.resize-cursor * { cursor: col-resize !important; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor,
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor * { cursor: grabbing !important; }
+/* A TABLE'S ROW LINE (NEW-3) — the horizontal twin of the rule above; the class is toggled by lib/notesTableRowHeight.js. */
+.planyr-note .ProseMirror.planyr-row-resize, .planyr-note .ProseMirror.planyr-row-resize * { cursor: row-resize !important; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.planyr-row-resize,
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.planyr-row-resize * { cursor: grabbing !important; }
 
-/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
-   (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
-   VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
-   part of its element for hit-testing). Mouse pointers never match this block. */
+/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the eight resize handles (10 px), the connect dot
+   (11 px) and the sheet edge grips (left alone, see the note). The VISIBLE size is unchanged: each handle
+   gets an invisible 44 px hit area centred on itself (a pseudo-element is part of its element for
+   hit-testing). Mouse pointers never match this block. */
 @media (pointer: coarse) {
   /* Halos exist only on the SELECTED box, and they must never sit over the box's TEXT: a tap on the first
-     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The grip's halo therefore
-     grows only up and to the LEFT of the grip (off the text, onto the paper edge); the resize / connect
-     halos are centred on their dots, so they are off while the box is being edited. Found on final main:
-     the original centred, always-on 44 px halo swallowed the taps verify-notes-touch-box-tap and
-     touch-pan measure. */
-  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip::after {
-    content: ""; position: absolute; right: 0; bottom: 0; width: 44px; height: 44px;
-  }
+     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The resize / connect
+     halos are centred on their dots, so they are off while the box is being edited. */
   .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-h::after,
   .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-connect::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
   }
-  /* The grip outranks the resize handles' halos: on a small box the west/north-west handles' 44 px
-     halos land on top of the grip, and the grip is the one control a finger must always be able to
-     reach (it is how a box moves). Cost, stated: a corner handle's halo is partly shadowed by the
-     grip's on a very small box — its own visible square still hits. */
-  .planyr-note .ProseMirror .planyr-anchor-grip { z-index: 2; }
+  /* The border band is the finger's way to move a box (B2426788), so on a SELECTED box it reaches
+     further OUT onto the paper (15 px beyond the line) and no further in — never over the text. The
+     handles' halos (z-index 2) outrank it at their own spots, so a corner still resizes. */
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-n { top: -16px; height: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-s { bottom: -16px; height: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-w { left: -16px; width: 19px; }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-edge-e { right: -16px; width: 19px; }
   /* The sheet's EDGE grips are deliberately NOT enlarged: they sit where a page-edge tap places a box, and
      every enlargement tried (44 px symmetric, then 36 px outward-only) moved a first letter off the finger
      by 5 px at 200% zoom in verify-notes-touch-landing. Resizing a page is a deliberate desktop-style act. */
@@ -853,7 +918,10 @@ function FindReplaceBar({ editor, find, onClose }) {
     height: 26, padding: "0 8px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
     background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12, width: 150,
   };
-  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700 };
+  /* The stylesheet owns the disabled arrow (index.css `button:disabled`); an enabled button still has to ask for the
+   * pointer, so it comes from here, only while enabled. */
+  const btnFor = (enabled) => ({ ...btnStyle, cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.45 });
 
   return (
     <div
@@ -873,14 +941,14 @@ function FindReplaceBar({ editor, find, onClose }) {
       <span data-testid="note-find-replace-count" style={{ fontSize: 12, color: "var(--text-tertiary)", minWidth: 60 }}>
         {term ? (count ? `${index + 1} of ${count}` : "No matches") : ""}
       </span>
-      <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>‹</button>
-      <button type="button" data-testid="note-find-replace-next" title="Next match" disabled={!count} onClick={() => step(1)} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>›</button>
+      <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={btnFor(!!count)}>‹</button>
+      <button type="button" data-testid="note-find-replace-next" title="Next match" disabled={!count} onClick={() => step(1)} style={btnFor(!!count)}>›</button>
       <input data-testid="note-replace-input" value={replacement} placeholder="Replace"
         onChange={(e) => setReplacement(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); replaceOne(); } }}
         style={inputStyle} />
-      <button type="button" data-testid="note-replace-one" disabled={!count} onClick={replaceOne} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace</button>
-      <button type="button" data-testid="note-replace-all" disabled={!count} onClick={replaceAll} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace all</button>
+      <button type="button" data-testid="note-replace-one" disabled={!count} onClick={replaceOne} style={btnFor(!!count)}>Replace</button>
+      <button type="button" data-testid="note-replace-all" disabled={!count} onClick={replaceAll} style={btnFor(!!count)}>Replace all</button>
       <button type="button" data-testid="note-find-replace-close" aria-label="Close find and replace" onClick={onClose}
         style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
     </div>
@@ -895,158 +963,168 @@ function FindReplaceBar({ editor, find, onClose }) {
  * `docs/NOTES-CARRY-FORWARD.md` §5 family 19 and trap 33 for the history — kept there as
  * a record, not as a design this file still has to honour. */
 
-/* ⛔ OUR OWN GLYPHS, WORD'S SILHOUETTE LANGUAGE (B36051, amendment 3). The owner asked for
- * "the same little insignias… it doesn't have to be the exact same one if that's a copyright
- * issue, but something that shows the exact same thing almost." So these are drawn here, from
- * scratch — no Microsoft asset is copied — while keeping the shape anyone who has used Word
- * reads instantly: a clipboard, plus the one mark that says which mode it is.
- *   Keep source formatting  clipboard + PAINTBRUSH
- *   Merge formatting        clipboard + two CHEVRONS meeting
- *   Keep text only          clipboard + a plain letter A
- * Inline SVG on `currentColor`, at the same 16-box and 1.7 stroke as the toolbar's own. */
-const CLIPBOARD_BODY = (
-  <>
-    <rect x="3.2" y="2.6" width="7.6" height="10.6" rx="1.4" />
-    <path d="M5.6 2.6V2a1 1 0 0 1 1-1h0.8a1 1 0 0 1 1 1v0.6" />
-  </>
-);
-
-/** ⛔ A BOX MADE FOR A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1). A new box starts a
- *  sticky-note wide; three table columns in that collapse to slivers behind a horizontal scroll.
- *  Called right after a paste into a box this paste itself created: finds the box the caret is in,
- *  and if it now holds a table, widens it to the table's column count (the same writing-column cap
- *  "Insert table" uses). Never touches a box that already existed. */
-function widenFreshBoxForTable(editor) {
+/** ⛔ A BOX THAT HOLDS A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1, owner report 2026-10-11).
+ *  Run after ANY paste that lands a table — blank paper, a selected box, an existing narrow box, the caret
+ *  inside a box (all four reach here through the one "paste" transaction hook below). It finds the box the
+ *  caret is in and widens it to the NATURAL width of the widest table it holds (`tableBoxWidth`: columns are
+ *  counted WITH their merged cells — the first version counted the first row's cells, so a OneNote table with
+ *  a three-cell merged header over six columns got a box half the width it needed). It never NARROWS a box,
+ *  and the page grows to hold the result exactly as it does for any box that overhangs. */
+function widenBoxForTable(editor, sheetWidth = 0) {
   try {
     if (!editor || editor.isDestroyed) return;
     const { $from } = editor.state.selection;
     for (let d = $from.depth; d > 0; d -= 1) {
       const node = $from.node(d);
       if (node.type.name !== "noteAnchor") continue;
-      let cols = 0;
-      node.descendants((n) => { if (n.type.name === "table") cols = Math.max(cols, n.firstChild ? n.firstChild.childCount : 0); return cols === 0; });
-      if (!cols) return;
-      const w = tableBoxWidth({ cols, current: node.attrs.w, max: MIGRATED_BOX_WIDTH });
-      if (w > (node.attrs.w || 0)) editor.commands.setNoteAnchorWidth($from.before(d), w);
+      const cur = Math.round(Number(node.attrs.w) || 0);
+      let want = cur;
+      node.descendants((n) => {
+        if (n.type.name !== "table") return true;
+        const { cols, widths } = tableShapeOfNode(n);
+        if (cols) want = Math.max(want, tableBoxWidth({ cols, widths, current: cur, sheet: sheetWidth }));
+        return false;
+      });
+      if (want > cur) editor.commands.growNoteAnchorWidth($from.before(d), want);
       return;
     }
   } catch (_) { /* a missed widening is cosmetic: the table is already in the box and scrolls */ }
 }
 
-const PASTE_ICONS = {
-  source: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M11.4 8.6c1.3-1.3 2.4-0.6 2.4-0.6s0.7 1.1-0.6 2.4l-1.9 1.9-1.8-1.8z" />
-      <path d="M11.3 12.3l-1.6 2.2 2.2-1.6" />
-    </>
-  ),
-  merge: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M10.2 8.2l2 2-2 2" />
-      <path d="M15 8.2l-2 2 2 2" />
-    </>
-  ),
-  text: (
-    <>
-      {CLIPBOARD_BODY}
-      <path d="M10.1 13.4l2.1-5 2.1 5" />
-      <path d="M10.9 11.7h2.6" />
-    </>
-  ),
-};
-
-/** Name + access key, exactly the way Word labels them. */
-export const PASTE_MODE_META = {
-  source: { label: "Keep source formatting", key: "K" },
-  merge: { label: "Merge formatting", key: "M" },
-  text: { label: "Keep text only", key: "T" },
-};
-
-function PasteIcon({ mode }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
-      {PASTE_ICONS[mode]}
-    </svg>
-  );
+/** ⛔ A BOX'S UNWRAPPED WIDTH, MEASURED (NEW-2). Lets the box be as wide as its content likes for one
+ *  synchronous read and puts the width straight back — no paint happens in between, and the node view's own
+ *  `update` never sees it. Returns the border-box width in unscaled document pixels (the canvas zoom is
+ *  divided out), or `null` when the box has no element yet. */
+function measureNaturalBoxWidth(root, aid) {
+  const el = root?.querySelector?.(`.planyr-anchor[data-anchor-id="${String(aid).replace(/"/g, '\\"')}"]`);
+  if (!el) return null;
+  const prev = el.style.width;
+  const scale = el.getBoundingClientRect().width / (el.offsetWidth || 1) || 1;
+  el.style.width = "max-content";
+  const w = el.getBoundingClientRect().width / scale;
+  el.style.width = prev;
+  return w;
 }
 
-/** ⛔ WORD'S PASTE-OPTIONS CONTROL, and it is NOT a dialog (house rule) — B36051.
+/** The self-sizing box with this id, as `{ node, pos }` — or null (not found / not self-sizing). */
+function findFitBox(editor, aid) {
+  let hit = null;
+  editor.state.doc.forEach((node, pos) => {
+    if (!hit && node.type.name === "noteAnchor" && String(node.attrs.aid || "") === String(aid) && node.attrs.fit) hit = { node, pos };
+  });
+  return hit;
+}
+
+/** Does this box hold anything that gives it a width? An EMPTY box keeps today's rule (it is pruned, not sized). */
+function boxHasContent(node) {
+  if ((node.textContent || "").trim()) return true;
+  let any = false;
+  node.descendants((n) => { if (["table", "noteImage", "noteAttachment"].includes(n.type.name)) any = true; return !any; });
+  return any;
+}
+
+/** ⛔ WORD'S AND EXCEL'S PASTE OPTIONS, and it is NOT a dialog (house rule) — B36051, then NEW-1 (Office-style).
  *
- *  A small clipboard BADGE appears at the end of a paste that carried formatting. Clicking it
- *  — or pressing Ctrl once, which is what Word does — expands the three icon buttons. Picking
- *  one RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as a single undo step: nothing is
- *  re-pasted from the clipboard and nothing outside that range is touched.
+ *  After a paste that carried formatting a small bordered TAB — a clipboard, "(Ctrl)", a caret — sits at the end of the
+ *  pasted range, exactly where Word puts it. Clicking it, or pressing Ctrl once, opens the FLYOUT: a square-cornered
+ *  panel headed "Paste Options:" with one square icon button per option. Hovering or focusing a button names it the
+ *  way Word does ("Keep Text Only (T)"); the option currently applied shows a light-blue pressed state; the letter in
+ *  the bracket picks it while the flyout is open. Picking one RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as a single
+ *  undo step, and may be done again — each pick starts from the paste as it first landed (notesPasteModes.js).
  *
- *  Module scope (MODULE-SCOPE-COMPONENTS): a component declared inside a render body is a new
- *  type every render, so React would remount it out from under its own click. */
-function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
+ *  A paste that landed a TABLE shows Excel's set, grouped under small bold headings (Paste · Paste Values · Other Paste
+ *  Options); anything else shows Word's three. Which set is the pure `pasteSetFor(offer)`.
+ *
+ *  Module scope (MODULE-SCOPE-COMPONENTS): a component declared inside a render body is a new type every render, so
+ *  React would remount it out from under its own click. The flyout is clamped into the visible mat in a LAYOUT effect
+ *  (measured before paint, so it never shows at an unclamped spot) and flips above the line when it would run off the
+ *  bottom — it has to fit a phone, where the buttons also grow to a thumb-sized target. */
+function PasteOptions({ offer, expanded, onExpand, onPick }) {
+  const rootRef = useRef(null);
+  const [tip, setTip] = useState(null);
+  const [place, setPlace] = useState(null);
+  const x = offer?.x; const y = offer?.y; const yTop = offer?.yTop;
+  const kind = offer?.kind;
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    const host = el?.offsetParent;
+    if (!el || !host) { setPlace(null); return; }
+    const w = el.offsetWidth; const h = el.offsetHeight;
+    const hw = host.clientWidth; const hh = host.clientHeight;
+    const left = Math.max(6, Math.min(x, hw - w - 6));
+    let top = y + 4;
+    if (top + h > hh - 6) top = Math.max(6, (yTop ?? y) - h - 4);
+    const tipRight = left + 250 > hw;
+    setPlace((prev) => (prev && prev.left === left && prev.top === top && prev.tipRight === tipRight ? prev : { left, top, tipRight }));
+  }, [x, y, yTop, expanded, kind]);
   if (!offer) return null;
   const box = {
-    position: "absolute", left: Math.max(6, offer.x), top: offer.y + 4, zIndex: 40,
-    display: "flex", alignItems: "center", gap: 3, padding: 3,
-    borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
-    background: "var(--surface-raised)", boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
+    position: "absolute", left: place ? place.left : Math.max(6, x), top: place ? place.top : y + 4, zIndex: 40,
+    cursor: "default",   // chrome: the arrow, not the mat's open hand
+    background: "var(--surface-raised)", border: "1px solid var(--border-strong)",
+    boxShadow: "0 3px 10px rgba(0,0,0,0.18)",
   };
   if (!expanded) {
     return (
-      <div data-testid="note-paste-options" style={box}>
+      <div ref={rootRef} data-testid="note-paste-options" className="planyr-paste-ctx" style={box}>
         <button
           type="button"
           data-testid="note-paste-badge"
-          title="Paste options (Ctrl)"
-          aria-label="Paste options"
+          title="Paste Options (Ctrl)"
+          aria-label="Paste Options (Ctrl)"
           aria-expanded={false}
           onMouseDown={(e) => e.preventDefault()}
           onClick={onExpand}
-          style={{
-            display: "flex", alignItems: "center", gap: 4, padding: "2px 6px",
-            border: "none", borderRadius: RADIUS.control, background: "transparent",
-            color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 700, cursor: "pointer",
-          }}
+          className="planyr-paste-tab"
         >
-          <PasteIcon mode="source" />
-          <span style={{ opacity: 0.7 }}>▾</span>
+          <ClipboardGlyph size={22} />
+          <span style={{ fontSize: 10.5, fontWeight: 700 }}>(Ctrl)</span>
+          <span aria-hidden="true" style={{ fontSize: 10.5 }}>▾</span>
         </button>
       </div>
     );
   }
+  const set = pasteSetFor(offer);
   return (
-    <div data-testid="note-paste-options" role="group" aria-label="Paste options" style={box}>
-      {PASTE_MODES.map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          data-testid={`note-paste-${mode}`}
-          title={`${PASTE_MODE_META[mode].label} (${PASTE_MODE_META[mode].key})`}
-          aria-label={PASTE_MODE_META[mode].label}
-          aria-keyshortcuts={PASTE_MODE_META[mode].key}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(mode)}
-          style={{
-            display: "grid", placeItems: "center", width: 26, height: 24,
-            border: "1px solid transparent", borderRadius: RADIUS.control,
-            background: "transparent", color: "var(--text-primary)", cursor: "pointer",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-page)"; e.currentTarget.style.borderColor = "var(--border-default)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}
-        >
-          <PasteIcon mode={mode} />
-        </button>
+    <div ref={rootRef} data-testid="note-paste-options" data-paste-kind={offer.kind} role="group" aria-label="Paste Options"
+      className="planyr-paste-ctx" style={{ ...box, padding: "6px 8px 8px" }}>
+      <div className="planyr-paste-head">Paste Options:</div>
+      {set.map((g) => (
+        <div key={g.title || "main"} role="group" aria-label={g.title || "Paste"} data-paste-group={g.title || ""}>
+          {g.title ? <div className="planyr-paste-group">{g.title}</div> : null}
+          <div className="planyr-paste-row">
+            {g.modes.map((mode) => {
+              const meta = PASTE_MODE_META[mode];
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`note-paste-${mode}`}
+                  data-tip={`${meta.label} (${meta.key})`}
+                  aria-label={`${meta.label} (${meta.key})`}
+                  aria-keyshortcuts={meta.key}
+                  aria-pressed={offer.applied === mode}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onPick(mode)}
+                  onMouseEnter={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onMouseLeave={() => setTip((t) => (t && t.mode === mode ? null : t))}
+                  onFocus={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onBlur={() => setTip((t) => (t && t.mode === mode ? null : t))}
+                  className="planyr-paste-btn"
+                >
+                  <PasteGlyph mode={mode} size={28} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       ))}
-      <button
-        type="button"
-        data-testid="note-paste-options-dismiss"
-        aria-label="Dismiss"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={onDismiss}
-        style={{
-          border: "none", background: "transparent", color: "var(--text-tertiary)",
-          font: "inherit", fontSize: 12, padding: "0 4px", cursor: "pointer",
-        }}
-      >✕</button>
+      {tip ? (
+        <div role="tooltip" data-testid="note-paste-tip" className="planyr-paste-tip"
+          style={{ top: tip.top, ...(place?.tipRight ? { right: 0 } : { left: tip.left }) }}>
+          {PASTE_MODE_META[tip.mode].label} ({PASTE_MODE_META[tip.mode].key})
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1190,8 +1268,12 @@ function MiniColor({ id, title, colors, current, onPick }) {
 function MiniBar({ editor }) {
   const chain = () => editor.chain().focus();
   const size = editor.getAttributes("textStyle")?.fontSize || "";
+  /* A header cell's text is bold by style — the B must never read off on it (NEW-1, 2026-10-28). */
+  const headerCells = selectionInHeaderCells(editor.state);
+  const boldInHeader = headerCells === "all";
+  const boldLit = boldTruth(editor.isActive("bold") ? "true" : "false", headerCells) !== "false";
   const items = [
-    { id: "bold", title: "Bold (Ctrl+B)", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
+    { id: "bold", title: boldInHeader ? "Bold (header row: use Header row to change)" : "Bold (Ctrl+B)", active: boldLit, run: () => { if (!boldInHeader) chain().toggleBold().run(); } },
     { id: "italic", title: "Italic (Ctrl+I)", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
     { id: "underline", title: "Underline (Ctrl+U)", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
     { id: "strike", title: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
@@ -1228,7 +1310,7 @@ function MiniBar({ editor }) {
         style={{
           height: 24, maxWidth: 62, border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
           background: "var(--surface-base)", color: "var(--text-primary)", font: "inherit", fontSize: 12,
-          padding: "0 2px", flex: "0 0 auto",
+          padding: "0 2px", flex: "0 0 auto", cursor: "pointer",
         }}
       >
         {SIZES.map((n) => <option key={String(n)} value={n == null ? "" : `${n}px`}>{n == null ? "Size" : n}</option>)}
@@ -1287,6 +1369,7 @@ function MenuRow({ item, onClose }) {
           <div
             role="menu"
             data-testid={`note-menu-${item.id}-sub`}
+            className="planyr-paste-ctx"
             style={{
               position: "absolute", left: "100%", top: -4, minWidth: 208, padding: "5px 0", zIndex: 1,
               background: "var(--surface-raised)", border: "1px solid var(--border-default)",
@@ -1316,6 +1399,10 @@ function MenuRow({ item, onClose }) {
         textAlign: "left", cursor: "pointer",
       }}
     >
+      {item.chip !== undefined ? (
+        <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, border: "1px solid var(--border-strong)", flex: "0 0 auto", background: item.chip || "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 10, lineHeight: "12px", textAlign: "center" }}>{item.chip ? "" : "✕"}</span>
+      ) : null}
+      {item.icon ? <span aria-hidden="true" className="planyr-paste-ctx" style={{ width: 20, height: 20, display: "grid", placeItems: "center", flex: "0 0 auto" }}>{item.icon}</span> : null}
       <span style={{ flex: 1 }}>{item.label}</span>
       {item.accel ? <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>{item.accel}</span> : null}
     </button>
@@ -1361,6 +1448,27 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
   left = Math.max(margin, left);
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
+}
+
+/** The table section of the right-click menu: "Header row" (shown as on/off) and "Fill ▸" with No fill first. */
+function tableMenuItems(editor) {
+  const state = editor.state;
+  const fillNow = currentFill(state);
+  return [
+    SEP,
+    { id: "header-row", label: "Header row", active: headerRowsState(state) === "true", run: () => editor.chain().focus().toggleHeaderRows().run() },
+    {
+      id: "fill",
+      label: "Fill",
+      sub: TABLE_FILLS.map((f) => ({
+        id: f.value ? `fill-${f.name.toLowerCase()}` : "fill-none",
+        label: f.name,
+        chip: f.value || "",
+        active: f.value ? fillNow === f.value.toLowerCase() : false,
+        run: () => editor.chain().focus().setCellFill(f.value).run(),
+      })),
+    },
+  ];
 }
 
 function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable, pressGuardRef }) {
@@ -1428,6 +1536,7 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
       sub: PASTE_MODES.map((mode) => ({
         id: mode === "text" ? "paste-plain" : `paste-${mode}`,
         label: PASTE_MODE_META[mode].label,
+        icon: <PasteGlyph mode={mode} size={20} />,
         accel: mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key,
         run: () => onPlainPaste(mode),
       })),
@@ -1441,6 +1550,10 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
        table is the only thing in its list item). Its own row, not lumped with `link`, because
        it restructures the document rather than formatting a selection. */
     ...(onConvertTable ? [SEP, { id: "convert-table-text", label: "Convert table to text", run: onConvertTable }] : []),
+    /* NEW-1/NEW-2 (2026-10-28) — the table's Header row and Fill, where a right-click lands. The SAME two
+       commands the toolbar's Table group runs (`toggleHeaderRows` / `setCellFill`): the cell selection if
+       there is one, else the caret cell's whole row. */
+    ...(at?.inTable ? tableMenuItems(editor) : []),
     ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
   ];
 
@@ -1469,6 +1582,7 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
          * unmeasured position — the flicker that a post-paint effect would produce. */
         visibility: box ? "visible" : "hidden",
         zIndex: 60, display: "flex", flexDirection: "column", alignItems: "flex-start",
+        cursor: "default",          // chrome: the arrow, whatever surface (the mat's hand, a box's move) it floats over
       }}
     >
       <MiniBar editor={editor} />
@@ -1538,9 +1652,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * `useEditor`, the migrated shape is simply what the editor STARTS with; neither is a
    * transaction, so `hasUserInputRef` below still gates the first save on a real, trusted user
    * action. */
-  const [initialDoc] = useState(() => migrateFlowBody(migrateSketchesToBoxes(
+  /* ⛔ AND "BULLETS" THAT ARE JUST TEXT BECOME REAL LISTS HERE TOO (lib/notesFakeBullets.js): a Word / OneNote outline pasted
+   * before the Office-list fix is paragraphs that begin with the glyph, so Enter has no list to continue. Same rule as the two
+   * migrations: on the way in, never a transaction, saved only once the person edits (pressing Enter is that edit). */
+  const [initialDoc] = useState(() => normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
     (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
-  )));
+  ))));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
   /* ⛔ NEW-5 — whether DOM focus is currently in the title `<input>`, so the toolbar knows to
    * read/write `titleStyle` instead of the document selection. A plain boolean, not derived
@@ -1620,6 +1737,15 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [pasteOffer, setPasteOffer] = useState(null);
   const pasteRef = useRef(null);
   pasteRef.current = pasteOffer;
+  /* The extension list must stay stable (rebuilding it rebuilds the editor), so the paste announcement reaches this
+   * component through a ref filled in below, once `editor` exists — the same shape as `runSlashRef`. */
+  const offerPasteOptionsRef = useRef(null);
+  /* Set while a pick is dispatching its own transaction, so the "any further editing retires the offer" listener
+   * does not mistake the option the person just chose for an edit that made the offer stale. */
+  const applyingPasteModeRef = useRef(false);
+  /* Released a tick LATER, not at the end of the pick: a pick that widens its box (Transpose, Keep Source Column Widths)
+   * has the width change land in a microtask after it, as its own update, and that one is the pick's too. */
+  const releasePasteApply = () => { setTimeout(() => { applyingPasteModeRef.current = false; }, 0); };
 
   /* THE SLASH MENU (NEW-1). All of the decision — whether it is open, what is in it, which
    * row is highlighted — lives in the plugin (lib/notesSlashMenu.js) reading the document.
@@ -1640,7 +1766,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     () => noteExtensions({
       imageContext,
       onSearchMatches: (m) => setFind(m),
-      onPasted: ({ from, to, text }) => setPasteOffer({ from, to, text, at: Date.now() }),
+      onPasted: (facts) => offerPasteOptionsRef.current?.(facts),
       onSlash: (s) => setSlash(s),
       onSlashRun: (id, range) => runSlashRef.current?.(id, range),
     }),
@@ -1864,6 +1990,24 @@ const NoteEditor = forwardRef(function NoteEditor({
        *  editor's DOM node — untrusted, so the browser performs no native edit of its own for
        *  it — which exercises ONLY the plugin's `handleDOMEvents.beforeinput`, exactly the event
        *  class his platform is documented to deliver without a usable `keydown`. */
+      /** NEW-1 (B2142464 x4) — drive the paste SAFETY NET on purpose. No clipboard we know of makes the parse drop a table, so
+       *  the net could never be seen working: this runs the pipeline's `transformPastedHTML` on `html` (filling its slot with
+       *  the tables the html held) and then `transformPasted` on a slice that holds a paragraph and NO table, and returns the
+       *  resulting slice as JSON. A healthy net hands the tables back. */
+      pasteSafetyNetProbe: (html) => {
+        if (editor.isDestroyed) return null;
+        const v = editor.view;
+        const para = v.state.schema.nodes.paragraph.create(null, v.state.schema.text("lost-table probe"));
+        const Frag = para.content.constructor;
+        const Slice = v.state.doc.slice(0, 0).constructor;
+        /* ProseMirror CHAINS every plugin's transform (the callback returns nothing, so `someProp` keeps going) — a probe that
+         * returned the first plugin's answer would stop at whichever one registered first and never reach ours. */
+        let h = html;
+        v.someProp("transformPastedHTML", (f) => { h = f(h, v); });
+        let out = new Slice(Frag.from(para), 0, 0);
+        v.someProp("transformPasted", (f) => { out = f(out, v); });
+        return out.content.toJSON();
+      },
       dispatchBeforeInput: (inputType = "deleteContentBackward") => {
         if (editor.isDestroyed) return;
         const event = new InputEvent("beforeinput", { inputType, cancelable: true, bubbles: true });
@@ -2234,13 +2378,15 @@ const NoteEditor = forwardRef(function NoteEditor({
       if (!landed) {
         const { x, y } = nextAnchorSpot(editor.state.doc);
         fresh = `a${Date.now().toString(36)}p${Math.floor(Math.random() * 1e6).toString(36)}`;
-        editor.commands.addNoteAnchorAt({ x, y, w: ANCHOR_WIDTH, aid: fresh });
+        const colW = editor.view.dom.offsetWidth;
+        const startW = placeAnchor({ x, y, width: colW, preferred: anchorStartPreferred(colW), minWidth: ANCHOR_START_MIN }).w;
+        editor.commands.addNoteAnchorAt({ x, y, w: startW, aid: fresh });
         setSelection(new Set([fresh]));
         setEditingId(fresh);
       }
       if (!editor.view.hasFocus()) editor.view.focus();
       pasteClipboardIntoEditor(html, text, e);
-      if (fresh) widenFreshBoxForTable(editor);
+      widenBoxForTable(editor, sheetWidthRef.current);
     };
     window.addEventListener("paste", onLoosePaste, { capture: true });
     return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
@@ -2282,6 +2428,16 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("copy", onClip, { capture: true });
     window.addEventListener("cut", onClip, { capture: true });
     return () => { window.removeEventListener("copy", onClip, { capture: true }); window.removeEventListener("cut", onClip, { capture: true }); };
+  }, [editor, onPrintNotice]);
+
+  /* B2530690 — the table's multi-cell selection says "this won't work on multiple selections" through a DOM event on
+   * the editor (it has no prop to call); show it where every other editor notice shows. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const dom = editor.view.dom;
+    const onNote = (e) => { if (e.detail && e.detail.message) onPrintNotice?.(e.detail.message); };
+    dom.addEventListener("planyr-notes-notice", onNote);
+    return () => dom.removeEventListener("planyr-notes-notice", onNote);
   }, [editor, onPrintNotice]);
 
   /* ⛔ THE FIRST KEYSTROKE, CAUGHT BEFORE THE EDITOR SEES IT. Bound on `window` in CAPTURE, for
@@ -2371,7 +2527,7 @@ const NoteEditor = forwardRef(function NoteEditor({
        * tables stay tables, the paste-options chip appears, the three paste modes apply. */
       if (!commitPendingPlace()) return;
       pasteClipboardIntoEditor(html, text, e);
-      widenFreshBoxForTable(editor);
+      widenBoxForTable(editor, sheetWidthRef.current);
     };
     /* ⛔ TEXT THAT ARRIVES WITHOUT A PRINTABLE KEYDOWN (NEW-1, iOS review). Predictive-bar taps,
      * QuickPath swipe, dictation, emoji (`key.length` 2) and IME composition report `Unidentified`
@@ -2463,7 +2619,9 @@ const NoteEditor = forwardRef(function NoteEditor({
      * not the box's top-left — lands under the fingertip (NEW-1, 2026-10-04; see `touchBoxOrigin`).
      * Desktop keeps the corner-at-the-click rule its acceptance test pins. */
     if (touch) ({ x: tapX, y: tapY } = touchBoxOrigin({ x: tapX, y: tapY, lineH, fontPx }));
-    const point = placeAnchor({ x: tapX, y: tapY, width: dom.offsetWidth });
+    /* ⛔ A NEW BOX STARTS WIDE (NEW-2): the text column's width, or the room to the right of the press if
+     * that is less, never below a usable line (`ANCHOR_START_MIN`). It shrinks to its words on click-out. */
+    const point = placeAnchor({ x: tapX, y: tapY, width: dom.offsetWidth, preferred: anchorStartPreferred(dom.offsetWidth), minWidth: ANCHOR_START_MIN });
     /* ⛔ A PRESS ARMS A CARET. IT DOES NOT CREATE ANYTHING (NEW-8, owner report 2026-09-08:
      * *"just because I click outside of the page, it shouldn't automatically open the page up to
      * it. Only once I actually type something. And also, if I click somewhere and then don't type
@@ -2547,6 +2705,83 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [editingId, setEditingId] = useState(null);
   const editingRef = useRef(null);
   editingRef.current = editingId;
+
+  /* ═══ A BOX SIZES ITSELF: STARTS WIDE, SHRINKS TO ITS WORDS ON CLICK-OUT (NEW-2, 2026-10-11) ═══
+   *
+   * ⛔ THE OWNER'S WORDS: new boxes should start "much wider, so typing and pasting have room", and
+   * "if the content doesn't use that width, the box shrinks to fit its text when he clicks out".
+   * Only a box that carries `fit` (made by typing or pasting on blank paper — see `addNoteAnchorAt`) ever
+   * does this; a box whose width a person set by hand, and every box from before the attribute existed,
+   * is NEVER touched. The decisions are pure (`fitWidthFor` / `growWidthFor`); this is only the wiring.
+   *
+   * ⛔ THE WRITE IS NOT AN UNDO STEP (`autoSizeNoteAnchor` sets `addToHistory: false`): Ctrl+Z undoes what
+   * the person did, never the app's tidy-up. ⛔ AND IT ONLY EVER SHRINKS ON CLICK-OUT — content wider than
+   * the box (a long unbroken line, a wide table) leaves the box exactly as it is. */
+  const settleBox = useCallback((aid) => {
+    if (!aid || !editor || editor.isDestroyed) return;
+    const hit = findFitBox(editor, aid);
+    if (!hit || !boxHasContent(hit.node)) return;
+    const w = fitWidthFor({ current: hit.node.attrs.w, natural: measureNaturalBoxWidth(noteRootRef.current, aid) });
+    if (w != null) editor.commands.autoSizeNoteAnchor(aid, w);
+  }, [editor]);
+  /* Two ways out of a box: another box / Escape / a press elsewhere changes `editingId`; a press on the
+   * title (or any field outside the editor) only BLURS the editor and leaves `editingId` standing — so both
+   * are watched. The blur path waits a beat and re-checks focus, so a node view that rebuilds itself under a
+   * keystroke (a blur that is not a person leaving) never shrinks a box mid-sentence. */
+  const prevEditingRef = useRef(null);
+  useEffect(() => {
+    const prev = prevEditingRef.current;
+    prevEditingRef.current = editingId;
+    if (prev && prev !== editingId) settleBox(prev);
+  }, [editingId, settleBox]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    let t = null;
+    const onBlur = () => {
+      const aid = editingRef.current;
+      if (!aid) return;
+      clearTimeout(t);
+      t = setTimeout(() => { if (!editor.isDestroyed && !editor.view.hasFocus()) settleBox(aid); }, 120);
+    };
+    editor.on("blur", onBlur);
+    return () => { clearTimeout(t); editor.off("blur", onBlur); };
+  }, [editor, settleBox]);
+
+  /* ⛔ RE-ENTERING DOES NOT RE-EXPAND; TYPING PAST THE EDGE DOES. A shrunk box stays shrunk while it is
+   * edited, until a keystroke would make its text wrap — then it grows back to the width a new box starts
+   * at, BEFORE the wrap, so the words never reflow into a one-letter column. Cheap by construction: a box
+   * already at least start-wide never measures. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onEditorUpdate = () => {
+      const id = editingRef.current;
+      if (!id || editor.isDestroyed) return;
+      const hit = findFitBox(editor, id);
+      if (!hit) return;
+      const cur = Math.round(Number(hit.node.attrs.w) || 0);
+      const colW = editor.view.dom.offsetWidth;
+      const start = placeAnchor({ x: hit.node.attrs.x, y: 0, width: colW, preferred: anchorStartPreferred(colW), minWidth: ANCHOR_START_MIN }).w;
+      if (cur >= start) return;
+      const w = growWidthFor({ current: cur, natural: measureNaturalBoxWidth(noteRootRef.current, id), start });
+      if (w != null) editor.commands.autoSizeNoteAnchor(id, w);
+    };
+    editor.on("update", onEditorUpdate);
+    return () => editor.off("update", onEditorUpdate);
+  }, [editor]);
+
+  /* ⛔ EVERY PASTE THAT LANDS A TABLE WIDENS ITS BOX (NEW-1) — one hook for every landing: blank paper, a
+   * selected box, an existing narrow box, the caret in a box. Microtask, so the pasted slice (and, for a
+   * paste that made the box, the box itself) is in the document first; the width change joins the paste's own
+   * undo group (an attribute step kept out of the history), so one Ctrl+Z still takes the table out. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onTx = ({ transaction }) => {
+      if (!transaction?.docChanged || transaction.getMeta("uiEvent") !== "paste") return;
+      queueMicrotask(() => widenBoxForTable(editor, sheetWidthRef.current));
+    };
+    editor.on("transaction", onTx);
+    return () => editor.off("transaction", onTx);
+  }, [editor]);
   const [band, setBand] = useState(null);          // the rubber band, in DOCUMENT space
   const selRef = useRef(selection);
   selRef.current = selection;
@@ -2895,6 +3130,13 @@ const NoteEditor = forwardRef(function NoteEditor({
          * paint also runs from the editor's own transaction handler, outside React's render. */
         if (String(editingRef.current || "") === id) el.setAttribute("data-editing", "1");
         else el.removeAttribute("data-editing");
+        /* ⛔ WHETHER A PRESS ON THIS BOX'S BODY WILL MOVE IT (convention 2026-10-20: the cursor never lies). Measured on
+         * this build: a SINGLE box's body is not a move surface in any state — press 1 selects, press 2 ENTERS it
+         * (data-editing flips on the mousedown, so the body drag stands down), and a drag from an unselected body
+         * pans. The one body that drags is a member of a multi-selection (`beginGroupDrag`, claimed on the mat's
+         * mousedown before the box is entered). So the four-arrow cursor is painted from this, not from data-selected. */
+        if (on && selRef.current.size >= 2 && String(editingRef.current || "") !== id) el.setAttribute("data-movable", "1");
+        else el.removeAttribute("data-movable");
         /* ⛔ THE ARROW'S SOURCE BOX, HIGHLIGHTED WHILE CLICK-TO-CONNECT IS WAITING FOR THE
          * SECOND CLICK (NEW-2) — the visual feedback the acceptance bar asks for, painted the
          * same way and for the same reason as `data-selected`/`data-editing` above. */
@@ -2959,16 +3201,20 @@ const NoteEditor = forwardRef(function NoteEditor({
    * gesture. (Leaflet does the same, for the same reason.)
    */
   /* The pan's on/off switch, shared by the blank-paper pan and the content pan below it. */
+  const panPinRef = useRef(null);
   const setMatPanning = useCallback((on) => {
     const mat = scrollerRef.current;
     if (mat) {
       if (on) mat.setAttribute("data-panning", "1");
       else mat.removeAttribute("data-panning");
     }
-    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
-     * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
-     * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
-    document.body.style.cursor = on ? "grabbing" : "";
+    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome), and an
+     * element's OWN cursor out-ranks the one it would inherit from body — so a body-style write left the
+     * hand showing only where nothing set its own cursor. `pinDragCursor` pins it at the document root
+     * for the life of the gesture and releases on pointerup / cancel / Escape / blur; the explicit
+     * release here is the mouse-event path's own exit. Idempotent — called once per pan. */
+    if (on) { if (!panPinRef.current) panPinRef.current = pinDragCursor("grabbing"); }
+    else if (panPinRef.current) { panPinRef.current(); panPinRef.current = null; }
     document.body.style.userSelect = on ? "none" : "";
   }, []);
 
@@ -2993,6 +3239,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const baseSelection = new Set([...selRef.current].map(String));
     /* What this gesture has committed to. `null` until it travels; never goes back. */
     let latched = null;
+    let releaseBand = null;
 
     const setPanning = setMatPanning;
 
@@ -3010,6 +3257,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         });
         return;
       }
+      if (!was) releaseBand = pinDragCursor("crosshair");     // the rubber band is a draw gesture: crosshair, held
       const to = toDoc(at.x, at.y);
       if (!to) return;
       const rect = marqueeRect(from, to);
@@ -3022,6 +3270,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("mouseup", onUp);
       setBand(null);
       setPanning(false);
+      releaseBand?.();
       /* ⛔ THE LATCH, NOT A FRESH READING AT MOUSE-UP. A pan returned to its own origin measures
        * zero travel, and asking the distance again here would call that a press and leave a note
        * behind at the end of every round trip. See `latchGesture`. */
@@ -3052,7 +3301,9 @@ const NoteEditor = forwardRef(function NoteEditor({
     e.preventDefault();
     e.stopPropagation();
 
+    let releaseCursor = null;
     const onMove = (ev) => {
+      if (!releaseCursor) releaseCursor = pinDragCursor("move");      // the group moves: MOVE, for the whole drag
       const dx = (ev.clientX - start.x) / f.scale;
       const dy = (ev.clientY - start.y) / f.scale;
       const moves = moveSelection(startBoxes, { dx, dy }, { maxX: f.dom.offsetWidth });
@@ -3064,6 +3315,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      releaseCursor?.();
       const dx = (ev.clientX - start.x) / f.scale;
       const dy = (ev.clientY - start.y) / f.scale;
       if (!dx && !dy) return;                        // a press that never moved writes NOTHING
@@ -3340,6 +3592,23 @@ const NoteEditor = forwardRef(function NoteEditor({
         /* ⛔ SEE THE STAGE-1 COMMENT BELOW — the same stale-caret hazard applies to an additive
          * shift-click, so it gets the same blur. */
         if (editor && !editor.isDestroyed) editor.commands.blur();
+        return;
+      }
+      /* ⛔ A PRESS ON A BOX'S BORDER BAND SELECTS IT AND NOTHING MORE (B2426788). The band is the move
+       * handle (PowerPoint / Bluebeam): the node view owns the DRAG — a single box or the whole
+       * selection, caret in it or not — so this press must not start a second one (`beginGroupDrag`
+       * below) and must never ENTER the box (stage 2 puts a caret on the outline, which is not text).
+       * An unselected box becomes the selection; a selected one keeps it, and a box with the caret
+       * keeps its caret (`preventDefault` stops the browser moving focus off it). The pointer capture
+       * the drag takes retargets this `mousedown` to the box, so the band is also named by the
+       * `data-edge-press` flag the node view sets for exactly the length of that press. */
+      if (id && (el.closest(".planyr-anchor-edge") || inBlock.hasAttribute("data-edge-press"))) {
+        e.preventDefault();
+        if (!selRef.current.has(String(id))) {
+          setEditingId(null);
+          setSelection(new Set([String(id)]));
+          if (editor && !editor.isDestroyed) editor.commands.blur();
+        }
         return;
       }
       if (id && selRef.current.has(String(id)) && selRef.current.size > 1) {
@@ -3922,9 +4191,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     const from = { ...viewRef.current };
     const sc = scrollerRef.current;
     if (sc) sc.setAttribute("data-panning", "1");
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "grabbing";
+    const releaseCursor = pinDragCursor("grabbing");
     document.body.style.userSelect = "none";
     const onMove = (ev) => {
       setView({ x: from.x - (ev.clientX - start.x), y: from.y - (ev.clientY - start.y), z: from.z });
@@ -3934,7 +4202,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       if (sc) sc.removeAttribute("data-panning");
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
     };
     window.addEventListener("pointermove", onMove);
@@ -3963,7 +4231,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * stage-1 select that stage 2's native caret placement and word-select build on).
    *
    * ⛔ WHAT KEEPS ITS OWN DRAG, stated because a drag that is "always a pan" would otherwise eat
-   * them: the box move grip, the resize handles, the arrow connect dot, a table's column-resize
+   * them: the box border (its move handle), the resize handles, the arrow connect dot, a table's column-resize
    * handle, the page-edge grips, and any form control / link / `<summary>`; Shift / Ctrl / Alt /
    * Cmd presses (marquee, toggle, context menu); a box that is already SELECTED (its body still
    * drags the box / the whole selection, the same rule the touch pan uses); and — this one is a
@@ -3976,7 +4244,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc || !editor) return undefined;
-    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-grip, '
+    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-edge, '
       + '.planyr-anchor-connect, .planyr-anchor-del, .planyr-anchor-size, .column-resize-handle, '
       + '[class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], [data-testid="note-zoom-pill"]';
     let claimed = false;
@@ -3988,6 +4256,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       const box = el.closest(".planyr-anchor");
       if (!box || el.closest(OWN)) return false;
       if (editor.view.dom.classList.contains("resize-cursor")) return false;     // on a column border
+      if (editor.view.dom.classList.contains("planyr-row-resize")) return false; // on a row line (NEW-3)
       const id = box.getAttribute("data-anchor-id");
       if (id && selRef.current.has(String(id))) return false;                    // selected: it keeps its drag
       if (box.getAttribute("data-editing") === "1") return false;                // being edited: text selection
@@ -4099,10 +4368,10 @@ const NoteEditor = forwardRef(function NoteEditor({
       const [a, b] = [...live.values()];
       return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) };
     };
-    /* Pressing one of these is never a pan. A selected / edited box, a box grip or resize handle, a
+    /* Pressing one of these is never a pan. A selected / edited box, a box border or resize handle, a
      * sheet edge grip, a form control, and the zoom pill all own their own touches. */
     const ownsTheTouch = (el) => !(el instanceof Element) || !!el.closest(
-      'input, textarea, select, button, a, [data-handle], .planyr-anchor-grip, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
+      'input, textarea, select, button, a, [data-handle], .planyr-anchor-edge, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
       + '.planyr-anchor[data-selected="1"], .planyr-anchor[data-editing="1"], [data-testid="note-zoom-pill"]');
     const beginPan = (id, at, latched) => {
       pan = { id, from: at, startView: { ...viewRef.current }, latched, samples: [{ t: performance.now(), ...at }] };
@@ -4316,7 +4585,11 @@ const NoteEditor = forwardRef(function NoteEditor({
          * off the end of the sheet landing under the Outline panel) from the scroller-era, when the pane
          * WAS the page; the canvas is unbounded and pannable now, and the STORED width is the person's
          * intent (this function's own header says so). No `hostWidth` = "unmeasured — never guess". */
-        const fit = fitAnchorBox({ x, w });
+        /* ⛔ A SELF-SIZING BOX (`data-anchor-fit`) MAY RENDER NARROWER THAN THE 160 PLACEMENT FLOOR (NEW-2): the
+         * floor protects a box somebody placed near the margin from being crushed; a box that has just
+         * shrunk to its words is the opposite case. Hand-sized and legacy boxes keep the 160 floor. */
+        const minWidth = el.getAttribute("data-anchor-fit") === "1" ? ANCHOR_FIT_MIN : undefined;
+        const fit = fitAnchorBox({ x, w, minWidth });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
@@ -4670,9 +4943,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     widthDragRef.current = drag;
     viewTouchedRef.current = true;          // the page is theirs now; never re-frame over a drag
     setWidthDragEdge(edge);
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
+    const releaseCursor = pinDragCursor("col-resize");
     document.body.style.userSelect = "none";
 
     /** What the geometry should be for a pointer at `clientX`. Pure apart from the two library
@@ -4722,7 +4994,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
       widthDragRef.current = null;
       setWidthDragEdge(null);
@@ -4834,9 +5106,8 @@ const NoteEditor = forwardRef(function NoteEditor({
     heightDragRef.current = drag;
     viewTouchedRef.current = true;          // as for the width grips — see `framedForRef`
     setHeightDragEdge(edge);
-    const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = "row-resize";
+    const releaseCursor = pinDragCursor("row-resize");
     document.body.style.userSelect = "none";
 
     const liveHeightFor = (clientY) => {
@@ -4897,7 +5168,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      document.body.style.cursor = prevCursor;
+      releaseCursor();
       document.body.style.userSelect = prevSelect;
       heightDragRef.current = null;
       setHeightDragEdge(null);
@@ -4987,7 +5258,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const onDown = (e) => {
       if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
       if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
-      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-grip")) return;
+      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-edge")) return;
       start = { x: e.clientX, y: e.clientY, target: e.target };
       timer = setTimeout(() => {
         timer = 0;
@@ -5025,57 +5296,185 @@ const NoteEditor = forwardRef(function NoteEditor({
     };
   }, [editor, readOnly, openDocMenuAt]);
 
+  /* THE PASTE ANNOUNCEMENT → AN OFFER. The extension hands over the documents either side of the paste; `analyzePaste`
+   * decides what it landed (text · new table(s) · cells of an existing table · a table that grew) and so which SET of
+   * options the flyout shows. `baseDoc` is the paste exactly as it landed: every pick puts the paste back to it first. */
+  useEffect(() => {
+    offerPasteOptionsRef.current = (facts) => {
+      if (!editor || editor.isDestroyed) return;
+      const found = analyzePaste(facts);
+      let { from, to } = facts;
+      if (found.kind === "cells") {
+        from = Math.min(...found.cells.map((c) => c.pos));
+        to = Math.max(...found.cells.map((c) => c.pos + (facts.postDoc.nodeAt(c.pos)?.nodeSize || 0)));
+      }
+      setPasteOffer({
+        from, to, curTo: to, baseDoc: facts.postDoc, kind: found.kind,
+        tables: found.tables, cells: found.cells, preTable: found.preTable || null,
+        meta: facts.meta || { tables: [] }, applied: "source", at: Date.now(),
+      });
+      setPasteExpanded(false);
+    };
+    return () => { offerPasteOptionsRef.current = null; };
+  }, [editor]);
+
   useEffect(() => {
     if (!pasteOffer || !editor || editor.isDestroyed) { setPasteAt(null); return undefined; }
-    let live = true;
     try {
-      const coords = editor.view.coordsAtPos(Math.min(pasteOffer.to, editor.state.doc.content.size));
       const host = editor.view.dom.closest("[data-testid='note-mat']")?.getBoundingClientRect();
-      if (host) setPasteAt({ x: coords.left - host.left, y: coords.bottom - host.top });
+      /* Text: just below the caret at the end of the pasted range. A picture: just below the picture's own box. */
+      const el = pasteOffer.dom != null ? editor.view.nodeDOM(pasteOffer.dom) : null;
+      const r = el?.getBoundingClientRect?.();
+      const coords = r ? { left: r.left, bottom: r.bottom, top: r.top } : editor.view.coordsAtPos(Math.min(pasteOffer.curTo ?? pasteOffer.to, editor.state.doc.content.size));
+      if (host) setPasteAt({ x: coords.left - host.left, y: coords.bottom - host.top, yTop: coords.top - host.top });
       else setPasteAt(null);
     } catch (_) { setPasteAt(null); }
-    // Word's chip goes away on its own rather than sitting there for the rest of the session.
-    const t = setTimeout(() => { if (live) setPasteOffer(null); }, 12000);
-    return () => { live = false; clearTimeout(t); };
+    return undefined;
   }, [pasteOffer, editor]);
 
+  /* Word's tab goes away on its own rather than sitting there for the rest of the session — but never while the flyout
+   * is open under somebody's pointer. */
+  const [pasteExpanded, setPasteExpanded] = useState(false);
+  useEffect(() => {
+    if (!pasteOffer || pasteExpanded) return undefined;
+    const t = setTimeout(() => setPasteOffer(null), 12000);
+    return () => clearTimeout(t);
+  }, [pasteOffer, pasteExpanded]);
+
   /* Any further editing retires the offer — its range would be stale, and an option that
-   * would silently act on the wrong text is worse than no option. */
+   * would silently act on the wrong text is worse than no option. (Not the edit a pick makes itself.) */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const retire = () => { if (pasteRef.current) setPasteOffer(null); };
+    const retire = () => { if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);
 
-  /* ⛔ PICKING A MODE RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as ONE undo step — it
-   * never re-pastes from the clipboard and never touches anything outside that range. */
-  const [pasteExpanded, setPasteExpanded] = useState(false);
-  const applyPasteMode = useCallback((mode) => {
+  /* ⛔ PICKING AN OPTION RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as ONE undo step — it never re-pastes from the
+   * clipboard and never touches anything outside the paste. It puts the paste back to how it landed (`baseDoc`) and
+   * applies the option to THAT, in the same transaction, so choosing twice (Keep Text Only, then Merge Formatting, then
+   * back to Keep Source Formatting) never compounds a loss. Picture is the one async option: it draws the table first. */
+  const applyPasteMode = useCallback(async (mode) => {
     const offer = pasteRef.current;
-    setPasteOffer(null);
     setPasteExpanded(false);
     if (!offer || !editor || editor.isDestroyed) return;
-    if (mode === "source") return;                       // already what is on the page
-    const to = Math.min(offer.to, editor.state.doc.content.size);
-    if (to <= offer.from) return;
-    if (mode === "text") editor.commands.keepTextOnly({ from: offer.from, to });
-    else editor.commands.mergeFormatting({ from: offer.from, to });
-  }, [editor]);
+    if (mode === offer.applied) return;
+    const sizeUp = (txt) => onPrintNotice?.(txt);
+    const run = (build) => {
+      applyingPasteModeRef.current = true;
+      let end = null;
+      let ok = false;
+      try {
+        ok = editor.chain().command(({ tr }) => {
+          tr.setMeta("uiEvent", "paste");              // the same "a paste landed a table" hook widens its box
+          const r = build(tr);
+          if (r && r.end != null) end = r.end;
+          return !!(r && r.ok);
+        }).run();
+        if (end == null) end = editor.state.selection.to;
+      } finally { releasePasteApply(); }
+      return { ok, end };
+    };
 
-  /* Ctrl on its own expands the badge — Word's shortcut, and the reason the badge can be a
-   * badge rather than three buttons permanently in the way. */
+    if (mode === "picture") {
+      const sources = (offer.tables || []).map((t) => ({ pos: t.pos, node: offer.baseDoc.nodeAt(t.pos) })).filter((t) => t.node);
+      if (!sources.length) return;
+      const drawn = [];
+      for (const [i, src] of sources.entries()) {
+        const r = await prepareTablePicture(withSourceFills(src.node, offer.meta?.tables?.[i]?.fills), editor.schema);
+        if (!r.ok) { sizeUp(r.error); return; }
+        const ctx = imageCtxRef.current || {};
+        const imageId = newId("img");
+        const stored = await putNoteImage({
+          id: imageId, pageId: ctx.pageId || null, dataUrl: r.prepared.dataUrl, mime: r.prepared.mime,
+          w: r.prepared.w, h: r.prepared.h, notebookPageIds: Array.isArray(ctx.notebookPageIds) ? ctx.notebookPageIds : null,
+        });
+        if (!stored.ok) return;                    // putNoteImage has already named the failure in the banner
+        drawn.push({ ...src, imageId, prepared: r.prepared, cssW: r.cssW, cssH: r.cssH });
+      }
+      // The picture took a moment; if the paste has been edited or dismissed meanwhile, its range is stale — say so, do nothing.
+      if (pasteRef.current !== offer || editor.isDestroyed) { sizeUp("The paste changed while its picture was being made, so the picture was not placed."); return; }
+      let pictureAnchor = null;
+      const { ok } = run((tr) => {
+        revertToBase(tr, offer.baseDoc);
+        const schema = tr.doc.type.schema;
+        const mark = tr.steps.length;
+        let anchor = null;
+        for (const d of [...drawn].sort((a, b) => b.pos - a.pos)) {
+          const table = tr.doc.nodeAt(d.pos);
+          if (!table || table.type.name !== "table") continue;
+          const image = schema.nodes.noteImage.create({
+            imageId: d.imageId, alt: "Pasted table", mime: d.prepared.mime, w: d.prepared.w || null, h: d.prepared.h || null,
+          });
+          const $at = tr.doc.resolve(d.pos);
+          const parent = $at.parent;
+          /* A box that held only the table (any empty lines beside it are litter, not content) becomes a PICTURE box:
+           * its whole content is the picture, sized to the picture, no longer self-sizing. Anywhere else the picture
+           * simply takes the table's place in the text around it. */
+          const alone = parent.type.name === "noteAnchor"
+            && (() => { let others = 0; parent.forEach((c) => { if (c !== table && !(c.type.name === "paragraph" && c.content.size === 0)) others += 1; }); return others === 0; })();
+          if (alone) {
+            const boxPos = $at.before($at.depth);
+            const box = tr.doc.nodeAt(boxPos);
+            tr.replaceWith(boxPos, boxPos + box.nodeSize, box.type.create({ ...box.attrs, w: d.cssW, h: d.cssH, fit: false }, image));
+            anchor = boxPos;
+          } else {
+            tr.replaceWith(d.pos, d.pos + table.nodeSize, image);
+            anchor = d.pos;
+          }
+        }
+        const end = Math.min(tr.doc.content.size, tr.mapping.slice(mark).map(Math.min(offer.to, offer.baseDoc.content.size), 1));
+        pictureAnchor = anchor;
+        return { ok: true, end };
+      });
+      if (!ok) { sizeUp("Planyr couldn't place the picture of that table."); return; }
+      /* A picture has no text position inside it, so the tab follows the PICTURE's own box on screen (`dom`), not a caret. */
+      setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "picture", curTo: editor.state.selection.to, dom: pictureAnchor } : cur));
+      return;
+    }
+
+    if (mode === "text") {
+      const text = textOfNode(offer.baseDoc.slice(offer.from, Math.min(offer.to, offer.baseDoc.content.size)).content);
+      applyingPasteModeRef.current = true;
+      let ok = false;
+      try {
+        ok = editor.chain()
+          .command(({ tr }) => { tr.setMeta("uiEvent", "paste"); revertToBase(tr, offer.baseDoc); return true; })
+          .insertContentAt({ from: offer.from, to: Math.min(offer.to, offer.baseDoc.content.size) }, plainTextToContent(text))
+          .run();
+      } finally { releasePasteApply(); }
+      if (!ok) { sizeUp("Planyr couldn't apply Keep Text Only to that paste."); return; }
+      setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "text", curTo: editor.state.selection.to, dom: null } : cur));
+      return;
+    }
+
+    const { ok, end } = run((tr) => applyPasteModeToTr(tr, mode, offer));
+    if (!ok) { sizeUp(`Planyr couldn't apply ${PASTE_MODE_META[mode].label} to that paste.`); return; }
+    setPasteOffer((cur) => (cur === offer ? { ...offer, applied: mode, curTo: end, dom: null } : cur));
+  }, [editor, onPrintNotice]);
+
+  /* Ctrl on its own opens the flyout — Word's shortcut, and the reason the tab can be a tab rather than a row of buttons
+   * permanently in the way. While it is open each option's letter picks it (the same letter means Keep Text Only in the
+   * text set and Transpose in the table set — `modeForKey` reads the set on screen); Escape closes it, then the tab; a
+   * press outside it closes it. */
   useEffect(() => {
     if (!pasteOffer) { setPasteExpanded(false); return undefined; }
+    const set = pasteSetFor(pasteOffer);
     const onKey = (e) => {
-      if (e.key === "Control") { setPasteExpanded(true); return; }
-      if (e.key === "Escape") { setPasteOffer(null); return; }
+      if (e.key === "Control") { if (!e.repeat) setPasteExpanded(true); return; }
+      if (e.key === "Escape") { if (pasteExpanded) setPasteExpanded(false); else setPasteOffer(null); return; }
+      if (!pasteExpanded || e.ctrlKey || e.metaKey || e.altKey) return;
+      const hit = modeForKey(set, e.key);
+      if (hit) { e.preventDefault(); e.stopPropagation(); applyPasteMode(hit); }
+    };
+    const onDown = (e) => {
       if (!pasteExpanded) return;
-      const hit = PASTE_MODES.find((m) => PASTE_MODE_META[m].key.toLowerCase() === e.key.toLowerCase());
-      if (hit) { e.preventDefault(); applyPasteMode(hit); }
+      if (e.target instanceof Element && e.target.closest("[data-testid='note-paste-options']")) return;
+      setPasteExpanded(false);
     };
     document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onDown, true);
+    return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("mousedown", onDown, true); };
   }, [pasteOffer, pasteExpanded, applyPasteMode]);
 
   /** Ctrl/Cmd+Shift+V, and the right-click menu's item, land here. LOUD-FAILURE: a browser
@@ -5449,7 +5848,6 @@ const NoteEditor = forwardRef(function NoteEditor({
           expanded={pasteExpanded}
           onExpand={() => setPasteExpanded(true)}
           onPick={applyPasteMode}
-          onDismiss={() => setPasteOffer(null)}
         />
         {/* THE SLASH MENU (NEW-1). Drawn over the mat at the `/` itself; every decision
             about it is the plugin's — see lib/notesSlashMenu.js. */}

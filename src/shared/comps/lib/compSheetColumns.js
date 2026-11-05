@@ -107,7 +107,7 @@ function monthsFromTermText(text) {
 
 export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
-  { value: "building_sale", label: "Bldg sale" },
+  { value: "building_sale", label: "Bldg Sale" },
   { value: "lease", label: "Lease" },
 ];
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
@@ -302,6 +302,10 @@ export const SHEET_COLUMNS = [
   // and year built are physical characteristics of the improvement, not the deal's location, and
   // grouping them with the street address read as if they were the same kind of fact.
   simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerAmps", label: "Power (A)", fullLabel: "Power (amps)", group: "BUILDING", width: 64, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerVolts", label: "Volts", fullLabel: "Power (volts)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "powerPhase", label: "Phase", fullLabel: "Power (phase: 1 or 3)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "dockDoors", label: "Docks", fullLabel: "Dock doors", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
   simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.
@@ -464,6 +468,23 @@ export const NOTES_COLUMN = simpleColumn({ key: "notes", label: "Notes", group: 
 
 export function columnIndex(key) {
   return SHEET_COLUMNS.findIndex((c) => c.key === key);
+}
+
+/** A row's cell flags that still apply to its CURRENT comp type. A flag is keyed by the column that
+ * raised it (`flagKey`), and the type switch never clears them — so a lease pasted with no rent
+ * period and then switched to Land kept its "needs a period" blocker on a type that has no period
+ * (the phone Save button then named a reason the owner could not act on). A key that matches no
+ * column is kept: a blocker we cannot classify is never hidden. */
+export function activeCellFlags(cellFlags, compType) {
+  const types = TYPE_OPTIONS.map((o) => o.value);
+  const out = {};
+  for (const [key, flag] of Object.entries(cellFlags || {})) {
+    const fk = (c, t) => c.flagKey?.({ compType: t });
+    const raisedBy = SHEET_COLUMNS.some((c) => types.some((t) => fk(c, t) === key));
+    const live = SHEET_COLUMNS.some((c) => c.appliesTo(compType) && fk(c, compType) === key);
+    if (!raisedBy || live) out[key] = flag;
+  }
+  return out;
 }
 
 // NEW-7 — the Save button's label, shared by the desktop sheet and the mobile one so the same fix

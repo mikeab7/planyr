@@ -102,8 +102,8 @@ describe("a new visit takes dishes, not 'What I had'", () => {
     expect(panel).not.toMatch(/setWhatIHad/);
   });
   it("old visits keep their saved text readable (card line + edit-form legacy line)", () => {
-    expect(panel).toMatch(/Had \{visit\.what_i_had\}/);
-    expect(panel).toMatch(/visit-legacy-had/);
+    expect(panel).toMatch(/visit-legacy-had/); // NEW-1 (2026-10-20): the visit ROW is one compact line; the saved text is read in the edit form
+    expect(panel).toMatch(/initial\?\.what_i_had && \(/);
   });
   it("rating groups are not <label>s (a label around a button group forwards a tap to the first button)", () => {
     expect(panel).not.toMatch(/<label[^>]*>\s*(Food|Ambiance)\s*<RatingSlider/);
@@ -144,7 +144,7 @@ describe("keyboard-aware sheet", () => {
   });
   it("every editable card is marked so the reveal shows the whole card, not just the field", () => {
     expect(read("components/DishesSection.jsx")).toMatch(/dish-edit-row" data-edit-card/);
-    expect(read("components/VisitPanel.jsx").match(/data-edit-card/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(read("components/VisitPanel.jsx").match(/data-edit-card/g)?.length).toBeGreaterThanOrEqual(5); // NEW-2 (2026-10-11): "What was good" is gone
     expect(read("components/BottomSheet.jsx")).toMatch(/closest\("\[data-edit-card\]"\)/);
   });
   it("the map's own controls are confined below the sheet (B2046224 ×3: the zoom control over the sheet)", () => {

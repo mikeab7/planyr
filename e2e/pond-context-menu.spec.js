@@ -1,6 +1,6 @@
 /* B875 (edit-path recurrence) — right-clicking a pond opens the POND element menu ("Detention
  * pond" → ⚙ Pond settings / 📐 Sizing assistant / Set purpose), NEVER the generic canvas map menu
- * (Zoom to fit / Paste / Export to Google Earth…).
+ * (Zoom to fit / Paste).
  *
  * The regression: #656 made a pond's map LABEL a pointer target (single-click reveals its inspector)
  * but gave the label an onPointerDown WITHOUT an onContextMenu. The label renders on top of the
@@ -15,7 +15,7 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 
 function pondCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).filter((e) => e.type === "pond").length;
   });
@@ -54,8 +54,8 @@ test.describe("pond right-click → the pond menu, never the map menu (logged ou
     // The pond's dedicated element-menu section appears…
     await expect(page.getByRole("button", { name: /Pond settings/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sizing assistant/i })).toBeVisible();
-    // …and the generic empty-map menu (its unique "Export to Google Earth" row) does NOT.
-    await expect(page.getByText(/Export to Google Earth/i)).toHaveCount(0);
+    // …and the generic empty-map menu (its unique "Zoom to fit" row) does NOT.
+    await expect(page.locator('[role="menu"]').filter({ hasText: /Zoom to fit/i })).toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

@@ -42,12 +42,12 @@
 import { reportClientEvent, SUPPRESSED_AUTOMATED } from "./clientErrors.js";
 import { readScene } from "./perfScene.js";
 import { perfEditCount } from "./perfSampling.js";
-import { bindPerfRecorder, bindPerfDelivery, perfContext } from "./perfRecorderHandle.js";
+import { bindPerfRecorder, bindPerfDelivery, bindPerfRefusal, bindPerfRecent, perfContext } from "./perfRecorderHandle.js";
 import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, feedBootTask, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
+import { createTrigger, feedFrame, feedBootTask, feedFreeze, feedSlowRun, inSlowRun, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, encodeSupplements, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -71,6 +71,12 @@ export const RECORDER_DEFAULTS = {
    *  counter tick, so it runs every Nth tick rather than every tick. */
   sceneEveryNTicks: 3,
   maxManual: 6,
+  /** NEW-4 (2026-10-22) — THE BUDGETS BELOW ARE PER ROLLING WINDOW, NOT PER PAGE LOAD. They were lifetime counters, so a
+   *  long-lived tab ran out for good: opening the ? panel arms a manual capture (B1231280), six openings in a session spent
+   *  all six, and from then on "Something was slow just now" answered "try again in a moment" — a recovery that never came
+   *  without a reload. The caps are unchanged (so the error channel's shared ceiling is never at risk); they now REFILL, one
+   *  slot at a time, `budgetWindowMs` after each was used. */
+  budgetWindowMs: 600_000,
   /** Total rows this page may send. `clientErrors` enforces one shared per-page ceiling across
    *  every row the app sends (SESSION_MAX 100); a recorder that could spend it would blind the
    *  error channel, which is a worse regression than any data it collects is worth. */
@@ -100,8 +106,10 @@ let _prevFrameT = 0;                 // 0 = next frame starts a new run, so its 
 let _rafId = 0, _timer = 0, _tick = 0;
 let _activeMs = 0;                   // cumulative interacting time
 let _lastScene = {};
-let _taskTotal = 0, _taskCount = 0, _taskMax = 0;
+let _taskTotal = 0, _taskCount = 0, _taskMax = 0, _taskBlock = 0;
 let _sent = 0, _manual = 0;
+let _manualAt = [], _sentAt = [];     // NEW-4 — when each manual / any capture was taken, for the rolling budgets (pruned on use)
+let _refusal = null;                  // NEW-4 — why the last capture() was refused: { reason: "budget", retryInMs } or null
 let _lastDelivery = null;            // promise of the last capture's delivery outcome (B265536)
 let _undelivered = 0;                // captures the server never acknowledged
 let _suppressed = 0;                 // captures deliberately not sent — an automated run (B270912)
@@ -109,6 +117,22 @@ let _captures = [];                  // recent capture summaries, for a live con
 let _gapMarks = [];                  // [tAtRestart, gapMs] — where the frame loop stopped and resumed
 let _lastFrameT = 0;                 // wall position of the last recorded frame, for gap sizing
 let _selfUs = 0;                     // measured per-frame cost of THIS recorder, µs (bench only)
+
+/* NEW-1/NEW-3 (2026-10-22, work-laptop report) — ENVIRONMENT MARKS: what happened to the PAGE around a capture, as opposed to
+ * what the app did. A 22.5 s hole appeared in a capture — no frames, and NO counter sample for 24 s — with no long task
+ * covering it, and the recorder could not say whether the tab was hidden, the timers were throttled/frozen, or the main thread
+ * was stalled by something that is not a task. The frame hole alone is NOT evidence of a stall (the frame loop is gated on
+ * input, so a quiet minute leaves one by design); the COUNTER timer is not input-gated, so its silence is. These marks make the
+ * difference readable: [t, ENV_HIDDEN|ENV_VISIBLE] visibility changes · [t, ENV_RESIZE, dpr×100, innerWidth] a window or
+ * pixel-ratio change (moving to another monitor, browser zoom) · [t, ENV_TIMER_LATE, gapMs, visibleAtFire] the counter timer
+ * firing more than three periods late (visibleAtFire 0 = a hidden tab's throttled timer; 1 = visible and still late = the page
+ * itself was not running). Bounded, written only on an event — never per frame. */
+export const ENV_HIDDEN = 1, ENV_VISIBLE = 2, ENV_RESIZE = 3, ENV_TIMER_LATE = 4;
+const ENV_MAX = 24;
+let _envMarks = [];                  // [t, code, a, b]
+let _lastEnvSize = "";               // "dpr|w|h" last recorded, so a resize storm records only real changes
+let _lastTickAt = 0;                 // when the counter timer last FIRED (visible or not)
+let _hiddenAt = -1;                  // B2319137 ×2 — when the page last went hidden (a frame spanning it is not a freeze)
 
 const now = () => { try { return _win.performance.now(); } catch (_) { return 0; } };
 
@@ -125,6 +149,11 @@ function onFrame(t) {
   _activeMs += dt;
   _lastFrameT = t;
   pushFrame(_frames, t, dt);
+  /* B2319137 ×2 — a frame that took a second or more to come while the page stayed visible is a FREEZE, which `feedFrame`
+   * would drop as "not a frame". `_hiddenAt` is a number, so this stays allocation-free; the fire branch is the rare one. */
+  /* B2319137 ×4 — a RUN of slow frames (1 fps for seconds) is a freeze too, though no single frame reaches `freezeMs` */
+  if (!(_hiddenAt >= prev) && feedSlowRun(_trig, t, dt)) return true;
+  if (dt >= _trig.cfg.freezeMs && !(_hiddenAt >= prev)) return feedFreeze(_trig, t, dt, "frame");
   return feedFrame(_trig, t, dt);
 }
 
@@ -135,6 +164,8 @@ function loop() {
   let fire = false;
   try { fire = onFrame(t); } catch (_) { /* a recorder fault must never break the frame */ }
   if (fire) { try { capture("auto"); } catch (_) { /* ignore */ } }
+  // B2319137 ×4 — keep watching through a slow run (a struggling page is the one that must not go unrecorded), capped
+  if (inSlowRun(_trig)) _activeUntil = Math.max(_activeUntil, t + _cfg.idleStopMs);
   if (t < _activeUntil) schedule();
   else { _running = false; _prevFrameT = 0; }
 }
@@ -170,8 +201,47 @@ function noteActivity() {
 }
 
 /* ── periodic counters ──────────────────────────────────────────────────────────────────────── */
+function envMark(code, a, b) {
+  const t = now();
+  _envMarks.push([t, code, a || 0, b || 0]);
+  if (_envMarks.length > ENV_MAX) _envMarks.shift();
+}
+
+function envSize() {
+  try {
+    const key = `${_win.devicePixelRatio}|${_win.innerWidth}|${_win.innerHeight}`;
+    if (key === _lastEnvSize) return;
+    const first = _lastEnvSize === "";
+    _lastEnvSize = key;
+    if (!first) envMark(ENV_RESIZE, Math.round(_win.devicePixelRatio * 100), _win.innerWidth);
+  } catch (_) { /* ignore */ }
+}
+
+/* The DOM's own answer to "is the header there?" at capture time — see perfCapture's hdrH/hdrHit. Read-only, never throws. */
+function headerProbe() {
+  const out = { hdrH: 0, hdrHit: 0, hasFocus: 0 };
+  try {
+    const d = _win.document;
+    out.hasFocus = d.hasFocus() ? 1 : 0;
+    const h = Array.from(d.querySelectorAll("header")).find((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+    if (h) {
+      const r = h.getBoundingClientRect();
+      out.hdrH = Math.round(r.height);
+      const top = d.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      out.hdrHit = top && (top === h || h.contains(top)) ? 1 : 0;
+    }
+  } catch (_) { /* ignore */ }
+  return out;
+}
+
 function counterTick() {
   try {
+    const fired = now();
+    if (_lastTickAt && fired - _lastTickAt > _cfg.counterMs * 3) {
+      envMark(ENV_TIMER_LATE, fired - _lastTickAt, _win.document && _win.document.visibilityState === "visible" ? 1 : 0);
+    }
+    _lastTickAt = fired;
+    envSize();
     if (_win.document && _win.document.visibilityState !== "visible") return;
     const t = now();
     _tick++;
@@ -210,9 +280,13 @@ function heapMB() {
  * NAMES the script responsible; `longtask` as the fallback, which can only say "something blocked
  * the main thread for N ms". The owner's browser is Chrome, so the good one is the one that will
  * actually run — but a recorder that reports nothing on Safari would be a silent hole. */
+/* NEW-1 (2026-11-01) — below this much blocking time a long animation frame is a wait on drawing, not on the page's code
+ * (the LoAF "long" bar itself is 50 ms of blocking). Exported for the test. */
+export const RENDER_WAIT_BLOCK_MS = 50;
+
 function observeTasks() {
-  const record = (t, dur, blk, name) => {
-    _taskTotal += dur; _taskCount++;
+  const record = (t, dur, blk, name, isLoaf) => {
+    _taskTotal += dur; _taskCount++; _taskBlock += blk;
     if (dur > _taskMax) _taskMax = dur;
     pushTask(_tasks, t, dur, blk, internString(_strings, name));
     /* NEW-3 — the BOOT-WINDOW judgment. This observer is the one piece of the recorder that is
@@ -220,6 +294,12 @@ function observeTasks() {
      * signal that can actually see a genuinely idle boot — see perfTrigger.js's feedBootTask
      * header for the full reasoning. */
     try { if (feedBootTask(_trig, t, dur)) capture("auto"); } catch (_) { /* a recorder fault must never break the frame */ }
+    /* B2319137 ×2 — one entry a second or longer is a freeze at ANY time, not only during boot (perfTrigger.feedFreeze). */
+    /* NEW-1 (2026-11-01) — a LoAF entry whose main thread was barely blocked is a frame that waited on DRAWING, not on code:
+     * judged "render", never "task" (perfTrigger.fireFreeze). The bare `longtask` fallback carries no blocking figure and
+     * every entry there IS a task, so it stays "task". */
+    const via = isLoaf && blk < RENDER_WAIT_BLOCK_MS ? "render" : "task";
+    try { if (feedFreeze(_trig, t, dur, via)) capture("auto"); } catch (_) { /* ignore */ }
   };
   let loaf = false;
   try {
@@ -230,7 +310,7 @@ function observeTasks() {
           const top = (e.scripts || []).slice().sort((a, b) => b.duration - a.duration)[0];
           if (top) name = attributionLabel(top);
         } catch (_) { /* attribution is optional; the timing is not */ }
-        record(e.startTime, e.duration, e.blockingDuration || 0, name);
+        record(e.startTime, e.duration, e.blockingDuration || 0, name, true);
       }
     }).observe({ type: "long-animation-frame", buffered: true });
     loaf = true;
@@ -238,7 +318,7 @@ function observeTasks() {
   if (loaf) return;
   try {
     new _win.PerformanceObserver((list) => {
-      for (const e of list.getEntries()) record(e.startTime, e.duration, 0, (e.attribution && e.attribution[0] && e.attribution[0].name) || "");
+      for (const e of list.getEntries()) record(e.startTime, e.duration, 0, (e.attribution && e.attribution[0] && e.attribution[0].name) || "", false);
     }).observe({ type: "longtask", buffered: true });
   } catch (_) { /* Safari has neither; the rest of the recorder still works */ }
 }
@@ -247,13 +327,39 @@ function observeTasks() {
 
 /** Take a capture. `reason` is "auto" (the trigger fired) or "manual" (he pressed the control).
  *  Returns true if one was taken. Never throws. */
+/* NEW-1 (2026-11-01) — a READ-ONLY summary of the last `windowMs` of the recorder's own rings, for the planner's
+ * `window.__plannerPerf()` diagnostic. It reads what the always-on recorder already keeps — it starts no loop and requests no
+ * frame (a rAF counter of its own would itself keep the page drawing and change what it measures). Frames are the INTERACTING
+ * frames the recorder's input-gated loop saw; long frames are every LoAF/long-task entry, with blocking split out. Never throws. */
+export function perfRecentWindow(windowMs = 60_000) {
+  try {
+    if (!_installed) return null;
+    const t = now(), since = t - windowMs;
+    const fi = ringOrderSince(_frames, since);
+    const d = fi.map((i) => _frames.dt[i]).sort((a, b) => a - b);
+    const q = (p) => (d.length ? Math.round(d[Math.min(d.length - 1, Math.floor(p * d.length))]) : null);
+    const ti = ringOrderSince(_tasks, since);
+    let ms = 0, blk = 0, max = 0;
+    for (const i of ti) { ms += _tasks.dur[i]; blk += _tasks.blk[i]; if (_tasks.dur[i] > max) max = _tasks.dur[i]; }
+    return { windowMs, frames: d.length, p50Ms: q(0.5), p95Ms: q(0.95), maxFrameMs: d.length ? Math.round(d[d.length - 1]) : null,
+      longFrames: ti.length, longFrameMs: Math.round(ms), blockingMs: Math.round(blk), maxLongFrameMs: Math.round(max) };
+  } catch (_) { return null; }
+}
+
 export function capture(reason) {
   try {
     if (!_installed) return false;
     const kind = reason === "manual" ? "manual" : "auto";
-    if (kind === "manual" && _manual >= _cfg.maxManual) return false;
-    if (_sent >= _cfg.maxSent) return false;
-    if (kind === "manual") _manual++;
+    const t0 = now();
+    const fresh = t0 - _cfg.budgetWindowMs;
+    _manualAt = _manualAt.filter((x) => x > fresh);
+    _sentAt = _sentAt.filter((x) => x > fresh);
+    /* A refusal says WHY and WHEN the budget refills (NEW-4) — the control must be able to tell "limit reached for now" from
+     * "no recorder", never call the first a hiccup. */
+    if (kind === "manual" && _manualAt.length >= _cfg.maxManual) { _refusal = { reason: "budget", retryInMs: Math.max(1000, _manualAt[0] + _cfg.budgetWindowMs - t0) }; return false; }
+    if (_sentAt.length >= _cfg.maxSent) { _refusal = { reason: "budget", retryInMs: Math.max(1000, _sentAt[0] + _cfg.budgetWindowMs - t0) }; return false; }
+    _refusal = null;
+    if (kind === "manual") { _manual++; _manualAt.push(t0); }
 
     const t = now();
     const since = t - _cfg.captureWindowMs;
@@ -302,6 +408,7 @@ export function capture(reason) {
      * the boot judgment's own facts instead. Gated on `kind === "auto"` for the same reason the
      * steady-state fields above are — a manual capture must never inherit a stale verdict. */
     const isBootVerdict = kind === "auto" && v.source === "boot";
+    const isFreezeVerdict = kind === "auto" && v.source === "freeze";
 
     const cap = buildCapture({
       kind,
@@ -326,6 +433,8 @@ export function capture(reason) {
       bootTrigger: isBootVerdict ? v.trigger : null,
       bootTaskMs: isBootVerdict ? v.taskMs : null,
       bootTaskCount: isBootVerdict ? v.taskCount : null,
+      freezeMs: isFreezeVerdict ? v.freezeMs : null,
+      freezeVia: isFreezeVerdict ? v.via : null,
       worstWindowMeanMs: worst ? worst.meanMs : null,
       worstWindowSlowFraction: worst ? worst.slowFraction : null,
       worstWindowRatio: worst && ts.baselineMs ? worst.meanMs / ts.baselineMs : null,
@@ -335,6 +444,7 @@ export function capture(reason) {
       longTasks: _taskCount,
       longTaskMs: _taskTotal,
       longTaskMaxMs: _taskMax,
+      longTaskBlockMs: Math.round(_taskBlock),
       heapMB: heapMB(),
       domNodes: scene.documentNodes,
       canvasNodes: scene.canvasNodes,
@@ -354,6 +464,8 @@ export function capture(reason) {
       deviceMemoryGB: safeNum(() => _win.navigator.deviceMemory),
       recorderSelfUs: _selfUs || undefined,
       counterSamples: counters.length,
+      ...headerProbe(),
+      envMarks: _envMarks.filter((m) => m[0] >= since).map((m) => [m[0] - since, m[1], m[2], m[3]]),
       frameDeltas: deltas,
       gaps,
       tasks,
@@ -397,7 +509,7 @@ export function capture(reason) {
     } else {
       enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
     }
-    _sent++;
+    _sent++; _sentAt.push(t0);
 
     /* ⛔ B265536 — THE DELIVERY IS TRACKED, NOT ASSUMED. Until this, `capture()` returned true the
      * moment the row was handed to the sink, and the sink swallowed every failure — so the manual
@@ -406,7 +518,7 @@ export function capture(reason) {
      * just now") the one most able to vanish without trace, and it would have taken a week of his
      * normal use producing nothing before anyone noticed. The record now carries what actually
      * happened, and `perfCaptureDelivery()` hands the promise to the UI so the ✓ means DELIVERED. */
-    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null };
+    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null, freezeVia: cap.freezeVia || null, freezeMs: cap.freezeMs ?? null };
     _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
 
@@ -501,11 +613,15 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
    * frame back is treated as the start of a new one and its enormous delta is dropped. */
   try {
     win.document.addEventListener("visibilitychange", () => {
-      if (win.document.visibilityState !== "visible") { _activeUntil = 0; _prevFrameT = 0; }
+      envMark(win.document.visibilityState === "visible" ? ENV_VISIBLE : ENV_HIDDEN);
+      if (win.document.visibilityState !== "visible") { _activeUntil = 0; _prevFrameT = 0; _hiddenAt = now(); }
     }, { passive: true });
+    win.addEventListener("resize", envSize, { passive: true });
   } catch (_) { /* ignore */ }
 
   bindPerfRecorder((reason) => capture(reason));
+  bindPerfRecent(perfRecentWindow);
+  bindPerfRefusal(() => _refusal);
 
   /* Live handles for a console read and for the harness. `__benchFrame` runs the REAL hot path
    * over synthetic timestamps so its cost can be measured directly rather than inferred from a
@@ -515,6 +631,8 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
       state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, suppressed: _suppressed, running: _running }),
       delivery: () => _lastDelivery,
       captures: () => _captures.slice(),
+      refusal: () => (_refusal ? { ..._refusal } : null),
+      env: () => _envMarks.map((m) => m.slice()),   // NEW-1/NEW-3 — the environment marks, for a console read and for the guard
       capture: (reason) => capture(reason),
       config: () => ({ ..._cfg, trigger: { ..._trig.cfg } }),
       __benchFrame: (n) => benchFrame(n),
@@ -548,9 +666,10 @@ export function __resetPerfRecorder(win) {
   _installed = false; _win = null; _timer = 0; _rafId = 0; _tick = 0;
   _frames = _tasks = _counters = _strings = _trig = _scratch = null;
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
-  _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
-  _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0;
+  _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0; _taskBlock = 0;
+  _sent = 0; _manual = 0; _manualAt = []; _sentAt = []; _refusal = null; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0; _hiddenAt = -1;
   _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
+  bindPerfRecent(null);
   bindPerfDelivery(null);
 }

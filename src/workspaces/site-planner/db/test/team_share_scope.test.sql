@@ -119,7 +119,9 @@ begin
   else failed := failed + 1; rep := rep || E'FAIL  4. the feature does not work — teammate cannot see the new shared project\n'; end if;
 
   -- ---------- TEST 5 — teammate has FULL EDIT while unlocked ---------------
-  update public.sites set site = 'edited by teammate' where id = new_site;
+  -- (B2404336, 2026-10-21: `version` bumped — sites_enforce_version_monotonic refuses a content write
+  -- that does not advance it; this test predates that guard and read FAIL 5 on production until then)
+  update public.sites set site = 'edited by teammate', version = version + 1 where id = new_site;
   get diagnostics n = row_count;
   if n = 1 then passed := passed + 1; rep := rep || E'PASS  5. teammate can EDIT an unlocked shared plan\n';
   else failed := failed + 1; rep := rep || E'FAIL  5. teammate cannot edit an unlocked shared plan (should have full edit)\n'; end if;
@@ -141,7 +143,7 @@ begin
   if n = 1 then passed := passed + 1; rep := rep || E'PASS  6. a locked plan is still READABLE by the teammate\n';
   else failed := failed + 1; rep := rep || E'FAIL  6. locking hid the plan (it should stay readable)\n'; end if;
 
-  update public.sites set site = 'teammate edit while locked' where id = new_site;
+  update public.sites set site = 'teammate edit while locked', version = version + 1 where id = new_site;
   get diagnostics n = row_count;
   if n = 0 then passed := passed + 1; rep := rep || E'PASS  6b. teammate CANNOT write a locked plan\n';
   else failed := failed + 1; rep := rep || E'FAIL  6b. teammate wrote a LOCKED plan\n'; end if;

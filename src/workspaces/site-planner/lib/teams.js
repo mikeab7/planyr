@@ -6,7 +6,8 @@
  *
  * Roles: 'admin' (manage members + invites) | 'member' (do project work, can't manage people).
  * Invites are keyed by email so you can invite someone who has no account yet — the invite waits
- * and activates when they sign up (signup trigger) or next sign in (claimInvites RPC).
+ * and activates when they sign up (signup trigger). Someone who ALREADY has an account answers the
+ * invite from the account menu (Accept / Decline — src/app/teamInvites.js); nothing joins them silently.
  */
 import { supabase } from "./supabase.js";
 
@@ -124,18 +125,21 @@ export async function listMembers(teamId) {
   });
 }
 
-// Pending (unclaimed) invites for a team — admins only (RLS). Returns
-// [{ id, email, role, createdAt, lastSentAt }]. lastSentAt (db/team_invite_email.sql) is null when
-// never emailed — or when that migration hasn't been run yet, in which case the column is simply
-// not asked for, so the roster still loads.
+// Open invites for a team — admins only (RLS): not yet accepted, including ones the invitee DECLINED
+// (so the inviter sees that outcome; accepted ones leave this list and appear in the roster). Returns
+// [{ id, email, role, createdAt, lastSentAt, declinedAt }]. lastSentAt (db/team_invite_email.sql) and
+// declinedAt (db/team_invite_inbox.sql) are null when never emailed / not declined — or when that
+// migration hasn't been run yet, in which case the column is simply not asked for, so the roster
+// still loads.
 export async function listInvites(teamId) {
   if (!supabase || !teamId) return [];
   const q = (cols) => supabase.from("team_invites").select(cols)
     .eq("team_id", teamId).is("claimed_at", null).order("created_at", { ascending: false });
-  let { data, error } = await q("id, email, role, created_at, claimed_at, last_sent_at");
+  let { data, error } = await q("id, email, role, created_at, claimed_at, last_sent_at, declined_at");
+  if (error) ({ data, error } = await q("id, email, role, created_at, claimed_at, last_sent_at"));
   if (error) ({ data, error } = await q("id, email, role, created_at, claimed_at"));
   if (error) return [];
-  return (data || []).map((r) => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at, lastSentAt: r.last_sent_at || null }));
+  return (data || []).map((r) => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at, lastSentAt: r.last_sent_at || null, declinedAt: r.declined_at || null }));
 }
 
 // Ask the server to email this pending invite (NEW-1). The server throttles (one send per invite
@@ -160,13 +164,17 @@ export async function sendInviteEmail(teamId, email) {
 }
 
 // Invite a person by email (admin action) and email them. The email is lower-cased; one open invite per
-// team+email (unique constraint). If they already have an account they'll join on next sign-in;
-// if not, the signup trigger adds them when they register. Returns { ok, error }.
+// team+email (unique constraint). If they already have an account the invite waits in their account
+// menu for Accept / Decline; if not, the signup trigger adds them when they register. Returns { ok, error }.
 export async function inviteByEmail(teamId, email, role = "member") {
   if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
   const e = lower(email);
   if (!isEmail(e)) return { ok: false, error: "Enter a valid email address." };
   const r = role === "admin" ? "admin" : "member";
+  // NEW-1 (invite inbox): inviting someone who DECLINED starts a fresh invite. team_invites has no
+  // UPDATE policy (so the upsert below could not reset the declined row), but an admin may delete it.
+  // Best-effort: on a database without declined_at this matches nothing / errors harmlessly.
+  await supabase.from("team_invites").delete().eq("team_id", teamId).eq("email", e).not("declined_at", "is", null);
   const { error } = await supabase.from("team_invites").upsert(
     { team_id: teamId, email: e, role: r }, { onConflict: "team_id,email" });
   if (error) return { ok: false, error: error.message };
@@ -182,17 +190,6 @@ export async function inviteByEmail(teamId, email, role = "member") {
 export async function resendInvite(teamId, email) {
   if (!isEmail(email)) return { ok: false, error: "Enter a valid email address." };
   return sendInviteEmail(teamId, email);
-}
-
-// Activate any invites waiting on the signed-in user's email (existing account invited later).
-// Call on every sign-in. Returns the number of new memberships (0 if none / signed out).
-export async function claimInvites() {
-  if (!supabase) return 0;
-  const { uid } = await currentIdentity();
-  if (!uid) return 0;
-  const { data, error } = await supabase.rpc("claim_team_invites");
-  if (error) return 0;
-  return typeof data === "number" ? data : 0;
 }
 
 // Change a member's role (admin action). Returns { ok, error }.

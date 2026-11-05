@@ -13,6 +13,7 @@
 // no `site_elements` at all and for which `parcels` IS the live store.
 import { dissolvedParcelSqft } from "./polyClip.js";
 import { boundedCache, pointsSignature } from "./pureCache.js";
+import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 // Acreage of a stored site from its planner-feet parcels. B715: dissolve the ACTIVE parcels so
 // overlapping ground counts once (matches the planner's siteSqft), instead of an additive sum over
@@ -35,7 +36,7 @@ export function siteAcres(site) {
   const key = parcelsKey(site.parcels);
   const hit = acresCache.get(key);
   if (hit !== undefined) return hit;
-  return acresCache.set(key, dissolvedParcelSqft(site.parcels) / 43560);
+  return acresCache.set(key, dissolvedParcelSqft(site.parcels) / SQFT_PER_ACRE);
 }
 
 // `parcelSummary` is `null` until it has loaded at least once (never fetched, or every attempt

@@ -25,7 +25,7 @@ const ROAD_PTS = [[300, 300], [430, 340], [560, 300], [690, 340]]; // 4 pts → 
 // assertion after a reload.
 function readEls(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const els = site.els || [];
     const road = els.find((e) => e.type === "road" && Array.isArray(e.pts));

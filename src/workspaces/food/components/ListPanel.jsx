@@ -6,6 +6,7 @@
  * The picker can only browse what he already has (Been + Want to try); a place nobody has marked arrives by the
  * toolbar's search box or a tap on a map pin while the picker is open — the hint says so. It never mints a
  * restaurant from a typed name. */
+import CloseX from "./CloseX.jsx";
 import { useRef, useState } from "react";
 import { Button, ToggleChip, SIZE } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -13,12 +14,13 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { noAutofill } from "../lib/noAutofill.js";
 import { LIST_COLORS, validateListName } from "../lib/foodLists.js";
 import { Swatch, IOS_NO_ZOOM, PANEL_SHADOW } from "./ListChips.jsx";
+import { chipBox } from "../lib/chipStyle.js";
 
 const STATUS_LABEL = { been: "Been", want: "Want to try", none: "Not marked" };
 
 function StatusControl({ status, onToggleWant, disabled }) {
   if (status === "been") {
-    return <span data-testid="food-list-status" data-status="been" style={{ flex: "none", fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: RADIUS.pill, padding: "2px 7px" }}>Been</span>;
+    return <span data-chip="" data-testid="food-list-status" data-status="been" style={{ ...chipBox(18, 7), flex: "none", fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: RADIUS.pill }}>Been</span>;
   }
   const on = status === "want";
   return (
@@ -40,10 +42,14 @@ function Row({ rec, action, actionLabel, actionTestId, onToggleWant, onOpen }) {
         {rec.name}
       </button>
       <StatusControl status={rec.status} onToggleWant={onToggleWant} />
-      <button type="button" onClick={action} aria-label={`${actionLabel} ${rec.name}`} data-testid={actionTestId}
-        style={{ flex: "none", minWidth: 44, minHeight: 44, border: "none", background: "transparent", cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-secondary)" }}>
-        {actionLabel === "Add" ? "+ Add" : "✕"}
-      </button>
+      {actionLabel === "Add" ? (
+        <button type="button" onClick={action} aria-label={`${actionLabel} ${rec.name}`} data-testid={actionTestId}
+          style={{ flex: "none", minWidth: 44, minHeight: 44, border: "none", background: "transparent", cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-secondary)" }}>
+          + Add
+        </button>
+      ) : (
+        <CloseX onClick={action} label={`${actionLabel} ${rec.name}`} testId={actionTestId} />
+      )}
     </div>
   );
 }

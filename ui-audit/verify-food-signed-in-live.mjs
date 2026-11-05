@@ -363,8 +363,7 @@ async function phoneRun(phone) {
       await closePanel();
       await pickRow(page, /^DAO['’]N/i).catch(async () => { await typeSearch(page, "dao"); await page.evaluate(() => { document.activeElement && document.activeElement.blur(); window.__setKeyboard(0); }); await pickRow(page, /^DAO['’]N/i); });
       // edit an old visit
-      await page.locator('[data-testid="food-visit-menu-btn"]').first().tap();
-      await page.locator('[data-testid="food-visit-edit-menu-item"]').first().tap();
+      await page.locator('[data-testid="food-visit-card"]').first().tap(); // NEW-1 (2026-10-20): the visit row's tap IS the edit (the ··· menu is gone)
       const editing = page.locator('[data-testid="food-visit-card-editing"]');
       if (await editing.waitFor({ state: "visible", timeout: 15000 }).then(() => true, () => false)) {
         for (const [what, tid] of [["edit old visit — date", "visit-date-input"], ["edit old visit — what was good", "visit-highlights-input"], ["edit old visit — cost", "visit-cost-input"], ["edit old visit — notes", "visit-notes-input"]]) {
@@ -396,9 +395,8 @@ async function phoneRun(phone) {
       await page.getByRole("button", { name: /^Map$/ }).first().tap();
       await page.waitForSelector('[data-testid="food-visit-card"]', { timeout: 20000 });
       const cardText = (await page.locator('[data-testid="food-visit-card"]').first().innerText()).replace(/\s+/g, " ");
-      row(`${L} V1476080 step 5 — the card shows the saved "Had …" text`, /had brisket plate, queso/i.test(cardText), cardText.slice(0, 160));
-      await page.locator('[data-testid="food-visit-menu-btn"]').first().tap();
-      await page.locator('[data-testid="food-visit-edit-menu-item"]').first().tap();
+      row(`${L} V1476080 step 5 — the visit row is one compact line (date · Food …); the saved "Had …" text is read in the edit form below (NEW-1, 2026-10-20)`, /Food \d/.test(cardText) && !/had brisket/i.test(cardText), cardText.slice(0, 160));
+      await page.locator('[data-testid="food-visit-card"]').first().tap(); // NEW-1 (2026-10-20): the visit row's tap IS the edit (the ··· menu is gone)
       const ed = page.locator('[data-testid="food-visit-card-editing"]');
       await ed.waitFor({ state: "visible", timeout: 15000 });
       const legacy = await ed.locator('[data-testid="visit-legacy-had"]').innerText().catch(() => "");
@@ -524,8 +522,7 @@ async function desktopRun() {
       }
       await closePanel();
       await searchBox(page).fill(""); await typeSearch(page, "dao", { touch: false }); await pickRow(page, /^DAO['’]N/i);
-      await page.locator('[data-testid="food-visit-menu-btn"]').first().click();
-      await page.locator('[data-testid="food-visit-edit-menu-item"]').first().click();
+      await page.locator('[data-testid="food-visit-card"]').first().click(); // NEW-1 (2026-10-20): the visit row's tap IS the edit (the ··· menu is gone)
       const editing = page.locator('[data-testid="food-visit-card-editing"]');
       if (await editing.waitFor({ state: "visible", timeout: 15000 }).then(() => true, () => false)) {
         for (const [what, tid] of [["edit old visit — date", "visit-date-input"], ["edit old visit — what was good", "visit-highlights-input"], ["edit old visit — cost", "visit-cost-input"], ["edit old visit — notes", "visit-notes-input"]]) await typeField(page, editing.locator(`[data-testid="${tid}"]`), what, { L: L + " " });

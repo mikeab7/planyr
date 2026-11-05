@@ -260,7 +260,11 @@ exactly what B778/NEW-1 did.
   the linter but DELIBERATE~~ — **no longer true.** These policies are gone; see the CLOSED note above.
 - The `anon/authenticated can execute SECURITY DEFINER function` warnings on the team helpers
   (`is_team_member`, `list_my_teams`, `create_team`, `claim_team_invites`, …) are the working team
-  RPC surface — each is internally scoped to `auth.uid()`.
+  RPC surface — each is internally scoped to `auth.uid()`. **Team-invite inbox (B2451824):** a person who
+  already has an account answers a pending invite from the account menu — `list_my_invites()` /
+  `respond_to_invite(id, accept)` (`site-planner/db/team_invite_inbox.sql`, keyed on the caller's own auth
+  email; `team_invites` RLS is NOT widened; `declined_at` marks a decline). Brand-new signups are still
+  auto-claimed by the `handle_new_user` trigger; the client no longer calls `claim_team_invites()` on load.
 - The two `function_search_path_mutable` warnings were REAL and are fixed by
   `doc-review/db/advisor_hardening.sql` (pins `project_folders_guard_drive_cols` +
   re-applies the already-pinned `guard_team_rehome` to the live DB).
@@ -313,6 +317,10 @@ create table public.profiles (
 -- RLS: 3 own-row policies (select/insert/update) keyed on auth.uid() = id.
 -- Trigger handle_new_user() inserts the row from raw_user_meta_data on signup; + backfill.
 ```
+
+## Database disk I/O — diagnose with `scripts/db-io-report.sql` (B2559168, 2026-10-30)
+
+Supabase's "running out of daily disk I/O burst budget" email was NOT write- or read-driven: WAL was ~35 MB/day and disk reads 96 MB total, but **Postgres had spilled 61 GB of sort/hash temp files** (smallest compute: `work_mem` ~2 MB), 38.8 GB of it from one Food RPC. **Look at temp files first** (`pg_stat_database.temp_bytes`, then `pg_stat_statements.temp_blks_written`); the read-only script lists them, WAL by statement, and the per-function overrides. Counters are cumulative: subtract two readings. A function that ranks/counts a big set must do it on NARROW rows (id + keys) and join the wide columns back for the survivors; a per-function `set work_mem` (like `food_places_in_bounds_sampled`) is the sanctioned way to give one sort room without raising it for every query. Measurements + the ruled-out suspects (sites autosave WAL, Realtime poll, `site_elements` polls, `client_errors`, `planar_history`) are on the item.
 
 ## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +

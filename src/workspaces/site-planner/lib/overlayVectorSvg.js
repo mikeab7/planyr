@@ -19,7 +19,7 @@
  * style: { stroke, strokeWidth, strokeOpacity, dash, fill, fillOpacity, radius }
  */
 import { xmlEscape } from "./kmzExport.js";
-import { pointSymbolOptions } from "./layerRequest.js";
+import { pointSymbolOptions, lineLabelText } from "./layerRequest.js";
 
 const clampNum = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Trim to `round` decimals without trailing-zero / exponent noise (kmzExport `num` idiom).
@@ -90,14 +90,15 @@ export function featureToSvg(feature, projectLngLat, { round = 2, opacity = 1, c
 
 /* Exhibit label text (pre-placed in pixel space): dark ink + white halo (paint-order:stroke),
  * matching the acreage-chip halo the export restyle already emits so the NEW-2 stroke-thinning
- * pass keeps it proportional. `labels` = [{x,y,text,uppercase?}]. Pure. */
+ * pass keeps it proportional. `labels` = [{x,y,text,uppercase?,angle?}]. Pure. */
 function labelSvg(labels, round) {
   let out = "";
   for (const lb of labels || []) {
     if (!lb || !Number.isFinite(lb.x) || !Number.isFinite(lb.y) || !lb.text) continue;
     const up = lb.uppercase ? ' style="text-transform:uppercase"' : "";
+    const rot = Number.isFinite(lb.angle) && lb.angle ? ` transform="rotate(${fmt(lb.angle, 1)} ${fmt(lb.x, round)} ${fmt(lb.y, round)})"` : ""; // B2507065: a county name runs along its line
     out +=
-      `<text x="${fmt(lb.x, round)}" y="${fmt(lb.y, round)}" text-anchor="middle" dominant-baseline="middle"` +
+      `<text x="${fmt(lb.x, round)}" y="${fmt(lb.y, round)}"${rot} text-anchor="middle" dominant-baseline="middle"` +
       ` font-family="Inter,system-ui,sans-serif" font-weight="700" font-size="11" fill="#1a1a1a"` +
       ` stroke="#ffffff" stroke-width="3" paint-order="stroke"${up}>${xmlEscape(lb.text)}</text>`;
   }
@@ -159,15 +160,54 @@ export function esriPrintFeatures(gj, cfg, leafStyle) {
   out.push(...esriLineFeatures(g, lineStyle));
   if (cfg.printGeometry === false) return out;
   if (g.type === "Point" || g.type === "MultiPoint") {
-    const o = pointSymbolOptions(cfg, 1);
+    // B2528688 — a point row with a per-feature `styleFn` (Colorado wells coloured by status) prints in the SAME colours the screen shows; a row without one is unchanged.
+    const base = pointSymbolOptions(cfg, 1, gj.properties); // NEW-1 (Mississippi): a row's per-marker `pointStyleFn` colour prints as it draws
+    const sf = typeof cfg.styleFn === "function" ? cfg.styleFn(gj.properties, 1) : null;
+    const o = sf ? { ...base, ...(sf.color ? { color: sf.color } : {}), ...(sf.weight != null ? { weight: sf.weight } : {}), fillColor: sf.fillColor || sf.color || base.fillColor, fillOpacity: sf.fillOpacity ?? base.fillOpacity, radius: sf.radius || base.radius } : base;
     for (const c of (g.type === "Point" ? [g.coordinates] : g.coordinates)) {
       out.push({ kind: "point", coords: c, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor, fillOpacity: o.fillOpacity, radius: o.radius } });
     }
   } else if (g.type === "Polygon" || g.type === "MultiPolygon") {
     const o = cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1, fillColor: cfg.color, fillOpacity: 0 };
-    out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
+    out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, ...(o.dashArray ? { dash: o.dashArray } : {}), fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
   }
   return out;
+}
+
+/* NEW-1 (DeSoto / Olive Branch) — the printed twin of the on-screen pipe-size label (`cfg.lineLabel`): ONE label per feature, at the middle of the
+ * line's length (the longest part of a multi-line), same text rule as the screen (`lineLabelText`). Returns [{lng,lat,text}] — the shape the export's
+ * vector fragment already takes for contour labels. PDF-PARITY. Pure. */
+export function esriLineLabels(gj, cfg) {
+  const text = lineLabelText(cfg, gj && gj.properties);
+  const g = gj && gj.geometry;
+  if (!text || !g) return [];
+  if (g.type === "Polygon" || g.type === "MultiPolygon") { // a polygon row (DeSoto zoning) labels its largest ring at the ring's area centroid
+    const rings = (g.type === "Polygon" ? [g.coordinates] : g.coordinates).map((r) => r[0]).filter((r) => r && r.length >= 3);
+    let best = null, bestA = 0;
+    for (const r of rings) { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; a = Math.abs(a / 2); if (a > bestA) { bestA = a; best = r; } }
+    if (!best || !(bestA > 0)) return [];
+    let cx = 0, cy = 0, A = 0;
+    for (let i = 0, j = best.length - 1; i < best.length; j = i++) { const f = best[j][0] * best[i][1] - best[i][0] * best[j][1]; A += f; cx += (best[j][0] + best[i][0]) * f; cy += (best[j][1] + best[i][1]) * f; }
+    return A ? [{ lng: cx / (3 * A), lat: cy / (3 * A), text }] : [];
+  }
+  const parts = g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : [];
+  let best = null, bestLen = -1;
+  for (const pts of parts) {
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (len > bestLen) { bestLen = len; best = pts; }
+  }
+  if (!best || best.length < 2 || !(bestLen > 0)) return [];
+  let half = bestLen / 2;
+  for (let i = 1; i < best.length; i++) {
+    const seg = Math.hypot(best[i][0] - best[i - 1][0], best[i][1] - best[i - 1][1]);
+    if (half <= seg && seg > 0) {
+      const t = half / seg;
+      return [{ lng: best[i - 1][0] + (best[i][0] - best[i - 1][0]) * t, lat: best[i - 1][1] + (best[i][1] - best[i - 1][1]) * t, text }];
+    }
+    half -= seg;
+  }
+  return [];
 }
 
 // terrain worker artifact coords are [lat,lng]; GeoJSON/our features are [lon,lat].

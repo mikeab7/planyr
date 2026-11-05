@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { FEET_WKID, isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -43,20 +43,20 @@ export function resolveGisUrl(url, base = typeof window !== "undefined" ? window
   return new URL(url, base);
 }
 
-async function fetchJson(url, params) {
+async function fetchJson(url, params, { timeoutMs = PARCEL_FETCH_TIMEOUT_MS } = {}) {
   const u = resolveGisUrl(url);
   u.searchParams.set("f", "json");
   if (params)
     for (const [k, v] of Object.entries(params))
       if (v != null) u.searchParams.set(k, String(v));
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PARCEL_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res;
   try {
     res = await fetch(u.toString(), { signal: ctrl.signal });
   } catch (e) {
     if (e && e.name === "AbortError")
-      throw new ParcelFetchError("timeout", `The county server didn't respond within ${Math.round(PARCEL_FETCH_TIMEOUT_MS / 1000)}s.`);
+      throw new ParcelFetchError("timeout", `The county server didn't respond within ${Math.round(timeoutMs / 1000)}s.`);
     throw new ParcelFetchError("network", "Couldn't reach the county server (network or CORS block).");
   } finally {
     clearTimeout(timer);
@@ -78,8 +78,8 @@ async function fetchJson(url, params) {
 const trim = (s) => s.replace(/\/+$/, "");
 
 // Layer metadata: name, geometry type, and field list.
-export async function getLayerInfo(layerUrl) {
-  const j = await fetchJson(layerUrl);
+export async function getLayerInfo(layerUrl, { timeoutMs } = {}) {
+  const j = await fetchJson(layerUrl, undefined, { timeoutMs });
   return {
     name: j.name,
     type: j.type,
@@ -93,8 +93,8 @@ export async function getLayerInfo(layerUrl) {
 }
 
 // All layers in a MapServer/FeatureServer root.
-export async function listLayers(serviceUrl) {
-  const j = await fetchJson(trim(serviceUrl) + "/layers");
+export async function listLayers(serviceUrl, { timeoutMs } = {}) {
+  const j = await fetchJson(trim(serviceUrl) + "/layers", undefined, { timeoutMs });
   return (j.layers || []).map((l) => ({
     id: l.id,
     name: l.name,
@@ -104,10 +104,10 @@ export async function listLayers(serviceUrl) {
 }
 
 // If a service-root URL was given, resolve it to the best parcels layer URL.
-export async function resolveLayerUrl(url) {
+export async function resolveLayerUrl(url, { timeoutMs } = {}) {
   if (/\/(MapServer|FeatureServer)\/\d+\/?$/i.test(url)) return trim(url);
   if (/\/(MapServer|FeatureServer)\/?$/i.test(url)) {
-    const layers = await listLayers(url);
+    const layers = await listLayers(url, { timeoutMs });
     if (!layers.length) throw new Error("That service has no layers.");
     const polys = layers.filter((l) => /polygon/i.test(l.geometryType || ""));
     const pick =
@@ -134,10 +134,12 @@ export function isPaginationUnsupportedError(e) {
   );
 }
 
-// Query features, returning geometry in Texas State Plane feet (EPSG:2278).
+// Query features, returning geometry in the `outSR` the caller asks for. NEW-1 (STATE-PLANE-AUDIT): the default used to be
+// FEET_WKID (Texas South Central, EPSG:2278) — a silent Texas default for any county in any state. Both callers pass 4326
+// explicitly (lon/lat, projected later by the site's own frame), so the default is now WGS84 and never a state plane.
 export async function queryFeatures(
   layerUrl,
-  { where = "1=1", outFields = "*", count = 8, outSR = FEET_WKID } = {}
+  { where = "1=1", outFields = "*", count = 8, outSR = 4326, timeoutMs, orderBy } = {}
 ) {
   const url = trim(layerUrl) + "/query";
   try {
@@ -147,7 +149,8 @@ export async function queryFeatures(
       returnGeometry: "true",
       outSR,
       resultRecordCount: count,
-    });
+      ...(orderBy ? { orderByFields: orderBy } : {}),
+    }, { timeoutMs });
     return j.features || [];
   } catch (e) {
     if (!isPaginationUnsupportedError(e)) throw e;
@@ -155,7 +158,7 @@ export async function queryFeatures(
     // matching ids only (no geometry, so it is cheap even when the id list is long), keep the first
     // `count`, then fetch exactly those. Both calls were measured working against the server that
     // needs this. A failure in either still surfaces as the typed error it is — never swallowed.
-    const idsJson = await fetchJson(url, { where, returnIdsOnly: "true" });
+    const idsJson = await fetchJson(url, { where, returnIdsOnly: "true" }, { timeoutMs });
     const ids = (idsJson.objectIds || []).slice(0, count);
     if (!ids.length) return [];
     const j = await fetchJson(url, {
@@ -163,7 +166,7 @@ export async function queryFeatures(
       outFields,
       returnGeometry: "true",
       outSR,
-    });
+    }, { timeoutMs });
     return j.features || [];
   }
 }
@@ -234,7 +237,7 @@ function featureContainsLngLat(feature, lng, lat) {
  * that actually CONTAINS the point (else the nearest hit) in the SAME
  * { geometry:{rings}, attributes } shape queryAtPoint returns, geometry in lon/lat
  * (4326), or null. Only meaningful for a /MapServer/<id> layer. */
-export async function identifyAtPoint(layerUrl, lng, lat) {
+export async function identifyAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
   const m = /^(.*\/MapServer)\/(\d+)\/?$/i.exec(trim(layerUrl));
   if (!m) return null; // identify is a MapServer op — not applicable to a FeatureServer layer
   const [, service, id] = m;
@@ -248,7 +251,7 @@ export async function identifyAtPoint(layerUrl, lng, lat) {
     mapExtent: `${lng - half},${lat - half},${lng + half},${lat + half}`,
     imageDisplay: "600,600,96",
     returnGeometry: "true",
-  });
+  }, { timeoutMs });
   const feats = (j.results || [])
     .filter((r) => r && r.geometry && r.geometry.rings)
     .map((r) => ({ geometry: r.geometry, attributes: r.attributes || {} }));
@@ -262,12 +265,12 @@ const POINT_ENVELOPE_HALF = 0.00005;
 
 // Find the parcel polygon under a clicked map point. Returns the ArcGIS feature
 // with geometry in lon/lat (EPSG:4326), which every service supports, or null.
-export async function queryAtPoint(layerUrl, lng, lat) {
+export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
   // B1657600 — a layer that has DECLARED its /query permanently disabled (TxGIO's statewide
   // MapServer, isIdentifyOnlyLayerUrl) skips the /query attempt entirely and asks /identify
   // directly, instead of paying a wasted round trip on every click just to rediscover the same
   // capability error the isQueryCapabilityError catch below already knows about.
-  if (isIdentifyOnlyLayerUrl(layerUrl)) return identifyAtPoint(layerUrl, lng, lat);
+  if (isIdentifyOnlyLayerUrl(layerUrl)) return identifyAtPoint(layerUrl, lng, lat, { timeoutMs });
   // NEW-1 (Louisiana) — Jefferson Parish's layer answers a point with nothing where a small envelope
   // around it answers with the parcel; a layer that declares `pointViaEnvelope` is asked the shape that
   // was measured working, then the parcel that actually CONTAINS the point is chosen (else the first).
@@ -284,7 +287,8 @@ export async function queryAtPoint(layerUrl, lng, lat) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
-    });
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
+    }, { timeoutMs });
     const feats = j.features || [];
     return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0] || null;
   }
@@ -298,7 +302,8 @@ export async function queryAtPoint(layerUrl, lng, lat) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
-    });
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}), // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
+    }, { timeoutMs });
     return (j.features || [])[0] || null;
   } catch (e) {
     // A MapServer that advertises Query but has the layer /query op disabled returns a
@@ -308,7 +313,7 @@ export async function queryAtPoint(layerUrl, lng, lat) {
     // untouched. Self-heals: if the agency re-enables query, /query succeeds and this
     // branch never runs.
     if (isQueryCapabilityError(e) && /\/MapServer\/\d+\/?$/i.test(trim(layerUrl)))
-      return identifyAtPoint(layerUrl, lng, lat);
+      return identifyAtPoint(layerUrl, lng, lat, { timeoutMs });
     throw e;
   }
 }
@@ -316,16 +321,12 @@ export async function queryAtPoint(layerUrl, lng, lat) {
 /* Identify the parcel under a clicked point across several candidate counties at
  * once — so the user never has to pre-pick a county. Each candidate is
  * { county, url } (the county's resolved parcel-layer URL). Queries them in
- * parallel and returns EVERY hit as { county, feature } (a click that straddles a
+ * parallel and keeps EVERY hit as { county, feature } (a click that straddles a
  * county line can legitimately hit two — the caller merges). A candidate whose
  * service is down/unreachable is skipped (its rejection swallowed) rather than
- * failing the whole identify, so a sibling county can still answer. Returns [] when
- * nothing matched anywhere. */
-export async function identifyParcelAcross(candidates, lng, lat) {
-  return (await identifyParcelDetailed(candidates, lng, lat)).hits;
-}
-
-/* Same identify, but also reports how many candidate services actually RESPONDED,
+ * failing the whole identify, so a sibling county can still answer.
+ *
+ * Also reports how many candidate services actually RESPONDED,
  * so a caller can tell "couldn't reach any parcel service" (responded === 0) apart
  * from "a service answered, but there's no parcel at this point" (responded > 0,
  * hits empty) — two states that must read differently (B233). Also returns a
@@ -385,7 +386,7 @@ export const BACKUP_GRACE_MS = 1200;
  * we already returned early — so the caller can feed the circuit breaker (sourceHealth)
  * the health of the slow/failed sources too. Returns { hits:[{county,feature}],
  * responded, errors, sources:[{county,ok,hit,error}], complete }. */
-export function identifyParcelEager(candidates, lng, lat, { onSettled, graceMs = BACKUP_GRACE_MS } = {}) {
+export function identifyParcelEager(candidates, lng, lat, { onSettled, graceMs = BACKUP_GRACE_MS, timeoutMs } = {}) {
   const list = candidates || [];
   const st = list.map((c) => ({ county: c.county, statewide: !!c.statewide, ok: false, hit: false, error: null, feature: null, settled: false, ms: null }));
   // `ms` (B1461731) rides alongside `ok` so a caller can feed the circuit breaker
@@ -429,7 +430,7 @@ export function identifyParcelEager(candidates, lng, lat, { onSettled, graceMs =
   if (!list.length) { finish(true); if (onSettled) onSettled([]); return out; }
   list.forEach(({ url }, i) => {
     const startedAt = Date.now();
-    queryAtPoint(url, lng, lat).then(
+    queryAtPoint(url, lng, lat, { timeoutMs }).then(
       (feature) => { st[i].ok = true; st[i].hit = !!feature; st[i].feature = feature || null; },
       (err) => { st[i].error = err; }
     ).finally(() => { st[i].ms = Date.now() - startedAt; settle(i); });

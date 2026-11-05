@@ -14,6 +14,7 @@ import { Button, Field } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, partyLabels, emptyDraft, draftToComp, validateComp,
 } from "../lib/comps.js";
+import { draftTitleFor } from "../lib/compDrafts.js";
 
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
 
@@ -37,7 +38,7 @@ export function anchorFromGeometry(rawGeometry) {
 }
 
 function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromote, onDismiss, busy }) {
-  const [fields, setFields] = useState(() => ({ ...emptyDraft(null), ...draft.proposed }));
+  const [fields, setFields] = useState(() => ({ ...emptyDraft(null), ...draft.proposed, title: draftTitleFor(draft) }));
   const set = (k) => (e) => setFields((f) => ({ ...f, [k]: e.target.value }));
   const geometryAnchor = anchorFromGeometry(draft.rawGeometry);
   const anchor = anchorOverride || geometryAnchor;
@@ -59,6 +60,8 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
           {draft.rawDescription}
         </div>
       )}
+
+      <Field label="Title" stacked><input value={fields.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
 
       <Field label="Type" stacked>
         {/* B1149586 — emptyDraft no longer defaults compType to "land", so a draft with no type

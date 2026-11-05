@@ -77,3 +77,24 @@ describe("/api/taxrates county normalisation (B2158064)", () => {
     expect(normalizeCounty("Fort  Bend County")).toBe("fort bend");
   });
 });
+
+describe("transient answers are never cached", () => {
+  it("a 'try again' answer is retried on the next open", async () => {
+    _resetTaxUnitsCache();
+    const f = vi.fn(async () => ({ ok: true, json: async () => ({ complete: false, transient: true }) }));
+    await fetchTaxUnits("harris", "0591420000105", f);
+    await fetchTaxUnits("harris", "0591420000105", f);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("B2194744 — a Harris lot with NO stored acct still resolves its account from the county record", () => {
+  it("the owner's 158.20 AC lot (acct null, HCAD_NUM 0421030000129) fetches", () => {
+    const lot = { acct: null, attrs: { OBJECTID: 504281, HCAD_NUM: "0421030000129", acct_num: "0421030000129" } };
+    expect(accountOf(lot, undefined)).toBe("0421030000129"); // the planner used to pass an undefined idField
+    expect(accountOf(lot, "HCAD_NUM")).toBe("0421030000129");
+  });
+  it("never answers with the OBJECTID", () => {
+    expect(accountOf({ attrs: { OBJECTID: 634440, HCAD_NUM: "0421030000123" }, acct: "634440" }, undefined)).toBe("0421030000123");
+  });
+});

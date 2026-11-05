@@ -3,6 +3,25 @@
  * Pure over the tickets shapeTickets returns. */
 import { ago } from "./adminPanels.js";
 
+/* Test / internal reports (B2159505). A report is hidden by the Support "Hide internal" switch when it comes from an
+ * internal or test ACCOUNT (the same rule Users uses — adminUsers.isInternalEmail, passed in as `isInternal`), or when
+ * it is SIGNED OUT and its own text marks it as a test ("test — please ignore", "zz-sweep-…", "safe to ignore").
+ * The text marker is applied to signed-out reports only: a signed-in customer who writes the word "test" in a real
+ * report is never hidden by it. Hiding is a VIEW — nothing is closed or deleted. */
+const TEST_TEXT_RE = /zz-sweep|zz-livechk|test\s*[—–-]\s*please ignore|please ignore|safe to ignore|^\s*test diagnostic/i;
+export const isTestReport = (t, isInternal) => {
+  if (t.email && isInternal && isInternal(t.email)) return true;
+  if (!t.userId && !t.email) return TEST_TEXT_RE.test(String(t.description || ""));
+  return false;
+};
+/** Tickets (shapeTickets output) minus test/internal ones when `hideInternal`; `hidden` counts what was held back (open + closed). */
+export function filterTickets(tickets, { hideInternal, isInternal }) {
+  if (!hideInternal) return { open: tickets.open, closed: tickets.closed, hiddenOpen: 0, hiddenClosed: 0 };
+  const keep = (t) => !isTestReport(t, isInternal);
+  const open = tickets.open.filter(keep), closed = tickets.closed.filter(keep);
+  return { open, closed, hiddenOpen: tickets.open.length - open.length, hiddenClosed: tickets.closed.length - closed.length };
+}
+
 export const isBareSlowTap = (t) => t.category === "slow" && !String(t.description || "").trim();
 const accountKey = (t) => t.userId || t.email || "signed-out";
 

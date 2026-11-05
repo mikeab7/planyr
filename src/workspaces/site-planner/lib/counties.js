@@ -33,17 +33,40 @@ import { situsKey } from "./appraisal.js";
  * every query before that returns a `pending` verdict, so nothing here ever trades a rectangle's
  * guess for a real answer. See countyPolygons.js for why the geometry is bundled rather than
  * fetched on demand. */
-import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster } from "./countyPolygons.js";
+import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster, countiesNearPoint } from "./countyPolygons.js";
 /* NEW-4 — county ROUTING KEYS are normalised at the map itself, not at each call site.
  * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
  * spelled "Harris", silently). */
-import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/countyKeys.js";
+import { byCountyKey, countyKeySet, normCountyKey, countyNameSlug } from "../../../shared/gis/countyKeys.js";
+import { parcelGapNotice } from "./parcelGaps.js";
 /* CITY-SCOPED SOURCES (B1583296) — a point-in-city-polygon check that runs BEFORE the nationwide
  * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
  * config line: a county whose only real parcel source covers just one city inside it cannot be
  * expressed at county granularity without silently misrouting every OTHER place in that county. */
-import { cityScopeAnswer } from "./cityScopes.js";
+import { cityScopeAnswer, CITY_SCOPE_COUNTIES } from "./cityScopes.js";
+// Re-exported for the admin coverage map: it must reach this data THROUGH counties.js (already in its chunk) — a direct
+// dynamic import of cityScopes.js from the admin chunk becomes its own shared chunk and breaches the Site-route allowlist.
+export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
+import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
+import { sdRaw, sdMap } from "./sdParcels.js"; // NEW-1 (B2343936) — the South Dakota county rows beyond sd_pennington/minnehaha/siouxfalls
+import { idRaw, idMap } from "./idParcels.js"; // NEW-1 (B2317920) — the Idaho county rows beyond the 13 OITS counties
+import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New Mexico county rows beyond nm_bernalillo
+import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
+import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
+import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
+import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
+import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
+import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
+import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
+import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
+import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
+import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
+import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
+import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
+import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
+import { iaRaw, iaMap, iaCopyRaw, iaCopyMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
+import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -143,6 +166,25 @@ const publishedButUnprobed =
 
 /* The four counties whose OWN parcel service is live-verified share one help shape too. */
 const ownHelp = (source, idKind) => `${source}. Search by ${idKind} or a site address.`;
+
+/* NEW-1 (Memphis radius) — the 24 MARIS-served Mississippi counties, as one compact table so the Site route pays for
+ * data, not 24 copies of prose. Row: [key slug, county name, MARIS layer (1 West / 2 East), centre lat, lng, padded bbox]. */
+const MARIS_SVC = "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/";
+const MS_MARIS_ROWS = [["yalobusha","Yalobusha",1,34.031,-89.709,[33.84,-89.96,34.23,-89.48]],["union","Union",2,34.497,-88.995,[34.34,-89.27,34.64,-88.69]],["tunica","Tunica",1,34.655,-90.372,[34.4,-90.62,34.92,-90.17]],["tishomingo","Tishomingo",2,34.747,-88.231,[34.44,-88.38,35.03,-88.06]],["tippah","Tippah",2,34.776,-88.899,[34.57,-89.11,35.03,-88.68]],["tate","Tate",1,34.658,-89.943,[34.53,-90.27,34.81,-89.63]],["tallahatchie","Tallahatchie",1,33.953,-90.175,[33.66,-90.48,34.2,-89.9]],["sunflower","Sunflower",1,33.607,-90.587,[33.25,-90.79,34.02,-90.42]],["quitman","Quitman",1,34.257,-90.288,[34.05,-90.48,34.55,-90.1]],["prentiss","Prentiss",2,34.624,-88.508,[34.44,-88.76,34.79,-88.29]],["pontotoc","Pontotoc",2,34.23,-89.032,[34.05,-89.27,34.41,-88.79]],["panola","Panola",1,34.371,-89.948,[34.13,-90.23,34.6,-89.69]],["marshall","Marshall",2,34.77,-89.497,[34.47,-89.75,35.03,-89.21]],["leflore","Leflore",1,33.555,-90.298,[33.22,-90.48,33.85,-90.06]],["lee","Lee",2,34.296,-88.672,[34.05,-88.85,34.55,-88.5]],["lafayette","Lafayette",2,34.364,-89.48,[34.14,-89.75,34.6,-89.21]],["itawamba","Itawamba",2,34.284,-88.355,[34.06,-88.57,34.5,-88.12]],["grenada","Grenada",1,33.772,-89.797,[33.65,-90.16,33.93,-89.47]],["coahoma","Coahoma",1,34.234,-90.602,[33.96,-90.98,34.56,-90.37]],["chickasaw","Chickasaw",2,33.925,-88.941,[33.71,-89.21,34.11,-88.68]],["calhoun","Calhoun",2,33.939,-89.332,[33.69,-89.54,34.2,-89.1]],["bolivar","Bolivar",1,33.8,-90.879,[33.51,-91.26,34.16,-90.63]],["benton","Benton",2,34.823,-89.179,[34.56,-89.37,35.03,-88.98]],["alcorn","Alcorn",2,34.887,-88.569,[34.73,-88.84,35.04,-88.32]]];
+/* NEW-1 (Mississippi, 2026-10-16) — the other 57 counties (all 82 now). Same row shape; the optional 7th item is the exact
+ * CNTYNAME MARIS stores when it is not the upper-cased display name (JEFFERSON_DAVIS, PEARLRIVER). DeSoto is the one county
+ * not here: it keeps its own fresher county service (ms_desoto). Layer pin + extent MEASURED per county through /gis-proxy
+ * 2026-10-16 (count > 0 on exactly one layer for each; extent from returnExtentOnly). */
+const MS_MARIS_ROWS_B = [["adams","Adams",1,31.47,-91.405,[31.16,-91.69,31.78,-91.12]],["amite","Amite",1,31.174,-90.822,[30.97,-91.13,31.38,-90.52]],["attala","Attala",2,33.083,-89.643,[32.85,-90.0,33.32,-89.28]],["carroll","Carroll",1,33.446,-89.909,[33.18,-90.21,33.71,-89.61]],["choctaw","Choctaw",2,33.321,-89.271,[33.08,-89.49,33.56,-89.06]],["claiborne","Claiborne",1,32.004,-90.976,[31.75,-91.27,32.26,-90.68]],["clarke","Clarke",2,32.027,-88.673,[31.8,-88.94,32.26,-88.4]],["clay","Clay",2,33.659,-88.753,[33.48,-89.07,33.84,-88.44]],["copiah","Copiah",1,31.868,-90.423,[31.65,-90.77,32.08,-90.08]],["covington","Covington",2,31.614,-89.578,[31.4,-89.79,31.83,-89.37]],["forrest","Forrest",2,31.172,-89.295,[30.88,-89.48,31.47,-89.11]],["franklin","Franklin",1,31.465,-90.896,[31.29,-91.19,31.64,-90.6]],["george","George",2,30.866,-88.648,[30.7,-88.92,31.03,-88.38]],["greene","Greene",2,31.217,-88.633,[30.97,-88.87,31.47,-88.39]],["hancock","Hancock",2,30.411,-89.505,[30.14,-89.72,30.68,-89.29]],["harrison","Harrison",2,30.441,-89.074,[30.17,-89.37,30.71,-88.78]],["hinds","Hinds",1,32.31,-90.398,[32.02,-90.76,32.6,-90.04]],["holmes","Holmes",1,33.127,-90.09,[32.85,-90.46,33.4,-89.72]],["humphreys","Humphreys",1,33.126,-90.532,[32.89,-90.76,33.36,-90.3]],["issaquena","Issaquena",1,32.712,-90.953,[32.38,-91.24,33.04,-90.66]],["jackson","Jackson",2,30.527,-88.639,[30.29,-88.91,30.77,-88.36]],["jasper","Jasper",2,32.013,-89.117,[31.77,-89.35,32.25,-88.88]],["jefferson","Jefferson",1,31.741,-91.049,[31.58,-91.39,31.9,-90.71]],["jeffersondavis","Jefferson Davis",1,31.582,-89.78,[31.36,-90.01,31.81,-89.55],"JEFFERSON_DAVIS"],["jones","Jones",2,31.628,-89.172,[31.4,-89.43,31.85,-88.91]],["kemper","Kemper",2,32.753,-88.632,[32.55,-88.95,32.96,-88.32]],["lamar","Lamar",2,31.208,-89.502,[30.95,-89.69,31.47,-89.32]],["lauderdale","Lauderdale",2,32.401,-88.652,[32.19,-88.95,32.61,-88.36]],["lawrence","Lawrence",1,31.545,-90.102,[31.3,-90.28,31.79,-89.93]],["leake","Leake",2,32.753,-89.525,[32.54,-89.76,32.96,-89.29]],["lincoln","Lincoln",1,31.533,-90.491,[31.32,-90.77,31.75,-90.21]],["lowndes","Lowndes",2,33.516,-88.46,[33.26,-88.7,33.78,-88.22]],["madison","Madison",1,32.642,-90.089,[32.37,-90.48,32.92,-89.7]],["marion","Marion",1,31.217,-89.846,[30.97,-90.07,31.47,-89.62]],["monroe","Monroe",2,33.869,-88.462,[33.62,-88.75,34.12,-88.17]],["montgomery","Montgomery",1,33.482,-89.584,[33.25,-89.82,33.71,-89.35]],["neshoba","Neshoba",2,32.754,-89.117,[32.55,-89.35,32.96,-88.88]],["newton","Newton",2,32.4,-89.119,[32.19,-89.35,32.61,-88.88]],["noxubee","Noxubee",2,33.107,-88.559,[32.89,-88.84,33.32,-88.27]],["oktibbeha","Oktibbeha",2,33.426,-88.88,[33.26,-89.12,33.6,-88.64]],["pearlriver","Pearl River",2,30.737,-89.597,[30.43,-89.89,31.05,-89.31],"PEARLRIVER"],["perry","Perry",2,31.172,-88.991,[30.88,-89.18,31.46,-88.8]],["pike","Pike",1,31.175,-90.404,[30.97,-90.58,31.38,-90.23]],["rankin","Rankin",1,32.321,-89.99,[32.02,-90.28,32.62,-89.7]],["scott","Scott",2,32.429,-89.552,[32.19,-89.81,32.67,-89.29]],["sharkey","Sharkey",1,32.88,-90.811,[32.63,-91.0,33.13,-90.62]],["simpson","Simpson",1,31.9,-89.95,[31.72,-90.28,32.08,-89.62]],["smith","Smith",2,32.003,-89.524,[31.75,-89.76,32.26,-89.29]],["stone","Stone",2,30.779,-89.114,[30.62,-89.37,30.94,-88.85]],["walthall","Walthall",1,31.175,-90.048,[30.97,-90.29,31.38,-89.8]],["warren","Warren",1,32.348,-90.866,[32.05,-91.21,32.65,-90.52]],["washington","Washington",1,33.269,-90.957,[32.98,-91.27,33.56,-90.65]],["wayne","Wayne",2,31.664,-88.696,[31.4,-88.97,31.92,-88.42]],["webster","Webster",2,33.6,-89.263,[33.43,-89.54,33.77,-88.99]],["wilkinson","Wilkinson",1,31.185,-91.343,[30.96,-91.66,31.4,-91.03]],["winston","Winston",2,33.102,-89.067,[32.89,-89.35,33.32,-88.78]],["yazoo","Yazoo",1,32.763,-90.363,[32.47,-90.79,33.05,-89.94]]];
+const MS_ALL_ROWS = () => [...MS_MARIS_ROWS, ...MS_MARIS_ROWS_B];
+const msScope = (n, sc) => "CNTYNAME='" + (sc || n.toUpperCase()) + "'";
+const msMarisRaw = () => Object.fromEntries(MS_ALL_ROWS().map(([k, n, ly, , , , sc]) => ["ms_" + k, {
+  state: "MS", label: n + " County, MS", layerUrl: MARIS_SVC + ly, idField: "PARNO", addrField: "SITEADD", scopeWhere: msScope(n, sc),
+  help: "Mississippi statewide parcels (MARIS / MDEQ, " + (ly === 1 ? "West" : "East") + " half) — searches are limited to " + n + " County. Search by parcel number or a site address.",
+}]));
+const msMarisMap = () => Object.fromEntries(MS_ALL_ROWS().map(([k, n, ly, la, ln, bb, sc]) => ["ms_" + k, {
+  state: "MS", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: MARIS_SVC + ly, scopeWhere: msScope(n, sc),
+}]));
 
 const COUNTIES_RAW = {
   harris: {
@@ -790,18 +832,189 @@ const COUNTIES_RAW = {
   },
   ky_jefferson: {
     state: "KY", label: "Jefferson County, KY",
-    layerUrl: "https://gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1",
-    idField: "PARCELID", // unconfirmed — gis.lojic.org is blocked from this build environment.
+    layerUrl: "/gis-proxy/gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataPVA/MapServer/1", // NEW-1 (Kentucky): relayed; measured 2026-10-19
+    idField: "PARCELID",
     help: "Jefferson County (Louisville) PVA parcels (LOJIC open data). Search by parcel ID or a site address.",
   },
   ms_desoto: {
-    // VERIFIED LIVE 2026-09-10 from this sandbox: 80,950 parcel polygons, count query 830ms,
-    // 55 populated fields.
+    // NEW-1 (B2507056, 2026-10-29) — the COUNTY'S OWN server is the primary now ("Tax Parcels", BaseLayers/MapServer/1 on gis.desotocountyms.gov, relayed because the host
+    // is not reachable from the build sandbox); Mississippi's statewide MARIS layer stands in when it does not answer (parcelFallbacks.js COUNTY_EXTRA_FALLBACKS), then the
+    // 2024 Esri-hosted ETR / Tristate copy this row used to point at (kept as the last resort; it answered from anywhere with the old PARNO / SITEADD schema).
     state: "MS", label: "DeSoto County, MS",
-    layerUrl: "https://services5.arcgis.com/nbwtrV1EDhKfIQhm/arcgis/rest/services/DESOTO_PARCELS/FeatureServer/0",
-    idField: "PARNO", addrField: "SITEADD",
-    help: "DeSoto County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
+    layerUrl: "/gis-proxy/gis.desotocountyms.gov/arcgis/rest/services/BaseLayers/MapServer/1",
+    idField: "PIN", addrField: "FULL_ADDR",
+    help: "DeSoto County parcels (the county's own GIS server). Search by parcel number (PIN) or a site address.",
   },
+  /* NEW-1 (Memphis 100-mile radius, 2026-10-15) — the 24 Mississippi counties inside the radius other than DeSoto
+   * (which keeps its own, fresher county service above). SOURCE: MARIS (Mississippi Automated Resource Information
+   * System, MDEQ-funded) statewide cadastral, service Cadastral/MS_Parcels_August_2024 on gis.mississippi.edu — ONE
+   * service, TWO layers by half of the state (1 = West, 2 = East), identical 55-field schema (PARNO, OWNNAME, SITEADD,
+   * TAXACRES, GISACRES, CNTYNAME, LANDVAL, TOTVAL …). Each county below pins the layer that holds it and is scoped by
+   * CNTYNAME (upper-case, e.g. 'TATE'), the Idaho shape: `sharedLayerUrlConflicts()` requires distinct scopes.
+   * MEASURED through this PR's Cloudflare preview of /gis-proxy (the sandbox itself cannot reach gis.mississippi.edu):
+   * a point query at every one of these 24 county interiors returned a parcel from the pinned layer carrying the
+   * matching CNTYNAME; none returned from the other half. Routed through the gis-proxy because the host's CORS
+   * header could not be read from the sandbox — the relay never depends on it (V# in VERIFICATION). Supersedes the
+   * "two half-state services, shape-mismatch" finding in docs/STATEWIDE-PARCELS.md: a per-county pin IS expressible. */
+  ms_yalobusha: {
+    state: "MS", label: "Yalobusha County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='YALOBUSHA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Yalobusha County. Search by parcel number or a site address.",
+  },
+  ms_union: {
+    state: "MS", label: "Union County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='UNION'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Union County. Search by parcel number or a site address.",
+  },
+  ms_tunica: {
+    state: "MS", label: "Tunica County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TUNICA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tunica County. Search by parcel number or a site address.",
+  },
+  ms_tishomingo: {
+    state: "MS", label: "Tishomingo County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TISHOMINGO'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Tishomingo County. Search by parcel number or a site address.",
+  },
+  ms_tippah: {
+    state: "MS", label: "Tippah County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TIPPAH'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Tippah County. Search by parcel number or a site address.",
+  },
+  ms_tate: {
+    state: "MS", label: "Tate County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TATE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tate County. Search by parcel number or a site address.",
+  },
+  ms_tallahatchie: {
+    state: "MS", label: "Tallahatchie County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TALLAHATCHIE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tallahatchie County. Search by parcel number or a site address.",
+  },
+  ms_sunflower: {
+    state: "MS", label: "Sunflower County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='SUNFLOWER'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Sunflower County. Search by parcel number or a site address.",
+  },
+  ms_quitman: {
+    state: "MS", label: "Quitman County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='QUITMAN'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Quitman County. Search by parcel number or a site address.",
+  },
+  ms_prentiss: {
+    state: "MS", label: "Prentiss County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PRENTISS'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Prentiss County. Search by parcel number or a site address.",
+  },
+  ms_pontotoc: {
+    state: "MS", label: "Pontotoc County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PONTOTOC'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Pontotoc County. Search by parcel number or a site address.",
+  },
+  ms_panola: {
+    state: "MS", label: "Panola County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PANOLA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Panola County. Search by parcel number or a site address.",
+  },
+  ms_marshall: {
+    state: "MS", label: "Marshall County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='MARSHALL'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Marshall County. Search by parcel number or a site address.",
+  },
+  ms_leflore: {
+    state: "MS", label: "Leflore County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LEFLORE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Leflore County. Search by parcel number or a site address.",
+  },
+  ms_lee: {
+    state: "MS", label: "Lee County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LEE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Lee County. Search by parcel number or a site address.",
+  },
+  ms_lafayette: {
+    state: "MS", label: "Lafayette County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LAFAYETTE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Lafayette County. Search by parcel number or a site address.",
+  },
+  ms_itawamba: {
+    state: "MS", label: "Itawamba County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='ITAWAMBA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Itawamba County. Search by parcel number or a site address.",
+  },
+  ms_grenada: {
+    state: "MS", label: "Grenada County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='GRENADA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Grenada County. Search by parcel number or a site address.",
+  },
+  ms_coahoma: {
+    state: "MS", label: "Coahoma County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='COAHOMA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Coahoma County. Search by parcel number or a site address.",
+  },
+  ms_chickasaw: {
+    state: "MS", label: "Chickasaw County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='CHICKASAW'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Chickasaw County. Search by parcel number or a site address.",
+  },
+  ms_calhoun: {
+    state: "MS", label: "Calhoun County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='CALHOUN'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Calhoun County. Search by parcel number or a site address.",
+  },
+  ms_bolivar: {
+    state: "MS", label: "Bolivar County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='BOLIVAR'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Bolivar County. Search by parcel number or a site address.",
+  },
+  ms_benton: {
+    state: "MS", label: "Benton County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='BENTON'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
+  },
+  ...msMarisRaw(),
+  ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
+  ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
+  ...miRaw(), // NEW-1 (Michigan, 2026-10-20) — 52 Michigan counties (see miParcels.js)
+  ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
+  ...okRaw(), // NEW-1 (Oklahoma)
+  ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
+  ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
+  ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
+  ...iaCopyRaw(), // NEW-1 (Iowa second pass, B2499376) — the 2017 statewide COPY for the Iowa counties with no source of their own
+  ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
+  ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
+  ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
+  ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
+  ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
+  ...sdRaw(), // NEW-1 (B2343936) — South Dakota counties (sd_beadle … sd_roberts)
+  ...azRaw(), // NEW-1 (Arizona 2026-10-19) — az_* rows beyond the hand-written az_pinal / az_maricopa
+  ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
+  ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
+  ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
+  ...kyRaw(), // NEW-1 (Kentucky) — Kentucky (ky_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -1135,11 +1348,14 @@ const COUNTIES_RAW = {
     help: "West Feliciana Parish parcels (parish government GIS, June 2022). Search by parcel ID or a street name.",
   },
   al_jefferson: {
+    // B2302784 — the layer the county's OWN "Parcel Look-up" web app queries (jccgis.jccal.org Basemap/Parcels layer 0), now
+    // MEASURED through the relay 2026-10-16 (it had shipped "unconfirmed"): ParcelNo / OWNERNAME / ADDR_PSPR / GIS_ACRES.
     state: "AL", label: "Jefferson County, AL",
-    layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
-    idField: "PARCELID", // unconfirmed — jccgis.jccal.org is blocked from this build environment.
-    help: "Jefferson County (Birmingham) parcels (county GIS). Search by parcel ID or a site address.",
+    layerUrl: "/gis-proxy/jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
+    idField: "ParcelNo", addrField: "ADDR_PSPR",
+    help: "Jefferson County (Birmingham) parcels (county GIS). Search by parcel number or a site address.",
   },
+
   /* ═══ B1551617 — Tier 1 (Hillwood-market) counties, discovered + verified LIVE from this sandbox
    * 2026-09-11 by ui-audit/discover-county-parcels.mjs (routes: ArcGIS Hub dataset API / ArcGIS
    * Online item search — both *.arcgis.com, reachable here). Every one passed the harness's
@@ -1645,13 +1861,13 @@ const COUNTIES_RAW = {
     help: "Clay County (Fort Gaines) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_cook: {
-    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
-    // policy blocks this host): 5,103 parcel polygons, last edited 2023-11.
-    // ⚠ measured extent (about -83.49..-83.37) is narrower than the whole county — possibly city-of-Adel-only coverage. Wired anyway; the live-verify pass on this item must click a lot well outside Adel to confirm county-wide coverage, and a miss there is filed as a recurrence, not silently accepted.
-    state: "GA", label: "Cook County (Adel), GA",
-    layerUrl: "https://services1.arcgis.com/TSNNo8H51qYl31gq/arcgis/rest/services/Map__Adel_Overview_WFL1/FeatureServer/2",
+    // B2316720 (2026-10-19) — REPLACED the Adel-only Esri layer (Map__Adel_Overview_WFL1, 5,103 parcels): re-measured 2026-10-19, 0 of 5 spread
+    // interior points of the county returned a lot (it covers the city of Adel only). Now the Southern Georgia Regional Commission's countywide
+    // layer through /gis-proxy: 10,432 parcels, extent -83.58..-83.28 / 31.03..31.35, 4/5 interior and 4/4 near-county-line points hit.
+    state: "GA", label: "Cook County, GA",
+    layerUrl: "/gis-proxy/www.sgrcmaps.com/alma/rest/services/Cook/Cook_Parcels/MapServer/0",
     idField: "Parcel_No", pinIdField: true,
-    help: "Cook County (Adel) parcels (Esri-hosted). Search by parcel number.",
+    help: "Cook County parcels (Southern Georgia Regional Commission). Search by parcel number.",
   },
   ga_crawford: {
     // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
@@ -1984,6 +2200,117 @@ const COUNTIES_RAW = {
     idField: "Name", addrField: "SitusAddress",
     help: "City of Independence parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Jackson County. Search by parcel APN or a site address.",
   },
+  /* NEW-1 (Memphis radius ×2) — SHELBY COUNTY, TN, countywide, on the Shelby County ASSESSOR OF PROPERTY's own certified
+   * parcel service (`CERTParcel`, copyright "Shelby County Assessor of Property, Memphis, TN"). It is on the county's
+   * `scgis.` server — NOT the Cloudflare-challenged `gis.shelbycountytn.gov` viewer B2289169 ruled out — and answers
+   * token-free. This build sandbox's egress refuses the host, so it is relayed through `/gis-proxy` (allow-listed) and was
+   * MEASURED THROUGH THE PR PREVIEW'S RELAY 2026-10-15: MapServer, Map/Query/Data, maxRecordCount 1000, TAXYR 2026; points
+   * airport-east 35.03,-89.95 → 073088  00221 LIBERTY STREET MEMPHIS PARTNERS (54.79 ac); downtown → 002021  00001 COUNTY
+   * OF SHELBY; Bartlett, Millington, Lakeland, Germantown (G0231   00121C) and Collierville (C0244   00853) all answer with
+   * owner + situs. It covers Germantown and Collierville WITH owners, so their owner-less city scopes were folded in. */
+  /* NEW-1 (Tennessee 95-county sweep, 2026-10-22) — OUTLINE FLOOR 17. The server's record cap is 1,000 and the outline layer draws one 512-px cell per request with no paging, so a cell holding more
+   * than 1,000 lots silently drew only the first 1,000 (`exceededTransferLimit`, nothing said). MEASURED over the whole county on the exact Leaflet cell grid: at zoom 16, 18 of 1,911 cells exceed 1,000
+   * (busiest 1,411, midtown/downtown Memphis); at zoom 17 the busiest cell holds 586. Same remedy as Davidson (`displayMinZoom`); pinned by test/tnOutlineDensity.test.js. */
+  tn_shelby: {
+    state: "TN", label: "Shelby County, TN",
+    layerUrl: "/gis-proxy/scgis.shelbycountytn.gov/serverhigh/rest/services/Parcel/CERTParcel/MapServer/0",
+    idField: "PARCELID", addrField: "PAR_ADDR1", idNormalizer: "tn-shelby", displayMinZoom: 17,
+    help: "Shelby County Assessor of Property certified parcels (county GIS) — covers Memphis, Bartlett, Germantown, Collierville, Lakeland, Arlington, Millington and the unincorporated county. Search by parcel ID or a site address.",
+  },
+  /* NEW-1 (Memphis radius ×3) — CHESTER COUNTY, TN (Henderson), on the Chester County ASSESSOR OF PROPERTY's own parcel layer, served by
+   * CaptureCAMA (the Tennessee Comptroller's assessment system) — the layer behind the Assessor's public AGOL web map
+   * f214fb11968a4539bf128561ea61ecd6. B2289169's "no public source" was wrong. The Comptroller's statewide layer holds no Chester rows
+   * (still in tn_statewide.excludedCounties). Host refused by the build sandbox, so relayed through /gis-proxy (allow-listed); MEASURED
+   * THROUGH THE DEPLOYED RELAY 2026-10-16: MapServer layer 7 "Parcels_12", Map/Query/Data, 10,333 parcels, maxRecordCount 2000, token-free.
+   * Henderson CROOK AVENUE 111 → 012033M I 01500, CITY OF HENDERSON, 0.394 ac; rural SILERTON ROAD 1280 → 012076 02700, 36.30 ac. Columns are
+   * shapefile truncations: parcel id L15Parce_2 · owner GPDATA__OW · situs GPDATA__PR · GIS acres L15Parce_4 (appraisal.js reads them by name). */
+  tn_chester: {
+    state: "TN", label: "Chester County, TN",
+    layerUrl: "/gis-proxy/gis.capturecama.com/arcgis/rest/services/ChesterTN/ChesterCapture/MapServer/7",
+    idField: "L15Parce_2", addrField: "GPDATA__PR", idNormalizer: "tn-link",
+    help: "Chester County Assessor of Property parcels (CaptureCAMA) — covers Henderson, Enville, Jacks Creek and the rest of the county. Search by parcel ID or a site address.",
+  },
+  /* NEW-1 (TN non-state counties, 2026-10-21) — DAVIDSON COUNTY, TN (Nashville), on Metro Nashville's own Parcels layer: the Metro Planning Department + Assessor
+   * of Property's `Parcels_view` FeatureServer, published by Nashville Open Data (AGOL org HdTo6HJqh92wn4D8, item fa26cd93…; `accessInformation` "Nashville Planning
+   * Department / Assessor of Property"). The Comptroller's statewide layer holds ZERO Davidson rows (Davidson assesses on its own system), so before this row a
+   * Nashville click was routed to that empty composite and read "No parcel at this point". Token-free, Query + Extract, maxRecordCount 2000, 287,729 lots, WKID 2274.
+   * MEASURED 2026-10-21 from the build sandbox: 20 CULVERT ST → STANPAR 10508026600, AKZO NOBEL COATINGS INC, 9.52 ac. Id column is STANPAR (the 11-digit assessor
+   * parcel number); the owner column is `Owner`, address `PropAddr`. Pinned: plain detection would pick `ParID` (an internal row number). Densest 512-px cell at zoom 16
+   * (downtown) is 2,238 lots — over the 2,000 cap — so the outline floor is 17 (busiest cell there 1,222). */
+  tn_davidson: {
+    state: "TN", label: "Davidson County, TN (Nashville)",
+    layerUrl: "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Parcels_view/FeatureServer/0",
+    idField: "STANPAR", pinIdField: true, addrField: "PropAddr", pinAddrField: true, displayMinZoom: 17,
+    help: "Metro Nashville parcels (Planning Department / Assessor of Property) — covers all of Davidson County. Search by parcel number (STANPAR) or a site address.",
+  },
+  /* NEW-1/NEW-2 (TN non-state counties, 2026-10-21) — RUTHERFORD COUNTY, TN, on Rutherford County GIS's own `ParcelsCAMA1` FeatureServer (AGOL org 36I6IHIdr660pAyH,
+   * portal name "Rutherford County GIS"; "parcel layer with up to date CAMA data", edited 2026-10-21). Rutherford is one of the nine counties the Comptroller's
+   * statewide layer leaves out. Token-free, Query + Extract, maxRecordCount 2000, 123,298 lots, WKID 2274, COUNTY = 075. MEASURED 2026-10-21: ParcelID 156-027.00-000 →
+   * RHODES DEVELOPMENT COMPANY, 8.75 deeded ac (Christiana); ParcelID 156-002.01-000 → RHODES DEVELOPMENT COMPANY, 37.00 ac. `ParcelID` is the Tennessee control-map id
+   * (control map [+ letter] - group - parcel . special-interest), the format an owner types. Pinned over GISLINK / CAMAACCT / PropertyID, which the detector also likes. */
+  tn_rutherford: {
+    state: "TN", label: "Rutherford County, TN",
+    layerUrl: "https://services.arcgis.com/36I6IHIdr660pAyH/arcgis/rest/services/ParcelsCAMA1/FeatureServer/0",
+    idField: "ParcelID", pinIdField: true, addrField: "STREETADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control",
+    help: "Rutherford County GIS parcels (CAMA-linked) — covers Murfreesboro, Smyrna, La Vergne, Eagleville, Christiana and the rest of the county. Search by parcel ID (e.g. 156-027.00-000) or a site address.",
+  },
+  /* NEW-2 (Tennessee pass 2, B2408834, 2026-10-22) — WILLIAMSON COUNTY, TN (Franklin, Brentwood, Spring Hill), on Williamson County government's OWN ArcGIS Online
+   * org (portal williamsontn.maps.arcgis.com, services8 org hkhKI6Qq7rjvBjZU): the `Parcels` FeatureServer — "Parcels that display on the online county map" — token-free, Query
+   * only, maxRecordCount 2000, 107,811 parcels, WKID 3857, edited 2026-10-15. Pass 1 recorded Williamson as a gap because a county-name search surfaced only the City of Franklin's
+   * UGB parcels and a stale third-party upload; the county's own org is owned by a county GIS staff account whose items carry no county name in their titles. The Comptroller's
+   * statewide layer holds ZERO Williamson rows (county id 94 is absent from its 86). MEASURED 2026-10-22: Franklin Public Square → '078    11000 00009078' CITY OF FRANKLIN;
+   * Nolensville Rd 7306 → '056M A 03800 00017056M'; Fairview, Thompsons Station and rural Bethesda each answer with owner + situs. The id column is the Tennessee control-map id in
+   * the assessor's fixed-width form (map + group + parcel + special interest); PIN carries the same text. `AC` is the DEEDED acreage and is 0 on most small lots, so the card's
+   * acreage is the measured one from the ring. Outline floor 16: the busiest 512-px cell at zoom 16 (Harpeth / Legends Ridge) holds 663 lots, Franklin downtown 638. */
+  tn_williamson: {
+    state: "TN", label: "Williamson County, TN",
+    layerUrl: "https://services8.arcgis.com/hkhKI6Qq7rjvBjZU/arcgis/rest/services/Parcels/FeatureServer/0",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-link",
+    help: "Williamson County government parcels (county GIS) — covers Franklin, Brentwood, Spring Hill, Nolensville, Fairview, Thompson's Station and the rest of the county. Search by a site address or the assessor's parcel ID.",
+  },
+  /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — HAMILTON COUNTY, TN (Chattanooga), on Hamilton County GIS's OWN ArcGIS Server: `Live_Parcels` MapServer layer 0 "Parcels"
+   * (`mapsdev.hamiltontn.gov/hcwa03`, the "Assessors Tax Maps" source Chattanooga's own Map Viewer reads). Pass 1 recorded Hamilton as a gap because the Comptroller's copy is switched
+   * off and AGOL holds only city / school-district slices; it had not looked at the county's own server, which the City's web maps name. The Comptroller's layer holds ZERO Hamilton
+   * rows (county id 33 absent). Host refused by the build sandbox, so relayed through /gis-proxy (allow-listed) and MEASURED THROUGH THE DEPLOYED RELAY 2026-10-22: ArcGIS 10.61,
+   * Map/Query/Data, maxRecordCount 1000, token-free, 169,662 parcels over the whole county (extent to 35.46 N), newest recorded sale 2026-09-04 (a live roll). Soddy-Daisy
+   * 10406 DAYTON PIKE → 057F B 003 VANESSAS COTTAGE LLC; Signal Mountain 410 WOOD ST → 107L J 006; Enterprise South 8001 VOLKSWAGEN DR → 130 001.18, 1,096 ac. The id is the assessor's
+   * tax-map number `TAX_MAP_NO` (map · group · parcel, the form Chattanooga's viewer searches); PBA_NUM / GISLINK carry the same number with a 3-digit district prefix and are NOT pinned.
+   * Layers 0 and 1 are the same 169,662 parcels split by display scale; layer 0 is used. OUTLINE FLOOR 17 (2026-10-22 sweep; the first cut said 16 on "the busiest zoom-16 cell holds 884 lots"):
+   * measured over the whole county on the exact Leaflet cell grid, ONE zoom-16 cell (East Ridge / Brainerd, 35.02 N -85.28) holds 1,066 lots against the 1,000 cap and a second sits at 999,
+   * so its outlines were silently truncated; at zoom 17 the busiest cell holds 523. Pinned by test/tnOutlineDensity.test.js. Condo / lease overlay rows (PARCEL_TYP 5-13, 7,000 of them) overlap their parent lot, so a click there can return several features, as on Davidson. */
+  tn_hamilton: {
+    state: "TN", label: "Hamilton County, TN (Chattanooga)",
+    layerUrl: "/gis-proxy/mapsdev.hamiltontn.gov/hcwa03/rest/services/Live_Parcels/MapServer/0",
+    idField: "TAX_MAP_NO", pinIdField: true, addrField: "ADDRESS", pinAddrField: true, idNormalizer: "tn-hamilton", displayMinZoom: 17,
+    help: "Hamilton County GIS parcels (Assessor of Property) — covers Chattanooga, East Ridge, Red Bank, Soddy-Daisy, Signal Mountain, Collegedale and the rest of the county. Search by tax map number (e.g. 057F B 003) or a site address.",
+  },
+  /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — MONTGOMERY COUNTY, TN (Clarksville), on the City of Clarksville's public ArcGIS Online republication of the Montgomery County
+   * Assessor's parcel layer (`Parcels_Test`, item 01ea390f…, owner chelsea.cooper; its sibling `Parcels_num`, the 2025 roll, is the layer the City's own Finance Viewer reads). The state's
+   * Comptroller layer holds ZERO Montgomery rows (county id 63 absent). Token-free, Query + Sync, maxRecordCount 1000, WKID 2274, 90,720 parcels, RecordYear 2026, edited 2026-10-21.
+   * WHY THIS COPY AND NOT THE COUNTY'S OWN SERVER (both measured): the county's `gis.mcgtn.org/arcgis/rest/services/Parcels/MapServer/0` (99,853 rows, RecordYear 2027, edited 2026-10-10) is
+   * one row PER BUILDING CARD — a five-building church lot comes back as five identical polygons with five OBJECTIDs, which the lot-key would count as five lots — and the City's copy is one
+   * row per parcel (90,720 rows, 90,719 distinct ParcelID). Same owners and acres on every point compared. The APSU mirror (`apnsgis4.apsu.edu`, "shared solely for use by authorized clients …
+   * not to be redistributed") is NOT used: a licence refusal, and its item reads "Last Updated 10-18-22". Fields are lower-case: `parcelno` (the assessor's number, '066F K 00100 000') is
+   * the id (`parcelid` is a numeric internal key), `propertyaddress` the situs. MEASURED 2026-10-22: 709 FRANKLIN ST → 066F K 00100 000 IMMACULATE CONCEPTION CATHOLIC CHURCH 5.40 ac;
+   * 401 TOBACCO RD → 030 00600 000 MAYNARD FAMILY COMPANY 97.94 ac. Outline floor 16: the busiest zoom-16 cell (downtown) holds 592 lots against the 1,000 cap. */
+  tn_montgomery: {
+    state: "TN", label: "Montgomery County, TN (Clarksville)",
+    layerUrl: "https://services6.arcgis.com/H9ihyy27OU16MQR3/arcgis/rest/services/Parcels_Test/FeatureServer/0",
+    idField: "parcelno", pinIdField: true, addrField: "propertyaddress", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-link",
+    help: "Montgomery County Assessor parcels (republished by the City of Clarksville) — covers Clarksville, Fort Campbell and the rest of the county. Search by parcel number (e.g. 066F K 00100 000) or a site address.",
+  },
+  /* NEW-3 (Tennessee pass 2, B2408834, 2026-10-22) — HICKMAN COUNTY, TN (Centerville), on the Hickman County ASSESSOR's CaptureCAMA publish: `Hickman/HickmanTN05182023` MapServer
+   * layer 9 "Parcels" on maps.capturecama.com (the same CaptureCAMA family as Chester, on its sibling host). Pass 1 said "nothing found" — it had looked at AGOL and the Comptroller's
+   * viewer index, not at CaptureCAMA's folder listing, where a `Hickman` folder sits beside `Chester`. Map/Query/Data, 18,549 parcels, maxRecordCount 1000, token-free, WKID 3857, with
+   * owner, situs, assessor acres and appraisal fields. The service name is dated 2023-05-18, so it is the assessor's 2023 publish, not a live feed (disclosed in
+   * docs/STATEWIDE-PARCELS.md). MEASURED through the deployed relay 2026-10-22: Centerville Public Square → '107L B 00100 00001107L', HICKMAN COUNTY, PUBLIC SQUARE. The Comptroller's layer
+   * holds ZERO Hickman rows (county id 41 is absent). Outline floor 16 (a MapServer's own floor, `mapServerOutlineFloor`): the busiest 512-px cell at zoom 16 (Centerville) holds 334 lots against the 1,000 cap; zoom 14 holds 1,002. */
+  tn_hickman: {
+    state: "TN", label: "Hickman County, TN",
+    layerUrl: "/gis-proxy/maps.capturecama.com/arcgis/rest/services/Hickman/HickmanTN05182023/MapServer/9",
+    idField: "PARCELID", pinIdField: true, addrField: "PROPADDR", pinAddrField: true, idNormalizer: "tn-link",
+    help: "Hickman County Assessor parcels (CaptureCAMA, 2023 publish) — covers Centerville, Lyles, Nunnelly and the rest of the county. Search by parcel ID or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -2219,7 +2546,7 @@ const JURISDICTION_LAYERS_RAW = {
         // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
         // single-layer county, so it no longer gets its own dropdown). Label names the county
         // + authority since it sits next to the statewide USGS contours there.
-        label: "1-ft contours (Fort Bend DD)",
+        label: "1-Ft Contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
         // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
@@ -2453,7 +2780,12 @@ const COUNTIES_MAP_RAW = {
     // Verify: live — gis.arkansas.gov is blocked in this build environment; shipped on the
     // strength of the official item's cached schema/feature count (docs/STATEWIDE-PARCELS.md).
     state: "AR", center: [34.9, -92.4], zoom: 7, mapServer: null, statewide: true,
-    layerUrl: "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",
+    // NEW-1 (Memphis radius, 2026-10-15): now relayed through /gis-proxy — measured through this PR's Cloudflare preview
+    // (the sandbox cannot reach gis.arkansas.gov directly): layer 6 PARCEL_POLYGON_CAMP, Query capability, maxRecordCount
+    // 200, and a point query inside each of the 22 Arkansas counties in the Memphis 100-mile radius returned a real
+    // parcel (ownername, parcelid, adrlabel populated). The relay removes the unmeasured-CORS risk the Verify: live note
+    // above carried.
+    layerUrl: "/gis-proxy/gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",
   },
   /* NEW-1 (2026-09-08) — CALIFORNIA and RHODE ISLAND, both of which this repo had on record as
    * `no-free-source` with `Candidate: none found`, and both of which are REAL. The doc's own
@@ -2646,10 +2978,16 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosaic/MapServer/1",
   },
   nj_statewide: {
-    // Verify: live — maps.nj.gov is blocked in this build environment. Owner-name values are
-    // reported redacted for many records under NJ's Daniel's Law privacy statute.
+    /* NEW-1 (B2384880, 2026-10-20) — NJOGIS's OWN ArcGIS Online copy of the same composite (item 533599bb…, owner NJOGIS, "Parcels and MOD-IV
+     * Composite of NJ, Web Mercator (3857)"), the same "prefer the official AGOL mirror" call ny_statewide and Fort Bend make: maps.nj.gov is a
+     * `.gov` host this build environment's egress policy blocks (no measurement possible from here), the mirror answers 200 with `access-control-allow-origin: *`
+     * so it needs no relay, and its parcels ARE the statewide composite — MEASURED 2026-10-20: 3,481,240 polygons, 21 counties, ALL 564 municipalities
+     * present (docs/STATEWIDE-PARCELS.md "New Jersey municipalities"), maxRecordCount 2000, point query 0.28–0.66 s. Fields: PAMS_PIN (the parcel id),
+     * PROP_LOC (the situs), OWNER_NAME (REDACTED for web use under Daniel's Law — that is the source's choice; the card shows what is there), CALC_ACRE,
+     * MUN_NAME / COUNTY. ~11% of parcels (403,260) carry geometry with no MOD-IV attributes (right-of-way / unmatched) — they answer with their lot lines. */
     state: "NJ", center: [40.1, -74.7], zoom: 8, mapServer: null, statewide: true,
-    layerUrl: "https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral/MapServer/0",
+    idField: "PAMS_PIN", addrField: "PROP_LOC",
+    layerUrl: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
   },
   /* B1455632 (2026-09-10) — NEVADA, corrected. The prior finding declined Nevada on a LEGAL basis
    * (the state demographer/DCNR mosaic is restricted from public redistribution under NRS 250) —
@@ -2696,6 +3034,10 @@ const COUNTIES_MAP_RAW = {
     // official ArcGIS Online mirror (org account NYSGIS_GPO, not a third party) instead, the
     // same "prefer the reliable AGOL copy" call this file already made for Fort Bend (FBCAD).
     // Covers the counties+NYC that opted in; a companion Footprint layer (not wired) names which.
+    // NEW-1 (2026-10-20) — MEASURED: the layer holds 38 of New York's 62 counties (the five NYC boroughs among them; its Footprint
+    // layer /0 names them, and a per-county count of /1 agrees). The other 24 are listed in nyParcels.js NY_UNCOVERED: a click there is
+    // never sent to this layer — it reaches that county's own row, or the honest "<County> — no parcel data wired here yet." sentence.
+    excludedCounties: NY_UNCOVERED,
     state: "NY", center: [42.9, -75.5], zoom: 6, mapServer: null, statewide: true,
     layerUrl: "https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1",
   },
@@ -2718,7 +3060,13 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://risegis.ri.gov/hosting/rest/services/RIDEM/Tax_Parcels/MapServer/0",
   },
   tn_statewide: {
-    // Covers 86 of 95 counties (9 use non-state assessment systems and are excluded).
+    /* NEW-1 (TN non-state counties, 2026-10-21) — THE NINE. The Comptroller's layer says "86 of 95 counties; 9 use non-state assessment systems", and
+     * a per-county count over the layer itself (outStatistics by COUNTY_ID, 2026-10-21) names them: county ids 12 Chester, 19 Davidson, 33 Hamilton, 41 Hickman,
+     * 47 Knox, 63 Montgomery, 75 Rutherford, 79 Shelby, 94 Williamson — each ABSENT from the 86 counties the layer holds (not low, absent). A composite is never
+     * routed a county it excludes, so a Nashville click used to go to this empty layer and read "No parcel at this point" — the 2026-10-21 report. Four have
+     * their own source (tn_shelby, tn_chester, tn_davidson, tn_rutherford, and — pass 2, 2026-10-22 — tn_williamson, tn_hamilton, tn_montgomery, tn_hickman); Knox is the one named, locked gap and says so
+     * (docs/STATEWIDE-PARCELS.md, "Tennessee non-state counties"). Pinned by the repo-root test tnNonStateCounties against a committed copy of that count. */
+    excludedCounties: ["Chester", "Davidson", "Hamilton", "Hickman", "Knox", "Montgomery", "Rutherford", "Shelby", "Williamson"],
     state: "TN", center: [35.9, -86.4], zoom: 7, mapServer: null, statewide: true,
     layerUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
   },
@@ -2806,6 +3154,27 @@ const COUNTIES_MAP_RAW = {
   or_clackamas: { state: "OR", center: [45.3573, -122.6068], zoom: 9, bbox: [44.95, -122.85, 45.55, -121.75], mapServer: null, layerUrl: COUNTIES.or_clackamas.layerUrl },
   ky_jefferson: { state: "KY", center: [38.2527, -85.7585], zoom: 10, bbox: [38.05, -85.95, 38.40, -85.45], mapServer: null, layerUrl: COUNTIES.ky_jefferson.layerUrl },
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
+  ...msMarisMap(),
+  ...alMap(),
+  ...orMap(), // NEW-1 (B2347696)
+  ...sdMap(), // NEW-1 (B2343936)
+  ...azMap(), // NEW-1 (Arizona 2026-10-19)
+  ...idMap(), // NEW-1 (B2317920)
+  ...nmMap(), // NEW-1 (B2345888)
+  ...gaMap(), // NEW-1 (B2316720)
+  ...laMap(),
+  ...miMap(),
+  ...ksMap(), // NEW-1 (B2348000)
+  ...nyMap(), // NEW-1 (New York 2026-10-20)
+  ...moMap(),
+  ...scMap(),
+  ...paMap(),
+  ...ilMap(),
+  ...waMap(), // NEW-1 (B2349360)
+  ...okMap(), // NEW-1 (Oklahoma)
+  ...iaMap(),
+  ...iaCopyMap(), // NEW-1 (Iowa second pass, B2499376)
+  ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
@@ -2825,7 +3194,7 @@ const COUNTIES_MAP_RAW = {
   la_stmartin: { state: "LA", center: [30.1118, -91.5350], zoom: 10, bbox: [29.72, -91.99, 30.51, -91.08], mapServer: null, layerUrl: COUNTIES.la_stmartin.layerUrl },
   la_plaquemines: { state: "LA", center: [29.4260, -89.5443], zoom: 10, bbox: [28.93, -90.07, 29.92, -89.02], mapServer: null, layerUrl: COUNTIES.la_plaquemines.layerUrl },
   la_sttammany: { state: "LA", center: [30.4465, -89.9142], zoom: 10, bbox: [30.18, -90.26, 30.72, -89.57], mapServer: null, layerUrl: COUNTIES.la_sttammany.layerUrl },
-  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl },
+  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl, scopeWhere: COUNTIES.la_lafayette.scopeWhere }, // scopeWhere: the same layer also holds Vermilion (la_vermilion, 2026-10-29) — every row sharing a service carries its own scope
   la_acadia: { state: "LA", center: [30.2752, -92.3785], zoom: 10, bbox: [30.06, -92.63, 30.49, -92.13], mapServer: null, layerUrl: COUNTIES.la_acadia.layerUrl },
   la_eastfeliciana: { state: "LA", center: [30.8275, -91.0700], zoom: 10, bbox: [30.65, -91.32, 31.01, -90.82], mapServer: null, layerUrl: COUNTIES.la_eastfeliciana.layerUrl },
   la_caddo: { state: "LA", center: [32.6115, -93.7645], zoom: 10, bbox: [32.19, -94.05, 33.03, -93.48], mapServer: null, layerUrl: COUNTIES.la_caddo.layerUrl },
@@ -3001,6 +3370,46 @@ const COUNTIES_MAP_RAW = {
     bbox: [39.0176, -94.4814, 39.1398, -94.2159],
     cityScoped: true,
     mapServer: null, layerUrl: COUNTIES.mo_independence.layerUrl,
+  },
+  tn_shelby: {
+    state: "TN", center: [35.18, -89.89], zoom: 10,
+    bbox: [34.98, -90.33, 35.43, -89.62], displayMinZoom: 17, // NEW-1 (95-county sweep) — see COUNTIES.tn_shelby: 18 zoom-16 cells exceed the 1,000-lot cap
+    mapServer: null, layerUrl: COUNTIES.tn_shelby.layerUrl,
+  },
+  tn_chester: {
+    state: "TN", center: [35.42, -88.64], zoom: 11,
+    bbox: [35.27, -88.88, 35.58, -88.42],
+    mapServer: null, layerUrl: COUNTIES.tn_chester.layerUrl,
+  },
+  tn_davidson: {
+    state: "TN", center: [36.17, -86.78], zoom: 11,
+    bbox: [35.94, -87.08, 36.43, -86.49], displayMinZoom: 17,
+    mapServer: null, layerUrl: COUNTIES.tn_davidson.layerUrl,
+  },
+  tn_rutherford: {
+    state: "TN", center: [35.84, -86.42], zoom: 10,
+    bbox: [35.60, -86.72, 36.12, -86.12], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_rutherford.layerUrl,
+  },
+  tn_williamson: {
+    state: "TN", center: [35.86, -86.90], zoom: 10,
+    bbox: [35.64, -87.26, 36.10, -86.55], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_williamson.layerUrl,
+  },
+  tn_hamilton: {
+    state: "TN", center: [35.19, -85.20], zoom: 10,
+    bbox: [34.95, -85.50, 35.50, -84.90], displayMinZoom: 17, // NEW-1 (95-county sweep) — see COUNTIES.tn_hamilton: one zoom-16 cell holds 1,066 lots against the 1,000 cap
+    mapServer: null, layerUrl: COUNTIES.tn_hamilton.layerUrl,
+  },
+  tn_montgomery: {
+    state: "TN", center: [36.50, -87.37], zoom: 10,
+    bbox: [36.28, -87.68, 36.68, -87.07], displayMinZoom: 16,
+    mapServer: null, layerUrl: COUNTIES.tn_montgomery.layerUrl,
+  },
+  tn_hickman: {
+    state: "TN", center: [35.80, -87.47], zoom: 10,
+    bbox: [35.56, -87.79, 36.04, -87.16],
+    mapServer: null, layerUrl: COUNTIES.tn_hickman.layerUrl,
   },
 };
 
@@ -3276,7 +3685,31 @@ export const statewideKeysForState = (state) =>
 let _countyEntriesMemo = null;
 const countyEntries = () => _countyEntriesMemo || (_countyEntriesMemo = Object.entries(COUNTIES_MAP));
 
+/* NEW-1 (Memphis radius ×2) — a statewide composite that DECLARES the resolved county excluded (`excludedCounties`) cannot
+ * answer for it, so it is never a candidate there, on ANY routing path below. Before this a Shelby County click still queried
+ * Tennessee's statewide layer, which holds none of Shelby: harmless while it answered, but a slow or dead layer turned the
+ * honest county answer into "the parcel server isn't responding". Near a county line the polygon is only picking a side, so
+ * the composite is kept there (it genuinely covers the neighbour). */
 export function candidateCountiesForPoint(lat, lng) {
+  const keys = candidateCountiesRaw(lat, lng);
+  const id = countyIdentity(lat, lng);
+  if (!id.name || id.nearEdge) return keys;
+  return keys.filter((k) => !statewideExcludesCounty(k, id.name));
+}
+
+/* NEW-1 (B2384880) — NEW JERSEY'S BARRIER ISLANDS AND SHORELINE FALL OUTSIDE THE BUNDLED COUNTY POLYGONS. The simplified nationwide county asset
+ * stops short of the Atlantic and Delaware Bay shore, so a click on a real lot in Atlantic City, Cape May, Long Beach Island, Seaside Heights, Sea Bright,
+ * Highlands, Brigantine … resolves to NO county and `candidateCountiesForPoint` used to return nothing at all — measured 2026-10-20: 87 of 1,692 sampled
+ * NJ parcels (3 per municipality, 564 municipalities) had no candidate. A point that no county polygon holds AND sits inside New Jersey's envelope is
+ * either water or one of those lots; asking the NJ composite is free in the first case (it answers empty) and the whole answer in the second.
+ * Only reached when no county polygon holds the point, so it can never override a real county answer in NY/PA/DE. */
+const NJ_ENVELOPE = [38.9, -75.6, 41.37, -73.85]; // [south, west, north, east]
+function njCoastalGapState(lat, lng) {
+  const e = NJ_ENVELOPE;
+  return lat >= e[0] && lat <= e[2] && lng >= e[1] && lng <= e[3] ? "NJ" : null;
+}
+
+function candidateCountiesRaw(lat, lng) {
   const entries = countyEntries();
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
@@ -3413,7 +3846,7 @@ export function candidateCountiesForPoint(lat, lng) {
     // (verified: Livonia and Taylor, MI — both outside Detroit's bbox and outside Oakland's bbox —
     // must not include mi_detroit here). See cityScopes.js's header for why the flag lives on the
     // entry rather than being re-derived.
-    const st = resolvedState(lat, lng);
+    const st = resolvedState(lat, lng) || njCoastalGapState(lat, lng);
     return st ? entries.filter(([, c]) => c.state === st && !c.cityScoped).map(([k]) => k) : [];
   }
   /* ⛔ NEW-6 — A CONFIDENT GEOMETRY ANSWER DECIDES *MEMBERSHIP*, NOT JUST ORDER.
@@ -3535,6 +3968,15 @@ export function countyForView(lat, lng) {
  * reports its own county in its attributes.
  *
  * Pure. */
+/* NEW-1 (Memphis radius) — does statewide composite `key` declare county `name` (as the polygon asset spells it, with or
+ * without its designation) as one it does NOT cover? The ONE answer `countyIdentity` and `candidateCountiesForPoint` share. */
+export function statewideExcludesCounty(key, name) {
+  const ex = COUNTIES_MAP[key] && COUNTIES_MAP[key].excludedCounties;
+  if (!ex || !name) return false;
+  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
+  return ex.some((e) => slug(e) === slug(name));
+}
+
 export function countyIdentity(lat, lng) {
   // City scope first (B1583296) — a point inside Detroit is a real, sourced answer, not a county
   // fallback. Everywhere else in Wayne County (or any other point) falls through unchanged to the
@@ -3555,30 +3997,83 @@ export function countyIdentity(lat, lng) {
    * claim) but the identity now names the covering layer so `noParcelSourceNote` stays silent.
    * Texas is excluded on purpose: its statewide layer is the derived fallback behind every TX county
    * row, and a TX county that still reaches here keeps its gap sentence. */
-  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state);
+  /* NEW-1 (Memphis radius) — a statewide layer that is NOT actually statewide declares the counties it leaves out
+   * (`excludedCounties`, county names as the polygon asset spells them minus the designation). Those counties must
+   * say "no parcel data", not borrow the statewide layer's cover and then silently return nothing: Tennessee's
+   * Comptroller layer omits Shelby and Chester (measured 0 features at 7 interior points each). */
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => !statewideExcludesCounty(k, ans.name));
   return {
     status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
     ...(sw.length ? { statewideKey: sw[0] } : {}),
   };
 }
 
+/* NEW-1 (Memphis radius ×2) — a click that lands before the nationwide county polygons are resident cannot name its
+ * county: `countyIdentity` answers `pending`, `noParcelSourceNote` has nothing to say, and every lot-picking flow fell
+ * back to "No parcel right there — zoom in…", blaming the user's aim for a gap in coverage. Every flow that picks a lot
+ * awaits this first; it is a cached promise (instant once loaded) and never throws — a failed load leaves the old
+ * behaviour, which is already LOUD inside `loadCountyPolygons`. */
+export async function ensureCountyGeometryAt(lat, lng) {
+  if (countyIdentity(lat, lng).status !== "pending") return;
+  try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
+}
+
+/* ⛔ NEW-1 (Memphis line band, B2289168 ×3) — THE COUNTY ACROSS THE LINE, asked when a lot click comes back empty.
+ *
+ * Owner report 2026-10-16: "its still saying no lot here in memphis" — lots on the north side of Stateline Rd (Shelby County)
+ * between Swinnea and Tchulahoma. MEASURED: the bundled county polygons draw the Tennessee–Mississippi line ≈550 m north of the
+ * surveyed line along its whole length (DeSoto's northernmost parcel vertex and Shelby's southernmost meet at ≈34.995°N at
+ * -89.98, -89.82 and -89.74; the asset's line is at ≈35.000°N). A point in that strip resolved CONFIDENTLY to DeSoto
+ * (`nearEdge` false — that band is ~150 m), so `candidateCountiesForPoint` asked DeSoto ALONE, DeSoto truthfully had no lot,
+ * and the app said "No lot here" over a Shelby lot it had just drawn in purple. ×2's harness clicked interior points only.
+ *
+ * The geometry may decide which county is asked FIRST; it may never be the reason a real lot is refused. So after an empty
+ * answer every county whose line passes within `LINE_NEIGHBOUR_DEG` is asked too — through its own source (or its state's
+ * statewide layer, unless that layer declares the county excluded). A county's server only holds its own parcels, so a lot
+ * it returns at the point IS the lot there: this cannot hand back a wrong-county lot, which is why it is a SECOND pass and not
+ * a widened first one (NEW-6's race is not reopened). Pure; returns source keys, nearest county first. */
+export const LINE_NEIGHBOUR_DEG = 0.012; // ≈1.3 km — about twice the worst measured offset of the asset's line
+export function lineNeighbourKeysForPoint(lat, lng) {
+  const out = [];
+  const push = (k) => { if (k && COUNTIES_MAP[k] && !out.includes(k)) out.push(k); };
+  for (const c of countiesNearPoint(lat, lng, LINE_NEIGHBOUR_DEG)) {
+    const key = countyKeyForName(c.name, c.state);
+    if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].cityScoped) {
+      if (!COUNTIES_MAP[key].statewide) { push(key); continue; }
+    }
+    statewideKeysForState(c.state).filter((k) => !statewideExcludesCounty(k, c.name)).forEach(push);
+  }
+  return out;
+}
+
+/* NEW-1 (Memphis line band) — a parcel SOURCE named for an owner-facing sentence ("Shelby County", "DeSoto County"), so an
+ * outage or slow-server message says WHICH server rather than "that county's". A statewide layer has no county name. Pure. */
+export function sourceDisplayName(key) {
+  const c = COUNTIES[key];
+  if (!c || (COUNTIES_MAP[key] && COUNTIES_MAP[key].statewide) || !c.label) return null;
+  return String(c.label).split(" · ")[0].replace(/,\s*[A-Z]{2}$/, "").trim() || null;
+}
+/* The silent sources of a failed click → one sentence subject: "Shelby County's parcel server" / "The county parcel server". */
+export function silentServerPhrase(keys) {
+  const names = [...new Set((keys || []).map(sourceDisplayName).filter(Boolean))];
+  return names.length === 1 ? `${names[0]}'s parcel server` : "The county parcel server";
+}
+
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is
  * nothing to say. Kept here beside the resolver so the wording cannot drift from the verdict it
- * describes, and deliberately short (PANEL-BREVITY): the county name is the fact, the absence is
- * the qualifier.
+ * describes, and deliberately short (PANEL-BREVITY): the county name is the fact, the reason is the
+ * qualifier.
  *
- * B1361425 — the suffix is TX-only, not "every state but Colorado". Texas's own source
- * (`Texas_County_Boundaries`) and Colorado's (`Colorado_Counties`) both publish BARE names
- * ("Harris", "Adams") — TX needs " County" appended, CO's own UI convention appends nothing.
- * Every OTHER state's geometry (the Esri `USA_Counties_Generalized_Boundaries` nationwide layer,
- * B1361425) already carries its own correct designation in the name itself — "Orleans Parish",
- * "Denali Borough", "Fairfax city", "District of Columbia" — so appending " County" there would
- * read "Orleans Parish County". Never assume "County" is the universal case; ask the source. */
+ * NEW-1 (2026-10-22) — this used to be the bare "<County> — no parcel data wired here yet." It now says WHY
+ * (paywall · locked · unreachable · none — `parcelGaps.js`, the one table) and the call sites that can
+ * show a link also take `parcelGapNotice(identity, point)` for the "Email Michael to request it" mailto.
+ * The naming rules did not change: B1361425 — the suffix is TX/CO only, because the nationwide
+ * geometry already carries every other state's own designation ("Orleans Parish", "Denali Borough",
+ * "Fairfax city"), and appending " County" there would read "Orleans Parish County". Never assume
+ * "County" is the universal case; ask the source. */
 export function noParcelSourceNote(identity) {
-  if (!identity || identity.status !== "no-source") return null;
-  if (identity.statewideKey) return null; // NEW-1 — a statewide layer covers this county
-  const suffix = identity.state === "TX" ? " County" : "";
-  return `${identity.name}${suffix} — no parcel data wired here yet.`;
+  const n = parcelGapNotice(identity);
+  return n ? n.message : null;
 }
 
 // The county keys whose parcel source is the STATEWIDE TxGIO layer (covers all 254
@@ -3641,6 +4136,14 @@ export const POINT_VIA_ENVELOPE_LAYER_URLS = Object.freeze(
   Object.values(COUNTIES_MAP).filter((c) => c.pointViaEnvelope).map((c) => trimLayerUrl(c.layerUrl)),
 );
 export const isPointViaEnvelopeLayerUrl = (url) => POINT_VIA_ENVELOPE_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* NEW-1 (Iowa second pass, B2499376) — a layer that stacks SEVERAL ROWS ON ONE LOT (Monroe County IA's published "Parcels_Join" carries each parcel twice: the original export, rows 1–16,599, with the previous owner,
+ * and the re-import, rows 16,600+, with the current one) must hand back the NEWEST row, not whichever the server lists first (a bare query returns them in OBJECTID order — the old owner). Declared once on the
+ * config entry as `pointOrderBy` (an ArcGIS `orderByFields` clause) and keyed by URL exactly like pointViaEnvelope, so `queryAtPoint` and the id/address search (which are handed a URL, not a county key) can ask it. */
+export const POINT_ORDER_BY_LAYERS = Object.freeze(
+  Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
+);
+export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a
@@ -3764,11 +4267,17 @@ const CONSOLIDATED_GOV_ALIAS = {
   GA: { augustarichmond: "richmond", athensclarke: "clarke" },
 };
 
+/* NEW-1 (B2317680, 2026-10-19) — Missouri's St. Louis city is an INDEPENDENT city, not part of St. Louis County, and both slug to "stlouis" once the designation words are
+ * stripped. Before Missouri was wired that collision was harmless (neither was configured); now St. Louis County has a real parcel source whose layer EXCLUDES the city, so
+ * the city must key apart or every city click would ask the county's layer and come back empty. Keyed on the full lower-cased letters of the asset's own name. */
+const INDEPENDENT_CITY_KEYS = { MO: { stlouiscity: "stlouiscity" } };
+
 export function countyKeyForName(name, state = null) {
   if (!name) return null;
-  const slug = String(name).toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
+  const slug = countyNameSlug(name);
   const st = state ? String(state).toUpperCase() : null;
-  const generalSlug = (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;
+  const independent = st && INDEPENDENT_CITY_KEYS[st] && INDEPENDENT_CITY_KEYS[st][String(name).toLowerCase().replace(/[^a-z]/g, "")];
+  const generalSlug = independent || (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;
   /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
    * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT
    * district — can never resolve to it by accident. The alias is applied here, in the one place

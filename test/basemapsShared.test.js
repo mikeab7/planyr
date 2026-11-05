@@ -9,6 +9,7 @@ import {
   SATELLITE_BASEMAP, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
 } from "../src/shared/basemaps/basemaps.js";
 import * as plannerReexport from "../src/workspaces/site-planner/lib/basemaps.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(join(__dirname, "..", rel), "utf8");
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -41,7 +42,7 @@ describe("one definition of the Site Plan map", () => {
     expect(finder).not.toMatch(/arcgisonline|openfreemap/);
     expect(finder).toMatch(/addVectorLabels\(/);
     expect(finder).toMatch(/useState\(SITE_PLAN_BASEMAP\.imageryKey\)/);
-    expect(stripComments(read("src/workspaces/site-planner/SitePlanner.jsx"))).toMatch(/SITE_PLAN_BASEMAP\.imageryKey/);
+    expect(stripComments(plannerSource())).toMatch(/SITE_PLAN_BASEMAP\.imageryKey/);
   });
 
   it("Food and the map finder use the SAME vector-label helper (never a Food-only copy)", () => {

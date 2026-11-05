@@ -241,3 +241,75 @@ describe("proxyServiceUrl ↔ handler agree on the key seam", () => {
     expect(proxyServiceUrl(SERVICE)).toBe(`/api/gis-cache/svc/${b64urlEncode(SERVICE)}`);
   });
 });
+
+/* NEW-1 (Select parcels, wide view) — the relay now carries parcel-tile /query answers. */
+import { cacheKeyStrong, isQueryUrl } from "../src/shared/gis/gisProxyCore.js";
+import { isStorableBody } from "../functions/api/gis-cache/_handler.js";
+
+describe("handleGisCache — parcel tile /query answers (wide view)", () => {
+  const PARCELS = "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Parcels_view/FeatureServer/0";
+  const QSEGS = ["svc", b64urlEncode(PARCELS), "query"];
+  const QSEARCH = "?f=json&geometry=-86.8,36.1,-86.7,36.2&where=Shape__Area+%3E%3D+21780";
+  const qUrl = () => parseUpstream(QSEGS, new URLSearchParams(QSEARCH).toString()).url;
+
+  it("fetches the county ONCE for any number of users, then serves every later request from the stored copy", async () => {
+    const client = fakeDrive();
+    const bag = deferBag();
+    let hits = 0;
+    const fetchImpl = async () => { hits++; return new Response('{"features":[]}', { status: 200, headers: { "content-type": "application/json" } }); };
+    for (let i = 0; i < 5; i++) {
+      const res = await handleGisCache({ client, segs: QSEGS, search: QSEARCH, fetchImpl, folderIdFor, defer: bag.defer });
+      expect(res.status).toBe(200);
+      await bag.settle();
+    }
+    expect(hits).toBe(1);
+  });
+
+  it("a 200 answer whose body is an ArcGIS error is served to its caller but NEVER stored (it would be handed to every user for a day)", async () => {
+    const client = fakeDrive();
+    const bag = deferBag();
+    const res = await handleGisCache({ client, segs: QSEGS, search: QSEARCH, fetchImpl: okFetch('{"error":{"code":400,"message":"Failed to execute query."}}', "application/json"), folderIdFor, defer: bag.defer });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Failed to execute query");
+    await bag.settle();
+    expect(client.calls.create).toBe(0);
+  });
+
+  it("storing a parcel tile does NOT list the whole cache folder (a 200 KB read per tile, and a miss on 10,000s of files); imagery still dedupes", async () => {
+    const client = fakeDrive();
+    let lists = 0;
+    const origList = client.list.bind(client);
+    client.list = async (...a) => { lists++; return origList(...a); };
+    const bag = deferBag();
+    await handleGisCache({ client, segs: QSEGS, search: QSEARCH, fetchImpl: okFetch('{"features":[]}', "application/json"), folderIdFor, defer: bag.defer });
+    await bag.settle();
+    expect(client.calls.create).toBe(1);
+    expect(lists).toBe(0);
+    await handleGisCache({ client, segs: SEGS, search: SEARCH, fetchImpl: okFetch("IMG"), folderIdFor, defer: bag.defer });
+    await bag.settle();
+    expect(lists).toBe(1);
+  });
+
+  it("isStorableBody: only a /query body that OPENS with an error member is refused; a feature set and any imagery body are stored", () => {
+    const enc = (s) => new TextEncoder().encode(s);
+    const q = "https://x.arcgis.com/arcgis/rest/services/P/FeatureServer/0/query?f=json";
+    expect(isStorableBody(q, enc('{"error":{"code":500}}'))).toBe(false);
+    expect(isStorableBody(q, enc('  {"error" : {}}'))).toBe(false);
+    expect(isStorableBody(q, enc('{"objectIdFieldName":"OBJECTID","features":[],"error":null}'))).toBe(true);
+    expect(isStorableBody("https://x.arcgis.com/arcgis/rest/services/P/MapServer/export?f=image", enc('{"error":{}}'))).toBe(true);
+  });
+
+  it("a /query tile gets a 64-bit key (two independent hashes + length); imagery keeps the unchanged 32-bit key so no existing copy is orphaned", () => {
+    const u = qUrl();
+    expect(isQueryUrl(u)).toBe(true);
+    expect(cacheKeyStrong(u)).toMatch(/^gis_[0-9a-f]{8}_[0-9a-f]{8}[0-9a-f]+$/);
+    expect(cacheKeyStrong(u)).not.toBe(cacheKeyStrong(u + "&x=1"));
+    expect(isQueryUrl(reconstruct(SEGS, SEARCH))).toBe(false);
+    expect(keyFor(SEGS, SEARCH)).toBe(`${cacheKey(reconstruct(SEGS, SEARCH))}.bin`);
+  });
+
+  it("a 503 from the county still fails OPEN (302 to the county) — never a cached error", async () => {
+    const res = await handleGisCache({ client: fakeDrive(), segs: QSEGS, search: QSEARCH, fetchImpl: downFetch(), folderIdFor });
+    expect(res.status).toBe(302);
+  });
+});

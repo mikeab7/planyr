@@ -1,0 +1,133 @@
+name: Sign-in health
+
+# NEW-1 (2026-11-02, after B2619760). Sign-in was dead for every signed-out person for days and the owner found it himself,
+# on his phone. This is the OUTSIDE-IN check that needs no browser to report anything: every hour, from a clean GitHub
+# runner, it confirms the live bundle carries a bot-check key, Supabase's bot check answers the way the site expects,
+# the sign-in form renders, and a real sign-in as the test account works (scripts/signin-health-check.mjs).
+#
+# THE ALARM IS AN EMAIL, NOT THIS WORKFLOW GOING RED. A red workflow nobody reads is not an alarm, and this one must never
+# join the pile of standing reds (B1239330). So the job exits 0 even when sign-in is broken: it POSTs what it saw to
+# /api/ops/signin-health, which decides (two failures in a row, or a rate of server refusals) and emails michael@planyr.io
+# once per incident, with a recovery note. The job goes red ONLY when the ALARM CHANNEL is broken (route unreachable /
+# refused us / the mail did not go out) — and then it also opens a GitHub issue that @-mentions the owner, a second
+# channel that does not depend on Gmail.
+#
+# AUTH TO THE ROUTE: GitHub's OIDC token (permissions: id-token: write) — verified by the route against GitHub's published
+# keys and pinned to THIS workflow file on main. No stored secret, so there is nothing for a person to paste anywhere.
+#
+# THIS WORKFLOW IS NOW THE BROWSER CHECK, BEST-EFFORT (NEW-1, 2026-11-04, B2650848). Measured: GitHub started only 5 scheduled runs
+# in 33 hours (5–8.5 h apart; the build sweep scheduled every 10 minutes ran 50 times in 10 days, median gap 5.1 h; the daily and
+# weekly workflows run fine) — every report here was green, none was lost; the scheduler just does not start the frequent ones. The hourly duty for the network checks moved to a Supabase pg_cron job that calls
+# /api/ops/signin-heartbeat every 15 minutes (docs/SIGNIN-HEALTH.md). This job still adds what needs a real browser, and every
+# report it makes also checks that the fast check is alive.
+#
+# DEAD-MAN'S SWITCH: each report (from this job or the fast check) checks that the OTHER source has not gone quiet — fast check
+# silent > 45 min, this job silent > 12 h — and emails the owner ONCE per stop. The Ops page and the daily sweep read each
+# source's clock too.
+#
+# Optional secrets (the check SKIPS the step cleanly when absent): E2E_EMAIL / E2E_PASSWORD (the real sign-in step).
+# Manual run: Actions → Sign-in health → Run workflow. Tick "drill" to send the [TEST] alarm sequence through the real
+# route and Gmail (two failures → ONE email; still failing → none; a pass → ONE recovery note).
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: "Run the alarm DRILL (sends [TEST] emails to the owner) instead of the real checks"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: signin-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browser
+        if: ${{ !inputs.drill }}
+        run: npx playwright install --with-deps chromium
+      - name: Run the sign-in check
+        id: check
+        env:
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          DRILL: ${{ inputs.drill && '--drill' || '' }}
+        run: |
+          set +e
+          node scripts/signin-health-check.mjs $DRILL
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          echo "--- result ---"; cat signin-health-result.json 2>/dev/null
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signin-health-result
+          path: signin-health-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+      # The SECOND channel — only when the alarm channel itself failed (or the check could not even run). One open issue at a
+      # time: it is not re-posted every hour, so it cannot become noise.
+      - name: Raise the alarm another way when the alarm channel failed
+        # Code 5 = a manual drill that could not run because the SQL has not been applied: a SETUP state, not a broken alarm
+        # channel — the job still ends red (below) but no "not delivering" issue is raised for it. Code 1 = a drill ASSERTION
+        # failed (the rules misbehaved; the channel itself delivered) — also red, but "not delivering" would be false and it
+        # @-mentions the owner (it did exactly that on the first live drill of B2650848, issue #2843).
+        if: always() && steps.check.outputs.code != '0' && steps.check.outputs.code != '5' && steps.check.outputs.code != '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const owner = context.repo.owner, repo = context.repo.repo;
+            let r = {}; try { r = JSON.parse(fs.readFileSync("signin-health-result.json", "utf8")); } catch (_) {}
+            const channel = r.channel || { status: "check-did-not-run", detail: "the job failed before the check produced a result" };
+            const body = [
+              `@${owner} — **the sign-in alarm could not tell you something.** Channel status: \`${channel.status}\`.`,
+              "",
+              channel.detail || "",
+              "",
+              r.overall ? `Latest outside check: **${r.overall}**.` : "",
+              r.checks ? r.checks.map((c) => `- ${c.status.toUpperCase()}: ${c.name} — ${c.detail}`).join("\n") : "",
+              "",
+              `Run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+              "",
+              "What this means: the hourly sign-in check is meant to email michael@planyr.io when sign-in breaks. This time its email path was unavailable, so this issue is the fallback. Fix the channel (Cloudflare Pages env `GMAIL_SERVICE_ACCOUNT_JSON` + `INVITE_SENDER` for \"not-configured\" / \"mail-failed\"), then close this issue — it closes itself on the next healthy run.",
+            ].filter((l) => l !== null).join("\n");
+            const { data: open } = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "signin-alarm", per_page: 1 });
+            if (open.length) { core.info(`An alarm issue is already open (#${open[0].number}); not re-posting.`); return; }
+            const { data: created } = await github.rest.issues.create({ owner, repo, title: "🚨 Sign-in alarm channel is not delivering", labels: ["signin-alarm"], body });
+            core.info(`Opened #${created.number}`);
+      - name: Close the fallback issue when the channel is healthy again
+        if: steps.check.outputs.code == '0' && !inputs.drill
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner, repo = context.repo.repo;
+            const { data: open } = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "signin-alarm", per_page: 10 });
+            for (const iss of open) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: iss.number, body: "✅ The sign-in alarm channel delivered a report again — closing." });
+              await github.rest.issues.update({ owner, repo, issue_number: iss.number, state: "closed" });
+            }
+      # Honest job status: red means the ALARM CHANNEL is broken (or the check could not run) — never "sign-in is broken".
+      - name: Fail the job if the alarm channel failed
+        if: always() && steps.check.outputs.code != '0'
+        run: |
+          echo "alarm channel failed (code ${{ steps.check.outputs.code || 'none' }}) — see the issue and the result above"
+          exit 1

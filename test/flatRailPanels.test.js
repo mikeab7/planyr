@@ -5,9 +5,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
-const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const src = plannerSource();
 const chrome = read("../src/shared/ui/PanelChrome.jsx");
 const floating = read("../src/shared/ui/FloatingPanel.jsx");
 const analysis = read("../src/workspaces/site-planner/components/SiteAnalysis.jsx");

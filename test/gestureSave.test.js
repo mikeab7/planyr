@@ -4,8 +4,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { GESTURE_SAVE_DEFER_MAX_MS, GESTURE_SAVE_POLL_MS, deferSaveDecision } from "../src/workspaces/site-planner/lib/gestureSave.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const planner = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const planner = plannerSource();
 
 describe("deferSaveDecision", () => {
   it("defers on the first frame of a gesture, and while inside the window", () => {

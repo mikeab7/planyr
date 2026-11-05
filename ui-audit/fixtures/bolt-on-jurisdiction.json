@@ -1,0 +1,77 @@
+{
+ "_note": "Live parcel rings of plan smun6o2o628f (\"Bolt-on\", Grand Port group smqfy2r7pdec, Chambers County / Baytown edge), read from public.site_elements kind=parcel deleted_at is null on 2026-10-08. Geometry only (plan feet frame, y screen-down) — owner/appraisal attributes deliberately dropped (planFixture PARCEL_RECORD_FIELDS). Source: slow report 55807aa9 (NEW-1). 21 further parcel rows on the plan are tombstoned and excluded. DEVIATION: the plan's 56 live element rows, 4 markups and 1 callout (read from the same tables) are NOT in this file — the jurisdiction path reads only parcels + origin + county, and transcribing 23 KB of rows by hand adds nothing to that measurement. A plan-load figure taken from this fixture is therefore a floor, not Bolt-on's full load.",
+ "siteId": "smun6o2o628f",
+ "origin": {
+  "lat": 29.807276059724515,
+  "lon": -94.87707929120518
+ },
+ "parcels": [
+  {
+   "id": "e1454605dvngtd",
+   "pts": "607.12,-1237.93 851.91,-1240.86 1091.69,-1243.73 1151.64,-1244.44 1211.59,-1245.16 1331.49,-1246.59 1673.25,-1250.67 1659.36,-1097.96 1615.34,-705.71 -23.73,-762.48 -55.09,-763.57 -62.45,-763.22 -69.66,-761.74 -76.55,-759.14 -82.95,-755.49 -88.70,-750.89 -93.65,-745.45 -97.70,-739.30 -100.73,-732.59 -102.68,-725.49 -103.49,-718.17 -103.93,-705.13 -135.76,223.78 -136.51,271.00 -135.50,318.22 -132.75,365.37 -128.25,412.38 -122.02,459.19 -71.98,788.38 -226.06,843.28 -380.81,896.28 -536.20,947.36 -692.21,996.52 -848.82,1043.75 -1005.99,1089.04 -1163.72,1132.38 -1321.96,1173.77 -1480.71,1213.20 -1639.93,1250.67 -1672.76,-1174.23 -1673.25,-1210.58 -1424.17,-1213.58 -1185.61,-1216.44 -415.66,-1225.68 -155.89,-1228.80 103.89,-1231.91"
+  },
+  {
+   "id": "e1455159ouffzo",
+   "pts": "-1305.59,-4798.73 -1512.47,-4798.06 -1518.17,-4798.20 -1523.76,-4799.46 -1529.09,-4801.81 -1533.98,-4805.18 -1538.29,-4809.47 -1541.90,-4814.55 -1544.70,-4820.27 -1546.61,-4826.46 -1547.56,-4832.94 -1366.02,-5274.64 -1306.81,-5176.84"
+  },
+  {
+   "id": "e1455294ygckir",
+   "pts": "1128.70,-2948.83 1188.64,-2949.67 1211.59,-1245.18 851.91,-1240.88 828.96,-2944.85 1068.72,-2950.14 1068.76,-2947.10"
+  },
+  {
+   "id": "e1455295ygckir",
+   "pts": "607.12,-1237.95 103.89,-1231.93 79.43,-3044.86 582.68,-3051.72"
+  },
+  {
+   "id": "e1455296ygckir",
+   "pts": "851.91,-1240.88 607.12,-1237.95 582.68,-3051.72 827.47,-3055.05"
+  },
+  {
+   "id": "e1455369wmveej",
+   "pts": "1585.42,-2450.47 1681.38,-1479.83 1684.71,-1408.01 1679.61,-1320.66 1673.25,-1250.69 1211.59,-1245.18 1188.65,-2949.67 1128.97,-2948.84 1068.76,-2947.10 1068.72,-2950.14 828.96,-2944.85 827.47,-3055.05 1463.82,-3063.70"
+  }
+ ],
+ "schemaVersion": 15,
+ "county": "chambers",
+ "name": "Bolt-on",
+ "site": "Grand Port",
+ "settings": {
+  "snap": false,
+  "aisle": 24,
+  "bayMax": 58,
+  "bayMin": 50,
+  "doorOC": 12,
+  "hidden": {},
+  "stallW": 9,
+  "bufferD": 15,
+  "setback": 25,
+  "drainage": {},
+  "gridSize": 10,
+  "roadCurb": 0.5,
+  "showDims": true,
+  "showGrid": true,
+  "speedBay": 60,
+  "trailerL": 53,
+  "trailerW": 12,
+  "doorWidth": 9,
+  "parkAngle": 90,
+  "showAreas": true,
+  "showDocks": true,
+  "roadWidths": "24, 26, 30, 36, 40",
+  "stallDepth": 18,
+  "typeStyles": {},
+  "parcelStyle": {
+   "stroke": "#0729cf",
+   "weight": 4
+  },
+  "showSetback": true,
+  "truckCourtD": 135,
+  "parcelSelect": true,
+  "showRowLines": true,
+  "trailerAisle": 60,
+  "trailerParkD": 50,
+  "bayDepthTarget": 50,
+  "bayLengthTarget": 56,
+  "printMetricsBand": false
+ }
+}

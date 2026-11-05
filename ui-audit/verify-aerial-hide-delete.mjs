@@ -158,9 +158,9 @@ const afterShow = await liveTileCount();
 log(afterShow > 0, `Show restores the live basemap tiles (${afterShow} tile node(s))`);
 
 // ── 5. Remove clears the row to the empty state AND removes the live tiles. ──
-const removeBtn = aerialRow.locator('button[title="Remove"]');
-log(await removeBtn.count() > 0, `Remove button is present`);
-await removeBtn.first().click();
+const removeBtn = aerialRow.locator('[data-testid^="reference-more-"]'); // NEW-1: ⋯ → Remove overlay
+log(await removeBtn.count() > 0, `Remove (⋯ menu) is present`);
+await removeBtn.first().click(); await page.locator("[role=menuitem]", { hasText: /^Remove overlay$/ }).click();
 await page.waitForTimeout(600);
 const afterRemove = await liveTileCount();
 // B848736 — no more separate "Add an aerial" empty state; a plan with no aerial (and, here,

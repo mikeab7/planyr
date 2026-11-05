@@ -19,6 +19,7 @@
 // glyphs that actually render. `bestMeasurer` guards `typeof document`, so this file stays Node-pure.
 
 import { bestMeasurer, wrapText } from "../../../shared/markup/textWrap.js";
+import { calloutDisplayText, calloutVAlignOffset } from "./calloutStyle.js";
 
 // Greedy CHAR-COUNT word-wrap `text` to at most `maxChars` per line, preserving hard "\n" breaks.
 // A single word longer than `maxChars` is hard-broken into `maxChars`-sized chunks so it can never
@@ -63,18 +64,25 @@ export function calloutLayout(c, st, ppf) {
   // be narrower than what actually draws. Bold/italic widen the glyphs, so feed them to the measurer.
   const measure = bestMeasurer({ bold: !!st.bold, italic: !!st.italic });
   const hasExplicitW = c && c.boxW != null && c.boxW > 0;
+  // NEW-1 (layout "A") — all caps is a DISPLAY transform: the box is measured and wrapped on the
+  // text as it will be drawn (caps are wider), while the stored text is never touched.
+  const shown = calloutDisplayText(c && c.text, st);
   let lines, w;
   if (hasExplicitW) {
     w = c.boxW * ppf;                                     // explicit width (feet → px) — stays exact
     const innerPx = Math.max(fontPx, w - padX * 2);       // usable text width inside the padding
-    lines = wrapText(c && c.text, fontPx, innerPx, measure); // width-based wrap (mirrors the editor's soft-wrap)
+    lines = wrapText(shown, fontPx, innerPx, measure);    // width-based wrap (mirrors the editor's soft-wrap)
   } else {
-    lines = String(c && c.text != null ? c.text : "").split("\n");
+    lines = shown.split("\n");
     const tw = Math.max(fontPx, ...lines.map((l) => measure(l, fontPx))); // auto width — hugs the widest REAL line
     w = tw + padX * 2;
   }
-  const h = lines.length * lineH + padY * 2;
-  return { zk, fontPx, charW, lineH, padX, padY, w, h, lines, wrapped: hasExplicitW };
+  const naturalH = lines.length * lineH + padY * 2;
+  // A fixed height (`boxH`, feet — set by dragging the top/bottom grip) can only make the box TALLER
+  // than its text; it never clips it. Absent ⇒ h === naturalH, byte-for-byte what every box drew before.
+  const h = c && c.boxH != null && c.boxH > 0 ? Math.max(naturalH, c.boxH * ppf) : naturalH;
+  const textOffsetY = calloutVAlignOffset(st.valign, h, naturalH);
+  return { zk, fontPx, charW, lineH, padX, padY, w, h, naturalH, textOffsetY, lines, wrapped: hasExplicitW };
 }
 
 // The minimum sensible explicit width (feet) for a callout at the current zoom: room for a few

@@ -29,6 +29,35 @@ import { execFileSync } from "node:child_process";
 
 export const LEDGER_DIR = "ledger";
 
+/* ------------------------------------------------------------------------------------------ *
+ * WHERE THE LEDGER LIVES (NEW-1, 2026-11-05 — owner decision: bookkeeping needs no pull request).
+ *
+ * The ledger is its own git branch, `ledger`, which has NO required checks and is not covered by the
+ * "Protect Main" ruleset (measured 2026-11-05: the ruleset's only include is ~DEFAULT_BRANCH). A
+ * session commits records straight to it. In a code clone the branch is checked out (shallow) into
+ * `.ledger/` — gitignored — so every reader below sees the same `ledger/<kind>/<state>/<ID>.md` tree
+ * it always saw, just rooted one directory deeper. `ledgerRoot(repo)` is the ONE seam:
+ *   1. `<repo>/ledger/backlog/_frame.md` exists  → the repo itself (the ledger branch's own checkout, the old
+ *      in-tree layout, and every throwaway repo the tests build);
+ *   2. else `<repo>/.ledger/ledger/backlog/_frame.md` exists → that checkout (a code clone, post-move);
+ *   3. else null (no ledger synced — `npm run ledger -- sync`).
+ * `.github/ledger-branch.json` on main is the MARKER that says "the ledger lives on a branch": tools that
+ * used to gate on ledger edits inside a PR (check-mint, the touch guard, the hooks) read it via
+ * `isBranchMode(repo)` and stand down. Scripts that write the ledger live in ledgerBranch.mjs.
+ * ------------------------------------------------------------------------------------------ */
+export const LEDGER_BRANCH = process.env.PLANYR_LEDGER_BRANCH || "ledger"; // overridable so end-to-end runs can use a disposable branch
+export const LEDGER_CHECKOUT = ".ledger";
+export const BRANCH_MARKER = ".github/ledger-branch.json";
+export const isBranchMode = (repo) => existsSync(join(repo, BRANCH_MARKER));
+
+/** Directory that CONTAINS `ledger/` for this repo, or null when no ledger is available locally. */
+export function ledgerRoot(repo) {
+  if (existsSync(join(repo, LEDGER_DIR, "backlog", "_frame.md"))) return repo;
+  const co = join(repo, LEDGER_CHECKOUT);
+  if (existsSync(join(co, LEDGER_DIR, "backlog", "_frame.md"))) return co;
+  return null;
+}
+
 export const KINDS = {
   backlog: {
     letter: "B",
@@ -64,7 +93,7 @@ export const marker = (state) => `<!-- ledger:entries ${state} -->`;
 const HEADING_RE = /^### ([BV])(\d+)\b/;
 const ENTRY_FILE_RE = /^([BV])(\d+)(?:\.(\d+))?\.md$/;
 
-export const ledgerEnabled = (repo) => existsSync(join(repo, LEDGER_DIR, "backlog", "_frame.md"));
+export const ledgerEnabled = (repo) => ledgerRoot(repo) !== null;
 
 /** Which ledger kind + role does a repo-relative path name? null when it is not a ledger path. */
 export function pathRole(rel) {
@@ -182,7 +211,9 @@ export function renderArchive(entries) {
  * ------------------------------------------------------------------------------------------ */
 export function readLedgerDir(repo, kind) {
   const k = KINDS[kind];
-  const root = join(repo, LEDGER_DIR, kind);
+  const base = ledgerRoot(repo);
+  if (!base) throw new Error(`no ledger available under ${repo} — run: npm run ledger -- sync (the ledger lives on the \`${LEDGER_BRANCH}\` branch)`);
+  const root = join(base, LEDGER_DIR, kind);
   const frame = readFileSync(join(root, "_frame.md"), "utf8");
   const entries = [];
   const stray = [];
@@ -261,7 +292,7 @@ function cached(repo, kind) {
 }
 function signature(repo, kind) {
   // cheap staleness probe: entry-folder mtimes + counts (tests mutate the tree between reads)
-  const root = join(repo, LEDGER_DIR, kind);
+  const root = join(ledgerRoot(repo) ?? repo, LEDGER_DIR, kind);
   let s = "";
   for (const d of readdirSync(root)) {
     const dp = join(root, d);
@@ -283,10 +314,11 @@ export const existsText = (repo, rel) => (pathRole(rel) && ledgerEnabled(repo)) 
  * Writing.
  * ------------------------------------------------------------------------------------------ */
 export function writeEntry(repo, kind, state, id, text, dup = 1) {
-  const dir = join(repo, LEDGER_DIR, kind, state);
+  const base = ledgerRoot(repo) ?? repo;
+  const dir = join(base, LEDGER_DIR, kind, state);
   mkdirSync(dir, { recursive: true });
   const rel = `${LEDGER_DIR}/${kind}/${state}/${entryFileName(id, dup)}`;
-  writeFileSync(join(repo, rel), text.replace(/\n+$/, "") + "\n");
+  writeFileSync(join(base, rel), text.replace(/\n+$/, "") + "\n");
   return rel;
 }
 

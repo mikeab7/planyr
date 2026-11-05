@@ -19,7 +19,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 
 import { ALL_LAYERS, JLAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
-import { STATE_ENVELOPES, STATE_POLYGONS } from "../src/workspaces/site-planner/lib/siteRegion.js";
+import { STATE_ENVELOPES, STATE_POLYGONS, US_STATE_CODES } from "../src/workspaces/site-planner/lib/siteRegion.js";
 
 /* National sources — shown on every site. FEMA, NWI, EPA, rail/airports, OSM, HIFLD, Mapillary, USGS NHD and 3DEP. */
 const NATIONAL = [
@@ -34,14 +34,20 @@ const TEXAS_ONLY = [
   "coh_ww", "coh_storm", "coh_water", "bkdd_drainage", "bkdd_easements", "bkdd_dmp", "fb_contours",
 ];
 
-/* Shared by Florida AND Georgia (PR #1902): the EIA approximate pipeline layers. */
-const SHARED_FL_GA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
-const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope"];
+/* The EIA approximate pipeline layers (PR #1902, widened NEW-1 2026-10-29): offered in EVERY state except Texas — `statesNot: ["TX"]`,
+ * not a state list — because they are the only pipeline source that works outside Texas (the RRC row is Texas-only). */
+const EIA_NOT_TX = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
+const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope",
+  // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — georgiaLayers.js
+  "ga_recharge", "ga_gw_susceptibility", "ga_protected_rivers", "ga_protected_mountains", "ga_swsw", "ga_swsw_protected", "ga_karst", "ga_solid_waste", "ga_brownfields", "ga_dams",
+  "ga_impaired_streams", "ga_conservation", "ga_mrpa_corridor", "ga_mrpa_buffer_150", "ga_mrpa_buffer_50", "ga_mrpa_buffer_35", "ga_opportunity_zones", "ga_jtc_tiers", "ga_spalding_zoning",
+  // follow-up: hosts reached through the /gis-proxy relay
+  "ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
 describe("the layer registry's state coverage", () => {
   it("the set of layers with NO state scope is exactly the declared national list", () => {
-    expect(idsWhere((c) => !c.states).sort()).toEqual(NATIONAL);
+    expect(idsWhere((c) => !c.states && !c.statesNot).sort()).toEqual(NATIONAL);
   });
   it("every Texas institution's layer is Texas-only — hidden for a Georgia site", () => {
     for (const id of TEXAS_ONLY) expect(ALL_LAYERS[id].states, id).toEqual(["TX"]);
@@ -51,23 +57,34 @@ describe("the layer registry's state coverage", () => {
     for (const [id, cfg] of Object.entries(JLAYERS)) expect(cfg.states, id).toEqual(["TX"]);
   });
   it("every state code used is one siteState() can actually return", () => {
-    const known = new Set([...Object.keys(STATE_ENVELOPES), ...Object.keys(STATE_POLYGONS)]);
+    // siteState names all 50 states + DC since B2479568; the original eight (envelopes / outlines) are a subset of that list.
+    const known = new Set([...Object.keys(STATE_ENVELOPES), ...Object.keys(STATE_POLYGONS), ...US_STATE_CODES]);
     for (const [id, c] of Object.entries(ALL_LAYERS)) for (const st of c.states || []) expect(known.has(st), `${id}: ${st}`).toBe(true);
   });
   it("every Georgia layer is Georgia-only, and each is in the declared Georgia set", () => {
     for (const id of GEORGIA) expect(ALL_LAYERS[id].states, id).toEqual(["GA"]);
-    for (const id of SHARED_FL_GA) expect(ALL_LAYERS[id].states, id).toEqual(["FL", "GA"]);
-    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA, ...SHARED_FL_GA].sort());
+    for (const id of EIA_NOT_TX) { expect(ALL_LAYERS[id].states, id).toBeUndefined(); expect(ALL_LAYERS[id].statesNot, id).toEqual(["TX"]); }
+    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA].sort());
+    expect(idsWhere((c) => !!c.statesNot).sort()).toEqual([...EIA_NOT_TX].sort());
   });
   it("no layer is both national and scoped, and no row lists an empty scope (an empty list would hide it everywhere)", () => {
     for (const [id, c] of Object.entries(ALL_LAYERS)) if (c.states) expect(c.states.length, id).toBeGreaterThan(0);
   });
   it("Georgia gets no Texas layer and Texas gets no Georgia layer, by construction", () => {
-    const shownIn = (st) => Object.entries(ALL_LAYERS).filter(([, c]) => !c.states || c.states.includes(st)).map(([k]) => k);
+    const shownIn = (st) => Object.entries(ALL_LAYERS).filter(([, c]) => (!c.states || c.states.includes(st)) && !(c.statesNot || []).includes(st)).map(([k]) => k);
     const ga = shownIn("GA"), tx = shownIn("TX");
     for (const id of TEXAS_ONLY) expect(ga, id).not.toContain(id);
-    for (const id of [...GEORGIA, ...SHARED_FL_GA]) expect(tx, id).not.toContain(id);
+    for (const id of [...GEORGIA, ...EIA_NOT_TX]) expect(tx, id).not.toContain(id);
+    for (const id of EIA_NOT_TX) expect(ga, id).toContain(id);
     for (const id of NATIONAL) { expect(ga, id).toContain(id); expect(tx, id).toContain(id); }
+  });
+});
+
+/* NEW-1 (Florida, B2452976): the Florida rows are declared by name (test/floridaLayers.test.js holds the full list) and scoped to FL alone — none leaks to Texas, Georgia or any other state. */
+describe("Florida layers are Florida-only", () => {
+  it("every row whose states include FL is states:['FL'] exactly, and the national list did not grow", () => {
+    for (const [id, c] of Object.entries(ALL_LAYERS)) if ((c.states || []).includes("FL")) expect(c.states, id).toEqual(["FL"]);
+    expect(idsWhere((c) => !c.states && !c.statesNot).sort()).toEqual(NATIONAL);
   });
 });
 
@@ -90,7 +107,9 @@ describe("every Georgia layer row is complete (a row an inline comment swallowed
 });
 
 describe("the Georgia GIS registry rows", () => {
-  const KEYS = ["countyGa", "cityGa", "hsiGa", "ustGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries"];
+  const KEYS = ["countyGa", "cityGa", "hsiGa", "ustGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries",
+    "gaRecharge", "gaPollutionSusc", "gaProtectedRiver", "gaProtectedMountain", "gaCarbonate", "gaSolidWaste", "gaBrownfields", "gaConservation", "gaDams", "gaImpaired", "gaOpportunityZones", "gaJobTaxCredit",
+    "gaMrpaCorridor", "gaMrpaVegBuffer", "gaMrpaImpBuffer", "gaMrpaTributaryBuffer", "gaSwsw", "gaSwswProtected", "gaSpaldingZoning", "gaRoadOwnership", "gaRareSpecies", "gaMineral", "gaBartowZoning"];
   it("each is Georgia-scoped, production-tier, and not on a test/staging path", () => {
     for (const k of KEYS) {
       const s = GIS_SOURCES[k];

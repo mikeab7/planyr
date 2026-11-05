@@ -14,10 +14,14 @@
  * points plus a screen-space radius; `cloudScallopPath` just turns points into a path string.
  */
 
-// Small/Medium/Large presets (arc radius, feet) — the numeric field can hold any value in between.
+// Arc radius presets (feet). The Properties panel no longer shows Small/Medium/Large buttons (NEW-3,
+// 2026-10-08); `medium` remains the DEFAULT arc for a new cloud.
 export const CLOUD_ARC_PRESETS = { small: 1.5, medium: 3, large: 6 };
 export const CLOUD_ARC_MIN_FT = 0.5;
 export const CLOUD_ARC_MAX_FT = 30;
+// NEW-3 (owner 2026-10-08) — the Properties arc-size stepper moves in 5 ft jumps (single feet make no
+// visible difference); a typed value is still taken as typed, and an existing cloud keeps its arc.
+export const CLOUD_ARC_STEP_FT = 5;
 export const CLOUD_ARC_DEFAULT_FT = CLOUD_ARC_PRESETS.medium;
 
 /** Clamp/validate a user-typed arc size to a sane real-world range; a bad value falls back to the

@@ -20,14 +20,14 @@ const panel = (p) => p.getByTestId("property-panel");
 
 function siteField(page, key) {
   return page.evaluate((k) => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site[k] || []).length;
   }, key);
 }
 const markupCount = (p) => siteField(p, "markups");
 const buildingElCount = (p) => p.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).filter((e) => e.type === "building").length;
 });
@@ -155,7 +155,7 @@ test.describe("markup reachability + locked honesty (logged out)", () => {
     await panel(page).getByRole("button", { name: /Lock/ }).click();
     await expect(panel(page).getByText(/Locked —/)).toBeVisible();
     // …a 🔒 cue appears on the canvas…
-    await expect(canvas(page).getByText("🔒")).toBeVisible();
+    await expect(canvas(page).locator("[data-lock-cue]")).toBeVisible();
     await expect(selectedMk(page)).toHaveAttribute("data-mk-locked", "1");
     // …and the shape's cursor is no longer the four-arrow "move".
     const lockedCursor = await page.evaluate(() => {

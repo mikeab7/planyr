@@ -33,7 +33,7 @@ async function loadPlan(page, tweak = (e) => e) {
   await page.waitForFunction(() => !!window.__plannerView, null, { timeout: 20_000 });
 }
 const roads = (page) => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts)).map((e) => ({ id: e.id, cls: e.roadClass, w: e.travelW, n: e.pts.length }));
 });

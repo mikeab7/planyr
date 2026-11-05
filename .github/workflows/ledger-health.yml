@@ -1,0 +1,51 @@
+name: Ledger health
+
+# Data checks over the REAL ledger (NEW-1, 2026-11-05). The BACKLOG / VERIFICATION records live on their own branch
+# (`ledger`), which has no required checks and no pull requests — a session commits a record straight to it. That is
+# the point of the move (no more ledger-only PR + a full build per live check), and the price is that nothing gates a
+# record. So the checks that used to run inside main's required `build` run HERE instead, on a schedule, and a red run
+# means "go look at the ledger", never "this PR can't merge":
+#   · scripts/ledger.mjs check              file layout: right folder, right filename, heading == filename, frame markers
+#   · build-backlog-index --tags-only       every #tag in an Open/Verify entry is in the legend
+#   · verification-queue-audit --check      the no-Blocker / stale V# ratchet
+#   · npm run test:ledger                   id uniqueness, leftover conflict markers, verification closability, …
+# Why not in `build`: a malformed record must never be able to fail an unrelated code PR.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ledger-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (the scripts)
+        uses: actions/checkout@v7
+      - name: Checkout the ledger branch
+        uses: actions/checkout@v7
+        with:
+          ref: ledger
+          path: .ledger
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Ledger layout check
+        run: node scripts/ledger.mjs check
+      - name: Tag-legend check
+        run: node scripts/build-backlog-index.mjs --tags-only
+      - name: Verification-queue ceiling
+        run: node scripts/verification-queue-audit.mjs --check
+      - name: Ledger data tests
+        run: npm run test:ledger

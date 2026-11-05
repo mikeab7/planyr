@@ -14,8 +14,9 @@ import { bandedStorage, usablePondVolume } from "../src/workspaces/site-planner/
 import { TAILWATER_SOURCES, deriveTailwater } from "../src/workspaces/site-planner/lib/tailwaterSource.js";
 import { DETENTION_CRITERIA, criteriaFor, coincidentStormPolicy, problems } from "../src/workspaces/site-planner/lib/detentionCriteria.js";
 import { yieldVerdictStrip } from "../src/workspaces/site-planner/lib/yieldVerdicts.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 const SQ = (s = 200) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
 const AC = 43560;
 // A pond anchored with its floor at ~100, water surface at ~109, and a flood WSE mid-column (105).

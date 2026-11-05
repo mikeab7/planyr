@@ -22,6 +22,7 @@ import {
   DEP_PRESENCE,
   LOOP_SUSPECT_RUNS,
 } from "../src/app/renderLoopProbe.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const REACT_ELEMENT = Symbol.for("react.element");
 const el = (type, key = null, props = {}) => ({ $$typeof: REACT_ELEMENT, type, key, ref: null, props, _owner: null });
@@ -166,7 +167,7 @@ describe("createLoopProbe — counting, windowing and the report", () => {
 const readSrc = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 describe("the two effects the #185 crashes threw from stay instrumented", () => {
-  const planner = readSrc("../src/workspaces/site-planner/SitePlanner.jsx");
+  const planner = plannerSource();
   const crumb = readSrc("../src/shared/ui/ProjectBreadcrumb.jsx");
 
   it("the geo-registration layout effect records its runs", () => {
@@ -189,7 +190,7 @@ describe("the two effects the #185 crashes threw from stay instrumented", () => 
   it("⛔ the geo-registration effect depends on the view's NUMBERS, never on the state object", () => {
     // B1189's own documented rule — "depend on view.ppf/offX/offY, size.w/h" — had been applied to
     // `size` and left undone for `view`.
-    expect(planner).toContain("}, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);");
+    expect(planner).toContain("}, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]);");
     expect(planner).not.toContain("}, [view, size.w, size.h, origin, geoOverscan]);");
   });
 

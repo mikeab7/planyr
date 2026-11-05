@@ -68,6 +68,19 @@ export function easementLabel(e) {
   return `${wStr}${t.short}`;
 }
 
+/* One-line summary of the recording/legal fields, shown on the collapsed "Recording details"
+ * header so filled data is never hidden silently: "CenterPoint · Vol 412 Pg 88 · Exclusive".
+ * Empty string when none of the three is set. */
+export function easementRecordingSummary(e) {
+  const parts = [];
+  const holder = e && typeof e.holder === "string" ? e.holder.trim() : "";
+  const rec = e && typeof e.recording === "string" ? e.recording.trim() : "";
+  if (holder) parts.push(holder);
+  if (rec) parts.push(rec);
+  if (e && e.exclusive) parts.push("Exclusive");
+  return parts.join(" · ");
+}
+
 // Shoelace area (absolute) of a ring of {x,y} — feet² when fed planner feet.
 export { ringArea };
 

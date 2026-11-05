@@ -14,6 +14,7 @@
  * theme (the terrain-layer / coordinate-chip rule). Pure except paintHeatmap, which
  * needs a DOM canvas and returns null where none exists (tests, SSR). */
 import { releaseCanvas } from "./releaseCanvas.js";
+import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 export const DEPTH_BIN_FT = 0.5;
 
@@ -90,7 +91,7 @@ export function cutFillTotals(cells) {
   }
   return {
     cutCf, fillCf, cutCy: cutCf / 27, fillCy: fillCf / 27,
-    gradedAcres: gradedSf / 43560, unknownAcres: unknownSf / 43560,
+    gradedAcres: gradedSf / SQFT_PER_ACRE, unknownAcres: unknownSf / SQFT_PER_ACRE,
   };
 }
 
@@ -146,13 +147,13 @@ export function heatmapTotals(cells, ratio = 1) {
   }
   volumeCf *= ratio;
   const perFpAcFt = {};
-  for (const [k, v] of byFp) perFpAcFt[k] = (v * ratio) / 43560;
+  for (const [k, v] of byFp) perFpAcFt[k] = (v * ratio) / CF_PER_ACFT;
   return {
     volumeCf,
-    volumeAcFt: volumeCf / 43560,
-    fillAcres: fillSf / 43560,
-    floodwayAcres: floodwaySf / 43560,
-    unknownAcres: unknownSf / 43560,
+    volumeAcFt: volumeCf / CF_PER_ACFT,
+    fillAcres: fillSf / SQFT_PER_ACRE,
+    floodwayAcres: floodwaySf / SQFT_PER_ACRE,
+    unknownAcres: unknownSf / SQFT_PER_ACRE,
     perFpAcFt,
   };
 }

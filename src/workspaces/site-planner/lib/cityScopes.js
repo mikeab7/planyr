@@ -180,14 +180,18 @@ const KANSASCITY_HOLES = [
   [[-94.4981,39.1595],[-94.4964,39.1621],[-94.4981,39.1622],[-94.4981,39.1595]],
 ];
 
-const INDEPENDENCE_OUTER = [[-94.2159,39.1384],[-94.2189,39.0804],[-94.2556,39.0811],[-94.2559,39.0784],[-94.2651,39.078],[-94.2698,39.0782],[-94.2697,39.0818],[-94.2757,39.0823],[-94.2777,39.0804],[-94.2779,39.0665],[-94.2698,39.0566],[-94.2698,39.0534],[-94.3153,39.0541],[-94.3127,39.0446],[-94.3054,39.0348],[-94.3322,39.0378],[-94.3324,39.033],[-94.3371,39.0327],[-94.3371,39.0292],[-94.3278,39.027],[-94.3314,39.0215],[-94.3328,39.025],[-94.3634,39.0263],[-94.3654,39.024],[-94.3743,39.0232],[-94.3742,39.0206],[-94.3776,39.0191],[-94.3818,39.0207],[-94.3869,39.0176],[-94.387,39.0353],[-94.425,39.0352],[-94.4254,39.0263],[-94.4377,39.0268],[-94.4372,39.036],[-94.4333,39.0417],[-94.475,39.0606],[-94.4747,39.0671],[-94.469,39.0668],[-94.4684,39.0687],[-94.4708,39.0727],[-94.4702,39.082],[-94.4782,39.0896],[-94.4788,39.0974],[-94.4763,39.1009],[-94.4814,39.1111],[-94.4711,39.1111],[-94.4706,39.1144],[-94.4678,39.1144],[-94.4674,39.1314],[-94.4554,39.1281],[-94.4554,39.1215],[-94.4607,39.1169],[-94.4565,39.1154],[-94.4531,39.117],[-94.4537,39.1028],[-94.437,39.1022],[-94.4324,39.1027],[-94.4314,39.1098],[-94.4277,39.1097],[-94.427,39.1136],[-94.4229,39.1142],[-94.4248,39.123],[-94.4236,39.1309],[-94.3554,39.1286],[-94.3519,39.1307],[-94.3521,39.1338],[-94.3492,39.1324],[-94.3179,39.1367],[-94.2682,39.1365],[-94.258,39.1398],[-94.2159,39.1384]];
+/* NEW-1 (Memphis 100-mile radius) — Germantown and Collierville, TN were city-scoped here until 2026-10-15 (×2), when the
+ * Shelby County Assessor's own countywide CERTParcel service was found and wired as `tn_shelby` (counties.js). It covers both
+ * towns WITH owner names, which their own layers never published, so the two scopes were folded into it and removed. */
 
+const INDEPENDENCE_OUTER = [[-94.2159,39.1384],[-94.2189,39.0804],[-94.2556,39.0811],[-94.2559,39.0784],[-94.2651,39.078],[-94.2698,39.0782],[-94.2697,39.0818],[-94.2757,39.0823],[-94.2777,39.0804],[-94.2779,39.0665],[-94.2698,39.0566],[-94.2698,39.0534],[-94.3153,39.0541],[-94.3127,39.0446],[-94.3054,39.0348],[-94.3322,39.0378],[-94.3324,39.033],[-94.3371,39.0327],[-94.3371,39.0292],[-94.3278,39.027],[-94.3314,39.0215],[-94.3328,39.025],[-94.3634,39.0263],[-94.3654,39.024],[-94.3743,39.0232],[-94.3742,39.0206],[-94.3776,39.0191],[-94.3818,39.0207],[-94.3869,39.0176],[-94.387,39.0353],[-94.425,39.0352],[-94.4254,39.0263],[-94.4377,39.0268],[-94.4372,39.036],[-94.4333,39.0417],[-94.475,39.0606],[-94.4747,39.0671],[-94.469,39.0668],[-94.4684,39.0687],[-94.4708,39.0727],[-94.4702,39.082],[-94.4782,39.0896],[-94.4788,39.0974],[-94.4763,39.1009],[-94.4814,39.1111],[-94.4711,39.1111],[-94.4706,39.1144],[-94.4678,39.1144],[-94.4674,39.1314],[-94.4554,39.1281],[-94.4554,39.1215],[-94.4607,39.1169],[-94.4565,39.1154],[-94.4531,39.117],[-94.4537,39.1028],[-94.437,39.1022],[-94.4324,39.1027],[-94.4314,39.1098],[-94.4277,39.1097],[-94.427,39.1136],[-94.4229,39.1142],[-94.4248,39.123],[-94.4236,39.1309],[-94.3554,39.1286],[-94.3519,39.1307],[-94.3521,39.1338],[-94.3492,39.1324],[-94.3179,39.1367],[-94.2682,39.1365],[-94.258,39.1398],[-94.2159,39.1384]];
 
 const CITY_SCOPES = [
   {
     key: "mi_detroit",
     name: "Detroit",
     state: "MI",
+    counties: ["Wayne"],
     bbox: [42.2550, -83.2877, 42.4504, -82.9103], // [minLat, minLng, maxLat, maxLng]
     outer: DETROIT_OUTER,
     holes: [DETROIT_HOLE],
@@ -196,6 +200,7 @@ const CITY_SCOPES = [
     key: "sd_siouxfalls",
     name: "Sioux Falls",
     state: "SD",
+    counties: ["Minnehaha"],
     bbox: [43.4643, -96.8488, 43.6381, -96.5981],
     outer: SIOUXFALLS_OUTER,
     holes: SIOUXFALLS_HOLES,
@@ -207,6 +212,7 @@ const CITY_SCOPES = [
     // part of the resolution test (see this module's own header). The ring test is the same
     // county-agnostic point-in-polygon check as every other scope here.
     state: "MO",
+    counties: ["Jackson", "Clay", "Platte"], // the three whose control points are verified (see header); display metadata only
     bbox: [38.8243, -94.7653, 39.3562, -94.3854],
     outer: KANSASCITY_OUTER,
     holes: KANSASCITY_HOLES,
@@ -215,11 +221,17 @@ const CITY_SCOPES = [
     key: "mo_independence",
     name: "Independence",
     state: "MO",
+    counties: ["Jackson"],
     bbox: [39.0176, -94.4814, 39.1398, -94.2159],
     outer: INDEPENDENCE_OUTER,
     holes: [],
   },
 ];
+
+/* NEW-3 (admin coverage map) — WHICH COUNTIES EACH CITY SOURCE SITS IN, as DISPLAY metadata for the admin coverage map (never part of
+ * the resolution test above, which is county-agnostic). One row per scope: its registry key, the city's name, its
+ * state and the bare county names it lies in. A new scope MUST declare `counties` (test/parcelCoverage.test.js). */
+export const CITY_SCOPE_COUNTIES = CITY_SCOPES.map((s) => ({ key: s.key, name: s.name, state: s.state, counties: s.counties || [] }));
 
 /* The city-scoped keys this module can resolve to — `counties.js` uses this to require every one
  * of them to carry `cityScoped: true` on its `COUNTIES_MAP` entry (test-guarded), rather than

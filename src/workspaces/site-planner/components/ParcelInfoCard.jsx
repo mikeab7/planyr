@@ -2,6 +2,8 @@ import { useState } from "react";
 import { parcelCardRows } from "../lib/appraisal.js";
 import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import ParcelRequestLink from "./ParcelRequestLink.jsx";
+import ParcelCopyNote from "./ParcelCopyNote.jsx";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". FOUR distinct states: found (the parcel's key
@@ -14,7 +16,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
  * on `unavailable`: "the county parcel service couldn't be reached for this area right
  * now… give it a moment." Both halves were false — nothing was unreachable, and waiting
  * changes nothing — and it is the wording the owner met when searching two Wayne County, MI
- * addresses. This state names the county and says the gap is a gap, from `noParcelSourceNote`'s
+ * addresses. This state names the county and says why it has no data, from `parcelGapNotice`'s
  * own sentence (passed in as `info.note`) so the words cannot drift from the verdict that
  * produced them. It deliberately does NOT offer "start the plan here anyway": per NEW-4's rule,
  * that fallback belongs to an OUTAGE (where the source that would have answered is down), and
@@ -81,6 +83,8 @@ export default function ParcelInfoCard({
   // NEW-4 — the fallback when the county service is unreachable: start the plan at this point
   // anyway and draw the boundary. Passed only by the map finder; absent → the card just explains.
   onStartBlank = null,
+  // NEW-2 (2026-10-22) — a server that did not answer is asked again by the person, not by a vague "give it a moment". Absent → no button.
+  onRetry = null,
   // B1149600ish/NEW-6 — the card used to offer "Plan this site" (a SITE-module action)
   // unconditionally, even while the map's own Site/Comp toggle read Comp — reproduced by the
   // owner on a real address search. `mode` decides which primary action belongs here; `onComp`
@@ -130,7 +134,7 @@ export default function ParcelInfoCard({
         <div style={{ padding: "8px 11px 10px" }}>
           {info.backup && (
             <div style={noticeStyle}>
-              Statewide backup — {info.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
+              {info.backupNote || <>Statewide backup — {info.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.</>}
             </div>
           )}
           {info.cached && (
@@ -155,6 +159,10 @@ export default function ParcelInfoCard({
               )}
             </>
           )}
+
+          {/* NEW-1 (2026-10-29) — a lot that came from a COPY of the county's data says so, with the date, and offers the
+              request; an official county / statewide row renders nothing here. */}
+          <ParcelCopyNote county={info.county} testId="parcel-card-copy" />
 
           {/* ⛔ NEW-1 (2026-09-08) — THIS CARD NO LONGER CARRIES A PRIMARY ACTION, and the removal
               is the point, not a trim. It used to end in one button chosen by the map toolbar's
@@ -181,13 +189,21 @@ export default function ParcelInfoCard({
            way forward is the aerial trace — never the outage fallback, and never "try again". */
         <div data-testid="parcel-card-no-source" style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
           {info.note} You can still trace the lot from the <b>Aerial</b> underlay.
+          {/* NEW-1 (2026-10-22) — the reason is in `info.note`; the way to ask for the county rides with it. */}
+          <ParcelRequestLink href={info.request} testId="parcel-card-gap-request" />
         </div>
       ) : (
         /* NEW-4 — an outage used to end here, with the owner left on a map that would not give
            him a lot and no way forward. The way forward goes in the same breath as the bad news:
            start the plan anyway, located at this address, and draw the boundary by hand. */
         <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.accent, lineHeight: 1.5 }}>
-          The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
+          The map centered on the address, but the county parcel server didn’t answer, so the lot couldn’t be checked.
+          {onRetry && (
+            <button onClick={onRetry} data-testid="parcel-card-try-again"
+              style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Try again
+            </button>
+          )}
           {onStartBlank && (
             <button onClick={onStartBlank} data-testid="parcel-card-start-blank"
               style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>

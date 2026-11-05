@@ -1,11 +1,12 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
-import SitePlanner from "./SitePlanner.jsx";
+import SitePlanner, { warmPlanForMount } from "./SitePlanner.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { claimInvites, listMyTeams } from "./lib/teams.js";
+import { listMyTeams } from "./lib/teams.js";
+import { TEAMS_CHANGED_EVENT } from "../../shared/teams/teamInviteModel.js";
 import { primeShareContext, defaultShareTeam, resetShareContext, resolveNewPlanTeam } from "./lib/newProjectSharing.js";
 import { loadUserPrefs } from "./lib/userPrefs.js";
 // B831777 (NEW-2) — CompsPanel is now rendered BY MapFinder itself, as the Comps tab in the
@@ -17,9 +18,9 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, scheduleHistoryHydration, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, siteExistsLocally, lastSaveRefusal, requestPlanStoreRoom, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
-import { summarizeParcelRows } from "./lib/parcelSummary.js";
+import { summarizeParcelRowsAsync } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
 import { STATUS_META, roleOf } from "./lib/siteModel.js";
 import { isPinnedMapReference } from "./lib/overlayOrder.js";
@@ -32,10 +33,11 @@ import { idbPersist } from "./lib/localDb.js";
  * mapped to a default for React.lazy. */
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
+import { runMint, describePushFailure, saveRefusedMessage, PUSH_MISSING } from "./lib/planMint.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, clearCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer, userLeftOnSignOut } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 // NEW-2(b) — a SECOND "open where I left off" pointer, entirely separate from `currentSite`
 // above: the Shell's own `planyr:lastRoute:v1` (src/app/lastRoute.js), which is what a
@@ -56,13 +58,14 @@ migrateOldAutosave(); // bring any legacy single-slot autosave into the site sto
 migrateSiteGroups();  // give every legacy record a site (location) group
 migrateScenarios();   // fold legacy named scenarios into Plans
 repairSplitProjectNames(); // NEW-3 — converge any project whose plans disagree on its name (idempotent; see lib/projectName.js)
-initHistoryStore();   // B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
+scheduleHistoryHydration();   // B2236000 (round 6) — off the boot path, after the page goes quiet. B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
 idbPersist();         // B474 review (#9) — ask the browser to keep our IndexedDB durable (not best-effort/evictable); it's now the version ring's home + the underlay raster's local cache
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
 // The effective project group of an active plan id (its group, or its own id for a
 // brand-new unsaved blank). null when no plan is open / we're on the map.
+const PLANNER_WARM_CEILING_MS = 1500;   // B2236000 — the longest the page's first planner mount waits for its warm-up
 const groupForPlan = (id, mode) => (mode === "plan" && id) ? (loadSite(id)?.groupId || id) : null;
 
 // Last "new project" tick already acted on (Work Item A). Module-scoped (not a ref) so it
@@ -154,6 +157,8 @@ export default function App({
    * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
    * URL names a project this device genuinely does not have. */
   const userLeftProjectRef = useRef(false);
+  // NEW-1 point 5 — the session ended without the person asking; the route is kept and the Shell says why.
+  const sessionLostRef = useRef(false);
   // B1865936 — what effect (2) below last asked the URL to become, or `NO_PENDING_ROUTE_WRITE`
   // once that write has round-tripped back as a fresh `projectId` prop. Lets effect (1) tell its
   // own not-yet-landed write apart from the URL genuinely naming something else. See effect (1)'s
@@ -266,7 +271,12 @@ export default function App({
   // never got to show — this is what makes "the page reloaded mid-write" recoverable instead of
   // silently losing the notice.
   useEffect(() => {
-    const pending = readCloudWriteFailures();
+    /* NEW-1 (2026-11-03) — a log entry whose error is exactly "missing" was recorded by a build that pushed a plan the DEVICE never stored (a refused
+     * duplicate): there is no local record, so no replay can ever succeed and the banner would come back on every load. Forget those, and say so. */
+    const all = readCloudWriteFailures();
+    const dead = all.filter((e) => e && e.error === PUSH_MISSING);
+    if (dead.length) { dead.forEach((e) => clearCloudWriteFailure(e.id)); reportClientEvent("write-failure-pruned-missing", "dropped logged cloud-write failures for plans that were never stored on this device", { count: dead.length }); }
+    const pending = all.filter((e) => !(e && e.error === PUSH_MISSING));
     if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
@@ -302,7 +312,7 @@ export default function App({
   // sites into their local cache and make that the active store (cloud is home);
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
-  const applyUser = async (u, event) => {
+  const applyUser = async (u, event, meta) => {
     const uid = (u && u.id) || null;
     // supabase-js re-emits SIGNED_IN on tab focus / token refresh. When it's the SAME
     // user already active, nothing actually changed — skip the re-pull + view reset that
@@ -311,7 +321,7 @@ export default function App({
     // sign-out still runs in full.
     if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
     /* B1594320 — stamp the dedup marker HERE, synchronously, before any `await` — not only at
-     * the end of this function (which still runs several awaits below: claimInvites, pullCloud,
+     * the end of this function (which still runs several awaits below: pullCloud,
      * refreshSites…). supabase-js can legitimately deliver more than one auth event for the SAME
      * resumed session close together (its own `_emitInitialSession`, fired the instant a NEW
      * listener subscribes, races `_recoverAndRefresh`'s separate `SIGNED_IN` broadcast on a cold
@@ -322,19 +332,17 @@ export default function App({
      * Setting it now closes that window; the `seq` guard below still supersedes a genuinely
      * newer event before this one reaches the resume step. */
     prevUid.current = uid;
+    sessionLostRef.current = !uid && !!(meta && meta.lost); // NEW-1 pt 5: died ≠ pressed Sign out — keep the route (Shell says why)
     const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     setActiveUser(uid);
     setSignedInUid(uid);     // null when logged out → the on-device-sites prompt only shows when signed in
     setMigrateMsg(""); setHideMigrate(false); // reset the prompt on any real auth switch
     if (uid) {
       setCloudLoading(true);
-      // TEAM: activate any invites waiting on this user's email (an existing account invited
-      // after signup) BEFORE pulling, so a freshly-joined team's shared projects come down in
-      // the same pull. Best-effort — never blocks loading the user's own sites.
-      // NEW-1 audit: both catches below are reviewed and left non-blocking on purpose — neither
-      // is a one-shot user action, and both re-run on this device's every sign-in, so a failure
-      // here self-heals rather than strands anything. Telemetry only, no banner.
-      await claimInvites().catch((e) => reportClientEvent("cloud-write-failed", "claiming pending team invites failed (retried on next sign-in)", { error: (e && e.message) || "" }));
+      // TEAM: invites are NOT claimed here any more (NEW-1, invite inbox). A person who already has an
+      // account answers a pending invite from the account menu (Accept / Decline); a brand-new signup is
+      // still added by the database's signup trigger. On Accept the menu fires TEAMS_CHANGED_EVENT, which
+      // re-pulls (below) so a freshly-joined team's shared projects come down.
       // B326416 — warm the default-sharing answer (account preference + your teams) right after
       // invites are claimed, so the FIRST project created in this session already knows whether it
       // is born shared. Best-effort: a failure leaves the context unset, and an unset context
@@ -388,7 +396,7 @@ export default function App({
       // that user is active (logged out, the app reads the legacy store), so leaving it is
       // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");
-      if (event === "SIGNED_OUT") { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
+      if (event === "SIGNED_OUT") { if (userLeftOnSignOut(meta)) userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
       refreshSites();
       refreshParcelSummary(null);
       refreshElementRecency(null);
@@ -425,10 +433,13 @@ export default function App({
   const applyUserRef = useRef(applyUser); applyUserRef.current = applyUser;
   useEffect(() => {
     if (!supabaseConfigured()) return;
-    return onAuthChange((event, u) => {
-      // Recovery UI + token refresh don't change which data store is active.
-      if (event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
-      applyUserRef.current(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
+    return onAuthChange((event, u, meta) => {
+      // Recovery UI + a profile edit don't change which data store is active. TOKEN_REFRESHED DOES reach applyUser
+      // (NEW-1 point 4): after a boot with an expired token and no network, supabase-js reports "no session" first
+      // and delivers the user later as TOKEN_REFRESHED — ignoring it left Site on the signed-out store until a
+      // refocus or reload. For a user already active, applyUser's same-user check makes it a no-op.
+      if (event === "PASSWORD_RECOVERY" || event === "USER_UPDATED") return;
+      applyUserRef.current(u, event, meta); // INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT
     });
     // No exhaustive-deps suppression needed: the only component-scope value this effect reads is
     // applyUserRef.current, a ref read at call time — the whole point of NEW-2(c) above.
@@ -451,16 +462,23 @@ export default function App({
   const [parcelSummary, setParcelSummary] = useState({});
   const [parcelSummaryLoaded, setParcelSummaryLoaded] = useState(() => !supabaseConfigured());
   const parcelSummaryFetching = useRef(false);
+  const parcelSummaryEpoch = useRef(0);   // bumped by every refresh and by sign-out: a slice-computed summary of a superseded call is dropped
   const refreshParcelSummary = async (uid) => {
-    if (!uid) { setParcelSummary({}); setParcelSummaryLoaded(true); return; }
+    if (!uid) { parcelSummaryEpoch.current++; setParcelSummary({}); setParcelSummaryLoaded(true); return; }
     if (parcelSummaryFetching.current) return;
     parcelSummaryFetching.current = true;
+    const epoch = ++parcelSummaryEpoch.current;
     try {
       const r = await cloudParcelRows(uid).catch(() => ({ ok: false }));
       // A failed fetch leaves the last-known summary in place (stale-while-revalidate, same
       // discipline as cloudError above) rather than reporting every site boundary-less. The
       // dissolve happens here, not in cloudSync.js — see cloudParcelRows's own header for why.
-      if (r && r.ok) { setParcelSummary(summarizeParcelRows(r.rows)); setParcelSummaryLoaded(true); }
+      if (r && r.ok) {
+        /* NEW-1 (B2224000) — summarised in ≤12 ms slices (the sync pass was one 134 ms task billed to the response). A sign-out during the slices
+           bumps the epoch, so a finished summary of the old account is never applied over the signed-out state. */
+        const summary = await summarizeParcelRowsAsync(r.rows);
+        if (epoch === parcelSummaryEpoch.current) { setParcelSummary(summary); setParcelSummaryLoaded(true); }
+      }
     } finally { parcelSummaryFetching.current = false; }
   };
 
@@ -550,7 +568,7 @@ export default function App({
   // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
   // whole-store clobber; this keeps the list in sync). Only reacts to the sites keys.
   useEffect(() => {
-    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refreshSites(); };
+    const onStorage = (e) => { if (!e.key || (e.key.startsWith("planarfit:sites") && !/^planarfit:sites:.*(:p:|:led$)/.test(e.key))) refreshSites(); };   // B2165120: one refresh per edit (the index write), not one per storage key
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
@@ -579,7 +597,33 @@ export default function App({
       window.removeEventListener("focus", maybePull);
     };
   }, [signedInUid]);
-  const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
+  // NEW-1 (invite inbox) — accepting a team invite from the account menu changes which projects are
+  // shared with this user and which team new projects default to. Re-pull the cloud (shared projects
+  // come down) and re-prime the default-sharing context (it holds the team list) right away, instead of
+  // waiting for the next focus pull or reload.
+  useEffect(() => {
+    if (!signedInUid) return undefined;
+    const onTeamsChanged = () => {
+      resetShareContext();
+      primeShareContext(signedInUid, SHARE_LOADERS).catch((e) => reportClientEvent("cloud-write-failed", "priming default-sharing context failed after joining a team (falls back to private)", { error: (e && e.message) || "" }));
+      pullCloud(signedInUid).then((res) => { if (res && res.ok !== false) refreshSites(); }).catch((e) => reportClientEvent("cloud-write-failed", "pull after joining a team failed (the next focus pull retries)", { error: (e && e.message) || "" }));
+    };
+    window.addEventListener(TEAMS_CHANGED_EVENT, onTeamsChanged);
+    return () => window.removeEventListener(TEAMS_CHANGED_EVENT, onTeamsChanged);
+  }, [signedInUid]);
+  const goPlan = (id) => { startTransition(() => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); }); };
+  /* NEW-1 (2026-11-03) — never navigate into an id with no record. The three mint sites (duplicate / new plan on the same parcel / new site from the map)
+   * use this; `newBlankSite` deliberately keeps plain `goPlan` (a lazy blank has no record by design — constraint #5). Same check `openSite` makes. */
+  const goPlanChecked = (id, entry) => {
+    if (!id || !siteExistsLocally(id)) { reportClientEvent("goplan-refused-missing", "refused to open a plan that has no record on this device", { id, entry }); return false; }
+    goPlan(id); return true;
+  };
+  /* NEW-1 — the one place a refused mint is refused OUT LOUD: the existing cloud-write failure banner (✕ forgets the log, Retry does not — constraint #6),
+   * honest words, and a Retry that makes room (forced: the user asked) and redoes the WHOLE create with a fresh id. No half-state: no push, no list churn. */
+  const raiseMintRefused = (message, redo) => {
+    setPushErrorWithRetry(message, async () => { try { await requestPlanStoreRoom({ force: true }); } catch (_) { /* reported by the store */ } redo(); });
+  };
+  const mintSave = (id, noun, what, save) => runMint({ id, noun, what, save, exists: () => siteExistsLocally(id), makeRoom: () => requestPlanStoreRoom(), refusal: () => lastSaveRefusal(id), report: reportClientEvent });
   /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
    *
    * The URL writer refuses to clear a route-named project unless it is told the user meant to
@@ -616,12 +660,19 @@ export default function App({
       if (r && r.ok === false) throw new Error(r.error || "push failed");
       return true;
     } catch (e) {
+      /* NEW-1 (2026-11-03) — "missing" is pushSiteToCloud saying the LOCAL record is not there: a device refusal, not a cloud failure. Nothing to retry,
+       * nothing to log for replay, and never the words "saved on this device". Telemetry names it for what it is. */
+      const why = describePushFailure(what, e && e.message);
+      if (why.kind === "missing") {
+        setPushErrorWithRetry(why.text, null);
+        reportClientEvent("push-missing-local", `${what} was not on this device when the cloud push ran`, { id, reason: (lastSaveRefusal(id) || {}).reason || "unknown" });
+        return false;
+      }
       // NEW-1 — persist BEFORE anything else: a lazy-chunk failure here can also trigger
       // chunkReload's auto-reload, which may navigate away before this banner ever paints. The
       // durable log (shared/cloud/writeFailureLog.js) is what makes that recoverable.
       recordCloudWriteFailure({ what, siteId: id, error: (e && e.message) || "" });
-      setPushErrorWithRetry(`${what} is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.`,
-        () => pushLoud(id, what));
+      setPushErrorWithRetry(why.text, () => pushLoud(id, what));
       reportClientEvent("cloud-push-failed", `background push failed (${what})`, { id, error: (e && e.message) || "" });
       return false;
     }
@@ -650,7 +701,8 @@ export default function App({
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
     const { teamId } = await defaultShareTeam(signedInUid, SHARE_LOADERS);
-    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null, teamId });
+    const mint = await mintSave(id, "site", "The new site", () => saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null, teamId }));
+    if (!mint.ok) { raiseMintRefused(mint.message, () => newSiteFromMap(payload)); return false; }   // NEW-1: nothing saved → no push, no refresh, no navigation
     pushLoud(id, "The new site"); // mirror to cloud when logged in (no-op otherwise); loud on failure (NEW-F6)
     // Seed this new project's standard folder tree + mirror it to Google Drive (B650). Idempotent
     // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
@@ -663,7 +715,7 @@ export default function App({
       .then((m) => m.ensureSeeded(id).then((r) => { if (r && r.ok && r.seeded) m.syncFoldersToDrive(id); }))
       .catch((e) => reportClientEvent("cloud-write-failed", "folder-tree seed didn't reach the cloud (self-heals on next Library visit)", { id, error: (e && e.message) || "" }));
     refreshSites();
-    goPlan(id);
+    goPlanChecked(id, "newSiteFromMap");
   };
 
   /* "Open blank planner" → a new empty site. We do NOT write a record yet: a blank site that's
@@ -801,7 +853,10 @@ export default function App({
   const routeChangedThisPassRef = useRef(false);
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
-    routeChangedThisPassRef.current = routeProjectJustChanged(prev, projectId);
+    // B2225425 — the round trip of effect (2)'s OWN write is not an external route change; flagging it left the defer flag
+    // standing for the next switch, whose URL write was then skipped (see `routeChangeNeedsDefer`).
+    const ownEcho = pendingRouteWriteRef.current !== NO_PENDING_ROUTE_WRITE && projectId === pendingRouteWriteRef.current;
+    routeChangedThisPassRef.current = routeChangeNeedsDefer(prev, projectId, ownEcho);
     // B1865936 — the Map-crumb bounce: `goMap`/`leaveProject` set `userLeftProjectRef` and
     // leave `activeSiteId` alone (the Leaflet keep-alive optimization), so the URL still names
     // the just-left project until effect (2) below writes the clear. If THIS effect runs before
@@ -844,7 +899,10 @@ export default function App({
             // Either not signed in (no cloud to check), or already retried once and it's still
             // absent — say so out loud and drop to the map. Never leave the OLD project on screen
             // under a URL naming a different one (that is what made repro B invisible).
-            setRouteMissing(projectId); setActiveSiteId(null); setMode("map");
+            // (A session that just died is neither of those: the route stays, the Shell says "You were signed out",
+            // and signing back in reopens this plan — NEW-1 point 5.)
+            if (sessionLostRef.current) { setActiveSiteId(null); setMode("map"); }
+            else { setRouteMissing(projectId); setActiveSiteId(null); setMode("map"); }
           }
         }
       } else { setRouteMissing(null); routeMissingRetryRef.current.delete(projectId); if (mode !== "plan") setMode("plan"); }
@@ -928,7 +986,7 @@ export default function App({
   // New plan on the SAME site: keep the location (parcel, origin, aerial) but
   // start the layout fresh. This is the iteration workflow — explore another
   // layout without leaving the parcel.
-  const newPlanSameParcel = (srcId) => {
+  const newPlanSameParcel = async (srcId) => {
     const src = loadSite(srcId);
     if (!src) return;
     const group = groupOf(src);
@@ -942,16 +1000,17 @@ export default function App({
     // site-plan overlays that are specific to the SOURCE layout — deliberately does NOT carry
     // over, matching the pre-B848736 behavior (only `underlay` ever crossed this boundary).
     const srcMapRef = (src.sheetOverlays || []).find(isPinnedMapReference) || null;
-    saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
+    const mint = await mintSave(id, "plan", "The new plan", () => saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
       origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {},
-      sheetOverlays: srcMapRef ? [srcMapRef] : [], teamId });
+      sheetOverlays: srcMapRef ? [srcMapRef] : [], teamId }));
+    if (!mint.ok) { raiseMintRefused(mint.message, () => newPlanSameParcel(srcId)); return false; }   // NEW-1: nothing saved → no push, no refresh, no navigation
     pushLoud(id, "The new plan"); // NEW-F6
     refreshSites();
-    goPlan(id);
+    return goPlanChecked(id, "newPlanSameParcel");
   };
 
   // Duplicate this plan (layout and all) as another plan of the same site.
-  const duplicatePlan = (srcId) => {
+  const duplicatePlan = async (srcId) => {
     const src = loadSite(srcId);
     if (!src) return;
     const group = groupOf(src);
@@ -959,11 +1018,14 @@ export default function App({
     // Inherit from the PROJECT (not from `src`, whose in-memory copy can predate a share/unshare).
     // A copy is also a fresh plan, so it must never carry the source's lock — the owner locks a
     // specific plan, not a lineage.
-    saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)`,
-      teamId: resolveNewPlanTeam(loadPlansOfGroup(group)).teamId, shareLocked: false });
+    const mint = await mintSave(id, "copy", "The duplicated plan", () => saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)`,
+      teamId: resolveNewPlanTeam(loadPlansOfGroup(group)).teamId, shareLocked: false }));
+    // NEW-1 (2026-11-03): a refused copy exists nowhere. No cloud push ("saved on this device" would be a lie), no list churn, and no navigation into an
+    // id with no record (that id used to reach the URL as the PROJECT id, and a reload said "This project doesn't exist"). The original plan stays open.
+    if (!mint.ok) { raiseMintRefused(mint.message, () => duplicatePlan(srcId)); return false; }
     pushLoud(id, "The duplicated plan"); // NEW-F6
     refreshSites();
-    goPlan(id);
+    return goPlanChecked(id, "duplicatePlan");
   };
 
   // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
@@ -1017,7 +1079,12 @@ export default function App({
       return res;
     });
   };
-  const renamePlan = (id, name) => { saveSite({ id, name }); pushLoud(id, "The plan rename"); refreshSites(); }; // NEW-F6
+  const renamePlan = (id, name) => { // NEW-F6
+    /* NEW-1 (2026-11-03): a rename the device refused is not "saved on this device" — say so and push nothing. A false from the resurrection guard (a
+     * deleted plan) carries no refusal and keeps the old quiet path. */
+    if (!saveSite({ id, name }) && lastSaveRefusal(id)) { raiseMintRefused(saveRefusedMessage("The plan rename", lastSaveRefusal(id).reason), () => renamePlan(id, name)); refreshSites(); return; }
+    pushLoud(id, "The plan rename"); refreshSites();
+  };
 
   // The planner dropped a blank, unedited site (never saved). Forget it.
   const handleSiteDropped = (id) => { if (id === activeSiteId) setActiveSiteId(null); refreshSites(); };
@@ -1076,7 +1143,8 @@ export default function App({
     // NEW-F6 — save every plan locally first, then aggregate the pushes to ONE banner.
     const groupId = groupOf(rec);
     const plans = loadPlansOfGroup(groupId);
-    plans.forEach((s) => saveSite({ id: s.id, status }));
+    const refusedPlan = plans.filter((s) => !saveSite({ id: s.id, status }) && lastSaveRefusal(s.id))[0];   // filter, not find: every plan must still be attempted   // NEW-1 (2026-11-03): a refused device write is said, not pushed as "saved on this device"
+    if (refusedPlan) raiseMintRefused(saveRefusedMessage("The status change", lastSaveRefusal(refusedPlan.id).reason), () => setSiteStatus(id, status));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => {
         if (oks.some((ok) => !ok)) {
@@ -1112,7 +1180,8 @@ export default function App({
     const rec = loadSite(id); if (!rec) return;
     const groupId = groupOf(rec);
     const plans = loadPlansOfGroup(groupId);
-    plans.forEach((s) => saveSite({ id: s.id, ...patch }));
+    const refusedPlan = plans.filter((s) => !saveSite({ id: s.id, ...patch }) && lastSaveRefusal(s.id))[0];   // NEW-1 (2026-11-03)
+    if (refusedPlan) raiseMintRefused(saveRefusedMessage("The deal-date change", lastSaveRefusal(refusedPlan.id).reason), () => setSiteDates(id, patch));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => {
         if (oks.some((ok) => !ok)) {
@@ -1158,6 +1227,31 @@ export default function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  /* B2233521 (round 5) — THE MAP MODE IS BUILT WHEN IT IS FIRST SHOWN, NOT AT BOOT. Both modes used to be mounted from the first render so that switching back never rebuilds a
+   * map; but a page that opens straight onto a PLAN (a pasted link, a reload — the usual way in) paid for a second AppHeader, the whole MapFinder, a Leaflet map, its layers
+   * panel and a pin per saved plan, hidden, inside the cold load's biggest render (~80 ms of Leaflet marker creation alone for the owner's 143 plans, measured). Once the map
+   * has been shown it STAYS mounted exactly as before (the keep-alive this comment's original author wanted); only its first mount moves — to the first time it is wanted. */
+  const mapEverRef = useRef(mode === "map");
+  if (mode === "map") mapEverRef.current = true;
+  const mapMounted = mapEverRef.current;
+  /* ⛔ B2236000 (round 6) — the page's FIRST planner mount waits for `warmPlanForMount` (SitePlanner.jsx: the plan's road network and parcel
+   * anchors driven in slices from the device copy), so the app opened fresh onto a plan does not pay that work inside the planner's one-task
+   * first render. Only the first mount of the page: an in-session switch mounts at once, as before (its caches are warm or it is a rows
+   * seed, which warms itself — `warmSeedCaches`). Bounded: the planner mounts when the warm-up finishes, fails, or after
+   * PLANNER_WARM_CEILING_MS, whichever comes first. The framing reveal (constraint #8) is inside the planner and unchanged. */
+  const plannerMountedOnceRef = useRef(false);
+  const [plannerWarmFor, setPlannerWarmFor] = useState(null);
+  const plannerWarmPending = !!activeSiteId && !plannerMountedOnceRef.current && plannerWarmFor !== activeSiteId;
+  if (activeSiteId && !plannerWarmPending) plannerMountedOnceRef.current = true;
+  useEffect(() => {
+    if (!plannerWarmPending) return undefined;
+    let done = false;
+    const id = activeSiteId;
+    const finish = () => { if (done) return; done = true; clearTimeout(cap); startTransition(() => setPlannerWarmFor(id)); };
+    const cap = setTimeout(finish, PLANNER_WARM_CEILING_MS);
+    warmPlanForMount(id).then(finish, finish);
+    return () => { done = true; clearTimeout(cap); };
+  }, [plannerWarmPending, activeSiteId]);
   return (
     <>
       {/* Map mode — AppHeader sits above MapFinder's own toolbar.
@@ -1176,6 +1270,7 @@ export default function App({
       <div data-mode="map" data-mode-active={mode === "map" ? "true" : "false"}
         aria-hidden={mode === "map" ? undefined : "true"} inert={mode === "map" ? undefined : ""}
         style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+        {mapMounted && <>
         <AppHeader
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
@@ -1264,12 +1359,13 @@ export default function App({
             focusMissingLocations={focusMissingLocations}
           />
         </div>
+        </>}
       </div>
       {/* Plan mode — SitePlanner renders its own AppHeader (same inert/aria-hidden rule). */}
       <div data-mode="plan" data-mode-active={mode === "plan" ? "true" : "false"}
         aria-hidden={mode === "plan" ? undefined : "true"} inert={mode === "plan" ? undefined : ""}
         style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
-        {activeSiteId && (
+        {activeSiteId && !plannerWarmPending && (
           <SitePlanner
             key={`${activeSiteId}:${loadEpoch}`}
             active={mode === "plan" && isActive}

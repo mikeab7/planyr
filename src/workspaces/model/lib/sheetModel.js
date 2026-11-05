@@ -144,6 +144,7 @@ export function createSheet() {
     formats: {},     // "colId:rowIndex" -> a number-format token, or absent = General
     styles: {},      // "colId:rowIndex" -> a per-cell look object (font/fill/alignment/border), absent = plain
     rowHeights: {},  // rowIndex -> px override, absent = DEFAULT_ROW_H
+    hiddenRows: {},  // rowIndex -> true for a row hidden by Ctrl+9 / the header menu (a hidden COLUMN is `column.hidden`)
     freezeRows: 0,   // count of frozen TOP rows
     freezeCols: 0,   // count of frozen LEFT columns
     merges: [],      // [{ r, c1Id, c2Id }] — horizontal-only spans, see file header
@@ -206,6 +207,7 @@ export function migrateSheet(raw) {
       ? raw.merges.filter((m) => m && typeof m.r === "number" && typeof m.c1Id === "string" && typeof m.c2Id === "string")
       : [];
     const rowHeights = raw.rowHeights && typeof raw.rowHeights === "object" ? { ...raw.rowHeights } : {};
+    const hiddenRows = raw.hiddenRows && typeof raw.hiddenRows === "object" ? { ...raw.hiddenRows } : {};
     const freezeRows = Number.isInteger(raw.freezeRows) && raw.freezeRows >= 0 ? raw.freezeRows : 0;
     const freezeCols = Number.isInteger(raw.freezeCols) && raw.freezeCols >= 0 ? raw.freezeCols : 0;
     // Stage 3 pt 2 — a pre-named-ranges blob simply has no `names` at all, same defaulting
@@ -219,7 +221,7 @@ export function migrateSheet(raw) {
     const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
       rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats, styles,
-      rowHeights, freezeRows, freezeCols, merges, names, dismissedInconsistencies, unsupportedFormulas,
+      rowHeights, hiddenRows, freezeRows, freezeCols, merges, names, dismissedInconsistencies, unsupportedFormulas,
     };
     // Always float capacity up to the current floor — never a stored ceiling. Reuses
     // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
@@ -229,14 +231,29 @@ export function migrateSheet(raw) {
   return createSheet();
 }
 
-/** Two ALREADY-MIGRATED sheets carry meaningfully different content (B891184-FOLLOWUP-2).
- *  Used to detect a cross-device divergence at load: "local always wins on load" (ModelApp.jsx)
- *  means a device with its own older local copy never shows what the cloud actually holds, so
- *  without this check its next edit saves cleanly (no CAS conflict — nothing raced) and
- *  silently overwrites another device's work. Both inputs are the same post-migration shape, so
- *  a plain structural compare is exact and needs no semantic diff. */
+/** JSON text with every object's keys in sorted order (arrays keep theirs — array order IS content).
+ *  ⛔ B2450528 — `model_sheets.data` is jsonb, and Postgres jsonb does NOT keep an object's key order
+ *  (it re-orders by key length, then bytewise), while the device copy keeps typing order. A plain
+ *  `JSON.stringify` compare therefore read IDENTICAL content as different the moment a cell key was
+ *  added anywhere but last in jsonb order — the false "different copy in the cloud" bar. Compare
+ *  through this, never through raw stringify, whenever either side may have been through jsonb. */
+export function canonicalJson(value) {
+  return JSON.stringify(value, (_k, v) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const out = {};
+      for (const key of Object.keys(v).sort()) out[key] = v[key];
+      return out;
+    }
+    return v;
+  });
+}
+
+/** Two ALREADY-MIGRATED sheets/workbooks carry meaningfully different content (B891184-FOLLOWUP-2).
+ *  Used to detect a cross-device divergence at load. Key-ORDER independent (see `canonicalJson`):
+ *  only a real content difference counts. Both inputs are the same post-migration shape, so a
+ *  structural compare is exact and needs no semantic diff. */
 export function sheetsDiverge(a, b) {
-  return JSON.stringify(a) !== JSON.stringify(b);
+  return canonicalJson(a) !== canonicalJson(b);
 }
 
 export const cellKey = (colId, rowIndex) => `${colId}:${rowIndex}`;
@@ -386,6 +403,94 @@ export function setRowHeight(sheet, rowIndex, height) {
   return { ...sheet, rowHeights };
 }
 
+/** Paste's formatting write: REPLACE (not merge) the look and number format of each listed cell —
+ *  `style` null / `format` null clears it. One pass, one new `styles` / `formats` object, so a
+ *  whole-sheet paste is not N object copies. Cells outside the sheet's columns are skipped. */
+export function setCellLooks(sheet, entries) {
+  let styles = sheet.styles, formats = sheet.formats;
+  let sChanged = false, fChanged = false;
+  for (const { r, c, style, format } of entries) {
+    const col = sheet.columns[c];
+    if (!col) continue;
+    const key = cellKey(col.id, r);
+    const hasStyle = style && Object.keys(style).length > 0;
+    if (hasStyle) {
+      if (JSON.stringify(styles[key]) !== JSON.stringify(style)) { if (!sChanged) styles = { ...styles }; styles[key] = style; sChanged = true; }
+    } else if (key in styles) { if (!sChanged) styles = { ...styles }; delete styles[key]; sChanged = true; }
+    if (format) {
+      if (formats[key] !== format) { if (!fChanged) formats = { ...formats }; formats[key] = format; fChanged = true; }
+    } else if (key in formats) { if (!fChanged) formats = { ...formats }; delete formats[key]; fChanged = true; }
+  }
+  return sChanged || fChanged ? { ...sheet, styles, formats } : sheet;
+}
+
+/** Drop every horizontal merge that touches the rectangle (a paste replaces the destination's merges). */
+export function removeMergesIn(sheet, r1, r2, c1, c2) {
+  const lo = Math.min(r1, r2), hi = Math.max(r1, r2), cl = Math.min(c1, c2), ch = Math.max(c1, c2);
+  const merges = (sheet.merges || []).filter((m) => {
+    if (m.r < lo || m.r > hi) return true;
+    const i1 = sheet.columns.findIndex((cc) => cc.id === m.c1Id);
+    const i2 = sheet.columns.findIndex((cc) => cc.id === m.c2Id);
+    return i2 < cl || i1 > ch;
+  });
+  return merges.length === (sheet.merges || []).length ? sheet : { ...sheet, merges };
+}
+
+/** Empty a rectangle completely — contents, look, number format, merges and the per-cell flags that
+ *  belonged to them. This is what the SOURCE of a cut-paste becomes (Excel moves the formatting too). */
+export function clearCellRange(sheet, r1, r2, c1, c2) {
+  const lo = Math.max(0, Math.min(r1, r2)), hi = Math.max(r1, r2);
+  const cl = Math.max(0, Math.min(c1, c2)), ch = Math.min(sheet.columns.length - 1, Math.max(c1, c2));
+  const cells = { ...sheet.cells }, formats = { ...sheet.formats }, styles = { ...sheet.styles };
+  const dismissed = { ...(sheet.dismissedInconsistencies || {}) }, unsupported = { ...(sheet.unsupportedFormulas || {}) };
+  let changed = false;
+  for (let c = cl; c <= ch; c++) {
+    const col = sheet.columns[c];
+    if (!col) continue;
+    for (let r = lo; r <= hi; r++) {
+      const key = cellKey(col.id, r);
+      for (const bag of [cells, formats, styles, dismissed, unsupported]) if (key in bag) { delete bag[key]; changed = true; }
+    }
+  }
+  const merged = removeMergesIn(sheet, lo, hi, cl, ch);
+  if (!changed && merged === sheet) return sheet;
+  return { ...merged, cells, formats, styles, dismissedInconsistencies: dismissed, unsupportedFormulas: unsupported };
+}
+
+/** Hide (`hidden` true) or unhide rows `r1..r2` — Ctrl+9 / Ctrl+Shift+9 and the row-header menu.
+ *  The rows keep their cells, formulas and height; only the display skips them. A no-op returns
+ *  `sheet` unchanged so it mints no undo frame. */
+export function setRowsHidden(sheet, r1, r2, hidden) {
+  const lo = Math.max(0, Math.min(r1, r2)), hi = Math.min(sheet.rowCount - 1, Math.max(r1, r2));
+  const next = { ...(sheet.hiddenRows || {}) };
+  let changed = false;
+  for (let r = lo; r <= hi; r++) {
+    if (hidden && !next[r]) { next[r] = true; changed = true; }
+    else if (!hidden && next[r]) { delete next[r]; changed = true; }
+  }
+  return changed ? { ...sheet, hiddenRows: next } : sheet;
+}
+
+/** Hide / unhide columns `c1..c2` (Ctrl+0 / Ctrl+Shift+0). The column's stored width is kept, so
+ *  unhiding restores it. Never hides the last visible column (an all-hidden sheet has nothing to
+ *  click to bring anything back). */
+export function setColumnsHidden(sheet, c1, c2, hidden) {
+  const lo = Math.max(0, Math.min(c1, c2)), hi = Math.min(sheet.columns.length - 1, Math.max(c1, c2));
+  let changed = false;
+  const columns = sheet.columns.map((col, i) => {
+    if (i < lo || i > hi) return col;
+    if (hidden && !col.hidden) { changed = true; return { ...col, hidden: true }; }
+    if (!hidden && col.hidden) { changed = true; const { hidden: _h, ...rest } = col; return rest; }
+    return col;
+  });
+  if (!changed) return sheet;
+  if (hidden && columns.every((col) => col.hidden)) return sheet;
+  return { ...sheet, columns };
+}
+
+export const isRowHidden = (sheet, r) => !!(sheet.hiddenRows && sheet.hiddenRows[r]);
+export const isColumnHidden = (sheet, c) => !!(sheet.columns[c] && sheet.columns[c].hidden);
+
 /** Freeze the top `rows` rows and/or the left `cols` columns — Excel's three menu actions
  *  (Freeze Top Row / Freeze First Column / Freeze Panes at the current selection) all reduce to
  *  setting this one pair of counts; the CALLER decides what counts to pass (SheetView/ModelApp),
@@ -496,6 +601,22 @@ function walkAndPatchStyles(sheet, r1, r2, c1, c2, patchFor) {
  *  can't express. */
 export function setCellStyle(sheet, r1, r2, c1, c2, patch) {
   return walkAndPatchStyles(sheet, r1, r2, c1, c2, () => patch);
+}
+
+/** Excel's own ceiling for a cell's indent level. */
+export const MAX_INDENT = 15;
+
+/** Increase / Decrease Indent — each cell in the range steps from ITS OWN level (Excel's rule), not from
+ *  the active cell's: a selection of an indented and an unindented label keeps their difference. 0 is stored
+ *  as "unset" (the same null-means-unset convention every other style key uses), and the level is capped at
+ *  MAX_INDENT. A cell already at the limit is a no-op, so a range that cannot move mints no history entry. */
+export function adjustIndent(sheet, r1, r2, c1, c2, delta) {
+  return walkAndPatchStyles(sheet, r1, r2, c1, c2, (r, c) => {
+    const col = sheet.columns[c];
+    const cur = (col && sheet.styles[cellKey(col.id, r)]?.indent) || 0;
+    const next = Math.max(0, Math.min(MAX_INDENT, cur + delta));
+    return next === cur ? null : { indent: next || null };
+  });
 }
 
 /** Border — the Borders group. `edges` is the subset of top/right/bottom/left to touch;
@@ -668,14 +789,17 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
 
   const rows = [];
   for (let r = rr1; r <= rr2; r++) {
-    const rowCells = {}, rowFormats = {}, rowStyles = {};
+    const rowCells = {}, rowFormats = {}, rowStyles = {}, rowUnsupported = {}, rowDismissed = {};
     for (const c of sheet.columns) {
       const key = cellKey(c.id, r);
       if (Object.prototype.hasOwnProperty.call(sheet.cells, key)) rowCells[c.id] = sheet.cells[key];
       if (Object.prototype.hasOwnProperty.call(sheet.formats, key)) rowFormats[c.id] = sheet.formats[key];
       if (Object.prototype.hasOwnProperty.call(sheet.styles, key)) rowStyles[c.id] = sheet.styles[key];
+      // NEW-4 — both maps are keyed colId:row like cells, so they ride in the row bundle too.
+      if (sheet.unsupportedFormulas && Object.prototype.hasOwnProperty.call(sheet.unsupportedFormulas, key)) rowUnsupported[c.id] = sheet.unsupportedFormulas[key];
+      if (sheet.dismissedInconsistencies && Object.prototype.hasOwnProperty.call(sheet.dismissedInconsistencies, key)) rowDismissed[c.id] = sheet.dismissedInconsistencies[key];
     }
-    rows.push({ cells: rowCells, formats: rowFormats, styles: rowStyles, height: sheet.rowHeights[r], sortKey: sortKeyFor(sheet.cells[cellKey(col.id, r)]) });
+    rows.push({ cells: rowCells, formats: rowFormats, styles: rowStyles, unsupported: rowUnsupported, dismissed: rowDismissed, height: sheet.rowHeights[r], sortKey: sortKeyFor(sheet.cells[cellKey(col.id, r)]) });
   }
   const dir = direction === "desc" ? -1 : 1;
   // Blank-last is a property of the DATA, not the direction — it must NOT be inside the part of
@@ -689,6 +813,7 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
   });
 
   const cells = { ...sheet.cells }, formats = { ...sheet.formats }, styles = { ...sheet.styles }, rowHeights = { ...sheet.rowHeights };
+  const unsupportedFormulas = { ...sheet.unsupportedFormulas }, dismissedInconsistencies = { ...sheet.dismissedInconsistencies };
   for (let i = 0; i < sorted.length; i++) {
     const r = rr1 + i, row = sorted[i];
     for (const c of sheet.columns) {
@@ -696,10 +821,12 @@ export function sortRange(sheet, r1, r2, colIndex, direction) {
       if (Object.prototype.hasOwnProperty.call(row.cells, c.id)) cells[key] = row.cells[c.id]; else delete cells[key];
       if (Object.prototype.hasOwnProperty.call(row.formats, c.id)) formats[key] = row.formats[c.id]; else delete formats[key];
       if (Object.prototype.hasOwnProperty.call(row.styles, c.id)) styles[key] = row.styles[c.id]; else delete styles[key];
+      if (Object.prototype.hasOwnProperty.call(row.unsupported, c.id)) unsupportedFormulas[key] = row.unsupported[c.id]; else delete unsupportedFormulas[key];
+      if (Object.prototype.hasOwnProperty.call(row.dismissed, c.id)) dismissedInconsistencies[key] = row.dismissed[c.id]; else delete dismissedInconsistencies[key];
     }
     if (row.height != null) rowHeights[r] = row.height; else delete rowHeights[r];
   }
-  return { ...sheet, cells, formats, styles, rowHeights };
+  return { ...sheet, cells, formats, styles, rowHeights, unsupportedFormulas, dismissedInconsistencies };
 }
 function sortKeyFor(raw) {
   if (raw == null || raw === "") return { kind: "blank", v: null };
@@ -868,9 +995,10 @@ export function insertRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     unsupportedFormulas[cellKey(colId, r >= at ? r + 1 : r)] = v;
   }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, 1);
+  const hiddenRows = relocateRowMap(sheet.hiddenRows || {}, at, 1);
   const merges = relocateMergeRows(sheet.merges, at, 1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, 1);
-  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, hiddenRows, merges, names, rowCount: sheet.rowCount + 1 };
 }
 
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
@@ -925,9 +1053,10 @@ export function deleteRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     unsupportedFormulas[cellKey(colId, r > at ? r - 1 : r)] = v;
   }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, -1);
+  const hiddenRows = relocateRowMap(sheet.hiddenRows || {}, at, -1);
   const merges = relocateMergeRows(sheet.merges, at, -1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, -1);
-  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, hiddenRows, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
 }
 
 /** How many rows the view should render past the real data, so typing never has to "add a

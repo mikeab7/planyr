@@ -107,9 +107,9 @@ await page.waitForTimeout(700);
 // toggles moved to the full-screen compose surface.
 await page.locator('button:has-text("Continue ➜")').first().click({ timeout: 8000 }).catch(() => {});
 await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 }).catch(() => {});
-// NOTE: the compose "Map / GIS layers" toggle is the renamed B765985 successor of the old
+// NOTE: the compose "Map layers" toggle is the renamed B765985 successor of the old
 // floating-bar "Print map layers" checkbox this harness originally looked for.
-const cbVisible = await page.locator('[data-testid="print-compose"] label:has-text("Map / GIS layers")').first().isVisible().catch(() => false);
+const cbVisible = await page.locator('[data-testid="print-compose"] label:has-text("Map layers")').first().isVisible().catch(() => false);
 await page.evaluate(() => {
   window.__vec = { groups: 0, paths: 0 };
   const origSA = Element.prototype.setAttribute;

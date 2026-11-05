@@ -399,6 +399,41 @@ Use `SPACE`/`FONT_SIZE`/`CONTROL_H` for a new gap/margin/padding/height/font-siz
 in the app; use `PAD`/`FONT` when you're building a `controls.jsx` primitive itself or something
 that needs to match one exactly.
 
+## Cursor convention (owner-approved 2026-10-20, B2383552)
+
+Every cursor in the app follows this table. **Callers never set a disabled cursor themselves** — the
+stylesheet does (`button:disabled … { cursor: default !important }` in `src/index.css`, which beats an inline
+`cursor: "pointer"`), and the primitives in `controls.jsx` branch on `disabled` too.
+
+| Situation | Cursor |
+|---|---|
+| Idle surface / plain text | default arrow |
+| Anything clickable (button, link, row, tab, menu item, toggle, checkbox AND its native input, native select, range) | `pointer` |
+| Clickable but not draggable canvas object (a LOCKED element you can still select) | `pointer` — locked things never show `move` |
+| Draggable object that moves (element body, note box body, markup body, overlay body, floating-panel header) | `move` |
+| Pannable empty surface while select/pan is active | `grab`; `grabbing` while panning |
+| Pick-up / reorder grips (list grip, bottom-sheet grip, tab reorder) | `grab` at rest, `grabbing` while dragging |
+| Any armed draw / place / pick mode | `crosshair` over EVERYTHING it can be clicked on, existing objects included |
+| Vertex / node grips | `move` (one convention, roads included) |
+| Resize grips | directional (`ew`/`ns`/`nwse`/`nesw`), following the object's on-screen rotation; corner grips use the grip's own axes |
+| Splitters / dividers | `col-resize` / `row-resize` |
+| Rotate grips | the ONE shared `ROTATE_CURSOR` (`src/shared/ui/controls.jsx`) |
+| Text being edited | `text` |
+| Disabled control | `default` — never `pointer`, never `not-allowed` |
+| Disabled because it is working | `progress` (set `aria-busy="true"` on the button) |
+| Drop not allowed during a drag | set `dataTransfer.dropEffect = "none"`; set it explicitly wherever `dragover` is accepted |
+| Info icon with a tooltip | `help` |
+| Busy / loading overlays | `progress` |
+
+**During a drag the cursor stays the drag's cursor for the whole gesture**, even when the pointer leaves the grip.
+Use `pinDragCursor(cursor)` from `src/shared/ui/controls.jsx` (pins it at the document root, released on pointerup,
+pointercancel, Escape and window blur) or pointer capture on the element whose cursor should show. A cursor must
+never lie about what a press will do: if a drag pans, show `grab`; if it moves the object, `move`; if the press is
+ignored, the arrow.
+
+Guards: `test/cursorConventionShared.test.js` (source; red on the pre-fix tree) and
+`ui-audit/verify-cursors-shared.mjs` (reads `getComputedStyle(elementFromPoint(x, y)).cursor` at named states).
+
 ## The primitives (`src/shared/ui/controls.jsx`)
 
 Every one is **token-driven and theme-safe** — they reference CSS theme tokens only, never a raw
@@ -413,7 +448,9 @@ flattened into one shared color.
 |---|---|---|---|---|
 | **`Button`** (`variant`: primary/ghost/danger, `size`: sm/md/lg) | `RADIUS.control` (8) | `PAD[size]` | `FONT.sm` (10.5, `FONT_SIZE.label`) at `size="sm"`, else `FONT.md` (12, `FONT_SIZE.control`), weight 600 | `disabled` → `opacity: 0.5`. `active` renders a ghost as filled (a pressed toggle). `danger` (not active) → `--danger-text` border/text on `--surface-raised`. Rest shadow: a fixed neutral `0 1px 2px rgba(0,0,0,.05)` (token-independent by design — kills the old colored "ember" shadow bug). Hover/focus are inherited from the shared browser default plus the app's global keyboard-focus-ring rule; no per-component override. |
 | **`SegmentedControl`** (`options`, `value`, `onChange`, `accent`/`onAccent`) | shell `RADIUS.control` (8); segments `nestedIn(md, 2)` = `RADIUS.sm` (6) | `SIZE.md` height (30), segments `0 12px` | `FONT.md` (12), weight 700 active / 600 rest | The ONE "pick one of N" shape (NEW-1, food controls, B2050928): `/food`'s Map \| List and Site Plan \| Hybrid had two hand-built looks. `md` not `pill`, so it sits flush beside `Button`s and fields without a family boundary (sibling clause). Active text is the module's `--on-accent-*`. |
+| **`Switch`** (`checked`, `accent`/`onAccent`, `disabled`) | `RADIUS.pill` (999) | 28×16 track, 10 px knob | none (caller labels it) | `role="switch"` + `aria-checked`; ON = accent fill + `--on-accent` knob, OFF = `--hover-ghost` + `--text-secondary` knob. For a setting that applies the moment it flips (NEW-1, Parcel tools menu: Lock boundary / Count in yield totals / Show acreage label) — never a pending choice, never a one-shot action. |
 | **`ToggleChip`** (`active`) | `RADIUS.pill` (999) | `6px 11px` | `FONT.sm` (10.5, `FONT_SIZE.label`), weight 650 active / 500 rest | `active` → filled with `accent`/`onAccent`, border = accent. Rest → `--surface-raised` / `--border-default` / `--text-primary`. |
+| **`RangeRow`** / `RangeFields` (`label`, `min`, `max`, `onChange`) | box `RADIUS.control` (8) | `SIZE.sm` height (26), `0 8px` | `FONT.md` (12), or the host's `fontSize` | "Between A and B" (Records filters, 2026-10-23). `RangeRow` is one line — fixed-width label, Min, the word "to", Max — so a column of ranges lines up; `RangeFields` stacks the label above. A box with a value takes the `--accent` border. Digits and one point only, thousands separators at rest, `NO_AUTOFILL`. Specimens on `#/design`. |
 | **`IconButton`** (`size` px, default 30, `active`) | `RADIUS.control` (8) | square `size × size`, zero padding, centered content | n/a (icon slot) | Same active/rest fill logic as `Button`. |
 | **`Field`** | n/a (row, not a control) | `gap: 10`, `marginBottom: 8` | label `12px` (`FONT_SIZE.control`) / `--text-secondary` | A label + control row layout only — no interactive state of its own. |
 | **`Section`** (collapsible group) | `RADIUS.panel` (12) | header `10px 12px`, body `0 12px 12px` | title `10.5px` (`FONT_SIZE.label`)/700/`0.09em` uppercase `--text-secondary` | `open`/`collapsed` (▶ rotates 90°, `.18s ease`). Keyboard: `role="button"` + `tabIndex={0}` + Enter/Space toggles, `aria-expanded` published. |
@@ -486,8 +523,7 @@ notice sits is shared.
 **The boundary — read this before moving anything:** this rule governs **floating, app-level**
 notifications only. An **inline** message that belongs to one panel, row, or form field **stays
 exactly where it is** — floating it to the bottom would divorce the message from the thing it
-describes. Examples that must NOT move: `src/shared/storage/StoragePanel.jsx`'s `msg` (inside the
-panel), `src/workspaces/library/components/FolderTree.jsx`'s inline tree error row, and the inline
+describes. Examples that must NOT move: `src/workspaces/library/components/FolderTree.jsx`'s inline tree error row, and the inline
 `role="alert"` blocks in `src/workspaces/notes/` (`Notes.jsx`, `NotesTree.jsx`,
 `components/IntegrityBanner.jsx`). **`role="status"`/`role="alert"` is NOT the test —
 floating-and-app-level is.** A component can carry either role and still be correctly inline.

@@ -144,6 +144,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+import { swallowReportWrites } from "./lib/reportCleanup.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
@@ -169,6 +170,7 @@ try {
 
   async function openScreen({ width, height = 900, mode }) {
     const ctx = await browser.newContext({ viewport: { width, height } });
+    await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
     if (mode === "plan") await ctx.addInitScript(seedPlan);
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-help-report-control");
@@ -484,6 +486,7 @@ try {
 
     async function openPhoneScreen({ device, insets, disablePollMs }) {
       const ctx = await engine.newContext({ ...device, ignoreHTTPSErrors: true });
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       if (insets) await ctx.addInitScript(insetOverrideScript(...insets));
       if (disablePollMs) {
         // Defeats ONLY the CORNER_POLL_MS-cadence setInterval (never blanket — other app
@@ -693,7 +696,7 @@ try {
       { label: "map", hash: "#/site", wait: ".leaflet-container" },
       { label: "plan", hash: "#/project/s_help/site", wait: 'svg[aria-label="Site plan canvas"]', seedPlan: true },
       { label: "schedule", hash: "#/schedule", wait: null },
-      { label: "model", hash: `#/project/${modelSiteId}/model`, wait: '[data-testid="model-sheet"]', seedModel: true },
+      { label: "model", hash: `#/project/${modelSiteId}/model`, wait: 'canvas[id^="univer-sheet-main-canvas"]', seedModel: true }, // NEW-2: the Univer grid is the Spreadsheet (a canvas); the old `model-sheet` DOM grid is gone for every account
       { label: "doc-review", hash: "#/markup", wait: null },
       { label: "library", hash: "#/library", wait: null },
       { label: "notes", hash: "#/notes", wait: null },
@@ -704,6 +707,7 @@ try {
     for (const route of ROUTES) {
       for (const width of WIDTHS) {
         const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+        await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
         if (route.seedPlan) await ctx.addInitScript(seedPlan);
         if (route.seedModel) await ctx.addInitScript(seedModelSite);
         const page = await ctx.newPage();
@@ -725,8 +729,9 @@ try {
             return cs.visibility !== "hidden" && cs.display !== "none" && Number(cs.opacity || "1") > 0;
           };
           // Exclude generic full-surface containers — the Leaflet map container and the Model
-          // workspace's own sheet grid (`model-sheet`, a single roving-tabindex host for keyboard
-          // grid nav, not a discrete control) both span nearly their whole route/pane. A bbox
+          // workspace's own sheet grid (the Univer canvas host: `univer-grid`, plus the `model-sheet` testid of the
+          // retired DOM grid — a single roving-tabindex host for keyboard grid nav, not a discrete
+          // control) both span nearly their whole route/pane. A bbox
           // "overlap" with something that big is meaningless — the FAB is a small button floating
           // ON TOP of the map/canvas/sheet surface BY DESIGN everywhere in this app (confirmed
           // live on the Model route: it sits over two blank grid cells in the last visible column,
@@ -735,7 +740,10 @@ try {
           const interactive = Array.from(document.querySelectorAll('button, a[href], input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])'))
             .filter((el) => el !== fab && !fab.contains(el) && isVisible(el)
               && !el.classList.contains("leaflet-container")
-              && el.getAttribute("data-testid") !== "model-sheet");
+              && el.getAttribute("data-testid") !== "model-sheet"
+              && el.getAttribute("data-testid") !== "univer-grid"
+              // the Univer grid's drawing surface: a full-pane <canvas> (tabindex-focusable, like the old `model-sheet` host) — the FAB floats on it by design
+              && !(el.tagName === "CANVAS" && el.closest('[data-testid="univer-grid"]')));
           // getBoundingClientRect() ignores ancestor CLIPPING — a scrollable list's row scrolled
           // below its own visible scrollport (e.g. a Layers-panel legend row past the fold) still
           // reports its full, real layout rect even though nothing of it is actually painted on
@@ -804,6 +812,7 @@ try {
     }
     async function openChromeFreeScreen(ctxOpts) {
       const ctx = await browser.newContext(ctxOpts);
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       const page = await ctx.newPage();
       await assertMeasurable(page, "verify-help-report-control PART I");
       await page.goto(URL + "#/schedule", { waitUntil: "load" }); // chrome-free route — no Leaflet, no canvas, isolates the button's own sizing
@@ -870,6 +879,7 @@ try {
         };
       })();`;
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       await ctx.addInitScript(mockMatchMediaScript);
       const page = await ctx.newPage();
       await assertMeasurable(page, "verify-help-report-control PART I (live switch)");
@@ -910,6 +920,7 @@ try {
     const modulePath = resolvePath(HERE, "../src/shared/ui/cornerClearance.js");
     const moduleSource = readFileSync(modulePath, "utf8");
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
     const page = await ctx.newPage();
     await page.goto("about:blank");
 

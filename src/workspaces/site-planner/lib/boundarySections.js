@@ -42,6 +42,22 @@
  *                            notch on an 8,400 ft outline) into their sides, while a compact lot
  *                            whose every side is short keeps all of them (3% of a 1,200 ft cross
  *                            is 36 ft, under its 100 ft sides).
+ *
+ * ── NEW-1 (B2191xxx, owner: "horrible", 10-13 sections on a real parcel) ─────────────────────
+ *  SMOOTH window D = clamp(4% of the perimeter, 40 ft, 300 ft). Three rules keep digitising noise
+ *  from becoming a section:
+ *   · a vertex is a CORNER only if the path D ft behind it and D ft ahead of it (chords, not the
+ *     single edges) still turns SMOOTH_CORNER_DEG or more — a jog / slight bend / 1-2 vertex step
+ *     has a big per-vertex turn but a tiny chord turn, so it never splits a run; and of corners
+ *     closer than D along the path only the sharpest survives (a chamfer is one corner);
+ *   · a section shorter than the floor merges into its longer neighbour whatever it borders
+ *     (a 70 ft "road" sliver inside a lot line is noise, not a section) — only a stated setback
+ *     difference or the owner's own split keeps it apart;
+ *   · "a typical parcel is 3-6 sections": while more than TARGET_SECTIONS remain the sliver floor is
+ *     raised in steps (ESCALATE_FLOOR_FRACS of the perimeter) — a 12-sided outline of equal sides
+ *     (8.3% each) still stays twelve;
+ *   · neighbouring sections that border the SAME road / water / neighbour with the same setback are
+ *     one section: no "(1)/(2)" twins next to each other.
  */
 
 import { STREET_ABUT_FT } from "./setbackRoles.js";
@@ -56,6 +72,12 @@ export const CURVE_EDGE_MAX_FT = 60;
 export const MIN_SECTION_FT = 15;
 export const MIN_SECTION_PERIM_FRAC = 0.03;
 export const NEIGHBOUR_COINCIDENT_FT = 3;
+export const TARGET_SECTIONS = 6;
+export const ESCALATE_FLOOR_FRACS = [0.045, 0.06, 0.075];
+export const SMOOTH_MIN_FT = 40;
+export const SMOOTH_MAX_FT = 300;
+export const SMOOTH_PERIM_FRAC = 0.04;
+export const SMOOTH_CORNER_DEG = 25;
 const ABUT_FRACTION = 0.5;
 const NEIGHBOUR_FRACTION = 0.6;
 const STRIDE_FT = 25;
@@ -231,11 +253,52 @@ function geometry(points) {
   }
   const curveVertex = new Array(n).fill(false);
   for (const g of curveGroups) for (let i = 1; i < g.length; i++) curveVertex[g[i]] = true; // vertex g[i] = start of edge g[i]
-  return { n, len, turns, curveGroups, curveVertex };
+  return { n, len, turns, curveGroups, curveVertex, chord: chordTurns(points, len) };
+}
+
+/* Point at path distance `d` from vertex `v` (forward = +, backward = −), along the closed ring. */
+function pointAlong(points, len, v, d) {
+  const n = points.length;
+  let rem = Math.abs(d);
+  if (d >= 0) {
+    let i = v;
+    for (let k = 0; k < n * 2; k++) {
+      const l = len[i % n];
+      if (rem <= l || !(l > 0)) { const a = points[i % n], b = points[(i + 1) % n]; const t = l > 0 ? rem / l : 0; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; }
+      rem -= l; i++;
+    }
+  } else {
+    let i = (v - 1 + n) % n;
+    for (let k = 0; k < n * 2; k++) {
+      const l = len[i];
+      if (rem <= l || !(l > 0)) { const a = points[i], b = points[(i + 1) % n]; const t = l > 0 ? rem / l : 0; return { x: b.x + (a.x - b.x) * t, y: b.y + (a.y - b.y) * t }; }
+      rem -= l; i = (i - 1 + n) % n;
+    }
+  }
+  return points[v];
+}
+
+/* Per-vertex turn of the SMOOTHED path (chord D ft back vs chord D ft ahead), degrees 0..180. */
+function chordTurns(points, len) {
+  const n = points.length;
+  const perim = len.reduce((s, l) => s + l, 0);
+  const D = Math.min(SMOOTH_MAX_FT, Math.max(SMOOTH_MIN_FT, SMOOTH_PERIM_FRAC * perim));
+  const turn = new Array(n).fill(0);
+  for (let v = 0; v < n; v++) {
+    const p = points[v], a = pointAlong(points, len, v, -D), b = pointAlong(points, len, v, D);
+    const ax = p.x - a.x, ay = p.y - a.y, bx = b.x - p.x, by = b.y - p.y;
+    if (!(hyp(ax, ay) > 1e-9) || !(hyp(bx, by) > 1e-9)) continue;
+    let d = ((Math.atan2(by, bx) - Math.atan2(ay, ax)) * 180) / Math.PI;
+    while (d > 180) d -= 360;
+    while (d <= -180) d += 360;
+    turn[v] = Math.abs(d);
+  }
+  return { turn, D };
 }
 
 function isCorner(v, g) {
   if (g.curveVertex[v]) return false;
+  if (g.chord.turn[v] < SMOOTH_CORNER_DEG) return false; // a jog / slight bend: big single-vertex turn, tiny smoothed turn
   const t = Math.abs(g.turns[v]);
   if (t >= CORNER_TURN_DEG) return true;
   const pe = (v - 1 + g.n) % g.n;
@@ -277,11 +340,27 @@ function breakVertices(points, opts, A) {
   const forced = new Set(canon(opts.breaks).filter((v) => v < n));
   const joined = new Set(canon(opts.joins).filter((v) => v < n));
   const isBrk = new Array(n).fill(false);
+  // corners within one smoothing window of a sharper corner are the same corner (a chamfer is one corner)
+  const cornerAt = new Array(n).fill(false);
+  for (let v = 0; v < n; v++) cornerAt[v] = isCorner(v, g);
+  const D = g.chord.D;
+  const posAt = []; let acc = 0;
+  for (let v = 0; v < n; v++) { posAt.push(acc); acc += g.len[v]; }
+  const ringDist = (a, b) => { const d = Math.abs(posAt[a] - posAt[b]); return Math.min(d, acc - d); };
+  const keep = cornerAt.slice();
+  for (let v = 0; v < n; v++) {
+    if (!cornerAt[v]) continue;
+    for (let w = 0; w < n; w++) {
+      if (w === v || !cornerAt[w] || ringDist(v, w) > D) continue;
+      const tv = g.chord.turn[v], tw = g.chord.turn[w];
+      if (tw > tv + 1e-9 || (Math.abs(tw - tv) <= 1e-9 && w < v)) { keep[v] = false; break; }
+    }
+  }
   for (let v = 0; v < n; v++) {
     if (forced.has(v)) { isBrk[v] = true; continue; }
     if (joined.has(v)) continue;
     const pe = (v - 1 + n) % n;
-    isBrk[v] = isCorner(v, g) || val[pe] !== val[v] || border[pe].key !== border[v].key;
+    isBrk[v] = keep[v] || val[pe] !== val[v] || border[pe].key !== border[v].key;
   }
   return { isBrk, forced };
 }
@@ -308,28 +387,55 @@ function buildSections(points, opts) {
     return { len: sum(edges, (e) => g.len[e]), uniform, v: val[edges[0]], key };
   };
 
-  // merge tiny sections into the longer compatible neighbour (never across a user break)
-  const floorFt = Math.max(MIN_SECTION_FT, MIN_SECTION_PERIM_FRAC * sum(g.len, (l) => l));
+  // merge tiny sections into a compatible neighbour (never across a user break). A typical parcel is
+  // a handful of sections: while more than TARGET_SECTIONS remain, the "tiny" floor is raised a notch
+  // (never past MAX_FLOOR_FRAC of the perimeter, so a 12-sided outline of equal sides stays 12).
+  const perimFt = sum(g.len, (l) => l);
+  const mergeTiny = (floorFt) => {
+    for (;;) {
+      if (brk.length < 2) return;
+      const secs = brk.map((_, k) => ({ k, ...stats(edgesOf(k, brk)) }));
+      const tiny = secs.filter((s) => s.len < floorFt).sort((a, b) => a.len - b.len);
+      let merged = false;
+      for (const t of tiny) {
+        const m = brk.length;
+        const prev = secs[(t.k - 1 + m) % m], next = secs[(t.k + 1) % m];
+        // a sliver merges into a neighbour whatever it borders; only a stated setback difference or the
+        // owner's own split keeps it apart. A neighbour sharing its border is preferred, then the longer one.
+        const ok = (nb, sepVertex) =>
+          nb.k !== t.k && !forced.has(sepVertex) && nb.uniform && t.uniform && nb.v === t.v;
+        const cands = [];
+        if (ok(prev, brk[t.k])) cands.push({ nb: prev, drop: brk[t.k] });
+        if (ok(next, brk[(t.k + 1) % m])) cands.push({ nb: next, drop: brk[(t.k + 1) % m] });
+        if (!cands.length) continue;
+        cands.sort((a, b) => (b.nb.key === t.key) - (a.nb.key === t.key) || b.nb.len - a.nb.len);
+        brk = brk.filter((v) => v !== cands[0].drop);
+        merged = true;
+        break;
+      }
+      if (!merged) return;
+    }
+  };
+  mergeTiny(Math.max(MIN_SECTION_FT, MIN_SECTION_PERIM_FRAC * perimFt));
+  for (const frac of ESCALATE_FLOOR_FRACS) {
+    if (brk.length <= TARGET_SECTIONS) break;
+    mergeTiny(frac * perimFt);
+  }
+
+  // neighbours that border the SAME road / water / neighbour with the same stated setback are ONE section
   for (;;) {
     if (brk.length < 2) break;
     const secs = brk.map((_, k) => ({ k, ...stats(edgesOf(k, brk)) }));
-    const tiny = secs.filter((s) => s.len < floorFt).sort((a, b) => a.len - b.len);
-    let merged = false;
-    for (const t of tiny) {
-      const m = brk.length;
-      const prev = secs[(t.k - 1 + m) % m], next = secs[(t.k + 1) % m];
-      const ok = (nb, sepVertex) =>
-        nb.k !== t.k && !forced.has(sepVertex) && nb.uniform && t.uniform && nb.v === t.v && nb.key === t.key;
-      const cands = [];
-      if (ok(prev, brk[t.k])) cands.push({ nb: prev, drop: brk[t.k] });
-      if (ok(next, brk[(t.k + 1) % m])) cands.push({ nb: next, drop: brk[(t.k + 1) % m] });
-      if (!cands.length) continue;
-      cands.sort((a, b) => b.nb.len - a.nb.len);
-      brk = brk.filter((v) => v !== cands[0].drop);
-      merged = true;
-      break;
+    let hit = null;
+    for (let k = 0; k < secs.length && hit == null; k++) {
+      const a = secs[k], b = secs[(k + 1) % secs.length];
+      const sep = brk[(k + 1) % brk.length];
+      if (a.k === b.k || forced.has(sep) || !a.uniform || !b.uniform || a.v !== b.v) continue;
+      if (a.key == null || a.key === "open" || a.key !== b.key) continue;
+      hit = sep;
     }
-    if (!merged) break;
+    if (hit == null) break;
+    brk = brk.filter((v) => v !== hit);
   }
 
   const ccw = signedArea(points) > 0;

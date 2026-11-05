@@ -79,7 +79,7 @@ const run = async (h, demoId, shot) => {
   const afterBtn = await page.locator('[data-testid="split-parking"]').count();
   const els = await page.evaluate((id) => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const site = all[id];
       return (site && site.els) || [];
     } catch (e) { return []; }

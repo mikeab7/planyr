@@ -24,7 +24,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const PAVING = "#d6d1c7"; // truck-court canvas fill (planStyle TYPE.paving), lower-cased
+const PAVING = "#d5d9de"; // truck-court canvas fill (planStyle TYPE.paving), lower-cased
 
 // A full dock-zone stack (court → trailer → buffer) bonded to building `b1` on `side`,
 // positioned roughly where `layoutZone` would put it (exact geometry is irrelevant to the

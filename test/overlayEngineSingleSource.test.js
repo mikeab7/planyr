@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { PLANNER_EXTRACTED } from "./helpers/plannerSource.js";
 
 /* NEW-1 — ONE implementation of each overlay concern, with both surfaces importing it. This sweeps
  * src/ for a second copy creeping back: no module at the old paths, no private Procrustes /
@@ -43,7 +44,7 @@ describe("overlay engine — single source of truth", () => {
     const homes = files.filter((p) => /export function rotateOffset\b/.test(text(p))).map(rel);
     expect(homes).toEqual(["shared/overlay/overlayPlacement.js"]);
     // …and the surfaces' own placement code does not re-derive it from overlay.rotation.
-    for (const f of ["workspaces/site-planner/SitePlanner.jsx", "workspaces/site-planner/lib/overlayPlacementHandles.js"])
+    for (const f of ["workspaces/site-planner/SitePlanner.jsx", ...PLANNER_EXTRACTED.map((m) => `workspaces/site-planner/${m}`), "workspaces/site-planner/lib/overlayPlacementHandles.js"])
       expect(text(SRC + f), f).not.toMatch(/dx \* cos - dy \* sin/);
   });
   it("one page→canvas step, shared by the Comps/OCR and Site-tab rasterisers", () => {

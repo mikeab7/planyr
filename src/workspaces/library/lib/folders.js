@@ -40,12 +40,21 @@ async function authToken() {
 }
 
 // All of a project's folder rows (trashed included, so subtree math is correct), client-shaped.
+// ⛔ NEW-4 — answers `{ ok, rows, error }`, NEVER a bare `[]` on failure: a failed read used to be
+// indistinguishable from an empty project, so FolderTree rendered the "Create the standard
+// N-folder structure" template over a project with a real tree, and `addFolder`/`trashSubtree`
+// computed siblings / the subtree from an EMPTY list — a delete trashed only `[id]`, reported
+// `ok: true`, and left the children live under a trashed parent (treeify re-parents them to top
+// level, the Drive mirror trashes only the root). Signed out / no project is an honest empty
+// success (`skipped`), not a failure. Every caller reads `.ok` (folderLoadDecision.js applies it).
 export async function listFolders(projectId) {
-  if (!supabase || !projectId) return [];
+  if (!supabase || !projectId) return { ok: true, rows: [], skipped: true, error: null };
   const { data, error } = await supabase.from("project_folders").select(COLS).eq("project_id", projectId);
-  if (error) { console.warn("listFolders failed:", error.message); return []; }
-  return (data || []).map(toClientRow);
+  if (error) { console.warn("listFolders failed:", error.message); return { ok: false, rows: [], error: error.message }; }
+  return { ok: true, rows: (data || []).map(toClientRow), error: null };
 }
+
+const READ_REFUSED = (what, error) => ({ ok: false, error: `Couldn't read the folder tree, so ${what} wasn't done — ${error || "the cloud didn't answer"}. Try again.`, readFailed: true });
 
 // In-tab guard: the in-flight seed PROMISE per project, so a double-mount awaits the SAME seed
 // and gets its real result (returning a premature {seeded:false} let the caller then read zero
@@ -101,7 +110,9 @@ export async function ensureSeeded(projectId) {
 // Add one folder under a parent (null = top level). `order` = next among live siblings.
 export async function addFolder({ projectId, parentId = null, name }) {
   if (!supabase || !projectId) return { ok: false, skipped: true };
-  const siblings = childrenOf(await listFolders(projectId), parentId);
+  const read = await listFolders(projectId);
+  if (!read.ok) return READ_REFUSED("the folder", read.error); // NEW-4 — never act on an empty list that isn't one
+  const siblings = childrenOf(read.rows, parentId);
   const order = siblings.reduce((m, r) => Math.max(m, r.order || 0), 0) + 1;
   const id = makeId();
   const { error } = await supabase.from("project_folders").insert({
@@ -129,7 +140,9 @@ export async function moveFolder(id, newParentId = null) {
  * the enumerated confirmation the user already approved lives in the UI (planFolderDelete). */
 export async function trashSubtree(projectId, id) {
   if (!supabase || !projectId) return { ok: false, skipped: true };
-  const ids = [...subtreeIds(await listFolders(projectId), id)];
+  const read = await listFolders(projectId);
+  if (!read.ok) return READ_REFUSED("the delete", read.error); // NEW-4 — a failed read would trash only [id] and strand the children
+  const ids = [...subtreeIds(read.rows, id)];
   const { error } = await supabase.from("project_folders")
     .update({ trashed: true, updated_at: new Date().toISOString() }).in("id", ids);
   return error ? { ok: false, error: error.message } : { ok: true, ids };
@@ -201,7 +214,7 @@ export async function syncFoldersToDrive(projectId, { onProgress } = {}) {
 /* Move ONE stored file's Drive bytes to the tree folder of an EXPLICIT discipline (the refile
  * flow — the stored key keeps its original discipline forever, so the confirmed one is passed).
  * 404/503 → skipped (Drive off); tree not mirrored → server reports skipped. Never throws. */
-export async function moveDriveFileToFolder(projectId, planyrKey, discipline) {
+export async function moveDriveFileToFolder(projectId, planyrKey, discipline, folderId = null) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   const token = await authToken();
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
@@ -209,7 +222,7 @@ export async function moveDriveFileToFolder(projectId, planyrKey, discipline) {
     const resp = await fetch("/api/folders", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "file-move", projectId, planyrKey, discipline }),
+      body: JSON.stringify({ action: "file-move", projectId, planyrKey, discipline, ...(folderId ? { folderId } : {}) }),
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
@@ -326,10 +339,14 @@ export async function planFolderDelete(projectId, folderId) {
  *
  * Order matters: the Drive trash is asked for FIRST, while this project's `project_folders` rows
  * still exist server-side (the server needs them to know whether — and where — a Drive tree was
- * ever mirrored; see `purgeProjectDrive` in server/storage/folderMirror.js). The rows are then
- * deleted regardless of whether the Drive half succeeded, so a purge never again leaves orphaned
- * `project_folders` rows behind even when Drive itself couldn't be reached — the caller is told
- * about that honestly (LOUD-FAILURE) rather than left to discover it the way this bug was found.
+ * ever mirrored; see `purgeProjectDrive` in server/storage/folderMirror.js).
+ *
+ * NEW-6 (data-risk 2026-10-29) — THE ROWS ARE DELETED ONLY ONCE DRIVE IS DONE WITH. This used to delete
+ * them "regardless of whether the Drive half succeeded": on 2026-10-06 Drive answered HTTP 502, the rows
+ * were deleted anyway and a ~118-folder tree was stranded with nothing left to find it by (B2146554). The
+ * rows ARE the retry handle, so a Drive failure now leaves them in place, reports it (LOUD-FAILURE) and
+ * the purge can be run again. Drive not enabled (404/503) is not a failure — there is nothing in Drive.
+ * A server refusal because the project still has a live plan (409) leaves the rows too.
  * Signed-out / unconfigured → skipped (there is nothing to purge). */
 export async function purgeProjectFolders(projectId) {
   if (!supabase || !projectId) return { ok: true, skipped: true };
@@ -347,15 +364,19 @@ export async function purgeProjectFolders(projectId) {
       if (resp.status === 404 || resp.status === 503) drive = { ok: true, trashed: false, skipped: true }; // Drive not enabled — nothing there to trash
       else {
         let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-        drive = resp.ok && jr.ok ? jr : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+        drive = resp.ok && jr.ok ? jr : { ok: false, live: !!jr.live, error: jr.error || `HTTP ${resp.status}` };
       }
     } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }
   }
+  if (drive.ok === false) {
+    // Drive failed (or the server refused): keep every row so the cleanup stays retryable.
+    return { ok: false, rowsDeleted: false, driveTrashed: false, live: !!drive.live || undefined, error: drive.error || "Drive cleanup failed." };
+  }
   const { error: delErr } = await supabase.from("project_folders").delete().eq("project_id", projectId);
   return {
-    ok: !delErr && drive.ok !== false,
+    ok: !delErr,
     rowsDeleted: !delErr,
     driveTrashed: !!drive.trashed,
-    error: delErr ? delErr.message : (drive.ok === false ? drive.error : null),
+    error: delErr ? delErr.message : null,
   };
 }

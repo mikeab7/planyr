@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* The plan-switch first-write loss (sweep report, 2026-10-06, reproduced 3/3 signed in).
  *
@@ -170,7 +171,7 @@ describe("plan switch before the outgoing plan's writes reached the wire", () =>
 });
 
 describe("the SitePlanner teardown seam uses the draining stop", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("the element-sync effect's cleanup drains (and seeds a never-seeded engine), never a bare stop()", () => {
     const i = src.indexOf("refetchReplace(eng); }, 4000);");
     expect(i).toBeGreaterThan(0);

@@ -93,6 +93,20 @@ export async function downloadOverlayBytes(key) { return (await fetchOverlayByte
  * or null. PDFs use downloadOverlayBytes + rasterizeStoredPdf instead. */
 export async function downloadOverlayDataUrl(key) { return (await fetchOverlayDataUrl(key)).data; }
 
+/* NEW-1 (sibling overlays) — can THIS user read the object? A signed URL is only issued for an object
+ * the caller's Storage RLS lets them select, so it is a cheap read test with no download. Used before a
+ * record naming `key` is copied into another plan: a copy the user cannot read would hydrate-fail and
+ * be healed to `storageKey: null` (killing the pointer). → "ok" | "missing" (gone OR not readable by
+ * this account) | "network" (could not tell — never treated as readable). */
+export async function probeOverlayObject(key) {
+  if (!supabase || !key) return "network";
+  try {
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(key, 60);
+    if (error) return classifyStorageError(error) === "missing" ? "missing" : "network";
+    return data && data.signedUrl ? "ok" : "network";
+  } catch (_) { return "network"; }
+}
+
 /* Best-effort delete of a stored overlay object (called when an overlay is removed so the
  * cloud copy doesn't orphan). Silent on any error. */
 export async function deleteOverlayObject(key) {

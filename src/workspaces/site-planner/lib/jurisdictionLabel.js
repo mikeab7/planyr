@@ -29,17 +29,19 @@
  *   `—`  introduces the NON-GOVERNING tail: cities that merely touch the site, or that a failed
  *        containment lookup left unclassified. Nothing after this em dash regulates anything.
  *
- * ═══ THE FOUR SHAPES (the owner's, verbatim) — plus the two STATES that are not shapes ═══════════
+ * ═══ THE SHAPES (the owner's, verbatim) — plus the two STATES that are not shapes ═════════════════
  *   1. in-city       "City of Houston · Harris County"
- *   2. in-city-etj   "City of Humble · Houston ETJ · Harris County"      (in one city's limits AND
- *                                                                         inside another's ETJ)
- *   3. etj           "City of Houston ETJ · Harris County"               (NOT "Unincorporated /
+ *   2. etj           "City of Houston ETJ · Harris County"               (NOT "Unincorporated /
  *                                                                         City of Houston ETJ")
- *   4. unincorporated "Unincorporated · Harris County — touches City of Katy"
+ *   3. unincorporated "Unincorporated · Harris County — touches City of Katy"
  *
- *   Note the ETJ naming is deliberately asymmetric: the LEAD slot carries the full formal
- *   "City of X ETJ" because it is the governing authority; a SECONDARY ETJ is the qualifier
- *   "X ETJ". That is the owner's own wording in both shapes above.
+ *   ⛔ THERE IS NO "CITY + ANOTHER CITY'S ETJ" SHAPE (owner, 2026-10-28, on Concept A: "it says Houston ETJ but then also says City of
+ *   Sugar Land, and it can't be both"). An ETJ is the ground OUTSIDE every city's limits (Local Gov't Code ch. 42), so a site a city
+ *   holds has no ETJ; the old "in-city-etj" shape described two published layers overlapping, not a place. City limits outrank any
+ *   ETJ hit — `jurisdiction.js` withholds the ETJ, and `jurisdictionShapeOf` below refuses to print it even if a model hands one in.
+ *
+ *   The ETJ naming is deliberately asymmetric where an ETJ and another fact share a line: the LEAD slot carries the full formal
+ *   "City of X ETJ" because it is the governing authority; a SECONDARY ETJ (a split site's remainder) is the qualifier "X ETJ".
  *
  *   `split` and `unknown` are not among the four because they are not shapes of a settled answer —
  *   they are the two states where there ISN'T one, and they predate this item (B280704 / B276753):
@@ -57,13 +59,15 @@
  * badge strings are pinned per shape against real recorded agency answers in
  * test/jurisdictionShapes.test.js. */
 
+import { municipalDisplayName, sortMunicipalNames, isNewYorkCity, nycBoroughOf } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
+
 // The three separators, exported so no consumer re-types one and no test asserts a literal.
 export const SLOT_SEP = " · ";   // governing chain:  ·
 export const PEER_SEP = " + ";        // co-equal peers inside one slot
 export const TOUCH_SEP = " — ";  // the non-governing tail:  —
 
 export const JURISDICTION_SHAPES = Object.freeze([
-  "in-city", "in-city-etj", "etj", "unincorporated", "split", "unknown",
+  "in-city", "etj", "unincorporated", "split", "unknown",
 ]);
 
 const list = (v) => (Array.isArray(v) ? v.filter((s) => s != null && s !== "").map(String) : []);
@@ -92,7 +96,11 @@ export function jurisdictionShapeOf(model = {}) {
   const etj = list(model.etjCities);
   if (model.cityUnresolved) return "unknown";
   if (part.length) return "split";
-  if (gov.length) return etj.length ? "in-city-etj" : "in-city";
+  /* ⛔ CITY LIMITS OUTRANK ANY ETJ (owner, 2026-10-28: "it says Houston ETJ but then also says City of Sugar Land, and it can't be
+   * both"). An ETJ is the ground OUTSIDE every city's limits, so a site a city holds has no ETJ — the shape that used to be
+   * "in-city-etj" described two published layers overlapping, not a place. `jurisdiction.js` withholds the ETJ before it gets here;
+   * this is the same rule at the leaf, so a hand-built model cannot print the contradiction either. */
+  if (gov.length) return "in-city";
   // NEW-2 (DFW gaps) — a disputed strip or an SB 2038 release area is an ETJ FINDING (the ground is marked as
   // ETJ ground by the publisher), never "unincorporated" and never a plain city's ETJ.
   if (etj.length || model.etjUndetermined || list(model.etjReleased).length) return "etj";
@@ -106,6 +114,16 @@ function leadFor(model, shape) {
   const part = list(model.partialCities);
   const etj = list(model.etjCities);
   if (shape === "unknown") return "Couldn't check city limits";
+  if (shape === "split" && isMuni(model)) {
+    /* NEW-1 (New Jersey + New York) — a split in a state with NO unincorporated land and NO ETJ. A municipality that holds the WHOLE
+     * site still leads (New York's town, when a village holds only part of the site), then each partial one is named with its share.
+     * The remainder is named only when nothing else holds it — and it is never "unincorporated" or an ETJ. */
+    const bare = String(model.splitNote || "").trim().replace(/^\((.*)\)$/, "$1");
+    const note = bare ? ` (${bare})` : "";
+    const heldAll = sortMunicipalNames(gov).map(municipalDisplayName);
+    const partial = sortMunicipalNames(part).map((c) => `Part in ${municipalDisplayName(c)}${note}`);
+    return [...heldAll, ...partial, !gov.length ? model.remainderLabel : null].filter(Boolean);
+  }
   if (shape === "split") {
     /* NEW-1/NEW-2 — the split lead names the CLASS and states the share as an AREA fraction. Both
      * halves are the item: "part in City of Baytown" gave no idea whether that is a third of the
@@ -130,6 +148,12 @@ function leadFor(model, shape) {
      * same separator. Asserted in test/jurisdictionLabel.test.js. */
     return [cities, model.remainderLabel].filter(Boolean);
   }
+  if (gov.length && isMuni(model)) {
+    /* NEW-1 (New Jersey + New York) — the municipality is named with its TYPE, as the state names it ("Township of Edison",
+     * "Borough of Fort Lee"), never "City of Edison". New York's chain is several governments, each its own slot:
+     * village → town ("Village of Pleasantville · Town of Mount Pleasant"). The state is not appended. */
+    return sortMunicipalNames(gov).map(municipalDisplayName);
+  }
   if (gov.length) {
     /* NEW-1 (Georgia) — "City of X, GA". A consolidated city-county (Athens-Clarke, Augusta-Richmond,
      * Columbus-Muscogee, Macon-Bibb) is ONE government, so it is named as itself — never "City of
@@ -137,7 +161,8 @@ function leadFor(model, shape) {
     if (isGa(model)) {
       const isCons = (c) => !!(model.consolidated && sameName(c, model.consolidated.city));
       const named = gov.map((c) => (isCons(c) ? model.consolidated.label : `City of ${c}`));
-      return `${named.join(PEER_SEP)}, ${stateAbbr(model)}${gov.some(isCons) ? " (consolidated)" : ""}`;
+      /* NEW-1 (Tennessee) — a Metro government names itself ("Metro Nashville-Davidson County"), so "(consolidated)" would only repeat it. */
+      return `${named.join(PEER_SEP)}, ${stateAbbr(model)}${gov.some(isCons) && !isTn(model) ? " (consolidated)" : ""}`;
     }
     return gov.map((c) => `City of ${c}`).join(PEER_SEP);
   }
@@ -148,6 +173,12 @@ function leadFor(model, shape) {
    * for a strip two cities claim; the claimants stay in the structured result, not on the badge. */
   if (model.etjUndetermined) return "ETJ undetermined (disputed)";
   if (list(model.etjReleased).length) return releasedText(list(model.etjReleased));
+  /* NEW-1 (New Jersey + New York) — no ETJ, and NO unincorporated land. A confirmed NJ / NY point that no municipal layer named is a
+   * data gap (open water, a boundary seam), said as exactly that — never "Unincorporated", which is false in both states. */
+  if (isMuni(model)) return "No municipality found";
+  /* NEW-1 (Tennessee) — a consolidated county (Davidson, Moore, Trousdale) has NO unincorporated land: a point in it that no city
+   * polygon names is still inside the Metro government, and the lead says so ("Metro Lynchburg-Moore County, TN"). */
+  if (isTn(model) && model.consolidated) return `${model.consolidated.label}, TN`;
   /* NEW-1 (Georgia) — no ETJ exists there, and outside city limits the COUNTY governs, so the lead names
    * the county: "Unincorporated Gwinnett County, GA". Without a county (a failed lookup) it stays honest. */
   if (isGa(model)) {
@@ -164,7 +195,12 @@ function leadFor(model, shape) {
 /* NEW-1 (Georgia, California) — a state-aware model carries `state: "GA" | "CA"` (set only on a point-in-polygon
  * confirmed site). Both are "no ETJ — the county governs outside city limits" states with the same label grammar, so
  * the one predicate (still named `isGa` for the call sites above) covers both and `stateAbbr` prints which. */
-const isGa = (model) => ["GA", "CA"].includes(String(model.state || "").toUpperCase());
+const isGa = (model) => ["GA", "CA", "TN", "MS"].includes(String(model.state || "").toUpperCase()); // NEW-1 (DeSoto MS) — Mississippi: no ETJ, the county governs outside the five cities // NEW-1 — Tennessee is the same "no ETJ, the county governs" grammar
+const isTn = (model) => String(model.state || "").toUpperCase() === "TN";
+/* NEW-1 (New Jersey + New York) — municipal-form states: every acre is in a municipality, there is no ETJ, the municipality's type
+ * is part of its name, and the county slot never leads. Deliberately NOT folded into `isGa` (whose branches say "Unincorporated
+ * <County>, GA"). */
+const isMuni = (model) => ["NJ", "NY"].includes(String(model.state || "").toUpperCase());
 const stateAbbr = (model) => String(model.state || "").toUpperCase();
 const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
@@ -187,7 +223,7 @@ function etjLeadText(etj) {
  * lead (shape 3) this is empty by construction — printing it twice is the redundancy this item is
  * about, in a second costume. */
 function etjSlotFor(model, shape) {
-  const etj = list(model.etjCities);
+  const etj = shape === "in-city" ? [] : list(model.etjCities);   // a city that holds the site leaves no ETJ to name
   if (shape === "etj") {
     // NEW-2 — the lead already carries the first finding; a SECOND kind of finding gets its own slot.
     const extra = [];
@@ -232,8 +268,16 @@ export function formatJurisdictionLabel(model = {}) {
   const jur = slots.join(SLOT_SEP);
 
   const counties = list(model.counties);
+  /* NEW-1 (New York) — New York City's five boroughs are each a county, and people say the borough: "Brooklyn (Kings County)". */
+  const countyText = (c) => {
+    /* NEW-1 (Tennessee) — inside a Metro government the county slot names the Metro ("Metro Nashville-Davidson County"), also beside a
+     * satellite city such as Belle Meade, which is a city inside that county government. */
+    if (isTn(model) && model.consolidated && sameName(c, model.consolidated.county)) return model.consolidated.label;
+    const borough = isMuni(model) && String(model.state).toUpperCase() === "NY" && isNewYorkCity(list(model.governingCities)) ? nycBoroughOf(c) : null;
+    return borough ? `${borough} (${c} County)` : `${c} County`;
+  };
   const county = counties.length
-    ? counties.map((c) => `${c} County`).join(PEER_SEP)
+    ? counties.map(countyText).join(PEER_SEP)
     : model.countyUnresolved ? "Couldn't check county" : null;
 
   const isds = list(model.isds);
@@ -245,9 +289,10 @@ export function formatJurisdictionLabel(model = {}) {
    * happen for a year. */
   const adjacent = list(model.adjacentCities);
   const unclassified = list(model.unclassifiedCities);
+  const touchName = (c) => (isMuni(model) ? municipalDisplayName(c) : `City of ${c}`);
   const touches = [
-    adjacent.length ? `touches ${adjacent.map((c) => `City of ${c}`).join(", ")}` : null,
-    unclassified.length ? `touches ${unclassified.map((c) => `City of ${c}`).join(", ")}, containment unchecked` : null,
+    adjacent.length ? `touches ${adjacent.map(touchName).join(", ")}` : null,
+    unclassified.length ? `touches ${unclassified.map(touchName).join(", ")}, containment unchecked` : null,
   ].filter(Boolean);
   const tail = touches.length ? touches.join("; ") : null;
 
@@ -273,7 +318,7 @@ export function formatJurisdictionLabel(model = {}) {
  *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
  * and handed the result to `assessAdministrator` as `cityLabel` — the signal that decides whether
  * a city's floodplain ordinance is even a CANDIDATE for the finished-floor elevation. Under the
- * grammar above that parse returns "Humble · Houston ETJ" for shape 2: no rule record matches it,
+ * grammar above that parse returns a multi-slot string whenever a second governing slot exists (a limited-purpose annexation, a split's remainder): no rule record matches it,
  * the city candidate silently vanishes, and the site is priced on the county's rule, which in flat
  * Harris/Fort Bend floodplain commonly sits 1–2 ft LOWER than the city's.
  *

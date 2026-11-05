@@ -17,8 +17,8 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const ROAD_FILL = "#b9b4a8";
-const ROAD_STROKE = "#7c786d";
+const ROAD_FILL = "#9eabb7";
+const ROAD_STROKE = "#66737f";
 const DEMO_ID = "verify-v248-pdfparity";
 
 const ptsB = [{ x: 0, y: 0 }, { x: 300, y: 0 }];
@@ -125,7 +125,7 @@ for (let i = 0; i < 60 && !svgText; i++) {
 log(!!svgText, `composed print-sheet SVG captured (${svgText ? svgText.length : 0} bytes)`);
 
 if (svgText) {
-  const widths = [...svgText.matchAll(/<polyline[^>]*stroke="#7c786d"[^>]*stroke-width="([\d.]+)"/gi)]
+  const widths = [...svgText.matchAll(/<polyline[^>]*stroke="#66737f"[^>]*stroke-width="([\d.]+)"/gi)]
     .map((m) => parseFloat(m[1]));
   const uniq = [...new Set(widths.map((w) => Math.round(w * 1000) / 1000))].sort((a, b) => a - b);
   log(uniq.length >= 2, `printed sheet has ${uniq.length} distinct curb stroke widths (${uniq.join(", ")}px)`);

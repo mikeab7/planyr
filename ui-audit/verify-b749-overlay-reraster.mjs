@@ -69,7 +69,7 @@ const readImg = () => page.evaluate(() => {
 // imgW/imgH). The hi-res raster is a render override only — it must NEVER write these back.
 const readRec = () => page.evaluate(() => {
   try {
-    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = Object.values(m)[0]?.sheetOverlays?.[0];
     return o ? { x: o.x, y: o.y, ftPerPx: o.ftPerPx, imgW: o.imgW, imgH: o.imgH } : null;
   } catch (_) { return null; }

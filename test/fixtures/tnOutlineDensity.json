@@ -1,0 +1,15 @@
+{
+  "measuredOn": "2026-10-22",
+  "how": "Lot count in every 512-px Leaflet cell (the exact web-mercator grid esri-leaflet requests) across each source's county, by returnCountOnly. `busiest` is the largest cell at that zoom; `cap` is the layer's maxRecordCount. The outline layer draws ONE request per cell with no paging, so a cell over the cap is silently truncated. Regenerate with ui-audit/scan-outline-density.mjs.",
+  "sources": {
+    "tn_shelby":      { "cap": 1000, "busiest": { "16": 1411, "17": 533 } },
+    "tn_hamilton":    { "cap": 1000, "busiest": { "16": 1066, "17": 523 } },
+    "tn_hickman":     { "cap": 1000, "busiest": { "16": 852,  "17": 417 } },
+    "tn_montgomery":  { "cap": 1000, "busiest": { "16": 891,  "17": 283 } },
+    "tn_williamson":  { "cap": 2000, "busiest": { "16": 899 } },
+    "tn_rutherford":  { "cap": 2000, "busiest": { "16": 1000 } },
+    "tn_chester":     { "cap": 2000, "busiest": { "16": 553 } },
+    "tn_davidson":    { "cap": 2000, "busiest": { "17": 1078 } },
+    "tn_statewide":   { "cap": 2000, "busiest": { "16": 880 }, "note": "16 sampled city cores (Johnson City, Kingsport, Jackson, Maryville, Cleveland, Bristol, Gatlinburg, ...) on a 3x3 cell scan — not an exhaustive grid; the 86 counties' densest named place also passed in the sweep (max 800)" }
+  }
+}

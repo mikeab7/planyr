@@ -8,14 +8,18 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
+import * as planStore from "./planStore.js";
+import { plainCopy } from "./planStore.js";
+import { elsProven, recordElsProof } from "./elsProof.js";
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeManifest, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
-import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
+import { idbGet, idbPut, idbPutVerified, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { buildPurgeEvent } from "./projectPurgeRecord.js";
 import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared/projects/projectModel.js";
 // B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
 // caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
@@ -124,6 +128,11 @@ function contentSig(m, headerOnly) {
     ]),
     sigArr(m && m.sheetOverlays).slice().sort(sigById),
     sigArr(m && m.parcelDrawings).slice().sort(sigById),
+    // NEW-1 (Overlays redesign) — an overlay list's ARRAY ORDER is its draw order (lib/overlayOrder.js), so a
+    // REORDER-ONLY change is a real content change. The id-sorted copies above cannot see it (a drag reorder
+    // moves no field), which would let the boot re-push skip a reorder the cloud never received. Ids only:
+    // cheap, and the fields themselves are already in the sorted copy.
+    sigArr(m && m.sheetOverlays).map((o) => (o && o.id) ?? null),
   ]);
 }
 // NEW-1 — `opts` carries the server's view of deletion, which is what makes a delete stick across
@@ -289,7 +298,10 @@ export async function pullCloud(uid) {
   try { dead = await cloudDeletedRows(uid); } catch (e) { dead = { ok: false, supported: true, rows: [], error: (e && e.message) || "" }; }
   if (!dead.ok) reportClientEvent("cloud-read-failed", "deleted-id fetch failed (sites) — suppressing absent-row heal this pull", { error: dead.error || "" });
   let existing = {};
-  try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  /* B2236000 (round 6) — the local side of the merge is the list read's remembered MODEL of each plan (built once per stored text, from a private
+   * copy), not a fresh private copy of every plan re-modelled from scratch: `mergePulledSites` re-creates both copies anyway, and on a model
+   * whose element list is already proven clean that re-creation is cheap. The merge never mutates its inputs (it builds new objects). */
+  try { for (const [id, rec] of Object.entries(planStore.readShared(cloudKey(uid)))) existing[id] = listModelOf(rec).model; } catch (_) { try { existing = planStore.readFresh(cloudKey(uid)); } catch (_2) {} }
   const { map, toPush, deleteRetry, tombClear, tombAdd, idCollisions, groupDivergence } = mergePulledSites(existing, models, uid, readSiteTombs(uid), {
     serverDeleted: dead.ok ? dead.rows.map((r) => r && r.id).filter(Boolean) : [],
     healAbsent: dead.ok,
@@ -302,7 +314,7 @@ export async function pullCloud(uid) {
     reportClientEvent("cloud-id-collision", "two cloud rows shared one id in the same pull — the second overwrote the first in the merge", { id: c.id, groupId: c.groupId });
   for (const d of (groupDivergence || []))
     reportClientEvent("cloud-group-count-diverged", "a project's plan count shrank between the cloud fetch and the merged store", { groupId: d.groupId, cloudCount: d.cloudCount, mergedCount: d.mergedCount });
-  try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  try { planStore.writeMap(cloudKey(uid), map); } catch (_) {}
   // B1525088 (NEW-1) — a pull can rewrite names/statuses this device never wrote itself (another
   // device's edit landing here for the first time — restoreDeletedProject's own pull included), so
   // announce it on the same shared channel an identity-changing saveSite/delete already uses.
@@ -331,7 +343,7 @@ export async function pullCloud(uid) {
   try { repairSplitProjectNames(); } catch (_) {}
   return { ok: true, count: models.length };
 }
-export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
+export function clearCloudCache(uid) { try { if (uid) planStore.clearStore(cloudKey(uid)); } catch (_) {} }
 // B473 — the logged-out store (planarfit:sites:v1) is dead weight once signed in: every id there that
 // is ALSO in the signed-in cloud cache is a pure duplicate crowding the ~5MB localStorage cap (the very
 // pressure that made writeSites fail → new-site data loss). Drop ONLY ids confirmed present in the cloud
@@ -339,9 +351,9 @@ export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cl
 // (the cloud copy is authoritative). Never throws.
 export function pruneMigratedLegacy(cloudMap) {
   try {
-    const raw = localStorage.getItem(SITES_KEY);
-    if (!raw || !cloudMap) return;
-    const legacy = JSON.parse(raw) || {};
+    if (!cloudMap) return;
+    const legacy = planStore.readFresh(SITES_KEY);
+    if (!Object.keys(legacy).length) return;
     let dropped = 0;
     // B511: prune a migrated legacy site ONLY when the cloud copy is same-or-newer than the
     // on-device copy. Pruning by id-exists alone silently dropped a NEWER logged-out edit
@@ -351,7 +363,7 @@ export function pruneMigratedLegacy(cloudMap) {
     for (const id of Object.keys(legacy)) {
       if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
     }
-    if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
+    if (dropped) planStore.writeMap(SITES_KEY, legacy);
   } catch (_) {}
 }
 
@@ -362,7 +374,7 @@ export function pruneMigratedLegacy(cloudMap) {
 // which is why local-only work can look "missing" once you sign in.)
 export function legacySitesList() {
   let obj = {};
-  try { obj = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { obj = planStore.readFresh(SITES_KEY); } catch (_) {}
   return Object.values(obj).map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
@@ -376,11 +388,11 @@ export function legacySitesList() {
 export async function importLegacyIntoCloud(uid) {
   if (!uid) return { copied: 0, skipped: 0, failed: 0, error: "not signed in" };
   let legacy = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { legacy = planStore.readFresh(SITES_KEY); } catch (_) {}
   const ids = Object.keys(legacy);
   if (!ids.length) return { copied: 0, skipped: 0, failed: 0 };
   let cloud = {};
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  try { cloud = planStore.readFresh(cloudKey(uid)); } catch (_) {}
   let copied = 0, skipped = 0, failed = 0;
   for (const id of ids) {
     const local = createSiteModel(legacy[id]);
@@ -391,7 +403,7 @@ export async function importLegacyIntoCloud(uid) {
     const r = await cloudUpsert(uid, local);  // and persist to Supabase
     if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
   }
-  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  try { planStore.writeMap(cloudKey(uid), cloud); } catch (_) {}
   return { copied, skipped, failed };
 }
 
@@ -411,8 +423,8 @@ export function pendingLegacyCount(uid) {
 export function pendingLegacySites(uid) {
   if (!uid) return legacySitesList();
   let legacy = {}, cloud = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  try { legacy = planStore.readFresh(SITES_KEY); } catch (_) {}
+  try { cloud = planStore.readShared(cloudKey(uid)); } catch (_) {}
   return Object.values(legacy)
     .map(migrate)
     .filter((rec) => {
@@ -436,16 +448,13 @@ export function pendingLegacySites(uid) {
 export function stageLegacySite(uid, siteId) {
   if (!uid || !siteId) return null;
   let legacy = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { legacy = planStore.readShared(SITES_KEY); } catch (_) {}
   const rec = legacy[siteId];
   if (!rec) return null;
-  const local = createSiteModel(rec);
+  const local = createSiteModel(plainCopy(rec));
   if (!local.id) return null;
   recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
-  let cloud = {};
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  cloud[local.id] = local;
-  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  try { planStore.writeOne(cloudKey(uid), local.id, local); } catch (_) {}
   return local;
 }
 
@@ -453,16 +462,8 @@ export function stageLegacySite(uid, siteId) {
 // Used for an explicit Discard in the migration flow — the user wants to erase this
 // on-device copy entirely, not save it to their account.
 export function discardLegacySite(uid, siteId) {
-  let legacy = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
-  delete legacy[siteId];
-  try { localStorage.setItem(SITES_KEY, JSON.stringify(legacy)); } catch (_) {}
-  if (uid) {
-    let cloud = {};
-    try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-    delete cloud[siteId];
-    try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
-  }
+  try { planStore.removeOne(SITES_KEY, siteId); } catch (_) {}
+  if (uid) { try { planStore.removeOne(cloudKey(uid), siteId); } catch (_) {} }
 }
 
 // True when a site has no meaningful content — nothing drawn, no parcels, no references
@@ -485,16 +486,13 @@ export function isEmptySite(model) {
 export async function importOneSiteToCloud(uid, siteId) {
   if (!uid || !siteId) return { ok: false, error: "missing args" };
   let legacy = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { legacy = planStore.readShared(SITES_KEY); } catch (_) {}
   const rec = legacy[siteId];
   if (!rec) return { ok: false, error: "not found" };
-  const local = createSiteModel(rec);
+  const local = createSiteModel(plainCopy(rec));
   if (!local.id) return { ok: false, error: "invalid record" };
   recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
-  let cloud = {};
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  cloud[local.id] = local; // stage in cache so it shows immediately
-  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  try { planStore.writeOne(cloudKey(uid), local.id, local); } catch (_) {} // stage in cache so it shows immediately
   return cloudUpsert(uid, local);
 }
 
@@ -774,40 +772,96 @@ const historyAll = () => {
   return historyMem;
 };
 // Reset hook for tests that drive the IndexedDB path (mirrors `_recentlyDeleted`). Not used by the app.
-export function _resetHistoryForTest() { historyMem = null; historyHydrated = false; historyLS = null; }
+export function _resetHistoryForTest() { historyMem = null; historyHydrated = false; historyLS = null; historyIdbFailed = false; pendingHistoryIdb = null; }
 // B473 — bound the version ring by BYTES, not just HISTORY_PER_SITE, so it can't creep back to ~MB
 // and crowd the ~5MB localStorage cap (the pressure that made saves fail). Thins uniformly (newest
 // kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
 // only when actually over budget.
 const HISTORY_BYTE_BUDGET = 700 * 1024;
-function capHistoryBytes(h, fullLen) {
-  let keep = HISTORY_PER_SITE, out = h;
-  // `fullLen` — the length of `JSON.stringify(h)` when the caller already has it (writeHistoryAll does), so
-  // the first budget test does not serialise the whole ring a second time.
-  let len = Number.isFinite(fullLen) ? fullLen : JSON.stringify(out).length;
-  while (keep > 1 && len > HISTORY_BYTE_BUDGET) {
-    keep = Math.floor(keep / 2);
-    out = {}; for (const [id, list] of Object.entries(h)) out[id] = (list || []).slice(0, keep);
-    len = JSON.stringify(out).length;
+/* B2236000 (round 6) — EACH SNAPSHOT IS SERIALISED ONCE IN ITS LIFE. A snapshot object is never changed after it is made (`snapshotVersion`
+ * builds a fresh one; the ring only re-orders and drops references), so its JSON text is remembered against it and the ring's text is built
+ * by concatenation — byte-identical to `JSON.stringify` of the same plain data. Before, every snapshot write re-serialised the WHOLE ring
+ * (an owner-sized ring is ~3.5 MB) once, and the localStorage byte cap re-serialised it again per halving step: ~280 ms at 2× CPU per
+ * snapshot (a paste, a delete, any count change, and the save on leaving a page), measured on an owner-sized store. */
+const snapJson = new WeakMap();
+const snapText = (v) => {
+  if (v && typeof v === "object") { let t = snapJson.get(v); if (t === undefined) { t = JSON.stringify(v); if (t !== undefined) snapJson.set(v, t); } return t; }
+  return JSON.stringify(v);
+};
+export function historyRingJson(h, keep = Infinity) {
+  const parts = [];
+  for (const [id, list] of Object.entries(h || {})) {
+    if (list === undefined || typeof list === "function") continue;
+    if (!Array.isArray(list)) { parts.push(JSON.stringify(id) + ":" + JSON.stringify(list)); continue; }
+    const l = keep === Infinity ? list : list.slice(0, keep);
+    parts.push(JSON.stringify(id) + ":[" + l.map((x) => { const t = snapText(x); return t === undefined ? "null" : t; }).join(",") + "]");
+  }
+  return "{" + parts.join(",") + "}";
+}
+/* The ring's text as PARTS (each snapshot's remembered text), so a byte cap can be decided by arithmetic and only the text that is actually
+ * written is ever assembled. `ringText(parts, keep)` === `historyRingJson(h, keep)`, byte for byte. */
+function ringParts(h) {
+  const out = [];
+  for (const [id, list] of Object.entries(h || {})) {
+    if (list === undefined || typeof list === "function") continue;
+    const key = JSON.stringify(id) + ":";
+    if (!Array.isArray(list)) { out.push({ key, fixed: JSON.stringify(list) }); continue; }
+    out.push({ key, items: list.map((x) => { const t = snapText(x); return t === undefined ? "null" : t; }) });
   }
   return out;
 }
+function ringLen(parts, keep) {
+  let n = 2 + Math.max(0, parts.length - 1);
+  for (const p of parts) {
+    n += p.key.length;
+    if (p.fixed !== undefined) { n += p.fixed.length; continue; }
+    const k = Math.min(keep, p.items.length);
+    n += 2 + Math.max(0, k - 1);
+    for (let i = 0; i < k; i++) n += p.items[i].length;
+  }
+  return n;
+}
+const ringText = (parts, keep) => "{" + parts.map((p) => p.key + (p.fixed !== undefined ? p.fixed : "[" + (keep >= p.items.length ? p.items : p.items.slice(0, keep)).join(",") + "]")).join(",") + "}";
+/** The per-site keep count the localStorage mirror is cut to (Infinity = uncut). Same rule as before: halve from HISTORY_PER_SITE until the text fits. */
+function historyKeepFor(parts) {
+  let keep = HISTORY_PER_SITE, len = ringLen(parts, Infinity);
+  if (len <= HISTORY_BYTE_BUDGET) return Infinity;
+  while (keep > 1 && len > HISTORY_BYTE_BUDGET) { keep = Math.floor(keep / 2); len = ringLen(parts, keep); }
+  return keep;
+}
+/* B2200385 — HISTORY LIVES IN INDEXEDDB ONLY, ON A DEVICE THAT NEEDS THE ROOM. The localStorage copy of the ring (up to HISTORY_BYTE_BUDGET, ~0.7M
+ * characters) duplicates what IndexedDB already holds, and on a device already near the browser's cap it is the room the per-plan split needs.
+ * `relocateHistoryToIdb` drops it ONLY after the IndexedDB copy is written, read back and compared entry for entry, and only then sets this flag
+ * (a tiny localStorage key, so every tab and every reload agrees). While the flag is set AND IndexedDB is healthy the ring is not mirrored to
+ * localStorage; the moment IndexedDB is unavailable or a write to it fails, the mirror resumes (the B126 net never has fewer copies than before).
+ * Reverting to an older build is safe: it seeds from an empty localStorage ring and then merges the full ring out of the same IndexedDB key. */
+const HISTORY_IDB_ONLY_KEY = "planarfit:sites:history:idbonly";
+let historyIdbFailed = false;           // an IndexedDB write failed this page load → fall back to the localStorage mirror until a write succeeds
+export const historyIdbOnly = () => { try { return localStorage.getItem(HISTORY_IDB_ONLY_KEY) === "1"; } catch (_) { return false; } };
+const historyIdbOnlyActive = () => historyIdbOnly() && idbAvailable() && !historyIdbFailed;
 function writeHistoryAll(h) {
   historyMem = h;                                   // in-memory ring = the synchronous source of truth (uncapped depth)
+  if (historyIdbOnlyActive()) {
+    /* No localStorage mirror. The durable copy is the (verified-on-failure) IndexedDB write; a snapshot taken before hydration waits for it
+     * (flushHistoryIdb hydrates first, so the fuller stored ring is merged in before anything is written over it). Returns true only for
+     * the claim that is true: the snapshot is in the in-memory ring and its IndexedDB write is queued — callers that GATE a destructive action
+     * on a backup (Restore) use `backupNowVerified`, which waits for a committed, read-back copy. */
+    queueHistoryIdbWrite();
+    return true;
+  }
   let lsOk = false;
-  /* NEW-1 (B217540 ×2) — ONE serialisation of the full ring, reused three ways. This used to stringify it for the
-   * budget test, again for the localStorage write when under budget, and again for the IndexedDB copy — three passes
-   * over a ring that holds up to 15 whole-plan snapshots for every plan edited on the device, on EVERY snapshot
-   * (every paste / delete / count change). Same bytes out, a third of the serialising. */
-  const full = JSON.stringify(h);
-  const capped = capHistoryBytes(h, full.length); // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
-  try { localStorage.setItem(HISTORY_KEY, capped === h ? full : JSON.stringify(capped)); lsOk = true; }
+  /* NEW-1 (B217540 ×2) / B2236000 (round 6) — each snapshot is serialised once in its life (`snapText`); the localStorage mirror's byte cap is
+   * decided on lengths, and only the CAPPED text is assembled here, in the caller's task. The uncapped text for IndexedDB is assembled when it
+   * is written, in an idle moment (`queueHistoryIdbWrite`). Same bytes in both stores as before. */
+  const parts = ringParts(h);
+  const keep = historyKeepFor(parts);   // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
+  try { localStorage.setItem(HISTORY_KEY, ringText(parts, keep)); lsOk = true; }
   catch (_) { // over quota — keep only the newest few per site and retry
-    try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); lsOk = true; } catch (_2) {}
+    try { localStorage.setItem(HISTORY_KEY, ringText(parts, Math.min(keep, 4))); lsOk = true; } catch (_2) {}
   }
   // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
   // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
-  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, full);
+  if (historyHydrated && idbAvailable() && !historyIdbFailed) queueHistoryIdbWrite();
   // Return ONLY the synchronously-VERIFIED localStorage result (B474 review #14). The idb write above is
   // fire-and-forget — idbAvailable() means "the API exists", not "the write committed" — so counting it
   // here let backupNow() (the Restore safety gate) report a backup that may not exist when localStorage is
@@ -816,6 +870,59 @@ function writeHistoryAll(h) {
   // localStorage now returns false → Restore is blocked honestly rather than destroying work. (Durability
   // of the deep history is unchanged — it still lands in IndexedDB; this only governs what we CLAIM.)
   return lsOk;
+}
+/* B2236000 (round 6) — the durable IndexedDB copy is written in an IDLE moment, never inside the click that took the snapshot: `put` of an
+ * owner-sized ring (~3.5 MB) clones it on the main thread (~40 ms at 2× CPU), and it was already fire-and-forget. Coalesced (only the newest
+ * text is written), flushed at once on `pagehide` / tab hidden so a closing tab still writes it, and the synchronous, VERIFIED localStorage
+ * mirror above is unchanged — it is what `backupNow` reports. */
+let pendingHistoryIdb = null, historyIdbTimer = null, historyIdbHooked = false;
+function flushHistoryIdb() {
+  if (historyIdbTimer) { try { (typeof cancelIdleCallback === "function" && historyIdbTimer.idle) ? cancelIdleCallback(historyIdbTimer.id) : clearTimeout(historyIdbTimer.id); } catch (_) {} historyIdbTimer = null; }
+  const due = pendingHistoryIdb; pendingHistoryIdb = null;
+  if (due && historyMem && historyIdbOnly() && !historyHydrated) {           // idb-only before hydration: merge the stored ring FIRST, then write
+    initHistoryStore().then(() => { pendingHistoryIdb = true; flushHistoryIdb(); });
+    return;
+  }
+  if (due && historyMem) {
+    const text = historyRingJson(historyMem);                                // the ring as it is NOW (coalesced: the newest state wins)
+    if (!historyIdbOnly()) { idbPut(HISTORY_KEY, text); return; }
+    idbPut(HISTORY_KEY, text).then((ok) => {
+      if (ok) { historyIdbFailed = false; return; }
+      historyIdbFailed = true;                                               // fall back to the localStorage mirror NOW, loudly
+      reportClientEvent("history-idb-write-failed", "the version-history copy in IndexedDB could not be written — the localStorage mirror resumes", { ringChars: text.length });
+      try { writeHistoryAll(historyMem); } catch (_) {}
+    });
+  }
+}
+function queueHistoryIdbWrite() {
+  pendingHistoryIdb = true;
+  if (!historyIdbHooked && typeof window !== "undefined") {
+    historyIdbHooked = true;
+    try { window.addEventListener("pagehide", flushHistoryIdb); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushHistoryIdb(); }); } catch (_) {}
+  }
+  if (historyIdbTimer) return;
+  try {
+    if (typeof requestIdleCallback === "function") { historyIdbTimer = { idle: true, id: requestIdleCallback(() => { historyIdbTimer = null; flushHistoryIdb(); }, { timeout: 2000 }) }; return; }
+  } catch (_) {}
+  historyIdbTimer = { idle: false, id: setTimeout(() => { historyIdbTimer = null; flushHistoryIdb(); }, 0) };
+}
+/** Tests: write any pending IndexedDB copy now. */
+export function _flushHistoryIdbForTest() { flushHistoryIdb(); }
+/* B2236000 (round 6) — after hydration, serialise every snapshot ONCE in idle slices (`snapText` remembers it), so the first snapshot taken
+ * after a page load builds the ring's text by concatenation instead of serialising every snapshot read back from IndexedDB inside the click. */
+function warmHistoryText(budgetMs = 8) {
+  const all = []; for (const list of Object.values(historyMem || {})) for (const v of list || []) if (v && typeof v === "object") all.push(v);
+  let i = 0;
+  const step = (deadline) => {
+    const t0 = Date.now();
+    while (i < all.length) {
+      snapText(all[i++]);
+      if (deadline && typeof deadline.timeRemaining === "function" ? deadline.timeRemaining() < 1 : Date.now() - t0 > budgetMs) break;
+    }
+    if (i < all.length) schedule();
+  };
+  const schedule = () => { try { if (typeof requestIdleCallback === "function") { requestIdleCallback(step, { timeout: 3000 }); return; } } catch (_) {} setTimeout(step, 0); };
+  if (all.length) schedule();
 }
 // Union two history maps per site by snapshot timestamp (`at`), newest-first, keep HISTORY_PER_SITE.
 function mergeHistory(a, b) {
@@ -843,10 +950,35 @@ export async function initHistoryStore() {
     const raw = await idbGet(HISTORY_KEY);
     let fromIdb = {};
     if (raw) { try { fromIdb = JSON.parse(raw) || {}; } catch (_) {} }
-    historyMem = mergeHistory(historyMem || {}, fromIdb);
+    const seed = historyMem || {};
+    historyMem = mergeHistory(seed, fromIdb);
     historyHydrated = true;
-    idbPut(HISTORY_KEY, JSON.stringify(historyMem)); // persist merge + migrate localStorage → IndexedDB
+    /* B2236000 (round 6) — persist the merge ONLY when the localStorage seed brought something IndexedDB lacks. It used to re-serialise and
+     * re-write the WHOLE ring on every page load (an owner-sized ring is ~3.5 MB: a parse, a stringify and a 3.5 MB put, ~190 ms at 2× CPU in
+     * one task) although on every load after the first the merge is exactly what IndexedDB already holds. */
+    if (raw == null || historySeedAddsTo(seed, fromIdb)) idbPut(HISTORY_KEY, historyRingJson(historyMem)); // persist merge + migrate localStorage → IndexedDB
+    warmHistoryText();
   } catch (_) { historyHydrated = true; }
+}
+/** Does the localStorage seed hold a snapshot (an `at` per site) the IndexedDB ring lacks? Then the merge is new and must be persisted. Pure. */
+export function historySeedAddsTo(seed, fromIdb) {
+  for (const [id, list] of Object.entries(seed || {})) {
+    const have = new Set(((fromIdb && fromIdb[id]) || []).map((v) => v && v.at));
+    for (const v of list || []) if (v && !have.has(v.at)) return true;
+  }
+  return false;
+}
+/** B2236000 (round 6) — hydrate the ring OFF the boot path: after the page has gone quiet (an idle callback, with a ceiling), never at module
+ *  load. Safe by the ring's own design: until hydration completes, writes go to the synchronous localStorage mirror only and IndexedDB is never
+ *  written (`historyHydrated` gates it), and hydration UNIONS the two — the same race-safety a slow IndexedDB open always needed. A reader that
+ *  needs the full ring NOW (the version-history panel) awaits `initHistoryStore()` itself. */
+export function scheduleHistoryHydration({ timeoutMs = 8000 } = {}) {
+  if (historyHydrated) return;
+  const run = () => { initHistoryStore(); };
+  try {
+    if (typeof requestIdleCallback === "function") { requestIdleCallback(run, { timeout: timeoutMs }); return; }
+  } catch (_) {}
+  setTimeout(run, Math.min(timeoutMs, 3000));
 }
 // Shape signature — counts of each drawn collection. A content DROP always changes it
 // (fewer items), so the pre-drop version is always captured; an identical-shape save
@@ -925,6 +1057,90 @@ export function getVersion(id, at) {
 }
 export function clearHistory(id) { const all = historyAll(); if (id && id in all) { delete all[id]; writeHistoryAll(all); } }
 
+/* ---- B2200385 — move the history ring's localStorage copy into IndexedDB, PROVEN, to make room for the per-plan split ---------------------------
+ * Resolves { ok, freedChars, reason? }. Nothing is removed unless: IndexedDB is available · the merged ring (localStorage seed ∪ stored IndexedDB
+ * copy) was WRITTEN, COMMITTED and READ BACK byte-for-byte · every snapshot the localStorage copy holds is present, identical, in the IndexedDB
+ * copy (or has legitimately aged out of a full per-site list) · the idb-only flag was written. Any failure keeps the localStorage copy exactly as it
+ * was and says why. */
+export async function relocateHistoryToIdb() {
+  const fail = (reason, extra) => { reportClientEvent("history-relocate-skipped", "the version-history copy in localStorage was kept (" + reason + ")", { reason, ...(extra || {}) }); return { ok: false, freedChars: 0, reason }; };
+  if (!idbAvailable()) return fail("no-idb");
+  let lsRaw = null; try { lsRaw = localStorage.getItem(HISTORY_KEY); } catch (_) { return fail("ls-unreadable"); }
+  if (lsRaw == null) {                               // nothing duplicated to drop; make sure the mode is recorded only if IndexedDB can hold the ring
+    return { ok: true, freedChars: 0, reason: "no-ls-copy" };
+  }
+  let lsRing; try { lsRing = JSON.parse(lsRaw) || {}; } catch (_) { return fail("ls-copy-unreadable"); }
+  await initHistoryStore();
+  if (!historyHydrated || historyIdbFailed) return fail("hydrate");
+  try { const cur = await idbGet(HISTORY_KEY); if (cur) historyMem = mergeHistory(historyMem, JSON.parse(cur) || {}); }   // another tab may have added snapshots since hydration: never write over them
+  catch (_) { return fail("idb-unparseable"); }
+  const text = historyRingJson(historyMem);
+  const w = await idbPutVerified(HISTORY_KEY, text);
+  if (!w.ok) return fail("idb-" + w.reason);
+  let stored; try { stored = JSON.parse(await idbGet(HISTORY_KEY)) || {}; } catch (_) { return fail("idb-unparseable"); }
+  for (const [id, list] of Object.entries(lsRing)) {
+    const there = Array.isArray(stored[id]) ? stored[id] : [];
+    const byAt = new Map(there.map((v) => [v && v.at, v]));
+    const oldest = there.length ? Math.min(...there.map((v) => (v && v.at) || 0)) : Infinity;
+    for (const v of Array.isArray(list) ? list : []) {
+      if (!v) continue;
+      const twin = byAt.get(v.at);
+      if (twin) { if (JSON.stringify(twin) !== JSON.stringify(v)) return fail("entry-differs", { id }); continue; }
+      if (there.length >= HISTORY_PER_SITE && (v.at || 0) < oldest) continue;   // aged out of a full per-site list by newer snapshots — the ring's own cap
+      return fail("entry-missing", { id });
+    }
+  }
+  try { localStorage.setItem(HISTORY_IDB_ONLY_KEY, "1"); } catch (_) { return fail("flag-unwritable"); }
+  try { localStorage.removeItem(HISTORY_KEY); } catch (_) { try { localStorage.removeItem(HISTORY_IDB_ONLY_KEY); } catch (_2) {} return fail("ls-remove"); }
+  historyIdbFailed = false;
+  return { ok: true, freedChars: HISTORY_KEY.length + lsRaw.length };
+}
+/** The Restore gate in a verified form: the backup is written to the durable store and READ BACK before it is claimed. Same answers as `backupNow`
+ *  on a device that still mirrors the ring in localStorage; on an idb-only device it waits for the committed, compared copy (it never claims one
+ *  it has not seen). */
+export async function backupNowVerified(id) {
+  if (!id) return false;
+  if (!historyIdbOnly()) return backupNow(id);
+  const cur = loadSite(id);
+  if (!cur) return true;
+  if (!contentCount(cur)) return true;
+  if (!idbAvailable() || historyIdbFailed) return snapshotVersion(cur, { force: true }) === true;   // degraded: the localStorage mirror resumed
+  await initHistoryStore();
+  if (snapshotVersion(cur, { force: true }) !== true) return false;
+  if (pendingHistoryIdb) { pendingHistoryIdb = null; if (historyIdbTimer) { try { (typeof cancelIdleCallback === "function" && historyIdbTimer.idle) ? cancelIdleCallback(historyIdbTimer.id) : clearTimeout(historyIdbTimer.id); } catch (_) {} historyIdbTimer = null; } }
+  const text = historyRingJson(historyMem);
+  const w = await idbPutVerified(HISTORY_KEY, text);
+  if (w.ok) return true;
+  historyIdbFailed = true;
+  reportClientEvent("history-idb-write-failed", "the pre-restore backup could not be verified in IndexedDB — the localStorage mirror resumes", { reason: w.reason });
+  try { return writeHistoryAll(historyMem) === true; } catch (_) { return false; }
+}
+/** planStore's make-room hook (B2200385): free localStorage that is PROVEN safe to free, in order, only as far as needed. Resolves { freedChars, steps }. */
+export async function makeRoomForPlanStore({ base, reason, shortBy } = {}) {
+  const steps = []; let freed = 0;
+  /* B2200384 — FIRST: the whole-library entry, if one is still on the device and every plan in it verifies as its own entry. It is by far the biggest thing
+   * that can be freed and the only one that is a duplicate of what the entries already hold. */
+  if (base) {
+    try { const r = planStore.retireLegacy(base); steps.push("legacy:" + r.reason + ":" + r.freedChars); freed += r.freedChars || 0; }
+    catch (e) { steps.push("legacy:error"); }
+  }
+  if (freed >= (shortBy || 0) && freed > 0) {
+    reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan move", { reason, shortByBefore: shortBy, freedChars: freed, enough: true, steps: steps.join(" · ") });
+    return { freedChars: freed, steps };
+  }
+  const h = await relocateHistoryToIdb();
+  steps.push("history:" + (h.ok ? "moved" : h.reason) + ":" + h.freedChars); freed += h.freedChars || 0;
+  if (freed < (shortBy || 0)) {                       // still short → re-fetchable caches (rebuild source declared in the storage census)
+    try {
+      const { reclaimLocalStorage } = await import("../../../shared/storage/storageReclaim.js");
+      const r = reclaimLocalStorage(localStorage, { limitBytes: Math.max(0, (shortBy || 0) - freed) });
+      steps.push("mapdata:" + r.removedKeys + ":" + r.freedBytes); freed += r.freedBytes;
+    } catch (e) { steps.push("mapdata:error"); }
+  }
+  reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan split", { reason, shortByBefore: shortBy, freedChars: freed, enough: freed >= (shortBy || 0), steps: steps.join(" · ") });
+  return { freedChars: freed, steps };
+}
+
 export const storage = {
   async list(prefix = "") {
     const keys = [];
@@ -963,9 +1179,7 @@ const CURRENT_KEY = "planarfit:currentSite:v1";
 // Active store key: the per-user cloud cache when signed in, else the legacy store.
 const sitesKey = () => (activeUid() ? cloudKey(activeUid()) : SITES_KEY);
 
-function readSites() {
-  try { return JSON.parse(localStorage.getItem(sitesKey())) || {}; } catch (_) { return {}; }
-}
+function readSites() { return planStore.readFresh(sitesKey()); }   // B2165120: PRIVATE copies (a caller may mutate them); the hot paths use readSharedStore
 // B474 — drop ONLY the rasters that are safely stashed in IndexedDB (have an `idbKey`), so the PERSISTED
 // record shrinks off the ~5MB cap while staying recoverable (a reload re-hydrates from IndexedDB). A
 // raster with no idbKey keeps its src (safe fallback). Mirrors stripDataUrls' three raster homes. NO-OP
@@ -979,59 +1193,53 @@ function dropIdbBackedSrc(m) {
     s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && d.idbKey && isDataUrl(d.src) ? { ...d, src: null } : d)) };
   return s;
 }
-/* ⛔ NEW-1 (B217540, recurrence ×2) — THE LAST WHOLE-STORE WRITE, REMEMBERED, SO THE NEXT TWO QUESTIONS NEED NO PARSE.
- * Every autosave asked "does this plan already exist here?" (`loadSite` — parse the entire store, migrate and
- * normalise the plan, run the name authority over every plan) and then, after writing, read the plan back the same
- * way to verify the write (B473 / B592). Both are answered by something this module already holds the instant it has
- * written: the exact string it stored and the object it stored. So `writeSites` remembers `{ key, str, obj }`, and the
- * two questions are answered from it ONLY while `localStorage` still holds exactly that string — the moment any other
- * writer (another tab, a cloud pull, a test) has touched the key the bytes differ and the original full read runs, so
- * the cross-tab honesty of the B473/B592 check is unchanged. It is not a cache of the plan: it is a byte-exact proof
- * that nothing has changed since this tab wrote it, which is a STRONGER persistence check than the id-membership
- * comparison it replaces on the single-tab path. Measured at a 3 MB store: three whole-store parses per autosave → one. */
-let lastSitesWrite = null;   // { key, str, obj }
-function rememberSitesWrite(key, str, obj) { lastSitesWrite = { key, str, obj }; }
-function lastWriteStillCurrent() {
-  const w = lastSitesWrite;
-  if (!w) return null;
-  try { return localStorage.getItem(w.key) === w.str ? w : null; } catch (_) { return null; }
-}
+/* ⛔ B2165120 — THE DEVICE STORE IS ONE ENTRY PER PLAN (lib/planStore.js; read its header first). Everything below is a thin façade
+ * over it, keeping the names the rest of the app already calls:
+ *   • `readSharedStore()`  — the plans as SHARED objects, READ-ONLY by contract (take `plainCopy` of a record you will change).
+ *   • `siteExistsLocally`  — "is there a record for this id?" — one key lookup.
+ *   • `readBackSite`       — the persistence verifier's read: the plan's REAL stored entry, parsed from disk.
+ *   • `sitesWriteStamp` / `sitesWriteStillCurrent` — the settle tick's "the mirror already wrote exactly this" proof.
+ *   • `writeSite(id, rec)` / `removeSite(id)` / `writeSites(map)` — persist one plan / drop one / make the store equal a map.
+ * An edit writes the edited plan's entry and a ~60-byte index; the cost no longer follows the size of the library.
+ * The B473/B592 verify-the-write contract is unchanged (and stronger: the read-back is the entry on disk, never a cache).
+ * B217540's byte-exact whole-store snapshot still serves a store that could not be split (planStore "blob" mode). */
 /** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
-export function siteExistsLocally(id) {
-  if (!id) return false;
-  const w = lastWriteStillCurrent();
-  if (w && w.key === sitesKey()) return !!w.obj[id];
-  return !!readSites()[id];
+export function siteExistsLocally(id) { return planStore.has(sitesKey(), id); }
+/** Why the device last refused to store plan `id` ({ reason: "quota" | <error name> | "unavailable", … }), or null. NEW-1 (2026-11-03). */
+export function lastSaveRefusal(id) { return planStore.lastRefusal(id); }
+/** Make room in this device's plan storage ONCE per page load (shared with the automatic attempt); `force` = an explicit user Retry. */
+export function requestPlanStoreRoom({ force = false } = {}) { return planStore.requestRoom({ base: sitesKey(), reason: "quota", force }); }
+/** The stored record for `id` as the persistence verifier needs it (its drawn collections). */
+export function readBackSite(id) { return planStore.readBack(sitesKey(), id) || loadSite(id); }
+function readSharedStore() { return planStore.readShared(sitesKey()); }
+export function sitesWriteStamp() { return planStore.writeStamp(sitesKey()); }
+export function sitesWriteStillCurrent(stamp) { return planStore.writeStillCurrent(sitesKey(), stamp); }
+const writeSites = (map) => planStore.writeMap(sitesKey(), map);
+const writeSite = (id, rec) => planStore.writeOne(sitesKey(), id, rec);
+const removeSite = (id) => planStore.removeOne(sitesKey(), id);
+/** A durable tombstone (signed-in stores) says this plan was deleted on this device — a legacy whole-library entry may never resurrect it (B2200384). */
+function planStoreIsDeleted(base, id) {
+  const pre = "planarfit:sites:cloud:";
+  if (!base || !base.startsWith(pre)) return false;
+  return id in readSiteTombs(base.slice(pre.length));
 }
-/** The stored record for `id` as the persistence verifier needs it (its drawn collections). While nothing has touched
- *  the store since THIS module wrote it, that is the object it wrote; otherwise the full `loadSite` read. */
-export function readBackSite(id) {
-  const w = lastWriteStillCurrent();
-  if (w && w.key === sitesKey() && w.obj[id]) return w.obj[id];
-  return loadSite(id);
-}
-function writeSites(obj) {
-  // B474 — proactively shed IndexedDB-backed raster src so the persisted record stays small (off cap).
-  const persist = {};
-  for (const [id, s] of Object.entries(obj)) persist[id] = dropIdbBackedSrc(s);
-  const key = sitesKey();
-  try { const str = JSON.stringify(persist); localStorage.setItem(key, str); rememberSitesWrite(key, str, persist); return true; }
-  catch (_) {
-    // Over quota anyway — shed ALL inline rasters (geometry still persists; rasters re-hydrate). B473.
-    try {
-      const slim = {};
-      for (const [id, s] of Object.entries(persist)) slim[id] = stripDataUrls(s);
-      const str = JSON.stringify(slim);
-      localStorage.setItem(key, str);
-      rememberSitesWrite(key, str, slim);
-      return true;
-    } catch (_2) { lastSitesWrite = null; return false; }
-  }
-}
+planStore.configure({
+  makeRoom: (a) => makeRoomForPlanStore(a),
+  isDeleted: planStoreIsDeleted,
+  persistForm: dropIdbBackedSrc,
+  slim: stripDataUrls,
+  merge: (mine, theirs) => {
+    /* LOUD-FAILURE: a foreign (older-build) write is the one way a torn assembly can still arrive from disk, and the merge below would heal it silently.
+     * Read it through the same detector a plain load uses first, so the tear is REPORTED (assembly-tear-detected …) before the merge repairs it. */
+    try { const w = bondedHealWatch(theirs && theirs.id); migrate(plainCopy(theirs), { onHeal: w.onHeal }); w.flush(); } catch (_) { /* telemetry never blocks the merge */ }
+    return mergeSiteContent(createSiteModel(mine), theirs);
+  },
+  onForeignMerge: () => { notifySitesListChanged(); },
+});
 
 // One-time migration of the legacy single-slot autosave into a site record.
 export function migrateOldAutosave() {
-  if (Object.keys(readSites()).length) return;
+  if (Object.keys(readSharedStore()).length) return;
   const old = loadAutosave();
   if (old && ((old.parcels && old.parcels.length) || (old.els && old.els.length) || old.underlay)) {
     const id = "s" + Date.now().toString(36);
@@ -1044,6 +1252,7 @@ export function migrateOldAutosave() {
 // record's `name` was the location, so it becomes the `site` and its layout is
 // re-labelled "Plan 1". Idempotent — runs harmlessly once everything's grouped.
 export function migrateSiteGroups() {
+  if (!Object.values(readSharedStore()).some((s) => s && !s.groupId)) return;   // B2165120: the common case reads nothing mutable
   const sites = readSites();
   let changed = false;
   for (const [id, s] of Object.entries(sites)) {
@@ -1080,34 +1289,65 @@ export function migrateScenarios() {
 export const groupOf = (s) => (s && (s.groupId || s.id)) || null;
 export const siteNameOf = (s) => (s && (s.site || s.name)) || "Untitled site";
 
-export function loadSitesList() {
-  // Normalize every record to the Site Model so the whole app (site list, map
-  // markers, plan switcher) reads consistent model objects from one source.
-  const raw = Object.values(readSites());
-  // LOUD-FAILURE: migrate() silently drops malformed entries (nulls / points-less husk parcels —
-  // the class that error-boundaried the planner on every load). Surface that a stored record
-  // needed sanitizing as a telemetry event so corruption is a visible signal, not a quiet edit.
-  // (reportClientEvent dedups/rate-caps, so the boot-frequency call path is safe.)
-  try {
-    const junk = raw.reduce((n, r) => n + countJunkEntries(r), 0);
-    if (junk > 0) reportClientEvent("model-sanitized", "dropped malformed collection entries on load", { junk, records: raw.length });
-  } catch (_) {}
+/* ⛔ B2236000 (round 6) — THE LIST READ REMEMBERS EACH PLAN'S MODEL UNTIL THAT PLAN'S STORED COPY CHANGES.
+ * Measured on an owner-sized device store (76 plans, 30 with their full drawing, ~1.6 MB): `loadSitesList()` took a private copy of
+ * EVERY plan (`readFresh`) and ran the full Site Model + bonded heal over each, and a cold load calls it five times (the sites state,
+ * the boot route's resume target twice, the sign-in refresh, the cloud-pull refresh) — ~1.4 s of the 2.6 s of stalls at 2× CPU, in
+ * tasks of 200–600 ms. The owner's own Chrome read 1.5–2.2 s of stalls on a fresh load. The answer is a pure function of the record,
+ * and the store already keeps ONE shared object per plan for as long as that plan's stored text is unchanged (planStore `loadPlans`;
+ * blob mode: the byte-exact snapshot), so the model is cached against THAT object (a WeakMap — an edit, a cloud pull or another tab's
+ * write gives the plan a new object, which simply misses).
+ * What is NOT changed, deliberately: (1) every call still returns a FRESH ARRAY of FRESH top-level objects (a shallow copy per plan), so
+ * `refreshSites()`'s fresh-array identity — which the route effect's retry-then-"missing" verdict re-runs on — and any caller that
+ * assigns a field on a returned plan behave exactly as before; (2) the name-authority pass and the sort run on every call; (3) the model
+ * is built from a PRIVATE copy of the stored record, so it never aliases the store's shared object. What a caller must NOT do (true of
+ * every reader here already, audited: they read, or patch through `saveSite({ id, … })`) is mutate a plan's NESTED arrays/objects in
+ * place — under test the cached models are deep-frozen so a caller that does fails loudly (`test/sitesListCache.test.js`). */
+const listModelCache = new WeakMap();   // the store's shared record object → { model, junk }
+const freezeListModels = () => { try { const pr = globalThis.process; return !!(pr && pr.env && (pr.env.VITEST || pr.env.PLANYR_FREEZE_LIST)); } catch (_) { return false; } };
+function deepFreeze(o) { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; }
+function listModelOf(shared, liveIds) {
+  let c = shared && typeof shared === "object" ? listModelCache.get(shared) : undefined;
+  if (c) return c;
+  /* B2236000 — across a reload, the same build modelling the same stored text gives the same answer: lib/elsProof.js remembers which plans'
+   * element lists came back from the heal untouched, keyed by build + the exact entry text, so a reload does not re-prove them. */
+  /* the stored entry's own text; on a device that could not be split (one whole-library entry) there is no per-plan text, so the plan's own JSON is used —
+   * a deterministic function of its content, and `plainCopy` below reuses it rather than serialising the plan a second time */
+  const text = planStore.textOf(shared) ?? (shared && typeof shared === "object" ? planStore.jsonOf(shared) : undefined), pid = shared && shared.id;
+  const proven = !!text && elsProven(pid, text);
+  const r = plainCopy(shared);
+  const rawEls = r && (Array.isArray(r.els) ? r.els : r.elements);
+  let junk = 0; try { junk = countJunkEntries(r); } catch (_) {}
   // NEW-2 — the list read normalizes every record too, and on a cold boot it is usually the FIRST
   // thing to run the bonded heal. Report from here as well, or the plan-open report below is
   // reached only after the repair has already happened somewhere else.
-  const models = raw.map((r) => {
-    const watch = bondedHealWatch(r && r.id);
-    const m = migrate(r, { onHeal: watch.onHeal });
-    watch.flush();
-    return m;
-  });
+  const watch = bondedHealWatch(r && r.id);
+  const model = migrate(r, { onHeal: watch.onHeal, provenCleanEls: proven });
+  watch.flush();
+  if (!proven && text && Array.isArray(rawEls) && model.els === rawEls) recordElsProof(pid, text, liveIds);
+  if (freezeListModels()) deepFreeze(model);
+  c = { model, junk };
+  if (shared && typeof shared === "object") listModelCache.set(shared, c);
+  return c;
+}
+export function loadSitesList() {
+  // Normalize every record to the Site Model so the whole app (site list, map
+  // markers, plan switcher) reads consistent model objects from one source.
+  const store = readSharedStore(), shared = Object.values(store);
+  let fresh = 0, junk = 0, liveIds = null;
+  const models = shared.map((r) => { const hit = r && typeof r === "object" && listModelCache.has(r); const c = listModelOf(r, hit ? null : (liveIds || (liveIds = new Set(Object.keys(store))))); if (!hit) { fresh++; junk += c.junk; } return c.model; });
+  // LOUD-FAILURE: migrate() silently drops malformed entries (nulls / points-less husk parcels —
+  // the class that error-boundaried the planner on every load). Surface that a stored record
+  // needed sanitizing as a telemetry event so corruption is a visible signal, not a quiet edit.
+  // (reportClientEvent dedups/rate-caps; reported when a record is first normalized, not on every re-read of the same bytes.)
+  try { if (junk > 0) reportClientEvent("model-sanitized", "dropped malformed collection entries on load", { junk, records: fresh }); } catch (_) {}
   // NEW-1 — a project's name is a DERIVED MIRROR of its group's one authoritative value, so the
   // list read resolves it. This is what stops a group that is split on disk (the Silvestri /
   // Sylvestri case) from ever REACHING the map list as two entries: even before the repair pass
   // has written anything back, every reader sees the group's real name. Pure + identity-preserving
   // on a coherent store, so a healthy list allocates nothing new. `repairSplitProjectNames()` is
   // the persisting half — a read must not write (this runs inside render paths).
-  return applyNameAuthority(models).models.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return applyNameAuthority(models.map((m) => ({ ...m }))).models.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 // NEW-1 (first-time landing, src/app/firstLanding.js) — a cheap "does the ACTIVE local store
@@ -1117,7 +1357,7 @@ export function loadSitesList() {
 // which is unnecessary work just to answer "is this empty" — and this needs to be cheap because
 // it runs on every route-less boot.
 export function hasAnyLocalSites() {
-  try { return Object.keys(readSites()).length > 0; } catch (_) { return false; }
+  try { return Object.keys(readSharedStore()).length > 0; } catch (_) { return false; }
 }
 
 /* Resolve every group's authoritative name across a set of models, reporting any group with no
@@ -1244,7 +1484,7 @@ export function setSiteGroupRole(idOrGroup, role) {
  * nothing is written and nothing is pushed. */
 export function repairSplitProjectNames() {
   let raw;
-  try { raw = Object.values(readSites()); } catch (_) { return { ok: false, changed: 0 }; }
+  try { raw = Object.values(readSharedStore()); } catch (_) { return { ok: false, changed: 0 }; }   // B2165120: read-only (the authority pass is pure and identity-preserving)
   if (!raw.length) return { ok: true, changed: 0 };
   // Deliberately reasons over the RAW stored records, not migrated models: the name authority reads
   // only id / groupId / site / siteRenamedAt / updatedAt, all of which a stored record already has,
@@ -1443,7 +1683,7 @@ const unconfirmedProjectPush = new Set();
 export async function ensureProjectRow(id, { name = "Untitled site", confirmLive = false } = {}) {
   if (!id) return { ok: false, created: false, error: "no id" };
   const retryingPush = unconfirmedProjectPush.has(id);
-  if (readSites()[id] && !retryingPush && !confirmLive) return { ok: true, created: false }; // already real on this device
+  if (siteExistsLocally(id) && !retryingPush && !confirmLive) return { ok: true, created: false }; // already real on this device
   if (!activeUid()) return { ok: true, created: false }; // signed-out — no cloud row to ensure
   const status = await checkProjectDeletionStatus(id).catch(() => ({ ok: false }));
   if (status && status.ok && status.deleted) {
@@ -1460,7 +1700,7 @@ export async function ensureProjectRow(id, { name = "Untitled site", confirmLive
   if (confirmLive && !(status && status.ok)) {
     return { ok: false, created: false, error: "Couldn't confirm this project with the cloud, so its folders weren't created." };
   }
-  if (!readSites()[id]) {
+  if (!siteExistsLocally(id)) {
     // B1227984 — don't trust this blindly: a blocked local write (e.g. a stale delete-tombstone
     // for this id) must be reported as the failure it is, never mistaken for cloud confirmation.
     const saved = saveSite({ id, groupId: id, site: name || "Untitled site", name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
@@ -1674,6 +1914,19 @@ async function purgeProjectFoldersFor(groupId) {
   }
 }
 
+// NEW-4 (data-risk 2026-10-29) — a permanently deleted project leaves a client_errors row saying which one, who
+// owned it, when it was trashed and what went with it. Observability ONLY: it runs after the purge is proven,
+// never changes the result, and can never throw into the purge (reportClientEvent is fire-and-forget).
+async function snapshotForPurge(ids, groupId) {
+  try { return await cloudPurgeManifest(activeUid(), ids, groupId); } catch (_) { return null; } // never blocks or fails a purge
+}
+function recordProjectPurge(manifest, outcome) {
+  try {
+    const ev = buildPurgeEvent(manifest, outcome);
+    if (ev) reportClientEvent("project-purged", "a project was permanently deleted", ev);
+  } catch (_) { /* observability must never affect the purge */ }
+}
+
 // "Delete forever" — the only user-facing HARD delete. The site_elements cascade firing here is
 // correct: this is the point at which permanent destruction was actually asked for. `groupId`
 // (the project id `project_folders` is keyed on) defaults to the first purged plan id — true for
@@ -1682,7 +1935,9 @@ async function purgeProjectFoldersFor(groupId) {
 export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
+  const manifest = await snapshotForPurge(list, groupId || list[0]); // NEW-4 — read-only, before the rows are gone
   const v = await hardDeleteVerified(list);
+  recordProjectPurge(manifest, v);
   if (v.confirmedGone) await purgeProjectFoldersFor(groupId || list[0]);
   return { ok: v.ok, purged: v.gone.length, error: v.error };
 }
@@ -1779,7 +2034,9 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
       reportClientEvent("plan-purge-skipped-live-group", "a soft-deleted plan's project still has live plans in its group — it was left in place instead of being auto-purged, since it was never offered back through the account-wide bin", { id: row.id, groupId: gid });
       continue;
     }
+    const manifest = await snapshotForPurge([row.id], gid); // NEW-4 — read-only, before the row is gone
     const out = await hardDeleteVerified([row.id]).catch(() => ({ ok: false }));
+    recordProjectPurge(manifest, out);
     if (out && out.ok) {
       purged += 1;
       if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }
@@ -1899,8 +2156,8 @@ function bondedHealWatch(id) {
   };
 }
 export function loadSite(id, { persistHeal = false } = {}) {
-  const all = id ? readSites() : null;
-  const rec = all ? all[id] : null;
+  const all = id ? readSharedStore() : null;      // NEW-1 (B217540 ×3): SHARED objects — read-only; the one record handed on is copied
+  const rec = all && all[id] ? plainCopy(all[id]) : null;
   if (!rec) return null;
   const watch = bondedHealWatch(id);
   let m = migrate(rec, { onHeal: watch.onHeal });
@@ -1969,8 +2226,8 @@ export function notifySitesListChanged() {
 // splits immediate-mirror from debounced-cloud this way; this brings the Site Planner to parity.)
 export function saveSite(partial, { skipHistory = false } = {}) {
   if (!partial || !partial.id) return false;
-  const sites = readSites();
-  const existing = sites[partial.id];
+  const sites = readSharedStore();     // NEW-1 (B217540 ×3): shared objects, READ-ONLY — only `existing` is ever changed, and it is a private copy
+  const existing = sites[partial.id] ? plainCopy(sites[partial.id]) : sites[partial.id];
   // Resurrection guard (B372): once a site is deleted in this tab, a late flush from the
   // unmounting planner (persist-on-leave / beforeunload) or an already-queued debounced autosave
   // must NOT re-insert it. Block ONLY a re-create of a deleted, currently-absent row — a normal
@@ -2082,10 +2339,16 @@ export function saveSite(partial, { skipHistory = false } = {}) {
       shareLocked: existing.shareLocked === undefined ? model.shareLocked : existing.shareLocked,
     });
   }
-  sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
   lastSeenHeader[partial.id] = headerSlice(model); // B1953797 — this tab's own write is its new base
-  const ok = writeSites(sites);
+  const ok = writeSite(partial.id, model);          // B2165120: this plan's entry only — never the library
+  if (!ok) {
+    /* ⛔ NEW-1 (2026-11-03) — A REFUSED DEVICE WRITE IS NEVER SILENT. `planStore` already reported WHY (`plan-store-write-refused`: reason, sizes, the cap
+     * inventory); this is the plan-level twin so a caller that ignores the boolean still leaves a trace naming the plan. Callers on a path the user
+     * watches (the three plan mints, rename, status/dates) read the boolean and say so — see lib/planMint.js. */
+    const why = planStore.lastRefusal(partial.id);
+    reportClientEvent("site-save-refused", "the device refused to store this plan — nothing was saved to this device", { id: partial.id, reason: (why && why.reason) || "unknown", existing: !!existing });
+  }
   if (ok) {
     notifySiteModelChanged(partial.id);
     // B1525088 (NEW-1) — announce an identity change (name/status/role/which group) on the
@@ -2147,15 +2410,12 @@ export function saveSite(partial, { skipHistory = false } = {}) {
  * Guard: `test/deleteConfirmedBeforeLocal.test.js` (mutation-proven both ways).
  */
 export function deleteSite(id, { tombstone = true } = {}) {
-  const sites = readSites();
-  const all = Object.values(sites);   // read the WHOLE list before the plan leaves it (below)
+  const all = Object.values(readSharedStore());   // read the WHOLE list before the plan leaves it (below) — read-only
   /* The local half, run only once the outcome is known (or immediately when there is no server to
    * ask). Re-reads the store rather than closing over `sites`, so a write that landed during the
    * round trip is not clobbered by a stale snapshot. */
   const removeLocally = () => {
-    const now = readSites();
-    delete now[id];
-    writeSites(now);
+    removeSite(id);                                  // B2165120: drop this plan's entry; the rest of the store is not rewritten
     // B1525088 (NEW-1) — a delete is identity-relevant (the site should vanish from the map/Sites
     // panel/switcher everywhere it's mounted), so it rides the same shared channel saveSite's
     // identity-writes use.

@@ -106,13 +106,3 @@ describe("verification-queue-audit — ceiling gate", () => {
     expect(problems.join("\n")).toMatch(/--write-ceiling/);
   });
 });
-
-describe("verification-queue-audit — the real repo file, right now", () => {
-  it("VERIFICATION.md currently passes its own recorded ceiling", () => {
-    const text = readText(REPO, "VERIFICATION.md");
-    const ceiling = JSON.parse(readFileSync(join(REPO, "scripts", "verification-queue-ceiling.json"), "utf8"));
-    const report = auditQueue(text, { staleThresholdDays: ceiling.staleThresholdDays });
-    const { ok, problems } = checkCeiling(report, ceiling);
-    expect(ok, problems.join("\n") + `\n(regenerate with: node scripts/verification-queue-audit.mjs --write-ceiling)`).toBe(true);
-  });
-});

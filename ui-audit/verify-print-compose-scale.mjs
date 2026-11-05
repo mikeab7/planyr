@@ -34,6 +34,8 @@ const fail = [];
 const ok = [];
 
 await page.goto(BASE, { waitUntil: "load" });
+// The app now lands on the Dashboard workspace; the seeded site opens once you switch to Site.
+await page.getByRole("button", { name: /^Site$/ }).first().click();
 await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60_000 });
 
 // Drop a building so the frame has real content to size against (fit-to-frame starts small
@@ -57,7 +59,7 @@ const openCompose = async () => {
 const readPreviewSvgText = async () => {
   const src = await page.locator('[data-testid="print-compose"] img[alt="Sheet preview"]').getAttribute("src").catch(() => null);
   if (!src) return null;
-  return page.evaluate(async (url) => (await fetch(url)).text(), src);
+  return page.evaluate(async (url) => { try { return await (await fetch(url)).text(); } catch { return null; } }, src);
 };
 const waitPreviewChange = async (prevText) => {
   for (let i = 0; i < 20; i++) {
@@ -73,9 +75,9 @@ try {
 
   /* ---- 1. ARCH D is selectable and changes the sheet --------------------------------- */
   const before = await readPreviewSvgText();
-  await page.getByText("ARCH D", { exact: true }).first().click();
+  await page.getByText("Full-size", { exact: true }).first().click();
   const afterArchD = await waitPreviewChange(before);
-  if (!afterArchD) fail.push("selecting ARCH D never rebuilt the sheet preview");
+  if (!afterArchD) fail.push("selecting Full-size (ARCH D) never rebuilt the sheet preview");
   else {
     const wIn = (afterArchD.match(/width="([\d.]+)in"/) || [])[1];
     const hIn = (afterArchD.match(/height="([\d.]+)in"/) || [])[1];
@@ -84,7 +86,7 @@ try {
   }
 
   /* ---- 2. an explicit scale locks the resize handles away + prints the ratio ---------- */
-  const scaleSelect = page.locator('[data-testid="print-compose"] select').first();
+  const scaleSelect = page.locator('[data-testid="print-compose"] select[aria-label="Scale"]');
   await scaleSelect.selectOption({ label: '1" = 100\'' });
   const withScale = await waitPreviewChange(afterArchD || before);
   if (withScale && withScale.includes("1&quot; = 100&#39;".replace("&#39;", "'"))) ok.push('the printed title block carries the stated scale (1" = 100\')');
@@ -118,7 +120,7 @@ try {
   else fail.push("Download PDF is NOT disabled despite the fit warning — a download here would silently misrepresent the scale");
 
   /* ---- 4. prepared-by reaches the sheet ------------------------------------------------ */
-  await scaleSelect.selectOption({ label: "Fit to frame (no stated scale)" });
+  await scaleSelect.selectOption({ label: "Scale to fit (NTS)" });
   await page.waitForTimeout(400);
   const preparedInput = page.locator('[data-testid="print-compose"] input[placeholder="Name or firm"]');
   await preparedInput.fill("J. Rivera, PE");

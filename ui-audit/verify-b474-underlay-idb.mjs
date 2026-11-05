@@ -18,7 +18,7 @@ const check = (n, p, d = "") => { results.push({ n, p }); console.log(`  ${p ? "
 const idbRasterBytes = (page, key) => page.evaluate((k) => new Promise((res) => {
   try { const r = indexedDB.open("planyr", 1); r.onsuccess = () => { try { const g = r.result.transaction("kv", "readonly").objectStore("kv").get(k); g.onsuccess = () => res(typeof g.result === "string" ? g.result.length : 0); g.onerror = () => res(0); } catch (_) { res(0); } }; r.onerror = () => res(0); } catch (_) { res(0); }
 }), key);
-const recUnderlay = (page) => page.evaluate((k) => { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); const s = Object.values(m)[0]; return s && s.underlay ? { hasSrc: !!s.underlay.src, idbKey: s.underlay.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
+const recUnderlay = (page) => page.evaluate((k) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); const s = Object.values(m)[0]; return s && s.underlay ? { hasSrc: !!s.underlay.src, idbKey: s.underlay.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
 // the underlay renders as an SVG <image href="data:…"> (not an <img>); count those.
 const bigImgs = (page) => page.evaluate(() => Array.from(document.querySelectorAll("image")).filter((i) => {
   const h = i.getAttribute("href") || i.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
@@ -49,7 +49,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const siteId = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
 // Open the "Aerial underlay" left-rail panel so its (hidden) file input mounts in the DOM.

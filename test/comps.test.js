@@ -709,11 +709,13 @@ describe("comps: create/edit validation", () => {
     expect(validateComp({ ...base, leaseOpex: 2.5 })).toEqual([]);
   });
 
-  it("NEW-5 (2026-09-22 live test): a Lease comp with no rent period is blocked before any insert, whether or not a rate was typed", () => {
+  it("NEW-5 (2026-09-22 live test) / NEW-1 (2026-10-19): a Lease comp WITH a rate but no rent period is blocked before any insert; with no rate there is nothing to pick a period for", () => {
     const base = { compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } };
-    expect(validateComp(base)).toEqual(["Pick a rent period (MO or YR)."]);
-    expect(validateComp({ ...base, leaseRatePeriod: "" })).toEqual(["Pick a rent period (MO or YR)."]);
+    expect(validateComp(base)).toEqual([]);
+    expect(validateComp({ ...base, leaseRatePeriod: "" })).toEqual([]);
+    expect(validateComp({ ...base, leaseRate: null })).toEqual([]);
     expect(validateComp({ ...base, leaseRate: 7.5 })).toEqual(["Pick a rent period (MO or YR)."]);
+    expect(validateComp({ ...base, leaseRate: "6.25", leaseRatePeriod: "" })).toEqual(["Pick a rent period (MO or YR)."]);
     expect(validateComp({ ...base, leaseRatePeriod: "monthly" })).toEqual([]);
     expect(validateComp({ ...base, leaseRatePeriod: "annual" })).toEqual([]);
     // A non-lease comp never needs a rent period at all.

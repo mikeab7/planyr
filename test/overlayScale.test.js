@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES, chooseOverlayScale,
-  parseDistanceInput, feetPerInchFromPair, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
+  parseDistanceInput, feetPerInchFromPair, parseTypedScale, parsePlainTypedScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
 } from "../src/shared/overlay/overlayScale.js";
 
 const IN = 72; // points per inch
@@ -186,5 +187,29 @@ describe("overlay scale — presets (B574–B578)", () => {
     for (const p of SCALE_PRESETS) {
       expect(feetPerInchFromPair({ pageVal: p.pageIn, realVal: p.realFt })).toBeCloseTo(feetPerInchForPreset(p), 9);
     }
+  });
+});
+
+describe("Set scale — the Custom box (parseTypedScale)", () => {
+  it("a plain number is feet per inch (read synchronously, no sheet-scale module needed)", async () => {
+    for (const [t, want] of [["40", 40], [" 37.5 ", 37.5], ["40'", 40], ["40 ft", 40]]) {
+      expect(parsePlainTypedScale(t)).toBe(want);
+      expect(await parseTypedScale(t)).toBe(want);
+    }
+  });
+  it("reads the sheet-scale forms people paste: 1\" = 40', 1:480, 1/8\" = 1'-0\"", async () => {
+    expect(await parseTypedScale("1\" = 40'")).toBe(40);
+    expect(await parseTypedScale("1:480")).toBe(40);
+    expect(await parseTypedScale("1/8\" = 1'-0\"")).toBe(8);
+    expect(await parseTypedScale("1/4\"=1'-0\"")).toBe(4);
+    expect(parsePlainTypedScale("1:480")).toBe(null);   // the richer forms are NOT the sync path
+  });
+  it("junk, blanks, zero, NTS, slopes and absurd values are null (the field reverts)", async () => {
+    for (const bad of ["", "   ", null, undefined, "abc", "0", "-5", "1:4 slope", "NTS", "40 40", "99999", "0.01"]) expect(await parseTypedScale(bad)).toBe(null);
+  });
+  it("the sheet-scale reader is a lazy import — overlayScale.js has no static edge to it that the Site route would pull in", () => {
+    const src = readFileSync(new URL("../src/shared/overlay/overlayScale.js", import.meta.url), "utf8");
+    expect(src).not.toMatch(/^import .*sheetScale/m);
+    expect(src).toMatch(/await import\("\.\.\/files\/sheetScale\.js"\)/);
   });
 });

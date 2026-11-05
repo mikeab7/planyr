@@ -93,7 +93,7 @@ const imgBox = (page) => page.evaluate(() => { const i = document.querySelector(
   await page.screenshot({ path: OUT + "verify-B-before.png" });
   await page.locator('[title="Overlay"]').first().click(); await page.waitForTimeout(300); // open overlay panel
   await page.getByText("BV-255-2024-LD1 - ARCH ASSET FOR.pdf").first().click(); await page.waitForTimeout(300); // select overlay
-  await page.getByRole("button", { name: "Size to view" }).click(); await page.waitForTimeout(600);
+  await page.locator('[data-testid^="reference-more-"]').first().click(); await page.locator("[role=menuitem]", { hasText: /^Size to view$/ }).click(); // NEW-1: now ⋯ → Size to view await page.waitForTimeout(600);
   const after = await imgBox(page);
   await page.screenshot({ path: OUT + "verify-B-after.png" });
   const shrank = before && after && after.w < before.w && after.w > 200 && after.w < 1440 * 1.2;

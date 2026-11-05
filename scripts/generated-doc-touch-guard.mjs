@@ -102,9 +102,19 @@ export function runGate(repo = REPO) {
   if (!diff.ok) return { unverifiable: true, reason: `could not diff against origin/main — ${diff.reason}` };
   const changedFiles = diff.out.split("\n").map((l) => l.trim()).filter(Boolean);
 
-  const ledgerInForce = tryGit(repo, "git cat-file -e origin/main:ledger/backlog/_frame.md").ok;
+  // The PR that MOVES the ledger onto its own branch deletes the in-tree ledger and the old views, so it carries the
+  // marker file; it is not blocked by the rule it introduces (same carve-out the original one-file-per-entry PR had).
+  const branchCarriesMarker = tryGit(repo, "git cat-file -e HEAD:.github/ledger-branch.json").ok;
+  const ledgerInForce = tryGit(repo, "git cat-file -e origin/main:ledger/backlog/_frame.md").ok && !branchCarriesMarker;
   const v = verdict({ branchNames, changedFiles, ledgerInForce });
-  return { ...v, branch: branchNames[0] || "(detached)" };
+  // NEW-1 (2026-11-05): once the ledger lives on its own branch, a PR that still edits ledger/ or the old
+  // ledger files is a STRAGGLER (opened before the move). It is never failed — failing it would strand its
+  // records — .github/workflows/ledger-forward.yml imports them onto the ledger branch when it merges.
+  // Only files this branch ADDS or CHANGES count (a deletion is the cut-over itself, or a branch dropping a straggler edit).
+  const added = tryGit(repo, "git diff --name-only --diff-filter=AMRC origin/main...HEAD");
+  const addedFiles = added.ok ? added.out.split("\n").map((l) => l.trim()).filter(Boolean) : changedFiles;
+  const stragglers = ledgerInForce ? [] : addedFiles.filter((f) => f.startsWith("ledger/") || RETIRED_LEDGER_FILES.includes(f));
+  return { ...v, stragglers, branch: branchNames[0] || "(detached)" };
 }
 
 // ---- CLI -------------------------------------------------------------------------------
@@ -124,6 +134,14 @@ function main(argv) {
     return 0;
   }
 
+  if (res.ok && res.stragglers?.length && !json) {
+    process.stdout.write(
+      `\nℹ This branch edits ${res.stragglers.length} ledger file(s) (${res.stragglers.slice(0, 3).join(", ")}${res.stragglers.length > 3 ? ", …" : ""}).\n` +
+        `  The ledger now lives on its own branch — records are filed with \`npm run ledger -- add|move|put\`, never in a PR.\n` +
+        `  Not a failure: when this merges, .github/workflows/ledger-forward.yml copies these edits onto the ledger branch.\n` +
+        `  (To avoid a modify/delete conflict with main, drop them from this branch and re-file with the ledger commands.)\n\n`,
+    );
+  }
   if (res.ok) {
     if (!json) {
       process.stdout.write(

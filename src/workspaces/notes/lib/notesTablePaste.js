@@ -29,6 +29,8 @@
  */
 
 import { Fragment } from "@tiptap/pm/model";
+import { ANCHOR_BOX_PAD_X } from "./notesBoxResize.js";
+import { normalizeFill } from "./notesTableFill.js";
 
 /** Does this HTML hold a table? Cheap and deliberately loose — it only decides who owns the paste. */
 export function htmlHasTable(html) {
@@ -147,6 +149,14 @@ export function rowsToTableHtml(rows) {
   return `<table><tbody>${body}</tbody></table>`;
 }
 
+/** ⛔ A WORD LIST'S `text/plain` IS A TWO-COLUMN GRID ("1.<tab>Entitlements", "·<tab>Soft costs"): every line is a
+ *  list marker, a tab, then the item. As a grid it would turn a pasted numbered or bulleted list into a table of
+ *  marker + text. A grid whose FIRST COLUMN is nothing but list markers is a list. */
+export function isMarkerColumn(rows) {
+  const marker = /^(?:[^\w\s]|o|\(?(?:\d{1,4}|[a-z]|[ivxlcdm]+)[.)])$/i;
+  return rows.length > 0 && rows.every((r) => marker.test(String(r[0] ?? "").replace(/[\s\u00a0]+/g, "")));
+}
+
 /** The grid in a clipboard's tab-separated `text/plain`, else null. By default only when the clipboard has
  *  no html table (the html is then the better source). `ignoreHtml` is the FALLBACK ("tab-separated rows
  *  must always become a table, whenever the HTML route yields none" — owner, 2026-10-06): the caller has
@@ -154,7 +164,8 @@ export function rowsToTableHtml(rows) {
 export function tabularFromClipboard(dt, { ignoreHtml = false } = {}) {
   try {
     if (!ignoreHtml && clipboardHasTable(dt)) return null;
-    return parseTabular(dt?.getData?.("text/plain") || "");
+    const rows = parseTabular(dt?.getData?.("text/plain") || "");
+    return rows && !isMarkerColumn(rows) ? rows : null;
   } catch (_) { return null; }
 }
 
@@ -234,9 +245,186 @@ export function fillEmptyCells(fragment, schema) {
   return fix(fragment);
 }
 
-/** How wide a box that has just been made FOR a pasted table should be — wide enough that three
- *  ordinary columns do not collapse to slivers, never wider than the page's writing column. */
-export function tableBoxWidth({ cols, current, column = 160, max = 560 }) {
-  const want = Math.max(1, Number(cols) || 1) * column;
-  return Math.round(Math.min(max, Math.max(Number(current) || 0, want)));
+/** ⛔ A TABLE'S REAL SHAPE: ITS COLUMN COUNT IS THE WIDEST ROW *COUNTING MERGED CELLS* (NEW-1, owner report
+ *  2026-10-11, a OneNote table with a merged "Cross Dock / Front Load / Rear Load" header, each spanning two
+ *  columns). The box was sized from the FIRST ROW'S CELL COUNT — 3 — while the table has 6 columns, so the box
+ *  came out half the width it needed and every column was squeezed to the floor.
+ *  `rows` is plain data (one array of `{ colspan, colwidth }` per row; `colwidth` is Tiptap's number-array-or-null),
+ *  so this stays engine-free. Returns `{ cols, widths }`: `widths[i]` is that column's stored width or `null`. */
+export function tableShape(rows) {
+  let cols = 0;
+  const widths = [];
+  for (const row of rows || []) {
+    let at = 0;
+    for (const cell of row || []) {
+      const span = Math.max(1, Number(cell?.colspan) || 1);
+      const cw = Array.isArray(cell?.colwidth) ? cell.colwidth : null;
+      for (let k = 0; k < span; k += 1) {
+        const w = cw && Number.isFinite(Number(cw[k])) && Number(cw[k]) > 0 ? Number(cw[k]) : null;
+        if (w != null && widths[at + k] == null) widths[at + k] = w;
+      }
+      at += span;
+    }
+    cols = Math.max(cols, at);
+  }
+  return { cols, widths: Array.from({ length: cols }, (_, i) => widths[i] ?? null) };
+}
+
+/** `tableShape` over a ProseMirror `table` node. */
+export function tableShapeOfNode(tableNode) {
+  const rows = [];
+  tableNode.forEach((row) => {
+    const cells = [];
+    row.forEach((cell) => cells.push({ colspan: cell.attrs?.colspan, colwidth: cell.attrs?.colwidth }));
+    rows.push(cells);
+  });
+  return tableShape(rows);
+}
+
+/** The widest a TABLE's box is capped at when the page is narrower than this: a six-column table on the
+ *  default narrow page would otherwise be forced to its floor. The page grows to hold it (anchorExtentX),
+ *  exactly as it does for any box that overhangs. */
+export const TABLE_BOX_CAP_MIN = 900;
+
+/** How wide a box holding a table should be — wide enough that every column shows without squeezing
+ *  (NEW-1). The table's NATURAL width, never the source's pixel widths (OneNote writes `width:0.9in` on every
+ *  cell): a column with no stored width counts `column`, one with a stored width counts that. It is capped
+ *  at the page's current width — or `TABLE_BOX_CAP_MIN` if the page is narrower — but never below what
+ *  keeps every column at the readable floor (`minCol`). Never narrows a box that is already wider. */
+export function tableBoxWidth({ cols, widths = null, current = 0, sheet = 0, column = 160, minCol = 100, cap = TABLE_BOX_CAP_MIN, pad = ANCHOR_BOX_PAD_X }) {
+  const n = Math.max(1, Math.floor(Number(cols) || 1));
+  const natural = (Array.isArray(widths) && widths.length === n
+    ? widths.reduce((a, w) => a + (Number(w) > 0 ? Math.max(Number(w), minCol) : column), 0)
+    : n * column) + pad;                       // the box's own padding + border sit OUTSIDE the table
+  const ceiling = Math.max(Number(sheet) || 0, cap, n * minCol + pad);
+  return Math.round(Math.max(Number(current) || 0, Math.min(natural, ceiling)));
+}
+
+/* ── the SOURCE table's look: column widths and cell shading (NEW-1, Office-style paste options) ─────────────
+ *
+ * The ordinary paste imports neither (see this file's header and notesTableFill.js): a table's box is sized from
+ * its columns, and a foreign white-on-white fill would be wrong on a dark page. The paste options that ask for
+ * "the source's widths" (W) or "the source's formatting" (E, R) need them, so they are READ here, from the
+ * clipboard markup, and carried beside the paste. Pure over a DOM element — the unit runner has none, so the
+ * length and colour parsing is exported and tested on its own, and the whole read is driven in a browser
+ * (ui-audit/verify-notes-paste-options.mjs) against the committed Excel / OneNote / Word fixtures.
+ */
+
+const CSS_PX = { px: 1, pt: 96 / 72, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 };
+
+/** `"64"`, `"48pt"`, `"0.9in"` → whole CSS pixels; percentages, `auto` and junk → null. */
+export function cssLengthPx(value) {
+  const m = /^\s*(\d*\.?\d+)\s*(px|pt|in|cm|mm)?\s*$/i.exec(String(value ?? ""));
+  if (!m) return null;
+  const n = parseFloat(m[1]) * CSS_PX[(m[2] || "px").toLowerCase()];
+  return n > 0 ? Math.round(n) : null;
+}
+
+/** The fill a CSS declaration block names (a hex or an rgb triple after `background` / `background-color`), as lowercase hex, or null.
+ *  White and "no fill" are not a look anyone chose. */
+export function fillFromDeclarations(css) {
+  const m = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i.exec(String(css || ""));
+  const token = m && /#[0-9a-f]{3,6}\b|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)/i.exec(m[1]);
+  const hex = normalizeFill(token ? token[0] : "");
+  return !hex || hex === "transparent" || /^#(?:f{6}|f{3})$/i.test(hex) ? null : hex;
+}
+
+/** `{ className: fill }` from the clipboard's own `<style>` text. ⛔ EXCEL (and Word) NAME A CELL'S SHADING BY CLASS —
+ *  `<td class=xl65>` with a `.xl65` rule carrying the background in the head — not inline, so reading only `style=` misses
+ *  every real spreadsheet fill (found by driving the committed Excel fixture, whose header row is shaded this way). */
+export function fillsByClass(cssText) {
+  const out = {};
+  const css = String(cssText || "").replace(/<!--|-->/g, " ");
+  for (const m of css.matchAll(/(?:^|[}\s,])(?:td|th)?\.([A-Za-z_][\w-]*)\s*\{([^}]*)\}/g)) {
+    const fill = fillFromDeclarations(m[2]);
+    if (fill && !out[m[1]]) out[m[1]] = fill;
+  }
+  return out;
+}
+
+/** A source cell's shading as `#rrggbb`, or null: inline style first, then `bgcolor`, then its classes' rules. */
+export function sourceFill(el, byClass = null) {
+  if (!el?.getAttribute) return null;
+  const inline = fillFromDeclarations(el.getAttribute("style") || "");
+  if (inline) return inline;
+  const attr = (el.getAttribute("bgcolor") || "").trim();
+  const fromAttr = fillFromDeclarations(`background:${/^[0-9a-f]{6}$/i.test(attr) ? `#${attr}` : attr}`);
+  if (fromAttr) return fromAttr;
+  if (byClass) for (const c of String(el.getAttribute("class") || "").split(/\s+/)) if (c && byClass[c]) return byClass[c];
+  return null;
+}
+
+function elementWidth(el) {
+  const attr = el.getAttribute?.("width");
+  const fromAttr = attr && !/%/.test(attr) ? cssLengthPx(attr) : null;
+  if (fromAttr) return fromAttr;
+  const m = /(?:^|;)\s*width\s*:\s*([^;]+)/i.exec(el.getAttribute?.("style") || "");
+  return m && !/%/.test(m[1]) ? cssLengthPx(m[1].trim()) : null;
+}
+
+const cellsOf = (tr) => Array.from(tr.children || []).filter((c) => /^t[dh]$/i.test(c.tagName || ""));
+
+/** Tables worth reporting, in document order: not an email layout table (the paste unwraps those), not one cell
+ *  (always pasted as text), and not nested inside a table that is itself kept. These are the tables the editor
+ *  ends up holding, one for one. */
+function realTables(root) {
+  const isScaffold = (t) => (isSingleColumn(t) && !isBorderedTable(t)) || t.querySelectorAll("td,th").length < 2;
+  return Array.from(root.querySelectorAll("table")).filter((t) => {
+    if (isScaffold(t)) return false;
+    const up = t.parentElement?.closest?.("table");
+    return !up || isScaffold(up);
+  });
+}
+
+/** The text grid of every real table in a clipboard document, in the same order `readSourceTables` reports them:
+ *  one array of cell strings per row (a cell's paragraphs joined by a space). The SAFETY NET's copy of the data —
+ *  if the parse ever drops a table the clipboard plainly held, these rebuild it (notesPastePlain.js). Never throws. */
+export function tableGridsOf(root) {
+  if (!root?.querySelectorAll) return [];
+  const out = [];
+  for (const table of realTables(root)) {
+    try {
+      const rows = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
+      const grid = rows.map((tr) => cellsOf(tr).map((c) => (c.textContent || "").replace(/[\s\u00a0]+/g, " ").trim()));
+      if (grid.length && grid.some((r) => r.length >= 2)) out.push(grid);
+    } catch (_) { /* one unreadable table costs its rescue, never the paste */ }
+  }
+  return out;
+}
+
+/** `{ widths, fills }` per real table in a clipboard document. `widths[i]` is column i's source width in CSS pixels
+ *  or null; `fills[r][c]` is the shading of the c-th cell of the r-th row (document order) or null. Never throws. */
+export function readSourceTables(root, styleRoot = root) {
+  if (!root?.querySelectorAll) return [];
+  const out = [];
+  const byClass = fillsByClass(Array.from(styleRoot?.querySelectorAll?.("style") || []).map((st) => st.textContent).join("\n"));
+  for (const table of realTables(root)) {
+    try {
+      const widths = [];
+      for (const col of Array.from(table.querySelectorAll(":scope > colgroup > col, :scope > col"))) {
+        const span = Math.max(1, parseInt(col.getAttribute("span") || "1", 10) || 1);
+        const w = elementWidth(col);
+        for (let k = 0; k < span; k += 1) widths.push(w);
+      }
+      const rows = Array.from(table.querySelectorAll(":scope > tr, :scope > tbody > tr, :scope > thead > tr, :scope > tfoot > tr"));
+      const fills = [];
+      const fromCells = [];
+      for (const tr of rows) {
+        let at = 0;
+        const rowFills = [];
+        for (const cell of cellsOf(tr)) {
+          const span = Math.max(1, parseInt(cell.getAttribute("colspan") || "1", 10) || 1);
+          rowFills.push(sourceFill(cell, byClass));
+          const w = elementWidth(cell);
+          if (w && span === 1 && fromCells[at] == null) fromCells[at] = w;
+          at += span;
+        }
+        fills.push(rowFills);
+      }
+      const cols = Math.max(widths.length, fromCells.length);
+      const merged = Array.from({ length: cols }, (_, i) => widths[i] ?? fromCells[i] ?? null);
+      out.push({ widths: merged, fills });
+    } catch (_) { /* one unreadable table costs its look, never the paste */ }
+  }
+  return out;
 }

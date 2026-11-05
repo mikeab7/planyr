@@ -16,7 +16,7 @@ export const planCrumb = (p) => p.getByTestId("plan-crumb");
 /* Every plan of the site, by name, straight off disk. */
 export function plans(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const out = {};
     for (const rec of Object.values(map)) {
       if (!rec || !rec.id) continue;
@@ -86,7 +86,7 @@ export async function drawBuilding(page, box, { plan = "Concept A", expect: n = 
 }
 
 export async function drawLengthMeasure(page, box, { plan = "Concept A", expect: n = 1 } = {}) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: "Length", exact: true }).click();
   const y = box.y + box.height * 0.62;
   await page.mouse.click(box.x + box.width * 0.30, y);

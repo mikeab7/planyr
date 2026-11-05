@@ -19,8 +19,9 @@ import { fileURLToPath } from "node:url";
 import { accumulatePondLedger } from "../src/workspaces/site-planner/lib/pondLedger.js";
 import { usablePondVolume, bandedStorage, detentionStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { solveTobRaise, sizePondForTargets, applyPondSizingActions } from "../src/workspaces/site-planner/lib/pondSizing.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+const src = plannerSource();
 const SQ = (s = 120) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
 const AC_FT = 43560;
 
@@ -36,7 +37,7 @@ const entryFrom = (split, extra = {}) => ({
 describe("F1 — the status-card headline usable IS the pond's Usable-detention row (same inward number)", () => {
   it("the headline reads the ledger's usableCf, not the drawn-gross-minus-dead formula that overstated it", () => {
     // The row: `pondRow('Usable detention (above flood WSE)', f1(split.usableCf / 43560))` (16825).
-    expect(src).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} AC-FT`)');
+    expect(src).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / CF_PER_ACFT)} AC-FT`)');
     // The headline: providedUsableCf now = pondLedger.usableCf — the SAME per-pond usableCf, summed.
     expect(src).toContain("const providedUsableCf = pondLedger.usableCf;");
     // The old overstating formula is GONE.

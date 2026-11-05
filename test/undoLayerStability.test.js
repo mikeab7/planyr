@@ -33,8 +33,9 @@ import {
 } from "../src/workspaces/site-planner/lib/layerPrefs.js";
 import { ALL_LAYERS, defaultOverlayState } from "../src/workspaces/site-planner/lib/layers.js";
 import { configCanLift } from "../src/workspaces/site-planner/lib/mapStack.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
-const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+const src = plannerSource();
 const someKey = Object.keys(defaultOverlayState())[0];
 const liftKey = Object.keys(ALL_LAYERS).find((k) => configCanLift(ALL_LAYERS[k]));
 

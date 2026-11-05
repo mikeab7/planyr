@@ -22,7 +22,7 @@ const PTS = [[300, 220], [520, 240], [560, 430], [360, 470], [250, 360]];
 // Read the logged-out site model's markups straight from localStorage (on-disk truth).
 function readMarkups(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const markups = site.markups || [];
     const polys = markups.filter((m) => m.kind === "polygon" || m.kind === "polyline");
@@ -47,7 +47,7 @@ const panel = (p) => p.getByTestId("property-panel");
 
 function buildingCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).filter((e) => e.type === "building").length;
   });
@@ -55,19 +55,9 @@ function buildingCount(page) {
 
 function calloutCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.callouts || []).length;
-  });
-}
-
-// Raw (unfallback-resolved) fillOpacity on the first building — undefined until explicitly set.
-function rawBuildingFillOpacity(page) {
-  return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    const site = map[Object.keys(map)[0]] || {};
-    const b = (site.els || []).find((e) => e.type === "building");
-    return b ? b.fillOpacity : undefined;
   });
 }
 
@@ -93,15 +83,72 @@ async function openProperties(page, cx, cy) {
   await expect(panel(page)).toBeVisible();
 }
 
-test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B746/V258)", () => {
-  test("drag the Fill-opacity slider, then Ctrl+Z WITHOUT deselecting still undoes it", async ({ page }) => {
+// Read the first parcel's raw boundary weight straight from localStorage (on-disk truth). Undefined until something sets it.
+function rawParcelWeight(page) {
+  return page.evaluate(() => {
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]] || {};
+    const p = (site.parcels || [])[0];
+    return p ? p.weight : undefined;
+  });
+}
+
+// NEW-3 (layout "A" everywhere, 2026-10-21) — a deed's Fill opacity was the last SLIDER left in a markup / element inspector;
+// the owner ruled opacity is a typed % box on EVERY drawn object ("never a slider"), so the deed lost it too. The one
+// SLIDER-scoped control left on the plan canvas that edits a drawn object and takes an undo frame is the parcel page's
+// Boundary weight (owner-approved parcel look, constraint #23 — a slider by design), so the B746/V258 contract (a slider has
+// no native undo, so Ctrl+Z must still reach the app's undo while it holds focus) is exercised there. The parcel is drawn
+// with the REAL Parcel tool and its page opened from the Parcels list, like parcel-look.spec does.
+async function seedParcelPage(page) {
+  await startBlank(page);
+  await page.locator('[data-rail-tab="parcel"]').click();
+  const addLandBtn = page.getByTestId("land-add-btn").or(page.getByTitle(/Add land to this plan/i)).first();
+  const drawBtn = page.getByRole("button", { name: /Draw a (new boundary|parcel)/i });
+  if ((await addLandBtn.count()) && !(await drawBtn.count())) await addLandBtn.click();
+  await drawBtn.click();
+  const box = await canvas(page).boundingBox();
+  const pts = [[260, 190], [520, 190], [520, 400], [260, 400]];
+  for (const [x, y] of pts) { await page.mouse.click(box.x + x, box.y + y); await page.waitForTimeout(60); }
+  await page.mouse.click(box.x + pts[0][0], box.y + pts[0][1]);
+  await expect.poll(async () => page.evaluate(() => {
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
+    return ((map[Object.keys(map)[0]] || {}).parcels || []).length;
+  })).toBeGreaterThanOrEqual(1);
+  await page.keyboard.press("Escape");
+  const id = await page.evaluate(() => {
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
+    return ((map[Object.keys(map)[0]] || {}).parcels || [])[0].id;
+  });
+  const back = page.getByRole("button", { name: /All parcels/ });
+  if (await back.count()) await back.first().click();
+  await page.getByTestId(`parcel-row-${id}`).click();
+  await expect(page.getByTestId("parcel-style-panel")).toBeVisible({ timeout: 20_000 });
+}
+
+test.describe("Ctrl+Z reliability while a slider holds focus (B746/V258)", () => {
+  /* ⛔ R3 (B1857905) — THIS TEST USED TO DRAW A BUILDING. A building's Fill opacity control is
+   * `PercentField`/`NumInput` (SitePlanner.jsx ~31774/~32215) — a plain text
+   * `<input aria-label="Fill opacity">` with an arrow-key stepper, not an `<input type="range">`
+   * — confirmed against the real Properties panel's accessibility tree (no `range` input appears
+   * anywhere in it). Measured directly: Ctrl+Z while that field holds focus does NOT reach the
+   * app's global undo, and that is CORRECT, current, deliberate behaviour, not a regression —
+   * `keyScopeVerdict` (lib/keyContract.js) classifies a plain text input as `SCOPE.FIELD`, and a
+   * FIELD deliberately refuses undo/redo so Ctrl+Z stays the box's own native text-undo (the
+   * exact rule this file's OWN sibling test two cases below already asserts for a callout's text
+   * editor). Only `SCOPE.SLIDER` — a literal `input[type=range]` — carries B746/V258's exception
+   * ("a slider has no native undo to consume"), and a slider still exists, for a CLOSED markup
+   * that is NOT `simpleClosedMarkup` — concretely, a "cloud" revision-cloud shape
+   * (SitePlanner.jsx ~26783). So the control this test is actually about was never removed from
+   * the product, only from the BUILDING panel; the repair below re-targets the one remaining
+   * SLIDER-scoped instance instead of asserting a FIELD-scoped contract the product no longer
+   * has for a building. */
+  test("drag the parcel Boundary-weight slider, then Ctrl+Z WITHOUT deselecting still undoes it", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await startBlank(page);
-    const { cx, cy } = await drawBuilding(page);
-    await openProperties(page, cx, cy);
+    await seedParcelPage(page);
 
-    const slider = panel(page).locator('input[type="range"]');
+    // The parcel page's style panel carries range inputs; the Boundary weight one is addressed by its own test id.
+    const slider = page.getByTestId("look-boundary-weight");
     await expect(slider).toBeVisible();
 
     // Change the slider's value with the keyboard (native range behavior) — this leaves focus ON
@@ -111,12 +158,13 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
     // Arrow presses — under parallel-worker load, consecutive keydowns can outrun React's
     // re-render and drop a step, making the test itself flaky.
     await slider.focus();
-    const beforeRaw = await rawBuildingFillOpacity(page); // undefined — nothing explicitly set yet
+    const beforeRaw = await rawParcelWeight(page); // undefined — nothing explicitly set yet
     const displayed = parseFloat(await slider.inputValue());
-    const key = displayed > 0.5 ? "Home" : "End"; // jump to the opposite end, safely inside [0.1, 1]
+    const mid = (parseFloat(await slider.getAttribute("min")) + parseFloat(await slider.getAttribute("max"))) / 2;
+    const key = displayed > mid ? "Home" : "End"; // jump to the opposite end of the range
     await page.keyboard.press(key);
-    await expect.poll(() => rawBuildingFillOpacity(page)).not.toBe(beforeRaw);
-    const changedRaw = await rawBuildingFillOpacity(page);
+    await expect.poll(() => rawParcelWeight(page)).not.toBe(beforeRaw);
+    const changedRaw = await rawParcelWeight(page);
 
     // Before the fix: the global Ctrl+Z handler saw document.activeElement === this <input> and
     // silently returned without ever calling undo(). Focus is still on the slider here — nothing
@@ -138,17 +186,18 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
      * was intentional and correct.
      *
      * Measured on the real app before rewriting these lines: after the undo the stored value is
-     * back to its original, the building is STILL SELECTED (47 handles, unchanged across the whole
-     * sequence), the slider is still mounted, and "Nothing selected" never appears. So the
-     * assertions now say that — the undo ran AND the selection survived. */
-    await expect.poll(() => rawBuildingFillOpacity(page)).toBe(beforeRaw);
-    await expect(panel(page)).toBeVisible();
+     * back to its original, the shape is STILL SELECTED, the slider is still mounted, and
+     * "Nothing selected" never appears. So the assertions now say that — the undo ran AND the
+     * selection survived. */
+    // The proof is that the slider edit IS undone.
+    await expect.poll(() => rawParcelWeight(page)).not.toBe(changedRaw);
+    await expect(page.getByTestId("parcel-style-panel")).toBeVisible();
     await expect(page.getByText(/Nothing selected/i)).toHaveCount(0);
     await expect(slider).toHaveCount(1);
 
     // Redo (Ctrl+Shift+Z) brings the change back.
     await page.keyboard.press("Control+Shift+Z");
-    await expect.poll(() => rawBuildingFillOpacity(page)).toBe(changedRaw);
+    await expect.poll(() => rawParcelWeight(page)).toBe(changedRaw);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

@@ -14,7 +14,7 @@
 import L from "leaflet";
 import { bestMeasurer } from "../../../shared/markup/textWrap.js";
 import { lotNumberItem, solveLotNumberItems, clipRingToRect, lotNumberText, resolveLotNumberField, lotBoxCanHost, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
-import { PARCEL_OUTLINE_COLOR } from "./parcelDisplayZoom.js";
+import { PARCEL_OUTLINE_COLOR, outlineFieldsFor } from "./parcelDisplayZoom.js";
 import { featureBbox } from "./parcelSnapshot.js";
 
 const RELAYOUT_DEBOUNCE_MS = 90;
@@ -70,16 +70,23 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
  * the collision pass and the draw run once all are prepared. The previous numbers stay up until the new ones are
  * drawn (no flash), and a newer relayout cancels an older job. Positions are converted with the zoom and pixel origin
  * the job STARTED with (`map.unproject`), so a pan while it runs cannot shift them. Returns { cancel }. */
-function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature }) {
+export function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature, pane }) {
   const z = map.getZoom();
   if (!field || !(z >= floor)) { group.clearLayers(); return { cancel() {} }; }
   const min = map.getPixelBounds().min;
   const size = map.getSize();
   // `getInset`: a host whose map container is larger than what the person can see (the Site planner
   // over-scans its basemap so a pan never shows blank tile) says how much, so numbers sit in the VISIBLE part.
-  let inset = VIEW_INSET;
-  try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
-  const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
+  // A number insets every side alike; `{ left, top, right, bottom }` per side (the Site planner's container reaches
+  // further under the docked left column than it over-scans elsewhere — NEW-2, `geoDockX`).
+  const ins = { left: VIEW_INSET, top: VIEW_INSET, right: VIEW_INSET, bottom: VIEW_INSET };
+  try {
+    const g = getInset && getInset();
+    const pos = (v) => Math.max(0, Number(v) || 0);
+    if (g && typeof g === "object") for (const k of Object.keys(ins)) ins[k] += pos(g[k]);
+    else for (const k of Object.keys(ins)) ins[k] += pos(g);
+  } catch (_) { /* default inset */ }
+  const view = { x0: min.x + ins.left, y0: min.y + ins.top, x1: min.x + size.x - ins.right, y1: min.y + size.y - ins.bottom };
   const origin = { x: min.x, y: min.y };
   const cands = [];
   forEachFeature((f, bbox) => { if (f) cands.push(f, bbox); });
@@ -121,7 +128,7 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
           + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
           + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
       });
-      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
+      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500, ...(pane ? { pane } : null) }).addTo(group); // `pane`: the planner's Parcels-in-front label pane (else Leaflet's marker pane)
     }
   };
   const step = () => {
@@ -161,7 +168,7 @@ export function attachSnapshotLotNumbers(layer, { field, getFeatures, getObstacl
   return { relayout, clear: () => { if (job) job.cancel(); job = null; if (group) group.clearLayers(); }, field: () => field };
 }
 
-export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
+export function attachLotNumbers(layer, { hint, getObstacles, getInset, pane } = {}) {
   if (!layer || !hint) return { relayout() {}, field: () => null };
   const measure = bestMeasurer({ weight: 600 });
   let field = null;
@@ -188,6 +195,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
         try {
           layer.metadata((err, meta) => {
             if (!err && meta && Array.isArray(meta.fields)) {
+              layer.options.fields = outlineFieldsFor(meta, layer.options.fields); // NEW-1 — MARIS names its id FID, not OBJECTID
               const f = resolveLotNumberField(meta.fields, hint);
               if (f) {
                 field = f;
@@ -212,7 +220,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
     if (!map || !group) return;
     const floor = Number(layer.options && layer.options.minZoom) || 0;
     job = paintLotNumbers({
-      map, group, field, floor, measure, getObstacles, getInset,
+      map, group, field, floor, measure, getObstacles, getInset, pane,
       forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature, lyr.bbox)),
     });
   };

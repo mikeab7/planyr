@@ -12,7 +12,46 @@
  * promote it in `counties.js` AND replace its row here with a `verifiedOn` in the same commit — a
  * promoted endpoint has a date, not a provenance excuse.
  */
+import { ALABAMA_VERIFICATION } from "./alabamaProvenance.js"; // NEW-1 (B2302784)
+import { SOUTH_DAKOTA_VERIFICATION } from "./sdProvenance.js"; // NEW-1 (B2343936)
+import { IDAHO_VERIFICATION } from "./idProvenance.js"; // NEW-1 (B2317920)
+import { GEORGIA_VERIFICATION } from "./gaProvenance.js"; // NEW-1 (B2316720)
+import { LOUISIANA_VERIFICATION } from "./laProvenance.js"; // NEW-1 (Louisiana 2026-10-19)
+import { MISSOURI_VERIFICATION } from "./moProvenance.js"; // NEW-1 (B2317680)
+import { MICHIGAN_VERIFICATION } from "./miProvenance.js"; // NEW-1 (Michigan, 2026-10-20)
+import { SOUTH_CAROLINA_VERIFICATION } from "./scProvenance.js"; // NEW-1 (South Carolina 2026-10-19)
+import { PENNSYLVANIA_VERIFICATION } from "./paProvenance.js"; // NEW-1 (Pennsylvania, 2026-10-19)
+import { ILLINOIS_VERIFICATION } from "./ilProvenance.js"; // NEW-1 (B2372624)
+import { WASHINGTON_VERIFICATION } from "./waProvenance.js"; // NEW-1 (B2349360)
+import { OREGON_VERIFICATION } from "./orProvenance.js"; // NEW-1 (B2347696)
+import { OKLAHOMA_VERIFICATION } from "./okProvenance.js"; // NEW-1 (Oklahoma)
+import { ARIZONA_VERIFICATION } from "./azProvenance.js"; // NEW-1 (B2365360)
+import { NEW_YORK_VERIFICATION } from "./nyProvenance.js"; // NEW-1 (New York, 2026-10-20)
+import { NEWMEXICO_VERIFICATION } from "./nmProvenance.js"; // NEW-1 (B2345888)
+import { KANSAS_VERIFICATION } from "./ksProvenance.js"; // NEW-1 (B2348000)
+import { IOWA_VERIFICATION } from "./iaProvenance.js"; // NEW-1 (Iowa, 2026-10-19)
+import { KENTUCKY_VERIFICATION } from "./kyProvenance.js"; // NEW-1 (Kentucky)
+
 export const COUNTY_VERIFICATION = {
+  ...ALABAMA_VERIFICATION,
+  ...SOUTH_DAKOTA_VERIFICATION,
+  ...IDAHO_VERIFICATION,
+  ...GEORGIA_VERIFICATION,
+  ...LOUISIANA_VERIFICATION,
+  ...MISSOURI_VERIFICATION,
+  ...MICHIGAN_VERIFICATION,
+  ...SOUTH_CAROLINA_VERIFICATION,
+  ...PENNSYLVANIA_VERIFICATION,
+  ...ILLINOIS_VERIFICATION,
+  ...WASHINGTON_VERIFICATION,
+  ...OREGON_VERIFICATION,
+  ...OKLAHOMA_VERIFICATION,
+  ...ARIZONA_VERIFICATION,
+  ...NEW_YORK_VERIFICATION,
+  ...NEWMEXICO_VERIFICATION,
+  ...KANSAS_VERIFICATION,
+  ...IOWA_VERIFICATION,
+  ...KENTUCKY_VERIFICATION,
   harris: {
     publisher: "own",
     publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
@@ -523,9 +562,9 @@ export const COUNTY_VERIFICATION = {
   },
   ga_cook: {
     publisher: "third-party",
-    publisherName: "Miami University researcher account (keverett_miamioh; Adel overview)",
-    verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
+    publisherName: "Southern Georgia Regional Commission (www.sgrcmaps.com, relayed)",
+    verifiedOn: "2026-10-19",
+    verifiedNote: "MEASURED through planyr.io/gis-proxy (the sandbox itself cannot reach www.sgrcmaps.com) 2026-10-19: countywide polygon layer, 10,432 parcels, extent inside Cook County, 4/5 spread interior points and 4/4 near-county-line points returned a parcel with a real Parcel_No; no owner column with a value on this layer. REPLACES the earlier Adel-only Esri layer, which returned no lot at 0 of 5 spread interior points (B2316720).",
   },
   ga_crawford: {
     publisher: "own",
@@ -623,6 +662,54 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 68,993 parcel polygons, count query 289ms, esriGeometryPolygon. Attribute-light by design (id + acreage only, no owner/situs/value on this layer).",
   },
+  tn_shelby: {
+    publisher: "own",
+    publisherName: "Shelby County, TN — Assessor of Property (CERTParcel, scgis.shelbycountytn.gov)",
+    verifiedOn: "2026-10-15",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE PR PREVIEW'S /gis-proxy RELAY: MapServer layer 0 'Parcel', description 'Shelby County Assessor of Property Parcels', copyright Shelby County Assessor of Property; token-free; maxRecordCount 1000; TAXYR 2026. Seven points across the county (Memphis airport-east + downtown, Bartlett, Millington, Lakeland, Germantown, Collierville) each returned PARCELID + OWNER + PAR_ADDR1.",
+  },
+  tn_chester: {
+    publisher: "own",
+    publisherName: "Chester County, TN — Assessor of Property (CaptureCAMA, gis.capturecama.com)",
+    verifiedOn: "2026-10-16",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: ChesterTN/ChesterCapture MapServer layer 7 'Parcels_12' (the layer behind the Assessor's public AGOL web map f214fb11968a4539bf128561ea61ecd6), Map/Query/Data, 10,333 parcels, maxRecordCount 2000, token-free. Henderson point (35.4398,-88.6414) → 012033M I 01500 / CITY OF HENDERSON / CROOK AVENUE 111 / 0.394 ac; rural Silerton Rd → 36.30 ac. Columns are shapefile truncations (L15Parce_2 id, GPDATA__OW owner, GPDATA__PR situs, L15Parce_4 GIS acres).",
+  },
+  tn_davidson: {
+    publisher: "own",
+    publisherName: "Metro Nashville & Davidson County — Planning Department / Assessor of Property (Nashville Open Data, AGOL org HdTo6HJqh92wn4D8)",
+    verifiedOn: "2026-10-21",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels_view FeatureServer layer 0 (item fa26cd9326c446179be059e00449cb1f, owner 'Nashville', accessInformation 'Nashville Planning Department / Assessor of Property'), 287,729 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Extract, maxRecordCount 2000, token-free. Point 36.137653,-86.755160 → STANPAR 10508026600 / AKZO NOBEL COATINGS INC / 20 CULVERT ST / 9.52 ac; address search 'PropAddr LIKE 20 CULVERT%' returns the same lot. The Comptroller's statewide layer holds 0 Davidson rows (county id 19 is absent from its 86 counties). Outline floor 17: the downtown 512-px cell at zoom 16 holds 2,238 lots (cap 2,000); the busiest zoom-17 cell measured 1,222.",
+  },
+  tn_rutherford: {
+    publisher: "own",
+    publisherName: "Rutherford County, TN GIS (AGOL org 36I6IHIdr660pAyH, 'Rutherford County GIS')",
+    verifiedOn: "2026-10-21",
+    verifiedNote: "VERIFIED LIVE from this sandbox: ParcelsCAMA1 FeatureServer layer 0 ('New parcel layer with up to date CAMA data 10/21/2026'), 123,298 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Extract, maxRecordCount 2000, token-free, COUNTY = 075. ParcelID 156-027.00-000 → RHODES DEVELOPMENT COMPANY, 8.75 deeded ac, CITY CHRISTIANA; ParcelID 156-002.01-000 → RHODES DEVELOPMENT COMPANY, 37.00 ac. A second copy, 'Parcel Data' layer 1 (org A5C0MR9xfkxVRwat, published by the City of Murfreesboro GIS manager, 123,256 lots), carries the identical schema and was NOT used — the county's own org is the primary. Outline floor 16: the busiest zoom-16 cell (Murfreesboro) holds 597 lots.",
+  },
+  tn_williamson: {
+    publisher: "own",
+    publisherName: "Williamson County, TN government GIS (AGOL org hkhKI6Qq7rjvBjZU, portal williamsontn.maps.arcgis.com)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels FeatureServer layer 0 ('Parcels that display on the online county map', item owner Adam.Rehn_williamsontn, public), 107,811 parcel polygons, esriGeometryPolygon, WKID 3857, Query only, maxRecordCount 2000, token-free, edited 2026-10-15, COUNTY = 094. Five points across the county (Franklin Public Square, Nolensville, Fairview, Thompson's Station, rural Bethesda) each returned PARCEL_ID + OWNER_1 + ADDRESS. Pass 1's 'only the City of Franklin and a stale upload' was a title search that never reached the county's own org. The Comptroller's statewide layer holds 0 Williamson rows (county id 94 absent). Outline floor 16: the busiest zoom-16 512-px cell holds 663 lots.",
+  },
+  tn_hamilton: {
+    publisher: "own",
+    publisherName: "Hamilton County, TN GIS — Assessor tax-map parcels (mapsdev.hamiltontn.gov, hcwa03 ArcGIS Server)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: Live_Parcels MapServer layer 0 'Parcels' (ArcGIS 10.61, the 'Assessors Tax Maps' source Chattanooga's Map Viewer web map reads), Map/Query/Data, 169,662 parcel polygons over the whole county (extent to 35.46 N), maxRecordCount 1000, token-free; newest recorded SALE1DATE 2026-09-04 (a live roll). Soddy-Daisy 10406 DAYTON PIKE → TAX_MAP_NO 057F B 003 / VANESSAS COTTAGE LLC; Signal Mountain 410 WOOD ST → 107L J 006; Enterprise South 8001 VOLKSWAGEN DR → 130 001.18 (1,096 ac, INDUSTRIAL DEV BOARD CHATT CITY OF). Comptroller's layer holds 0 Hamilton rows (county id 33 absent). Outline floor 16: busiest zoom-16 cell 884 lots against the 1,000 cap. The City of Chattanooga's own pwgis.chattanooga.gov Misc/Parcels (city-limits parcels, 'Last Updated 10/16/26') and the AGOL copies (Parcels_Static: 'IT WILL NOT UPDATE'; CHattanoogaParcels 2023) were also read and are NOT used — the county service covers all of them.",
+  },
+  tn_montgomery: {
+    publisher: "third-party",
+    publisherName: "City of Clarksville (republishes the Montgomery County Assessor's parcels — AGOL org H9ihyy27OU16MQR3, item 01ea390f…)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "VERIFIED LIVE from this sandbox: Parcels_Test FeatureServer layer 0 (public, owner chelsea.cooper, created 2025-11-19), 90,720 parcel polygons, esriGeometryPolygon, WKID 2274, Query + Sync, maxRecordCount 1000, token-free, RecordYear 2026, edited 2026-10-21; 90,719 distinct ParcelID (one row per parcel). 709 FRANKLIN ST → parcelno 066F K 00100 000 / IMMACULATE CONCEPTION CATHOLIC CHURCH / 5.40 ac; 401 TOBACCO RD → 030 00600 000 / MAYNARD FAMILY COMPANY / 97.94 ac. The county's own gis.mcgtn.org Parcels MapServer (99,853 rows, RecordYear 2027) was read through the relay and is one row PER BUILDING CARD (a 5-building lot returns 5 identical polygons), so it is not the click source; the APSU mirror is licence-restricted and last updated 2022. Outline floor 16: busiest zoom-16 cell 592 lots against the 1,000 cap.",
+  },
+  tn_hickman: {
+    publisher: "own",
+    publisherName: "Hickman County, TN — Assessor of Property (CaptureCAMA, maps.capturecama.com)",
+    verifiedOn: "2026-10-22",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE DEPLOYED /gis-proxy RELAY: Hickman/HickmanTN05182023 MapServer layer 9 'Parcels', Map/Query/Data, 18,549 parcels, maxRecordCount 1000, token-free, COUNTY_ID 41. The service is the assessor's 2023-05-18 publish, not a live feed. Centerville Public Square → PARCELID 107L B 00100 00001107L / HICKMAN COUNTY / PUBLIC SQUARE. The Comptroller's layer holds 0 Hickman rows (county id 41 absent). Outline floor 16 (the MapServer floor): the busiest zoom-16 512-px cell (Centerville) holds 334 lots; zoom 14 holds 1,002 against the 1,000 cap.",
+  },
   mo_platte: {
     publisher: "third-party",
     publisherName: "City of Parkville (republishes Platte County tax parcels)",
@@ -644,13 +731,419 @@ export const COUNTY_VERIFICATION = {
   ky_jefferson: {
     publisher: "own",
     publisherName: "LOJIC (Louisville/Jefferson County Information Consortium)",
-    verifiedNote: "gis.lojic.org is blocked by this build environment's egress policy. Endpoint, feature count (272ms/7 populated fields) and county provenance (LOJIC — the Louisville/Jefferson County Information Consortium's own open-data service) are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
+    verifiedOn: "2026-10-19",
+    verifiedNote: "MEASURED 2026-10-19 through the Cloudflare preview of planyr.io/gis-proxy (gis.lojic.org is unreachable from the sandbox, and was never probed before): 4/5 spread interior points and 2/4 points ~300 m inside the county line returned a parcel polygon with PARCELID / LRSN; misses fall on river and road right-of-way. LOJIC's open-data layer carries no owner or address column.",
   },
   ms_desoto: {
-    publisher: "third-party",
-    publisherName: "ETR Business Development / Tristate Consulting (DeSoto County assessor data)",
-    verifiedOn: "2026-09-10",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 80,950 parcel polygons, count query 830ms, 55 populated fields, esriGeometryPolygon. A 3-point spread (Southaven/Hernando/Horn Lake) all answered with real parcels.",
+    publisher: "own",
+    publisherName: "DeSoto County, MS GIS (BaseLayers \"Tax Parcels\")",
+    verifiedOn: "2026-10-29",
+    verifiedNote: "B2507056 — the county's OWN ArcGIS Server, relayed through /gis-proxy (the host is not reachable from the build sandbox). Replaces the 2024-06 ETR / Tristate Consulting Esri-hosted copy (80,950 polygons, verified 2026-09-10), which stays as the last of three fallbacks after Mississippi's statewide MARIS layer. Measured through planyr.io: see the PR description.",
+  },
+  ms_yalobusha: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_union: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_tunica: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_tishomingo: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_tippah: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_tate: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_tallahatchie: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_sunflower: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_quitman: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_prentiss: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_pontotoc: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_panola: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_marshall: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_leflore: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_lee: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_lafayette: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_itawamba: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_grenada: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_coahoma: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_chickasaw: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_calhoun: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_bolivar: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_benton: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_alcorn: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-15",
+  },
+  ms_adams: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_amite: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_attala: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_carroll: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_choctaw: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_claiborne: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_clarke: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_clay: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_copiah: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_covington: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_forrest: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_franklin: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_george: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_greene: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_hancock: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_harrison: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_hinds: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_holmes: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_humphreys: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_issaquena: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jackson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jasper: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jefferson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jeffersondavis: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_jones: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_kemper: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lamar: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lauderdale: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lawrence: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_leake: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lincoln: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_lowndes: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_madison: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_marion: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_monroe: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_montgomery: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_neshoba: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_newton: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_noxubee: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_oktibbeha: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_pearlriver: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_perry: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_pike: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_rankin: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_scott: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_sharkey: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_simpson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_smith: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_stone: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_walthall: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_warren: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_washington: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_wayne: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_webster: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_wilkinson: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_winston: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, East layer)",
+    verifiedOn: "2026-10-16",
+  },
+  ms_yazoo: {
+    publisher: "statewide",
+    publisherName: "Mississippi MARIS / MDEQ (MS_Parcels_August_2024, West layer)",
+    verifiedOn: "2026-10-16",
   },
   ok_oklahoma: {
     publisher: "unverified",
@@ -873,8 +1366,10 @@ export const COUNTY_VERIFICATION = {
   al_jefferson: {
     publisher: "own",
     publisherName: "Jefferson County Commission, AL",
-    verifiedNote: "jccgis.jccal.org is blocked by this build environment's egress policy. Endpoint, feature count (652ms/68 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
+    verifiedOn: "2026-10-16",
+    verifiedNote: "MEASURED through planyr.io/gis-proxy 2026-10-16 (B2302784; the sandbox cannot reach jccgis.jccal.org): the layer the county's own 'Parcel Look-up' web app queries; polygon, point queries at 5 spread points inside the county hit real parcels with PARCELID / ParcelNo, OWNERNAME, ADDR_PSPR and GIS_ACRES populated. Replaces the 2026-09-10 'unconfirmed' note.",
   },
+
   /* ═══ B1551617 — Tier 1 counties, all discovered + verified LIVE from this sandbox 2026-09-11 by
    * ui-audit/discover-county-parcels.mjs (routes 1/2 — hub.arcgis.com / www.arcgis.com, both
    * reachable here). Every one passed 3 geometry-verified spread points across the WHOLE county
