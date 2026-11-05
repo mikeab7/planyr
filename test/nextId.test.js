@@ -81,17 +81,13 @@ describe("maxId — parses only the authoritative id forms", () => {
   });
 });
 
-describe("computeNextIds — real repo files", () => {
-  it("returns nextB = maxB + 1 and nextV = maxV + 1", () => {
-    const { maxB, maxV, nextB, nextV } = computeNextIds();
+describe("computeNextIds — the fixture ledger (the live ledger is its own branch since NEW-1; its sanity floor is in test/ledger-data/nextIdLive.test.js)", () => {
+  const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures", "ledger-mini");
+  it("returns nextB = maxB + 1 and nextV = maxV + 1, scanning done entries too", () => {
+    const { maxB, maxV, nextB, nextV } = computeNextIds(FIXTURE);
+    expect([maxB, maxV]).toEqual([100, 50]);   // B100 open, B90 verify, B80 done · V50 pending, V40 done
     expect(nextB).toBe(maxB + 1);
     expect(nextV).toBe(maxV + 1);
-  });
-
-  it("finds real, plausibly-large maxes (the archive is scanned, not just the open file)", () => {
-    const { maxB, maxV } = computeNextIds();
-    expect(maxB).toBeGreaterThan(700); // sanity floor as of B755
-    expect(maxV).toBeGreaterThan(200);
   });
 });
 
