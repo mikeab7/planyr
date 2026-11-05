@@ -1380,8 +1380,10 @@ export default function NoteToolbar({
   const sizeLabel = sizeMixed ? "" : (currentSizeNum != null ? String(currentSizeNum) : String(sizeFallback ?? DEFAULT_SIZE));
   const pickSize = (n) => {
     if (titleActive) { setTitleStyle({ fontSize: n }); return; }
-    if (n == null) { chain().unsetFontSize().syncBlockFontSize().run(); return; }
-    chain().setFontSize(`${n}px`).syncBlockFontSize().run();
+    /* ⛔ `sizeEmptyBlocks` FIRST (NEW-1): empty cells have no text to mark, so they take the size on the BLOCK;
+     * it must precede the mark command because a document change clears the stored marks that command set. */
+    if (n == null) { chain().sizeEmptyBlocks(null).unsetFontSize().syncBlockFontSize().run(); return; }
+    chain().sizeEmptyBlocks(n).setFontSize(`${n}px`).syncBlockFontSize().run();
   };
 
   /* ═══ LINE SPACING (NEW-4) ═══ */
@@ -1576,7 +1578,7 @@ export default function NoteToolbar({
         mixed={fontMixed}
         displayLabel={fontLabel}
         options={fontOptions.map((f) => ({ label: f.label, value: f.value }))}
-        onPick={(v) => (v ? chain().setFontFamily(v).run() : chain().unsetFontFamily().run())} />
+        onPick={(v) => (v ? chain().setFontFamily(v).seedMark("textStyle", { fontFamily: v }).run() : chain().unsetFontFamily().seedMark("textStyle", { fontFamily: null }).run())} />
 
       <SizeMenu testid="nt-size" big={narrow}
         value={currentSizeNum} mixed={sizeMixed} displayLabel={sizeLabel}
@@ -1585,20 +1587,20 @@ export default function NoteToolbar({
   );
   const bIU = (
     <>
-      <TBButton title={boldInHeader ? BOLD_TITLE_IN_HEADER : BOLD_TITLE} testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => { if (!boldInHeader) chain().toggleBold().run(); }}>
+      <TBButton title={boldInHeader ? BOLD_TITLE_IN_HEADER : BOLD_TITLE} testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => { if (!boldInHeader) chain().toggleBold().seedMark("bold", {}, "toggle").run(); }}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>B</span>
       </TBButton>
-      <TBButton title="Italic" testid="nt-italic" big={narrow} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().run()}>
+      <TBButton title="Italic" testid="nt-italic" big={narrow} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().seedMark("italic", {}, "toggle").run()}>
         <span style={{ fontStyle: "italic", fontFamily: "Georgia, serif", fontSize: 13 }}>I</span>
       </TBButton>
-      <TBButton title="Underline" testid="nt-underline" big={narrow} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().run()}>
+      <TBButton title="Underline" testid="nt-underline" big={narrow} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().seedMark("underline", {}, "toggle").run()}>
         <span style={{ textDecoration: "underline", fontSize: 13 }}>U</span>
       </TBButton>
     </>
   );
   const strikeSupSub = (
     <>
-      <TBButton title="Strikethrough" testid="nt-strike" big={narrow} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().run()}>
+      <TBButton title="Strikethrough" testid="nt-strike" big={narrow} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().seedMark("strike", {}, "toggle").run()}>
         <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
       </TBButton>
       <TBButton title="Superscript" testid="nt-sup" big={narrow} pressed={supPressed}
@@ -1615,14 +1617,14 @@ export default function NoteToolbar({
     <>
       <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed}
         swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
-        onPick={(c) => (titleActive ? setTitleStyle({ color: c }) : (c ? chain().setColor(c).run() : chain().unsetColor().run()))} />
+        onPick={(c) => (titleActive ? setTitleStyle({ color: c }) : (c ? chain().setColor(c).seedMark("textStyle", { color: c }).run() : chain().unsetColor().seedMark("textStyle", { color: null }).run()))} />
     </>
   );
   const highlight = (
     <>
       <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} mixed={hlMixed}
         swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
-        onPick={(c) => (titleActive ? setTitleStyle({ highlight: c }) : (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run()))} />
+        onPick={(c) => (titleActive ? setTitleStyle({ highlight: c }) : (c ? chain().setHighlight({ color: c }).seedMark("highlight", { color: c }, "set").run() : chain().unsetHighlight().seedMark("highlight", {}, "unset").run()))} />
     </>
   );
   const align = (

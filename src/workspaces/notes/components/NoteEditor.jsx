@@ -671,6 +671,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .ProseMirror.resize-cursor, .planyr-note .ProseMirror.resize-cursor * { cursor: col-resize !important; }
 .planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor,
 .planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.resize-cursor * { cursor: grabbing !important; }
+/* A TABLE'S ROW LINE (NEW-3) — the horizontal twin of the rule above; the class is toggled by lib/notesTableRowHeight.js. */
+.planyr-note .ProseMirror.planyr-row-resize, .planyr-note .ProseMirror.planyr-row-resize * { cursor: row-resize !important; }
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.planyr-row-resize,
+.planyr-note [data-testid="note-mat"][data-panning="1"] .ProseMirror.planyr-row-resize * { cursor: grabbing !important; }
 
 /* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the eight resize handles (10 px), the connect dot
    (11 px) and the sheet edge grips (left alone, see the note). The VISIBLE size is unchanged: each handle
@@ -4252,6 +4256,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       const box = el.closest(".planyr-anchor");
       if (!box || el.closest(OWN)) return false;
       if (editor.view.dom.classList.contains("resize-cursor")) return false;     // on a column border
+      if (editor.view.dom.classList.contains("planyr-row-resize")) return false; // on a row line (NEW-3)
       const id = box.getAttribute("data-anchor-id");
       if (id && selRef.current.has(String(id))) return false;                    // selected: it keeps its drag
       if (box.getAttribute("data-editing") === "1") return false;                // being edited: text selection
