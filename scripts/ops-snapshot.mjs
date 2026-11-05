@@ -19,6 +19,7 @@
  * (setup not done yet); a rejected or failed push exits 1.
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { ledgerRoot } from "./lib/ledger.mjs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { snapshotHealth, sweepLine } from "../src/shared/auth/signinHealth.js";
@@ -40,7 +41,8 @@ const digest = (items, n = 25) => ({
   recent: [...items].sort((a, b) => num(b) - num(a)).slice(0, n).map(({ id, title }) => ({ id, title })),
 });
 
-export function buildSnapshots(root = ".", stamp = {}) {
+export function buildSnapshots(rootArg = ".", stamp = {}) {
+  const root = ledgerRoot(rootArg) ?? rootArg; // the ledger lives on its own branch, checked out under .ledger/ (NEW-1)
   const open = list(join(root, "ledger/backlog/open"));
   const tagCounts = {};
   for (const it of open) for (const t of it.tags) tagCounts[t] = (tagCounts[t] || 0) + 1;
@@ -149,7 +151,7 @@ export async function runSignin({ env = process.env, argv = process.argv, fetchI
 if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--signin")) {
   runSignin().then((c) => { process.exitCode = c; });
 } else if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--push")) {
-  runPush({ dryRun: process.argv.includes("--dry-run") }).then((r) => { process.exitCode = r.code; });
+  runPush({ dryRun: process.argv.includes("--dry-run"), root: (process.argv.find((a) => a.startsWith("--ledger=")) || "=.").split("=")[1] }).then((r) => { process.exitCode = r.code; });
 } else if (import.meta.url === `file://${process.argv[1]}`) {
   const s = buildSnapshots();
   const q = (o) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;

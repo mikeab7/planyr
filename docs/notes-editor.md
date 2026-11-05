@@ -1,6 +1,6 @@
 # Notes box editor → BlockNote (NEW-1, owner decision 2026-10-30) — decision record, measured spike, staged plan
 
-Tracking item: **B2562064** (`ledger/backlog/open/B2562064.md`). Read `docs/NOTES-CARRY-FORWARD.md` first; this file
+Tracking item: **B2562064** (on the `ledger` branch: `npm run ledger -- show B2562064`). Read `docs/NOTES-CARRY-FORWARD.md` first; this file
 adds only what the BlockNote swap needs.
 
 ## 1 · The decision (owner, verbatim intent)

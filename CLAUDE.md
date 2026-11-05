@@ -20,38 +20,70 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
 >   before judging whether any change works.**
 >
-> **🧾 LEDGER — ONE FILE PER ENTRY (NEW-1, B2109728, owner-approved 2026-10-05). `BACKLOG.md` AND `VERIFICATION.md`
-> ARE NO LONGER HAND-EDITED, AND THE TWO `docs/archive/*-DONE.md` FILES NO LONGER EXIST. This section overrides every
-> older sentence in this file (and in the docs) that says to append to, move a block within, or archive from them.**
-> **WHY:** every session appended to the same spot of those two files, so on a busy day every PR invalidated every other
-> one — and GitHub's SERVER-side mergeability ignores `merge=union` (measured 2026-10-05, PRs #2022/#2023: two PRs
-> prepending a line to a `merge=union` file both read `mergeable_state: dirty`; two PRs adding different *files* read
-> clean, #2024). PR #1900 sat dirty five days over code that never clashed. Only a layout in which two entries never
-> share a file removes the conflict by construction.
-> - **Where entries live:** `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md` and
->   `ledger/verification/<pending|checklist|done>/V<id>.md` — each file is exactly the old block (`### B<id> — title` …).
->   A duplicate legacy id inside one folder is `B<id>.2.md`. The prose around the entries (rules, tag legend, section
->   headings, the checklist preamble) is `ledger/<kind>/_frame.md` — hand-edited, rarely.
-> - **File an entry:** write the new file under `…/open/` (backlog) or `…/pending/` (verification). **Edit one:** edit its
->   file. **Lifecycle move** (Open → Verify → Done, a recurrence back to Open, a V# archived when passed):
->   `npm run ledger -- move B<id> <state>` (a rename — edit the text in the same commit). **Never delete an entry.**
-> - **Orient cheaply:** `npm run ledger -- list open` (one heading per entry), Grep `^### B` in `ledger/backlog/open` /
->   `…/verify`, or read `BACKLOG_OPEN.md`. The *-done folders are write-only — look up ONE id (`ledger/backlog/done/B###.md`),
->   never read a folder wholesale. `npm run next-id` still mints (it reads the ledger; `check-mint`, the id-uniqueness tests
->   and every other consumer go through `scripts/lib/ledger.mjs`, which also serves the old file paths as VIRTUAL text).
-> - **`BACKLOG.md` / `VERIFICATION.md` at the repo root are GENERATED VIEWS** (frame + live entries), refreshed nightly by
->   `.github/workflows/regen-derived-docs.yml` and never edited by a branch — `scripts/generated-doc-touch-guard.mjs`
->   FAILS THE BUILD on a PR that touches them, `docs/archive/BACKLOG-DONE.md` or `…/VERIFICATION-DONE.md` (enforced once
->   `ledger/` is on main). They can lag the real ledger by up to a day: the entry folders are the truth.
-> - **`npm run ledger -- check`** (a CI gate) validates layout: right folder, right filename, heading id = filename id, a frame
->   marker for every live state. `ledger render` regenerates the two views locally (never commit them).
-> - **A branch that edited the OLD files** (opened before this landed): merge `origin/main`, take main's version of the old
->   files, then `node scripts/ledger.mjs import-legacy <merge-base> <your-branch-tip-before-the-merge>` replays your entry
->   additions/edits/moves onto `ledger/`. (`resolve-ledgers.mjs` / `npm run safe-merge` are no longer needed for these files;
->   they remain for `MAP.md` / `BACKLOG_OPEN.md`.)
-> - **Acceptance test:** `test/ledgerConcurrentPRs.test.js` — two concurrent PRs each add a backlog + a verification entry
->   and merge cleanly in both orders under a GitHub-equivalent `git merge-tree`; the same two PRs against the old
->   one-big-file layout conflict (red-proof). Never reintroduce a shared append point.
+> **🧾 THE LEDGER LIVES ON ITS OWN GIT BRANCH, `ledger` — RECORDS NEED NO PULL REQUEST AND NO BUILD (NEW-1, owner
+> decision 2026-11-05). This section overrides every older sentence in this file or in `docs/` that says to file,
+> edit, move or mint a `B#`/`V#` in a PR, to append to `BACKLOG.md`/`VERIFICATION.md`, or to use the `docs/archive/*-DONE.md`
+> files (which no longer exist). NO SESSION OPENS A LEDGER-ONLY PR AGAIN.**
+> **WHY:** after every live check a session opened a ledger-only PR and waited a full build — burning session and watcher
+> tokens and delaying the close of a task — for a change that cannot break anything. Product code, workflows and this file
+> stay on `main` behind the required `build` exactly as before; this changes WHERE records live, not WHAT is recorded.
+> **MEASURED before it was built (2026-11-05, this environment):** a plain `git push` of a non-`claude/` branch lands; the only
+> ruleset ("Protect Main") includes just `~DEFAULT_BRANCH`, so `ledger` is unprotected; a second fresh clone fetched and pushed
+> it; a stale clone's push was refused "fetch first" and landed after fetch+retry; **two sessions racing the same instant on
+> the real remote both landed with different ids.** (The sandbox proxy lets you create/push branches but NOT delete them.)
+> - **Layout (unchanged, just elsewhere):** ONE file per entry — `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md`,
+>   `ledger/verification/<pending|checklist|done>/V<id>.md`, each exactly the old `### B<id> — title …` block, plus
+>   `ledger/<kind>/_frame.md` (the prose, legend and section markers). The branch is parented on main's history, so
+>   `git log -- ledger/backlog/done/B123.md` shows an entry's FULL history. **`main` has no `ledger/`, no `BACKLOG.md`, no
+>   `VERIFICATION.md`** (both are gitignored local views: `npm run ledger -- render`). `.github/ledger-branch.json` on main is the
+>   marker that tells the tools (`isBranchMode`, `scripts/lib/ledger.mjs`) the ledger is on a branch. **Never delete an entry.**
+> - **READ — cold start, ONE command:** `npm run ledger -- list open` (every Open + Verify heading; ~3 s on the full ledger).
+>   It checks the branch out (shallow) into `.ledger/` — gitignored; never commit it, never hand-edit and force-push — and
+>   re-fetches when the copy is over 10 minutes old (`--fresh` forces it). Also: `list verify|pending|done [--b|--v]`,
+>   `show B123`, `status`. **Grep `^### B` in `.ledger/ledger/backlog/open` / `…/verify`, or read `BACKLOG_OPEN.md` on main
+>   (a nightly-refreshed index; may lag a day — the branch is the truth).** The `done` folders are write-only: look up ONE id
+>   (`show B123`), never read a folder wholesale. **⛔ Never slurp a whole tracking folder to find one thing.**
+> - **WRITE — straight to the branch, no PR (each command fetches, writes, commits, pushes; a lost race is REDONE from the new tip):**
+>   `npm run ledger -- add backlog --file entry.md` (or `--stdin`; heading `### B? — title` or `### NEW-1 — title`; add
+>   `--state verify|…`) · `add verification --file …` · `put B123 --file …` (replace text) · `move B123 verify|done|open …
+>   [--file new-text.md]` (a rename; edit the text in the same step) · `mint --b 1 --v 1` (reserve ids as stub entries when you must
+>   cite a number before the entry is written) · `inbox` · `push -m "…"` (land hand-edits you made inside `.ledger/`). Output is the
+>   assigned id; commit-message-style `-m` is optional.
+> - **IDS ARE MINTED BY THE PUSH ITSELF.** `add` computes `max+1` from the tip it just fetched and the push is the
+>   compare-and-swap: if another session landed first, the push is refused, the whole write is redone from the new tip and the
+>   id recomputed — so two sessions on two containers can never hold the same id. **The old rules are RETIRED: reserved blocks
+>   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (it now stands down), the `BELOW`/`TAKEN`
+>   verdicts.** `npm run next-id` is advisory only (it prints the ledger branch's next free numbers). Keep the provisional `NEW-#`
+>   label in code and tests as before; **cite the real id in the PR title/commit once `ledger add` has printed it, and file
+>   the entry no later than the moment you open the PR** (the record check below will name a merged id with no record).
+> - **LIFECYCLE is unchanged** (🔲 Open → ⏳ Verify → ✅ Done; `Verify: live` items park in `verify` with a `V###`; a recurrence
+>   re-opens the original `B#`; DEDUPE-FIRST) — only the mechanism: `npm run ledger -- move B<id> <state>` instead of a block move
+>   inside a PR. The record is finished the moment `ledger` has it; **you do not wait for a build to close a task.**
+> - **A CHAT RECORDS ITS OWN LIVE VERIFY DIRECTLY (the 2026-09-01 rule, now pointed at the branch).** A Cowork/claude.ai chat
+>   with a shell runs the commands above. A chat with only the GitHub connector commits straight to branch `ledger`
+>   (`create_or_update_file` / `push_files` with `branch: "ledger"`): to update or move an EXISTING entry, write its new text at
+>   the new path and delete the old path (one commit via `push_files` where possible); to file a NEW entry, create
+>   `ledger/inbox/backlog-<slug>.md` or `ledger/inbox/verification-<slug>.md` (a free-form name can never collide — the next
+>   session that writes the ledger, or `npm run ledger -- inbox`, gives it its real id and files it; a first line `state: done`
+>   picks a non-default state). **A chat with NO push access at all hands the entry text to a Claude Code session in the dispatch brief, which
+>   files it with `ledger add`.** Never to `main`; the commit message names the chat and the `V#`/`B#` it closes; record only what was observed.
+> - **STRAGGLERS:** a PR opened before the move may still edit `ledger/` on main. The touch guard LETS IT MERGE (failing it would
+>   strand its records) and `.github/workflows/ledger-forward.yml` copies those edits onto the branch (adds, edits, moves; a
+>   colliding new id is renumbered and reported; a diverged edit is reported, never overwritten; a bare deletion is never
+>   forwarded). A straggler that conflicts with main's deletion of `ledger/` is resolved by dropping its `ledger/` files and re-filing
+>   them with the commands above (`npm run ledger -- import-delta <base> <tip>` replays a branch's `ledger/` edits for you).
+> - **WHAT REPLACED "the fix and its record merge together":** `.github/workflows/ledger-record-check.yml` (every push to main + nightly)
+>   reads merged commit subjects and WARNS about any `B#`/`V#` they cite that has no entry on the branch
+>   (`npm run ledger -- record-check --since "3 days ago"` locally). It never blocks a merge. **A record check warning is an
+>   instruction: file the record.**
+> - **DATA CHECKS moved off the required build** (a bad record must never fail an unrelated code PR): `ledger check`, the tag-legend
+>   guard, the verification-queue ceiling and the id-uniqueness / conflict-marker / closability tests run in
+>   `.github/workflows/ledger-health.yml` (scheduled; red = go look at the ledger) and on demand with `npm run test:ledger`.
+>   `ledger add|put|move` themselves refuse an entry whose heading disagrees with its filename or whose path is invalid.
+> - **Acceptance tests:** `test/ledgerBranch.test.js` (two parallel writers both land with unique ids — real child processes AND a
+>   deterministic lost race; red-proofed by disabling the retry), `test/ledgerBranchMode.test.js`. Code: `scripts/lib/ledgerBranch.mjs`
+>   (transactions, retry, inbox, import), `scripts/lib/ledger.mjs` (`ledgerRoot` — the one seam every reader goes through).
+>   Never reintroduce a shared append point on `main`.
 >
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
@@ -77,113 +109,15 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **never `@blocknote/xl-*`, GPL**), the measured spike (React 18 needs Mantine pinned to 8; tiptap
 > 3.29 vs 3.32; native-paste gaps; bundle cost) and the staged plan. Not yet shipped — Stage 0 only.
 >
-> **⛔ Never slurp a giant tracking file to find one thing.** `BACKLOG.md`, `VERIFICATION.md`,
-> and the two `*-DONE.md` archives are large. To pick work, **Grep the item headings**
-> (`^### B` / `^### V`) — a few KB — then **Read only the one block** you'll act on. Reading a
-> whole 250 KB file into context to find a 5-line item is the single biggest avoidable
-> token burn here. The `*-DONE.md` archives are **write-only — never Read them** except to
-> look up one specific past ID.
->
-> **🔢 To MINT a new B# or V#, run `npm run next-id` — never grep the archives for the max (B755).**
-> It prints `Next free → B### · V###` in one line, scanning `BACKLOG.md` + `docs/archive/BACKLOG-DONE.md` (and the
-> two `VERIFICATION*.md`) **on disk, at zero model-token cost**. This is the fix for the recurring
-> "which number do we ship/merge with?" tax: the highest id routinely lives on a *Done* item in the
-> 1.4 MB archive, so reading files into context to eyeball the max was pure waste. `--json` for a
-> machine-readable object, `--b`/`--v` for just the paste-ready label. Multi-mint runs consecutively
-> from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
-> *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
->
-> **🧱 SUPERSEDED 2026-08-06 (B6864–B6867) — YOU NOW MINT FROM YOUR OWN RESERVED BLOCK, and the
-> high-water-mark rule that everything below describes IS GONE.** Read the rest of this section as
-> history; this paragraph is the live rule. `npm run next-id -- --against-main` prints **your block** —
-> a range reserved to your branch by name, e.g. `Your block → B6864–B6879 · V6144–V6159` — and you mint
-> from its low end. Two sessions minting at the same instant get **different blocks**, so they cannot
-> draw the same number; there is no allocator to race and none to be down (the block is a pure function
-> of the branch name). **`check-mint` now fails ONLY on a genuine collision** (`TAKEN` — someone really
-> holds that id); an id merely *below* what some other branch picked is **green**, and an id outside
-> your block is **reported, never fatal**.
-> **Why this changed:** the `BELOW` rule was a ratchet with **no fixed point at any speed**. It passed a
-> branch only if its ids were strictly above the highest id any *other* in-flight branch held — so with
-> two branches, A is green iff `a > b` and B is green iff `b > a`, and both can never hold at once. With
-> `n` branches, `n − 1` are red by construction, and the only remedy the rule offered (renumber upward)
-> turns the one green branch red. On 2026-08-06 that produced a **livelock**: seven PRs open, none
-> mergeable, every one reading `build — Expected — Waiting for status to be reported` with **no merge
-> control available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark
-> passed **B100002**. Full diagnosis, including every hypothesis that was refuted:
-> **`docs/incidents/CI-REQUIRED-CHECK.md`**. That the shape can never come back is now a guard, not a memory —
-> `test/mintFatality.test.js` (B226401) fails the build if a fatal mint verdict is ever again a function
-> of an aggregate of peer state (a max, a mean, a high-water mark) rather than a present, proven collision.
-> **The practical consequences for you:** (a) mint from your block and you will never need to renumber;
-> (b) **a run normally starts within SECONDS of the push** — corrected 2026-08-07 (B226400) from the old
-> "half an hour is normal, wait it out", which measured a four-hour Actions outage and stated it as a
-> standing property; eight samples the next day ran 3–5 s for a push to main and 11–44 s for a
-> `pull_request` event. So a minute or two of `Expected` is just delivery, longer is worth *looking* at
-> (is the run being created at all?), and **renumbering is never the response either way** — the verdict
-> no longer changes with time; (c) gaps are still free; (d) the steel-man for the block scheme, including
-> where it concedes a real cost, is the header of `scripts/idBlocks.mjs`.
-> **⛔ AND ONE MEASURED FACT THAT CONTRADICTS THIS REPO'S NUDGE LORE (B6867): RE-RUNNING A FAILED
-> `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A re-run replays the merge commit the run
-> was created against — it does **not** recompute `refs/pull/<n>/merge` against main's current tip. Tried
-> on four stuck PRs the minute the fix landed; all four failed again, reproducing the OLD gate's wording
-> verbatim. **A stuck PR needs a NEW PUSH** — prefer `git fetch origin main && git merge origin/main`
-> (it also brings the corrected gate into the branch, so the pre-push hook and CI agree) over an empty
-> `Nudge CI` commit. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides and renumbering
-> nothing.
-> **⚖ AMENDED (B36051, owner decision 2026-08-06): a PEER BRANCH holding your number is an ADVISORY too,
-> not a failure.** Owner, verbatim: *"a number is taken only if main has it. A guess made from stale
-> information about an unmerged branch is not a collision and must not fail a build."* That branch may be
-> renumbered, rebased or abandoned, and whoever merges SECOND renumbers — so the gate NAMES the peer and
-> lets the build through. **`origin/main` already holding the id is now the ONE fatal case**, and it is
-> untouched: two headings, one number, guaranteed the moment you merge.
->
-> **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
-> `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
-> concurrent session (branched from the same main, its mint not merged yet) can honestly grab the same
-> number — and whoever merges second renumbers. So: **do the work under the provisional `NEW-#` / branch
-> label everywhere in code, tests, and commits** (code/tests keep the provisional label through any
-> renumber), and **assign the real backlog number only when you're about to push**, computed against the
-> just-fetched main:
-> ```
-> git fetch origin main && npm run next-id -- --against-main    # main + every in-flight branch
-> ```
-> **⚠ CORRECTED 2026-07-30 (B779 ×2) — the earlier claim here, that late-binding "collapses the window to a
-> few seconds," was WRONG as originally shipped, and six consecutive dispatches collided under it.** Late
-> binding closes `mint → push`; the collisions happen in **`push → merge`** — PR open, CI nudge, build,
-> auto-merge — which is minutes to hours, and other sessions merge during it. Reproduced in a two-clone lab:
-> both sessions fetch a fresh main, both run `--against-main`, **both get the same number.** The rule was
-> being followed and the tool was blind. Two things changed so the claim is now true:
-> - **`--against-main` reads the in-flight PEER BRANCHES too**, not just `origin/main` — the ids other
->   sessions have claimed are on the remote and readable *now*. It also **PROVES `origin/main` is freshly
->   fetched and REFUSES (exit 2) rather than return a stale number** (this clone was measured 7 days / 169
->   ids behind while still printing "[incl. origin/main]"), and reports the commit + fetch age it read.
-> - **`npm run check-mint` is a pre-push hook + a required-build step** that BLOCKS a push whose new ids
->   are already claimed, naming the branch and the id to move to. It checks the property, not the
->   ceremony, so a correct late mint passes untouched and a **recurrence mints nothing and never trips
->   it.** Gaps are free — leaving one beats a second renumber pass (B1140). **The hook INSTALLS ITSELF —
->   `npm install` / `npm ci` runs `scripts/install-hooks.mjs` from npm's `prepare` step (B1164), so a
->   fresh container is armed with no manual step.** It is idempotent, it never clobbers a `core.hooksPath`
->   you set yourself (it reports and leaves it), and it never fails `npm install` — every outcome that
->   leaves the gate un-armed prints a loud named block instead. `npm run hooks:install` still works (add
->   `-- --force` to take over a foreign hooksPath); `-- --check` verifies without writing.
->   **The gate's REJECTION path is a permanent CI self-test, not a field hope (B1165):**
->   `test/mintGateE2E.test.js` drives the real CLI against real git refs in throwaway repos (a bare
->   remote in a temp dir — hermetic, no network) and asserts all four outcomes plus the resilience case:
->   taken-on-main → rejected · taken-on-an-unmerged-peer-branch → rejected · below-the-mark → rejected ·
->   clean mint → allowed · recurrence → allowed · unreachable remote → warns and PASSES under `--ci`
->   (a guard that becomes an outage is worse than the collision).
->
-> Because only the BACKLOG/VERIFICATION *heading* carries the real number, a late clash renumbers a couple
-> of heading lines — never code. **A collision that still slips through is caught
-> LOUDLY:** `test/idUniqueness.test.js` fails the build if two ACTIVE items share a `B#`/`V#` (in
-> `BACKLOG.md` / `VERIFICATION.md`), **and** (B780) if any NEW collision appears across the live+archive
-> pair — the race where one session ships-and-archives its item while the other's same-numbered item stays
-> open. So a colliding PR goes red *before* it merges — renumber the newer item then (the reconcile-on-merge
-> rule in *Workflow & deploy* is now the rare, loud backstop, not the routine tax). `next-id` also prints a
-> `⚠ DUPLICATE ACTIVE ids` line if the live files already collide. The 58 historical cross-file dupes that
-> merged before the guard existed are GRANDFATHERED at their exact counts in `KNOWN_LEGACY_ID_COLLISIONS`
-> (`scripts/next-id.mjs`) — audited 2026-07-11: every one is two different features sharing a number,
-> comments/provenance only, zero runtime dependence; renumbering them would break archive cross-refs, so
-> the baseline may only SHRINK (clean a dup → delete its row in the same commit).
+> **🔢 MINTING (history, so a stale memory does not resurrect it).** Ids used to be minted from `max+1` of two big files, then from
+> per-branch reserved blocks with a peer scan and a push-time gate, because several PRs minting in their own ledger edits collided
+> (B779, the 2026-08-06 livelock — diagnosis in `docs/incidents/CI-REQUIRED-CHECK.md`, guard `test/mintFatality.test.js`). All of that
+> existed to solve "two un-merged branches each add a ledger entry". With the ledger on its own branch nothing is minted in a PR;
+> the compare-and-swap push does it (see the LEDGER block). `scripts/idBlocks.mjs`/`check-mint.mjs` remain only for the legacy-layout
+> tests. `test/idUniqueness.test.js` (now in `test/ledger-data/`) still fails the ledger-health run on two active items sharing an id.
+> **⛔ ONE MEASURED FACT THAT STILL APPLIES (B6867): RE-RUNNING A FAILED `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A
+> re-run replays the merge commit the run was created against — it does **not** recompute `refs/pull/<n>/merge` against main's tip.
+> A stuck PR needs a NEW PUSH — prefer `git fetch origin main && git merge origin/main` over an empty `Nudge CI` commit.
 >
 > **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
 > pointer (what's here + key files) that auto-loads only when you work in that folder. **When
@@ -230,11 +164,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   exported symbols. **Grep `MAP.md` to find a path or symbol** instead of sweeping `src/`, but
 >   expect it to lag a recent rename/add by up to a day. `node scripts/build-map.mjs --check` still
 >   exists for the scheduled job and for local curiosity — it is no longer a required CI gate.
-> - **`BACKLOG_OPEN.md`** (repo root) — one line per Open / ⏳ Verify item (B#, title, module, `#tags`,
->   Verify status) + a by-tag rollup so a theme's members are visible at a glance. The **tag-legend
->   rule stays enforced** on `BACKLOG.md` itself (`node scripts/build-backlog-index.mjs --tags-only`,
->   `test/backlogIndex.test.js`) — only the requirement that this INDEX be byte-fresh moved to the
->   scheduled job; `--check` still exists for it and for local use.
+> - **`BACKLOG_OPEN.md`** (repo root, STAYS on main — the claude.ai Project syncs it from main) — one line per Open / ⏳ Verify
+>   item (B#, title, module, `#tags`, Verify status) + a by-tag rollup. It is generated FROM THE LEDGER BRANCH by the nightly
+>   `regen-derived-docs.yml` (so it can lag the branch by up to a day — the branch is the truth). The **tag-legend rule stays
+>   enforced** on the ledger (`node scripts/build-backlog-index.mjs --tags-only`, run by `ledger-health.yml`).
 > - The same rule covers **`docs/UI-INVENTORY.md`** (the generated control-signature inventory — see
 >   `docs/DESIGN.md`): never touch it either. Its real design-quality gate (the per-surface
 >   signature BUDGET) stays required via `node ui-audit/ui-inventory.mjs --budget-only`; only the
@@ -368,10 +301,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > lists rows where a stored copy disagrees with its source in production — run it after any change that adds or
 > moves a copy. A project's STATUS is read only through `projectModel.groupStatusOf`.
 >
-> **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
-> work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same
-> session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
-> B# = highest `B#` across **both** files + 1 — **get it with `npm run next-id`** (don't grep for it).
+> **📋 The BACKLOG (`ledger/backlog/` on the `ledger` branch) = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
+> work the **🔲 Open** items (`npm run ledger -- list open --b`). **The moment an item ships, MOVE it that same
+> session: `npm run ledger -- move B<id> done`** (or `verify` for a `Verify: live` item) — never mark it done in place, and no PR is involved.
+> A new B# is assigned by `npm run ledger -- add backlog …` (see the LEDGER block).
 > (Product backlog; distinct from the "Deferred / maintenance backlog" near the end of this file.)
 >
 > **⏳ THREE-STATE LIFECYCLE (B645): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
@@ -396,10 +329,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > dated PASS note in `VERIFICATION.md`. When an audit can't run the live check itself (sandbox / signed-in /
 > real-project-data), it says so and reports the item as `merged — V### pending`, never green.
 >
-> **🔍 `VERIFICATION.md` = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it and
-> **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
-> "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
-> pending, MOVE it to `docs/archive/VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
+> **🔍 The VERIFICATION ledger (`ledger/verification/` on the `ledger` branch) = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it
+> (`npm run ledger -- list pending --v`) and **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the
+> environment — see "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
+> pending, MOVE it: `npm run ledger -- move V<id> done --file <text-with-the-dated-PASS>`** (same discipline as the backlog; no PR, no build). The session that
 > ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
 > on him or hand him a test to-do.**
 >
@@ -431,20 +364,21 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **⛔ STANDING RULE — A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (owner decision, 2026-09-01:
 > "I'm okay with the chat writing to the repo … implement the new rule so you can write that yourself").**
 > When a Cowork session verifies something live — on Michael's own browser, against production — it
-> commits the result straight into the ledger (`VERIFICATION.md` / `BACKLOG.md`) itself, instead of
+> commits the result straight into the ledger (since 2026-11-05 the `ledger` BRANCH — see the LEDGER block for how a chat with a
+> shell, a chat with only the GitHub connector, and a chat with no push access each do it) itself, instead of
 > relaying it to a Claude Code session to type in. This **supersedes the inbox-then-drain path above for
 > new checks** — `verification-inbox/` stays only for whatever is already queued in it. Claude Code still
 > owns every line of product code; this is recording, never building. **Why:** a session spun up purely
 > to transcribe one paragraph is the most expensive possible way to write it, and the hand-off fails
 > open — 79 completed live checks once piled up unrecorded because the courier didn't always get sent.
 > **Guardrails:** ledgers and docs only, never product code or a workflow file · never hand-edit a
-> script-generated, drift-checked file (`MAP.md`, `BACKLOG_OPEN.md`) · never commit to `main` while
-> another session is mid-measurement against it (the bundle gate compares against a base ref — moving it
-> mid-flight caused the 2026-08-31 double revert) · the commit message names the Cowork session and the
+> script-generated, drift-checked file (`MAP.md`, `BACKLOG_OPEN.md`) · records go to the `ledger` branch, which has no
+> required checks and no bundle base to disturb (committing to `main` is for code/docs only, and never while
+> another session is mid-measurement against it — moving the base mid-flight caused the 2026-08-31 double revert) · the commit message names the Cowork session and the
 > `V#`/`B#` it closes · record only what was observed, never what a session reported.
 
-> **📦 `docs/archive/BACKLOG-DONE.md` / `docs/archive/VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
-> up a specific past item; they are historical record only, and exist so the two live files above stay small.
+> **📦 The `done` folders of the ledger (`ledger/backlog/done`, `ledger/verification/done`) are write-only archives — do NOT read them wholesale** unless looking
+> up a specific past item (`npm run ledger -- show B123`); the old `docs/archive/*-DONE.md` files no longer exist.
 
 ## How to talk to me (Michael) — IMPORTANT, applies to every reply
 Michael is an industrial real-estate developer, not a software engineer. In chat,
@@ -985,9 +919,11 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
   fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
   case at the same time.
+  **(HISTORY — since 2026-11-05 `BACKLOG.md`/`VERIFICATION.md` are not on main at all, so this conflict class is gone; `safe-merge`
+  and `resolve-ledgers.mjs` remain for `MAP.md`/`BACKLOG_OPEN.md` and for branches that predate the move.)
   **⛔ USE `npm run safe-merge -- origin/main`, NOT a bare `git merge origin/main`, whenever the merge
-  might touch `BACKLOG.md`/`VERIFICATION.md` (B1592848, 2026-09-12) — which is nearly always, since
-  main moves fast on exactly these two files.** The manual remedy below (`node
+  might touch `BACKLOG.md`/`VERIFICATION.md` (B1592848, 2026-09-12) — which was nearly always, since
+  main moved fast on exactly these two files.** The manual remedy below (`node
   scripts/resolve-ledgers.mjs`) already existed and was already safe, and sessions kept not running
   it anyway: within one hour, PR #1673 and PR #1675 both went `mergeable_state: dirty` on this exact
   file pair and were hand-rebased instead of resolved, and PR #1656 hit the identical shape earlier
@@ -1758,7 +1694,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
    built in this item contradicts a listed constraint, and say so in the session reply. If a
    contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
    the reply names the constraint it collided with.
-5. The backlog entry filed/moved under `ledger/backlog/` (see the LEDGER section — never edit `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
+5. The backlog entry filed/moved **on the `ledger` branch with `npm run ledger -- add|move|put`** (see the LEDGER section — no PR, never a `ledger/` file in your diff, never `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
    index touch guard rejects a PR that touches it (NEW-1, B<PENDING>, 2026-09-08); it's refreshed by
    `.github/workflows/regen-derived-docs.yml` instead. Touched yield / pond panel copy?
    **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs` before and after, and put

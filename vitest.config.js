@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 // NEW-7 — THE SUITE RUNS IN UTC, wherever it runs. Measured 2026-10-19 in a container with
 // TZ=America/Chicago: `npm test` → 6 failed / 24,683 passed, every failure in two files that build
@@ -28,5 +28,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.js"],
+    // NEW-1 (2026-11-05): checks over the REAL ledger content run in the ledger-health job (vitest.ledger.config.js),
+    // never in main's build — the ledger lives on its own branch and must not be able to fail an unrelated PR.
+    exclude: [...configDefaults.exclude, "test/ledger-data/**"],
   },
 });

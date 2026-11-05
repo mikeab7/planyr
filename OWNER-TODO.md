@@ -1110,6 +1110,8 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - [ ] **Reload planyr.io once** after a deploy to pick up the latest fixes (his open tab runs the old build until
       reloaded). Routine — only matters right after Claude ships something.
 
+- [ ] **Delete two scratch branches on GitHub (2 clicks each, github.com/mikeab7/planyr/branches) — `ledger-probe` and `ledger-e2e-tmp`.** Claude made them while proving the new ledger branch works and then could not remove them (the sandbox can create and push branches but not delete them). They hold nothing you need; the real branch is `ledger`. (NEW-1, 2026-11-05)
+
 ## Deferred / low-urgency (filed; no action needed unless he wants them sooner)
 - **B364 (remaining half) — two optional server backends, only if/when wanted.** The scanned-drawing reading
       now runs FREE in the browser (shipped 2026-07-05 — scanned sets get real sheet labels + auto-filing with no
