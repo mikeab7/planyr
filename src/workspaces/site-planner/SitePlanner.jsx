@@ -48,7 +48,7 @@ import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/
 import { markupsUnderPoint, nextMarkupSelection, boxCorners, closedMarkupSize, openMarkupLength } from "./lib/markupPick.js";
 import {
   CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
-  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
+  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt,
 } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
@@ -8600,7 +8600,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // which now carries arcFt too — a cloud's arc size is a per-object property with a remembered
   // default exactly like its stroke weight, not a separate piece of pre-draw config).
   const newCloudMarkup = (pts) => ({
-    id: uid(), kind: "cloud", pts, ...mkCloudStyle, ...cloudMetaDefaults(new Date().toISOString()),
+    id: uid(), kind: "cloud", pts, ...mkCloudStyle,
+    // NEW-1 (2026-11-06) — an untouched default arc is sized to read at the zoom it is drawn at; a size someone chose is kept.
+    arcFt: mkCloudStyle.arcFt === CLOUD_ARC_DEFAULT_FT ? cloudDefaultArcFt(view.ppf) : mkCloudStyle.arcFt,
+    ...cloudMetaDefaults(new Date().toISOString()),
   });
   // `ptsOverride` lets a caller finish a ring it has ALREADY computed (the cloud gesture's onUp,
   // which must not round-trip through setMkPoly's async state before it can close) without
@@ -24491,7 +24494,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "cloud") {
                   const screenPts = m.pts.map(f2p);
                   const s = screenPts.map((q) => `${q.x},${q.y}`).join(" ");
-                  const scallopD = cloudScallopPath(screenPts, clampCloudArcFt(m.arcFt) * rppf);
+                  const scallopD = cloudScallopPath(screenPts, cloudArcPx(m.arcFt, rppf, labelK)); // NEW-1 (2026-11-06): never drawn smaller than a readable scallop
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                       <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
