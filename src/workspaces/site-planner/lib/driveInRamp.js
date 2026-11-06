@@ -281,6 +281,90 @@ export function refitRamps(els, dockSidesOf, dockHeightIn) {
   return changed ? next : els;
 }
 
+/* ---- a ramp stays ON its wall: it follows the end it was placed against (NEW-1, owner 2026-11-06) ------------------------------------------------ */
+/* WHY: `at` is an ABSOLUTE distance from the wall's start, so a building shortened at its far end left the far-end ramps behind in the gap (the owner's
+ * Academy › Concept A, Building 4: placed against a ~918-ft wall at 850.84, wall now 784 → two ramps ~66 ft off the end of the building). The rule is one
+ * pure function, `reseatRamps`, run at the planner's one element-write seam (and once per open as the heal), in this order:
+ *   1. a ramp in the NEARER half of its wall (by the wall length it was placed against) is anchored to that end and keeps its distance from it, so a ramp
+ *      near the START stays at the same `at`, one near the END moves with the end; it is then clamped so its footprint is on the wall (a mid-wall ramp that
+ *      no longer fits is clamped; a wall shorter than the ramp centres it);
+ *   2. a ramp whose DOOR CENTRE is past a wall end (no length history — a plan opened with one already stranded) goes to the door-module spot at the end it
+ *      overshoots — the very spot the "+" beside that corner would pick (`pickRampSpot`), so the heal and the button cannot disagree;
+ *   3. a re-seated ramp that would sit on another ramp of the same wall is DROPPED (its door modules come back, exactly as Delete ramp does — the belt is
+ *      derived from the ramps that exist). Un-moved ramps are never dropped.
+ * `base` is the elements as a gesture BEGAN (a drag measures every frame from there, so shrinking then growing back restores the ramp, and the nearer-end test
+ * never flips mid-drag); outside a gesture base === prev. A write that changed a ramp's own `at` (Properties, the "+" button) is the owner's choice: not followed. */
+export const RAMP_OVERLAP_FT = 0.5;
+const isRampEl = (e) => !!e && e.type === "driveInRamp" && !!e.ramp && isRampSide(e.ramp.side);
+const plainBuilding = (h) => !!h && h.type === "building" && !h.points && Number.isFinite(h.w) && Number.isFinite(h.h);
+export const wallLengthOf = (host, side) => (side === "top" || side === "bottom" ? host.w : host.h);
+
+/** The door-module position for a ramp at one END of a wall — the ONE answer the "+" button (`taken` = the ramps already there) and the heal (no `taken`) read.
+ *  `run` = the wall's door run WITHOUT ramps ({ startF, endF, doors }), or null for a marker wall. Null when nothing clear fits. */
+export function pickRampSpot({ run = null, L, W, where, taken = [] }) {
+  const lo = run ? run.startF : 0, hi = run ? run.endF : L;
+  const clear = (at) => at - W / 2 >= lo - 0.01 && at + W / 2 <= hi + 0.01 && taken.every((t) => at + W / 2 <= t.u0 + 0.01 || at - W / 2 >= t.u1 - 0.01);
+  const want = where === "end" ? hi - W / 2 : lo + W / 2;
+  const stops = run ? moduleStops(run.doors) : [];
+  const grid = [];
+  for (let k = 0; k <= Math.ceil(L / 6); k++) { grid.push(want + k * 6); if (k) grid.push(want - k * 6); }
+  const cands = [...stops.slice().sort((a, c) => Math.abs(a - want) - Math.abs(c - want)), ...(stops.length ? [] : grid)];
+  const found = cands.find(clear);
+  return found == null ? null : found;
+}
+/** The door positions that keep the whole footprint on a wall of length L. */
+export function rampFitRange(ramp, L, opt = {}) {
+  const z = rampSpan({ ...ramp, at: 0 }, opt);
+  return { lo: -z.u0, hi: L - z.u1 };
+}
+const fitTo = (at, range) => (range.lo <= range.hi ? clamp(at, range.lo, range.hi) : (range.lo + range.hi) / 2);
+
+/** `ctx`: { dockSidesOf(host) → sides, dockHeightIn, runOf(host, side, els) → the wall's door run without ramps (optional: without it the heal clamps),
+ *  onDrop(id) (optional: told of every ramp dropped) }. Returns `next` itself when nothing moved. */
+export function reseatRamps(base, prev, next, ctx = {}) {
+  if (!Array.isArray(next) || !next.some(isRampEl)) return next;
+  const { dockSidesOf, dockHeightIn, runOf, onDrop } = ctx;
+  const idx = (a) => { const m = new Map(); if (Array.isArray(a)) for (const e of a) if (e && (e.type === "driveInRamp" || e.type === "building")) m.set(e.id, e); return m; };   // only what is read: ramps and hosts (this runs at every element write)
+  const nextBy = idx(next), prevBy = prev === next ? nextBy : idx(prev), baseBy = base === prev ? prevBy : base === next ? nextBy : idx(base);
+  const moved = new Map();                               // id → new `at`
+  for (const e of next) {
+    if (!isRampEl(e)) continue;
+    const host = nextBy.get(e.attachedTo);
+    if (!plainBuilding(host)) continue;
+    const side = e.ramp.side, L = wallLengthOf(host, side), at = num(e.ramp.at) ?? 0;
+    const marker = !((dockSidesOf ? dockSidesOf(host) : []) || []).includes(side);
+    const opt = { marker, dockHeightIn }, range = rampFitRange(e.ramp, L, opt);
+    const p = prevBy.get(e.id), b = baseBy.get(e.id), bHost = b ? baseBy.get(b.attachedTo) : null;
+    const chosen = !p || !p.ramp || !same(num(p.ramp.at), at);           // this very write set the position: the owner's choice
+    let target = null;
+    if (!chosen && b && b.ramp && b.ramp.side === side && plainBuilding(bHost)) {
+      const Lold = wallLengthOf(bHost, side), bAt = num(b.ramp.at) ?? 0;   // (Lold === L gives bAt back: a drag that returns to its start restores the ramp)
+      if (Math.abs(Lold - L) > 1e-6 || !same(bAt, at)) target = fitTo(bAt <= Lold / 2 ? bAt : L - (Lold - bAt), range);
+    }
+    if (target == null && (at < -0.01 || at > L + 0.01)) {   // stranded: the door centre is past a wall end, and there is no length history to follow
+      const W = marker ? doorSizeOf(e.ramp).w : rampWidthFt(e.ramp);
+      const run = !marker && runOf ? runOf(host, side, next) : null;
+      const spot = pickRampSpot({ run, L, W, where: at > L ? "end" : "start" });
+      target = fitTo(spot == null ? (at > L ? L : 0) : spot, range);
+    }
+    if (target != null && !same(target, at)) moved.set(e.id, r2(target));
+  }
+  if (!moved.size) return next;
+  // a re-seated ramp that lands on another ramp of its wall is dropped; kept ramps (moved or not) are what the next one is judged against
+  const spanOf = (e, at) => rampSpan({ ...e.ramp, at }, { marker: !((dockSidesOf ? dockSidesOf(nextBy.get(e.attachedTo)) : []) || []).includes(e.ramp.side), dockHeightIn });
+  const kept = new Map();                                // `${host}|${side}` → [{ u0, u1 }]
+  const keyOf = (e) => `${e.attachedTo}|${e.ramp.side}`;
+  const dropped = new Set();
+  for (const e of next) if (isRampEl(e) && !moved.has(e.id)) { const k = keyOf(e); (kept.get(k) || kept.set(k, []).get(k)).push(spanOf(e, num(e.ramp.at) ?? 0)); }
+  for (const e of next) {
+    if (!isRampEl(e) || !moved.has(e.id)) continue;
+    const sp = spanOf(e, moved.get(e.id)), k = keyOf(e), others = kept.get(k) || [];
+    if (others.some((o) => Math.min(sp.u1, o.u1) - Math.max(sp.u0, o.u0) > RAMP_OVERLAP_FT)) { dropped.add(e.id); if (onDrop) onDrop(e.id); continue; }
+    others.push(sp); kept.set(k, others);
+  }
+  return next.filter((e) => !dropped.has(e && e.id)).map((e) => (e && moved.has(e.id) && !dropped.has(e.id) ? { ...e, ramp: { ...e.ramp, at: moved.get(e.id) } } : e));
+}
+
 /* ---- grading: the plane ---------------------------------------------------------------------------------------------------------------- */
 /** The ramp's centreline in the world: where it meets the apron (LOW), where it meets the door (HIGH), its rise and its run. No elevations — the engine
  *  adds the host's FINISH elevation (typed or suggested) itself, so this is all a prepared element needs to carry. Null for a marker. */

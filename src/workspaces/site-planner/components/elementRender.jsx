@@ -138,6 +138,13 @@ export function dockDoorRun(el, side, dogEars, lengthLines, g, rampSpans = null)
   const doors = doorsAfterRamps(placed, g.doorWidth, rampSpans);
   return { startF, endF, horiz, doors, displaced: placed.length - doors.length };
 }
+/** One dock wall's door run WITHOUT ramps (the module grid is the building's, not the ramps') — the run a ramp's end spot is picked from. Pure over
+ *  (host, side, the elements holding its bump-outs, the plan settings): the "+" button, the write-seam re-seat and the on-open heal all read it. */
+export function rampDoorRunOf(b, side, els, settings) {
+  const grd = resolveGridSettings(b, settings);
+  const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
+  return dockDoorRun(b, side, (els || []).filter((x) => x.attachedTo === b.id && x.dogEar), gg.lengthLines.map((l) => l.at), grd);
+}
 /** The ramp spans of one building's wall — the 6th argument of dockDoorRun. `ramps` = the driveInRamp elements attached to the building. */
 export function rampSpansOnSide(ramps, side, dockSides, settings) {
   if (!ramps || !ramps.length) return null;

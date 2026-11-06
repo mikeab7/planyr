@@ -381,7 +381,7 @@ import { regionPathD, polylinesPathD } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
 import { followDrives } from "./lib/driveFollow.js";
-import { RAMP_DEFAULTS, RAMP_MAX_GRADE_PCT, RAMP_LAYOUTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampWidthFt, rampGradePct, rampLayout, rampDir, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, gradeText, rampGeometry, fitAlongTheWall } from "./lib/driveInRamp.js";
+import { RAMP_DEFAULTS, RAMP_MAX_GRADE_PCT, RAMP_LAYOUTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampWidthFt, rampGradePct, rampLayout, rampDir, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, gradeText, rampGeometry, fitAlongTheWall, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
@@ -562,7 +562,7 @@ import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/u
 import { BORDER_1, PondSection, ROWB6, SURF_RAISED } from "./lib/plannerShared.js";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
-import { ElNode, dimSlideFor, dockDoorRun, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
+import { ElNode, dimSlideFor, dockDoorRun, rampDoorRunOf, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
 import { CostDisclosure, DesignChangeSummaryCard, DrainagePanel, ProvenanceLegend, YieldPanel } from "./components/YieldDrainagePanels.jsx";
 
 /* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
@@ -1418,10 +1418,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 (2026-10-30) — a drive-in ramp's box is a cache derived from its host (lib/driveInRamp.js); the plan's dock height (the ramp's default
   // rise) is read through this ref so the seam below never closes over `settings`, which is declared further down.
   const rampDockInRef = useRef(48);
+  /* NEW-1 (2026-11-06) — a ramp stays ON its wall: `reseatRamps` (lib/driveInRamp.js) runs at this same seam, before the box refit, so a building shortened or
+   * lengthened at either end carries its end ramps with it (and the on-open heal below re-seats one already stranded). It needs the plan settings (the door grid
+   * its end spot is picked from) through a ref, like the dock height; a ramp it drops is queued here and tombstoned by the effect below (TOMBSTONE-DELETES). */
+  const rampSettingsRef = useRef(null);
+  const rampDropQueue = useRef(new Set());
+  const rampSeatCtx = () => ({ dockSidesOf: (h) => dockSidesFor(h).dockSides, dockHeightIn: rampDockInRef.current, onDrop: (id) => rampDropQueue.current.add(id),
+    runOf: (h, side, arr) => rampDoorRunOf(h, side, arr, rampSettingsRef.current) });
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
-    setElsRaw((prev) => refitRamps(followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad }), (h) => dockSidesFor(h).dockSides, rampDockInRef.current));
+    setElsRaw((prev) => {
+      const next = followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad });
+      return refitRamps(reseatRamps(gestureBase || prev, prev, next, rampSeatCtx()), (h) => dockSidesFor(h).dockSides, rampDockInRef.current);
+    });
   };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
@@ -4527,7 +4537,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
     // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
     if (guarded !== els) setElsRaw((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
-  }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [els]);
   /* NEW-1 (B2289936) — a lot's number is STAMPED, so deleting one never renumbers the rest (siteModel.parcelNumbers). A plan read
    * from storage arrives stamped (READ_NORMALIZE); this stamps what was created in this session. Identity-preserving once stamped,
    * so it cannot loop, and skipped where this tab may not write the plan (it would only be adopted straight back). */
@@ -12420,25 +12430,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * takes a door MARKER instead (no ramp: the floor is at grade there). The door run it reads is `dockDoorRun` WITHOUT ramps — the module grid is the
    * building's, not the ramps'. */
   const rampsOnHost = (arr, b) => arr.filter((x) => x.type === "driveInRamp" && x.attachedTo === b.id);
-  const rampDoorRun = (b, side) => {
-    const grd = resolveGridSettings(b, settings);
-    const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
-    return dockDoorRun(b, side, els.filter((x) => x.attachedTo === b.id && x.dogEar), gg.lengthLines.map((l) => l.at), grd);
-  };
+  const rampDoorRun = (b, side) => rampDoorRunOf(b, side, els, settings);
   const planRampAt = (b, side, where) => {
     const isDock = dockSidesOf(b).dockSides.includes(side);
-    const f = wallFrame(b, side);
     const W = isDock ? RAMP_DEFAULTS.widthFt : DOOR_SIZES[RAMP_DEFAULTS.door].w;
     const taken = rampsOnHost(els, b).filter((r) => r.ramp.side === side).map((r) => rampSpan(r.ramp, { marker: !isDock, dockHeightIn: rampDockIn }));
-    const run = isDock ? rampDoorRun(b, side) : null;
-    const lo = run ? run.startF : 0, hi = run ? run.endF : f.L;
-    const clear = (at) => at - W / 2 >= lo - 0.01 && at + W / 2 <= hi + 0.01 && taken.every((t) => at + W / 2 <= t.u0 + 0.01 || at - W / 2 >= t.u1 - 0.01);
-    const want = where === "end" ? hi - W / 2 : lo + W / 2;   // "start" | "end" — the corner button it came from
-    const stops = run ? moduleStops(run.doors) : [];
-    const grid = [];
-    for (let k = 0; k <= Math.ceil(f.L / 6); k++) { grid.push(want + k * 6); if (k) grid.push(want - k * 6); }
-    const cands = [...stops.slice().sort((a, c) => Math.abs(a - want) - Math.abs(c - want)), ...(stops.length ? [] : grid)];
-    return cands.find(clear) ?? null;
+    return pickRampSpot({ run: isDock ? rampDoorRun(b, side) : null, L: wallFrame(b, side).L, W, where, taken });
   };
   const addRamp = (b, side, where) => {
     if (!b || b.type !== "building" || b.points || b.footEdit || !SIDE_N[side]) return;
@@ -14363,7 +14360,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // it changes (a derived cache, not an edit: no undo frame; identity-stable when nothing moved).
   const rampDockIn = dockHeightInOf(settings);
   rampDockInRef.current = rampDockIn;
+  rampSettingsRef.current = settings;
   useEffect(() => { setElsRaw((prev) => refitRamps(prev, (h) => dockSidesFor(h).dockSides, rampDockIn)); }, [rampDockIn]);
+  /* NEW-1 (2026-11-06) — the on-open heal: a ramp whose door centre is past its wall's end (stranded when its building was shortened before ramps followed)
+   * is re-seated by the SAME rule, and one that lands on another ramp is dropped. Runs after every settled write (never mid-gesture; the seam above handles
+   * those), identity-stable on a plan with nothing stranded, and a fixed point. Then the queue of dropped ramps is tombstoned. */
+  useEffect(() => {
+    if (drag.current) return;
+    setElsRaw((prev) => { const fixed = reseatRamps(prev, prev, prev, rampSeatCtx()); return fixed === prev ? prev : refitRamps(fixed, (h) => dockSidesFor(h).dockSides, rampDockInRef.current); });
+  }, [els]);
+  useEffect(() => { const q = rampDropQueue.current; if (q.size) { const ids = [...q]; q.clear(); tombstone(ids); } }, [els]);
   const gsMedianGrade = fmElev.existGradeFt;
   // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
   // ground sampler that does not need a drainage check to have run). All inert for every other account.
