@@ -131,7 +131,8 @@ const state = (page, id) => page.evaluate((id) => {
     glyphs: [...cell.querySelectorAll("[data-task-icon]")].map(e => e.getAttribute("data-task-icon")),
     nameLeft: nameEl ? Math.round(range.getBoundingClientRect().left * 10) / 10 : null,
     toggle: toggle ? { title: toggle.getAttribute("title"), icon: toggle.querySelector("i")?.className || "", text: toggle.textContent.trim() } : null,
-    cellText: cell.innerText, summary: cell.querySelector("[data-phase-icons]")?.innerText || null,
+    cellText: cell.innerText, summary: cell.querySelector("[data-phase-icons]") ? (cell.querySelector("[data-phase-count]")?.getAttribute("data-phase-count") || "") : null,
+    cellTextHasCount: /\d+ tasks?/.test(cell.innerText),
     summaryIcons: cell.querySelectorAll("[data-phase-icons] img, [data-phase-icons] svg").length,
   };
 }, id);
@@ -232,12 +233,13 @@ try {
   ok("7 an EXPANDED phase shows no summary", exp.summary === null);
   await page.locator(`${row(1)} span[title="Collapse"]`).click(); await pacedWait(page, 300);
   const col = await state(page, 1);
+  ok("7 the count is generated content: the row's cell text is still just the task name", col.cellTextHasCount === false && col.cellText.trim() === "Entitlements");
   ok("7 collapsed phase: chevron-right icon", col.toggle?.icon.includes("ti-chevron-right"), JSON.stringify(col.toggle));
   ok("7 collapsed phase: distinct leaf icons + “3 tasks” (roof, 📮, plat, 🗳️ → 4 icons)", col.summaryIcons === 4 && /3 tasks/.test(col.summary || ""), JSON.stringify({ icons: col.summaryIcons, text: col.summary }));
   if (SHOTS) await page.screenshot({ path: SHOT_DIR + "collapsed-summary.png" });
   await page.locator(`${row(5)} span[title="Collapse"]`).click(); await pacedWait(page, 300);
   const col5 = await state(page, 2 + 1 /* rows renumber? use the phase by position */);
-  const sitework = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-task-row]")].find(x => x.querySelector('[data-col-key="name"]').innerText.includes("Sitework")); const c = r.querySelector("[data-phase-icons]"); return { text: c?.innerText, n: c?.querySelectorAll("img, svg").length }; });
+  const sitework = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-task-row]")].find(x => x.querySelector('[data-col-key="name"]').innerText.includes("Sitework")); const c = r.querySelector("[data-phase-icons]"); return { text: c?.querySelector("[data-phase-count]")?.getAttribute("data-phase-count"), n: c?.querySelectorAll("img, svg").length }; });
   ok("7 shared icons are listed once (Sitework: dump + pond → 2 icons, “2 tasks”)", sitework.n === 2 && /2 tasks/.test(sitework.text || ""), JSON.stringify(sitework));
   await page.locator(`${row(1)} span[title="Expand"]`).click(); await pacedWait(page, 250);
   ok("7 expanding removes the summary", (await state(page, 1)).summary === null);

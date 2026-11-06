@@ -383,6 +383,7 @@ select.ei { cursor: pointer; }
 [data-grid-scroll]:not([data-kbnav]) .drow:hover .ti-slot-add, [data-task-icon-slot][aria-expanded="true"] .ti-slot-add { opacity: .4; }
 [data-task-icon-slot]:hover .ti-slot-add { opacity: .8 !important; }
 [data-task-icon-slot]:hover { background: rgba(9,105,218,.08); }
+.ti-count::after { content: attr(data-phase-count); }
 .ti-chev:hover { background: #dce8fd; color: var(--blue) !important; }
 .ti-pick-cell { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; position: relative;
   border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer; padding: 0; }
@@ -15839,7 +15840,8 @@ function PhaseIconSummary({tasks, taskId}) {
     <span data-phase-icons style={{display:"inline-flex", alignItems:"center", gap:3, marginLeft:8, flex:"0 1000 auto", minWidth:0, overflow:"hidden", whiteSpace:"nowrap"}}>   {/* shrinks ~1000x faster than the name: in a narrow column the summary yields first, the phase name keeps its room */}
       {vis.map(id => <TaskIconGlyph key={id} id={id} size={13} faded />)}
       {more > 0 && <span style={{fontSize:10, color:"var(--mut)"}}>+{more}</span>}
-      <span style={{fontSize:10.5, color:"var(--mut)", marginLeft:vis.length ? 3 : 0, fontWeight:500}}>{sum.leaves} {sum.leaves === 1 ? "task" : "tasks"}</span>
+      {/* the count is generated content (CSS ::after), so a collapsed row's cell TEXT stays just its task name — name lookups by text keep working */}
+      <span className="ti-count" aria-label={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} data-phase-count={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} style={{fontSize:10.5, color:"var(--mut)", marginLeft:vis.length ? 3 : 0, fontWeight:500}} />
     </span>
   );
 }
