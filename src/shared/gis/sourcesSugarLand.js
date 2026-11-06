@@ -13,7 +13,10 @@
 
 const SL_ORG = "https://services1.arcgis.com/SVtsrBXEiBhI5L5n/arcgis/rest/services";
 const SL_CITY = "https://interactivemaps.sugarlandtx.gov/512/rest/services";
+/* NEW-1 (2026-11-06) — the water and sewer network: CDM Smith's public copy for the city (item owner seetoner_CDMSmith), a DIFFERENT ArcGIS Online org from the city's own. CORS-open, no token. */
+const SL_IWRP = "https://services1.arcgis.com/VVapzOPgBae5joyC/arcgis/rest/services/CityofSugarLand/FeatureServer";
 const base = { states: ["TX"], coverage: "sugarland", tier: "production", lastVerified: "2026-11-02", layerId: null };
+const iwrp = { ...base, lastVerified: "2026-11-06" };
 
 export const SUGARLAND_SOURCES = {
   slThoroughfare: {
@@ -109,6 +112,94 @@ export const SUGARLAND_SOURCES = {
     fields: { name: "Project_Name", address: "Address", status: "Status", start: "Construction_Start", done: "Completion_Date", estimated: "Estimated_Completion" },
     ...base,
     // Live 2026-11-02: 47 projects (29 In Progress · 18 Completed), edited 2026-10-09. The contractor / superintendent names, phones and emails in the layer are never requested.
+  },
+  /* ---- Water and sewer network (NEW-1, 2026-11-06) — see lib/sugarLandUtilities.js for the date story: every layer's newest install date is Jan 2017; the layers' own edit dates are 2021-11-10 (most), 2025-11-20 (Pressurized Main), 2025-12-23 (Gravity Main). ---- */
+  slWaterLines: {
+    key: "slWaterLines", label: "Water mains (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Pressurized Main)",
+    serviceUrl: `${SL_IWRP}/17`, geometryType: "line",
+    fields: { size: "Diameter", material: "Material", water: "WaterType", status: "LifecycleS", installed: "InstallDat", operator: "Administra" },
+    where: "(LifecycleS IS NULL OR LifecycleS <> 'Removed')",
+    ...iwrp,
+    // Live 2026-11-06: 32,175 mains (Active 31,548 · Abandoned 563 · Removed 3 · blank 61); WaterType Potable 31,846 + "Potable Water" 55 · Raw 143 · Reclaimed 4 · chemical feed 36. Layer last edited 2025-11-20; newest InstallDat 2017-01-27. Layer 27 (Surface Water Transmission Line, 91) is a subset (89 of 91 ASSETIDs are here).
+  },
+  slSewerGravity: {
+    key: "slSewerGravity", label: "Gravity sewer mains (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Gravity Main)",
+    serviceUrl: `${SL_IWRP}/20`, geometryType: "line",
+    fields: { size: "NominalDia", material: "Material", status: "LifecycleS", installed: "InstallDat", operator: "Administra" },
+    where: "(LifecycleS IS NULL OR LifecycleS NOT IN ('Removed','Proposed')) AND (WaterType IS NULL OR WaterType <> 'Storm')",
+    ...iwrp,
+    // Live 2026-11-06: 16,049 mains (Active 16,032 · Abandoned 12 · Proposed 3 · …); 11 are typed WaterType Storm and left out. Layer last edited 2025-12-23; newest InstallDat 2017-01-27.
+  },
+  slSewerLaterals: {
+    key: "slSewerLaterals", label: "Sewer laterals (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Lateral Line)",
+    serviceUrl: `${SL_IWRP}/19`, geometryType: "line",
+    fields: { size: "Diameter", material: "Material", status: "LifecycleS", installed: "InstallDat", operator: "Administra" },
+    ...iwrp,
+    // Live 2026-11-06: 8,260 laterals (mostly 6 in, ~57 ft long). Layer last edited 2021-11-10; newest InstallDat 2017-01-27.
+  },
+  slSewerForce: {
+    key: "slSewerForce", label: "Sewer force mains (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Pressurized Mains)",
+    serviceUrl: `${SL_IWRP}/18`, geometryType: "line",
+    fields: { size: "Diameter", material: "Material", status: "LifecycleS", installed: "InstallDat", operator: "Administra" },
+    where: "(LifecycleS IS NULL OR LifecycleS <> 'Removed')",
+    ...iwrp,
+    // Live 2026-11-06: 189 lines, every one WaterType Sewage (this is the SEWER pressure layer — the water pressure mains are layer 17). Layer last edited 2021-11-10; newest InstallDat 2017-03-02.
+  },
+  slWaterValves: {
+    key: "slWaterValves", label: "Water system valves (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - System Valve, water)",
+    serviceUrl: `${SL_IWRP}/2`, geometryType: "point",
+    fields: { size: "Diameter", status: "LifecycleS", installed: "InstallDat", id: "ASSETID" },
+    ...iwrp,
+    // Live 2026-11-06: 14,648 valves. Layer last edited 2021-11-10; newest InstallDat 2017-01-27.
+  },
+  slWaterControlValves: {
+    key: "slWaterControlValves", label: "Water control valves (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Control Valve, water)",
+    serviceUrl: `${SL_IWRP}/9`, geometryType: "point",
+    fields: { size: "Diameter", status: "LifecycleS", installed: "InstallDat", id: "ASSETID" },
+    ...iwrp,
+    // Live 2026-11-06: 51 control valves.
+  },
+  slManholes: {
+    key: "slManholes", label: "Sewer manholes (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Manhole)",
+    serviceUrl: `${SL_IWRP}/13`, geometryType: "point",
+    fields: { status: "LifecycleS", installed: "InstallDat", id: "ASSETID" },
+    ...iwrp,
+    // Live 2026-11-06: 15,135 manholes. Layer last edited 2021-11-10; newest InstallDat 2017-01-27.
+  },
+  slCleanouts: {
+    key: "slCleanouts", label: "Sewer clean-outs (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Clean Out)",
+    serviceUrl: `${SL_IWRP}/16`, geometryType: "point",
+    fields: { status: "LifecycleS", installed: "InstallDat", id: "ASSETID" },
+    ...iwrp,
+    // Live 2026-11-06: 1,065 clean-outs.
+  },
+  slLiftStations: {
+    key: "slLiftStations", label: "Sewer lift stations (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (Lift Stations)",
+    serviceUrl: `${SL_IWRP}/23`, geometryType: "point",
+    fields: { name: "BUILDING_N", address: "LOCATION", status: "LIFE_CYCLE" },
+    ...iwrp,
+    // Live 2026-11-06: 116 points (114 LS · 2 WWTP). Layer last edited 2021-11-10.
+  },
+  slWwtp: {
+    key: "slWwtp", label: "Wastewater treatment plants (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (WWTP)",
+    serviceUrl: `${SL_IWRP}/22`, geometryType: "point",
+    fields: { name: "BUILDING_N", status: "LIFE_CYCLE" },
+    ...iwrp,
+    // Live 2026-11-06: 5 plants (the Latitude / Longitude attributes read 0; the GEOMETRY is correct, all 5 inside Sugar Land).
+  },
+  slWaterPlants: {
+    key: "slWaterPlants", label: "Water plants (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (Water Plant Facilities)",
+    serviceUrl: `${SL_IWRP}/21`, geometryType: "point",
+    fields: { name: "Name", status: "LifecycleS", installed: "InstallDat" },
+    ...iwrp,
+    // Live 2026-11-06: 78 facilities. Layer last edited 2021-11-10.
+  },
+  slWaterWells: {
+    key: "slWaterWells", label: "Water production wells (City of Sugar Land, CDM Smith copy)", provider: "CDM Smith for the City of Sugar Land (IWRP - Production Wells)",
+    serviceUrl: `${SL_IWRP}/4`, geometryType: "point",
+    fields: { name: "Name", water: "WaterType", status: "LifecycleS", installed: "InstallDat" },
+    ...iwrp,
+    // Live 2026-11-06: 22 wells.
   },
 };
 
