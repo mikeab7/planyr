@@ -10348,6 +10348,18 @@ function App() {
     // page's main thread has run it, so a busy frame (a row commit, a recompute) stalls the scroll itself — the grid
     // "sticks" and then jumps. The handler only ever acts when Ctrl/Cmd is down, so it is registered ONLY while one is
     // (keydown → add, keyup / blur → remove); a plain wheel never meets a blocking listener.
+    // NEW-1 (2026-11-06, B2693?) — "i want ctrl zoom to always work if im hovering over the schedule". The gate above armed
+    // from this frame's OWN key events only, so with keyboard focus anywhere else in the app (the header, a project switcher,
+    // another panel) a Ctrl press never reached the frame, no listener existed, and Ctrl+wheel zoomed the BROWSER PAGE. It is
+    // now armed from three more places, none of which leaves a blocking listener at rest (measured: a permanent one adds
+    // ~15 ms to EVERY wheel→scroll at every CPU speed — docs on the B2644624 / NEW-1 entries):
+    //   · any pointer event over the frame that carries the modifier (a pointer event reports Ctrl/Cmd even when the key went
+    //     to another document — covers "Ctrl held in the address bar, then the mouse moves in");
+    //   · the shell forwards Ctrl/Cmd down/up/blur from ITS window (`planar:modifier-keys`, Scheduler.jsx) — covers focus
+    //     anywhere in the app, with the pointer resting still;
+    //   · (unchanged) this frame's own keydown/keyup/blur.
+    // NOT covered, by design: focus outside the page document with the pointer not moving after Ctrl goes down, and a
+    // trackpad pinch (Chrome sends it as a ctrl+wheel with no key at all).
     let armed = false;
     const arm = on => {
       if (on === armed) return; armed = on;
@@ -10355,6 +10367,12 @@ function App() {
       else window.removeEventListener("wheel", onWheel);
     };
     const onKey = e => arm(!!(e.ctrlKey || e.metaKey));
+    const onPointer = e => arm(!!(e.ctrlKey || e.metaKey));
+    const onShellKeys = e => {
+      const m = e && e.data;
+      if (!m || m.source !== "planar-shell" || m.type !== "planar:modifier-keys") return;
+      arm(!!(m.ctrl || m.meta));
+    };
     const onBlur = () => arm(false);
     const onWheel = e => {
       if (!e.ctrlKey && !e.metaKey) return;
@@ -10382,10 +10400,16 @@ function App() {
     };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("keyup", onKey, true);
+    window.addEventListener("pointermove", onPointer, {capture: true, passive: true});
+    window.addEventListener("pointerdown", onPointer, {capture: true, passive: true});
+    window.addEventListener("message", onShellKeys);
     window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKey, true);
+      window.removeEventListener("pointermove", onPointer, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("message", onShellKeys);
       window.removeEventListener("blur", onBlur);
       arm(false);
       if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);

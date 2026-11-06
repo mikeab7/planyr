@@ -38,6 +38,7 @@ import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { DELETE_VERIFY_MS, deleteStillPresent, deleteFailureMessage } from "./lib/scheduleDeleteVerify.js";
+import { installModifierForward } from "./lib/modifierForward.js";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -432,6 +433,10 @@ export default function Scheduler({
     }, 8000);
     return () => clearTimeout(t);
   }, [navConfirmed, ready, projectId, activeId]);
+
+  // NEW-1 (2026-11-06) — "i want ctrl zoom to always work if im hovering over the schedule": tell the embedded Schedule when
+  // Ctrl/Cmd is down even though keyboard focus is elsewhere in the app (see lib/modifierForward.js for why).
+  useEffect(() => installModifierForward(window, () => iframeRef.current?.contentWindow, window.location.origin), []);
 
   // Same-origin iframe, so target its exact origin (not "*").
   const post = (msg) => {
