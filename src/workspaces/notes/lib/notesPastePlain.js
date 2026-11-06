@@ -32,6 +32,7 @@ import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { pushDownInherited } from "./notesPasteInherit.js";
 import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment, readSourceTables, tableGridsOf } from "./notesTablePaste.js";
 import { convertOfficeLists } from "./notesOfficeLists.js";
+import { normalizeOfficeStyle } from "./notesOfficeStyle.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 export const pastePlainKey = new PluginKey("notePastePlain");
@@ -420,6 +421,10 @@ const NotePastePlain = Extension.create({
                  * reports are the ones the editor will hold, one for one. A conversion that throws is dropped whole and
                  * the paste goes through exactly as it did before this existed. */
                 if (convert) convertOfficeLists(d.body);
+                /* ⛔ OFFICE'S CLASS-BASED AND <font> TEXT FORMATTING (NEW-1, 2026-11-05, notesOfficeStyle.js): Excel's bold / red
+                 * cell arrives bold / red, and `<font color face>` keeps its colour and typeface. Its own guard: a throw leaves
+                 * the paste exactly as it was before this existed. */
+                try { normalizeOfficeStyle(d); } catch (_) { /* paste unchanged */ }
                 return d;
               };
               let doc2;

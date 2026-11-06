@@ -213,6 +213,26 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-list-paste.mjs
+      # Notes CLIPBOARD REGRESSION BANK (NEW-1, 2026-11-05: "this is what stops the paste bug stream from coming back"). Every clipboard
+      # fixture committed for Notes - OneNote desktop/web, Word, Outlook, Excel, Sheets, the Word/OneNote outlines - plus the BlockNote
+      # spike's four Office losses (bgcolor fills, <font color face>, empty cells arriving as a space, Word bullets arriving as "·"),
+      # a Word bullet + numbered list and an Excel range with a merged cell, a fill, an empty cell, a bold cell and a coloured-text cell,
+      # each pasted through a REAL paste event into a real box (and onto blank paper) and judged on DOCUMENT STRUCTURE: rows, columns,
+      # merges, fills, empty cells, marks, text colours, list nesting. Decided behaviour pinned: a plain paste imports no foreign cell
+      # shading, "Values and Source Formatting" does. Known-good arm + a teeth arm VOID the run; test/notesPasteBank.test.js (in `npm test`)
+      # fails when a fixture is committed without an expectation. 6 of 58 checks red on unmodified main. Reuses the preview server and Chromium.
+      - name: Notes clipboard regression bank (every committed clipboard fixture, real paste path, judged on document structure - NEW-1, 2026-11-05)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-paste-bank.mjs
+      # Notes ENGINE CONTRACT (NEW-1, 2026-11-05). What the editor relies on from Tiptap, pinned at the browser so an upgrade cannot change a
+      # decided behaviour silently: Tab at the start of a paragraph after a list stays a tab character (3.33's list keymap would have
+      # moved the paragraph INTO the last bullet), a dragged-then-undone column width leaves no stale <col> width, a right-click keeps a
+      # Ctrl+click multi-cell selection, and a stored font value with a ';' cannot add a declaration. Known-good arms VOID the run.
+      - name: Notes engine contract (Tab after a list, column-width undo, multi-cell right-click, style-value injection - NEW-1, 2026-11-05)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-engine-contract.mjs
       # Notes ENTER-AFTER-A-PASTED-BULLET gate (follow-up NEW-1, B2557985, 2026-10-30). Owner screenshot: Enter at the end of a
       # pasted level-2 item made a flush-left plain paragraph. Real keys on pasted Word / OneNote outlines at levels 1-4 and a
       # numbered one (sibling at the same level and marker, Enter on the empty item steps out one level, Ctrl+Z, Tab / Shift+Tab,
