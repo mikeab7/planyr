@@ -7,6 +7,12 @@
  *       none leaves the sketch. A section too short to hold a label gets none (it is labelled while
  *       it is hovered or selected, via `force`). Pure: no DOM, no React.
  *
+ *   pickVertexDots(pts, breaks) — which vertices get a button in "Split or join sections" (NEW-1,
+ *       2026-11-06). A digitised curve has a dozen vertices inside a few viewBox units, so a dot on every
+ *       vertex buried the real corners (the owner could not find the north/south corner on the Academy
+ *       lot). Every current BREAK is always offered (it is the only way to join), the rest are the sharpest
+ *       turns first, none closer than DOT_MIN_GAP to another dot, and not near-collinear ones.
+ *
  * Sketch space is the SVG viewBox (y down). Every number here is a viewBox unit, never CSS pixels.
  */
 
@@ -77,4 +83,35 @@ export function layoutSectionLabels(items, { width = 300, height = 150, charW = 
     if (hit) { placed.push(hit); out.set(it.key, { x: hit.x + hit.w / 2, y: hit.y + hit.h / 2, w: hit.w, h: hit.h }); }
   }
   return out;
+}
+
+export const DOT_MIN_GAP = 12;
+export const DOT_MIN_TURN_DEG = 6;
+
+/* Turn of the sketch outline at vertex i, degrees 0..180. */
+function sketchTurn(pts, i) {
+  const n = pts.length, a = pts[(i - 1 + n) % n], p = pts[i], b = pts[(i + 1) % n];
+  const ax = p.x - a.x, ay = p.y - a.y, bx = b.x - p.x, by = b.y - p.y;
+  if (!(Math.hypot(ax, ay) > 1e-9) || !(Math.hypot(bx, by) > 1e-9)) return 0;
+  let d = ((Math.atan2(by, bx) - Math.atan2(ay, ax)) * 180) / Math.PI;
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return Math.abs(d);
+}
+
+/* @param pts sketch-space ring (open, viewBox units) @param breaks vertex indices that are section starts
+ * @returns [{ i, isBreak }] ascending by vertex index. */
+export function pickVertexDots(pts, breaks, { minGap = DOT_MIN_GAP, minTurn = DOT_MIN_TURN_DEG } = {}) {
+  const n = Array.isArray(pts) ? pts.length : 0;
+  if (!n) return [];
+  const brk = [...new Set((breaks || []).filter((v) => Number.isInteger(v) && v >= 0 && v < n))].sort((a, b) => a - b);
+  const placed = brk.map((i) => ({ i, isBreak: true }));
+  const isBrk = new Set(brk);
+  const cand = [];
+  for (let i = 0; i < n; i++) if (!isBrk.has(i)) { const t = sketchTurn(pts, i); if (t >= minTurn) cand.push({ i, t }); }
+  cand.sort((a, b) => b.t - a.t || a.i - b.i);
+  for (const c of cand) {
+    if (placed.every((d) => Math.hypot(pts[d.i].x - pts[c.i].x, pts[d.i].y - pts[c.i].y) >= minGap)) placed.push({ i: c.i, isBreak: false });
+  }
+  return placed.sort((a, b) => a.i - b.i);
 }

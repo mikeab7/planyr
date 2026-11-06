@@ -58,6 +58,16 @@
  *     (8.3% each) still stays twelve;
  *   · neighbouring sections that border the SAME road / water / neighbour with the same setback are
  *     one section: no "(1)/(2)" twins next to each other.
+ *
+ * ── NEW-1 (owner 2026-11-06, Academy › Concept A "Parcel 1 · A": "on the north and south I can't cleanly add a
+ *    setback") — a sliver joins the side it FACES ────────────────────────────────────────────────────────
+ *  `mergeTiny` used to give a short piece to its LONGER neighbour (after a shared border). On an open-bordered
+ *  lot every border key is "open", so the long side won every time: the 650 ft top-right piece of that parcel
+ *  (running along the north, 25° off it) went to the EAST side, and the 970 ft south-west end (running along the
+ *  south) went to the WEST side. Now, after a shared border, a piece merges into the neighbour whose OUTWARD
+ *  direction is closest to its own (outward normals, length-weighted); only when the two neighbours face it
+ *  within FACING_TIE_DEG of equally (a convex corner piece facing both) does length break the tie. The
+ *  detection of the pieces is unchanged — only who they are handed to.
  */
 
 import { STREET_ABUT_FT } from "./setbackRoles.js";
@@ -74,6 +84,7 @@ export const MIN_SECTION_PERIM_FRAC = 0.03;
 export const NEIGHBOUR_COINCIDENT_FT = 3;
 export const TARGET_SECTIONS = 6;
 export const ESCALATE_FLOOR_FRACS = [0.045, 0.06, 0.075];
+export const FACING_TIE_DEG = 12;
 export const SMOOTH_MIN_FT = 40;
 export const SMOOTH_MAX_FT = 300;
 export const SMOOTH_PERIM_FRAC = 0.04;
@@ -358,25 +369,50 @@ function breakVertices(points, opts, A) {
   }
   for (let v = 0; v < n; v++) {
     if (forced.has(v)) { isBrk[v] = true; continue; }
-    if (joined.has(v)) continue;
+    // a JOIN is applied to the finished result (buildSections), never here: removing a break before the small-piece
+    // merge changes how many sections remain, which re-opens the "about six" pass and makes unrelated pieces
+    // pop back out (join the north and the south end splits off again).
     const pe = (v - 1 + n) % n;
     isBrk[v] = keep[v] || val[pe] !== val[v] || border[pe].key !== border[v].key;
   }
-  return { isBrk, forced };
+  return { isBrk, forced, joined };
 }
 
 const sum = (arr, f) => arr.reduce((s, e) => s + f(e), 0);
+
+/* Length-weighted OUTWARD direction of a run of edges (either winding), as a unit vector; null if the run
+ * has no length. This is the same sum the finished sections use for `side`. */
+function outwardOf(points, edges, ccw) {
+  const n = points.length;
+  let nx = 0, ny = 0;
+  for (const e of edges) {
+    const a = points[e], b = points[(e + 1) % n];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    nx += ccw ? dy : -dy;
+    ny += ccw ? -dx : dx;
+  }
+  const l = hyp(nx, ny);
+  return l > 1e-9 ? { x: nx / l, y: ny / l } : null;
+}
+
+/* Angle in degrees between two outward directions (0 = facing the same way); 180 when either is unknown,
+ * so a run with no direction never wins on facing. */
+function facingGap(a, b) {
+  if (!a || !b) return 180;
+  return (Math.acos(Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y))) * 180) / Math.PI;
+}
 
 function buildSections(points, opts) {
   const n = points.length;
   if (n < 3) return [];
   const A = analyse(points, opts);
-  const { isBrk, forced } = breakVertices(points, opts, A);
+  const { isBrk, forced, joined } = breakVertices(points, opts, A);
   const { g, val, border } = A;
   let brk = [];
   for (let v = 0; v < n; v++) if (isBrk[v]) brk.push(v);
   if (!brk.length) brk = [0];
 
+  const ccwRing = signedArea(points) > 0;
   const edgesOf = (k, list) => edgesBetween(list[k], list[(k + 1) % list.length], n);
   const stats = (edges) => {
     const uniform = edges.every((e) => val[e] === val[edges[0]]);
@@ -384,7 +420,7 @@ function buildSections(points, opts) {
     for (const e of edges) byKey.set(border[e].key, (byKey.get(border[e].key) || 0) + g.len[e]);
     let key = null, best = -1;
     for (const [k, l] of byKey) if (l > best) { best = l; key = k; }
-    return { len: sum(edges, (e) => g.len[e]), uniform, v: val[edges[0]], key };
+    return { len: sum(edges, (e) => g.len[e]), uniform, v: val[edges[0]], key, out: outwardOf(points, edges, ccwRing) };
   };
 
   // merge tiny sections into a compatible neighbour (never across a user break). A typical parcel is
@@ -408,7 +444,15 @@ function buildSections(points, opts) {
         if (ok(prev, brk[t.k])) cands.push({ nb: prev, drop: brk[t.k] });
         if (ok(next, brk[(t.k + 1) % m])) cands.push({ nb: next, drop: brk[(t.k + 1) % m] });
         if (!cands.length) continue;
-        cands.sort((a, b) => (b.nb.key === t.key) - (a.nb.key === t.key) || b.nb.len - a.nb.len);
+        // shared border first; then the neighbour the piece FACES (a clearly smaller angle between outward
+        // directions); only a near-tie in facing falls back to the longer neighbour.
+        cands.sort((a, b) => {
+          const k = (b.nb.key === t.key) - (a.nb.key === t.key);
+          if (k) return k;
+          const ga = facingGap(t.out, a.nb.out), gb = facingGap(t.out, b.nb.out);
+          if (Math.abs(ga - gb) > FACING_TIE_DEG) return ga - gb;
+          return b.nb.len - a.nb.len;
+        });
         brk = brk.filter((v) => v !== cands[0].drop);
         merged = true;
         break;
@@ -436,6 +480,12 @@ function buildSections(points, opts) {
     }
     if (hit == null) break;
     brk = brk.filter((v) => v !== hit);
+  }
+
+  // the owner's JOINS, last: each removes exactly its own break from the automatic result and nothing else moves
+  if (joined.size) {
+    const kept = brk.filter((v) => forced.has(v) || !joined.has(v));
+    brk = kept.length ? kept : [0];
   }
 
   const ccw = signedArea(points) > 0;
