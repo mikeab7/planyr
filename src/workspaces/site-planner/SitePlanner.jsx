@@ -72,7 +72,8 @@ import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
 // GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
-import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ } from "./lib/mapStack.js";
+import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ, PANE_SNAPSHOT, PANE_SNAPSHOT_Z } from "./lib/mapStack.js";
+import { snapshotHostedInMap, snapshotDrawnInCanvas, snapshotBounds } from "./lib/aerialSnapshot.js"; // NEW-1 (2026-11-05): the pinned map snapshot is the aerial, so it is hosted UNDER the GIS fills, never over them
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import GisIdentifyCard from "./components/GisIdentifyCard.jsx";
 import { setHighlight, releaseHighlight } from "./lib/featureHighlight.js";
@@ -2928,6 +2929,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // BUILD-TIME choices (see the retina note above). Re-running this effect on every zoom
     // would rebuild the tile layer and refetch the whole aerial mid-gesture.
   }, [basemapSrc, basemapOn, origin, showAerial]);
+
+  /* NEW-1 (2026-11-05, owner: "Zoning and Future Land Use fills are cut out around the site") — THE STORED MAP SNAPSHOT IS THE AERIAL, SO IT LIVES AT THE BOTTOM OF THE BACKDROP MAP.
+   * With the live basemap Off a located plan used to draw its pinned "Aerial backdrop" capture as an SVG <image> in the planner canvas — above the backdrop map, so it painted over every GIS
+   * AREA fill in a rectangle the size of the capture. Hosted here instead: an image overlay in its own pane (mapStack.PANE_SNAPSHOT, under the GIS panes), same feet → lat/lon round trip as
+   * the tiles and the print's aerial (lib/aerialSnapshot.js). The canvas stands down for it (`renderSheetOverlay`); the export already laid it under the GIS overlays. */
+  const snapOverlay = useMemo(() => (sheetOverlays || []).find((o) => snapshotHostedInMap(o, { origin, basemapOn, showAerial })) || null, [sheetOverlays, origin, basemapOn, showAerial]);
+  const snapKey = snapOverlay ? [snapOverlay.id, snapOverlay.src, snapOverlay.x, snapOverlay.y, snapOverlay.imgW, snapOverlay.imgH, snapOverlay.ftPerPx, snapOverlay.ftPerPxY, snapOverlay.opacity, origin.lat, origin.lon].join("|") : "";
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !snapOverlay) return undefined;
+    const bounds = snapshotBounds(snapOverlay, origin);
+    if (!bounds) return undefined;
+    if (!map.getPane(PANE_SNAPSHOT)) { const p = map.createPane(PANE_SNAPSHOT); p.style.zIndex = PANE_SNAPSHOT_Z; p.style.pointerEvents = "none"; }
+    const id = snapOverlay.id;
+    const lyr = L.imageOverlay(snapOverlay.src, bounds, { pane: PANE_SNAPSHOT, interactive: false, opacity: Number.isFinite(snapOverlay.opacity) ? snapOverlay.opacity : 1 });
+    lyr.on("error", () => setOverlayLoadErr((m) => ({ ...m, [id]: "remote" })));
+    lyr.on("load", () => setOverlayLoadErr((m) => (m[id] === "remote" ? Object.fromEntries(Object.entries(m).filter(([k]) => k !== id)) : m)));
+    lyr.addTo(map);
+    return () => { try { map.removeLayer(lyr); } catch (_) { /* the map is already gone */ } };
+  }, [snapKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Road names over the aerial (NEW-1) — the SAME vector label helper and the SAME `siteStack` gate the
    * map finder uses (one implementation, no fork). The helper adds its own Leaflet pane (z 250, pointer-
@@ -19490,7 +19511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B848736 — the pinned map reference keeps the old aerial's exact suppression: hidden via the
     // plan-level `showAerial` toggle, and standing down on a georeferenced plan while the live
     // basemap tiles are on (they ARE the aerial there — item 4, B688864).
-    if (o.fromMap && (!showAerial || (origin && basemapOn))) return null;
+    if (o.fromMap && !snapshotDrawnInCanvas(o, { origin, showAerial })) return null; // NEW-1 (2026-11-05): on a located plan the snapshot is drawn by the backdrop MAP, under the GIS fills — never here, over them
     const tl = f2p({ x: o.x, y: o.y });
     const sy = o.ftPerPxY || o.ftPerPx; // B848736 — a map capture's vertical scale can differ (Web Mercator)
     const w = o.imgW * o.ftPerPx * rppf;
