@@ -92,7 +92,7 @@ const rows = (pg) => pg.evaluate(() => [...document.querySelectorAll("[data-grid
     const raw = nameCell?.innerText || "";
     const span = nameCell?.querySelector("span");
     const pl = span ? parseFloat(getComputedStyle(span).paddingLeft) : 0;
-    return { id: Number(r.dataset.taskRow), top: parseFloat(r.style.top), name: raw.replace(/^[▾▸]\s*/, "").trim(), level: Math.round((pl - 4) / 14), expanded: raw.startsWith("▾") ? true : raw.startsWith("▸") ? false : null };
+    return { id: Number(r.dataset.taskRow), top: parseFloat(r.style.top), name: raw.replace(/^[▾▸]\s*/, "").trim(), level: Math.round((pl - 4) / 14), expanded: nameCell?.querySelector('span[title="Collapse"]') ? true : nameCell?.querySelector('span[title="Expand"]') ? false : null   /* NEW-1 task icons: the toggle is now a chevron ICON, not a ▾/▸ character — read its title */ };
   }).sort((a, b) => a.top - b.top));
 const rowByName = async (pg, name, nth = 0) => (await rows(pg)).filter(r => r.name === name)[nth] || null;
 
