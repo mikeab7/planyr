@@ -4,7 +4,7 @@
  * The parser reads formatting from the element's own `style=` and from `<b> <i> <u> <s>`. Office also writes it two other ways,
  * and a paste lost both:
  *   1. A CLASS whose rule sits in the clipboard's `<style>` — Excel's whole-cell format (`<td class=xl65>` + `.xl65 { font-weight:700;
- *      color:#C00000 }`). Bold and a text colour set that way arrived plain. Only declarations that become a MARK are read (bold,
+ *      color:red }`). Bold and a text colour set that way arrived plain. Only declarations that become a MARK are read (bold,
  *      italic, underline, strike, colour): the font and size Excel repeats on EVERY cell are not turned into a mark on every cell.
  *   2. The HTML-3.2 `<font color= face=>` element (Outlook, Word-for-web). No parse rule matches `<font>`, so colour and typeface
  *      were dropped — the same loss the 2026-10-30 BlockNote spike measured.

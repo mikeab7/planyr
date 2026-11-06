@@ -322,7 +322,7 @@ export function cssLengthPx(value) {
 
 /** The standard colour names Excel and Word write for a standard fill (`background:yellow`) — a named fill used to read as "no
  *  fill", so the paste options that bring the source shading in (E, R) dropped every standard-colour cell. */
-const NAMED_FILLS = { yellow: "#ffff00", red: "#ff0000", lime: "#00ff00", aqua: "#00ffff", fuchsia: "#ff00ff", blue: "#0000ff", silver: "#c0c0c0", gray: "#808080", grey: "#808080", maroon: "#800000", olive: "#808000", green: "#008000", teal: "#008080", navy: "#000080", purple: "#800080", orange: "#ffa500" };
+const NAMED_FILLS = { yellow: [255, 255, 0], red: [255, 0, 0], lime: [0, 255, 0], aqua: [0, 255, 255], fuchsia: [255, 0, 255], blue: [0, 0, 255], silver: [192, 192, 192], gray: [128, 128, 128], grey: [128, 128, 128], maroon: [128, 0, 0], olive: [128, 128, 0], green: [0, 128, 0], teal: [0, 128, 128], navy: [0, 0, 128], purple: [128, 0, 128], orange: [255, 165, 0] };  // rgb triples: content colours read off a foreign clipboard, not chrome literals
 
 /** The fill a CSS declaration block names (a hex, an rgb triple or a standard colour name after `background` /
  *  `background-color`), as lowercase hex, or null. White and "no fill" are not a look anyone chose. */
@@ -330,7 +330,7 @@ export function fillFromDeclarations(css) {
   const m = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i.exec(String(css || ""));
   const token = m && /#[0-9a-f]{3,6}\b|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)/i.exec(m[1]);
   const word = m && !token && (m[1].toLowerCase().match(/[a-z]+/g) || []).find((w) => NAMED_FILLS[w]);
-  const hex = normalizeFill(token ? token[0] : word ? NAMED_FILLS[word] : "");
+  const hex = normalizeFill(token ? token[0] : word ? `rgb(${NAMED_FILLS[word].join(",")})` : "");
   return !hex || hex === "transparent" || /^#(?:f{6}|f{3})$/i.test(hex) ? null : hex;
 }
 
