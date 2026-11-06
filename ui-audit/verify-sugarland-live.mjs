@@ -5,8 +5,8 @@
  * It proves, against the DEPLOYED build (read from /version.json in the same call as the assertions):
  *   A. A throwaway LOCATED plan at the Academy point (29.6122, −95.6693 — inside the city, beside Sugar Land Regional Airport) lists every Sugar Land row
  *      (Access: Thoroughfare Plan, Capital Projects · Jurisdictions: Zoning, Airport Zoning, Future Land Use, Zoning Cases, Public Right-of-Way & Land, Tax Increment Zones,
- *      Available Sites, Development Projects · Utilities: the Fire Hydrants row) and the Utilities group carries the note that the water / sewer lines are dated through Jan 2017
- *      (the water / sewer rows themselves are proved by verify-sugarland-utilities-live.mjs).
+ *      Available Sites, Development Projects · Utilities: the Fire Hydrants row) and the Utilities group carries NO paragraph (the water / sewer note is behind each row's (i);
+ *      those rows are proved by verify-sugarland-utilities-live.mjs).
  *   B. With the rows on, the city's server (through /gis-proxy) and the city's org each ANSWER, the layers PAINT the features they were sent (window.__plannerLayers().features —
  *      esri-leaflet drops features if a `fields` list omits the object-id field, which no unit test can see), a click card carries real values (the layer's own identify at a point
  *      ON a known feature), the zoning legend is headed "Sugar Land" with one code per row, and a canvas click opens the zoning card.
@@ -146,10 +146,7 @@ try {
   for (const id of ["sl_thoroughfare", "sl_capital_projects"]) check(`A · Access offers "${id}"`, access.includes(id));
   for (const id of ["sl_zoning", "sl_airport_zoning", "sl_flu", "sl_zoning_cases", "sl_public_land", "sl_tirz", "sl_available_sites", "sl_dev_projects"]) check(`A · Jurisdictions offers "${id}"`, jur.includes(id));
   check('A · Utilities offers the Fire Hydrants row', util.includes("fire_hydrants"));
-  const note = await page.getByTestId("layer-group-note").first().innerText().catch(() => "");
-  check('A · Utilities says the water and sewer lines are dated through Jan 2017 (no longer "does not publish")', /dated through Jan 2017/.test(note) && !/does not publish/.test(note), note.replace(/\n/g, " "));
-  const href = await page.getByTestId("layer-group-note").locator("a").first().getAttribute("href").catch(() => null);
-  check("A · and links the city's Utility Map Request form", href === "https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862", String(href));
+  check("A · the Utilities group carries no persistent paragraph (the water / sewer note lives behind each row's (i) — verify-sugarland-utilities-live.mjs)", (await page.getByTestId("layer-group-note").count()) === 0, "");
   const early = sent();
   console.log("requests before any layer is on:", early.map((e) => e.url.replace(/^https?:\/\/[^/]+/, "").slice(0, 100)).join(" | ") || "(none)");
   check("A · nothing from the city is requested before a layer is switched on", early.length === 0, `${early.length} sent`);

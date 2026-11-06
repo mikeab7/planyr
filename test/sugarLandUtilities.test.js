@@ -6,17 +6,19 @@
  *   · the CARDS and STYLES — plain labels, nothing invented (Subtype / Elevation never decoded), junk sizes dropped, abandoned lines grey and dotted, force mains dashed;
  *   · the GATING — covered point by point in sugarLandLayers.test.js (every row in SUGARLAND_LAYERS is offered at the Academy point and nowhere else); here the new rows are asserted to be in that set. */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES } from "../src/shared/gis/sourceFixtures.js";
 import { cleanCard } from "../src/workspaces/site-planner/lib/identifyCard.js";
 import {
-  UTILITY_DATA_AS_OF, UTILITY_TAG, UTILITY_LAYER_EDITED, UTILITY_CAVEAT_TEXT, UTILITY_NOTE_TEXT, utilitySource, utilityVintage, taggedLabel,
+  UTILITY_DATA_AS_OF, UTILITY_TAG, UTILITY_LAYER_EDITED, UTILITY_CAVEAT_TEXT, utilitySource, utilityVintage, taggedLabel,
   sizeInches, installYear, lifecycle, isAbandoned, materialText, operatorText, carriesText, pipeWeight,
   WATER_COLORS, SEWER_COLORS, waterKind, waterStyle, sewerStyle, WATER_LEGEND, SEWER_LEGEND,
   waterLineCard, gravityMainCard, lateralCard, forceMainCard, waterValveCard, controlValveCard, manholeCard, cleanoutCard, liftStationCard, wwtpCard, waterPlantCard, wellCard,
   WATER_WHERE, GRAVITY_WHERE, FORCE_WHERE,
 } from "../src/workspaces/site-planner/lib/sugarLandUtilities.js";
-import { SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, SUGARLAND_VINTAGE } from "../src/workspaces/site-planner/lib/sugarLandLayers.js";
+import { SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, SUGARLAND_VINTAGE, UTILITY_REQUEST_LINK, UTILITY_MAP_REQUEST_URL } from "../src/workspaces/site-planner/lib/sugarLandLayers.js";
+import { rowInfoSections, mergeGroupInfoSections } from "../src/workspaces/site-planner/lib/layerPanelInfo.js";
 
 const NEW_ROWS = {
   sl_water_lines: ["slWaterLines", 17], sl_sewer_gravity: ["slSewerGravity", 20], sl_sewer_laterals: ["slSewerLaterals", 19], sl_sewer_force: ["slSewerForce", 18],
@@ -73,10 +75,18 @@ describe("source wiring — the right layer is water and the right layer is sewe
     expect(SUGARLAND_LAYERS.sl_sewer_gravity.fields).toContain("OBJECTID_12");
     expect(SUGARLAND_LAYERS.sl_water_wells.fields).toContain("OBJECTID_12");
   });
-  it("dense layers page through their whole view (fetchAll) and load at close zoom; points are not drawn at wide zoom", () => {
+  it("dense layers page through their whole view (fetchAll)", () => {
     for (const id of ["sl_water_lines", "sl_sewer_gravity", "sl_sewer_laterals", "sl_sewer_force", "sl_water_valves", "sl_water_control_valves", "sl_manholes", "sl_cleanouts"]) expect(SUGARLAND_LAYERS[id].fetchAll, id).toBe(true);
-    for (const id of ["sl_water_valves", "sl_manholes", "sl_cleanouts", "sl_sewer_laterals"]) expect(SUGARLAND_LAYERS[id].minZoom, id).toBeGreaterThanOrEqual(16);
-    for (const id of ["sl_water_lines", "sl_sewer_gravity"]) expect(SUGARLAND_LAYERS[id].minZoom, id).toBeGreaterThanOrEqual(15);
+  });
+  it("THE LINES DRAW AT THE ZOOM A DEVELOPER WORKS AT — a whole-site view is ~8 km across (about zoom 14.6), so no line row may be gated above 14 (owner report 2026-11-06: water and sewer drew nothing at ~zoom 14.6 because the gates were 15 / 16)", () => {
+    for (const id of ["sl_water_lines", "sl_sewer_gravity", "sl_sewer_laterals", "sl_sewer_force"]) expect(SUGARLAND_LAYERS[id].minZoom, id).toBeLessThanOrEqual(14);
+    // points stay close-zoom so they do not swamp the map (14,648 valves, 15,135 manholes)
+    for (const id of ["sl_water_valves", "sl_water_control_valves", "sl_manholes", "sl_cleanouts"]) expect(SUGARLAND_LAYERS[id].minZoom, id).toBeGreaterThanOrEqual(15);
+  });
+  it("every member of a merged row has the SAME gate — otherwise one switch draws part of a row and the panel toasts 'Sewer Laterals is hidden at this zoom' for a sub-layer the user never saw", () => {
+    const byGroup = {};
+    for (const id of Object.keys(NEW_ROWS)) { const g = SUGARLAND_LAYERS[id].mergeGroup; if (g) (byGroup[g] ??= new Set()).add(SUGARLAND_LAYERS[id].minZoom); }
+    for (const [g, zooms] of Object.entries(byGroup)) expect([...zooms], g).toHaveLength(1);
   });
   it("every new source has at least two real-feature fixture points", () => {
     for (const [, [key]] of Object.entries(NEW_ROWS)) expect(SOURCE_FIXTURES[key].fixtures.length, key).toBeGreaterThanOrEqual(2);
@@ -97,8 +107,12 @@ describe("the date is on the row, in the (i), and on every card", () => {
     expect(SUGARLAND_LAYERS.sl_water_lines.label).toBe("Water Lines · as of 2017");
     expect(SUGARLAND_MERGE_GROUPS.sl_sewer_lines.label).toBe("Sewer Lines · as of 2017");
     expect(SUGARLAND_MERGE_GROUPS.sl_valves.label).toBe("Water Valves · as of 2017");
-    expect(SUGARLAND_MERGE_GROUPS.sl_sewer_structures.label).toBe("Manholes & Cleanouts · as of 2017");
-    expect(SUGARLAND_MERGE_GROUPS.sl_plants.label).toBe("Plants & Lift Stations · as of 2017");
+    expect(SUGARLAND_MERGE_GROUPS.sl_sewer_structures.label).toBe("Manholes · as of 2017");
+    expect(SUGARLAND_MERGE_GROUPS.sl_plants.label).toBe("Utility Plants · as of 2017");
+  });
+  it("no tagged label is long enough to clip the date at the Layers panel's default width (seen live 2026-11-06: 'Manholes & Cleanouts · as of 2017' lost its date; the owner asked to KEEP the 'as of 2017' wording, so the names are what was shortened)", () => {
+    const labels = [SUGARLAND_LAYERS.sl_water_lines.label, ...["sl_sewer_lines", "sl_valves", "sl_sewer_structures", "sl_plants"].map((g) => SUGARLAND_MERGE_GROUPS[g].label)];
+    for (const l of labels) { expect(l, l).toMatch(/ · as of 2017$/); expect(l.length, l).toBeLessThanOrEqual(27); }
   });
   it("the (i): every row's Source line names the publisher, the content date and that layer's own edit date; the vintage line says so too", () => {
     expect(SUGARLAND_LAYERS.sl_water_lines.source).toBe(utilitySource("Nov 20, 2025"));
@@ -117,7 +131,6 @@ describe("the date is on the row, in the (i), and on every card", () => {
     expect(UTILITY_CAVEAT_TEXT).toMatch(/built since are not shown/);
     expect(UTILITY_CAVEAT_TEXT).toMatch(/Utility Map Request/);
     expect(UTILITY_CAVEAT_TEXT).toMatch(/811/);
-    expect(UTILITY_NOTE_TEXT).toMatch(/Jan 2017/);
   });
   const CARDS = [
     ["water main", waterLineCard, UTILITY_LAYER_EDITED.water], ["gravity main", gravityMainCard, UTILITY_LAYER_EDITED.gravity], ["lateral", lateralCard, UTILITY_LAYER_EDITED.other],
@@ -235,5 +248,32 @@ describe("styles — water and sewer read apart, pressure from gravity", () => {
     expect(SEWER_LEGEND.map((e) => e.label)).toEqual(["Gravity sewer main", "Service lateral", "Force main (pressure)", "Abandoned"]);
     expect(SUGARLAND_LAYERS.sl_water_lines.legend).toBe(WATER_LEGEND);
     expect(SUGARLAND_LAYERS.sl_sewer_gravity.legend).toBe(SEWER_LEGEND);
+  });
+});
+
+describe("the source / date note and the request link live behind each row's (i) — never as a paragraph in the panel (owner rule, 2026-11-06)", () => {
+  it("every water / sewer row carries the Utility Map Request link", () => {
+    expect(UTILITY_REQUEST_LINK).toEqual({ text: "Request current utility maps from the city", href: UTILITY_MAP_REQUEST_URL });
+    for (const id of Object.keys(NEW_ROWS)) expect(SUGARLAND_LAYERS[id].infoLink, id).toBe(UTILITY_REQUEST_LINK);
+    expect(UTILITY_MAP_REQUEST_URL).toBe("https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862");
+  });
+  it("a solo row's (i) ends with the link, after the source, the as-of line and the caution", () => {
+    const sec = rowInfoSections(SUGARLAND_LAYERS.sl_water_lines, { vintage: SUGARLAND_VINTAGE.sl_water_lines });
+    expect(sec.map((x) => (x.link ? "link" : /^Source:/.test(x.text) ? "source" : /^As of:/.test(x.text) ? "asof" : "other")).filter((k) => k !== "other")).toEqual(["source", "asof", "link"]);
+    expect(sec.at(-1).link.href).toBe(UTILITY_MAP_REQUEST_URL);
+    expect(sec.some((x) => x.text === UTILITY_CAVEAT_TEXT)).toBe(true);
+  });
+  it("a merged row's (i) shows the link ONCE, not once per member", () => {
+    const members = ["sl_sewer_gravity", "sl_sewer_laterals", "sl_sewer_force"].map((id) => [id, SUGARLAND_LAYERS[id]]);
+    const sec = mergeGroupInfoSections(members, { groupNote: SUGARLAND_MERGE_GROUPS.sl_sewer_lines.note });
+    expect(sec.filter((x) => x.link)).toHaveLength(1);
+    expect(sec.filter((x) => x.text === UTILITY_CAVEAT_TEXT)).toHaveLength(1);
+  });
+  it("the panel renders NO group-level note: no GroupNote component, no layer-group-note, no Sugar Land note function", () => {
+    const panel = readFileSync("src/workspaces/site-planner/components/LayerPanel.jsx", "utf8");
+    expect(panel).not.toMatch(/GroupNote|layer-group-note|sugarLandGroupNote/);
+    expect(panel).toMatch(/layer-info-link/); // the (i) can carry a link
+    const layers = readFileSync("src/workspaces/site-planner/lib/sugarLandLayers.js", "utf8");
+    expect(layers).not.toMatch(/SUGARLAND_UTILITY_NOTE|sugarLandGroupNote/);
   });
 });

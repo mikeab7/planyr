@@ -57,10 +57,9 @@ import { PinIcon } from "./icons.jsx";
 import {
   PANEL_GROUPS, groupEntriesFor, availableEntries, dropdownPlan, rowSwatch, rampGradient, legendFor,
   CONTOUR_INTERVALS, contourIntervalLabel, contourRowValue, CORRIDOR_WIDTH_CHOICES, corridorWidthOptions,
-  opacityFromPercent, percentOf, OPACITY_MIN, OPACITY_MAX, pickGroup, inRegion,
+  opacityFromPercent, percentOf, OPACITY_MIN, OPACITY_MAX, pickGroup,
 } from "../lib/layerPanelModel.js";
 import { useServiceAreas } from "../lib/useServiceAreas.js";
-import { sugarLandGroupNote } from "../lib/sugarLandLayers.js"; // NEW-1: the Utilities honesty line on a Sugar Land site
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 import { useViewLegends } from "../lib/viewLegendStore.js";
@@ -177,7 +176,7 @@ function RampBar({ gradient }) {
 function InfoReveal({ label, sections }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  const rows = (sections || []).filter((s) => s && s.text != null && String(s.text).trim() !== "");
+  const rows = (sections || []).filter((s) => s && ((s.text != null && String(s.text).trim() !== "") || (s.link && s.link.href)));
   if (!rows.length) return null;
   return (
     <div data-part="info">
@@ -189,7 +188,9 @@ function InfoReveal({ label, sections }) {
       {open && (
         <div id={id} role="note" data-testid="layer-info-text" style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4, lineHeight: 1.42 }}>
           {rows.map((s, i) => (
-            <div key={i} style={{ color: s.tone === "warn" ? "var(--warn-text)" : MUTED, fontStyle: s.tone === "warn" ? "italic" : "normal" }}>{s.text}</div>
+            s.link && s.link.href
+              ? <div key={i} style={{ color: MUTED }}><a href={s.link.href} target="_blank" rel="noopener noreferrer" data-testid="layer-info-link" style={{ color: "inherit", fontWeight: 600 }}>{s.link.text}</a></div>
+              : <div key={i} style={{ color: s.tone === "warn" ? "var(--warn-text)" : MUTED, fontStyle: s.tone === "warn" ? "italic" : "normal" }}>{s.text}</div>
           ))}
         </div>
       )}
@@ -312,16 +313,6 @@ function SimpleCheckRow({ id, label, checked, onChange, testId }) {
 }
 
 /* A short note at the head of a panel group's rows (NEW-1, Sugar Land): why a kind of data is absent here, and the route to get it. Muted body text, one link. */
-function GroupNote({ note }) {
-  if (!note) return null;
-  return (
-    <div data-testid="layer-group-note" style={{ color: MUTED, lineHeight: 1.4, margin: "0 0 6px" }}>
-      {note.text}{" "}
-      <a href={note.href} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", fontWeight: 600 }}>{note.linkText}</a>.
-    </div>
-  );
-}
-
 function SectionHeading({ children, title }) {
   return <div title={title} style={{ fontWeight: 700, color: MUTED, margin: "8px 0 4px" }}>{children}</div>;
 }
@@ -730,7 +721,7 @@ export default function LayerPanel({
   const bodyFor = (key) => {
     if (key === "base") return baseBody;
     if (key === "flood") return floodBody;
-    return <>{key === "util" && <GroupNote note={sugarLandGroupNote("util", inRegion("sugarland", siteLocation) === true && (scope.state == null || scope.state === "TX"))} />}{groupRows(entriesFor(key))}{key === "topo" && gradingBody}</>;
+    return <>{groupRows(entriesFor(key))}{key === "topo" && gradingBody}</>;
   };
 
   /* ── header actions ── */
