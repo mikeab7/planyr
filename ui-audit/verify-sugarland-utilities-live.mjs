@@ -4,13 +4,15 @@
  *
  * It proves, against the DEPLOYED build (read from /version.json in the same call as the assertions):
  *   A. A throwaway LOCATED plan at the Harmon lift station (29.62955, −95.63495 — inside the city, a dense part of the network) lists the five new Utilities rows WITH the date tag
- *      ("Water Lines · as of 2017", "Sewer Lines · as of 2017", "Water Valves · …", "Manholes & Cleanouts · …", "Plants & Lift Stations · …"), the Utilities note says the data is dated through
+ *      ("Water Lines · as of 2017", "Sewer Lines · as of 2017", "Water Valves · …", "Manholes · …", "Utility Plants · …"), the Utilities note says the data is dated through
  *      Jan 2017 and still links the city's Utility Map Request form, and NOTHING is requested from CDM Smith's service before a row is on.
  *   B. With the rows on, the service ANSWERS (water layer 17, gravity 20, force 18, valves 2, manholes 13, lift stations 23, …), the layers PAINT what they were sent
  *      (window.__plannerLayers().features — a `fields` list that omits the service's own object-id field collapses a layer to ONE feature, which no unit test can see), a click card
  *      opens at a point ON a known feature with real values AND the data date + the layer's own edit date + the source, the row's (i) carries the same, and the opacity starts at 100%.
  *   C. A second plan at a production well: the plants / wells row paints and its card opens.
  *   D. NOTHING LEAKS — a throwaway plan in Houston (known-good arm: it lists Texas rows) offers none of the new rows and issues ZERO requests to CDM Smith's service.
+ *   E. THE OWNER'S VIEW (2026-11-06 follow-up): a throwaway plan with Map Base on and Zoning on, zoomed OUT to a whole-site view (~8 km across, between zoom 14.2 and 15) — the Water and Sewer rows are NOT dormant,
+ *      the lines are requested, ANSWERED and PAINTED (thousands of them), and a click card opens at a point on a known pipe. (This section is red on build ae04c79, whose gates were 15 / 16.)
  * FOREGROUND-OR-VOID first. Throwaway plans are deleted at the end and the deletion re-read (owner rule 15). `--local` is the signed-out PR-preview variant (plans seeded into the
  * browser's own store, nothing touches the cloud). */
 import { mkdirSync } from "node:fs";
@@ -30,9 +32,10 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${
 const HOSTS = /VVapzOPgBae5joyC/;
 const HARMON = { lat: 29.62955, lng: -95.63495 };
 const WELL = { lat: 29.62782, lng: -95.61653 };
+const WIDE = { lat: 29.595, lng: -95.62 };   // the middle of the owner's visible area (-95.66..-95.58, 29.56..29.63): residential Sugar Land east of the airport
 const HOUSTON = { lat: 29.80, lng: -95.54 };
 const NEW_ROWS = ["sl_water_lines", "sl_sewer_lines", "sl_valves", "sl_sewer_structures", "sl_plants"];
-const TAGGED = { sl_water_lines: "Water Lines · as of 2017", sl_sewer_lines: "Sewer Lines · as of 2017", sl_valves: "Water Valves · as of 2017", sl_sewer_structures: "Manholes & Cleanouts · as of 2017", sl_plants: "Plants & Lift Stations · as of 2017" };
+const TAGGED = { sl_water_lines: "Water Lines · as of 2017", sl_sewer_lines: "Sewer Lines · as of 2017", sl_valves: "Water Valves · as of 2017", sl_sewer_structures: "Manholes · as of 2017", sl_plants: "Utility Plants · as of 2017" };
 
 const LOCAL = args.includes("--local");
 const TAG = Math.random().toString(36).slice(2, 7);
@@ -49,7 +52,7 @@ if (LOCAL) {
   browser = await chromium.launch({ args: ["--no-sandbox"], executablePath: process.env.PW_CHROME || undefined });
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
   page = await ctx.newPage();
-  LOCAL_PLANS.harmon = localPlan("harmon", HARMON, "Harmon lift station"); LOCAL_PLANS.well = localPlan("well", WELL, "Production well"); LOCAL_PLANS.hou = localPlan("hou", HOUSTON, "Houston");
+  LOCAL_PLANS.harmon = localPlan("harmon", HARMON, "Harmon lift station"); LOCAL_PLANS.wide = localPlan("wide", WIDE, "Whole-site view"); LOCAL_PLANS.well = localPlan("well", WELL, "Production well"); LOCAL_PLANS.hou = localPlan("hou", HOUSTON, "Houston");
   await page.addInitScript((j) => { try { localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify(Object.fromEntries(Object.values(LOCAL_PLANS).map((pl) => [pl.id, pl]))));
   s = { proof: { email: "(signed out — local plans)" }, close: () => browser.close() };
 } else {
@@ -136,8 +139,8 @@ const AT = {
 };
 
 try {
-  const harmon = mk("harmon", HARMON, "Harmon lift station"), well = mk("well", WELL, "Production well"), hou = mk("hou", HOUSTON, "Houston");
-  await insert(harmon); await insert(well); await insert(hou);
+  const wide = mk("wide", WIDE, "Whole-site view"), harmon = mk("harmon", HARMON, "Harmon lift station"), well = mk("well", WELL, "Production well"), hou = mk("hou", HOUSTON, "Houston");
+  await insert(wide); await insert(harmon); await insert(well); await insert(hou);
 
   /* ── A. Harmon: the rows are listed, dated, and quiet until switched on ─────────────────────── */
   log = [];
@@ -149,12 +152,26 @@ try {
     const label = await panel.locator(`[data-testid="layer-row-${id}"]`).first().innerText().catch(() => "");
     check(`A · and the row label carries the date: "${TAGGED[id]}"`, label.includes(TAGGED[id]), label.replace(/\n/g, " ").slice(0, 80));
   }
+  /* the text above reads the row's full string even when CSS clips it with an ellipsis (seen 2026-11-06: "Manholes & Cleanouts · as…"), so the tag is also checked GEOMETRICALLY: no element from the label up to the row may be wider than its box */
+  for (const id of NEW_ROWS) {
+    const clipped = await panel.locator(`[data-testid="layer-row-${id}"]`).first().evaluate((row) => {
+      const hit = [...row.querySelectorAll("*")].find((e) => e.children.length === 0 && /· as of 2017/.test(e.textContent || ""));
+      if (!hit) return "no element carries the tag";
+      for (let e = hit; e && e !== row.parentElement; e = e.parentElement) if (e.scrollWidth > e.clientWidth + 1) return `${e.tagName} is ${e.scrollWidth}px of ${e.clientWidth}px`;
+      return null;
+    }).catch((e) => String(e));
+    check(`A · ${id}: the date tag is fully visible (not clipped by the row)`, clipped === null, String(clipped));
+  }
   check("A · the existing Fire Hydrants row is still there", util.includes("fire_hydrants"));
-  const note = await page.getByTestId("layer-group-note").first().innerText().catch(() => "");
-  check("A · the Utilities note says the data is dated through Jan 2017", /dated through Jan 2017/.test(note), note.replace(/\n/g, " "));
-  check("A · and no longer says the city publishes none", !/does not publish/.test(note));
-  const href = await page.getByTestId("layer-group-note").locator("a").first().getAttribute("href").catch(() => null);
-  check("A · and still links the city's Utility Map Request form", href === "https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862", String(href));
+  /* NO paragraph in the panel (owner rule 2026-11-06): the source / date note and the request link are behind each row's (i) */
+  check("A · the Utilities group carries NO persistent paragraph (no layer-group-note, no 'dated through' text outside an (i))", (await page.getByTestId("layer-group-note").count()) === 0 && !/dated through Jan 2017/.test(await panel.locator("[data-testid^='layer-row-']").first().evaluate((r) => r.parentElement.parentElement.innerText).catch(() => "")), "");
+  {
+    await panel.getByTestId("layer-caret-sl_water_lines").click(); await sleep(400);
+    await panel.locator('[data-testid="layer-row-sl_water_lines-menu"] [data-part="info"] button').first().click(); await sleep(300);
+    const href = await panel.locator('[data-testid="layer-row-sl_water_lines-menu"] [data-testid="layer-info-link"]').first().getAttribute("href").catch(() => null);
+    check("A · the Utility Map Request form is linked INSIDE the row's (i)", href === "https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862", String(href));
+    await panel.getByTestId("layer-caret-sl_water_lines").click().catch(() => {}); await sleep(200);
+  }
   check("A · nothing is requested from CDM Smith's service before a row is switched on", sent().length === 0, `${sent().length} sent`);
 
   /* ── B. Harmon: rows on — answers, paint, cards, (i) ────────────────────────────────────────── */
@@ -227,6 +244,39 @@ try {
   console.log("card well:", JSON.stringify(wc));
   check("C · the well card opens with the date row", !!(wc && wc.title) && rowText(wc, "Data as of") === "Jan 2017 · layer last edited Nov 10, 2021", JSON.stringify(wc && wc.rows));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/C-well.png` });
+
+  /* ── E. The owner's view: Map Base on, Zoning on, a whole-site view (~8 km across) ─────────────────── */
+  log = [];
+  panel = await openPanel(wide.id);
+  await panel.getByTestId("layer-group-jur").click(); await sleep(250);
+  const zcb = panel.locator('[data-testid="layer-row-sl_zoning"] input[type="checkbox"]').first(); if (!(await zcb.isChecked())) await zcb.check();
+  const ppfNow = () => page.evaluate(() => Number(document.querySelector("[data-view-ppf]").getAttribute("data-view-ppf")));
+  const cbox = await page.getByTestId("planner-canvas").boundingBox();
+  await page.mouse.move(cbox.x + cbox.width / 2, cbox.y + cbox.height / 2);
+  for (let i = 0; i < 80 && (await ppfNow()) > 0.06; i++) { await page.mouse.wheel(0, 120); await sleep(300); }
+  const ppfE = await ppfNow();
+  console.log(`E · view ppf ${ppfE.toFixed(4)} (zoom 15 = 0.064; the owner's view ≈ 0.052)`);
+  check("E · PRECONDITION: the view is a whole-site view (between zoom ~14.2 and 15), not a close-up", ppfE <= 0.064 && ppfE >= 0.04, String(ppfE));
+  await turnOn(panel, "util", "sl_water_lines"); await turnOn(panel, "util", "sl_sewer_lines");
+  let LE = null;
+  for (let i = 0; i < 90; i++) { await sleep(1000); LE = await layers(); const f = (LE && LE.features) || {}; if ((f.sl_water_lines || 0) > 500 && (f.sl_sewer_gravity || 0) > 200) break; }
+  const FE = (LE && LE.features) || {};
+  console.log("E · painted:", JSON.stringify(Object.fromEntries(Object.entries(FE).filter(([k]) => /^sl_(water_lines|sewer_|zoning)/.test(k)))));
+  check("E · the Water Lines row is not dormant at this zoom", (await panel.locator('[data-testid="layer-row-sl_water_lines"]').first().getAttribute("data-layer-state")) !== "dormant-zoom", String(await panel.locator('[data-testid="layer-row-sl_water_lines"]').first().getAttribute("data-layer-state")));
+  check("E · the Sewer Lines row is not dormant at this zoom", (await panel.locator('[data-testid="layer-row-sl_sewer_lines"]').first().getAttribute("data-layer-state")) !== "dormant-zoom", String(await panel.locator('[data-testid="layer-row-sl_sewer_lines"]').first().getAttribute("data-layer-state")));
+  check("E · water mains were QUERIED and answered with features (not just the layer's metadata)", ans(/FeatureServer\/17\/query/) > 500, String(ans(/FeatureServer\/17\/query/)));
+  check("E · gravity sewer mains were queried and answered with features", ans(/FeatureServer\/20\/query/) > 200, String(ans(/FeatureServer\/20\/query/)));
+  check("E · water mains PAINT across the view (> 500 lines)", (FE.sl_water_lines || 0) > 500, String(FE.sl_water_lines));
+  check("E · gravity sewer mains PAINT across the view (> 200 lines)", (FE.sl_sewer_gravity || 0) > 200, String(FE.sl_sewer_gravity));
+  if (!LOCAL) check("E · Zoning (the other layer on) painted too", (FE.sl_zoning || 0) >= 1, String(FE.sl_zoning)); // the city's server is reached through /gis-proxy (a Cloudflare Function), which a local server does not run
+  check("E · no request to CDM Smith's service failed", log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400).length === 0, "");
+  const wideAt = { sl_water_lines: { lat: 29.595335, lng: -95.620256 }, sl_sewer_gravity: { lat: 29.595108, lng: -95.620562 } };
+  for (const id of Object.keys(wideAt)) {
+    const c = await identify(id, wideAt[id]);
+    console.log(`E · card ${id}:`, JSON.stringify(c && { title: c.title, rows: c.rows.map((r) => `${r.label}: ${r.text}`) }));
+    check(`E · ${id}: a click card opens on a pipe at the whole-site view, with the data date`, !!(c && c.title) && /^Jan 2017 · layer last edited/.test(rowText(c, "Data as of") || ""), c ? c.title : "no card");
+  }
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/E-whole-site.png` });
 
   /* ── D. Houston offers none of it ───────────────────────────────────────────────────────────── */
   log = [];

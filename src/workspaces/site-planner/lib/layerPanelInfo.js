@@ -24,6 +24,7 @@ export function rowInfoSections(cfg = {}, { vintage, age, ls } = {}) {
   out.push({ text: `As of: ${vintage || "vintage unknown"}${refreshed}`, tone: ls && ls.stale ? "warn" : undefined });
   if (cfg.note) out.push({ text: cfg.note });
   if (cfg.infoCaveat) out.push({ text: cfg.infoCaveat, tone: "warn" });
+  if (cfg.infoLink && cfg.infoLink.href) out.push({ link: { text: cfg.infoLink.text, href: cfg.infoLink.href } }); // NEW-1 (Sugar Land utilities): a route to the real thing, behind the (i) — never a paragraph above the rows
   return out;
 }
 
@@ -108,5 +109,8 @@ export function mergeGroupInfoSections(members, { groupNote } = {}) {
   }
   const caveats = [...new Set((members || []).map(([, cfg]) => cfg?.infoCaveat).filter(Boolean))];
   caveats.forEach((text) => out.push({ text, tone: "warn" }));
+  const links = new Map();
+  for (const [, cfg] of members || []) if (cfg?.infoLink?.href && !links.has(cfg.infoLink.href)) links.set(cfg.infoLink.href, cfg.infoLink);
+  links.forEach((l) => out.push({ link: { text: l.text, href: l.href } }));
   return out;
 }

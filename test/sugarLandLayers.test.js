@@ -26,7 +26,7 @@ import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/li
 import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import {
-  SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, SUGARLAND_UTILITY_NOTE, UTILITY_MAP_REQUEST_URL, sugarLandGroupNote, relayed, SUGARLAND_RELAY, soft, money, cityHref,
+  SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, UTILITY_MAP_REQUEST_URL, relayed, SUGARLAND_RELAY, soft, money, cityHref,
   airportCard, airportStyle, AIRPORT_AREAS, AIRPORT_CODE_URL, fluCard, fluLegend, hydrantCard, cupCard, exceptionCard, varianceCard, cipCard, CIP_WHERE, rowLandCard, tirzCard, availableSiteCard, devProjectCard,
 } from "../src/workspaces/site-planner/lib/sugarLandLayers.js";
 import { THOROUGHFARE_WHERE } from "../src/workspaces/site-planner/lib/sugarLandThoroughfare.js";
@@ -335,17 +335,10 @@ describe("the other click cards read real values and drop the empty ones", () =>
   });
 });
 
-describe("the Utilities group says what the water and sewer data is, and keeps the route to current maps", () => {
-  it("appears for the Utilities group inside Sugar Land only", () => {
-    expect(sugarLandGroupNote("util", true)).toBe(SUGARLAND_UTILITY_NOTE);
-    expect(sugarLandGroupNote("util", false)).toBeNull();
-    expect(sugarLandGroupNote("util", null)).toBeNull();
-    expect(sugarLandGroupNote("flood", true)).toBeNull();
-    expect(SUGARLAND_UTILITY_NOTE.text).toMatch(/dated through Jan 2017/);
-    expect(SUGARLAND_UTILITY_NOTE.text).not.toMatch(/does not publish/);
-    expect(SUGARLAND_UTILITY_NOTE.linkText).toBe("Request current utility maps from the city");
-    expect(SUGARLAND_UTILITY_NOTE.href).toBe(UTILITY_MAP_REQUEST_URL);
-    expect(UTILITY_MAP_REQUEST_URL).toBe("https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862");
+describe("the Utilities group carries NO paragraph — the note and the request link are behind each row's (i)", () => {
+  it("there is no group note function or object any more", () => {
+        expect(UTILITY_MAP_REQUEST_URL).toBe("https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862");
+    expect(ALL_LAYERS.sl_water_lines.infoLink.href).toBe(UTILITY_MAP_REQUEST_URL);
   });
   it("the hydrant row no longer claims the city publishes no water lines", () => {
     expect(ALL_LAYERS.sl_hydrants.infoCaveat).not.toMatch(/does not publish/);

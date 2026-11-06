@@ -29,7 +29,7 @@ export const UTILITY_PUBLISHER = "CDM Smith for the City of Sugar Land";
 /* The newest install date found in the network (2017-01-27), as a month. */
 export const UTILITY_DATA_AS_OF = "Jan 2017";
 /* The tag on every row label. */
-export const UTILITY_TAG = "as of 2017";
+export const UTILITY_TAG = "as of 2017"; // the owner asked for this wording (2026-11-06 follow-up) — the NAMES are kept short enough that it is never clipped at the panel's default width (a geometric check in verify-sugarland-utilities-live)
 /* Each layer's own editingInfo.lastEditDate (read 2026-11-06). */
 export const UTILITY_LAYER_EDITED = Object.freeze({ water: "Nov 20, 2025", gravity: "Dec 23, 2025", other: "Nov 10, 2021" });
 
@@ -243,9 +243,6 @@ export const WATER_WHERE = "(LifecycleS IS NULL OR LifecycleS <> 'Removed')";
 /* Not Removed, not Proposed (never built), and not the 11 mains the city typed as WaterType Storm in its sewer layer. */
 export const GRAVITY_WHERE = "(LifecycleS IS NULL OR LifecycleS NOT IN ('Removed','Proposed')) AND (WaterType IS NULL OR WaterType <> 'Storm')";
 export const FORCE_WHERE = "(LifecycleS IS NULL OR LifecycleS <> 'Removed')";
-
-/* ───────────────────────── the Utilities group note (owner: tell people what the data is, keep the route to current maps) ───────────────────────── */
-export const UTILITY_NOTE_TEXT = `Sugar Land's water and sewer lines are the city's consultant's network, dated through ${UTILITY_DATA_AS_OF} — mains built since are not on it.`;
 
 /* The one caution every water / sewer row carries (deduped into a single line on a merged row's (i)). */
 export const UTILITY_CAVEAT_TEXT = `Network dated through ${UTILITY_DATA_AS_OF} — mains, valves and manholes built since are not shown. These are the consultant's GIS locations, not a survey or an as-built: confirm size, material and depth with the city's as-builts (Utility Map Request) and an 811 locate before design or digging.`;
