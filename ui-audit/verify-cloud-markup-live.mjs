@@ -118,12 +118,14 @@ try {
   check("a click on empty ground lets go: no dots, nothing selected", st.handles === 0 && !st.selected, `dots=${st.handles} selected=${st.selected}`);
 
   await page.waitForTimeout(3000); // let the cloud save land
+  // a signed-in plan's markups live in the site_elements ROWS (kind 'markup'), not in the plan blob — read them there
   const stored = await page.evaluate(async (id) => {
-    const q = await window.pfSupabase.from("sites").select("data").eq("id", id).single();
-    const mk = ((q.data && q.data.data && q.data.data.markups) || []).filter((m) => m.kind === "cloud");
-    return { n: mk.length, arcFt: mk[0] && mk[0].arcFt, pts: mk[0] && (mk[0].pts || []).length };
+    const q = await window.pfSupabase.from("site_elements").select("id,data,rev,deleted_at").eq("site_id", id).eq("kind", "markup").is("deleted_at", null);
+    const mk = ((q.data) || []).filter((r) => r.data && r.data.kind === "cloud");
+    return { n: mk.length, arcFt: mk[0] && mk[0].data.arcFt, pts: mk[0] && (mk[0].data.pts || []).length, rev: mk[0] && mk[0].rev, err: q.error ? String(q.error.message) : null };
   }, ID);
   check("the cloud row reached the cloud with a stored arc size", stored.n === 1 && stored.arcFt > 0, JSON.stringify(stored));
+  check("no stray edit after drawing: the row is still at its first revision (select / deselect / a plain press on a dot wrote nothing)", stored.rev === 1, `rev ${stored.rev}`);
 
   await page.reload({ waitUntil: "load" });
   await canvas.waitFor({ timeout: 45000 });
