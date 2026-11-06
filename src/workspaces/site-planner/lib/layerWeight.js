@@ -150,6 +150,9 @@ export const LAYER_TIER = {
   sl_zoning: "reference",
   sl_public_land: "reference",
   sl_hydrants: "reference",
+  sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network
+  sl_water_valves: "reference", sl_water_control_valves: "reference", sl_manholes: "reference", sl_cleanouts: "reference",
+  sl_lift_stations: "reference", sl_wwtp: "reference", sl_water_plants: "reference", sl_water_wells: "reference",
   sl_flu: "context",
   sl_zoning_cup: "context",
   sl_zoning_exception: "context",
