@@ -1,0 +1,297 @@
+{
+ "_about": "The Notes clipboard regression bank (see ui-audit/lib/pasteBank.mjs). `outlines` = the clipboard-lists fixtures and the outline each must become (moved here from verify-notes-list-paste.mjs's WANT table — that harness keeps its own copy); `entries` = the cases added with the bank; the clipboard-tables fixtures take their expectation from that directory's manifest.json. A fixture committed to any of the three directories without an entry fails test/notesPasteBank.test.js.",
+ "outlines": {
+  "word-outline-table": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "      • Fees step down as the building gets larger",
+   "  • Permits and impact fees",
+   "    • Impact fees are charged per lot",
+   "• Hard costs"
+  ],
+  "word-outline-tab-rows": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "  • Permits and impact fees"
+  ],
+  "word-outline-table-outside": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "[table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "Closing paragraph after the table."
+  ],
+  "word-numbered-outline": [
+   "1. Entitlements",
+   "  1. Zoning",
+   "    1. Confirm the district",
+   "    2. Check the overlay",
+   "  2. Platting",
+   "2. Construction"
+  ],
+  "onenote-outline-table-in-li": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "      • Fees step down as the building gets larger",
+   "  • Permits and impact fees",
+   "• Hard costs"
+  ],
+  "onenote-outline-table-after-ul": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "[table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]"
+  ],
+  "onenote-hanging-markers": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size",
+   "      • Fees step down"
+  ]
+ },
+ "entries": {
+  "spike-bgcolor-attr": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 1 — a fill written as the legacy bgcolor attribute. DECIDED BEHAVIOUR (notesTableFill.js / notesPasteModes.js): a plain paste imports NO foreign cell shading; 'Values and Source Formatting' (E) applies it. So the default paste is judged no-fill and the option is judged to bring the bgcolor fills in.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 2,
+      "text": [
+       [
+        "Yellow fill",
+        "No fill"
+       ],
+       [
+        "Below",
+        "Green fill"
+       ]
+      ],
+      "noFillAll": true,
+      "optionFills": {
+       "mode": "valuesFormat",
+       "fills": [
+        {
+         "r": 0,
+         "c": 0,
+         "color": "#ffff00"
+        },
+        {
+         "r": 1,
+         "c": 1,
+         "color": "#00b050"
+        }
+       ],
+       "noFill": [
+        {
+         "r": 0,
+         "c": 1
+        },
+        {
+         "r": 1,
+         "c": 0
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "spike-font-color": {
+   "kind": "runs",
+   "spike": true,
+   "about": "Spike loss 2 — <font color> / <font face> (the HTML 3.2 spelling Office still emits) lost the colour and the typeface.",
+   "expect": {
+    "noTables": true,
+    "plainText": "Red words and blue Arial words and plain.",
+    "runs": [
+     {
+      "text": "Red words",
+      "color": "#c00000"
+     },
+     {
+      "text": "blue Arial words",
+      "color": "#0070c0",
+      "fontFamily": "Arial"
+     }
+    ]
+   }
+  },
+  "spike-excel-nbsp-cell": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 3a — Excel's &nbsp; cell (and its truly empty <td></td>) arrived as a cell holding a space; an empty cell must be EMPTY.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 3,
+      "text": [
+       [
+        "Left",
+        "",
+        "Right"
+       ],
+       [
+        "Under",
+        "",
+        "Also"
+       ]
+      ],
+      "empty": [
+       {
+        "r": 0,
+        "c": 1
+       },
+       {
+        "r": 1,
+        "c": 1
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "spike-word-o-p-cell": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 3b — Word's <p><o:p>&nbsp;</o:p></p> cell arrived as a space, and Word's trailing spacer paragraph must not become content.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 2,
+      "text": [
+       [
+        "Parcel",
+        "Owner"
+       ],
+       [
+        "A-1",
+        ""
+       ]
+      ],
+      "empty": [
+       {
+        "r": 1,
+        "c": 1
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "spike-word-bullets": {
+   "kind": "outline",
+   "spike": true,
+   "about": "Spike loss 4 — Word bullets (mso-list, Symbol glyph) arrived as '·' paragraphs; a bulleted list and a numbered list in one clipboard must become two real lists with a paragraph between.",
+   "expect": {
+    "outline": [
+     "• First bullet",
+     "• Second bullet",
+     "Between the lists",
+     "1. Step one",
+     "2. Step two"
+    ]
+   }
+  },
+  "excel-mixed-cells": {
+   "kind": "table",
+   "about": "An Excel range with a merged header, a filled cell, an empty cell, a bold cell and a red-text cell — formats written as CLASSES in the head <style>, which is how Excel really writes a whole-cell format. Default paste: marks arrive, shading does not (decided); 'Values and Source Formatting' brings the shading.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 3,
+      "cols": 3,
+      "text": [
+       [
+        "Header AB",
+        "Header C"
+       ],
+       [
+        "Filled",
+        "",
+        "Red text"
+       ],
+       [
+        "Bold cell",
+        "Plain",
+        "12,500"
+       ]
+      ],
+      "merges": [
+       {
+        "r": 0,
+        "c": 0,
+        "colspan": 2
+       }
+      ],
+      "empty": [
+       {
+        "r": 1,
+        "c": 1
+       }
+      ],
+      "cellMarks": [
+       {
+        "r": 0,
+        "c": 0,
+        "mark": "bold"
+       },
+       {
+        "r": 2,
+        "c": 0,
+        "mark": "bold"
+       }
+      ],
+      "cellColors": [
+       {
+        "r": 1,
+        "c": 2,
+        "color": "#c00000"
+       }
+      ],
+      "noFillAll": true,
+      "optionFills": {
+       "mode": "valuesFormat",
+       "fills": [
+        {
+         "r": 0,
+         "c": 0,
+         "color": "#dbe5f1"
+        },
+        {
+         "r": 1,
+         "c": 0,
+         "color": "#ffff00"
+        }
+       ],
+       "noFill": [
+        {
+         "r": 2,
+         "c": 0
+        },
+        {
+         "r": 2,
+         "c": 1
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ }
+}

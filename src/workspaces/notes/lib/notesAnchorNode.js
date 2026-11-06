@@ -161,9 +161,6 @@ export function fitAnchorBox({ x, w, hostWidth, pad = ANCHOR_EDGE_PAD, minWidth 
   return { x: Math.round(left), w: Math.round(Math.max(minWidth, Math.min(want, room))) };
 }
 
-/** The width alone, for callers that only need that. */
-export const fitAnchorWidth = (args) => fitAnchorBox(args).w;
-
 /** ⛔ IS THE SELECTION INSIDE A BOX? A table (or anything else with its own editing surface)
  *  inserted from a toolbar button or menu — as opposed to typed, which always goes through an
  *  armed/committed box first — lands wherever `state.selection` currently resolves, and that

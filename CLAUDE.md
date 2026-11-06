@@ -104,10 +104,11 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > carry-forward filed anywhere a session does not automatically read is the same mistake.
 > **When a new instrument trap or bug family turns up, it goes in that file in the SAME commit** —
 > never left in a session.
-> **Replacing the Notes box editor with BlockNote (owner decision 2026-10-30, B2562064)? READ
-> `docs/notes-editor.md` FIRST** — the decision record, the licence rule (core/react/mantine only,
-> **never `@blocknote/xl-*`, GPL**), the measured spike (React 18 needs Mantine pinned to 8; tiptap
-> 3.29 vs 3.32; native-paste gaps; bundle cost) and the staged plan. Not yet shipped — Stage 0 only.
+> **Touching the Notes editor ENGINE, its Tiptap version, or the paste pipeline (owner decision 2026-11-05, B2671191 — the BlockNote
+> swap is REJECTED, Notes stays on Tiptap)? READ `docs/notes-editor.md` FIRST** — the closing decision, the free-OSS-only rule (no Tiptap
+> Pro/Cloud), how to upgrade the `@tiptap/*` set (one exact version, 3.33.0), the audit of every Planyr-owned editor piece vs upstream,
+> and the **clipboard regression bank** (`ui-audit/verify-notes-paste-bank.mjs`, a required build step): a paste bug becomes a fixture
+> in `test/fixtures/clipboard-bank/` first, red, then a fix.
 >
 > **🔢 MINTING (history, so a stale memory does not resurrect it).** Ids used to be minted from `max+1` of two big files, then from
 > per-branch reserved blocks with a peer scan and a push-time gate, because several PRs minting in their own ledger edits collided

@@ -26,8 +26,6 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 
-export const TOGGLE_TITLE_PLACEHOLDER = "Toggle";
-
 /** The visible line. Its own node type so the schema — not a convention — guarantees a
  *  toggle always has exactly one summary, in first position. */
 export const NoteToggleTitle = Node.create({
