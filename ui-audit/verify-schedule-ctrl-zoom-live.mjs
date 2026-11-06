@@ -27,27 +27,37 @@ const ok = (m) => line("  ✓ " + m);
 const logs = [];
 page.on("pageerror", (e) => logs.push(String(e.message).slice(0, 200)));
 
-await page.goto(base + "/#/schedule", { waitUntil: "domcontentloaded" });
-const frameReady = async () => {
-  for (let i = 0; i < 40; i++) {
-    const f = page.frames().find((x) => x.url().includes("/sequence/"));
-    if (f) {
-      const has = await f.evaluate(() => !!document.querySelector("[data-gantt-scroll]")).catch(() => false);
-      const vis = await page.evaluate(() => { const i = document.querySelector('iframe[title="Sequence Planyr"]'); return !!i && getComputedStyle(i).visibility !== "hidden"; }).catch(() => false);
-      if (has && vis) return f;
-    }
-    await pacedWait(page, 500);
-  }
-  return null;
-};
-let frame = await frameReady();
+const NAME = "zz ctrl-zoom check (auto-deleted)";
+const bodyText = async () => (await page.locator("body").innerText()).replace(/\n/g, " | ");
+await page.goto(base + "/#/project/e2e-fixture-site/schedule", { waitUntil: "domcontentloaded" });
+await pacedWait(page, 8000);
+// The test account has no schedule of its own, and the shell HIDES the Schedule frame while there is none. Create one
+// (Organization-level, named so it is obviously a test artifact) and delete it again in `cleanup` — owner rule 2026-10-05.
+const openCrumb = async () => { await page.locator(`text=/Select a schedule|${NAME.slice(0, 12)}/`).first().click(); await pacedWait(page, 700); };
 let created = false;
-if (!frame) {
-  line("  · no visible Gantt on the account's Schedule — looking for the shell's own create control");
-  const btn = page.getByRole("button", { name: /create (a )?(new )?schedule|new schedule/i }).first();
-  if (await btn.count()) { await btn.click(); created = true; await pacedWait(page, 1500); frame = await frameReady(); }
+async function cleanup() {
+  if (!created) return;
+  try {
+    await openCrumb();
+    await page.getByRole("button", { name: new RegExp("More actions for .*" + NAME.slice(0, 12)) }).first().click(); await pacedWait(page, 500);
+    await page.getByText("Delete", { exact: true }).first().click(); await pacedWait(page, 500);
+    await page.getByRole("button", { name: "Delete", exact: true }).last().click(); await pacedWait(page, 2500);
+    await openCrumb();
+    const left = (await bodyText()).includes(NAME);
+    left ? line(`  ✗ the throwaway schedule "${NAME}" is STILL listed — delete it by hand`) : line("  ✓ the throwaway schedule was deleted and is gone from the list (delete verified)");
+    if (left) failures.push("cleanup: throwaway schedule not deleted");
+  } catch (e) { line(`  ✗ cleanup could not complete (${String(e.message).split("\n")[0]}) — delete "${NAME}" by hand`); failures.push("cleanup failed"); }
 }
-if (!frame) { line("VOID — there is no Schedule frame with a Gantt on this account to hover. Body: " + (await page.locator("body").innerText()).slice(0, 200).replace(/\n/g, " | ")); await s.close(); process.exit(2); }
+if (!(await bodyText()).includes(NAME)) {
+  await openCrumb();
+  await page.getByText("New schedule", { exact: true }).first().click(); await pacedWait(page, 1200);
+  await page.getByPlaceholder("Master Schedule").fill(NAME);
+  await page.getByRole("button", { name: "Create schedule" }).click(); created = true; await pacedWait(page, 6000);
+} else { created = true; }
+await page.getByRole("button", { name: "Gantt", exact: true }).click(); await pacedWait(page, 2500);
+let frame = page.frames().find((x) => x.url().includes("/sequence/"));
+const hasGantt = frame ? await frame.evaluate(() => !!document.querySelector("[data-gantt-scroll]")).catch(() => false) : false;
+if (!hasGantt) { line("VOID — no Gantt in the Schedule frame. Body: " + (await bodyText()).slice(0, 200)); await cleanup(); await s.close(); process.exit(2); }
 
 // the frame's own build, so the reading is about THIS bundle
 const chunk = await frame.evaluate(() => [...document.querySelectorAll("script[src]")].map((x) => x.src).slice(0, 3).join(" "));
@@ -59,9 +69,7 @@ await frame.evaluate(() => {
 const width = () => frame.evaluate(() => document.querySelector("[data-gantt-scroll]")?.scrollWidth ?? null);
 
 // Park focus in the SHELL: click the shell's own header (outside the iframe) — then verify where focus really is.
-const hdr = page.locator('header, [role="banner"], nav').first();
-await hdr.click({ position: { x: 8, y: 8 }, force: true }).catch(() => {});
-await page.evaluate(() => { const i = document.querySelector('iframe[title="Sequence Planyr"]'); if (document.activeElement === i) document.activeElement.blur(); });
+await page.evaluate(() => { const i = document.querySelector('iframe[title="Sequence Planyr"]'); const b = [...document.querySelectorAll("button")].find((x) => !i.contains(x) && x.offsetParent && x.getBoundingClientRect().y < 80); if (b) b.focus(); });
 const focusIn = await page.evaluate(() => { const a = document.activeElement; return a ? (a.tagName === "IFRAME" ? "frame" : a.tagName.toLowerCase()) : "none"; });
 if (focusIn === "frame") { line("VOID — focus is still in the frame; the precondition could not be set"); await s.close(); process.exit(2); }
 ok(`keyboard focus is in the shell (${focusIn}), not in the Schedule frame`);
@@ -86,11 +94,7 @@ for (const [key, label] of [["Control", "Ctrl"], ["Meta", "Cmd"]]) {
 }
 if (logs.length) line("  page errors: " + logs.join(" | "));
 
-if (created) {
-  line("  · clearing the schedule this run created");
-  // best effort through the shell's own breadcrumb menu is UI-specific; report loudly if it cannot be done
-  line("    ! created a schedule for this check — delete it by hand if it still shows in the account's schedule list");
-}
+await cleanup();
 await s.close();
 if (failures.length) { line(`FAIL — ${failures.length} defect(s) on build ${served}`); process.exit(1); }
 line(`PASS — in the real shell on build ${served}, with focus in the shell, Ctrl/Cmd+wheel over the Gantt zooms the timeline and the browser page never gets the event.`);
