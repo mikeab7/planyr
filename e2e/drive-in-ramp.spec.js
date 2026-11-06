@@ -205,6 +205,70 @@ test.describe("drive-in ramps on dock walls", () => {
     expect(Math.abs((moved.cx - nb.cx) - (before.cx - bl.cx)) + Math.abs((moved.cy - nb.cy) - (before.cy - bl.cy))).toBeLessThan(0.01 + (nb.rot === bl.rot ? 0 : 1e6)); // same offset from its building
   });
 
+  test("NEW-1 2026-11-06: shortening or lengthening the building carries its end ramps — none is left off the wall; undo brings both back; a reload keeps them", async ({ page }) => {
+    await open(page);
+    const bl = await drawAndSelectBuilding(page);
+    // press every corner ramp "+" once (two per dock wall); the new ramp takes the selection, so re-select the building between presses
+    for (const pick of ["first", "last"]) {                          // the two corner buttons furthest apart: the start-end and the far-end of the wall
+      const dx = pick === "first" ? -70 : 70;                          // the docked panel covers the left of the canvas: bring the end we are working on into view
+      await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 3), [bl.cx + dx, bl.cy]);
+      await page.waitForTimeout(400);
+      const bp = await at(page, bl.cx + dx, bl.cy);
+      await page.mouse.click(bp.x, bp.y);
+      await expect(page.getByTestId("feature-edit-nodes")).toBeVisible();
+      const btns = (await rampButtons(page)).sort((a, b) => a.y - b.y || a.x - b.x);
+      expect(btns.length).toBeGreaterThan(0);
+      const b = pick === "first" ? btns[0] : btns[btns.length - 1];
+      await page.mouse.click(b.x, b.y);
+      await settle(page);
+    }
+    const before = await rampsOf(page);
+    expect(before.length, "ramps at the corners of the dock walls").toBeGreaterThanOrEqual(2);
+    const lenAxisW = bl.w >= bl.h;                                   // the length axis the Properties "Length" box edits
+    const L0 = lenAxisW ? bl.w : bl.h, L1 = L0 - 90;
+    const wallLen = (side, b) => (side === "top" || side === "bottom" ? b.w : b.h);
+    const farOnes = before.filter((r) => r.ramp.at > wallLen(r.ramp.side, bl) / 2);
+    expect(farOnes.length, "at least one ramp placed against a far end").toBeGreaterThanOrEqual(1);
+    // select the building, type a shorter length
+    await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 3), [bl.cx + 70, bl.cy]);
+    await page.waitForTimeout(400);
+    const bp = await at(page, bl.cx + 70, bl.cy);
+    await page.mouse.click(bp.x, bp.y);
+    await expect(page.getByTestId("footprint-length")).toBeVisible();
+    await page.getByTestId("footprint-length").fill(String(Math.round(L1))); await page.getByTestId("footprint-length").press("Enter");
+    await settle(page);
+    const nb = await buildingOf(page), after = await rampsOf(page);
+    expect(Math.round(lenAxisW ? nb.w : nb.h)).toBe(Math.round(L1));
+    expect(after.length).toBe(before.length);
+    for (const r of after) {
+      const L = wallLen(r.ramp.side, nb);
+      expect(r.ramp.at, "no ramp is left off the end of the building").toBeLessThanOrEqual(L + 0.01);
+      expect(r.ramp.at).toBeGreaterThanOrEqual(-0.01);
+      const was = before.find((q) => q.id === r.id);
+      const wasFar = was.ramp.at > wallLen(was.ramp.side, bl) / 2;
+      expect(r.ramp.at, "a ramp keeps its distance from the end it was placed against").toBeCloseTo(wasFar ? L - (wallLen(was.ramp.side, bl) - was.ramp.at) : was.ramp.at, 1);
+    }
+    // lengthen again: the far-end ramps go back out with the end
+    await page.getByTestId("footprint-length").fill(String(Math.round(L0))); await page.getByTestId("footprint-length").press("Enter");
+    await settle(page);
+    for (const r of await rampsOf(page)) expect(r.ramp.at).toBeCloseTo(before.find((q) => q.id === r.id).ramp.at, 1);
+    // undo the lengthening, then the shortening: the building and every ramp are exactly as they were
+    await page.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => {});
+    await page.keyboard.press("Control+z"); await settle(page);
+    await page.keyboard.press("Control+z"); await settle(page);
+    const undone = await rampsOf(page), ub = await buildingOf(page);
+    expect(Math.round(lenAxisW ? ub.w : ub.h)).toBe(Math.round(L0));
+    expect(undone.map((r) => `${r.id}:${r.ramp.at}`).sort()).toEqual(before.map((r) => `${r.id}:${r.ramp.at}`).sort());
+    // redo the shortening, reload: the ramps stay on the wall
+    await page.keyboard.press("Control+y"); await settle(page);
+    await page.reload();
+    await expect(canvas(page)).toBeVisible();
+    await settle(page);
+    const rb = await buildingOf(page), reloaded = await rampsOf(page);
+    expect(reloaded.length).toBe(before.length);
+    for (const r of reloaded) expect(r.ramp.at).toBeLessThanOrEqual(wallLen(r.ramp.side, rb) + 0.01);
+  });
+
   test("pictures: a straight-in ramp at a corner and an along-the-wall ramp at a corner, at the close-in view", async ({ page }) => {
     fs.mkdirSync(SHOTS, { recursive: true });
     await open(page);
