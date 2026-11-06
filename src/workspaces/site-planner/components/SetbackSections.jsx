@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT } from "../../../shared/theme/typography.js";
-import { summarizeSetbacks, layoutSectionLabels } from "../lib/setbackSketch.js";
+import { summarizeSetbacks, layoutSectionLabels, pickVertexDots } from "../lib/setbackSketch.js";
 
 /* Seven theme-aware accents, cycled — colour only tells neighbouring sections apart; the label does the naming. */
 export const SECTION_COLORS = ["var(--accent-site)", "var(--accent-model)", "var(--accent-review)", "var(--accent-notes)", "var(--accent-library)", "var(--accent-food)", "var(--accent-schedule)"];
@@ -48,6 +48,7 @@ function Sketch({ points, sections, selectedKey, hoverKey, editing, onSelect, on
     sections.map((s, i) => ({ key: s.key, pts: paths[i], text: labelText(s), force: s.key === selectedKey || s.key === hoverKey })),
     { width: VB_W, height: VB_H, centre }), [sections, paths, selectedKey, hoverKey, centre]);
   const n = points.length;
+  const dots = useMemo(() => (editing ? pickVertexDots(mapped, sections.map((s) => s.startVertex % n)) : []), [editing, mapped, sections, n]);
   return (
     <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" role="group" aria-label="Parcel outline split into setback sections" data-testid="setback-sketch" style={{ display: "block", maxHeight: 170 }}>
       <polygon points={mapped.map((q) => `${q.x},${q.y}`).join(" ")} fill="var(--surface-page)" stroke="none" />
@@ -70,10 +71,15 @@ function Sketch({ points, sections, selectedKey, hoverKey, editing, onSelect, on
           </g>
         );
       })}
-      {editing && mapped.map((q, i) => (
-        <circle key={i} cx={q.x} cy={q.y} r={4.5} data-testid={`setback-vertex-${i}`} onClick={() => onVertex(i)} style={{ cursor: "pointer" }}
-          fill={sections.some((s) => s.startVertex % n === i) ? "var(--text-primary)" : "var(--surface-raised)"} stroke="var(--text-primary)" strokeWidth={1.5} />
-      ))}
+      {editing && dots.map(({ i, isBreak }) => {
+        const q = mapped[i];
+        return (
+          <g key={i} data-testid={`setback-vertex-${i}`} data-break={isBreak ? "1" : "0"} onClick={() => onVertex(i)} style={{ cursor: "pointer" }}>
+            <circle cx={q.x} cy={q.y} r={9} fill="transparent" />
+            <circle cx={q.x} cy={q.y} r={isBreak ? 6 : 4.5} fill={isBreak ? "var(--text-primary)" : "var(--surface-raised)"} stroke="var(--text-primary)" strokeWidth={1.5} />
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -119,6 +125,12 @@ export default function SetbackSections({ points, sections, selectedKey, onSelec
         </label>
       </div>
       <Sketch points={points} sections={sections} selectedKey={selectedKey} hoverKey={hoverKey} editing={editing} onSelect={onSelect} onHover={setHoverKey} onVertex={onToggleVertex} />
+      {/* directly under the sketch, so it never moves down with the number of rows below (no scrolling to fix a grouping) */}
+      <div style={{ marginTop: SPACE.xs }}>
+        <button type="button" onClick={() => setEditing((o) => !o)} aria-pressed={editing} data-testid="setback-split-join"
+          style={{ padding: 0, border: "none", background: "transparent", color: "var(--accent-site-text, var(--text-primary))", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer" }}>{editing ? "Done splitting or joining" : "Split or join sections"}</button>
+        {editing && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.xs }}>Click a corner dot: a filled dot is a break — click it to join; a hollow one to split there.</div>}
+      </div>
       {(selected || shown.length > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: SPACE.xs, marginTop: SPACE.sm }}>
           {selected && row(selected)}
@@ -126,12 +138,9 @@ export default function SetbackSections({ points, sections, selectedKey, onSelec
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.lg, marginTop: SPACE.md }}>
-        <button type="button" onClick={() => setEditing((o) => !o)} aria-pressed={editing} data-testid="setback-split-join"
-          style={{ padding: 0, border: "none", background: "transparent", color: "var(--accent-site-text, var(--text-primary))", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer" }}>{editing ? "Done splitting or joining" : "Split or join sections"}</button>
         <button type="button" onClick={onResetAll} data-testid="setback-reset"
           style={{ padding: 0, border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer" }}>{resetLabel}</button>
       </div>
-      {editing && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.xs }}>Click a corner dot: a filled dot is a break — click it to join; a hollow one to split there.</div>}
     </div>
   );
 }
