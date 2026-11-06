@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_1284 source files mapped._
+_1290 source files mapped._
 
 ## infra
 
@@ -504,7 +504,7 @@ _1284 source files mapped._
 - **`src/workspaces/notes/components/TemplateManager.jsx`** — "Manage templates". Create, rename, edit the body, duplicate and delete the account's page templates.
   - _exports_: `default (TemplateManager)`
 - **`src/workspaces/notes/lib/notesAnchorNode.js`** — the `noteAnchor` schema node: a block that stays where it was double-clicked. Position is two numbers ON the node (unscaled document pixels), so it cannot crawl, cannot leak alignment, leaves no padding paragraphs, and rides the document into storage, sync and the PDF. Plus the pure `clampAnchor`.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentLeft`, `anchorExtentTop`, `anchorExtentX`, `anchorPosAtSelection`, `default`, `fitAnchorBox`, `fitAnchorWidth`, `nextAnchorSpot`, `NoteAnchor`, `placeAnchor`, `selectionInsideAnchor`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentLeft`, `anchorExtentTop`, `anchorExtentX`, `anchorPosAtSelection`, `default`, `fitAnchorBox`, `nextAnchorSpot`, `NoteAnchor`, `placeAnchor`, `selectionInsideAnchor`
 - **`src/workspaces/notes/lib/notesAnchorPrune.js`** — an anchored block with nothing in it is PROVISIONAL: the one definition of "empty", used by the screen and by the storage seam, so an abandoned press never reaches the disk or the cloud
   - _exports_: `anchorIsEmpty`, `countEmptyAnchors`, `pruneEmptyAnchors`
 - **`src/workspaces/notes/lib/notesArrows.js`** — PURE decisions for arrows BETWEEN RICH-TEXT BOXES (NEW-2, 2026-09-22, superseding sketch mode's own boxes-and-arrows canvas).
@@ -532,7 +532,7 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesEnterInherit.js`** — Enter carries the line's formatting to the new line: the pure decision about when to claim the press (only a collapsed caret at the end of a non-empty textblock) and the handler that runs the split it displaces and repairs it in the same transaction.
   - _exports_: `default`, `enterInheritHandler`, `enterShouldInherit`, `inheritedAttrs`
 - **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set (incl. images, the empty-page placeholder and search marking), the empty-document constant, and the per-page configured variant.
-  - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `noteExtensions`
+  - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `noteExtensions`, `NoteTableView`
 - **`src/workspaces/notes/lib/notesFakeBullets.js`** — A NOTE PASTED BEFORE THE OFFICE-LIST FIX HOLDS "BULLETS" THAT ARE JUST TEXT.
   - _exports_: `normalizeFakeBullets`, `readMarker`
 - **`src/workspaces/notes/lib/notesFileMeta.js`** — How an attached file is described in words — size, type badge, safe name — shared by the chip, the export and the print sheet.
@@ -567,6 +567,8 @@ _1284 source files mapped._
   - _exports_: `addPage`, `adoptDeletedOrphans`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageTree`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `ORG_GROUP_LABEL`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_ORG`, `SCOPE_PROJECT`, `searchTitles`, `setPageOrgScope`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `unfiledPages`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOfficeLists.js`** — A WORD / ONENOTE OUTLINE ARRIVES AS A REAL NESTED LIST, WITH ITS TABLE UNDER THE BULLET IT SAT UNDER (NEW-1 / NEW-2, owner report 2026-10-30: a bulleted soft-cost outline with a small table…
   - _exports_: `classifyMarker`, `convertOfficeLists`, `isBlankText`, `lengthIn`, `listFormatMap`, `parseMsoList`, `planOutline`, `splitTabRow`, `tabRuns`
+- **`src/workspaces/notes/lib/notesOfficeStyle.js`** — OFFICE'S OTHER SPELLINGS OF TEXT FORMATTING, TURNED INTO THE INLINE MARKUP THE EDITOR'S PARSER READS (NEW-1, 2026-11-05; found by the Notes paste bank, ui-audit/lib/pasteBank.mjs, red on…
+  - _exports_: `marksByClass`, `normalizeOfficeStyle`
 - **`src/workspaces/notes/lib/notesOrphanPlan.js`** — PURE: what to do with every body that has no node (NEW-1, 2026-10-16).
   - _exports_: `planOrphanResolution`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
@@ -614,13 +616,13 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesTableClipboard.js`** — A TABLE THAT IS ALREADY ON A NOTES PAGE COPIES, CUTS AND PASTES (NEW-1, owner report 2026-10-06: "I'm trying to copy a table that's already in the notebook module, and I can't paste it.")…
   - _exports_: `cellToTsv`, `clipboardTextForSlice`, `contentOfBoxes`, `default`, `NoteTableClipboard`, `tableClipboardKey`, `tableToTsv`, `wholeTableSelection`
 - **`src/workspaces/notes/lib/notesTableColumns.js`** — THE EDITOR-SIDE HALF OF notesTableWidth.js: reading a live table's per-column widths off the real ProseMirror node, and writing normalized ones back.
-  - _exports_: `applyTableColumnNormalization`, `default`, `normalizeTableColumnWidths`, `NoteTableColumns`, `NoteTableView`, `tableColumnWidths`
+  - _exports_: `applyTableColumnNormalization`, `default`, `normalizeTableColumnWidths`, `NoteTableColumns`, `tableColumnWidths`
 - **`src/workspaces/notes/lib/notesTableFill.js`** — HEADER ROWS ON ANY ROW, AND CELL FILL (NEW-1 / NEW-2, owner report 2026-10-28).
   - _exports_: `BOLD_TITLE`, `BOLD_TITLE_IN_HEADER`, `boldTruth`, `chosenFill`, `currentFill`, `FILL_NONE`, `fillForCell`, `headerRowsState`, `normalizeFill`, `NoteTableFill`, `selectionInHeaderCells`, `setCellFill`, `TABLE_FILLS`, `tableTarget`, `toggleHeaderRows`
 - **`src/workspaces/notes/lib/notesTableMultiSelect.js`** — CTRL+CLICK ADDS CELLS TO A NOTES TABLE'S SELECTION (B2530690, owner report 2026-10-29: "Using Control to click multiple cells doesn't work.
   - _exports_: `ctrlClickSelection`, `isMultiCell`, `modelOf`, `MULTI_SELECTION_MESSAGE`, `multiCellPositions`, `MultiCellSelection`, `NOTES_NOTICE_EVENT`, `NoteTableMultiSelect`, `refuseMultiCell`, `selectionFromModel`
 - **`src/workspaces/notes/lib/notesTablePaste.js`** — A TABLE COPIED FROM ONENOTE / WORD / EXCEL / SHEETS / OUTLOOK ARRIVES AS A REAL NOTES TABLE, WHEREVER THE PASTE LANDS (NEW-1, owner report 2026-10-05: "I tried copying a table from OneNote…
-  - _exports_: `clipboardHasTable`, `cssLengthPx`, `fillEmptyCells`, `fillFromDeclarations`, `fillsByClass`, `htmlHasTable`, `isBorderedTable`, `isMarkerColumn`, `isSingleColumn`, `normalizeTableMarkup`, `parseTabular`, `readSourceTables`, `repairTableFragment`, `rowsToTableHtml`, `sourceFill`, `TABLE_BOX_CAP_MIN`, `tableBoxWidth`, `tableGridsOf`, `tableOwnsClipboard`, `tableRowsToText`, `tableShape`, `tableShapeOfNode`, `tabularFromClipboard`
+  - _exports_: `classRules`, `clipboardHasTable`, `cssLengthPx`, `fillEmptyCells`, `fillFromDeclarations`, `fillsByClass`, `htmlHasTable`, `isBorderedTable`, `isMarkerColumn`, `isSingleColumn`, `normalizeTableMarkup`, `parseTabular`, `readSourceTables`, `repairTableFragment`, `rowsToTableHtml`, `sourceFill`, `TABLE_BOX_CAP_MIN`, `tableBoxWidth`, `tableGridsOf`, `tableOwnsClipboard`, `tableRowsToText`, `tableShape`, `tableShapeOfNode`, `tabularFromClipboard`
 - **`src/workspaces/notes/lib/notesTablePicture.js`** — "PASTE AS PICTURE" FOR A TABLE (Excel's Paste Options ▸ Picture, NEW-1).
   - _exports_: `prepareTablePicture`, `renderTableToPng`, `TABLE_PICTURE_MAX_SIDE`
 - **`src/workspaces/notes/lib/notesTableRowHeight.js`** — DRAG THE LINE UNDER A ROW TO CHANGE ITS HEIGHT (NEW-3, owner report 2026-11-05: "it doesn't let me change row height").
@@ -636,7 +638,7 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
   - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
 - **`src/workspaces/notes/lib/notesToggleNode.js`** — The `noteToggle` / `noteToggleTitle` schema nodes — a foldable section built on the browser's own details element.
-  - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
+  - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `toggleClickKey`
 - **`src/workspaces/notes/lib/notesToolbarDiag.js`** — Read-only, call-time-gated diagnostic for B831600 ×3 (the table-toolbar-jump bug): records every `applyToolbarDelta` call so the owner can capture the real production call sequence. Off by default, no telemetry leaves the browser.
   - _exports_: `isToolbarDiagArmed`, `latchToolbarDiag`, `recordToolbarDiag`, `TOOLBAR_DIAG_LOG_KEY`, `TOOLBAR_DIAG_PARAM`, `TOOLBAR_DIAG_STORAGE_KEY`
 - **`src/workspaces/notes/lib/notesVersionOrder.js`** — PURE: orders a conflict's two copies by recency (never by which browser window they came from), telling the caller whether that ordering is actually known.
@@ -1359,6 +1361,8 @@ _1284 source files mapped._
   - _exports_: `ADMIN_BOUNDARY_MAX_ZOOM`, `adminBoundariesVisible`, `attachAdminBoundaries`, `getStateLineEmphasis`, `setStateLineEmphasis`, `subscribeStateLineEmphasis`
 - **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
   - _exports_: `attachAdminBoundaries`
+- **`src/workspaces/site-planner/lib/aerialSnapshot.js`** — WHERE the stored map snapshot ("Aerial backdrop", `fromMap: true`) is drawn on a LOCATED plan (NEW-1, 2026-11-05, owner: "Zoning and Future Land Use fills are cut out around the site on the…
+  - _exports_: `snapshotBounds`, `snapshotDrawnInCanvas`, `snapshotHostedInMap`
 - **`src/workspaces/site-planner/lib/aerialVisibility.js`** — persisted aerial-backdrop visibility (`settings.aerialHidden`) and whether the live basemap tile layer should render, gating both the static underlay image and the Leaflet aerial on one fact so Hide/Remove actually take effect and persist.
   - _exports_: `aerialWantedOnSheet`, `isAerialTileActive`, `isAerialVisible`, `wantBasemapSrc`, `withAerialVisible`
 - **`src/workspaces/site-planner/lib/alabamaParcels.js`** — ALABAMA county parcel sources. Alabama has NO free statewide parcel service (AGOL, Hub, ADOR / AGIC / GSA searched; only commercial resellers carry one — not used), so each county is wired…
@@ -1397,10 +1401,12 @@ _1284 source files mapped._
   - _exports_: `initialBootResolved`, `mayReconcileUrl`, `mayResumeLastSite`, `mayWriteRouteProject`, `pickResumeTarget`, `resumeTargetAfterSignIn`, `routeChangeNeedsDefer`, `routeProjectAvailability`, `routeProjectJustChanged`, `userLeftOnSignOut`
 - **`src/workspaces/site-planner/lib/boundaryLabels.js`** — Pure label-placement math for boundary overlays: shoelace ring centroid, one anchor per name, greedy collision-drop by on-screen area, zoom gate (Leaflet-free, node-tested)
   - _exports_: `declutterBoxes`, `featureAnchor`, `labelAnchors`, `labelsVisible`, `placeLabels`, `ringAreaCentroid`, `titleCaseName`
+- **`src/workspaces/site-planner/lib/boundaryPaint.js`** — HOW A COUNTIES & CITIES FEATURE IS PAINTED (NEW-1, owner 2026-11-05).
+  - _exports_: `colorFeatures`, `createColorBook`, `geometryBox`, `placeKey`, `placeStyle`, `sharedColorBook`
 - **`src/workspaces/site-planner/lib/boundarySections.js`** — Boundary SECTIONS — the few, named stretches a parcel outline is edited in (NEW-1).
   - _exports_: `abutStats`, `boundarySections`, `CORNER_TURN_DEG`, `CURVE_EDGE_MAX_FT`, `CURVE_MAX_EDGE_FRAC`, `CURVE_MAX_TURN_DEG`, `CURVE_MIN_TURN_DEG`, `ESCALATE_FLOOR_FRACS`, `LONG_EDGE_CORNER_DEG`, `LONG_EDGE_FT`, `MIN_SECTION_FT`, `MIN_SECTION_PERIM_FRAC`, `NEIGHBOUR_COINCIDENT_FT`, `sectionLabel`, `sectionOfEdge`, `sectionsSummary`, `setSectionSetback`, `shiftBreaksOnDelete`, `shiftBreaksOnInsert`, `SMOOTH_CORNER_DEG`, `SMOOTH_MAX_FT`, `SMOOTH_MIN_FT`, `SMOOTH_PERIM_FRAC`, `TARGET_SECTIONS`, `toggleBreak`
 - **`src/workspaces/site-planner/lib/boundaryStyle.js`** — The look of the Counties & Cities lines (B2507065 / NEW-10, owner constraint #47) — three ranks of line that never read as the same thing: cities a bolder outline + a light tint inside…
-  - _exports_: `BOUNDARY_FALLBACK_INK`, `CITY_LINE_MIN_WEIGHT`, `CITY_TINT_OPACITY`, `CLICK_HIGHLIGHT_COLOR`, `CLICK_HIGHLIGHT_WEIGHT`, `COUNTY_LINE_COLOR`, `COUNTY_LINE_DASH`, `COUNTY_LINE_WEIGHT`, `STATE_LINE_CASING`, `STATE_LINE_CORE`
+  - _exports_: `BOUNDARY_FALLBACK_INK`, `CITY_LINE_MIN_WEIGHT`, `CITY_TINT_OPACITY`, `CLICK_HIGHLIGHT_COLOR`, `CLICK_HIGHLIGHT_WEIGHT`, `COUNTY_LINE_COLOR`, `COUNTY_LINE_DASH`, `COUNTY_LINE_WEIGHT`, `ETJ_LINE_DASH`, `ETJ_LINE_WEIGHT`, `ETJ_TINT_OPACITY`, `PLACE_LABEL_INK`, `PLACE_LABEL_SHADOW`, `PLACE_PALETTE`, `PLACE_PILL_ETJ_BG`, `PLACE_PILL_SHADOW`, `STATE_LINE_CASING`, `STATE_LINE_CORE`
 - **`src/workspaces/site-planner/lib/buildability.js`** — B710 buildability pathway: editable per-jurisdiction required-FFE rules (0.2% WSE + 2 ft seeds, verified-flagged), fill-to-elevate pathway flags, LOMR-F + wetlands-§404 copy flags
   - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `OUTSIDE_FLOODPLAIN_FFE_NOTE`, `requiredFfe`, `SITE_BASED_FFE_NOTE`, `siteBasisFfe`, `suggestedFfe`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildableClient.js`** — Buildable-ground client (NEW-1/NEW-2, owner-only grading layer) — the main-thread half.
@@ -1775,6 +1781,8 @@ _1284 source files mapped._
   - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `cityAreasFromFeaturesAsync`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `DFW_ZONE`, `distanceMiles`, `ETJ_SOURCES`, `etjCoverageFor`, `etjPointCoverage`, `etjSourceCovers`, `etjSourcesForPoint`, `fetchCityClipOut`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `inDfwZone`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `SHARE_SLICE_MS`, `SHARE_WINDOW_PAD_M`, `shareQueryRing`, `simplifyRing`, `tnFuncClassNumber`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
   - _exports_: `abbreviateJurisdiction`, `governingIdentity`, `jurisdictionRungs`, `jurisdictionSegments`
+- **`src/workspaces/site-planner/lib/jurisdictionCard.js`** — THE ONE CLICK CARD FOR COUNTIES & CITIES (NEW-1, owner 2026-11-05: "Click on any shape shows a clean card: city, limits or ETJ, county").
+  - _exports_: `boundaryRoleOf`, `combineJurisdictionHits`, `COUNTIES_CITIES_GROUP`, `foldBoundaryItems`
 - **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `LIMIT_CLASS_NOUN`, `PEER_SEP`, `shareNote`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
@@ -1829,6 +1837,8 @@ _1284 source files mapped._
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
 - **`src/workspaces/site-planner/lib/lercGrid.js`** — LERC payload decode (`decodeGrid`), split out of demGrid.js (B1042) so the `lerc` codec stays off the Site route's boot bundle; static-imported by the terrain worker, dynamic-imported on the main thread
   - _exports_: `decodeGrid`
+- **`src/workspaces/site-planner/lib/limitLineFlags.js`** — A SITE THAT TOUCHES OR CROSSES A CITY-LIMITS / ETJ LINE SAYS SO (NEW-1, owner 2026-11-05: "when the open site touches or crosses a limits/ETJ line, flag it on the site, so the header…
+  - _exports_: `limitLineFlags`, `limitLineNote`, `limitLineSentence`
 - **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
   - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
 - **`src/workspaces/site-planner/lib/loadingWalls.js`** — the Building panel's LOADING wall picker, as pure functions.
@@ -1846,7 +1856,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
   - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `hasRegisterableContainer`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mapBoxCenterX`, `mapBoxInset`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `resolvedLayoutInputs`, `sanitizeShift`, `tileNwFeet`, `viewValuesEqual`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → LIFTED GIS area fills → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the per-layer "Show above plan" lift (the escape hatch opacity cannot be) with its band pane names + rebuild key, the three export bands, and the audit that fails the build on an unclassified GIS source
-  - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `lineHostZ`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `PANE_PARCEL_PICK`, `PANE_PARCEL_PICK_LABEL`, `panesForLayer`, `panesForRole`, `PARCEL_PICK_BAND_ATTR`, `PARCEL_TIER_ATTR`, `PARCEL_TIER_SLOT_ATTR`, `parcelsOnTop`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
+  - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `lineHostZ`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `PANE_PARCEL_PICK`, `PANE_PARCEL_PICK_LABEL`, `PANE_SNAPSHOT`, `PANE_SNAPSHOT_Z`, `panesForLayer`, `panesForRole`, `PARCEL_PICK_BAND_ATTR`, `PARCEL_TIER_ATTR`, `PARCEL_TIER_SLOT_ATTR`, `parcelsOnTop`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
   - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
@@ -2047,6 +2057,8 @@ _1284 source files mapped._
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
+- **`src/workspaces/site-planner/lib/placeLabelAnchors.js`** — WHERE A PLACE NAME GOES, AT ANY ZOOM (NEW-1, owner 2026-11-05).
+  - _exports_: `clipRingToRect`, `labelBoxPx`, `labelFontPx`, `placeNames`, `viewAnchors`
 - **`src/workspaces/site-planner/lib/placeNamesData.js`** — Moved to src/shared/basemaps (NEW-1/B2018608: /food draws the SAME city-name layer as the Site map, and food may not import from site-planner).
   - _exports_: `* (../../../shared/basemaps/placeNamesData.js)`
 - **`src/workspaces/site-planner/lib/placeNamesGate.js`** — Moved to src/shared/basemaps (NEW-1/B2018608: /food draws the SAME city-name layer as the Site map, and food may not import from site-planner).
@@ -2394,7 +2406,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/usStatesData.js`** — GENERATED by scripts/build-us-states.mjs — do not hand-edit.
   - _exports_: `US_STATES_ENCODED`, `US_STATES_SCALE`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
-  - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `isCityLimitsId`, `isCountyLinesId`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
+  - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `isCityLimitsId`, `isCountyLinesId`, `pickTier`, `PLACE_LABEL_MAX_ZOOM`, `placeLabelZoom`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedStreamBufferLayer`, `cachedTnStreamBufferLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
 - **`src/workspaces/site-planner/lib/viewChangeRecorder.js`** — Records every `setView` with its before/after view, call stack and whether a TRUSTED gesture authorised it, on one timeline with visibility/freeze/resume/network/long-task events. Diag-armed, read-only.
