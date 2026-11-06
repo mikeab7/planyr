@@ -214,7 +214,7 @@ async function rowsByName(page) {
     const nameCell = r.querySelector('[data-col-key="name"]');
     const startCell = r.querySelector('[data-col-key="start"]');
     const raw = (nameCell?.innerText || "");
-    const expanded = raw.startsWith("▾") ? true : raw.startsWith("▸") ? false : null;
+    const expanded = nameCell?.querySelector('span[title="Collapse"]') ? true : nameCell?.querySelector('span[title="Expand"]') ? false : null;   /* NEW-1 task icons: the toggle is now a chevron ICON, not a ▾/▸ character — read its title */;
     return { id, name: raw.replace(/^▾\s*|^▸\s*/, "").trim(), start: (startCell?.innerText || "").trim(), expanded };
   }));
 }
@@ -231,7 +231,7 @@ async function rowsWithLevel(page) {
     const span = nameCell?.querySelector("span");
     const pl = span ? parseFloat(getComputedStyle(span).paddingLeft) : null;
     const level = pl != null ? Math.round((pl - 4) / 14) : null;
-    return { id, name: raw.replace(/^▾\s*|^▸\s*/, "").trim(), level, expanded: raw.startsWith("▾") ? true : raw.startsWith("▸") ? false : null };
+    return { id, name: raw.replace(/^▾\s*|^▸\s*/, "").trim(), level, expanded: nameCell?.querySelector('span[title="Collapse"]') ? true : nameCell?.querySelector('span[title="Expand"]') ? false : null   /* NEW-1 task icons: the toggle is now a chevron ICON, not a ▾/▸ character — read its title */ };
   }));
 }
 async function levelOf(page, name) { const rows = await rowsWithLevel(page); return rows.find(r => r.name === name)?.level ?? null; }
