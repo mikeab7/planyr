@@ -93,10 +93,11 @@ test.describe("NEW-1 — the stored map snapshot never covers a GIS area fill", 
       const svg = document.querySelector('[data-testid="planner-canvas"]');
       const backdrop = [...svg.parentElement.children].find((el) => el.tagName === "DIV" && el.querySelector(".leaflet-container"));
       const snapPane = backdrop && backdrop.querySelector(".leaflet-aerialSnapshot-pane");
-      const areaPane = backdrop && backdrop.querySelector(".leaflet-gisArea-pane");
+      // NEW-1 second pass (B2671190 ×2): the GIS area pane is no longer IN the backdrop map — it is hosted in the plan SVG's area band, above the whole backdrop
+      const areaPane = svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane");
       return {
         snapshotInMap: !!(snapPane && snapPane.querySelector("img")),
-        snapshotBelowFills: !!(snapPane && areaPane && parseInt(getComputedStyle(snapPane).zIndex, 10) < parseInt(getComputedStyle(areaPane).zIndex, 10)),
+        snapshotBelowFills: !!(snapPane && areaPane && !backdrop.querySelector(".leaflet-gisArea-pane")),
         snapshotInCanvas: !!svg.querySelector('image[href^="data:image/png"]:not([data-overlay-image])'),
       };
     });

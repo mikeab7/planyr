@@ -72,7 +72,7 @@ import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
 // GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
-import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ, PANE_SNAPSHOT, PANE_SNAPSHOT_Z } from "./lib/mapStack.js";
+import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ, PANE_SNAPSHOT, PANE_SNAPSHOT_Z, AREA_BAND_ATTR } from "./lib/mapStack.js";
 import { snapshotHostedInMap, snapshotDrawnInCanvas, snapshotBounds } from "./lib/aerialSnapshot.js"; // NEW-1 (2026-11-05): the pinned map snapshot is the aerial, so it is hosted UNDER the GIS fills, never over them
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import GisIdentifyCard from "./components/GisIdentifyCard.jsx";
@@ -2634,6 +2634,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * a Leaflet pane inside it must not be translated twice). */
   const geoFrontWrapRef = useRef(null);
   const geoFrontPaneRef = useRef(null);
+  // NEW-1 second pass (B2671190 ×2) — the DEFAULT area band's host, inside the plan SVG right after the default-band references (mapStack AREA_BAND_ATTR).
+  const geoAreaWrapRef = useRef(null);
+  const geoAreaPaneRef = useRef(null);
   /* NEW-1 — the PARCELS-IN-FRONT HOST: the county lots on offer ("Pick county lots") live in a Leaflet pane hosted
    * INSIDE the plan SVG (a foreignObject under the moved parcel group), exactly the front band's shape and for the
    * same reason — a pane inside the backdrop map can never clear the SVG. Same two mirrored transforms. */
@@ -2737,8 +2740,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      *                                 above the elements and still under the labels + handles
      *   LINE (strokes/points)       → a pane in the map-top host, over the planner SVG
      * Everything after this just names a pane; nothing anywhere picks a z-order. */
-    const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
-    const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    /* NEW-1 second pass (B2671190 ×2, 2026-11-06) — the AREA band is no longer a pane of the backdrop map: there it sat UNDER the whole plan SVG, so an
+     * opaque reference picture (the owner's dropped PNG, ~3,800 ft east of his Academy site) cut a rectangular hole in Zoning / Future Land Use with the
+     * Map Base on or off. It is mounted (below, with the other bands) in the plan SVG's `data-gis-area-band` anchor: over the default-band references,
+     * still under the parcel, setback and elements. */
     /* Both external hosts mirror Leaflet's own map-pane translate. Zoom + fade animation are off
      * on this map (it is a slaved backdrop), so the transform only ever changes on a commit — one
      * assignment per commit, no interpolation to chase. ONE mirror function for both, so a host
@@ -2756,6 +2761,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * silently BELOW the plan, which is the exact bug this feature exists to fix. Say so. */
     if (!geoFrontPaneRef.current) console.error("[planyr] the lifted GIS band host (data-gis-front-band) is not mounted — a layer set to 'Show above plan' would draw under the plan instead");
     if (!geoTopPaneRef.current) console.error("[planyr] the map-top GIS band host is not mounted — line layers would draw under the plan instead");
+    if (geoAreaPaneRef.current) mountBand(geoAreaPaneRef.current, PANE_AREA, PANE_AREA_LABEL, 350);
+    else { // LOUD-FAILURE: fall back to the old place (under the plan SVG) rather than lose the fills, and say a reference picture will cover them
+      console.error("[planyr] the GIS area band host (data-gis-area-band) is not mounted — area fills will draw under any reference picture instead");
+      const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
+      const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    }
     mountBand(geoFrontPaneRef.current, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, 380);
     mountBand(geoTopPaneRef.current, PANE_LINE, PANE_LINE_LABEL, 400);
     if (!geoPickPaneRef.current) console.error("[planyr] the Parcels-in-front host (data-parcel-pick-band) is not mounted — the county lots on offer would draw under the plan instead");
@@ -2765,7 +2776,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const mp = map._mapPane;
         if (!mp) return;
         const t = mp.style.transform || "";
-        for (const el of [geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]) if (el) el.style.transform = t;
+        for (const el of [geoAreaPaneRef.current, geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]) if (el) el.style.transform = t;
       };
       map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
       mirrorPane();
@@ -3105,7 +3116,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — BOTH external hosts, never just the top one: the lifted-area band tracks the
       // imagery on exactly the same terms as the line band, so a lifted floodplain edge stays
       // welded to the aerial through a flick-drag instead of sliding a frame behind it.
-      const mirrors = [geoTopWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current];
+      const mirrors = [geoTopWrapRef.current, geoAreaWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current];
       if (origin != null) { wrap.style.transformOrigin = origin; for (const m of mirrors) if (m) m.style.transformOrigin = origin; }
       wrap.style.transform = value;
       for (const m of mirrors) if (m) m.style.transform = value;
@@ -25056,6 +25067,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the scale/rotate handles and the calibration marks are no longer drawn here —
                   every manipulation handle lives in the one always-on-top handle layer (NEW-1). */}
               {overlayBands.below.map(renderSheetOverlay)}
+              {/* NEW-1 second pass (B2671190 ×2, 2026-11-06) — THE GIS AREA BAND (Zoning, Future Land Use, flood zones, districts …), HERE: over the default-band
+                  references, under the parcel / setback / elements. It used to be a pane of the backdrop map, i.e. under this whole SVG, so an opaque reference
+                  picture cut a crisp rectangular hole in every fill (the owner's Academy plan). Hosted exactly like the lifted band below (same overscan, same
+                  gesture transform mirror, same counter-transform); `data-export="skip"` because the sheet composites its own copy INTO this group (PDF-PARITY);
+                  nothing in it takes a press (the stylesheet pins `pointer-events: none` on every descendant). */}
+              {origin && (
+                <g {...{ [AREA_BAND_ATTR]: "1" }}>
+                  <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
+                      <div ref={geoAreaWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
+                        <div ref={geoAreaPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
+              )}
 
 
               {/* NEW-1 — PARCELS IN FRONT (mapStack.js). The plan's own setback rings + parcels live in `parcelTierNodes`

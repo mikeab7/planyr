@@ -63,7 +63,7 @@ describe("the stacking model", () => {
   it("the snapshot pane sits UNDER every GIS pane — that is the whole fix", () => {
     expect(PANE_SNAPSHOT).toBe("aerialSnapshotPane");
     expect(PANE_SNAPSHOT_Z).toBeLessThan(200); // under Leaflet's own tile pane too: it IS the basemap
-    expect(PANE_SNAPSHOT_Z).toBeLessThan(350);  // GIS area fills (SitePlanner creates PANE_AREA at 350, its labels at 360)
+    expect(PANE_SNAPSHOT_Z).toBeLessThan(350);  // GIS area fills (since NEW-1's second pass hosted in the plan SVG, above the whole backdrop map)
     expect(PANE_AREA).toBe("gisAreaPane"); expect(PANE_AREA_LABEL).toBe("gisAreaLabelPane");
   });
   it("SitePlanner hosts it in that pane and its canvas no longer draws a located plan's snapshot (source guard — red on the pre-fix `origin && basemapOn` stand-down)", () => {
@@ -72,6 +72,6 @@ describe("the stacking model", () => {
     expect(src).toMatch(/o\.fromMap && !snapshotDrawnInCanvas\(o, \{ origin, showAerial \}\)\) return null/);
     expect(src).not.toMatch(/o\.fromMap && \(!showAerial \|\| \(origin && basemapOn\)\)/);
     expect(src).toMatch(/\.createPane\(PANE_SNAPSHOT\)/);
-    expect(src).toMatch(/createPane\(PANE_AREA\); areaPane\.style\.zIndex = 350/);
+    expect(src).toMatch(/mountBand\(geoAreaPaneRef\.current, PANE_AREA, PANE_AREA_LABEL, 350\)/);
   });
 });

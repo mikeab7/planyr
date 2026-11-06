@@ -70,3 +70,52 @@ test("a lifted FEMA band follows the pan at the basemap's speed, not twice it", 
   expect(Math.abs(moveFront.y - moveLine.y), `lifted band moved ${moveFront.y.toFixed(1)} px, the basemap ${moveLine.y.toFixed(1)} px`).toBeLessThan(1.5);
   expect(errors, errors.join(" | ")).toHaveLength(0);
 });
+
+/* NEW-1 second pass (B2671190 ×2, 2026-11-06) — the DEFAULT area band now lives in the plan SVG too (`data-gis-area-band`, over the reference pictures,
+ * under the elements), hosted exactly like the lifted band. Same oracle, NOT lifted: FEMA's fill half lands in the area band, its boundary half in the line
+ * band; at rest the two images must sit on the same spot (no registration offset), and during a held drag they must move by the same vector. */
+test("the default area band (in the plan SVG) sits on the basemap at rest and follows the pan at its speed", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.route("**/*", async (r) => {
+    const u = new URL(r.request().url());
+    if (/\/export$/.test(u.pathname)) return r.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, contentType: "image/png", body: PNG });
+    if (/NFHL/i.test(u.href) || /\/(MapServer|FeatureServer)\//i.test(u.href)) return r.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, contentType: "application/json", body: JSON.stringify({ name: "NFHL", layers: [{ id: 27 }, { id: 28 }] }) });
+    if (/\.(jpg|jpeg)(\?|$)/i.test(u.pathname)) return r.abort();
+    return r.continue();
+  });
+  await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
+  await page.goto("/#/site-planner", { waitUntil: "load" });
+  await page.getByText("Front Band Pan Guard", { exact: false }).first().click();
+  await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
+  await page.waitForTimeout(1200);
+  await openPlannerLayers(page);
+  await setLayer(page, "fema", true);
+  await page.waitForTimeout(2500);
+
+  const sample = () => page.evaluate(() => {
+    const svg = document.querySelector('[data-testid="planner-canvas"]'); const wrap = svg.parentElement;
+    const area = svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane img.leaflet-image-layer"), line = [...wrap.children].map((c) => c.querySelector(".leaflet-gisLine-pane img.leaflet-image-layer")).find(Boolean);
+    const pos = (i) => { if (!i) return null; const r = i.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+    return { area: pos(area), line: pos(line) };
+  });
+  const before = await sample();
+  expect(before.area, "the default area band's image is not on the page — the fixture proves nothing").not.toBeNull();
+  expect(before.line, "the line band's image is not on the page — the fixture proves nothing").not.toBeNull();
+  // at rest: the same export frame → the same box (a missing counter-transform would shift the fill off the imagery)
+  for (const k of ["x", "y", "w", "h"]) expect(Math.abs(before.area[k] - before.line[k]), `at rest the area band's ${k} is ${before.area[k].toFixed(1)}, the line band's ${before.line[k].toFixed(1)}`).toBeLessThan(1.5);
+
+  const box = await page.getByTestId("planner-canvas").boundingBox();
+  await page.mouse.move(box.x + 160, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160 + 120, box.y + box.height / 2 + 40, { steps: 12 });
+  await page.waitForTimeout(60);
+  const mid = await sample();
+  await page.mouse.up();
+  const d = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+  const moveArea = d(mid.area, before.area), moveLine = d(mid.line, before.line);
+  expect(Math.abs(moveLine.x), "the drag did not move the basemap's band — the fixture proves nothing").toBeGreaterThan(40);
+  expect(Math.abs(moveArea.x - moveLine.x), `area band moved ${moveArea.x.toFixed(1)} px, the basemap ${moveLine.x.toFixed(1)} px`).toBeLessThan(1.5);
+  expect(Math.abs(moveArea.y - moveLine.y), `area band moved ${moveArea.y.toFixed(1)} px, the basemap ${moveLine.y.toFixed(1)} px`).toBeLessThan(1.5);
+  expect(errors, errors.join(" | ")).toHaveLength(0);
+});
