@@ -187,8 +187,8 @@ const KEY_ROLE = {
   jur_etj: "ETJ",
 };
 const KEY_STYLE = {
-  County: { weight: 2.8, dash: true }, "City Limits": { weight: 3, dash: false }, ETJ: { weight: 1.5, dash: true }, // B2507065: counties DASHED grey, city limits bolder (the map's own looks)
-  "Municipal Limits": { weight: 3, dash: false }, "Town Limits": { weight: 3, dash: false }, "Village Limits": { weight: 3, dash: false },
+  County: { weight: 2.8, dash: true }, "City Limits": { weight: 3.5, dash: false }, ETJ: { weight: 2, dash: true }, // B2507065: counties DASHED grey, city limits bolder (the map's own looks); NEW-1 (2026-11-05): limits solid + bold, ETJ the same colour thinner and dashed
+  "Municipal Limits": { weight: 3.5, dash: false }, "Town Limits": { weight: 3.5, dash: false }, "Village Limits": { weight: 3.5, dash: false },
 };
 export function boundaryKey(members) {
   const seen = new Map();

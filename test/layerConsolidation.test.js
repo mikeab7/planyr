@@ -190,12 +190,18 @@ describe("identifyOverlaysAt (B1092)", () => {
   it("a layer that is OFF is never identified — you can't click what isn't drawn", () => {
     expect(identifyOverlaysAt({ bkdd_easements: layer(HIT) }, { bkdd_easements: { on: false } }, at)).toEqual([]);
   });
-  it("OPT-IN only: a wide-area boundary layer is never canvas-identified", () => {
-    // Every empty click lands inside a county/city/ISD polygon, so identifying those would
-    // turn the card into noise instead of an answer. The flag is what keeps it precise.
-    expect(ALL_LAYERS.jur_county.canvasIdentify).toBeFalsy();
-    expect(ALL_LAYERS.jur_city.canvasIdentify).toBeFalsy();
-    expect(identifyOverlaysAt({ jur_county: layer(HIT) }, { jur_county: { on: true } }, at)).toEqual([]);
+  it("OPT-IN: wide-area polygons stay out of the canvas identify — EXCEPT the Counties & Cities row, which the owner ordered to answer a click as ONE card", () => {
+    // NEW-1 (owner 2026-11-05: "Click (never hover) on any shape shows a clean card: city, limits or ETJ, county") REVERSES the old blanket rule for the merged row only:
+    // county / city / ETJ answer a click on the planner canvas, folded into ONE item (jurisdictionCard.js). School districts still blanket the view and still stay out.
+    expect(ALL_LAYERS.jur_isd.canvasIdentify).toBeFalsy();
+    expect(identifyOverlaysAt({ jur_isd: layer(HIT) }, { jur_isd: { on: true } }, at)).toEqual([]);
+    for (const k of ["jur_county", "jur_city", "jur_etj"]) expect(ALL_LAYERS[k].canvasIdentify, k).toBe(true);
+    const county = { sourceId: "jur_county", title: "Fort Bend County", name: "Fort Bend", rows: [], sourceName: "TxDOT" };
+    const city = { sourceId: "jur_city", title: "Sugar Land — city limits", name: "Sugar Land", rows: [], sourceName: "TxGIO" };
+    const out = identifyOverlaysAt({ jur_county: layer(county), jur_city: layer(city) }, { jur_county: { on: true }, jur_city: { on: true } }, at);
+    expect(out).toHaveLength(1); // ONE card, not one per layer
+    expect(out[0]).toMatchObject({ id: "counties_cities", title: "Sugar Land — city limits" });
+    expect(out[0].rows.map((r) => r.text)).toEqual(["City of Sugar Land — inside the city limits", "Fort Bend County"]);
   });
   it("the precise flood-group features ARE opted in — the band and the centreline", () => {
     expect(ALL_LAYERS.bkdd_easements.canvasIdentify).toBe(true);

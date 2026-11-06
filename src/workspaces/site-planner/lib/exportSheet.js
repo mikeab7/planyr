@@ -49,9 +49,11 @@ import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
-import { labelAnchors, placeLabels, declutterBoxes } from "./boundaryLabels.js";
+import { declutterBoxes, titleCaseName } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
-import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH } from "./boundaryStyle.js";
+import { placeStyle, colorFeatures } from "./boundaryPaint.js";
+import { viewAnchors, placeNames, labelFontPx } from "./placeLabelAnchors.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
 import { siteState } from "./siteRegion.js";
 import { gisCache } from "./gisCache.js";
@@ -930,29 +932,37 @@ export function createExportSheet(ctx) {
       let fc = geo ? geo.toGeoJSON() : null;
       if ((!fc || !fc.features) && typeof ref.eachFeature === "function") { const fs = []; ref.eachFeature((l) => l.feature && fs.push(l.feature)); fc = { type: "FeatureCollection", features: fs }; }
       if (!fc || !fc.features || !fc.features.length) return { features: [] };
-      // B2507065 (NEW-10) — PDF-PARITY with the screen: counties a heavier dashed grey line, city limits a bolder outline + light tint, county names along the line.
-      const style = isCountyLinesId(id)
-        ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
-        : isCityLimitsId(id)
-          ? { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || BOUNDARY_FALLBACK_INK, fillOpacity: CITY_TINT_OPACITY }
-          : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+      // B2507065 (NEW-10) + NEW-1 (2026-11-05) — PDF-PARITY with the screen: counties a heavier dashed grey line; each city its own hue (bold limits + tint, thinner dashed ETJ);
+      // county names along the line; every city / ETJ name in the part of its polygon that is on the sheet.
+      const srcRow = VECTOR_SOURCES[id];
+      const placeKind = isCityLimitsId(id) ? "city" : id === "jur_etj" ? "etj" : null;
+      const nameOfF = (f) => { const raw = f && f.properties && srcRow && srcRow.labelField ? f.properties[srcRow.labelField] : null; const n = raw == null ? "" : String(raw).trim(); return n && srcRow.titleCaseLabel ? titleCaseName(n) : n; };
+      if (placeKind) colorFeatures(fc, nameOfF);
       const features = [];
-      for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
+      for (const f of fc.features) {
+        const ps = placeKind ? placeStyle(placeKind, nameOfF(f), { opacity: 1, fallbackInk: cfg.color || BOUNDARY_FALLBACK_INK }) : null;
+        const style = isCountyLinesId(id)
+          ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
+          : ps
+            ? { stroke: ps.color, strokeWidth: ps.weight, strokeOpacity: 1, fill: ps.fillColor, fillOpacity: ps.fillOpacity, ...(ps.dashArray ? { dash: ps.dashArray } : {}) }
+            : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+        features.push(...esriPolygonFeatures(f.geometry, style));
+      }
       let labels = [];
-      const src = VECTOR_SOURCES[id];
+      const src = srcRow;
       if (src && isCountyLinesId(id) && src.labelField) {
         const home = siteState({ lat: origin.lat, lng: origin.lon });
-        const placedC = countyLineLabels(fc.features, {
-          textOf: (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home),
-          project: (lng, lat) => projLLtoPx([lng, lat]),
-          viewW: size.w, viewH: size.h,
-        });
+        const textOfC = (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home);
+        const placedC = countyLineLabels(fc.features, { textOf: textOfC, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
         labels = placedC.map((p) => ({ x: p.x, y: p.y, text: p.text, angle: p.angle }));
+        const have = new Set(placedC.map((p) => p.text));
+        const anchorsC = viewAnchors(fc.features, { nameOf: textOfC, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h, band: [0.76, 0.9] }).filter((a) => !have.has(a.name));
+        for (const a of placeNames(anchorsC, { textOf: (x) => x.name, fontPx: 11, viewW: size.w, viewH: size.h, taken: placedC.map((p) => ({ x: p.x, y: p.y, box: { w: Math.max(30, p.text.length * 7), h: 15 } })) })) labels.push({ x: a.x, y: a.y, text: a.name });
       } else if (src && src.labelField) {
-        const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
-        const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
-        const tmpl = src.nameTemplate || "{name}";
-        labels = placed.map((p) => ({ x: p.box.x, y: p.box.y, text: tmpl.replace("{name}", p.name), uppercase: isCountyLinesId(id) }));
+        const tmpl = (n) => (id === "jur_etj" ? (/^Undetermined/.test(n) ? "ETJ undetermined (disputed)" : /release area/.test(n) ? n : `${n} ETJ`) : (src.nameTemplate || "{name}").replace("{name}", n));
+        const anchors = viewAnchors(fc.features, { nameOf: nameOfF, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
+        const placed = placeNames(anchors, { textOf: (a) => tmpl(a.name), fontPx: 11, viewW: size.w, viewH: size.h });
+        labels = placed.map((p) => ({ x: p.x, y: p.y, text: tmpl(p.name), uppercase: false }));
       }
       return { features, labels };
     }

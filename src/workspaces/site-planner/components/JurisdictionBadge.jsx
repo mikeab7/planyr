@@ -157,6 +157,8 @@ export default function JurisdictionBadge({ badge }) {
       ? `"Crosses": this boundary touches more than one city's ETJ. Texas apportions an ETJ overlap between the cities along a line — each governs only its own side, never both at once. Confirm which side with each city.`
       : "",
     badge.straddle ? "⚑ Straddles a boundary: touches multiple jurisdictions." : "",
+    // NEW-1 (owner 2026-11-05) — the limits / ETJ line(s) the site crosses or touches, one sentence each, so one clean jurisdiction is never named for a split tract.
+    badge.limitLineNote ? `⚑ ${badge.limitLineNote}` : "",
   ].filter(Boolean).join("\n");
   return (
     <span
@@ -183,7 +185,7 @@ export default function JurisdictionBadge({ badge }) {
       <span ref={textRef} data-jurisdiction-text="1" data-rung={rung} style={{ overflow: "hidden", textOverflow: "clip" }}>
         {rungs[Math.min(rung, rungs.length - 1)]}
       </span>
-      {badge.straddle && <span aria-hidden="true" style={{ flex: "none", color: "var(--warn-text)", fontWeight: 700 }}>⚑</span>}
+      {(badge.straddle || (badge.limitLines && badge.limitLines.length > 0)) && <span aria-hidden="true" data-testid="jurisdiction-line-flag" data-limit-line={(badge.limitLines || []).map((f) => `${f.kind}:${f.line}:${f.name}`).join("|") || undefined} style={{ flex: "none", color: "var(--warn-text)", fontWeight: 700 }}>⚑</span>}
       {/* The rungs, published for a headless check to read (and never laid out or shown). The FIT is
           decided by asking the browser whether the visible span clipped — see above — so these are a
           DOM contract, not a measuring device. */}

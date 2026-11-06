@@ -43,6 +43,7 @@ import {
   wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable, countVertices, FEATURE_VERTEX_BUDGET, FEATURE_VERTEX_TOTAL,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
+import { foldBoundaryItems } from "./jurisdictionCard.js";
 // One-line predicate, needed synchronously when a layer is built — see featureHoverAttach.js for
 // why the rest of the hover engine is deferred.
 const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
@@ -1332,6 +1333,9 @@ export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDE
  * numbers above survive as comments of intent only; the old tier CEILINGS (layerWeight.js) no longer bound a default. */
 export const DEFAULT_LAYER_OPACITY = 1;
 Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg) cfg.opacity = DEFAULT_LAYER_OPACITY; });
+/* NEW-1 (owner 2026-11-05) — every vector member of the Counties & Cities merged row answers a CLICK on the planner canvas too (it used to answer only on the Map view); the members'
+ * answers are folded into ONE card by `jurisdictionCard.foldBoundaryItems` in `identifyOverlaysAt`. Click only — never hover (constraint #43). */
+Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg && cfg.kind === "vector" && cfg.mergeGroup === "counties_cities" && cfg.canvasIdentify == null) cfg.canvasIdentify = true; });
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
@@ -1843,9 +1847,9 @@ export function rasterIdentifyLayers(overlays, { layerHealthy = () => true, limi
  * the canvas ask the same question with a lat/lng it already computes for its coordinate
  * chip, and get the same answer the map finder's popover would give.
  *
- * Opt-in per layer (`cfg.canvasIdentify`), and ON layers only. Deliberately NOT every
- * vector layer: county / city / ETJ / ISD polygons blanket the view, so every empty click
- * would hit one and the card would become noise instead of an answer.
+ * Opt-in per layer (`cfg.canvasIdentify`), and ON layers only. The Counties & Cities members opt in
+ * (NEW-1, 2026-11-05) and answer as ONE combined card; ISD polygons still do not (they blanket the view,
+ * so every empty click would hit one and the card would become noise instead of an answer).
  *
  * `refs` is the same id→layer object syncOverlayLayers maintains. Returns [] when nothing
  * is under the point (or when a layer has no geometry in hand — a raster/fallback layer
@@ -1861,9 +1865,9 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
       // NEW-1 (DeSoto PSC): several layers may answer with the SAME card (one click → all four utility providers); a shared `dedupeKey` keeps one.
       if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit, about: hit.about || layerAbout(k, cfg) });
     } catch (_) { /* one bad layer never breaks the identify */ }
-    if (out.length >= limit) break;
+    if (out.length >= limit + 4) break; // the merged Counties & Cities row may contribute up to three members, folded into ONE item below
   }
-  return out;
+  return foldBoundaryItems(out).slice(0, limit);
 }
 
 /* NEW-1 — a ROLE-SPLIT raster layer's ref: two live export layers (one per band), presented

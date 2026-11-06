@@ -25,14 +25,17 @@
  */
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
-import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
-import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
+import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, placeLabelZoom, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
+import { labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { cardNode } from "./identifyCard.js";
 import { makeHighlight, setHighlight, releaseHighlight, childFor } from "./featureHighlight.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
 import { siteState } from "./siteRegion.js";
-import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, PLACE_LABEL_INK, PLACE_PILL_ETJ_BG, PLACE_PILL_SHADOW, PLACE_LABEL_SHADOW } from "./boundaryStyle.js";
+import { placeStyle, colorFeatures, placeKey, sharedColorBook } from "./boundaryPaint.js";
+import { viewAnchors, placeNames, labelFontPx, labelBoxPx } from "./placeLabelAnchors.js";
+import { combineJurisdictionHits, COUNTIES_CITIES_GROUP } from "./jurisdictionCard.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { streamBufferBands, bufferLegend, streamBufferLossNote } from "./georgiaStreamBuffers.js";
@@ -137,10 +140,52 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 // Map-cartography label style: white with a dark halo reads on any imagery/theme —
 // this is on-map lettering (like the tile providers' own labels), not app chrome,
 // so it deliberately does not follow the app theme tokens.
-const labelHtml = (text, { uppercase, angle = 0 }) =>
-  `<span style="position:absolute;transform:translate(-50%,-50%)${angle ? ` rotate(${Math.round(angle * 10) / 10}deg)` : ""};white-space:nowrap;color:#fff;` +
-  `text-shadow:0 0 3px rgba(0,0,0,0.9),0 0 7px rgba(0,0,0,0.55);font:700 11px/1.2 system-ui,sans-serif;` +
-  `letter-spacing:0.05em;${uppercase ? "text-transform:uppercase;" : ""}pointer-events:none;">${escapeHtml(text)}</span>`;
+const labelHtml = (text, { uppercase, angle = 0, fontPx = 11, pill = null, dashed = false }) =>
+  `<span style="position:absolute;transform:translate(-50%,-50%)${angle ? ` rotate(${Math.round(angle * 10) / 10}deg)` : ""};white-space:nowrap;color:${PLACE_LABEL_INK};` +
+  (pill
+    ? `background:${dashed ? PLACE_PILL_ETJ_BG : pill};${dashed ? `color:${pill};border:1.5px dashed ${pill};` : ""}padding:1px 7px;border-radius:999px;box-shadow:${PLACE_PILL_SHADOW};`
+    : `text-shadow:${PLACE_LABEL_SHADOW};`) +
+  `font:700 ${Math.round(fontPx * 10) / 10}px/1.2 system-ui,sans-serif;` +
+  `letter-spacing:0.04em;${uppercase ? "text-transform:uppercase;" : ""}pointer-events:none;" data-place-label="1">${escapeHtml(text)}</span>`;
+
+/* NEW-1 — the Counties & Cities members live on each map, so a click on ANY of them can ask the others what is under the same point (one combined card). */
+const boundaryMembers = new WeakMap(); // map → Map(sourceId → identifyAt)
+const boundaryGate = new WeakMap(); // map → { ok, handler } — the ONE map-level click handler (a click INSIDE a shape reaches no polygon: only the outline answers a click, index.css)
+const tolDegFor = (m) => (360 / (256 * Math.pow(2, m.getZoom()))) * 4;
+/* The combined Counties & Cities answer at a point: every member layer on this map asked, folded into one card item (jurisdictionCard.js), or null. */
+function boundaryItemAt(m, latlng) {
+  const at = { lat: latlng.lat, lng: latlng.lng, tolDeg: tolDegFor(m) };
+  const hits = [];
+  for (const ask of (boundaryMembers.get(m) || new Map()).values()) { try { const h = ask(at); if (h) hits.push(h); } catch (_) { /* one bad member never breaks the card */ } }
+  return combineJurisdictionHits(hits);
+}
+/* Open the ONE card for a click at `latlng`; the clicked place is outlined until the card closes (B2507061). Returns the popup, or null when nothing answers. */
+function openBoundaryCard(m, latlng) {
+  const item = boundaryItemAt(m, latlng);
+  if (!item) return null;
+  const node = cardNode({ title: item.title, rows: item.rows, note: item.note, about: item.sourceName ? `Source: ${item.sourceName}` : null });
+  const popup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(latlng).setContent(node).openOn(m);
+  if (item.highlight) { setHighlight(item.highlight); popup.on("remove", () => releaseHighlight(item.highlight)); }
+  return popup;
+}
+/* A click on bare map (or inside a shape) answers with the card, unless the click landed on something that answers for itself (another layer's polygon, a pin, a control). */
+function ensureBoundaryClick(m, ok) {
+  if (boundaryGate.has(m)) return;
+  const entry = { ok, handler: (e) => {
+    const g = boundaryGate.get(m);
+    if (!g || !(boundaryMembers.get(m) || new Map()).size || !g.ok()) return;
+    const t = e.originalEvent && e.originalEvent.target;
+    if (t && t.closest && t.closest(".leaflet-interactive, .leaflet-marker-icon, .leaflet-popup, .leaflet-control")) return;
+    openBoundaryCard(m, e.latlng);
+  } };
+  boundaryGate.set(m, entry);
+  m.on("click", entry.handler);
+}
+function releaseBoundaryClick(m) {
+  if ((boundaryMembers.get(m) || new Map()).size) return;
+  const g = boundaryGate.get(m);
+  if (g) { m.off("click", g.handler); boundaryGate.delete(m); }
+}
 
 /* Build the cached boundary layer for overlay id `k` (must have a VECTOR_SOURCES
  * row). Returns an L.LayerGroup with a `setOpacity` like every other overlay, or
@@ -160,7 +205,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   let map = null, opacity = initialOpacity, lastVectorError = null;
   let fellBack = false, fallbackLayer = null, openPopup = null;
-  let seq = 0, lastKey = null, anchors = [], lastFc = null;
+  let seq = 0, lastKey = null, lastFc = null;
   const labelMarkers = [];
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const lineColor = cfg.color || "#374151";
@@ -172,17 +217,17 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   const pointStyle = () => ({ ...pointSymbolOptions(cfg, opacity), className: "pf-boundary-hit" });
   /* B2507065 (NEW-10, owner constraint #47) — Counties & Cities reads at a glance. CITY LIMITS: a bolder outline plus a light tint INSIDE (none outside = unincorporated). COUNTIES:
    * a heavier DASHED grey line with a light halo (the `pf-county-line` CSS filter) — a different kind of line from a city's solid one; state lines (adminBoundaryData) are heavier still. */
-  const countyLine = isCountyLinesId(source.id), cityLine = isCityLimitsId(source.id);
-  const lineStyle = () => (countyLine ? {
+  const countyLine = isCountyLinesId(source.id), cityLine = isCityLimitsId(source.id), etjLine = source.id === "jur_etj";
+  const placeLine = cityLine || etjLine; // a layer of PLACES: each city gets its own hue (boundaryPaint)
+  const lineStyle = (feature) => (countyLine ? {
     color: COUNTY_LINE_COLOR, weight: COUNTY_LINE_WEIGHT, opacity: Math.max(opacity, 0.85), dashArray: COUNTY_LINE_DASH,
     fill: true, fillColor: COUNTY_LINE_COLOR, fillOpacity: interactive ? 0.02 : 0, className: "pf-boundary-hit pf-county-line",
-  } : cityLine ? {
-    color: lineColor, weight: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), opacity,
-    fill: true, fillColor: lineColor, fillOpacity: CITY_TINT_OPACITY, className: "pf-boundary-hit",
+  } : placeLine ? {
+    // NEW-1 (owner 2026-11-05): ONE hue per city — limits bold + tinted, ETJ the same hue thinner, dashed, fainter. The hue book is shared by every layer and surface.
+    ...placeStyle(etjLine ? "etj" : "city", nameOf(feature), { opacity, fallbackInk: lineColor }), fill: true, className: "pf-boundary-hit",
   } : {
     color: lineColor, weight: cfg.weight || 2, opacity,
-    // B761: a boundary source can request a DASHED stroke (cfg.dash) — used to draw ETJ
-    // in the same hue as solid city limits, so line-style (not color) tells them apart.
+    // B761: a boundary source can request a DASHED stroke (cfg.dash) — line style, not colour, is how a kind of line is told apart.
     ...(cfg.dash ? { dashArray: "6 5" } : {}),
     // fill is the hover/click hit area; at 0.02 it's imperceptible on imagery. The
     // className lets select mode neutralize Leaflet's `.leaflet-interactive
@@ -194,7 +239,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   // NEW-2 — an SB 2038 release area draws DOTTED (line style, never opacity, is what separates a kind of line):
   // solid = city limits, dashed = ETJ, dotted = a release area.
   const baseStyle = (feature) => (isPointFeature(feature) ? pointStyle()
-    : feature && feature.properties && feature.properties._release ? { ...lineStyle(), dashArray: "2 5" } : lineStyle());
+    : feature && feature.properties && feature.properties._release ? { ...lineStyle(feature), dashArray: "2 5" } : lineStyle(feature));
 
   const group = L.layerGroup([], { pane });
   const nameOf = (feature) => {
@@ -214,6 +259,12 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     // B2507061 (owner constraint #43): NO hover tooltip and no hover emphasis — a boundary answers a CLICK with the clean card, and nothing else.
     lyr.on("click", (e) => {
       if (!identifyOk() || !map) return;
+      /* NEW-1 (owner 2026-11-05): a click on the Counties & Cities row answers with ONE card — city, limits or ETJ, county — built from every member layer at the point
+       * (jurisdictionCard.js), never with whichever polygon happened to be on top. */
+      if (cfg.mergeGroup === COUNTIES_CITIES_GROUP) {
+        const popup = openBoundaryCard(map, e.latlng);
+        if (popup) { openPopup = popup; return; }
+      }
       const about = source.sourceName ? `Source: ${source.sourceName}` : null;
       const node = cardNode({ title: displayName(feature), rows: identifyRowsFor(source, feature && feature.properties), note: source.identifyNote || null, about });
       openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(node).openOn(map);
@@ -246,44 +297,68 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   // boundaryLabels.js; bigger polygons win, collisions drop).
   /* B2507065 (NEW-10): COUNTY names go alongside the line on each county's own side, turned to run parallel to it ("DeSoto Co." / "Shelby Co., TN"), instead of at the middle
    * of the county. Pure placement in countyLineLabels.js; this only projects and draws. */
-  const refreshCountyLabels = () => {
-    if (!map || !lastFc || !labelsVisible(source.labelZoom, map.getZoom())) return;
-    const size = map.getSize(), c = map.getCenter();
-    const home = siteState({ lat: c.lat, lng: c.lng });
-    const labels = countyLineLabels((lastFc.features) || [], {
-      textOf: (f) => countyLabelText(nameOf(f), source.stateAbbr, home),
-      project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
-      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x, y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
-      viewW: size.x, viewH: size.y,
-    });
-    for (const p of labels) {
-      const icon = L.divIcon({ className: "", html: labelHtml(p.text, { uppercase: false, angle: p.angle }), iconSize: [0, 0] });
-      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
-      group.addLayer(mk);
-      labelMarkers.push(mk);
+  /* NEW-1 — the part of the map a PERSON CAN SEE. The planner's backdrop map is deliberately bigger than the canvas it sits behind (overscan: tiles are kept past every edge so a pan never shows
+   * blank), so names placed against the map's own box landed off screen at working zoom (found live: a name at y = 984 in a 950-px window). Every name is placed in the rectangle of the
+   * nearest clipping ancestor, in coordinates local to it, and put back into map pixels only when the marker is made. A map that is not overscanned (the Map view) is its own rectangle. */
+  const visibleRect = (m) => {
+    const c = m.getContainer(), cr = c.getBoundingClientRect();
+    let x0 = cr.left, y0 = cr.top, x1 = cr.right, y1 = cr.bottom;
+    for (let el = c.parentElement, n = 0; el && n < 4; el = el.parentElement, n++) {
+      let ov = ""; try { const cs = getComputedStyle(el); ov = `${cs.overflow} ${cs.overflowX} ${cs.overflowY} ${cs.clipPath || ""}`; } catch (_) { /* detached */ }
+      if (!/hidden|clip|scroll|auto/.test(ov)) continue;
+      const r = el.getBoundingClientRect();
+      x0 = Math.max(x0, r.left); y0 = Math.max(y0, r.top); x1 = Math.min(x1, r.right); y1 = Math.min(y1, r.bottom);
     }
+    if (!(x1 - x0 > 20 && y1 - y0 > 20)) return { x: 0, y: 0, w: cr.width, h: cr.height };
+    return { x: x0 - cr.left, y: y0 - cr.top, w: x1 - x0, h: y1 - y0 };
+  };
+  const mapPx = (m, r) => (lng, lat) => { try { const p = m.latLngToContainerPoint([lat, lng]); return { x: p.x - r.x, y: p.y - r.y }; } catch (_) { return null; } };
+  const mapBounds = (m) => { const b = m.getBounds(); return { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() }; };
+  const addLabel = (m, r, px, py, html) => {
+    let ll = null; try { ll = m.containerPointToLatLng([px + r.x, py + r.y]); } catch (_) { return; }
+    const icon = L.divIcon({ className: "", html, iconSize: [0, 0] });
+    const mk = L.marker([ll.lat, ll.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
+    group.addLayer(mk);
+    labelMarkers.push(mk);
+  };
+  const refreshCountyLabels = () => {
+    if (!map || !lastFc || !labelsVisible(placeLabelZoom(source), map.getZoom())) return;
+    const r = visibleRect(map), c = map.getCenter(), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
+    const home = siteState({ lat: c.lat, lng: c.lng });
+    const feats = lastFc.features || [];
+    const textOf = (f) => countyLabelText(nameOf(f), source.stateAbbr, home);
+    const project = mapPx(map, r);
+    const labels = countyLineLabels(feats, {
+      textOf, project,
+      unproject: (x, y) => { try { const ll = map.containerPointToLatLng([x + r.x, y + r.y]); return { lat: ll.lat, lng: ll.lng }; } catch (_) { return null; } },
+      viewW: r.w, viewH: r.h, fontPx,
+    });
+    for (const p of labels) addLabel(map, r, p.x, p.y, labelHtml(p.text, { uppercase: false, angle: p.angle, fontPx }));
+    /* NEW-1 (owner 2026-11-05): a county whose boundary is NOT on screen (the whole view is inside it — the working zoom of a site plan) still names itself, once, near the
+     * bottom of the view; "Fort Bend Co." must not vanish just because you zoomed in past its line. */
+    const placedTexts = new Set(labels.map((p) => p.text));
+    const anchors = viewAnchors(feats, { nameOf: textOf, project, viewW: r.w, viewH: r.h, bounds: mapBounds(map), band: [0.76, 0.9] }).filter((a) => !placedTexts.has(a.name));
+    const taken = labels.map((p) => ({ x: p.x, y: p.y, box: labelBoxPx(p.text, fontPx) }));
+    for (const a of placeNames(anchors, { textOf: (x) => x.name, fontPx, viewW: r.w, viewH: r.h, taken })) addLabel(map, r, a.x, a.y, labelHtml(a.name, { uppercase: false, fontPx }));
   };
 
+  /* NEW-1 (owner 2026-11-05) — city / ETJ names at EVERY zoom, in the part of each polygon that is on screen (placeLabelAnchors.js): the old rule put the name at the polygon's
+   * centre and switched it off above zoom 13, so at working zoom nothing named the ground the site stood on. A city's name sits on a pill in its own hue; an ETJ's on a dashed one. */
   const refreshLabels = () => {
     clearLabels();
     if (isCountyLinesId(source.id)) { refreshCountyLabels(); return; }
-    if (!map || !anchors.length || !labelsVisible(source.labelZoom, map.getZoom())) return;
-    const size = map.getSize();
+    if (!map || !lastFc || !source.labelField || !labelsVisible(placeLabelZoom(source), map.getZoom())) return;
+    const r = visibleRect(map), zoom = map.getZoom(), fontPx = labelFontPx(zoom);
     /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already
      * drawing (see placeNamesGate.js). Filtered BEFORE placement so the names that remain get the freed room. */
     const drawnElsewhere = isCityLimitsId(source.id) ? placeNamesShown(map) : null;
-    const wanted = drawnElsewhere && drawnElsewhere.size ? anchors.filter((a) => !drawnElsewhere.has(placeNameKey(a.name))) : anchors;
-    const placed = placeLabels(wanted, {
-      project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
-      viewW: size.x, viewH: size.y,
-    });
-    for (const p of placed) {
-      // NEW-2 — a disputed strip and a release area already carry their full wording; never "… ETJ ETJ".
-      const text = source.id === "jur_etj" ? (/^Undetermined/.test(p.name) ? "ETJ undetermined (disputed)" : /release area/.test(p.name) ? p.name : `${p.name} ETJ`) : p.name;
-      const icon = L.divIcon({ className: "", html: labelHtml(text, { uppercase: isCountyLinesId(source.id) }), iconSize: [0, 0] });
-      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
-      group.addLayer(mk);
-      labelMarkers.push(mk);
+    let anchors = viewAnchors(lastFc.features || [], { nameOf, project: mapPx(map, r), viewW: r.w, viewH: r.h, bounds: mapBounds(map) });
+    if (drawnElsewhere && drawnElsewhere.size) anchors = anchors.filter((a) => !drawnElsewhere.has(placeNameKey(a.name)));
+    // NEW-2 — a disputed strip and a release area already carry their full wording; never "… ETJ ETJ".
+    const textFor = (name) => (source.id === "jur_etj" ? (/^Undetermined/.test(name) ? "ETJ undetermined (disputed)" : /release area/.test(name) ? name : `${name} ETJ`) : name);
+    for (const p of placeNames(anchors, { textOf: (a) => textFor(a.name), fontPx: etjLine ? fontPx * 0.92 : fontPx, viewW: r.w, viewH: r.h })) {
+      const pill = placeLine ? (sharedColorBook.colorOf(placeKey(p.name)) || lineColor) : null;
+      addLabel(map, r, p.x, p.y, labelHtml(textFor(p.name), { uppercase: false, fontPx: etjLine ? fontPx * 0.92 : fontPx, pill, dashed: etjLine }));
     }
   };
 
@@ -319,8 +394,8 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     geo.clearLayers();
     lastFc = fc || null; // B1092 — kept so a non-Leaflet surface can hit-test what's painted
     const n = (fc && fc.features && fc.features.length) || 0;
+    if (placeLine && fc) colorFeatures(fc, nameOf); // every place gets its hue BEFORE it is drawn (a neighbour never shares one)
     if (n) geo.addData(fc);
-    anchors = source.labelField && fc ? labelAnchors(fc, { labelField: source.labelField, titleCase: !!source.titleCaseLabel }) : [];
     refreshLabels();
     const paintMs = performance.now() - t0;
     if (paintMs > SLOW_PAINT_MS) reportSlow("boundary-paint-slow", paintMs, fc, { labels: labelMarkers.length });
@@ -334,7 +409,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     if (fellBack) return;
     seq++; // invalidate every in-flight vector fetch / pending onFresh swap — nothing may paint over the fallback
     closeIdentify();
-    geo.clearLayers(); clearLabels(); anchors = []; lastKey = null;
+    geo.clearLayers(); clearLabels(); lastKey = null;
     if (!buildFallback) {
       report("failed", `${cfg.label}: ${(err && err.message) || "the boundary service is not responding"} (screening only).`);
       return;
@@ -356,7 +431,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     const zoom = map.getZoom();
     if (cfg.minZoom && zoom < cfg.minZoom) {
       seq++; // a slow in-flight fetch from above the gate must not paint below it
-      geo.clearLayers(); clearLabels(); anchors = []; lastKey = null;
+      geo.clearLayers(); clearLabels(); lastKey = null;
       report("empty", `Zoom in to ≥ ${cfg.minZoom} to load`);
       return;
     }
@@ -409,6 +484,11 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     }
     L.LayerGroup.prototype.onAdd.call(this, m);
     m.on("moveend", refresh);
+    if (cfg.mergeGroup === COUNTIES_CITIES_GROUP) {
+      if (!boundaryMembers.has(m)) boundaryMembers.set(m, new Map());
+      boundaryMembers.get(m).set(source.id, group.identifyAt);
+      if (interactive) ensureBoundaryClick(m, identifyOk); // click-only (never hover): a click inside a shape opens the same card
+    }
     if (isCityLimitsId(source.id)) m.on("pf:placenames", refreshLabels);   // the canvas layer's names changed → re-place ours
     report("loading");
     refresh();
@@ -418,6 +498,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     seq++; // invalidate in-flight fetches / onFresh swaps
     closeIdentify(); // the popover must not outlive the layer
     m.off("moveend", refresh);
+    if (boundaryMembers.has(m)) { boundaryMembers.get(m).delete(source.id); releaseBoundaryClick(m); }
     if (isCityLimitsId(source.id)) m.off("pf:placenames", refreshLabels);
     L.LayerGroup.prototype.onRemove.call(this, m);
     map = null; lastKey = null;
@@ -442,6 +523,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
  * canvas card describe a feature identically. `titleOf` is the layer's OWN headline
  * rule (a boundary layer's label field vs. a line layer's registry title), so neither
  * borrows the other's wording. Pure given `fc`. */
+const nameText = (source, f) => { const raw = f && f.properties && source.labelField ? f.properties[source.labelField] : null; const n = raw == null ? "" : String(raw).trim(); return n && source.titleCaseLabel ? titleCaseName(n) : n; };
 function identifyPayload(source, fc, at, disabled, titleOf, childOf = null) {
   if (disabled || !fc) return null;
   const f = hitFeature(fc, at || {});
@@ -452,6 +534,7 @@ function identifyPayload(source, fc, at, disabled, titleOf, childOf = null) {
     ...(token ? { highlight: token } : {}),
     sourceId: source.id || null,
     title: titleOf(f),
+    name: nameText(source, f), // the plain place name — the combined Counties & Cities card names the place from it (jurisdictionCard.js)
     rows: identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref }),
     note: source.identifyNote || null,
     sourceName: source.sourceName || null,
