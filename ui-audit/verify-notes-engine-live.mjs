@@ -41,12 +41,13 @@ if (process.env.EXPECT_BUILD) ok(`served build is the merge commit ${process.env
 
 const para = (t) => ({ type: "paragraph", content: t ? [{ type: "text", text: t }] : [] });
 const DOC = () => ({ type: "doc", content: [
-  { type: "noteAnchor", attrs: { x: 40, y: 40, w: 520, h: null, aid: "fmt" }, content: [para("Alpha bravo charlie")] },
-  { type: "noteAnchor", attrs: { x: 40, y: 220, w: 520, h: null, aid: "pst" }, content: [para("x")] },
+  { type: "noteAnchor", attrs: { x: 40, y: 150, w: 520, h: null, aid: "fmt" }, content: [para("Alpha bravo charlie")] },
+  { type: "noteAnchor", attrs: { x: 40, y: 330, w: 520, h: null, aid: "pst" }, content: [para("x")] },
   para(""),
 ] });
 const live = () => page.evaluate(() => window.__noteEditor?.json?.() ?? null);
 const settle = (ms = 900) => page.waitForTimeout(ms);
+const dump = async (tag) => { if (process.env.DBG) { const d = await live(); console.log("   [dbg]", tag, "bravo:", markNames(runsOf(d, "bravo")[0]).join(" ") || "NO MARKS", JSON.stringify((d?.content || []).map((n) => n.type === "noteAnchor" ? [n.attrs.aid, n.attrs.x, n.attrs.y, JSON.stringify(n.content).slice(0, 220)] : n.type))); } };
 async function pointIn(needle, whole = false) {
   const p = await page.evaluate(([n, w]) => {
     const t = document.createTreeWalker(document.querySelector(".ProseMirror"), NodeFilter.SHOW_TEXT);
@@ -65,9 +66,33 @@ const tool = async (id) => {
   await page.locator(`[data-testid="${id}"]`).first().click(); await settle(400);
 };
 const runsOf = (doc, needle) => { const out = []; const w = (n) => { if (!n) return; if (n.type === "text" && n.text.includes(needle)) out.push(n); (n.content || []).forEach(w); }; w(doc); return out; };
-const markNames = (n) => (n?.marks || []).map((m) => m.type + (m.attrs ? JSON.stringify(Object.fromEntries(Object.entries(m.attrs).filter(([, v]) => v != null))) : ""));
+const markNames = (n) => (n?.marks || []).map((m) => { const a = Object.fromEntries(Object.entries(m.attrs || {}).filter(([, v]) => v != null)); return m.type + (Object.keys(a).length ? JSON.stringify(a) : ""); });
 const boxes = (doc) => (doc.content || []).filter((n) => n.type === "noteAnchor");
 const tableOf = (doc) => { let t = null; const w = (n) => { if (!n || t) return; if (n.type === "table") { t = n; return; } (n.content || []).forEach(w); }; w(doc); return t; };
+
+const posOf = async () => { const b = boxes(await live()).find((n) => n.attrs.aid === "fmt"); return b ? [b.attrs.x, b.attrs.y] : null; };
+const exercisedArms = [];
+async function boxMoveTest(label) {
+  const pos = posOf;
+  if (!(await pos())) voided("the first box is missing before the move test");
+
+    for (const side of ["top", "left"]) {
+      const start = await pos();
+      const r = await page.evaluate(() => { const b = [...document.querySelectorAll(".planyr-anchor")].find((a) => a.textContent.includes("Alpha")); const q = b.getBoundingClientRect(); return { l: q.left, t: q.top, w: q.width, h: q.height }; });
+      const at = side === "top" ? { x: r.l + r.w / 2, y: r.t - 1 } : { x: r.l - 2, y: r.t + r.h / 2 };
+      await page.mouse.move(at.x, at.y, { steps: 4 }); await settle(200);
+      const onBand = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest?.(".planyr-anchor-edge"), [at.x, at.y]);
+      if (!onBand && process.env.DBG) console.log("   [dbg] covered by", JSON.stringify(await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); const chain = []; for (let n = e; n && chain.length < 6; n = n.parentElement) chain.push(`${n.tagName}.${(n.className || "").toString().slice(0, 40)}[${n.getAttribute("data-testid") || ""}]`); const a = [...document.querySelectorAll(".planyr-anchor")].map((q) => { const b = q.getBoundingClientRect(); return [q.textContent.slice(0, 12), Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; }); return { at: [x, y], chain, anchors: a, vp: [innerWidth, innerHeight] }; }, [at.x, at.y])));
+      if (!onBand) { console.log(`   • ${label}: ${side} band NOT under the pointer (covered by other chrome) — arm not exercised, not scored`); exercisedArms.push(`${label}/${side}:no`); continue; }
+      exercisedArms.push(`${label}/${side}:yes`);
+      if (process.env.DBG) console.log("   [dbg] press target", label, side, JSON.stringify(await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return { cls: e?.className?.toString().slice(0, 60), tag: e?.tagName, edge: !!e?.closest?.(".planyr-anchor-edge"), cursor: e ? getComputedStyle(e).cursor : null, active: document.activeElement?.className?.toString().slice(0, 40), sel: document.querySelectorAll('[data-selected="1"]').length }; }, [at.x, at.y])));
+      await page.mouse.down(); await page.mouse.move(at.x + 40, at.y + 30, { steps: 8 }); await page.mouse.move(at.x + 40, at.y + 30, { steps: 2 }); await page.mouse.up(); await settle(1000);
+      const moved = await pos();
+      ok(`${label}: moving a box by its ${side} border moves it (X and Y)`, moved[0] > start[0] + 20 && moved[1] > start[1] + 15, `${JSON.stringify(start)} → ${JSON.stringify(moved)}`);
+      await page.keyboard.press("Control+z"); await settle(900);
+      ok(`${label}: Ctrl+Z puts the box back (${side})`, JSON.stringify(await pos()) === JSON.stringify(start), JSON.stringify(await pos()));
+    }
+}
 
 let created = false;
 try {
@@ -86,22 +111,27 @@ try {
   console.log("\n=== 1 · type and format ===");
   await enter("Alpha bravo charlie");
   await page.keyboard.press("End"); await page.keyboard.type(" delta"); await settle(500);
+  await dump("typed");
   ok("typed text lands in the box", /Alpha bravo charlie delta/.test(JSON.stringify(await live())));
-  { const p = await pointIn("bravo", true); await page.mouse.dblclick(p.x, p.y); await settle(300); }
+  /* the word is selected with real keys (Home, Ctrl+Right, Ctrl+Shift+Right): a double-click on a word is timing-dependent */
+  await page.keyboard.press("Home"); await page.keyboard.press("Control+ArrowRight"); await page.keyboard.press("Control+Shift+ArrowRight"); await settle(300);
+  { const sel = await page.evaluate(() => window.__noteEditor.selection()); if (!sel || sel.empty) voided("the word was not selected — formatting cannot be judged"); }
   await tool("nt-bold");
+  await dump("selected+bold");
   { const armBold = await pressed("nt-bold"); if (armBold !== "true") voided("a real bold did not light B — the toolbar is not reaching the document"); }
-  ok("[known-good] bold stored on the selected word", markNames(runsOf(await live(), "bravo")[0]).includes("bold"));
+  ok("[known-good] bold stored on the selected word", markNames(runsOf(await live(), "bravo")[0]).includes("bold"), JSON.stringify(runsOf(await live(), "bravo")));
   await tool("nt-color"); await page.locator('[data-testid="nt-color-popover"] button').nth(2).click(); await settle(400);
   await tool("nt-highlight"); await page.locator('[data-testid="nt-highlight-popover"] button').nth(2).click(); await settle(400);
   await tool("nt-size");
   { const opt = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="nt-size-opt-"]')].map((b) => b.getAttribute("data-testid")).filter((t) => !/default$/.test(t))[3]); if (opt) await page.locator(`[data-testid="${opt}"]`).click(); await settle(400); }
-  { const el = page.locator('[data-testid="nt-font"]').first(); if (!(await el.isVisible().catch(() => false))) { await page.locator('[data-testid="nt-more"]').first().click().catch(() => {}); await settle(300); }
-    const vals = await page.locator('[data-testid="nt-font"]').first().evaluate((n) => [...n.options].map((o) => o.value)); const pick = vals.filter(Boolean)[3] || vals[1]; await page.locator('[data-testid="nt-font"]').first().selectOption(pick); await settle(500); }
+  await tool("nt-font");
+  { const opt = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="nt-font-opt-"]')].map((b) => b.getAttribute("data-testid")).filter((t) => !/default$/.test(t))[3]); if (opt) await page.locator(`[data-testid="${opt}"]`).click(); await settle(500); }
   { const marks = markNames(runsOf(await live(), "bravo")[0]).join(" ");
     ok("text colour stored", /"color":"#?[0-9a-fA-F]+/.test(marks), marks);
     ok("highlight stored", /highlight/.test(marks), marks);
     ok("size stored", /fontSize/.test(marks), marks);
     ok("font stored", /fontFamily/.test(marks), marks); }
+  await dump("after-fmt");
   await tool("nt-spacing");
   { const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="nt-spacing-line-"]')].map((b) => b.getAttribute("data-testid")));
     const pick = opts.find((o) => /1-5|1\.5|150/.test(o)) || opts[opts.length - 2];
@@ -109,17 +139,36 @@ try {
     const lh = boxes(await live())[0].content[0].attrs?.lineHeight;
     ok("line spacing stored on the paragraph", lh != null && lh !== "", `lineHeight=${lh} (picked ${pick})`); }
 
+  await boxMoveTest("right after formatting");
+
   console.log("\n=== 2 · paste the Excel fixture ===");
+  await dump("before-paste");
   const fx = bankEntry;
-  await enter("x"); await page.keyboard.press("Backspace"); await settle(300);
+  await enter("x"); await page.keyboard.press("End"); await settle(300);   // table pastes land AFTER the line (a Backspace on a selected box would delete the box)
+  /* 2a — the BROWSER clipboard (a trusted Ctrl+V). Chrome sanitises html written through the async clipboard API, so this proves the
+   * real-keystroke route and the grid / merge / empty cell; the exact bytes (class-written bold, red) are 2b below. */
+  {
+    const frag = fx.html.replace(/^[\s\S]*<!--StartFragment-->/, "").replace(/<!--EndFragment-->[\s\S]*$/, "");
+    await page.evaluate(async ([h, t]) => { await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([h], { type: "text/html" }), "text/plain": new Blob([t], { type: "text/plain" }) })]); }, [frag, fx.text]);
+    const before = JSON.stringify(await live());
+    await page.keyboard.press("Control+V"); await settle(1500);
+    const sum = summariseDoc(await live()).tables[0];
+    ok("real Ctrl+V from the browser clipboard: a 3×3 table with every cell's text and the empty cell empty", !!sum && sum.rows === 3 && sum.cols === 3 && sum.cells.find((c) => c.r === 0 && c.c === 0)?.text === "Header AB" && sum.cells.find((c) => c.r === 2 && c.c === 2)?.text === "12,500" && sum.cells.some((c) => c.r === 1 && c.c === 1 && c.raw === ""), JSON.stringify(sum && sum.cells.map((c) => [c.r, c.c, c.text, c.colspan])));
+    await page.keyboard.press("Control+z"); await settle(900);
+    ok("Ctrl+Z takes that paste back out", JSON.stringify(await live()) === before);
+  }
+  console.log("   2b — the exact fixture bytes");
+  await enter("x"); await page.keyboard.press("End"); await settle(300);   // the undo above restored the earlier box selection; a paste over a selected box replaces it
   await page.evaluate(([h, t]) => {
     const dt = new DataTransfer(); dt.setData("text/html", h); dt.setData("text/plain", t);
     document.activeElement.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
   }, [fx.html, fx.text]);
   await settle(1500);
+  await dump("after-paste");
   { const t = tableOf(await live()); if (!t) voided("the Excel paste did not land a table at all"); }
   { const problems = checkEntry(fx, summariseDoc(await live())); ok("exact-bytes paste: rows, columns, merge, empty cell, bold, red text, no imported shading", problems.length === 0, problems.join("\n      ")); }
 
+  if (process.env.BISECT) await boxMoveTest("after the paste");
   console.log("\n=== 3 · paste options ===");
   { const chip = page.locator('[data-testid="note-paste-badge"]');
     ok("the paste-options tab is offered", (await chip.count()) === 1);
@@ -133,12 +182,16 @@ try {
       ok("one Ctrl+Z puts the table back as pasted", JSON.stringify(tableOf(await live())) === before);
     } }
 
+  await dump("after-options");
+  if (process.env.BISECT) await boxMoveTest("after the paste option + undo");
   console.log("\n=== 4 · fill, row height, box move ===");
   await enter("Plain");
   await tool("nt-fill"); await page.locator('[data-testid="nt-fill-yellow"]').click(); await settle(1000);
   { const row = tableOf(await live()).content[2]; ok("the row is filled", row.content.every((c) => c.attrs?.background === "#fef08a"), JSON.stringify(row.content.map((c) => c.attrs?.background))); }
   await tool("nt-fill"); await page.locator('[data-testid="nt-fill-none"]').click(); await settle(1000);
   { const row = tableOf(await live()).content[2]; ok("No fill clears it", row.content.every((c) => !c.attrs?.background || c.attrs.background === "transparent")); }
+  await dump("after-fill");
+  if (process.env.BISECT) await boxMoveTest("after fill + clear");
   {
     const rect = await page.evaluate(() => { const td = [...document.querySelectorAll(".ProseMirror td")].find((c) => c.textContent.trim() === "Plain"); const r = td.getBoundingClientRect(); return { x: r.left + r.width / 2, bottom: r.bottom }; });
     await page.mouse.move(rect.x, rect.bottom - 1); await settle(200);
@@ -146,26 +199,22 @@ try {
     const rh = tableOf(await live()).content.map((r) => r.attrs?.rowHeight ?? null);
     ok("dragging the row's lower line sets its height", rh.some((h) => typeof h === "number" && h > 40), JSON.stringify(rh));
   }
-  {
-    const before = boxes(await live()).map((b) => [b.attrs.x, b.attrs.y]);
-    const r = await page.evaluate(() => { const b = document.querySelector('.planyr-anchor[data-aid="fmt"]') || document.querySelectorAll(".planyr-anchor")[0]; const q = b.getBoundingClientRect(); return { x: q.left, y: q.top, h: q.height }; });
-    await page.mouse.move(r.x - 2, r.y + r.h / 2); await settle(200);
-    await page.mouse.down(); await page.mouse.move(r.x + 40, r.y + r.h / 2 + 30, { steps: 8 }); await page.mouse.up(); await settle(1000);
-    const after = boxes(await live()).map((b) => [b.attrs.x, b.attrs.y]);
-    ok("moving a box by its border moves it", after[0][0] > before[0][0] + 20 && after[0][1] > before[0][1] + 15, `${JSON.stringify(before[0])} → ${JSON.stringify(after[0])}`);
-    await page.keyboard.press("Control+z"); await settle(900);
-    const undone = boxes(await live()).map((b) => [b.attrs.x, b.attrs.y]);
-    ok("Ctrl+Z puts the box back", JSON.stringify(undone[0]) === JSON.stringify(before[0]), JSON.stringify(undone[0]));
-  }
-
+  await dump("after-rowdrag");
+  await boxMoveTest("after the paste, fill and row drag");
+  ok("the border-move arms that could be reached were exercised (at least the two taken right after formatting)", exercisedArms.filter((a) => /^right after formatting.*:yes$/.test(a)).length === 2, exercisedArms.join(" "));
+  await dump("end-of-4");
   console.log("\n=== 5 · reload with a cache-busting query ===");
   const snap = await live();
   const want = { bravo: markNames(runsOf(snap, "bravo")[0]).sort().join("|"), grid: JSON.stringify(summariseDoc(snap).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) };
   await page.waitForTimeout(4000);
   await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="note-body"]', { timeout: 30000 }); await settle(3000);
+  await page.waitForSelector('[data-testid^="notes-row-"]', { timeout: 30000 }); await settle(2500);
+  { const idx = await page.evaluate((t) => [...document.querySelectorAll('[data-testid^="notes-row-"]')].findIndex((r) => r.innerText.split("\n")[0].trim() === t), TITLE);
+    if (idx >= 0) { await page.locator('[data-testid^="notes-row-"]').nth(idx).click(); await settle(2500); } }
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 30000 }); await settle(2000);
   { const after = await live();
     ok("this is the throwaway page after the reload", JSON.stringify(after).includes("Alpha"), "page did not reopen on the throwaway");
+    ok("the formatted word has marks to persist (not a vacuous comparison)", want.bravo.length > 0, want.bravo);
     ok("formatting persisted", markNames(runsOf(after, "bravo")[0]).sort().join("|") === want.bravo, markNames(runsOf(after, "bravo")[0]).join(" "));
     ok("the table persisted (same cells, same merge)", JSON.stringify(summariseDoc(after).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) === want.grid);
     const sv = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json())); console.log("   served build after reload:", sv.build); }
