@@ -171,9 +171,14 @@ try {
   check("B · no request to CDM Smith's service failed", bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
   for (const id of ["sl_water_lines", "sl_sewer_gravity", "sl_water_valves", "sl_manholes"]) check(`B · ${id}: painted ≥ 2 features (the layer is not collapsed to one)`, (F[id] || 0) >= 2, String(F[id]));
   for (const id of ["sl_sewer_force", "sl_lift_stations"]) check(`B · ${id}: painted ≥ 1 feature`, (F[id] || 0) >= 1, String(F[id]));
-  const ops = (L && L.opacities) || {};
-  console.log("opacities:", JSON.stringify(Object.fromEntries(Object.entries(ops).filter(([k]) => k.startsWith("sl_")))));
-  check("B · opacity starts at 100% on a switched-on row", JSON.stringify(ops.sl_water_lines || {}).includes("1") && !JSON.stringify(ops.sl_water_lines || {}).match(/0\.\d/), JSON.stringify(ops.sl_water_lines));
+  /* opacity is read from the row's OWN control (`__plannerLayers().opacities` lists raster opacities only — it is [] for a vector layer, so it cannot answer this) */
+  await panel.getByTestId("layer-group-util").click(); await sleep(250);
+  for (const id of ["sl_water_lines", "sl_sewer_lines", "sl_valves", "sl_sewer_structures", "sl_plants"]) {
+    await panel.getByTestId(`layer-caret-${id}`).click(); await sleep(400);
+    const pct = await panel.locator(`[data-testid="layer-row-${id}-menu"] [data-part="opacity"] input[type="text"]`).first().inputValue().catch(() => null);
+    check(`B · ${id}: opacity starts at 100%`, pct === "100", String(pct));
+    await panel.getByTestId(`layer-caret-${id}`).click().catch(() => {}); await sleep(200);
+  }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-harmon-all-rows.png` });
 
   const card = {};
