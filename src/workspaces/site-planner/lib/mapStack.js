@@ -30,8 +30,12 @@
  *   A toggle you never have to touch beats a toggle you always have to touch.
  *
  * WHERE THE TIERS PHYSICALLY LIVE (planner canvas, SitePlanner.jsx):
- *   basemap · gisArea      → Leaflet panes inside the BACKDROP map <div> (below the SVG)
+ *   basemap                → Leaflet panes inside the BACKDROP map <div> (below the SVG)
  *   reference … handle     → `<g>` groups INSIDE the one planner SVG, in this order
+ *   gisArea                → a Leaflet pane hosted INSIDE the planner SVG, in a screen-space
+ *                            <foreignObject> at the `data-gis-area-band` anchor, right after the
+ *                            default-band references (NEW-1 second pass, B2671190 ×2) — the same
+ *                            hosting as gisAreaFront, one band lower
  *   gisAreaFront           → a Leaflet pane hosted INSIDE the planner SVG, in a screen-space
  *                            <foreignObject> sitting at the `data-gis-front-band` anchor —
  *                            which is how a LIFTED fill gets above the elements and still
@@ -55,9 +59,17 @@
  * because a human-readable label on every entry is a string that ships to every visitor's browser
  * and that no runtime code ever reads. (NEW-1 moved them out for exactly that reason, paying for
  * its own bundle cost rather than raising the site route's budget.)
- *   basemap        100 — aerial / basemap imagery
- *   gisArea        200 — GIS AREA layers: filled polygons (floodplain, wetlands, soils, districts)
- *   reference      300 — references / imported site-plan overlays (the DEFAULT "below" band)
+ *   basemap        100 — aerial / basemap imagery (and a located plan's stored map snapshot, lib/aerialSnapshot.js)
+ *   reference      200 — references / imported site-plan overlays (the DEFAULT "below" band)
+ *   gisArea        300 — GIS AREA layers: filled polygons (floodplain, wetlands, soils, districts, zoning)
+ *                        ⛔ NEW-1 second pass (B2671190 ×2, 2026-11-06): ABOVE the default-band references, not
+ *                        under them. A reference is a picture the user dropped on the plan — often an aerial
+ *                        screenshot or a scanned sheet — and an opaque one used to cut a crisp rectangular HOLE
+ *                        in every fill (the owner's Academy plan: a PNG ~3,800 ft east of the site; "Zoning and
+ *                        Future Land Use cut out around the site", Map Base on or off). Fills are translucent, so a
+ *                        drawing under one still reads; a fill under an opaque picture does not exist on screen. The
+ *                        fills still sit UNDER the parcel, setback and elements (the load-bearing rule below is
+ *                        untouched), and a reference promoted "above the plan" (referenceFront) still clears them.
  *   parcel         400 — parcel boundary
  *   setback        500 — setback band
  *   elements       600 — site elements
@@ -76,8 +88,8 @@
  *   handle         900 — manipulation handles, always on top */
 export const MAP_STACK = [
   { id: "basemap", z: 100 },
-  { id: "gisArea", z: 200 },
-  { id: "reference", z: 300 },
+  { id: "reference", z: 200 },
+  { id: "gisArea", z: 300 },
   { id: "parcel", z: 400 },
   { id: "setback", z: 500 },
   { id: "elements", z: 600 },
@@ -91,11 +103,11 @@ export const MAP_STACK = [
 export const STACK_Z = Object.freeze(Object.fromEntries(MAP_STACK.map((t) => [t.id, t.z])));
 
 /* The tiers that share the ONE planner SVG element. The SVG's own z-index is the first of
- * them, which is what puts the whole band above gisArea. `gisAreaFront` (NEW-1) joins them:
+ * them, which is what puts the whole band above the basemap. `gisAreaFront` (NEW-1) joins them:
  * its Leaflet pane is hosted in a screen-space <foreignObject> parked at the SVG's
  * `data-gis-front-band` anchor, so a lifted fill clears the elements without leaving the one
  * SVG — which is exactly what keeps it under the labels and under the handle layer. */
-export const SVG_TIERS = ["reference", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "label", "handle"];
+export const SVG_TIERS = ["reference", "gisArea", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "label", "handle"];
 export const SVG_Z = STACK_Z.reference;
 
 /* The DOM anchor the lifted band is hosted at, inside the plan SVG. Named here (not spelled
@@ -103,6 +115,12 @@ export const SVG_Z = STACK_Z.reference;
  * pane host at it, the PDF/PNG export inserts the lifted layers into it (PDF-PARITY), and the
  * e2e stacking spec reads it to prove the tier is where the model says it is. */
 export const FRONT_BAND_ATTR = "data-gis-front-band";
+
+/* NEW-1 second pass (B2671190 ×2) — the DEFAULT area band's anchor inside the plan SVG: right after the default-band
+ * references and before the parcel. The canvas mounts PANE_AREA / PANE_AREA_LABEL in a foreignObject here (the same hosting the
+ * lifted band uses — a Leaflet pane inside the backdrop map can never paint over an SVG image), and the PDF/PNG export inserts
+ * the `under` GIS layers into it, so the sheet lays fills over references exactly as the screen does (PDF-PARITY). */
+export const AREA_BAND_ATTR = "data-gis-area-band";
 
 /* ⚠ THE ONE KNOWN DEVIATION, stated plainly rather than papered over.
  *
@@ -132,8 +150,8 @@ export const FRONT_BAND_ATTR = "data-gis-front-band";
  * this wrapper — the identify cards, banners, toolbars, mobile rails — occupies 6 and up and
  * must stay above all three. Only the relative order matters, and it is the model's. */
 export const CANVAS_Z = Object.freeze({
-  basemap: 0, // the Leaflet backdrop <div>: basemap tiles + the gisArea pane
-  plan: 1, // the planner SVG: reference → parcel → setback → elements → referenceFront → label → handle
+  basemap: 0, // the Leaflet backdrop <div>: basemap tiles + the stored map snapshot (the gisArea pane moved INTO the plan SVG, NEW-1 second pass)
+  plan: 1, // the planner SVG: reference → gisArea → parcel → setback → elements → referenceFront → label → handle
   gisLine: 2, // the map-top host: the gisLine pane, above the plan, below the canvas chrome
 });
 
@@ -237,7 +255,7 @@ export const layerOverPlan = (cfg, above = false) => {
 /* Canonical pane names. One pane per BAND — never one pane per layer, which would be a
  * free-form z-order picker by another name. */
 /* NEW-1 (2026-11-05) — the pinned map SNAPSHOT of a located plan (the "Aerial backdrop" kept when the live basemap is Off) is the aerial, so it is the BOTTOM of the backdrop map: its pane sits
- * under every GIS pane (area 350, area labels 360) and above nothing but the paper. It used to be an SVG image above the whole backdrop map and painted over every fill (lib/aerialSnapshot.js). */
+ * under every GIS pane (since the second pass the area panes are not in the backdrop map at all — they are hosted in the plan SVG, above it) and above nothing but the paper. It used to be an SVG image above the whole backdrop map and painted over every fill (lib/aerialSnapshot.js). */
 export const PANE_SNAPSHOT = "aerialSnapshotPane";
 export const PANE_SNAPSHOT_Z = 150;
 export const PANE_AREA = "gisAreaPane";

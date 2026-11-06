@@ -33,7 +33,7 @@ import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, AREA_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -313,6 +313,7 @@ export function createExportSheet(ctx) {
       }
     }
     // GIS overlay LAYERS (FEMA floodplain, pipelines, wetlands, utilities, ground relief) — B739.
+    // (NEW-1 second pass: the `under` band now lands OVER the default-band site-plan overlays — see `underInto`.)
     // Composited ABOVE the aerial and BELOW the drawn geometry + site-plan overlays, matching the
     // on-screen stacking (aerial tiles < GIS-overlay pane < SVG). Same feet frame + pixel grid as
     // the aerial (overlayExportPlacement shares aerialGeom), each at its layer opacity, in the
@@ -332,6 +333,16 @@ export function createExportSheet(ctx) {
      * rather than silently printing underneath the plan it was lifted out of. */
     const overRaster = [], overVector = [];
     const frontAnchor = root.querySelector(`[${FRONT_BAND_ATTR}]`);
+    /* NEW-1 second pass (B2671190 ×2) — the `under` band goes INTO the plan's own `data-gis-area-band` group, which sits right after the default-band
+     * references: on screen a fill paints over a dropped reference picture, so on paper it does too. A sheet without the anchor (a canvas without an
+     * origin never renders one — and has no GIS layers to print) keeps the old place, right above the aerial, with a warning. */
+    const areaAnchor = root.querySelector(`[${AREA_BAND_ATTR}]`);
+    let areaWarned = false;
+    const underInto = (node) => {
+      if (areaAnchor) { areaAnchor.appendChild(node); return; }
+      if (!areaWarned) { areaWarned = true; console.warn(`[export] the sheet has no ${AREA_BAND_ATTR} anchor — GIS area fills print under the reference pictures`); }
+      root.insertBefore(node, anchor.nextSibling); anchor = node;
+    };
     const bandOf = (o) => {
       const want = o.band || (o.over ? "over" : "under");
       if (want !== "front") return want;
@@ -357,7 +368,7 @@ export function createExportSheet(ctx) {
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
         if (append === "front") frontAnchor.appendChild(im);
         else if (append) root.appendChild(im);
-        else { root.insertBefore(im, anchor.nextSibling); anchor = im; }
+        else underInto(im);
       }
     };
     if (includeMapLayers && exportOverlays && exportOverlays.length) {
@@ -385,7 +396,7 @@ export function createExportSheet(ctx) {
         g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
         if (append === "front") frontAnchor.appendChild(g);
         else if (append) root.appendChild(g);
-        else { root.insertBefore(g, anchor.nextSibling); anchor = g; }
+        else underInto(g);
       }
     };
     if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {

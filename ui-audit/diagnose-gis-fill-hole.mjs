@@ -31,6 +31,11 @@ if (args.includes("--big")) { // the owner's Academy footprint: a ~3,100 × 6,00
 if (args.includes("--legacy")) { // the owner's stored map snapshot ("Aerial backdrop", fromMap) — same fields as his plan, read 2026-11-05
   plan.sheetOverlays = [{ x: -2829.86, y: -5399.98, id: "legacy-aerial", src: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=-95.67823007777187,29.5974288862136,-95.66040537174493,29.6269975919816&bboxSR=4326&imageSR=4326&size=1085,1800&format=jpg&transparent=false&f=image", imgH: 1800, imgW: 1085, kind: "image", name: "Aerial backdrop", page: 1, locked: true, fromMap: true, ftPerPx: 5.2163318, opacity: 1, ftPerPxY: 5.99954, knockout: false, rotation: 0, pageCount: 1, calibrated: false }];
 }
+if (args.includes("--ref")) { // NEW-1 second pass (2026-11-06): the owner's OTHER picture — a hand-dropped PNG reference (`e1455157xyinxo`, added 2026-10-29), NOT the map snapshot. Exact placement read
+  // from his plan; it runs ~3,800 ft EAST of the origin (toward the airport) and only ~2,300 ft west — the asymmetric rectangle he reported. The pixels are an opaque grey stand-in (his bytes are his).
+  const png = await page.evaluate(() => { const cv = document.createElement("canvas"); cv.width = 901; cv.height = 929; const x = cv.getContext("2d"); x.fillStyle = "#7d8a6a"; x.fillRect(0, 0, 901, 929); return cv.toDataURL("image/png"); });
+  plan.sheetOverlays = [...(plan.sheetOverlays || []), { x: -2294.7401561596466, y: -3163.7100068590753, id: "ref-png", src: png, imgH: 929, imgW: 901, kind: null, name: "reference.png", page: 1, locked: true, ftPerPx: 6.78194917893529, opacity: 1, visible: true, rotation: 0, unscaled: true, pageCount: 1 }];
+}
 const err = await page.evaluate(async ([pl]) => { const { data: u } = await window.pfSupabase.auth.getUser(); const { error } = await window.pfSupabase.from("sites").insert({ id: pl.id, group_id: pl.groupId, site: pl.site, name: pl.name, county: null, user_id: u.user.id, version: 1, data: pl }); return error ? String(error.message) : null; }, [plan]);
 if (err) throw new Error(err);
 const verdicts = [];

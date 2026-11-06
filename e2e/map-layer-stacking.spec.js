@@ -105,11 +105,16 @@ test.describe("NEW-1 — map layer stacking", () => {
       // Scoped to the PLANNER's own hosts: the map finder stays mounted behind the planner
       // (display:none, to keep its map alive) and builds its own copy of both panes, so a bare
       // document.querySelector would sample the wrong map.
-      const areaPane = backdrop && backdrop.querySelector(".leaflet-gisArea-pane");
+      // NEW-1 second pass (B2671190 ×2): the AREA pane is hosted in the plan SVG's `data-gis-area-band` (after the default-band references,
+      // before the parcel and the elements) — no longer in the backdrop map, where any reference picture covered it.
+      const areaPane = svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane");
+      const bldg = svg.querySelector('[data-el-id="b1"]');
+      const areaBand = svg.querySelector("[data-gis-area-band]");
       const linePane = topHost && topHost.querySelector(".leaflet-gisLine-pane");
       const drawn = (pane) => (pane ? pane.querySelectorAll("path, canvas, img").length : -1);
       return {
-        areaInBackdrop: !!(areaPane && backdrop && backdrop.contains(areaPane)),
+        areaInBackdrop: !!(backdrop && backdrop.querySelector(".leaflet-gisArea-pane")),
+        areaUnderPlan: !!(areaPane && bldg && (areaBand.compareDocumentPosition(bldg) & 4)), // the building FOLLOWS the band → paints over it
         // The line pane must NOT be inside the backdrop — that is exactly the trap: Leaflet's
         // map pane carries the pan transform, so a pane hosted there can never rise above the
         // plan, whatever z-index it is given.
@@ -122,7 +127,8 @@ test.describe("NEW-1 — map layer stacking", () => {
         lineDrawn: drawn(linePane),
       };
     });
-    expect(where.areaInBackdrop, "the AREA pane must live inside the backdrop map, below the plan").toBe(true);
+    expect(where.areaInBackdrop, "the AREA pane must not live inside the backdrop map — every reference picture would cover it").toBe(false);
+    expect(where.areaUnderPlan, "the AREA band must sit in the plan SVG BEFORE the building, so the building paints over the fill").toBe(true);
     expect(where.lineInBackdrop, "the LINE pane must NOT live inside the backdrop map — it can never rise above the plan there").toBe(false);
     expect(where.lineAbovePlan).toBe(true);
     expect(where.areaDrawn, "the stubbed easement painted nothing").toBeGreaterThan(0);
@@ -223,7 +229,7 @@ test.describe("NEW-1 — show a layer above the plan", () => {
       const band = svg.querySelector("[data-gis-front-band]");
       const drawn = (p) => (p ? p.querySelectorAll("path, canvas, img").length : 0);
       return {
-        inBackdrop: drawn(backdrop && backdrop.querySelector(".leaflet-gisArea-pane")),
+        inBackdrop: drawn(svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane")), // the DEFAULT area band (NEW-1 second pass: in the plan SVG, under the elements)
         inFront: drawn(band && band.querySelector(".leaflet-gisAreaFront-pane")),
       };
     });
@@ -248,7 +254,7 @@ test.describe("NEW-1 — show a layer above the plan", () => {
     const clip = await page.evaluate(() => {
       const svg = document.querySelector('[data-testid="planner-canvas"]');
       const backdrop = [...svg.parentElement.children].find((el) => el.tagName === "DIV" && el.querySelector(".leaflet-container"));
-      const painted = backdrop && backdrop.querySelector(".leaflet-gisArea-pane path, .leaflet-gisArea-pane canvas, .leaflet-gisArea-pane img");
+      const painted = svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane :is(path, canvas, img)");
       const bldg = svg.querySelector('[data-el-id="b1"]');
       if (!painted || !bldg) return null;
       const a = painted.getBoundingClientRect(), b = bldg.getBoundingClientRect();
@@ -279,7 +285,7 @@ test.describe("NEW-1 — show a layer above the plan", () => {
       const rect = painted ? painted.getBoundingClientRect() : null;
       const bRect = bldg ? bldg.getBoundingClientRect() : null;
       return {
-        inBackdrop: drawn(backdrop && backdrop.querySelector(".leaflet-gisArea-pane")),
+        inBackdrop: drawn(svg.querySelector("[data-gis-area-band] .leaflet-gisArea-pane")),
         inFront: drawn(frontPane),
         frontInsideSvg: !!(frontPane && svg.contains(frontPane)),
         // the band paints AFTER the building…

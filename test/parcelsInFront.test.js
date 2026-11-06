@@ -56,7 +56,7 @@ describe("NEW-1 — the model keeps its order; only the line host moves, and onl
     expect(lineHostZ(false)).toBeGreaterThan(CANVAS_Z.plan);
   });
   it("the fixed bottom→top stack is untouched — parcels in front is a mode-gated render move, not a new permanent tier", () => {
-    expect(MAP_STACK.map((t) => t.id)).toEqual(["basemap", "gisArea", "reference", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "gisLine", "label", "handle"]);
+    expect(MAP_STACK.map((t) => t.id)).toEqual(["basemap", "reference", "gisArea", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "gisLine", "label", "handle"]);
   });
   it("names are the ones the planner, the export and the spec all agree on", () => {
     expect(PANE_PARCEL_PICK).toBe("parcelPickPane");
@@ -93,8 +93,8 @@ describe("NEW-1 — the wiring (source guards; the browser spec proves it behave
     expect(planner).toContain("pane: PANE_PARCEL_PICK, labelPane: PANE_PARCEL_PICK_LABEL");
     expect(planner).toContain("the Parcels-in-front panes are missing"); // LOUD-FAILURE
     // the host carries the same two mirrored transforms as the other bands
-    expect(planner).toContain("[geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]");
-    expect(planner).toContain("[geoTopWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current]");
+    expect(planner).toContain("[geoAreaPaneRef.current, geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]");
+    expect(planner).toContain("[geoTopWrapRef.current, geoAreaWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current]");
   });
 
   it("Pick county lots routes EVERY primary press to the lot, in the capture phase, ahead of any feature", () => {

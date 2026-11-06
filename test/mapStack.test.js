@@ -31,7 +31,7 @@ const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site
 describe("NEW-1 — the stacking model is fixed, ordered, and complete", () => {
   it("the order is bottom→top exactly as the model declares, with no ties", () => {
     expect(MAP_STACK.map((t) => t.id)).toEqual([
-      "basemap", "gisArea", "reference", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "gisLine", "label", "handle",
+      "basemap", "reference", "gisArea", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "gisLine", "label", "handle",
     ]);
     const zs = MAP_STACK.map((t) => t.z);
     expect(zs).toEqual([...zs].sort((a, b) => a - b));
@@ -54,12 +54,16 @@ describe("NEW-1 — the stacking model is fixed, ordered, and complete", () => {
     expect(STACK_Z.label).toBeGreaterThan(STACK_Z.gisLine);
   });
 
-  it("references sit between the GIS area fills and the parcel, with B1198's promoted band above the plan", () => {
+  it("references sit between the basemap and the GIS area fills (NEW-1 second pass), with B1198's promoted band above the plan", () => {
     // A scanned exhibit the user is aligning is USER CONTENT, so Figma-style ordering is correct
     // for it — front/back reorders references AMONG THEMSELVES (lib/overlayOrder.js), and the
     // explicit "Draw above the plan" opt-in is its own declared tier, not a second scheme.
-    expect(STACK_Z.reference).toBeGreaterThan(STACK_Z.gisArea);
-    expect(STACK_Z.reference).toBeLessThan(STACK_Z.parcel);
+    // B2671190 ×2 — a default-band reference (a dropped aerial screenshot, a scanned sheet) sits UNDER the fills: an opaque one
+    // above them cut a rectangular hole in every Zoning / Future Land Use fill on the owner's Academy plan.
+    expect(STACK_Z.reference).toBeLessThan(STACK_Z.gisArea);
+    expect(STACK_Z.reference).toBeGreaterThan(STACK_Z.basemap);
+    expect(STACK_Z.gisArea).toBeLessThan(STACK_Z.parcel);
+    expect(SVG_TIERS.slice(0, 3)).toEqual(["reference", "gisArea", "parcel"]);
     expect(STACK_Z.referenceFront).toBeGreaterThan(STACK_Z.elements);
     expect(STACK_Z.referenceFront).toBeLessThan(STACK_Z.gisLine);
     expect(SVG_TIERS[0]).toBe("reference");
