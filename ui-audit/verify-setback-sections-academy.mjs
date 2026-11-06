@@ -16,6 +16,7 @@ import { chromium } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { cleanupLive } from "./lib/liveFixtures.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173").replace(/\/$/, "");
 const J = JSON.parse(readFileSync(new URL("../test/fixtures/academySplitParcel.json", import.meta.url)));
@@ -51,15 +52,15 @@ await page.route("**/*.jpg", (r) => r.abort());
 const T = (id) => page.getByTestId(id);
 
 /* The stored per-edge setbacks of the seeded parcel, read from the device copy the planner autosaves to. */
-const storedSetbacks = () => page.evaluate(async ({ id, signed }) => {
-  const raw = window.__planyrSitesRaw ? window.__planyrSitesRaw(signed ? undefined : "planarfit:sites:v1") : null;
+const storedSetbacks = () => page.evaluate(async ({ id, key }) => {
+  const raw = window.__planyrSitesRaw ? window.__planyrSitesRaw(key) : localStorage.getItem(key);
   let all = null;
   try { all = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (_) { all = null; }
   const list = all ? (Array.isArray(all) ? all : Object.values(all)) : [];
   const s = list.find((x) => x && x.id === id) || (all && all[id]);
   const pc = s && (s.parcels || []).find((p) => p.id === "acad");
   return pc ? pc.setbacks : null;
-}, { id: SITE_ID, signed: SIGNED });
+}, { id: SITE_ID, key: SIGNED ? "planarfit:sites:cloud:" + UID : "planarfit:sites:v1" });
 
 let failed = true;
 try {
@@ -120,12 +121,14 @@ try {
   ok("no page errors", errors.length === 0, errors.join(" | "));
   failed = results.some((r) => !r.pass);
 } finally {
-  // constraint #15: the throwaway is always removed again, without asking
+  // constraint #15 + delete-must-verify: the throwaway is removed through the shared helper (trash first — the table refuses a
+  // permanent delete of a live row), which re-reads and reports what is left. Anything left, or any error, FAILS the run.
   if (SIGNED && UID) {
-    await page.evaluate(async ([uid, id]) => {
-      try { const k = "planarfit:sites:cloud:" + uid; const o = JSON.parse(localStorage.getItem(k) || "{}"); delete o[id]; localStorage.setItem(k, JSON.stringify(o)); } catch (_) {}
-      try { await window.pfSupabase.from("sites").delete().eq("id", id); await window.pfSupabase.from("site_elements").delete().eq("site_id", id); } catch (_) {}
-    }, [UID, SITE_ID]).catch(() => {});
+    await page.evaluate(([uid, id]) => { try { const k = "planarfit:sites:cloud:" + uid; const o = JSON.parse(localStorage.getItem(k) || "{}"); delete o[id]; localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }, [UID, SITE_ID]).catch(() => {});
+    const c = await cleanupLive(page, { planId: SITE_ID }).catch((e) => ({ errors: [String(e)], left: { site: "?" } }));
+    console.log("cleanup", JSON.stringify(c));
+    ok("the throwaway site is gone (re-read shows 0 left, no errors)", c.left && c.left.site === 0 && c.errors.length === 0);
+    failed = results.some((r) => !r.pass);
   }
   await browser.close();
 }
