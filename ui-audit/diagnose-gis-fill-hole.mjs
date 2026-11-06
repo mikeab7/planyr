@@ -74,7 +74,8 @@ try {
       } catch (e) { truth = null; }
       return { loaded, truth, nfeat, zoom: map.getZoom(), layers: polys.length };
     }, [sample, urls[key]]);
-    const diff = (a, b, p) => { const i = (p.y * a.width + p.x) * a.channels; return Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]); };
+    /* a PATCH, not a pixel: with Map Base Off the drafting grid is drawn over the map, and an opaque grid-line pixel is identical with the layer on or off — one sample column on a grid line read as a "hole" on the FIXED build (2026-11-06). The point is painted if ANY pixel in its 9×9 patch changed. */
+    const diff = (a, b, p) => { let best = 0; for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const x = p.x + dx, y = p.y + dy; if (x < 0 || y < 0 || x >= a.width || y >= a.height) continue; const i = (y * a.width + x) * a.channels; best = Math.max(best, Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2])); } return best; };
     const dpr = on.width / VW;
     const painted = sample.map((p) => diff(on, base, { x: Math.round(p.x * dpr), y: Math.round(p.y * dpr) }) > 12);
     let rows = {}; sample.forEach((p, i) => { (rows[p.y] = rows[p.y] || []).push(`${info.truth ? (info.truth[i] ? "T" : "-") : "?"}${info.loaded[i] ? "L" : "-"}${painted[i] ? "P" : "-"}`); });
@@ -86,7 +87,7 @@ try {
     await setLayer(panel, key, false); await page.waitForTimeout(2500);
   }
   /* VERDICT (run with --els 0 so nothing of the plan sits on the fill): a hole is a point the service holds a polygon at that did not change the picture. A plan's own parcel outline / the panel's edge /
-   * the scale bar legitimately cover a handful of sample points (4 measured on the unfixed build with the live basemap on); the unfixed Map-Base-Off build leaves 19-20 per layer (the snapshot's rectangle). */
+   * the scale bar legitimately cover a handful of sample points (measured with the live basemap on); the unfixed Map-Base-Off build leaves the snapshot's whole rectangle unpainted. */
   const LIMIT = 8;
   for (const v of verdicts) console.log(`${v.holes <= LIMIT && v.truthPts > 50 ? "✅" : "❌"} ${v.key}: ${v.holes} unpainted of ${v.truthPts} service-covered points (limit ${LIMIT}); unloaded ${v.unloaded}${v.holes > LIMIT ? "  at " + v.at : ""}`);
   if (verdicts.some((v) => v.holes > LIMIT || v.truthPts <= 50)) process.exitCode = 1;
