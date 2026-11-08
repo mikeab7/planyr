@@ -36,6 +36,13 @@ export const AUTH_EVENT = Object.freeze({
   WRONG_PASSWORD: "auth-wrong-password",
   USER_ERROR: "auth-user-error",
   UNEXPECTED: "auth-unexpected",
+  // The sign-in PANEL itself (NEW-1, 2026-11-08) — counts, never an alarm. `vanished`: it unmounted while signed out with
+  // nobody asking (a defect). `restored`: a forced reload took the page and the panel came back with the typed email.
+  // `escape`: the person's Escape closed it (reason = whether an email had been typed — the only way to tell a deliberate
+  // Escape from one aimed at a password manager's menu).
+  PANEL_VANISHED: "auth-panel-vanished",
+  PANEL_RESTORED: "auth-panel-restored",
+  PANEL_ESCAPE: "auth-panel-escape",
 });
 
 /* Outcomes that belong to the person, not to the system: counted, never an alarm. */

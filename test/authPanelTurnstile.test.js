@@ -102,7 +102,7 @@ describe("AuthPanel — no dead ends (NEW-1 follow-up)", () => {
   it("the set-new-password view cannot be dismissed", () => {
     expect(panelSrc).toMatch(/title="Set a new password" dismissable=\{false\}/);
     expect(panelSrc).toContain("dismissRef.current");
-    expect(panelSrc).toMatch(/onClick=\{dismissable \? onClose : undefined\}/);
+    expect(panelSrc).toMatch(/const ok = dismissRef\.current && backdropMayClose\(/);   // NEW-1 (2026-11-08): the backdrop asks the press+release rule, and only when dismissable
   });
   it("a failure's next step is offered, and the minimum length has one home", () => {
     for (const label of ["Try again", "Sign in instead", "Reset your password", "Send a new link"]) expect(panelSrc).toContain(label);

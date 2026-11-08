@@ -13,6 +13,8 @@ import SignedOutNotice from "./SignedOutNotice.jsx";
 // see the note beside its call site below for what this replaced and why.
 import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
 import { markRecoveryPending, isRecoveryPending } from "../shared/auth/recoveryPending.js";
+import { readDraft, clearDraft, draftStorage } from "../shared/auth/panelDismiss.js";
+import { reportAuthEvent, AUTH_EVENT } from "../shared/auth/authTelemetry.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -282,12 +284,22 @@ export default function Shell() {
   // even if PASSWORD_RECOVERY fired before this component subscribed, and a dead link (expired / already used)
   // opens Forgot password with the reason instead of landing signed out with no message.
   const [linkReturn] = useState(() => authReturn());
-  const [authOpen,  setAuthOpen]  = useState(() => !!(linkReturn.recovery || linkReturn.failure));
+  // NEW-1 (2026-11-08): a forced page reload (the stale-build rescue) must not cost a half-filled sign-in panel — the panel
+  // keeps its email + tab in sessionStorage while it is open signed out (shared/auth/panelDismiss.js), and it comes back
+  // here. A link return (reset / dead link) and an explicit ?auth= deep link have their own say and win over the draft.
+  const [restoredDraft] = useState(() => {
+    if (typeof window === "undefined" || linkReturn.recovery || linkReturn.failure) return null;
+    try { if (/[?&]auth=/.test(window.location.search || "") || /[?&]authlink=/.test(window.location.search || "")) return null; } catch (_) { /* unreadable → no draft */ }
+    return readDraft(draftStorage());
+  });
+  const restoredRef = useRef(!!restoredDraft);
+  useEffect(() => { if (restoredDraft) reportAuthEvent(AUTH_EVENT.PANEL_RESTORED, { reason: "reload" }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [authOpen,  setAuthOpen]  = useState(() => !!(linkReturn.recovery || linkReturn.failure || restoredDraft));
   const [recovery,  setRecovery]  = useState(() => !!linkReturn.recovery);
   const [authNotice, setAuthNotice] = useState(() => authReturnNotice(linkReturn.failure)); // why the panel opened on Forgot password
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
-  const [authEmail, setAuthEmail]  = useState("");        // invite-email deep link: ?auth=…&email=… prefills the form
-  const [authMode,  setAuthMode]  = useState(() => (linkReturn.failure ? "reset" : "signin"));  // which AuthPanel tab (signin|signup|reset) it opens on
+  const [authEmail, setAuthEmail]  = useState(() => (restoredDraft ? restoredDraft.email : ""));        // invite-email deep link: ?auth=…&email=… prefills the form
+  const [authMode,  setAuthMode]  = useState(() => (linkReturn.failure ? "reset" : restoredDraft ? restoredDraft.mode : "signin"));  // which AuthPanel tab (signin|signup|reset) it opens on
   // NEW-1 point 4/5: "pending" = a stored session could not be used YET (no network at boot) — not signed out, so the
   // header shows its neutral placeholder rather than a Sign in pill; "signedOutNotice" = the session died under the person.
   const [authPending, setAuthPending] = useState(false);
@@ -464,13 +476,14 @@ export default function Shell() {
       setUser(u);
       setAuthKnown(true);
       if (u) setSignedOutNotice(false); else if (meta && meta.lost) setSignedOutNotice(true);
+      if (u) { clearDraft(draftStorage()); if (restoredRef.current) { restoredRef.current = false; setAuthOpen(false); setAuthMode("signin"); setAuthEmail(""); } }   // a panel restored after a reload, for someone whose session turned out to be live, has nothing left to ask
       if (event === "PASSWORD_RECOVERY") { markRecoveryPending(); setRecovery(true); setAuthOpen(true); }
     });
   }, []);
   // A dead-link notice is for someone who is signed out. If the session turns out to be live (a used link followed
   // by a person who is already signed in), there is nothing to say and the panel should not open on Forgot password.
   useEffect(() => {
-    if (user && authNotice && !recovery) { setAuthOpen(false); setAuthNotice(""); setAuthMode("signin"); }
+    if (user && authNotice && !recovery) { setAuthOpen(false); setAuthNotice(""); setAuthMode("signin"); clearDraft(draftStorage()); }
   }, [user, authNotice, recovery]);
   // While a stored session is waiting on the network, keep asking: supabase-js retries the refresh when the
   // session is read, and a success arrives above as TOKEN_REFRESHED (a permanent refusal as SIGNED_OUT).
@@ -1045,7 +1058,7 @@ export default function Shell() {
           initialEmail={authEmail}
           initialNotice={authNotice}
           onLeaveRecovery={() => setRecovery(false)}
-          onClose={() => { setAuthOpen(false); setRecovery(false); setAuthNotice(""); setAuthMode("signin"); }}
+          onClose={() => { restoredRef.current = false; setAuthOpen(false); setRecovery(false); setAuthNotice(""); setAuthMode("signin"); }}
         />
       )}
       {signedOutNotice && !user && !authOpen && <SignedOutNotice onSignIn={openAuth} onDismiss={() => setSignedOutNotice(false)} />}
