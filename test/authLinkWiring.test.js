@@ -37,8 +37,10 @@ describe("the link is spent only by the button press", () => {
 describe("the set-new-password form cannot be dismissed", () => {
   it("recovery mode renders a non-dismissable Wrap: it ignores Escape and the backdrop and has no Close button", () => {
     expect(panel).toMatch(/title="Set a new password" dismissable=\{false\}>/);
-    expect(panel).toMatch(/onClick=\{dismissable \? onClose : undefined\}/);
-    expect(panel).toMatch(/\{dismissable && <button onClick=\{onClose\} aria-label="Close"/);
+    // NEW-1 (2026-11-08): both the backdrop and Escape consult dismissRef before asking the close rules (panelDismiss.js)
+    expect(panel).toMatch(/const ok = dismissRef\.current && backdropMayClose\(/);
+    expect(panel).toMatch(/if \(!dismissRef\.current \|\| !onCloseRef\.current\) return;/);
+    expect(panel).toMatch(/\{dismissable && <button onClick=\{\(\) => onClose\("button"\)\} aria-label="Close"/);
     // …and its own way out leaves the password unchanged
     expect(panel).toMatch(/data-testid="recovery-signout"/);
   });

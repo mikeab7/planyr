@@ -37,6 +37,9 @@ import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { savedProfileValues, profileDirty } from "../lib/settingsForm.js";
+// NEW-1 (2026-11-08): the panel closes only when the PERSON asks — see shared/auth/panelDismiss.js for the rules and the list of every close path.
+import { escapeMayClose, backdropMayClose, saveDraft, clearDraft, draftStorage } from "../../../shared/auth/panelDismiss.js";
+import { reportAuthEvent, AUTH_EVENT } from "../../../shared/auth/authTelemetry.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, background: "var(--surface-field)", color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
@@ -85,8 +88,10 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
     // never does, and a coarse pointer never does (see isCoarsePointer).
     const wantInput = focusFirstInput && !isCoarsePointer();
     (wantInput ? (init.find((el) => el.tagName === "INPUT") || init[0] || panel) : panel)?.focus();
+    // Tab is trapped here (document capture: it must beat the page behind). ESCAPE IS NOT: it is handled on the card
+    // itself (onKeyDown below, bubble phase), so a password manager's menu, an autofill list or an open dropdown that
+    // takes the key first is respected, and a key pressed with focus OUTSIDE the panel is never ours (NEW-1, 2026-11-08).
     const onKey = (e) => {
-      if (e.key === "Escape") { if (dismissRef.current && onCloseRef.current) onCloseRef.current(); return; }
       if (e.key !== "Tab" || !panel) return;
       const els = getFocusable();
       if (!els.length) { e.preventDefault(); panel.focus(); return; }
@@ -100,9 +105,26 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
       try { opener && opener.focus && opener.focus(); } catch (_) { /* opener gone — fine */ }
     };
   }, [focusFirstInput]);
+  // The backdrop closes only when the press began on it AND the click landed on it. A press that starts in the card
+  // (selecting text in a field, a drag) and is released outside makes a click whose target is the backdrop; an injected
+  // click with no press behind it never closes anything (NEW-1, 2026-11-08).
+  const pressedOnBackdrop = useRef(false);
+  const onBackdropPointerDown = (e) => { pressedOnBackdrop.current = e.target === e.currentTarget; };
+  const onBackdropClick = (e) => {
+    const ok = dismissRef.current && backdropMayClose({ pressedOnBackdrop: pressedOnBackdrop.current, target: e.target, currentTarget: e.currentTarget });
+    pressedOnBackdrop.current = false;
+    if (ok && onCloseRef.current) onCloseRef.current("backdrop");
+  };
+  const onCardKeyDown = (e) => {
+    if (e.key !== "Escape") return;
+    const ne = e.nativeEvent || e;
+    if (!dismissRef.current || !onCloseRef.current) return;
+    if (!escapeMayClose({ defaultPrevented: ne.defaultPrevented, isComposing: ne.isComposing, target: e.target, panel: panelRef.current })) return;
+    onCloseRef.current("escape");
+  };
   return (
-    <div onClick={dismissable ? onClose : undefined} data-auth-backdrop style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", ...(vv ? { top: vv.top, bottom: "auto", height: vv.h } : null) }}>
-      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: vv ? Math.max(200, Math.floor(vv.h * 0.94)) : "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch", outline: "none" }}>
+    <div onPointerDown={onBackdropPointerDown} onPointerCancel={() => { pressedOnBackdrop.current = false; }} onClick={onBackdropClick} data-auth-backdrop style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center", ...(vv ? { top: vv.top, bottom: "auto", height: vv.h } : null) }}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onKeyDown={onCardKeyDown} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: vv ? Math.max(200, Math.floor(vv.h * 0.94)) : "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch", outline: "none" }}>
         {back ? (
           /* Drilled-in section page (phone Settings): "‹ Settings" back link left, section title centred.
              Equal-width side slots keep the title optically centred; a long title truncates. */
@@ -110,13 +132,13 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
             <button data-settings-back onClick={back.onClick} style={{ ...linkBtn, justifySelf: "start", fontSize: 13, fontWeight: 600, padding: "6px 2px" }}>‹ {back.label}</button>
             <h2 data-settings-title style={{ margin: 0, fontSize: 16, color: PAL.ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{title}</h2>
             {closeIcon
-              ? <button onClick={onClose} aria-label="Close" data-settings-close style={{ justifySelf: "end", width: 44, height: 44, margin: "-6px -10px -6px 0", display: "grid", placeItems: "center", background: "transparent", border: "none", color: PAL.ink, fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}><span aria-hidden="true">✕</span></button>
-              : <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12, justifySelf: "end" }}>Close <span aria-hidden="true">✕</span></button>}
+              ? <button onClick={() => onClose("button")} aria-label="Close" data-settings-close style={{ justifySelf: "end", width: 44, height: 44, margin: "-6px -10px -6px 0", display: "grid", placeItems: "center", background: "transparent", border: "none", color: PAL.ink, fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}><span aria-hidden="true">✕</span></button>
+              : <button onClick={() => onClose("button")} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12, justifySelf: "end" }}>Close <span aria-hidden="true">✕</span></button>}
           </div>
         ) : (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
             <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>{title}</h2>
-            {dismissable && <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>}
+            {dismissable && <button onClick={() => onClose("button")} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>}
           </div>
         )}
         {children}
@@ -450,7 +472,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
 // page both re-validate it — shared/auth/authLink.js safeNextRoute). A reset link has nothing to return to.
 const currentRoute = () => { try { return window.location.hash || undefined; } catch (_) { return undefined; } };
 
-export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, initialNotice, onLeaveRecovery, onClose }) {
+export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, initialNotice, onLeaveRecovery, onClose: shellClose }) {
   // initialMode (B1315632 — landing page deep link): "signup" lands the signed-out
   // visitor straight on the create-account tab instead of the sign-in default, so the
   // landing page's "Create an account" button actually means something distinct from
@@ -464,6 +486,24 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(initialNotice ? { type: "err", text: initialNotice } : null); // { type: 'err'|'ok', text, actions? }
   const [busy, setBusy] = useState(false);
+  // THE ONE WAY THE PANEL LEAVES (NEW-1, 2026-11-08): every close the person asked for goes through here — Close, an Escape
+  // nothing else took, a press-and-release on the backdrop, a successful sign-in — and forgets the draft (they are done).
+  // An unmount that did NOT come through here, while signed out, is reported as a defect (`auth-panel-vanished`); a forced
+  // page reload never reaches an unmount at all, and the draft below is what brings the panel back from that.
+  const closedByPerson = useRef(false);
+  const userRef = useRef(user); userRef.current = user;
+  const emailRef = useRef(""); 
+  const close = useCallback((reason) => {
+    closedByPerson.current = true;
+    clearDraft(draftStorage());
+    if (reason === "escape") reportAuthEvent(AUTH_EVENT.PANEL_ESCAPE, { reason: emailRef.current ? "typed" : "empty" });
+    shellClose();
+  }, [shellClose]);
+  const onClose = close;
+  useEffect(() => () => {
+    if (closedByPerson.current || userRef.current) return;
+    reportAuthEvent(AUTH_EVENT.PANEL_VANISHED, { reason: "unmounted" });
+  }, []);
   // Synchronous double-submit guard (NEW-1): `busy` only lands on the next render, and the
   // password field's Enter key bypasses the button's disabled state entirely.
   const submitting = useRef(false);
@@ -481,6 +521,14 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   // The browser check could not run on this network (script blocked, timed out, errored): the sign-in link is then the real
   // way in, so it is promoted to the main action (NEW-1). A pending or passed check is not "blocked".
   const captchaBlocked = captchaOn && mode === "signin" && (cv.widget === "error" || !!cv.failure);
+
+  // Keep what has been typed so far (email + tab only, never a password) for as long as the panel is open signed out: if the
+  // page is reloaded under the person (the stale-build rescue), the Shell reopens the panel with it.
+  emailRef.current = email;
+  useEffect(() => {
+    if (user || recovery || mode === "recovery") return;
+    saveDraft(draftStorage(), { email, mode });
+  }, [email, mode, user, recovery]);
 
   // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
   // while this panel is already open, sync into recovery mode so the set-password form
