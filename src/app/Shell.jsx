@@ -27,7 +27,7 @@ import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
-import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
+import { writeLastRoute, seedBootRoute, pointerForRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
 import { installBuildSkewWatch, shouldOfferReload, shouldEscalate, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
@@ -614,7 +614,7 @@ export default function Shell() {
   // pointer, indistinguishable from "on the plain dashboard" — so it's excluded the same way
   // Food is: a visit to /admin must never clobber the pointer to whatever project was
   // actually open before it (B711904).
-  useEffect(() => { if (!isAdminHash && !isDesignHash && !isDashboardHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash, isDashboardHash]);
+  useEffect(() => { const p = pointerForRoute(route, { admin: isAdminHash, design: isDesignHash, dashboard: isDashboardHash }); if (p) writeLastRoute(p); }, [route, isAdminHash, isDesignHash, isDashboardHash]);
 
   // B842866 — drain any problem reports that couldn't reach the server on a prior load
   // (offline, a dropped connection). Once per boot; LOUD-FAILURE means a report never
