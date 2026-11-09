@@ -493,7 +493,7 @@ export default function ModelApp({
   useEffect(() => {
     if (!univerOn) return undefined;
     let live = true; const done = () => { if (live) setCalcReadyKey(viewPrefsKey); };
-    primeCalcCache(viewPrefsKey).then(done, done);
+    Promise.resolve(primeCalcCache(viewPrefsKey)).then(done, done); // B2671203 — primeCalcCache(null) returns null (no scope): a bare `.then` crashed the whole workspace
     const t = setTimeout(done, CALC_WAIT_MS);
     return () => { live = false; clearTimeout(t); };
   }, [univerOn, viewPrefsKey]);
