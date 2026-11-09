@@ -19,7 +19,7 @@
  */
 /* global __BUILD_ID__ */
 import { supabase, supabaseConfigured } from "../../workspaces/site-planner/lib/supabase.js";
-import { safePlanId } from "../telemetry/perfCapture.js";
+import { safePlanId } from "../telemetry/planIdSafe.js";
 import { perfContext } from "../telemetry/perfRecorderHandle.js";
 import { reportClientEvent } from "../telemetry/clientErrors.js";
 

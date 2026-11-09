@@ -92,6 +92,9 @@
       "$comment": [
         "Exact chunk identities allowed on a Site route, matched by stem (content hash stripped).",
         "An unexpected member fails the audit by NAME, so the diagnosis is immediate.",
+        "SWAPPED ONE MORE ON 2026-11-09 (B329408, vendor chunks split): `trailerOverRoads` -> `geo-vendor`, list length and the siteRouteChunks ceiling unchanged (41), NO ceiling moves. `map-vendor` used to hold leaflet + esri-leaflet + clipper-lib + @terraformer together, so Food (which draws a leaflet map and nothing else) downloaded ~130 KB of polygon math and an ArcGIS client it never calls. It now holds leaflet only; `geo-vendor` holds esri-leaflet + clipper-lib + @terraformer (see vite.config.js GEO_VENDOR), and the Site route — which uses both — downloads the SAME bytes in one more file. `trailerOverRoads` (~1.0 KB, used only by the plan editor and two lazy exporters) left the Site route with the editor and would now fail this guard by name if it came back.",
+        "SWAPPED TWO MORE ON 2026-11-09 (B329408, the sign-in panel is a lazy chunk): `keyContract` -> `InterfaceSettings` and `appraisal` -> `LazyPanel`; list length and the siteRouteChunks ceiling unchanged (41), NO ceiling moves. AuthPanel.jsx (~15 KB) left the entry bundle every route downloads (it opens only when the person asks; the shell warms it at idle). Two modules it shared with the always-loaded header chrome — the interface-settings popover and the LazyPanel loader — used to be inlined into the entry/AppHeader chunk beside it and now each get their own shared chunk, the identical mechanical reason as every entry below. The Site route downloads FEWER bytes in total (siteRouteJsBytes -35 KB in the same change), in two more files. `keyContract` and `appraisal` (reached only by the plan editor and lazy consumers now) left the Site route and would fail this guard by name if they came back.",
+        "SWAPPED ONE ON 2026-11-09 (B329408, the plan editor is its own lazy chunk): `hitTest` -> `textWrap`, so the list and the siteRouteChunks ceiling stay the same length (41) and NO ceiling moves. SitePlanner.jsx (the editor, ~1.7 MB) is no longer a static import of SitePlannerApp, so `hitTest` (only the editor and Review reach it) left the Site route and cannot come back without failing this guard by name. In the other direction `src/shared/markup/textWrap.js` (~2.7 KB) had the editor and the landing map's parcel-label layer as its two static consumers, so it used to be inlined into SitePlannerApp; now that the editor is a separate chunk Rollup gives it its own shared chunk, the identical mechanical reason as every entry below. Same bytes, one more file, and siteRouteJsBytes fell by ~1.7 MB in the same change.",
         "GREW BY ONE ON 2026-11-05 (B2586592, trailer parking always draws above roads): `trailerOverRoads` \u2014 src/workspaces/site-planner/lib/trailerOverRoads.js (~1.0 KB, the pure trailer-over-road paint-order rule). SitePlanner.jsx imports it statically (elPaintItems) and planThumbnail.js (the Dashboard's thumbnails) and kmzExport.js import it lazily, so Rollup gives it its own shared chunk, as with every entry in this list. One rule for the canvas, the thumbnail and the KMZ is the whole point (a second copy would let them disagree). The Site route downloads the same bytes in one more file (siteRouteJsBytes +1.4 KB vs the base ref).",
         "GREW BY ONE ON 2026-10-29 (B2514848, one home for the acre constant and number formatters): `areaUnits` \u2014 src/shared/units/areaUnits.js (SQFT_PER_ACRE / CF_PER_ACFT plus the AC/SF spelling helpers, ~0.7 KB; numberFormat.js is folded into it) \u2014 replaced 33 private copies of 43,560 and ~30 private formatters, so it is now imported by Site-route modules AND by lazy ones (Review, Model, the grading panels). A module reached from both a static and a lazy consumer gets its own Rollup chunk, as with every entry in this list. The Site route downloads FEWER bytes than before (siteRouteJsBytes \u22120.5 KB vs the base ref), in one more file.",
         "GREW BY ONE ON 2026-10-29 (B2494336, bare points resolve by county): `statePlaneCore` — src/shared/coordinates/statePlaneCore.js (~30 KB: the zone registry, the three projections and the point resolver) — has STATIC Site-route consumers already (overlayPlacement, proximityScreen) and gained a second, lazy one: site-planner/lib/pointZoneLocator.js, dynamically imported by countyPolygons.js the moment the polygons are resident, which installs the county locator into it. A module reached from both a static and a lazy consumer gets its own Rollup chunk, as with every entry in this list; the Site route downloads the SAME BYTES it always did (this core was previously inlined into the overlayPlacement chunk), in one more file. The 22 KB county table rides only the lazy locator chunk, never the boot path.",
@@ -285,7 +288,7 @@
       "allow": [
         "index",
         "SitePlannerApp",
-        "hitTest",
+        "textWrap",
         "AppHeader",
         "map-vendor",
         "cjs-interop",
@@ -308,7 +311,7 @@
         "elementApi",
         "basemaps",
         "compsRatePeriodPrefs",
-        "keyContract",
+        "InterfaceSettings",
         "userPrefsStore",
         "names",
         "siteAnchor",
@@ -316,14 +319,14 @@
         "freePinchZoom",
         "counties",
         "jurisdiction",
-        "appraisal",
+        "LazyPanel",
         "localDb",
         "countyPolygons",
         "countyKeys",
         "similarityTransform",
         "statePlaneCore",
         "areaUnits",
-        "trailerOverRoads"
+        "geo-vendor"
       ]
     },
     "notesRouteJsBytes": {
