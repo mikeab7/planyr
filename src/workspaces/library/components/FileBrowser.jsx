@@ -1272,7 +1272,8 @@ function DropQueue({ queue, onDismiss, onTriage, onResolveDuplicate }) {
     [S.DUPLICATE]: { color: "var(--warn-text)", label: it.duplicate?.filedAt ? `Already filed · ${fmtFiledDate(it.duplicate.filedAt)}` : "Already filed here" },
   })[it.status] || { color: "var(--text-secondary)", label: it.status };
   return (
-    <div style={{ flex: "none", margin: "0 12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div data-testid="upload-tray" style={{ flex: "none", margin: "0 60px 8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+      {/* NEW-1 (AUTH-SWEEP 3, V870512): the right margin keeps the tray's right-aligned buttons (Replace / Keep both / Cancel, Triage, Dismiss) clear of the app-wide help button, which is fixed to this exact corner and used to sit on top of Cancel. */}
       {active.map((it) => {
         const m = meta(it);
         return (

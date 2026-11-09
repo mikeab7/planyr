@@ -377,6 +377,18 @@ select.ei { cursor: pointer; }
 .rowgrip { opacity: .55; transition: opacity .1s; cursor: grab; }
 [data-grid-scroll]:not([data-kbnav]) .drow:hover .rowgrip { opacity: 1; }
 .rowgrip:active { cursor: grabbing !important; }
+/* NEW-1 (task icons, 2026-11-06) — the icon slot in the Task cell. Blank at rest; the faint "add icon" glyph shows only while
+   the row is hovered (or the picker is open). A schedule with no icons looks like today apart from the chevron. */
+.ti-slot-add { opacity: 0; transition: opacity .1s; color: var(--mut); }
+[data-grid-scroll]:not([data-kbnav]) .drow:hover .ti-slot-add, [data-task-icon-slot][aria-expanded="true"] .ti-slot-add { opacity: .4; }
+[data-task-icon-slot]:hover .ti-slot-add { opacity: .8 !important; }
+[data-task-icon-slot]:hover { background: rgba(9,105,218,.08); }
+.ti-count::after { content: attr(data-phase-count); }
+.ti-chev:hover { background: #dce8fd; color: var(--blue) !important; }
+.ti-pick-cell { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; position: relative;
+  border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer; padding: 0; }
+.ti-pick-cell:hover { background: var(--surf); border-color: var(--bd2); }
+.ti-pick-cell[aria-pressed="true"] { background: #e8f0fe; border-color: var(--blue); }
 /* NEW-ROWMOVE-2BAND — the drag insertion line's leading dot. A plain 2-3px line reads fine at a
    34px row but is easy to lose against 20px-tall grid lines/borders at his actual row height; the
    dot gives the eye one unmistakable anchor at the depth the line starts from, independent of row
@@ -427,6 +439,7 @@ html.in-iframe { --fab-dock: 48px; }
 <div id="root" style="height:100vh"></div>
 <script src="/sequence/vendor/react.production.min.js"></script>
 <script src="/sequence/vendor/react-dom.production.min.js"></script>
+<script src="/sequence/taskIcons.js"></script>
 <script>
 // Suppress Babel's in-browser development warning
 (function(){ var w = console.warn; console.warn = function(){ if(arguments[0] && String(arguments[0]).indexOf('Babel') > -1) return; w.apply(console, arguments); }; })();
@@ -4848,7 +4861,7 @@ const recomputeAfterStructureChange = tasks => recomputeSchedule(tasks);
 // and the stale value was persisted. B835's first pass wrongly concluded "no code bug"; the live repro
 // (hs-v1: task 82's duration changed 45cd→45d, its FS successor 83 never re-flowed) is exactly this gap.
 // Anything NOT in this set (name, health, %-complete, notes, color,
-// focused, isExpanded, responsibleParty, cost) can never move a date, so it correctly skips the cascade.
+// focused, isExpanded, responsibleParty, cost, icons) can never move a date, so it correctly skips the cascade.
 // Mirrored + unit-tested in ui-audit/stress/scheduler-engine.mjs (source-guarded in test/schedulerEngine.test.js).
 const SCHEDULE_INPUT_KEYS = ['start','end','duration','durValue','durUnit','predecessors','pinnedStart','pinnedEnd','meetingBound','meetingBodyId','pinnedMeetingDate','minMeetingsAfter','deadlineForTaskId'];
 const touchesSchedule = updates => !!updates && SCHEDULE_INPUT_KEYS.some(k => k in updates);
@@ -10448,6 +10461,9 @@ function App() {
         if ('underline' in updates) u.underline = !!updates.underline;
         if ('textColor' in updates) u.textColor = isValidColor(updates.textColor) ? updates.textColor : null;
         if ('fontSize' in updates)  u.fontSize  = isValidFontSize(updates.fontSize) ? updates.fontSize : null;
+        // NEW-1 (task icons) — `icons` is its OWN field (0–2 emoji / "c:<name>" ids), never part of the name. Sanitised on
+        // write like the format fields above; an empty list DELETES the key so an icon-free schedule is byte-identical to today.
+        if ('icons' in updates) { const ic = PlanyrTaskIcons.normalizeTaskIcons(updates.icons); if (ic.length) u.icons = ic; else delete u.icons; }
         if ('predecessors' in updates) {
           u.predecessors = normPreds(updates.predecessors);
           // Editing a predecessor is an explicit instruction to let the cascade
@@ -11063,7 +11079,7 @@ function App() {
     const walk = id => {
       const t = allTasks.find(x => x.id === id);
       if (!t) return;
-      out.push({...t, notes: (t.notes||[]).map(n => ({...n})), predecessors: (t.predecessors||[]).map(p => ({...p}))});
+      out.push({...t, notes: (t.notes||[]).map(n => ({...n})), predecessors: (t.predecessors||[]).map(p => ({...p})), ...(Array.isArray(t.icons) ? {icons: [...t.icons]} : {})});   // NEW-1 — icons travel with a copied/pasted row
       allTasks.filter(x => x.parentId === id).forEach(c => walk(c.id));
     };
     walk(rootId);
@@ -11346,6 +11362,7 @@ function App() {
       return copy;
     }) : undefined;
     const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
+      ...(Array.isArray(t.icons) ? {icons: [...t.icons]} : {}),   // NEW-1 — task icons ride along with the copy (a fresh array, not shared)
       ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
     // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
     // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
@@ -15079,12 +15096,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                   if (c.k === "name") inner = creating ? (
                     <span style={{...cs, paddingLeft:4+lvl*14, gap:0, flex:1, minWidth:0}}>
                       <span style={{width:16, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"#16a34a"}}><i className="ti ti-plus" style={{fontSize:12}}/></span>
+                      <span aria-hidden="true" style={{width:ICON_SLOT_W, flexShrink:0}} />   {/* NEW-1 — the icon slot, so proposed names line up with real rows */}
                       <span style={{color:"#15803d", fontWeight:600, fontSize:12, overflow:"hidden", textOverflow:"ellipsis", minWidth:0}}>{rv.newName || "New task"}</span>
                       <span style={{flexShrink:0, marginLeft:6, fontSize:8.5, fontWeight:700, color:"#15803d", background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"1px 4px", letterSpacing:".04em"}}>NEW</span>
                     </span>
                   ) : (
                     <span style={{...cs, paddingLeft:4+lvl*14, gap:0, flex:1, minWidth:0}}>
                       <span style={{width:16, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"var(--amber)"}}><i className="ti ti-corner-down-right" style={{fontSize:12}}/></span>
+                      <span aria-hidden="true" style={{width:ICON_SLOT_W, flexShrink:0}} />
                       <span style={{color:"var(--amber)", fontWeight:600, fontStyle:"italic", fontSize:12, overflow:"hidden", textOverflow:"ellipsis", minWidth:0}}>proposed</span>
                     </span>
                   );
@@ -15709,6 +15728,124 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 }
 
 // ── Cell ─────────────────────────────────────────────────
+// ── NEW-1 (2026-11-06) — TASK ICONS: the slot between the chevron and the task name, the picker, the collapsed-phase summary.
+// The library, search, 2-icon rule and phase summary are PURE and live in /sequence/taskIcons.js (window.PlanyrTaskIcons);
+// this is only the drawing. Emoji draw as bundled Twemoji SVGs (a missing file falls back to the plain character, never a
+// broken image); "c:<name>" ids draw as inline SVG. Icons are their own task field — editing a name never touches them.
+const ICON_SLOT_W = 38;   // fits two 16px icons; FIXED so names align within a level whether a row has 0, 1 or 2 icons
+function TaskIconGlyph({id, size = 16, faded = false}) {
+  const [failed, setFailed] = React.useState(false);
+  const TI = window.PlanyrTaskIcons;
+  const st = {display:"block", flexShrink:0, opacity: faded ? 0.55 : 1};
+  if (TI.isCustom(id)) {
+    const m = TI.CUSTOM_SVG[TI.customName(id)];
+    if (!m) return null;   // an id from a newer client: keep it stored, draw nothing
+    return <svg viewBox="0 0 36 36" width={size} height={size} aria-hidden="true" style={st} dangerouslySetInnerHTML={{__html: m}} />;
+  }
+  if (failed) return <span aria-hidden="true" style={{...st, width:size, height:size, fontSize:Math.round(size*0.8), lineHeight:size+"px", textAlign:"center"}}>{id}</span>;
+  return <img src={"/sequence/vendor/twemoji/" + TI.twemojiFile(id) + ".svg"} width={size} height={size} alt="" draggable={false} style={st} onError={() => setFailed(true)} />;
+}
+
+function TaskIconPicker({anchorRef, icons, onChange, onClose}) {
+  const TI = window.PlanyrTaskIcons;
+  const [q, setQ] = React.useState("");
+  const rootRef = React.useRef(null);
+  const PW = 336;
+  const pos = useAnchoredPopover(true, anchorRef, r => {
+    const room = window.innerHeight - r.bottom - 12, above = room < 300 && r.top > room;
+    const maxH = Math.max(220, Math.min(420, (above ? r.top : room) - 8));
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - PW - 8));
+    return above ? {left, bottom: window.innerHeight - r.top + 4, maxH} : {left, top: r.bottom + 4, maxH};
+  }, onClose);
+  React.useEffect(() => {
+    const down = e => { const el = rootRef.current, a = anchorRef.current; if (el && el.contains(e.target)) return; if (a && a.contains(e.target)) return; onClose(); };
+    document.addEventListener("mousedown", down);
+    return () => document.removeEventListener("mousedown", down);
+  }, []);
+  const groups = TI.searchTaskIcons(q);
+  const shown = TI.normalizeTaskIcons(icons);
+  if (!pos) return null;
+  return ReactDOM.createPortal(
+    <div ref={rootRef} data-task-icon-picker {...MENU_STOPS_GRID} role="dialog" aria-label="Choose task icons"
+      onKeyDown={e => { e.nativeEvent.stopImmediatePropagation(); e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
+      onDoubleClick={e => e.stopPropagation()}
+      style={{position:"fixed", left:pos.left, top:pos.top, bottom:pos.bottom, width:PW, maxHeight:pos.maxH, zIndex:100000, display:"flex", flexDirection:"column",
+        background:"#fff", border:"1px solid var(--bd2)", borderRadius:9, boxShadow:"0 8px 28px rgba(0,0,0,.18)", fontFamily:"'Inter',system-ui,sans-serif", overflow:"hidden"}}>
+      <div style={{padding:"8px 8px 6px", borderBottom:"1px solid var(--bd)", flexShrink:0}}>
+        <input {...NO_AUTOFILL} autoFocus type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Search icons — tia, sewer, roof, tilt…"
+          aria-label="Search icons"
+          style={{width:"100%", height:28, border:"1px solid var(--bd2)", borderRadius:6, padding:"0 8px", fontSize:12, fontFamily:"inherit", outline:"none", color:"var(--txt)", background:"#fff"}}
+          onFocus={e => { e.target.style.borderColor = "var(--blue)"; }} onBlur={e => { e.target.style.borderColor = ""; }} />
+      </div>
+      <div style={{overflowY:"auto", padding:"4px 8px 8px", flex:"1 1 auto", minHeight:0}}>
+        {groups.length === 0 && <div style={{padding:"18px 6px", fontSize:12, color:"var(--mut)", textAlign:"center"}}>Nothing matches “{q.trim()}”. Try another word.</div>}
+        {groups.map(g => (
+          <div key={g.key} data-icon-group={g.key}>
+            <div style={{fontSize:9.5, fontWeight:700, letterSpacing:".08em", textTransform:"uppercase", color:"var(--mut)", padding:"8px 2px 3px"}}>{g.title}</div>
+            <div style={{display:"flex", flexWrap:"wrap", gap:2}}>
+              {g.items.map(it => {
+                const on = shown.includes(it.id), lab = TI.iconLabel(it.id, it.label);
+                return (
+                  <button key={it.id} type="button" className="ti-pick-cell" data-icon-id={it.id} aria-pressed={on} aria-label={lab} title={lab}
+                    onClick={() => onChange(TI.toggleTaskIcon(shown, it.id))}>
+                    <TaskIconGlyph id={it.id} size={22} />
+                    {TI.isCustom(it.id) && <span aria-hidden="true" style={{position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:"#16a34a"}} />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex", alignItems:"center", gap:6, padding:"7px 8px", borderTop:"1px solid var(--bd)", flexShrink:0, background:"var(--surf)"}}>
+        <a href="/sequence/vendor/twemoji/CREDITS.txt" target="_blank" rel="noopener" title="Emoji art: Twemoji, CC-BY 4.0" style={{fontSize:10, color:"var(--mut)", textDecoration:"none", marginRight:"auto"}}>Emoji art: Twemoji (CC-BY 4.0)</a>
+        <button type="button" data-icon-clear disabled={shown.length === 0} onClick={() => onChange([])}
+          style={{height:24, padding:"0 10px", fontSize:11.5, fontFamily:"inherit", borderRadius:5, border:"1px solid var(--bd2)", background:"#fff", color:shown.length ? "var(--txt)" : "var(--mut)", cursor:shown.length ? "pointer" : "default"}}>Clear</button>
+        <button type="button" data-icon-done onClick={onClose}
+          style={{height:24, padding:"0 12px", fontSize:11.5, fontWeight:600, fontFamily:"inherit", borderRadius:5, border:"1px solid var(--blue)", background:"var(--blue)", color:"#fff", cursor:"pointer"}}>Done</button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function TaskIconSlot({task, updateTask}) {
+  const TI = window.PlanyrTaskIcons;
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  const icons = TI.normalizeTaskIcons(task.icons);
+  const close = React.useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <span ref={ref} data-task-icon-slot={icons.length} role="button" aria-label="Task icons" aria-haspopup="dialog" aria-expanded={open}
+        title={icons.length ? undefined : "Add an icon"}
+        onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+        style={{width:ICON_SLOT_W, height:ROW_H - 2, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"flex-start", gap:2, paddingLeft:2, borderRadius:3, cursor:"pointer", userSelect:"none"}}>
+        {icons.length === 0
+          ? <i className="ti ti-mood-plus ti-slot-add" aria-hidden="true" style={{fontSize:14}} />
+          : icons.map(id => <span key={id} data-task-icon={id} title={TI.iconLabel(id)} style={{display:"inline-flex"}}><TaskIconGlyph id={id} size={16} /></span>)}
+      </span>
+      {open && <TaskIconPicker anchorRef={ref} icons={icons} onChange={next => updateTask(task.id, {icons: next})} onClose={close} />}
+    </>
+  );
+}
+
+// Collapsed summary/phase row: the distinct icons of every leaf task inside it (faded) + a muted "N tasks". Nothing when expanded.
+function PhaseIconSummary({tasks, taskId}) {
+  const sum = window.PlanyrTaskIcons.phaseIconSummary(tasks, taskId);
+  if (!sum.leaves) return null;
+  const MAXI = 8, vis = sum.icons.slice(0, MAXI), more = sum.icons.length - vis.length;
+  return (
+    <span data-phase-icons style={{display:"inline-flex", alignItems:"center", gap:3, marginLeft:8, flex:"0 1000 auto", minWidth:0, overflow:"hidden", whiteSpace:"nowrap"}}>   {/* shrinks ~1000x faster than the name: in a narrow column the summary yields first, the phase name keeps its room */}
+      {vis.map(id => <TaskIconGlyph key={id} id={id} size={13} faded />)}
+      {more > 0 && <span style={{fontSize:10, color:"var(--mut)"}}>+{more}</span>}
+      {/* the count is generated content (CSS ::after), so a collapsed row's cell TEXT stays just its task name — name lookups by text keep working */}
+      <span className="ti-count" aria-label={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} data-phase-count={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} style={{fontSize:10.5, color:"var(--mut)", marginLeft:vis.length ? 3 : 0, fontWeight:500}} />
+    </span>
+  );
+}
+
 function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef, data}) {
   // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
   // skipping hidden ones, via the shared stepVisibleColIdx helper.
@@ -15778,7 +15915,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         return (
           <input {...NO_AUTOFILL} autoFocus className="ei"
             defaultValue={seedVal}
-            style={{fontSize:fSize, fontWeight:fw, fontStyle:fs, color:fColor, textDecoration:fUnderline, paddingLeft:20+task.level*14}}
+            style={{fontSize:fSize, fontWeight:fw, fontStyle:fs, color:fColor, textDecoration:fUnderline, paddingLeft:20+ICON_SLOT_W+task.level*14}}
             onFocus={e => { if (editStartChar == null) e.target.select(); }}
             onBlur={e => commit(task.id, "name", e.target.value)}
             onKeyDown={e => {
@@ -15864,6 +16001,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       <span style={{...s,paddingLeft:4+task.level*14,gap:0,flex:1,minWidth:0}}>
         {proj?.tasks.some(t=>t.parentId===task.id) ? (
           <span
+            className="ti-chev"
             onClick={e=>{
               e.stopPropagation();
               const opening = !task.isExpanded;
@@ -15881,26 +16019,23 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             onMouseDown={e=>e.stopPropagation()}
             onDoubleClick={e=>e.stopPropagation()}
             title={task.isExpanded?"Collapse":"Expand"}
+            /* NEW-1 (task icons) — a real Tabler chevron (right when collapsed, down when open) replaces the text-glyph
+               triangle in a bordered box. Same element, title and handlers, so every harness that finds the toggle still does. */
             style={{
               cursor:"pointer",flexShrink:0,
-              width:13,height:13,marginRight:3,
+              width:16,height:ROW_H - 2,
               display:"inline-flex",alignItems:"center",justifyContent:"center",
-              borderRadius:2,
-              background:task.isExpanded?"#e8f0fe":"var(--surf)",
-              border:`1px solid ${task.isExpanded?"#b6cef7":"var(--bd2)"}`,
+              borderRadius:3,
               color:task.isExpanded?"var(--blue)":"var(--mut)",
-              fontSize:8,fontWeight:700,lineHeight:1,
-              transition:"background .12s,border-color .12s,color .12s",
               userSelect:"none",
             }}
-            onMouseEnter={e=>{e.currentTarget.style.background="#dce8fd";e.currentTarget.style.borderColor="var(--blue)";e.currentTarget.style.color="var(--blue)";}}
-            onMouseLeave={e=>{e.currentTarget.style.background=task.isExpanded?"#e8f0fe":"var(--surf)";e.currentTarget.style.borderColor=task.isExpanded?"#b6cef7":"var(--bd2)";e.currentTarget.style.color=task.isExpanded?"var(--blue)":"var(--mut)";}}
           >
-            {task.isExpanded?"▾":"▸"}
+            <i className={"ti " + (task.isExpanded ? "ti-chevron-down" : "ti-chevron-right")} aria-hidden="true" style={{fontSize:14,lineHeight:1}} />
           </span>
         ) : (
           <span style={{width:16,flexShrink:0,display:"inline-block"}} />
         )}
+        <TaskIconSlot task={task} updateTask={updateTask} />
         {(() => { const ls=[{fontSize:13,fontWeight:600},{fontSize:12,fontWeight:500},{fontSize:11.5,fontWeight:400},{fontSize:11,fontWeight:400}][Math.min(task.level,3)]; const cf = task.cellFmt?.name; const isEmpty = !task.name; const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight; const fs = (task.italic || cf?.italic || isEmpty) ? "italic" : "normal";
           // NEW-2 — same cell-overrides-row-overrides-default precedence as fw/fs, for a value not a boolean.
           const fSize = cf?.size ?? task.fontSize ?? ls.fontSize; const fColor = cf?.color ?? task.textColor; const fUnderline = (task.underline || cf?.underline) ? "underline" : "none"; return (
@@ -15908,6 +16043,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             {task.name || "New task"}
           </span>
         ); })()}
+        {!task.isExpanded && task.hasChildren && <PhaseIconSummary tasks={proj?.tasks} taskId={task.id} />}
         {rowCanFocus(task) && (
           <span
             data-focus-chip={task.focused ? "on" : "off"}

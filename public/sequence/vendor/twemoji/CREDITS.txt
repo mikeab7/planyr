@@ -1,0 +1,15 @@
+Emoji artwork in the Planyr Schedule task-icon picker
+=====================================================
+
+The emoji icons are Twemoji graphics, version 15.1.0 (the jdecked/twemoji fork,
+https://github.com/jdecked/twemoji), bundled here as SVG files.
+
+Copyright Twitter, Inc. and other contributors.
+Graphics licensed under CC-BY 4.0: https://creativecommons.org/licenses/by/4.0/
+
+Only the files this app uses are included. No change was made to the artwork.
+
+The "drawn for Planyr" icons in the same picker (survey tripod, drill rig,
+permit, tilt-wall, roof, dock doors, dump truck, manhole, detention pond,
+civil/architectural drawings, sprinkler, concrete mixer, steel joist, plat,
+hydrant) are original Planyr artwork and are not part of Twemoji.

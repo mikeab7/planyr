@@ -10,8 +10,9 @@
  *     /gis-proxy relay (functions/gis-proxy), measured on the PR preview. The server's login-gated folders (PW_Utilities, CIP, CityHall, CWOL_Services, GTG) are NEVER read.
  *
  * WHAT THE CITY DOES NOT PUBLISH, and so what is not here (each measured):
- *   · WATER, SEWER AND STORM PIPE LINES. The city's public folders, all 507 org services and an ArcGIS Online item search hold none. The Utilities group says so
- *     (`SUGARLAND_UTILITY_NOTE`, with the city's Utility Map Request form) instead of listing an empty "Water Mains" row. Hydrants (inspection layer) are the only public trace of the water system.
+ *   · STORM PIPE LINES. None are public. (WATER AND SEWER were thought to be absent too — "all 507 org services hold none" — until the owner pointed at CDM Smith's public copy of the city's integrated water resources plan
+ *     data, 2026-11-06: lib/sugarLandUtilities.js reads it and carries the date story. The city's OWN server keeps PW_Utilities behind a token, and that is still never read.) Each water / sewer row's (i)
+ *     says the lines are a 2017 snapshot and keeps the city's Utility Map Request form (`UTILITY_REQUEST_LINK`) as the way to current as-builts — never a paragraph in the panel.
  *   · the WATER SYSTEM service-area polygons (Hosted/waterSystemMap_VIEW, and its siblings waterSystem and waterSystem_VIEW): every query — count, ids, features — answers HTTP 500
  *     "Database error has occurred" on the city's server. There is nothing to read, so there is no row.
  *   · LEVEE IMPROVEMENT DISTRICTS and MUNICIPAL UTILITY DISTRICTS: the TCEQ water-district row already draws all 9 city LIDs and the MUDs (TCEQ's layer carries a TYPE of LID and MUD, 15 Fort Bend
@@ -33,6 +34,11 @@ import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { approvalDate } from "./desotoZoning.js";
 import { zoningStyle, zoningCard, zoningLegend, legendItemsOf, zoneLabelText, normalizeZone, ZONING_CITATION } from "./sugarLandZoning.js";
 import { thoroughfareStyle, thoroughfareCard, thoroughfareLegend, THOROUGHFARE_WHERE } from "./sugarLandThoroughfare.js";
+import {
+  UTILITY_LAYER_EDITED, UTILITY_CAVEAT_TEXT, taggedLabel, utilitySource, utilityVintage,
+  WATER_COLORS, SEWER_COLORS, POINT_COLORS, WATER_LEGEND, SEWER_LEGEND, waterStyle, sewerStyle,
+  waterLineCard, gravityMainCard, lateralCard, forceMainCard, waterValveCard, controlValveCard, manholeCard, cleanoutCard, liftStationCard, wwtpCard, waterPlantCard, wellCard,
+} from "./sugarLandUtilities.js";
 export { THOROUGHFARE_WHERE };
 
 /* ───────────────────────── small readers ───────────────────────── */
@@ -242,11 +248,32 @@ export function devProjectCard(props) {
 }
 const DEV_STATUS_COLOR = (p) => (/completed/i.test(str(p && p.Status)) ? "#6b7280" : "#d97706");
 
+/* ───────────────────────── Utilities: the route to current maps (owner: source / date notes live behind each row's (i), never as a paragraph in the panel) ───────────────────────── */
+export const UTILITY_MAP_REQUEST_URL = "https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862";
+export const UTILITY_REQUEST_LINK = Object.freeze({ text: "Request current utility maps from the city", href: UTILITY_MAP_REQUEST_URL });
+
 /* ───────────────────────── The registry rows ───────────────────────── */
 export const SUGARLAND_MERGE_GROUPS = {
   sl_zoning_cases: {
     label: "Zoning Cases",
     note: "Conditional use permits, special exceptions and variances the City of Sugar Land has decided — one switch for all three.",
+  },
+  /* NEW-1 (2026-11-06) — the water and sewer network. Every label carries the data's date (`UTILITY_TAG`, "as of 2017"); the full dates are in each member's Source line below and on every click card. */
+  sl_sewer_lines: {
+    label: taggedLabel("Sewer Lines"),
+    note: "The City of Sugar Land's sanitary sewer: gravity mains by size (green), service laterals (light green) and force mains (dark green, dashed). One switch for all three. Click a line for its size, material and install year.",
+  },
+  sl_valves: {
+    label: taggedLabel("Water Valves"),
+    note: "System valves and control valves on the City of Sugar Land's water mains. Loads at close zoom.",
+  },
+  sl_sewer_structures: {
+    label: taggedLabel("Manholes"),
+    note: "Sanitary sewer manholes and clean-outs. Loads at close zoom.",
+  },
+  sl_plants: {
+    label: taggedLabel("Utility Plants"),
+    note: "Sewer lift stations, wastewater treatment plants, water plants and water production wells.",
   },
 };
 
@@ -335,8 +362,82 @@ export const SUGARLAND_LAYERS = {
   sl_hydrants: feature("slHydrants", {
     label: "Hydrants", mergeGroup: "fire_hydrants", role: "point", group: "utilities", order: 21, minZoom: 16, source: "City of Sugar Land — Hydrant Inspections",
     color: "#dc2626", weight: 1.5, pointRadius: 4, fields: ["OBJECTID", "FacilityID", "InstallDate"], identifyCard: hydrantCard,
-    note: "City of Sugar Land fire hydrants — the closest public trace of where water mains run.",
-    infoCaveat: "Hydrants only: the city does not publish water or sewer lines. The layer was last edited 2021-02-23 and carries an ID on about 1 in 6 hydrants. Removed and abandoned hydrants are left out.",
+    note: "City of Sugar Land fire hydrants, from the city's hydrant inspection layer. The Water Lines row shows the mains they sit on.",
+    infoCaveat: "The layer was last edited 2021-02-23 and carries an ID on about 1 in 6 hydrants. Removed and abandoned hydrants are left out.",
+  }),
+  /* ---- Water and sewer network (NEW-1, 2026-11-06) — lib/sugarLandUtilities.js carries the date story and the card / style rules ---- */
+  sl_water_lines: feature("slWaterLines", {
+    label: taggedLabel("Water Lines"), role: "line", group: "utilities", order: 22, minZoom: 14, source: utilitySource(UTILITY_LAYER_EDITED.water),
+    fields: ["OBJECTID_1", "OBJECTID", "InstallDat", "LifecycleS", "Material", "Diameter", "WaterType", "Year_", "Administra"], fetchAll: true,
+    color: WATER_COLORS.potable, weight: 1.6, styleFn: waterStyle, legend: WATER_LEGEND, identifyCard: waterLineCard,
+    note: "The City of Sugar Land's water mains, heavier with size: drinking water blue, raw water teal and dashed, reclaimed water purple, abandoned lines grey and dotted. Click a main for its size, material, install year and the data date.",
+    infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_sewer_gravity: feature("slSewerGravity", {
+    label: "Gravity Sewer Mains", mergeGroup: "sl_sewer_lines", role: "line", group: "utilities", order: 23, minZoom: 14, source: utilitySource(UTILITY_LAYER_EDITED.gravity),
+    fields: ["OBJECTID_12", "OBJECTID_1", "OBJECTID", "InstallDat", "LifecycleS", "Material", "NominalDia", "WaterType", "Year_", "Administra"], fetchAll: true,
+    color: SEWER_COLORS.gravity, weight: 1.6, styleFn: sewerStyle("gravity"), legend: SEWER_LEGEND, identifyCard: gravityMainCard,
+    note: "Gravity sewer mains by size.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_sewer_laterals: feature("slSewerLaterals", {
+    label: "Sewer Laterals", mergeGroup: "sl_sewer_lines", role: "line", group: "utilities", order: 23, minZoom: 14, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "InstallDat", "LifecycleS", "Material", "Diameter", "WaterType", "Year_", "Administra"], fetchAll: true,
+    color: SEWER_COLORS.lateral, weight: 1, styleFn: sewerStyle("lateral"), identifyCard: lateralCard,
+    note: "Service laterals from the mains to the lots.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_sewer_force: feature("slSewerForce", {
+    label: "Sewer Force Mains", mergeGroup: "sl_sewer_lines", role: "line", group: "utilities", order: 23, minZoom: 14, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "InstallDat", "LifecycleS", "Material", "Diameter", "WaterType", "Year_", "Administra"], fetchAll: true,
+    color: SEWER_COLORS.force, weight: 1.8, styleFn: sewerStyle("force"), identifyCard: forceMainCard,
+    note: "Pressure sewer lines out of lift stations (dashed).", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_water_valves: feature("slWaterValves", {
+    label: "Water System Valves", mergeGroup: "sl_valves", role: "point", group: "utilities", order: 24, minZoom: 15, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "Diameter", "LifecycleS", "InstallDat", "Year_", "ASSETID"], fetchAll: true,
+    color: POINT_COLORS.waterValve, weight: 1, pointRadius: 3, identifyCard: waterValveCard,
+    note: "Valves on the water mains.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_water_control_valves: feature("slWaterControlValves", {
+    label: "Water Control Valves", mergeGroup: "sl_valves", role: "point", group: "utilities", order: 24, minZoom: 15, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "Diameter", "LifecycleS", "InstallDat", "Year_", "ASSETID"], fetchAll: true,
+    color: POINT_COLORS.controlValve, weight: 1, pointRadius: 4.5, identifyCard: controlValveCard,
+    note: "Control valves on the water mains.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_manholes: feature("slManholes", {
+    label: "Sewer Manholes", mergeGroup: "sl_sewer_structures", role: "point", group: "utilities", order: 25, minZoom: 15, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "LifecycleS", "InstallDat", "Year_", "ASSETID"], fetchAll: true,
+    color: POINT_COLORS.manhole, weight: 1, pointRadius: 3.5, identifyCard: manholeCard,
+    note: "Sanitary sewer manholes.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_cleanouts: feature("slCleanouts", {
+    label: "Sewer Clean-outs", mergeGroup: "sl_sewer_structures", role: "point", group: "utilities", order: 25, minZoom: 15, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "LifecycleS", "InstallDat", "Year_", "ASSETID"], fetchAll: true,
+    color: POINT_COLORS.cleanout, weight: 1, pointRadius: 2.5, identifyCard: cleanoutCard,
+    note: "Sanitary sewer clean-outs.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_lift_stations: feature("slLiftStations", {
+    label: "Sewer Lift Stations", mergeGroup: "sl_plants", role: "point", group: "utilities", order: 26, minZoom: 12, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "BUILDING_N", "LOCATION", "LIFE_CYCLE", "Common_Nam"],
+    color: POINT_COLORS.liftStation, weight: 1, pointRadius: 6, identifyCard: liftStationCard,
+    note: "Sanitary sewer lift stations.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_wwtp: feature("slWwtp", {
+    label: "Wastewater Treatment Plants", mergeGroup: "sl_plants", role: "point", group: "utilities", order: 26, minZoom: 12, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "BUILDING_N", "LIFE_CYCLE", "Common_Nam"],
+    color: POINT_COLORS.wwtp, weight: 1, pointRadius: 8, identifyCard: wwtpCard,
+    note: "Wastewater treatment plants.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_water_plants: feature("slWaterPlants", {
+    label: "Water Plants", mergeGroup: "sl_plants", role: "point", group: "utilities", order: 26, minZoom: 12, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_1", "OBJECTID", "Name", "Name_1", "text", "LifecycleS", "InstallDat", "Year_"],
+    color: POINT_COLORS.waterPlant, weight: 1, pointRadius: 6, identifyCard: waterPlantCard,
+    note: "Water plants and pump stations.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
+  }),
+  sl_water_wells: feature("slWaterWells", {
+    label: "Water Production Wells", mergeGroup: "sl_plants", role: "point", group: "utilities", order: 26, minZoom: 12, source: utilitySource(UTILITY_LAYER_EDITED.other),
+    fields: ["OBJECTID_12", "OBJECTID_1", "OBJECTID", "Name", "WaterType", "LifecycleS", "InstallDat", "Year_"],
+    color: POINT_COLORS.well, weight: 1, pointRadius: 5, identifyCard: wellCard,
+    note: "Water production wells.", infoCaveat: UTILITY_CAVEAT_TEXT, infoLink: UTILITY_REQUEST_LINK,
   }),
 };
 
@@ -355,18 +456,18 @@ export const SUGARLAND_VINTAGE = {
   sl_available_sites: "City of Sugar Land economic development listing — layer edited 2022-05-11",
   sl_dev_projects: "City of Sugar Land development project tracker — layer edited 2026-10-09",
   sl_hydrants: "City of Sugar Land hydrant inspection layer — last edited 2021-02-23",
+  sl_water_lines: utilityVintage(UTILITY_LAYER_EDITED.water),
+  sl_sewer_gravity: utilityVintage(UTILITY_LAYER_EDITED.gravity),
+  sl_sewer_laterals: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_sewer_force: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_water_valves: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_water_control_valves: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_manholes: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_cleanouts: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_lift_stations: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_wwtp: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_water_plants: utilityVintage(UTILITY_LAYER_EDITED.other),
+  sl_water_wells: utilityVintage(UTILITY_LAYER_EDITED.other),
 };
-
-/* ───────────────────────── Utilities honesty (owner: tell people why, offer the route) ───────────────────────── */
-export const UTILITY_MAP_REQUEST_URL = "https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862";
-export const SUGARLAND_UTILITY_NOTE = Object.freeze({
-  text: "Sugar Land does not publish water or sewer lines.",
-  linkText: "Request utility maps from the city",
-  href: UTILITY_MAP_REQUEST_URL,
-});
-/* The note a panel group carries at a site: { text, linkText, href } | null. Only the Utilities group, only inside the Sugar Land area. */
-export function sugarLandGroupNote(groupKey, inSugarLand) {
-  return groupKey === "util" && inSugarLand === true ? SUGARLAND_UTILITY_NOTE : null;
-}
 
 export { normalizeZone };

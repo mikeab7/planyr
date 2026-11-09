@@ -26,7 +26,7 @@ import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/li
 import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import {
-  SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, SUGARLAND_UTILITY_NOTE, UTILITY_MAP_REQUEST_URL, sugarLandGroupNote, relayed, SUGARLAND_RELAY, soft, money, cityHref,
+  SUGARLAND_LAYERS, SUGARLAND_MERGE_GROUPS, UTILITY_MAP_REQUEST_URL, relayed, SUGARLAND_RELAY, soft, money, cityHref,
   airportCard, airportStyle, AIRPORT_AREAS, AIRPORT_CODE_URL, fluCard, fluLegend, hydrantCard, cupCard, exceptionCard, varianceCard, cipCard, CIP_WHERE, rowLandCard, tirzCard, availableSiteCard, devProjectCard,
 } from "../src/workspaces/site-planner/lib/sugarLandLayers.js";
 import { THOROUGHFARE_WHERE } from "../src/workspaces/site-planner/lib/sugarLandThoroughfare.js";
@@ -42,7 +42,7 @@ const ELSEWHERE = {
 };
 const scopeOf = (p) => ({ state: siteState(p), loc: p });
 const CITY_HOST = /interactivemaps\.sugarlandtx\.gov/;
-const ORG = /SVtsrBXEiBhI5L5n/;
+const ORG = /(SVtsrBXEiBhI5L5n|VVapzOPgBae5joyC)/; // the city's org, and CDM Smith's public copy of the water / sewer network (NEW-1, 2026-11-06)
 
 describe("the Sugar Land service area is a real boundary (the city's limits ∪ its ETJ)", () => {
   it("is built into the generated area data with polygons", () => {
@@ -118,9 +118,16 @@ describe("every Sugar Land row is registered whole and scoped to the city", () =
     expect(MERGE_GROUPS.sl_zoning_cases).toBe(SUGARLAND_MERGE_GROUPS.sl_zoning_cases);
     expect(ALL_LAYERS.sl_hydrants.mergeGroup).toBe("fire_hydrants");
   });
-  it("no empty 'Water Mains' / 'Sewer' / 'Storm' / 'Water System' row exists (the city publishes none)", () => {
-    for (const id of IDS) expect(ALL_LAYERS[id].label, id).not.toMatch(/water main|sewer|storm|gravity|force main|water system/i);
-    expect(IDS.some((id) => /water|sewer|storm|lid|mud/.test(id))).toBe(false);
+  it("the water and sewer rows exist, are tagged with the data's year, and never show a bare 'Water Mains' / 'Storm' row (the city publishes no storm lines)", () => {
+    for (const id of ["sl_water_lines", "sl_sewer_gravity", "sl_sewer_laterals", "sl_sewer_force", "sl_water_valves", "sl_water_control_valves", "sl_manholes", "sl_cleanouts", "sl_lift_stations", "sl_wwtp", "sl_water_plants", "sl_water_wells"]) {
+      expect(ALL_LAYERS[id], id).toBeTruthy();
+      expect(ALL_LAYERS[id].group, id).toBe("utilities");
+    }
+    expect(ALL_LAYERS.sl_water_lines.label).toBe("Water Lines · as of 2017");
+    for (const g of ["sl_sewer_lines", "sl_valves", "sl_sewer_structures", "sl_plants"]) expect(MERGE_GROUPS[g].label, g).toMatch(/ · as of 2017$/);
+    expect(MERGE_GROUPS.sl_sewer_lines.label).toBe("Sewer Lines · as of 2017");
+    expect(IDS.some((id) => /storm/.test(id))).toBe(false);
+    for (const id of IDS) expect(ALL_LAYERS[id].label, id).not.toMatch(/storm/i);
   });
   it("close-zoom gates on the dense layers", () => {
     expect(ALL_LAYERS.sl_public_land.minZoom).toBeGreaterThanOrEqual(16);
@@ -129,7 +136,8 @@ describe("every Sugar Land row is registered whole and scoped to the city", () =
 });
 
 describe("the registry rows (GIS_SOURCES) the weekly health check covers", () => {
-  const KEYS = ["slThoroughfare", "slZoning", "slAirportZoning", "slFlu", "slHydrants", "slCups", "slSpecialExceptions", "slVariances", "slCip", "slRowLand", "slTirz", "slAvailableSites", "slDevProjects"];
+  const KEYS = ["slThoroughfare", "slZoning", "slAirportZoning", "slFlu", "slHydrants", "slCups", "slSpecialExceptions", "slVariances", "slCip", "slRowLand", "slTirz", "slAvailableSites", "slDevProjects",
+    "slWaterLines", "slSewerGravity", "slSewerLaterals", "slSewerForce", "slWaterValves", "slWaterControlValves", "slManholes", "slCleanouts", "slLiftStations", "slWwtp", "slWaterPlants", "slWaterWells"];
   it("has a row per layer, and passes the registry audit with fixtures", () => {
     for (const k of KEYS) expect(GIS_SOURCES[k], k).toBeTruthy();
     const { problems } = auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS);
@@ -327,14 +335,13 @@ describe("the other click cards read real values and drop the empty ones", () =>
   });
 });
 
-describe("the Utilities group says why there are no water or sewer lines, and offers the route", () => {
-  it("appears for the Utilities group inside Sugar Land only", () => {
-    expect(sugarLandGroupNote("util", true)).toBe(SUGARLAND_UTILITY_NOTE);
-    expect(sugarLandGroupNote("util", false)).toBeNull();
-    expect(sugarLandGroupNote("util", null)).toBeNull();
-    expect(sugarLandGroupNote("flood", true)).toBeNull();
-    expect(SUGARLAND_UTILITY_NOTE.text).toBe("Sugar Land does not publish water or sewer lines.");
-    expect(SUGARLAND_UTILITY_NOTE.href).toBe(UTILITY_MAP_REQUEST_URL);
-    expect(UTILITY_MAP_REQUEST_URL).toBe("https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862");
+describe("the Utilities group carries NO paragraph — the note and the request link are behind each row's (i)", () => {
+  it("there is no group note function or object any more", () => {
+        expect(UTILITY_MAP_REQUEST_URL).toBe("https://survey123.arcgis.com/share/a9755767526546b5a9509d1648399862");
+    expect(ALL_LAYERS.sl_water_lines.infoLink.href).toBe(UTILITY_MAP_REQUEST_URL);
+  });
+  it("the hydrant row no longer claims the city publishes no water lines", () => {
+    expect(ALL_LAYERS.sl_hydrants.infoCaveat).not.toMatch(/does not publish/);
+    expect(ALL_LAYERS.sl_hydrants.note).not.toMatch(/closest public trace/);
   });
 });
