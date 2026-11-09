@@ -281,6 +281,7 @@
      see --canvas-line-casing below — not from re-tinting it per theme. */
   --canvas-parcel:      #34E802;   /* owner default 2026-07-30 (was indigo, was the olive #5b6650) */
   --canvas-setback:     var(--canvas-parcel);   /* the two are one default, set together */
+  --canvas-paving:      #2F7DF0;   /* NEW-1 (2026-11-09) — the paving setback line: dotted blue, never the building line's green (mirrors palette.js canvasPaving) */
   /* The dark under-stroke drawn beneath the parcel boundary and the setback ring. A bright,
      highly-saturated line lands on green fields and irrigated crop on many of these sites; the
      casing is what keeps the line readable there, and on asphalt and on a topo basemap, without
@@ -467,6 +468,7 @@
      imagery, which does not follow the app theme, and its contrast comes from the casing. */
   --canvas-parcel:      #34E802;
   --canvas-setback:     var(--canvas-parcel);
+  --canvas-paving:      #5AA2FF;   /* NEW-1 (2026-11-09) — the paving setback line: dotted blue, never the building line's green (mirrors palette.js canvasPaving) */
   --canvas-line-casing: rgba(0, 0, 0, 0.55);
   --canvas-chip-ink:    #15171C;   /* the chip plate stays white on dark too — same near-black ink */
   /* NEW-1 — opaque, matching --surface-overlay's own dark-theme fix (2026-09-08) — was a

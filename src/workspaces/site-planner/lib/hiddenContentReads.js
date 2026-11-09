@@ -47,6 +47,8 @@ export const DECLARATIONS = Object.freeze([
     why: "B3296 — the DISSOLVED pavement. Drawn once per connected cluster on behalf of several roads at once, so no road owns it and a per-element filter cannot reach it. This is the call site the whole audit exists because of." },
   { name: "roadRadiusFlags", verdict: F,
     why: "B3296 — review chrome painted ON a road, whose corner dot is a live one-click Fix. A flag for a road nobody can see is a marker floating on empty ground." },
+  { name: "pavingFlagGeoms", verdict: F,
+    why: "NEW-1 (2026-11-09) — the red outline + \"Crosses paving setback\" mark painted ON a parking field / road / court. Review chrome about an object nobody can see is a marker floating on empty ground, so a hidden element raises none (the conflict scan itself also takes only the visible set)." },
   { name: "fit", verdict: F,
     why: "B494048 — Zoom to fit. An extent built from the whole model frames the view around content that is not on screen, so the drawing you CAN see is pushed into a corner of it." },
   { name: "connectableRoads", verdict: F,
