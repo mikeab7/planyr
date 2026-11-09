@@ -206,6 +206,8 @@ import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/feature
 import ColorField from "../../shared/ui/ColorField.jsx";
 import ParcelPage from "./components/ParcelPage.jsx";
 import SetbackSections, { sectionPath, sectionColor } from "./components/SetbackSections.jsx";
+// NEW-1 (2026-11-09) — the PAVING setback: a second per-edge array (`pc.pavingSetbacks`, absent = not added) over the SAME sections. Off until the owner adds it; never derived from the building setback.
+import { hasPaving, pavingValues, newPaving, pavingAll, setPavingSection, sectionValue as pavingSectionValue, shiftPavingOnInsert, shiftPavingOnDelete, pavingRing, pavingConflicts, conflictSig as pavingConflictSig } from "./lib/pavingSetback.js";
 import { boundarySections, setSectionSetback, toggleBreak, shiftBreaksOnInsert, shiftBreaksOnDelete } from "./lib/boundarySections.js";
 import { cadNameOf, parcelOrigin } from "./lib/parcelOrigin.js";
 import { taxTableFor, taxTableForCombined } from "./lib/taxRates.js";
@@ -377,7 +379,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
-import { regionPathD, polylinesPathD } from "./lib/roadNetwork.js";
+import { regionPathD, polylinesPathD, roadSurfaceRing } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
 import { followDrives } from "./lib/driveFollow.js";
@@ -1354,7 +1356,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const PAL = useMemo(() => ({
     paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
     ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
-    setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    setback: themePal.canvasSetback, paving: themePal.canvasPaving, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
     // NEW-1 — the scale bar / north arrow "plate" background (sheetFurniture.js). These are map
     // CHROME sitting over the aerial, like the Layers/View panels — not drawn site content — so
     // the plate must follow the theme the way its neighbouring status chips already do. Only the
@@ -9197,7 +9199,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
     // split (both halves are still the same side). Without this the vector stops matching the ring
     // and every correction the user made is silently dropped on the next re-derive.
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnInsert(pc.sectionBreaks || [], edgeIndex), sectionJoins: shiftBreaksOnInsert(pc.sectionJoins || [], edgeIndex) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnInsert(pc.sectionBreaks || [], edgeIndex), sectionJoins: shiftBreaksOnInsert(pc.sectionJoins || [], edgeIndex) } : {}), ...(hasPaving(pc) ? { pavingSetbacks: shiftPavingOnInsert(pc.pavingSetbacks, edgeIndex) } : {}) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
@@ -9247,7 +9249,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     // NEW-6 — deleting a vertex merges two edges into one; the merged edge keeps the first half's
     // role and the vector stays aligned to the ring (see `shiftOverridesOnDelete`).
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnDelete(pc.sectionBreaks || [], index), sectionJoins: shiftBreaksOnDelete(pc.sectionJoins || [], index) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnDelete(pc.sectionBreaks || [], index), sectionJoins: shiftBreaksOnDelete(pc.sectionJoins || [], index) } : {}), ...(hasPaving(pc) ? { pavingSetbacks: shiftPavingOnDelete(pc.pavingSetbacks, index) } : {}) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));
@@ -22616,6 +22618,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, sectionBreaks: r.breaks, sectionJoins: r.joins } : p)));
   };
+  /* NEW-1 (2026-11-09) — the PAVING setback handlers. All write the one `pc.pavingSetbacks` array through a fresh
+   * read-modify-write of this parcel only; adding starts at 0 on every edge (never the building value), removing deletes
+   * the KEY (so an untouched parcel and a parcel that added-then-removed are byte-identical). One undo frame each. */
+  const pavingAdd = () => {
+    const pc = selParcel; if (!pc || hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: newPaving(p.points.length) } : p)));
+    setSettings((st) => (st.showPaving === false ? { ...st, showPaving: true } : st)); // a fresh add shows its line
+  };
+  const pavingRemove = () => {
+    const pc = selParcel; if (!pc || !hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => { if (p.id !== pc.id) return p; const { pavingSetbacks: _gone, ...rest } = p; return rest; }));
+    pushToast({ text: "Paving setback removed", action: { label: "Undo", onClick: undo } }); // the building setback is untouched; Undo brings the paving back
+  };
+  const pavingSectionValue2 = (sec, v) => {
+    const pc = selParcel; if (!pc || !hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: setPavingSection(pavingValues(p), sec, v, p.points.length) } : p)));
+  };
+  const pavingAllValue = (v) => {
+    const pc = selParcel; if (!pc || !hasPaving(pc) || !Number.isFinite(+v)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: pavingAll(p.points.length, v) } : p)));
+  };
   const renderParcelPage = () => {
     const pc = selParcel;
     if (!pc) return null;
@@ -22648,8 +22675,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
           collapsed={setbackEnvelope(pc.points, parcelSetbacks(pc)).collapsed}
-          resetLabel={`Reset to default (${settings.setback}′)`}
-          onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
+          resetLabel={hasPaving(pc) ? "Reset all" : `Reset to default (${settings.setback}′)`}
+          onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0), ...(hasPaving(p) ? { pavingSetbacks: newPaving(p.points.length) } : {}) } : p)); }}
+          onAddPaving={pavingAdd}
+          paving={hasPaving(pc) ? { valueOf: (sec) => pavingSectionValue(pavingValues(pc), sec), onSetValue: pavingSectionValue2, onSetAll: pavingAllValue, showLine: settings.showPaving !== false, onShowLine: (v) => setSettings((st) => ({ ...st, showPaving: v })), onRemove: pavingRemove } : null}
           renderNum={(value, onCommit, ariaLabel) => <NumInput style={{ ...numInput, width: 54 }} value={value} min={0} ariaLabel={ariaLabel} onCommit={onCommit} />} />
       </section>
     ) : null;
@@ -23985,6 +24014,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // class requires was drawing at 11 — a compliance problem, and the visible cause of "that shape is
   // wrong". The geometry still can't lie, so the app says so instead: a flag on the offending vertex,
   // on the canvas, without having to select the road first. Review chrome — never exported.
+  /* NEW-1 (2026-11-09) — PAVING SETBACK CONFLICTS: which car parking / trailer parking / truck court & paving / road crosses a parcel's
+   * paving line (rules + the driveway exemption: lib/pavingSetback.js). Review chrome — `data-export="skip"`, like the road-radius flags.
+   * ⛔ NO-PER-MOVE-WORK: it costs NOTHING unless some active parcel has added paving, and even then it is a TRAILING 120 ms debounce — a drag
+   * restarts the timer instead of running the polygon maths, so the marks settle when the gesture does. Hidden elements raise none. */
+  const [pavingFlags, setPavingFlags] = useState([]);
+  const pavingFlagSigRef = useRef("");
+  useEffect(() => {
+    const live = parcels.some((pc) => pc.active !== false && hasPaving(pc));
+    if (!live) { if (pavingFlagSigRef.current !== "") { pavingFlagSigRef.current = ""; setPavingFlags([]); } return undefined; }
+    const t = setTimeout(() => {
+      const visible = (els || []).filter((el) => !elHidden(hiddenGroups, el));
+      const found = pavingConflicts({
+        parcels, els: visible, ringOf,
+        roadCentreline: (el) => (isCenterlineRoad(el) ? roadDenseCenterline(el, settings, sharpFor(el)) : null),
+        roadRingOf: (el, line) => roadSurfaceRing(line, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [],
+      });
+      const sig = pavingConflictSig(found);
+      if (sig !== pavingFlagSigRef.current) { pavingFlagSigRef.current = sig; setPavingFlags(found); }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [els, parcels, hiddenGroups, settings, sharpFor]);
+  // The flag GEOMETRY in feet (view-independent — VIEW-INDEPENDENT-ONCE): a pan/zoom only re-projects these few rings, it never rebuilds a road strip.
+  const pavingFlagGeoms = useMemo(() => {
+    if (!pavingFlags.length) return [];
+    const out = [];
+    pavingFlags.forEach((f, i) => {
+      const el = (els || []).find((x) => x.id === f.id);
+      if (!el || elHidden(hiddenGroups, el)) return;
+      const ring = isCenterlineRoad(el) ? roadStripRing(el, settings, sharpFor(el), undefined) : ringOf(el);
+      if (!ring || ring.length < 3) return;
+      out.push({ key: `pvf${f.id}-${f.parcelId}-${i}`, id: f.id, sf: Math.round(f.areaSf), ring, at: polylabel(ring) });
+    });
+    return out;
+  }, [pavingFlags, els, hiddenGroups, settings, sharpFor]);
   const roadRadiusFlags = useMemo(() => {
     const out = [];
     if (!radiusReviewOn) return out; // NEW-3 — the min-radius review is hidden (one flag, default OFF): no corner dot, no pill
@@ -24637,6 +24700,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                 </g>;
               })}
+              {/* NEW-1 (2026-11-09) — the PAVING setback line, beside the building one. DOTTED and its own colour (the building
+                  line is dashed) so the two read apart at a glance; same sub-pixel gate, casing and screen-pixel weight rules as the
+                  building ring, no grab band (the building ring is the lot's second grab target). Drawn only for a parcel that ADDED
+                  paving and only while this plan's paving Show line is on; a parcel that never added it draws nothing new. It is in
+                  the plan SVG, so the export clone carries it (PDF-PARITY). */}
+              {settings.showPaving !== false && !isHidden(hiddenGroups, "parcels") && parcels.filter((pc) => pc.active !== false && hasPaving(pc)).map((pc) => {
+                const pv = pavingValues(pc);
+                const posPv = pv.filter((v) => v > 0);
+                if (!posPv.length || !insetRingVisible(Math.min(...posPv), labelPpf)) return null;
+                const o = pavingRing(pc);
+                if (!o) return null;
+                const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                const w = lookOf(pc).setback.weightPx;
+                const dots = `0.1 ${Math.max(3.5, w * 2.5)}`;
+                return <g key={`pv${pc.id}`} data-testid="paving-ring-group" data-paving-edges={pv.join(",")}>
+                  <polygon data-testid="paving-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={w + PARCEL_CASING_W} strokeDasharray={dots} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+                  <polygon data-testid="paving-ring" points={ring} fill="none" stroke={PAL.paving} strokeWidth={w + 0.5} strokeDasharray={dots} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={pc.sbOpacity ?? 1} pointerEvents="none" />
+                </g>;
+              })}
               {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
                   when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
                   SAME ring is the only grab target, so a lot is selectable by its boundary edge, never
@@ -25142,6 +25224,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
+              {pavingFlagGeoms.length > 0 && (
+                <g data-testid="paving-conflicts" data-export="skip">
+                  {pavingFlagGeoms.map((g) => { const at = f2p(g.at); return (
+                    <g key={g.key} data-paving-flag={g.id} data-paving-flag-sf={g.sf}>
+                      <polygon points={g.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="var(--danger)" strokeWidth={2.25} strokeLinejoin="round" pointerEvents="none" />
+                      <text x={at.x} y={at.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
+                        style={{ fontSize: 11, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Crosses paving setback</text>
+                    </g>); })}
+                </g>
+              )}
               {roadRadiusFlags.length > 0 && (
                 // NEW-4, owner rule 2026-07-25: "they shouldn't just throw up an exclamation mark.
                 // I don't even know how to fix it." So the mark is replaced by the two things he

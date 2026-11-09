@@ -213,6 +213,9 @@ export function planSplit(parcels, path, { targetId = null, selId = null, newId,
       setbacks: remapEdgeVector(pc.setbacks, edgeSrc, baseSetback),
       roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
       roles: remapEdgeVector(pc.roles, edgeSrc, null),
+      // NEW-1 (2026-11-09) — a paving setback rides the split like the building one, but the edge the CUT created takes 0
+      // (never the building value, never a neighbour's): paving is only ever what the owner typed. No key when the parent had none.
+      ...(Array.isArray(pc.pavingSetbacks) ? { pavingSetbacks: remapEdgeVector(pc.pavingSetbacks, edgeSrc, 0) || edgeSrc.map(() => 0) } : {}),
       ...(exc[i].length ? { exceptions: exc[i] } : {}),
       splitFrom: { group, count: pieces.length, sig: sigOf(ring), from: snap },
     }));
