@@ -207,8 +207,9 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 import ParcelPage from "./components/ParcelPage.jsx";
 import SetbackSections, { sectionPath, sectionColor } from "./components/SetbackSections.jsx";
 // NEW-1 (2026-11-09) — the PAVING setback: a second per-edge array (`pc.pavingSetbacks`, absent = not added) over the SAME sections. Off until the owner adds it; never derived from the building setback.
-import { hasPaving, pavingValues, newPaving, pavingAll, setPavingSection, sectionValue as pavingSectionValue, shiftPavingOnInsert, shiftPavingOnDelete, pavingRing, pavingConflicts, conflictSig as pavingConflictSig } from "./lib/pavingSetback.js";
-import { boundarySections, setSectionSetback, toggleBreak, shiftBreaksOnInsert, shiftBreaksOnDelete } from "./lib/boundarySections.js";
+import { parcelAfterInsert, parcelAfterDelete } from "./lib/parcelReshape.js";
+import { hasPaving, pavingValues, newPaving, pavingAll, setPavingSection, sectionValue as pavingSectionValue, pavingRing, pavingConflicts, conflictSig as pavingConflictSig } from "./lib/pavingSetback.js";
+import { boundarySections, setSectionSetback, toggleBreak } from "./lib/boundarySections.js";
 import { cadNameOf, parcelOrigin } from "./lib/parcelOrigin.js";
 import { taxTableFor, taxTableForCombined } from "./lib/taxRates.js";
 import { ownerName as apprOwnerName } from "./lib/appraisal.js";
@@ -340,7 +341,7 @@ import { offsetPolygon, outsetPolygon, lineIntersect, setbackEnvelope } from "./
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
 // `pc.setbacks` array the yield engine reads is untouched by anything in here.
-import { resolveRoles, shiftOverridesOnInsert, shiftOverridesOnDelete } from "./lib/setbackRoles.js";
+import { resolveRoles } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
 // NEW-1 — the ONE model behind the right rail's "Parcel tools" menu: the full inventory of what a
@@ -9199,7 +9200,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
     // split (both halves are still the same side). Without this the vector stops matching the ring
     // and every correction the user made is silently dropped on the next re-derive.
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnInsert(pc.sectionBreaks || [], edgeIndex), sectionJoins: shiftBreaksOnInsert(pc.sectionJoins || [], edgeIndex) } : {}), ...(hasPaving(pc) ? { pavingSetbacks: shiftPavingOnInsert(pc.pavingSetbacks, edgeIndex) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? parcelAfterInsert(pc, edgeIndex, np) : pc)); // lib/parcelReshape.js — every per-edge array follows the new corner
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
@@ -9249,7 +9250,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     // NEW-6 — deleting a vertex merges two edges into one; the merged edge keeps the first half's
     // role and the vector stays aligned to the ring (see `shiftOverridesOnDelete`).
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnDelete(pc.sectionBreaks || [], index), sectionJoins: shiftBreaksOnDelete(pc.sectionJoins || [], index) } : {}), ...(hasPaving(pc) ? { pavingSetbacks: shiftPavingOnDelete(pc.pavingSetbacks, index) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? parcelAfterDelete(pc, index) : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));

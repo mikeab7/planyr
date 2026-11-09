@@ -9,9 +9,11 @@ const panel = fs.readFileSync(new URL("../src/workspaces/site-planner/components
 const palette = fs.readFileSync(new URL("../src/shared/theme/palette.js", import.meta.url), "utf8");
 
 describe("paving setback wiring", () => {
-  it("a corner inserted / deleted on a parcel carries the paving array with it (and only when the parcel has one)", () => {
-    expect(src).toMatch(/hasPaving\(pc\) \? \{ pavingSetbacks: shiftPavingOnInsert\(pc\.pavingSetbacks, edgeIndex\) \} : \{\}/);
-    expect(src).toMatch(/hasPaving\(pc\) \? \{ pavingSetbacks: shiftPavingOnDelete\(pc\.pavingSetbacks, index\) \} : \{\}/);
+  it("a corner inserted / deleted on a parcel carries the paving array with it (and only when the parcel has one) — via the one reshape", () => {
+    const re = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/parcelReshape.js", import.meta.url), "utf8");
+    expect(re).toMatch(/hasPaving\(pc\) \? \{ pavingSetbacks: shiftPavingOnInsert\(pc\.pavingSetbacks, edgeIndex\) \} : \{\}/);
+    expect(re).toMatch(/hasPaving\(pc\) \? \{ pavingSetbacks: shiftPavingOnDelete\(pc\.pavingSetbacks, index\) \} : \{\}/);
+    expect(src).toContain("parcelAfterInsert(pc, edgeIndex, np)");
   });
   it("adding starts at zeros from newPaving — never from the building setback or the default", () => {
     const add = src.slice(src.indexOf("const pavingAdd = () =>"), src.indexOf("const pavingRemove = () =>"));
