@@ -15,7 +15,6 @@ import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
 import { markRecoveryPending, isRecoveryPending } from "../shared/auth/recoveryPending.js";
 import { readDraft, clearDraft, draftStorage } from "../shared/auth/panelDismiss.js";
 import { reportAuthEvent, AUTH_EVENT } from "../shared/auth/authTelemetry.js";
-import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
@@ -37,6 +36,7 @@ import NameNoticeHost from "../shared/names/NameNoticeHost.jsx";
 import "../shared/schedule/scheduleSiteNames.js"; // registers the live project-name resolver for schedule labels
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
+import { loadAuthPanel } from "./authPanelChunk.js";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
 import { isTextControl } from "../shared/keyboard/keyScope.js";
 import { openShortcutsPage, closeShortcutsPage, subscribeShortcutsPage } from "../shared/keyboard/shortcutsPageBus.js";
@@ -63,6 +63,9 @@ const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
 // NEW-2 (company workspace card) — the Site tab at COMPANY scope: a map of every project, one pin
 // each. Lazy and not a WORKSPACES entry: it is the Site tab's org-scope face, mounted only while
 // the route is #/org/site (the Site Planner is not mounted for it).
+/* B329408 — the sign-in panel (~15 KB) is its own chunk (authPanelChunk.js says when it is warmed: on intent, at the header's "Sign in" pill). The panel
+ * itself is unchanged (constraint #54 — it closes only when asked — lives inside it). */
+const AuthPanel = lazy(loadAuthPanel);
 const OrgSitesView = lazy(() => import("../workspaces/site-planner/components/OrgSitesView.jsx"));
 // NEW-1 (keyboard shortcuts page, 2026-09-12) — same lazy/not-a-workspace shape as the three
 // above: reachable from every route via the global "?" listener below and the Help menu's
@@ -1049,6 +1052,7 @@ export default function Shell() {
         </Suspense>
       )}
       {authOpen && (
+        <Suspense fallback={null}>
         <AuthPanel
           user={user}
           recovery={recovery}
@@ -1060,6 +1064,7 @@ export default function Shell() {
           onLeaveRecovery={() => setRecovery(false)}
           onClose={() => { restoredRef.current = false; setAuthOpen(false); setRecovery(false); setAuthNotice(""); setAuthMode("signin"); }}
         />
+        </Suspense>
       )}
       {signedOutNotice && !user && !authOpen && <SignedOutNotice onSignIn={openAuth} onDismiss={() => setSignedOutNotice(false)} />}
     </div>

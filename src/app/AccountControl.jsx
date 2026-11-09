@@ -17,6 +17,7 @@
  * gate, sign-out, the menu primitive) is imported directly — this file is app-shell chrome, at
  * the same import depth Shell uses, so src/shared/ui stays free of workspace-lib imports.
  */
+import { warmAuthPanel } from "./authPanelChunk.js";
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../shared/ui/radius.js";
 import { MenuTrigger, Button } from "../shared/ui/controls.jsx";
@@ -310,7 +311,7 @@ export default function AccountControl({ user, authKnown = true, reconnecting = 
     // branch that renders), but nobody is signed in. See that hook's own comment for why a
     // copy-independent marker matters here.
     return (
-      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
+      <MenuTrigger onClick={onOpenAuth} onPointerEnter={warmAuthPanel} onFocus={warmAuthPanel} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
         Sign in
       </MenuTrigger>
     );

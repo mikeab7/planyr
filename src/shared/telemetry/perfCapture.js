@@ -126,21 +126,9 @@ export const NOTE_VOCAB = [
 ];
 
 /* ── Plan identity ───────────────────────────────────────────────────────────────────────────
- * A plan id here may be an opaque key OR a name the owner typed. Opaque-looking ids pass; anything
- * else becomes a short FNV-1a hash. Non-reversible, stable within and across sessions, and enough
- * to answer "is this always the same plan?" — which is the only question the recorder needs it for. */
-export function safePlanId(raw) {
-  const s = raw == null ? "" : String(raw);
-  if (!s) return { plan: "", planIdKind: "id" };
-  if (/^[A-Za-z0-9_-]{1,40}$/.test(s)) return { plan: s, planIdKind: "id" };
-  return { plan: hash32(s), planIdKind: "hash" };
-}
-
-export function hash32(s) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return (h >>> 0).toString(36);
-}
+ * `safePlanId` / `hash32` live in the leaf planIdSafe.js (B329408 — the always-loaded shell needs them without this whole module). */
+import { safePlanId, hash32 } from "./planIdSafe.js";
+export { safePlanId, hash32 };
 
 /* ── Frame statistics ────────────────────────────────────────────────────────────────────────
  * Percentiles over the kept frames. `jankFrames` counts frames at or past the trigger's own slow

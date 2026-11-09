@@ -1,6 +1,6 @@
 import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
-import SitePlanner, { warmPlanForMount } from "./SitePlanner.jsx";
+import { loadPlanner, prefetchPlanner } from "./lib/plannerChunk.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
@@ -32,6 +32,9 @@ import { idbPersist } from "./lib/localDb.js";
  * import behind the one conditional that renders it. Named export, so the promise is
  * mapped to a default for React.lazy. */
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
+/* B329408 — the plan EDITOR is its own chunk (lib/plannerChunk.js says when it is fetched: at t=0 for a page opening on a plan, at idle for a
+ * visit that lands on the map). `warmPlanForMount` is reached through the same door below. */
+const SitePlanner = lazy(loadPlanner);
 import { nextConceptName } from "./lib/conceptName.js";
 import { runMint, describePushFailure, saveRefusedMessage, PUSH_MISSING } from "./lib/planMint.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -123,6 +126,9 @@ export default function App({
    * four while every battery in this repo runs at zero. One effect keyed on the overlay state —
    * never per render, never per frame — and the handle sanitises and bounds what it stores. */
   useEffect(() => { noteLayerContext(overlays); }, [overlays]);
+  /* B329408 — a visit that landed on the MAP fetches the plan editor's chunk once the browser is idle, so the first "open a plan" finds it already
+   * in the module cache (a page opening ON a plan gets it at t=0 from the index.html preload instead — lib/plannerChunk.js says both). */
+  useEffect(() => { prefetchPlanner(); }, []);
   // Per-layer load status (id → {state, msg}), app-shared so the Layers panel on
   // either page shows which layers are actually painting vs failed/empty.
   const [layerStatus, setLayerStatus] = useState({});
@@ -1249,7 +1255,7 @@ export default function App({
     const id = activeSiteId;
     const finish = () => { if (done) return; done = true; clearTimeout(cap); startTransition(() => setPlannerWarmFor(id)); };
     const cap = setTimeout(finish, PLANNER_WARM_CEILING_MS);
-    warmPlanForMount(id).then(finish, finish);
+    loadPlanner().then((m) => m.warmPlanForMount(id)).then(finish, finish);
     return () => { done = true; clearTimeout(cap); };
   }, [plannerWarmPending, activeSiteId]);
   return (
@@ -1366,6 +1372,7 @@ export default function App({
         aria-hidden={mode === "plan" ? undefined : "true"} inert={mode === "plan" ? undefined : ""}
         style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && !plannerWarmPending && (
+          <Suspense fallback={null}>
           <SitePlanner
             key={`${activeSiteId}:${loadEpoch}`}
             active={mode === "plan" && isActive}
@@ -1400,6 +1407,7 @@ export default function App({
             authControl={authControl}
             accountActive={accountActive}
           />
+          </Suspense>
         )}
       </div>
       {/* NEW-1 — outside both mode divs so a status-change undo offered on the map survives
