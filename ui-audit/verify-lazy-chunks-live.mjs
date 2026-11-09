@@ -56,9 +56,10 @@ try {
 
   /* 5 — Notes */
   try {
+    // in-session hop first (no reload): the Notes tree must appear from the plan route as a user would reach it
     await page.goto(`${base}/#/notes`);
-    await page.locator('[data-testid="notes-tree"], [data-notes-root], [aria-label*="Notes"]').first().waitFor({ state: "visible", timeout: 45_000 });
-    pass("5: the Notes workspace renders");
+    await page.locator('[data-testid^="notes-row-"], [data-testid^="notes-group-"]').first().waitFor({ state: "visible", timeout: 60_000 });
+    pass("5: the Notes workspace renders after an in-session hop (its tree rows are visible)");
   } catch (e) { bad("5: Notes did not render: " + String(e).split("\n")[0]); }
 
   /* 6 — Spreadsheet: a project's workbook, then the bare route (B2671203: it used to show the error card) */
