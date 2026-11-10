@@ -131,14 +131,14 @@ describe("the light summary read is memoised on the store's exact bytes", () => 
     expect(loadSiteSummaries()[0].name).not.toBe("scribbled on");
     expect(b.length).toBe(6);
     parse.mockRestore();
-    saveSite({ id: "p0", name: "Renamed" });                      // a real change bumps the index → the memo misses and the read is redone
+    saveSite({ id: "p0", name: "Renamed" }, { planRename: true });                      // a real change bumps the index → the memo misses and the read is redone
     const c = loadSiteSummaries();
     expect(c.find((m) => m.id === "p0").name).toBe("Renamed");
   });
   it("right after THIS tab saved a plan, it takes the parse storage.js already holds — zero store parses — and still equals a real read", () => {
     seed(6);
     loadSiteSummaries();
-    saveSite({ id: "p3", name: "Plan 3 renamed", els: [bld("changed")] });         // the bytes changed: the memo misses
+    saveSite({ id: "p3", name: "Plan 3 renamed", els: [bld("changed")] }, { planRename: true });         // the bytes changed: the memo misses
     const parse = vi.spyOn(JSON, "parse");
     const got = loadSiteSummaries();
     const bigParses = parse.mock.calls.filter((c) => typeof c[0] === "string" && c[0].length > 2000).length;

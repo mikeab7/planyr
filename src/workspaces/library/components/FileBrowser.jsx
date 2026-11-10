@@ -718,8 +718,17 @@ export default function FileBrowser({
     setRenaming(null);
     if (!r.value.trim()) { setMoveNotice(`A name can't be empty — "${f.title || "this file"}" kept its name.`); return; }
     if (r.value.trim() === (f.title || "")) return;
-    const res = await renameReviewTitle(f.id, r.value);
-    if (!res.ok) setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}`);
+    /* NEW-1 (B2671215, owner 2026-11-10: "when I hit enter, it should immediately change the name") — THE ROW SHOWS THE NEW TITLE ON THE SAME FRAME
+     * AS ENTER. `renameReviewTitle` loads the record and saves it (a network round trip each when signed in), and the row used to keep the old
+     * title until `refresh()` after both — the lag the owner reported on plans. Same shape as `moveFileToFolder` just above: patch the list at
+     * once, put the old title back with a plain message if the save fails, then re-read to reconcile. */
+    const typed = r.value.trim();
+    const was = { title: f.title, titleAuto: f.titleAuto };
+    setReviews((rs) => rs.map((x) => (x && x.id === f.id ? { ...x, title: typed, titleAuto: false } : x)));
+    const undo = () => setReviews((rs) => rs.map((x) => (x && x.id === f.id && x.title === typed ? { ...x, title: was.title, titleAuto: was.titleAuto } : x)));
+    let res;
+    try { res = await renameReviewTitle(f.id, typed); } catch (e) { res = { ok: false, error: (e && e.message) || "the save failed" }; }
+    if (!res.ok) { undo(); setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}. It kept its old name.`); }
     refresh();
   };
   const openFileMenu = (f, x, y) => setFileMenu({ f, x, y });

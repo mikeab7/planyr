@@ -1088,7 +1088,7 @@ export default function App({
   const renamePlan = (id, name) => { // NEW-F6
     /* NEW-1 (2026-11-03): a rename the device refused is not "saved on this device" — say so and push nothing. A false from the resurrection guard (a
      * deleted plan) carries no refusal and keeps the old quiet path. */
-    if (!saveSite({ id, name }) && lastSaveRefusal(id)) { raiseMintRefused(saveRefusedMessage("The plan rename", lastSaveRefusal(id).reason), () => renamePlan(id, name)); refreshSites(); return; }
+    if (!saveSite({ id, name }, { planRename: true }) && lastSaveRefusal(id)) { raiseMintRefused(saveRefusedMessage("The plan rename", lastSaveRefusal(id).reason), () => renamePlan(id, name)); refreshSites(); return; }
     pushLoud(id, "The plan rename"); refreshSites();
   };
 

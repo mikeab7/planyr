@@ -482,7 +482,7 @@ describe("5 — one-way re-adopt: a legacy entry that REAPPEARS is folded in per
     expect(planStore.readShared(ck).x9.name).toBe("touch");
   });
   it("the old tab holds an OLDER copy of a plan this build edited: this build's edit wins, nothing reverts", () => {
-    saveSite({ id: "x4", name: "named by the new build" });
+    saveSite({ id: "x4", name: "named by the new build" }, { planRename: true });   // a deliberate rename (a content save may no longer move a plan name — B2671215)
     oldTabWrite((all) => { all.x4 = lib.x4; all.x9 = { ...all.x9, name: "unrelated old edit", updatedAt: Date.now() + 5000 }; });
     expect(loadSite("x4").name).toBe("named by the new build");
     expect(loadSite("x9").name).toBe("unrelated old edit");
