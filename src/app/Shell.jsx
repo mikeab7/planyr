@@ -946,6 +946,7 @@ export default function Shell() {
                     noteIntent={noteIntent}
                     onGoDashboard={goDashboard}
                     onNewProject={newProject}
+                    onOpenAuth={openAuth}
                     onOpenReviewInDocReview={openReviewInDocReview}
                     onScheduleLinkChanged={scheduleLinkChanged}
                   />

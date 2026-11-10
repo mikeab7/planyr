@@ -15,6 +15,7 @@ import { supabase } from "../../site-planner/lib/supabase.js";
 import { FOLDER_TEMPLATE, TEMPLATE_VERSION } from "../../../shared/folders/folderTemplate.js";
 import { buildSeedRows, subtreeIds, childrenOf } from "../../../shared/folders/folderTree.js";
 import { ensureProjectExists } from "../../../shared/projects/projects.js";
+import { authedFetch, FAIL_UNREACHABLE } from "../../../shared/auth/apiAuth.js";
 
 const COLS = "id,parent_id,name,sort_order,trashed,drive_folder_id";
 
@@ -33,10 +34,32 @@ function makeId() {
   return "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
-async function authToken() {
-  if (!supabase) return null;
-  try { const { data } = await supabase.auth.getSession(); return (data && data.session && data.session.access_token) || null; }
-  catch (_) { return null; }
+// NEW-1 (2026-11-09) — every /api/folders call goes through the ONE shared helper
+// (shared/auth/apiAuth.js): a token that is not expired, and on a 401 one refresh + one retry. The old
+// bare getSession → Bearer sent a stale token as-is, so a tab left open over a weekend made the
+// one-time organizer print "Invalid or expired session (403)".
+const SIGNED_OUT = "Not signed in.";
+
+async function postFolders(payload) {
+  const r = await authedFetch("/api/folders", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.resp) return { failure: r.failure || "signed-out" };
+  return { resp: r.resp };
+}
+
+// The result for "no usable sign-in". `skipped` + "Not signed in." is the shape every existing caller
+// already reads as signed out; `authExpired` is the new, explicit flag (the sign-in is the cause).
+function noSignIn(failure, extra = {}) {
+  if (failure === FAIL_UNREACHABLE) return { ok: false, error: "Couldn't reach Planyr — check your connection.", ...extra };
+  return { ok: false, skipped: true, authExpired: true, error: SIGNED_OUT, ...extra };
+}
+
+// A non-ok API answer. A 401 that survived the refresh-and-retry is a real "sign in again".
+function apiFailure(resp, jr, extra = {}) {
+  return { ok: false, error: (jr && jr.error) || `HTTP ${resp.status}`, ...(resp.status === 401 ? { authExpired: true } : {}), ...extra };
 }
 
 // All of a project's folder rows (trashed included, so subtree math is correct), client-shaped.
@@ -151,21 +174,17 @@ export async function trashSubtree(projectId, id) {
 // One sync pass: loop the server's chunks until remaining hits 0. Internal — the exported
 // syncFoldersToDrive wraps this in a per-project single-flight.
 async function syncRounds(projectId, emit) {
-  const token = await authToken();
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
   const MAX_ROUNDS = 25; // 25 × 20 ops = 500 ops — far beyond any real tree; a hard runaway stop
   let grandTotal = null;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const resp = await fetch("/api/folders", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ action: "sync", projectId }),
-      });
+      const call = await postFolders({ action: "sync", projectId });
+      if (call.failure) return noSignIn(call.failure, { summary });
+      const resp = call.resp;
       if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
       let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, summary };
+      if (!(resp.ok && jr.ok)) return apiFailure(resp, jr, { summary });
       for (const k of Object.keys(summary)) summary[k] += (jr.summary && jr.summary[k]) || 0;
       if (grandTotal == null) grandTotal = jr.total || 0;
       const remaining = jr.remaining || 0;
@@ -216,17 +235,13 @@ export async function syncFoldersToDrive(projectId, { onProgress } = {}) {
  * 404/503 → skipped (Drive off); tree not mirrored → server reports skipped. Never throws. */
 export async function moveDriveFileToFolder(projectId, planyrKey, discipline, folderId = null) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
-  const token = await authToken();
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   try {
-    const resp = await fetch("/api/folders", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "file-move", projectId, planyrKey, discipline, ...(folderId ? { folderId } : {}) }),
-    });
+    const call = await postFolders({ action: "file-move", projectId, planyrKey, discipline, ...(folderId ? { folderId } : {}) });
+    if (call.failure) return noSignIn(call.failure);
+    const resp = call.resp;
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-    return resp.ok && jr.ok ? jr : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+    return resp.ok && jr.ok ? jr : apiFailure(resp, jr);
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
@@ -235,23 +250,19 @@ export async function moveDriveFileToFolder(projectId, planyrKey, discipline, fo
  * server-side (already-in-place files skip), so an interrupted run just resumes. */
 export async function migrateProjectFiles(projectId, { onProgress } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
-  const token = await authToken();
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   const totals = { moved: 0, already: 0, skipped: 0 };
   const fileErrors = []; // per-file failures ride along — they never stop the walk (B663 review)
   let offset = 0;
   const HARD_CAP = 500; // absolute runaway backstop; the real exit is done/stall below
   try {
     for (let round = 0; round < HARD_CAP; round++) {
-      const resp = await fetch("/api/folders", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ action: "migrate-files", projectId, offset }),
-      });
+      const call = await postFolders({ action: "migrate-files", projectId, offset });
+      if (call.failure) return noSignIn(call.failure, { ...totals, fileErrors });
+      const resp = call.resp;
       if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
       let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
       // Chunk-level failure (index/page read, auth) is positional — stop here, report loudly.
-      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, ...totals, fileErrors };
+      if (!(resp.ok && jr.ok)) return apiFailure(resp, jr, { ...totals, fileErrors });
       totals.moved += jr.moved || 0; totals.already += jr.already || 0; totals.skipped += jr.skipped || 0;
       if (Array.isArray(jr.errors) && jr.errors.length) fileErrors.push(...jr.errors);
       const next = jr.nextOffset ?? offset;
@@ -269,45 +280,82 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", ...totals, fileErrors }; }
 }
 
+// The words the organizer banner uses (NEW-1, 2026-11-09). Plain language only: never a raw status code, never a
+// project name as if it were the problem of the project the person is looking at (the organizer walks EVERY project,
+// so a failure on one shows on any project's Library). The technical detail goes to `result.errors` (console /
+// telemetry), not to the banner.
+export const ORGANIZER_SIGNIN_EXPIRED = "Your sign-in expired — sign in again and the folder setup will finish.";
+export const ORGANIZER_UNREACHABLE = "Couldn't reach Planyr to finish the folder setup — check your connection and try again.";
+const AUTH_ERROR_RE = /\bjwt\b|invalid or expired session|session (has )?expired|not authenticated|invalid (token|session)/i;
+const UNREACHABLE_RE = /couldn't reach planyr|network error|failed to fetch|load failed/i;
+
+export function organizerFailureMessage(failures, total) {
+  if (failures.length && failures.every((f) => UNREACHABLE_RE.test(f.reason || ""))) return ORGANIZER_UNREACHABLE;
+  const n = failures.length;
+  return `Folder setup couldn't finish for ${n} of ${total} project${total === 1 ? "" : "s"}. Retry will pick up where it stopped.`;
+}
+
 /* THE one-time account migration (B663, owner-requested 2026-07-05): give EVERY existing
  * project the standard folder tree and move its already-uploaded files into the right tree
  * folders in Drive. Per project: idempotent seed → chunked Drive mirror → chunked file moves.
  * Everything inside is resumable/idempotent, so a failure mid-way is safe to re-run; the
- * caller records completion (a local marker) and shows honest progress + errors. */
+ * caller records completion (a local marker) and shows honest progress + errors.
+ * Result: `{ ok, projects, seeded, mirrored, movedFiles, errors, message, authExpired }` — `message` is the
+ * banner text (plain words), `errors` the technical lines. A sign-in problem (`authExpired`) STOPS the walk: every
+ * later project would fail the same way, and it is the person's sign-in — not a project — that needs attention.
+ * By the time it is reported, the API call has already been refreshed-and-retried once (shared/auth/apiAuth.js). */
 export async function migrateAllProjects(projects = [], { onProgress, checkIdentity } = {}) {
-  const result = { ok: true, projects: projects.length, seeded: 0, mirrored: 0, movedFiles: 0, errors: [] };
+  const result = { ok: true, projects: projects.length, seeded: 0, mirrored: 0, movedFiles: 0, errors: [], message: "", authExpired: false };
+  const failures = []; // { project, reason } — projects that did not finish for a non-sign-in reason
+  const stopForSignIn = (label, why) => { result.authExpired = true; result.errors.push(`${label}: ${why || "sign-in expired"}`); result.message = ORGANIZER_SIGNIN_EXPIRED; };
   for (let i = 0; i < projects.length; i++) {
     // Identity pin (B663 review #9): an account switch mid-run must stop the walk — the next
     // project would run under the WRONG user's token/marker.
-    if (checkIdentity && !(await checkIdentity())) { result.errors.push("Account changed — organization stopped."); break; }
+    if (checkIdentity && !(await checkIdentity())) { result.errors.push("Account changed — organization stopped."); result.message = "Account changed — folder setup stopped."; break; }
     const p = projects[i];
     const label = p.name || p.id;
     onProgress?.({ index: i, total: projects.length, project: label, phase: "folders" });
     const seed = await ensureSeeded(p.id);
     if (seed.ok && seed.seeded) result.seeded += 1;
-    if (seed.ok === false && !seed.skipped) { result.errors.push(`${label}: ${seed.error || "couldn't set up folders"}`); continue; }
+    if (seed.ok === false && !seed.skipped) {
+      if (AUTH_ERROR_RE.test(seed.error || "")) { stopForSignIn(label, seed.error); break; }
+      failures.push({ project: label, reason: seed.error || "couldn't set up folders" });
+      continue;
+    }
     const sync = await syncFoldersToDrive(p.id, {
       onProgress: ({ done, total }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "mirror", mirrorDone: done, mirrorTotal: total }),
     });
+    if (sync.authExpired) { stopForSignIn(label, sync.error); break; }
     if (sync.skipped) {
-      // Name the actual cause — "signed out" and "Drive off" need different user action.
-      result.errors.push(sync.error === "Not signed in."
-        ? "You were signed out — sign back in and the organizer will finish automatically."
-        : "Google Drive isn't connected — folders saved in Planyr only.");
+      // Drive isn't on for this deployment — "Drive off" needs different user action than a sign-in problem.
+      result.errors.push("Google Drive isn't connected — folders saved in Planyr only.");
+      result.message = "Google Drive isn't connected — folders saved in Planyr only.";
       break;
     }
-    if (!sync.ok) { result.errors.push(`${label}: ${sync.error || "Drive mirror failed"}`); continue; }
+    if (!sync.ok) {
+      if (AUTH_ERROR_RE.test(sync.error || "")) { stopForSignIn(label, sync.error); break; }
+      failures.push({ project: label, reason: sync.error || "Drive mirror failed" });
+      continue;
+    }
     result.mirrored += 1;
     onProgress?.({ index: i, total: projects.length, project: label, phase: "files" });
     const mig = await migrateProjectFiles(p.id, {
       onProgress: ({ moved }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "files", moved }),
     });
-    // The mirror just succeeded, so a skipped file phase is anomalous (e.g. signed out
-    // between calls) — record it so the done-marker can't be written over a silent gap.
-    if (mig.skipped) { result.errors.push(`${label}: ${mig.error || "file move skipped"}`); continue; }
-    if (!mig.ok) { result.errors.push(`${label}: ${mig.error || "file move failed"}`); continue; }
+    // 401 on the FILE-MOVE phase is the same sign-in problem as on the mirror phase.
+    if (mig.authExpired) { stopForSignIn(label, mig.error); break; }
+    // The mirror just succeeded, so a skipped file phase is anomalous — record it so the
+    // done-marker can't be written over a silent gap.
+    if (mig.skipped) { failures.push({ project: label, reason: mig.error || "file move skipped" }); continue; }
+    if (!mig.ok) {
+      if (AUTH_ERROR_RE.test(mig.error || "")) { stopForSignIn(label, mig.error); break; }
+      failures.push({ project: label, reason: mig.error || "file move failed" });
+      continue;
+    }
     result.movedFiles += mig.moved;
   }
+  for (const f of failures) result.errors.push(`${f.project}: ${f.reason}`);
+  if (failures.length && !result.message) result.message = organizerFailureMessage(failures, projects.length);
   result.ok = result.errors.length === 0;
   return result;
 }
@@ -316,19 +364,15 @@ export async function migrateAllProjects(projects = [], { onProgress, checkIdent
 // so the confirmation can enumerate it. Falls back to { skipped } when Drive isn't enabled.
 export async function planFolderDelete(projectId, folderId) {
   if (!supabase) return { ok: false, skipped: true };
-  const token = await authToken();
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   try {
-    const resp = await fetch("/api/folders", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "plan-delete", projectId, folderId }),
-    });
+    const call = await postFolders({ action: "plan-delete", projectId, folderId });
+    if (call.failure) return noSignIn(call.failure);
+    const resp = call.resp;
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
     return resp.ok && jr.ok
       ? { ok: true, folders: jr.folders || [], files: jr.files || [], truncated: !!jr.truncated }
-      : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+      : apiFailure(resp, jr);
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
@@ -351,23 +395,19 @@ export async function planFolderDelete(projectId, folderId) {
 export async function purgeProjectFolders(projectId) {
   if (!supabase || !projectId) return { ok: true, skipped: true };
   let drive = { ok: true, trashed: false };
-  const token = await authToken();
-  if (!token) {
-    drive = { ok: false, error: "Not signed in." };
-  } else {
-    try {
-      const resp = await fetch("/api/folders", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ action: "purge-project", projectId }),
-      });
+  try {
+    const call = await postFolders({ action: "purge-project", projectId });
+    if (call.failure) {
+      drive = { ok: false, error: call.failure === FAIL_UNREACHABLE ? "Couldn't reach Planyr — check your connection." : SIGNED_OUT };
+    } else {
+      const resp = call.resp;
       if (resp.status === 404 || resp.status === 503) drive = { ok: true, trashed: false, skipped: true }; // Drive not enabled — nothing there to trash
       else {
         let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
         drive = resp.ok && jr.ok ? jr : { ok: false, live: !!jr.live, error: jr.error || `HTTP ${resp.status}` };
       }
-    } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }
-  }
+    }
+  } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }
   if (drive.ok === false) {
     // Drive failed (or the server refused): keep every row so the cleanup stays retryable.
     return { ok: false, rowsDeleted: false, driveTrashed: false, live: !!drive.live || undefined, error: drive.error || "Drive cleanup failed." };

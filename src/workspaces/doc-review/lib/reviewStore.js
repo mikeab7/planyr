@@ -26,6 +26,7 @@ import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
 import { categoryFor, FILE_STATES } from "../../../shared/files/fileFacts.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
+import { getApiToken, authedFetch, authedFetchResponse } from "../../../shared/auth/apiAuth.js";
 import { notifyLibraryChanged } from "../../../shared/library/libraryChanged.js";
 
 export const BUCKET = "doc-review-files";
@@ -806,10 +807,7 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   // Token as a GETTER, not a snapshot: a multi-GB upload outlives a Supabase access token
   // (~1 h), so every request re-reads the current (auto-refreshed) session token.
-  const getToken = async () => {
-    try { const { data } = await supabase.auth.getSession(); return (data && data.session && data.session.access_token) || ""; }
-    catch (_) { return ""; }
-  };
+  const getToken = async () => (await getApiToken({ client: supabase })).token || "";
   if (!(await getToken())) return { ok: false, skipped: true, error: "Not signed in." };
   const name = fileName || "document.pdf";
   const driveKey = buildDriveKey({ projectId, discipline, fileName, srcId, orgScope }); // unique per source (NEW-F1); server prefixes the uid
@@ -825,6 +823,9 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
       .catch(() => { /* best-effort — the upload itself must never wait on or fail from this */ });
   }
   return uploadFileInChunks({
+    // NEW-1 (2026-11-09): each request carries a non-expired token and, on a 401, refreshes the sign-in and
+    // retries once (the uploader's own header is replaced by the helper's).
+    fetchImpl: (url, init) => authedFetchResponse(url, init, { client: supabase }),
     file, token: getToken, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
     // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
     // folder tree when it's mirrored; an explicit folder pick (B686) wins over the discipline
@@ -844,12 +845,9 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
  * deleted so a Drive-only file doesn't orphan a copy in Drive. */
 export async function deleteFromDrive(driveKey) {
   if (!supabase || !driveKey) return false;
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return false; }
-  if (!token) return false;
   try {
-    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
-    return resp.ok;
+    const { resp } = await authedFetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { method: "DELETE" }, { client: supabase });
+    return !!resp && resp.ok;
   } catch (_) { return false; }
 }
 
@@ -858,12 +856,9 @@ export async function deleteFromDrive(driveKey) {
  * pre-Drive file (or any Drive miss) still opens. Never throws. */
 export async function downloadFromDrive(driveKey) {
   if (!supabase || !driveKey) return null;
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return null; }
-  if (!token) return null;
   try {
-    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { headers: { authorization: `Bearer ${token}` } });
-    if (!resp.ok) return null;
+    const { resp } = await authedFetch(`/api/files?key=${encodeURIComponent(driveKey)}`, {}, { client: supabase });
+    if (!resp || !resp.ok) return null;
     return await resp.arrayBuffer();
   } catch (_) { return null; }
 }
@@ -876,11 +871,9 @@ export async function downloadFromDrive(driveKey) {
  * server prefixes the uid). Never throws. */
 export async function getShareLink(driveKey) {
   if (!supabase || !driveKey) return { ok: false, error: "No file to share." };
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return { ok: false, error: "Sign in to share." }; }
-  if (!token) return { ok: false, error: "Sign in to share." };
   try {
-    const resp = await fetch(`/api/files/share?key=${encodeURIComponent(driveKey)}`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    const { resp } = await authedFetch(`/api/files/share?key=${encodeURIComponent(driveKey)}`, { method: "POST" }, { client: supabase });
+    if (!resp) return { ok: false, error: "Sign in to share." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
     if (resp.status === 503) return { ok: false, error: "Drive isn’t enabled yet." };
     if (resp.status === 404) return { ok: false, error: jr.error || "This file isn’t stored in Drive, so there’s no shareable link." };
@@ -992,8 +985,9 @@ export async function storeSource(srcId, blob, { projectId = null, discipline = 
  * fall back to the buffered download). Never throws. */
 export async function driveStreamSource(driveKey) {
   if (!supabase || !driveKey) return null;
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return null; }
+  // pdf.js reads this URL with Range requests it issues itself, so no refresh-and-retry is possible here —
+  // the best that can be done is to hand it a token that is not about to expire.
+  const { token } = await getApiToken({ client: supabase });
   if (!token) return null;
   return { url: `/api/files?key=${encodeURIComponent(driveKey)}`, httpHeaders: { authorization: `Bearer ${token}` } };
 }
