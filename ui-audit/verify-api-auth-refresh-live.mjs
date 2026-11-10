@@ -31,9 +31,11 @@ try {
   if (SHA) ok("the deploy serves the merge commit", String(build).startsWith(SHA.slice(0, 7)) || String(SHA).startsWith(String(build).slice(0, 7)), `${build} vs ${SHA}`);
 
   const net = [];
+  const authUrls = [];
+  page.on("request", (rq) => { if (/\/auth\/v1\//.test(rq.url())) authUrls.push(rq.method() + " " + rq.url().replace(/^https?:\/\/[^/]+/, "").slice(0, 70)); });
   page.on("response", (r) => {
     const u = r.url();
-    if (/\/api\/folders/.test(u)) net.push({ kind: "folders", status: r.status(), auth: (r.request().headers().authorization || "").slice(7, 17) });
+    if (/\/api\/folders/.test(u)) net.push({ kind: "folders", status: r.status(), auth: (r.request().headers().authorization || "").slice(-12) });
     else if (/\/auth\/v1\/token\?grant_type=refresh_token/.test(u)) net.push({ kind: "refresh", status: r.status() });
   });
 
@@ -84,7 +86,7 @@ try {
   await page.route("**/api/folders", async (route) => {
     if (injected === 0) {
       injected++;
-      net.push({ kind: "folders", status: 401, auth: (route.request().headers().authorization || "").slice(7, 17), injected: true });
+      // (the page's own "response" listener records this fulfilled answer — do not record it twice)
       return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ ok: false, error: "Invalid or expired session (403)." }) });
     }
     return route.continue();
@@ -92,9 +94,11 @@ try {
   await plant({});
   await openLibrary(() => net.filter((n) => n.kind === "folders").length >= 2);
   const bStat = net.filter((n) => n.kind === "folders");
-  ok("B PRECONDITION: the first /api/folders call was refused with 401 (the owner's condition)", !!bStat[0] && bStat[0].status === 401 && bStat[0].injected, brief(bStat));
+  ok("B PRECONDITION: the first /api/folders call was refused with 401 (the owner's condition)", !!bStat[0] && bStat[0].status === 401 && injected === 1, brief(bStat));
+  if (!net.some((n) => n.kind === "refresh")) console.log("   (auth requests seen: " + JSON.stringify(authUrls.slice(-8)) + ")");
   ok("B the session was refreshed (a REAL refresh_token request, 2xx)", net.some((n) => n.kind === "refresh" && n.status < 300), brief(net.filter((n) => n.kind === "refresh")));
-  ok("B the retried /api/folders call carried a DIFFERENT token and the real server answered 2xx", !!bStat[1] && bStat[1].status < 300 && bStat[1].auth !== bStat[0].auth, brief(bStat));
+  ok("B the retry was sent ONCE with a DIFFERENT token than the refused one", bStat.length >= 2 && bStat[1].auth !== bStat[0].auth, brief(bStat));
+  ok("B the REAL server accepted the retried token (2xx)", !!bStat[1] && bStat[1].status < 300, brief(bStat));
   ok("B exactly one refresh (no loop)", net.filter((n) => n.kind === "refresh").length === 1, String(net.filter((n) => n.kind === "refresh").length));
   const b = await banner();
   ok("B the banner is the running status, not an error", !/expired|couldn.t finish|403|HTTP/i.test(b.text) && /Organizing/i.test(b.text), b.text);
