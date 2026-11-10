@@ -11,6 +11,7 @@
  *   4  the cloud rows carry all three new names once the hold is released (read back from `public.sites`), and a reload shows them
  *   5  a cloud write that FAILS (aborted) for a plan rename: the new name stays (local-first, saved on this device) and the failure is told in
  *      words on screen — never a silent revert and never a silent success
+ *   7  the SCHEDULE rename (embedded app, no network): the crumb reads the new name within 100 ms of Enter; the throwaway schedule is deleted and read back
  *   6  cleanup (constraint #15, never asked): every row of the throwaway project is removed, and the count left is READ BACK = 0
  * KNOWN-GOOD ARM: the run is VOID unless the signed-in proof holds AND the served build (read from /version.json in the SAME call as the
  * assertions) contains EXPECT_SHA; and unless the held-write arm really held something (a count of held requests > 0), so "the screen did not
@@ -153,6 +154,47 @@ try {
   ok("5 a failed cloud write: the new name STAYS on the crumb (local-first, never a silent revert)", ((await page.getByTestId("plan-crumb").innerText()) || "").includes(NAME5));
   ok("5 …and the failure is said in plain words on screen (not silent)", !!toldIt);
   mode = "pass";
+
+  /* ---- 7 · the SCHEDULE rename (the embedded app): the shell posts the rename and the crumb waits for the app's reply — one message hop and a
+   *      render, NO network. Measured 16-21 ms (about one frame later than a Site rename), so the bar here is "within 100 ms", not "first frame". ---- */
+  let madeSchedule = false;
+  try {
+    await page.evaluate((g) => { location.hash = `#/project/${g}/schedule`; }, gid);
+    await page.getByTestId("schedule-empty-shell").waitFor({ timeout: 40000 });
+    await page.getByRole("button", { name: "Create schedule" }).first().click();
+    await page.getByTestId("new-schedule-name").waitFor({ timeout: 15000 });
+    await page.getByTestId("new-schedule-name").fill("zz probe schedule");
+    await page.getByTestId("new-schedule-create").click();
+    madeSchedule = true;
+    await page.getByTestId("schedule-crumb").filter({ hasNotText: "Select a schedule" }).first().waitFor({ timeout: 40000 });
+    await sleep(2000);
+    await page.getByTestId("schedule-crumb").first().click(); await sleep(500);
+    const NAME7 = `Renamed schedule ${stamp}`;
+    await page.evaluate((NEW) => {
+      window.__t0 = null; window.__ms = null;
+      window.addEventListener("keydown", (e) => { if (e.key === "Enter" && window.__t0 == null) window.__t0 = performance.now(); }, true);
+      new MutationObserver(() => { if (window.__t0 != null && window.__ms == null && ((document.querySelector('[data-testid="schedule-crumb"]') || {}).textContent || "").includes(NEW)) window.__ms = Math.round(performance.now() - window.__t0); }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    }, NAME7);
+    await page.getByTestId("schedule-owner-kebab").first().click();
+    await page.getByTestId("schedule-owner-rename").click();
+    const i7 = page.getByTestId("schedule-owner-rename-input"); await i7.fill(NAME7); await i7.press("Enter");
+    const ms7 = await waitFor(async () => page.evaluate(() => window.__ms), 6000, 100);
+    ok("7 the Schedule crumb reads the new schedule name within 100 ms of Enter (embedded app: one message hop, no network)", typeof ms7 === "number" && ms7 <= 100, `ms=${ms7}`);
+  } catch (e) {
+    ok("7 the Schedule rename check ran", false, String(e && e.message || e).slice(0, 200));
+  } finally {
+    // the throwaway schedule goes through the app's own delete (constraint #15) and the count left is READ BACK
+    if (madeSchedule) {
+      try {
+        if (!(await page.getByTestId("schedule-owner-kebab").first().isVisible().catch(() => false))) { await page.getByTestId("schedule-crumb").first().click().catch(() => {}); await sleep(500); }
+        await page.getByTestId("schedule-owner-kebab").first().click();
+        await page.getByTestId("schedule-owner-delete").click();
+        await page.getByTestId("schedule-owner-delete-confirm").click();
+        await sleep(2500);
+        ok("7 cleanup: the throwaway schedule is gone (read back)", (await page.getByTestId("schedule-owner-row").count()) === 0);
+      } catch (e) { ok("7 cleanup of the throwaway schedule ran", false, String(e && e.message || e).slice(0, 200)); }
+    }
+  }
 } catch (e) {
   ok("harness ran to the end", false, String(e && e.stack || e).slice(0, 400));
 } finally {
