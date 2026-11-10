@@ -1,21 +1,26 @@
-/* SCHEDULE › TASK ICONS (NEW-1, owner-approved design 2026-11-06) — rendered check in a real browser.
+/* SCHEDULE › TASK ICONS (NEW-1, owner-approved design 2026-11-06; AMENDED 2026-11-09, B2671196 ×2) — rendered check in a real browser.
  *
  * Drives the REAL public/sequence/index.html (served from public/, CDN assets vendored like every other Schedule harness) and
  * proves, one assertion at a time:
  *   1  the text triangle is gone — a Tabler chevron ICON (right when collapsed, down when open) replaces it
- *   2  names ALIGN within an outline level for rows with 0 / 1 / 2 icons (the slot is a fixed width)
- *   3  an untagged row's slot is blank at rest and shows a faint "add icon" glyph only while the row is hovered
- *   4  the picker opens from the slot, searches ("tia" → the traffic light, "sewer" → the manhole), says so when nothing
- *      matches, takes up to TWO picks (a third replaces the oldest), removes on a second click, Clear / Done / Esc / outside
+ *   2  NO reserved gap: an untagged phase's chevron sits right against its name; a tagged row reads chevron · icon(s) · name with
+ *      tight spacing; the icon slot is not in the DOM at all for an untagged row (it takes zero width)
+ *   3  HOVERING an untagged row shows nothing in the name cell (no add-icon glyph, no slot, the cell is unchanged)
+ *   4  the picker (opened from the row's RIGHT-CLICK "Set icon…"; or by clicking an existing icon) is anchored at the task's name,
+ *      searches ("tia" → the traffic light, "sewer" → the manhole), says so when nothing matches, takes up to TWO picks (a third
+ *      replaces the oldest), removes on a second click, Clear / Done / Esc / outside
  *   5  the picker's search box carries the no-autofill attributes
- *   6  editing a task NAME leaves its icons intact
- *   7  a COLLAPSED phase shows the distinct icons of its leaf tasks (faded) + "N tasks"; EXPANDED shows nothing extra
+ *   6  editing a task NAME leaves its icons intact, and the editor's text starts where the displayed name starts
+ *   7  a COLLAPSED phase shows the distinct icons of its leaf tasks (faded) and NO "N tasks" count anywhere; an icon-free phase
+ *      shows nothing; EXPANDED shows nothing extra
  *   8  icons survive a save → full reload, and Ctrl+Z undoes a pick
+ *  11  right-click → Set icon… → pick → icon appears and survives a reload; right-click again → Change icon… + Remove icon;
+ *      Remove icon clears it and that survives a reload — on a LEAF row and on a PHASE row
  *   9  a missing Twemoji file falls back to the plain emoji character — never a broken image
  *  10  "Duplicate schedule" carries the icons
- * KNOWN-GOOD ARM: a row with no icons must report slot=0 and no glyphs; a run that cannot see that is VOID.
- * Teeth: PLANYR_ICON_MUTANT=1 serves the page with the slot's width collapsed to 0 when empty (names then misalign) and the
- * alignment check must go RED.
+ * KNOWN-GOOD ARM: a row with no icons must report no slot and no glyphs; a run that cannot see that is VOID.
+ * Teeth: PLANYR_ICON_MUTANT=1 serves the page with an empty slot that reserves width again (the old fixed gap) and the no-gap
+ *   checks must go RED.
  *
  * Run: node ui-audit/verify-schedule-task-icons.mjs   [--shots] [--dist]  (--dist = the built page; run `npm run build` first)   (writes PNGs to ui-audit/_shots/task-icons/)
  */
@@ -59,7 +64,7 @@ const MUTANT = process.env.PLANYR_ICON_MUTANT === "1";
 const src = await readFile(HTML_PATH, "utf8");
 const pageHtml = () => {
   let h = rewriteCdn(src).split("about:blank").join("/__tabler/tabler-icons.min.css");   // rewriteCdn drops the icon CSS to about:blank
-  if (MUTANT) h = h.replace("width:ICON_SLOT_W, height:ROW_H - 2", "width: icons.length ? ICON_SLOT_W : 0, height:ROW_H - 2");
+  if (MUTANT) h = h.replace("if (icons.length === 0) return null;", "if (icons.length === 0) return <span data-task-icon-slot=\"0\" style={{display:'inline-block', width:38, flexShrink:0}} />;");
   return h;
 };
 
@@ -88,7 +93,7 @@ async function makeServer() {
 const task = (over) => ({ start: "2026-01-05", end: "2026-01-05", duration: 1, predecessors: [], health: "gray", percentComplete: 0,
   parentId: null, responsibleParty: "", notes: [], isExpanded: true, durUnit: "d", durValue: 1, ...over });
 // 1 Entitlements (phase) → 2 Submit TIA (no icons) · 3 Will-serve letters (1) · 4 Plat (2) ; 5 Sitework (phase) → 6 Mass grading (🚦-free, dump) · 7 Pond (pond) ;
-// 8 Lone task (no parent, no icons)
+// 8 Lone task (no parent, no icons) ; 9 Closeout (phase, no icons anywhere inside) → 10 Punch list (no icons)
 const FIXTURE = {
   aPid: 1, nPid: 2, nTid: 1000, view: "grid", section: "projects",
   projects: { 1: { id: 1, name: "Task Icons Fixture", tasks: [
@@ -100,6 +105,8 @@ const FIXTURE = {
     task({ id: 6, name: "Mass grading", parentId: 5, icons: ["c:dump"] }),
     task({ id: 7, name: "Pond construction", parentId: 5, icons: ["c:pond", "c:dump"] }),
     task({ id: 8, name: "Lone task" }),
+    task({ id: 9, name: "Closeout" }),
+    task({ id: 10, name: "Punch list", parentId: 9 }),
   ] } },
 };
 
@@ -122,20 +129,38 @@ const state = (page, id) => page.evaluate((id) => {
   const r = document.querySelector(`[data-task-row="${id}"]`); if (!r) return null;
   const cell = r.querySelector('[data-col-key="name"]');
   const slot = cell.querySelector("[data-task-icon-slot]");
-  const nameEl = [...cell.querySelectorAll("span[title]")].find(e => !/^(Collapse|Expand|Add an icon|Focus|Show all)/.test(e.getAttribute("title") || "") && !e.hasAttribute("data-task-icon"));
-  const range = document.createRange(); if (nameEl) range.selectNodeContents(nameEl);
+  const nameEl = cell.querySelector("[data-task-name]");
+  const nr = nameEl ? nameEl.getBoundingClientRect() : null;
   const toggle = cell.querySelector('span[title="Collapse"], span[title="Expand"]');
+  const icons = [...cell.querySelectorAll("[data-task-icon]")];
+  const rect = e => e.getBoundingClientRect();
   return {
+    slot: !!slot,
     slotCount: slot ? Number(slot.getAttribute("data-task-icon-slot")) : null,
-    slotW: slot ? Math.round(slot.getBoundingClientRect().width * 10) / 10 : null,
-    glyphs: [...cell.querySelectorAll("[data-task-icon]")].map(e => e.getAttribute("data-task-icon")),
-    nameLeft: nameEl ? Math.round(range.getBoundingClientRect().left * 10) / 10 : null,
+    glyphs: icons.map(e => e.getAttribute("data-task-icon")),
+    nameLeft: nr ? Math.round(nr.left * 10) / 10 : null,
+    nameBottom: nr ? nr.bottom : null,
+    cellLeft: rect(cell).left,
+    chevRight: toggle ? rect(toggle).right : null,
+    firstIconLeft: icons.length ? rect(icons[0]).left : null,
+    lastIconRight: icons.length ? rect(icons[icons.length - 1]).right : null,
+    hasAddGlyph: !!cell.querySelector(".ti-mood-plus, .ti-slot-add, [title='Add an icon']"),
+    cellHtml: cell.innerHTML,
     toggle: toggle ? { title: toggle.getAttribute("title"), icon: toggle.querySelector("i")?.className || "", text: toggle.textContent.trim() } : null,
-    cellText: cell.innerText, summary: cell.querySelector("[data-phase-icons]") ? (cell.querySelector("[data-phase-count]")?.getAttribute("data-phase-count") || "") : null,
-    cellTextHasCount: /\d+ tasks?/.test(cell.innerText),
+    cellText: cell.innerText, hasPhaseIcons: !!cell.querySelector("[data-phase-icons]"),
+    hasCountNode: !!cell.querySelector("[data-phase-count], .ti-count"),
+    cellTextHasCount: /\d+\s*tasks?\b/i.test(cell.innerText),
     summaryIcons: cell.querySelectorAll("[data-phase-icons] img, [data-phase-icons] svg").length,
   };
 }, id);
+
+// The row's right-click menu (the portal'd one that holds "Insert Row Above"). Returns its icon-related labels.
+async function rightClickName(page, id) {
+  await page.locator(`${row(id)} [data-col-key="name"]`).click({ button: "right", position: { x: 90, y: 8 } });
+  await pacedWait(page, 250);
+  return page.evaluate(() => [...document.querySelectorAll("div")].filter(d => /^(Set icon…|Change icon…|Remove icon)$/.test(d.textContent.trim()) && d.children.length >= 2 && getComputedStyle(d).cursor === "pointer").map(d => d.textContent.trim()));
+}
+const menuItem = (page, label) => page.locator("div", { hasText: new RegExp("^" + label + "$") }).filter({ has: page.locator("i.ti") }).last();
 
 const { server, url } = await makeServer();
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium" });
@@ -150,32 +175,42 @@ try {
   ok("1 expanded phase shows the Tabler chevron-down ICON (no text triangle)", phase.toggle?.icon.includes("ti-chevron-down") && phase.toggle.text === "" && !/[▾▸]/.test(phase.cellText), JSON.stringify(phase.toggle));
   ok("1 a leaf has no chevron (empty chevron-width space)", leaf.toggle === null);
 
-  // ── KNOWN-GOOD ARM: the untagged row really reports an empty slot ────────────
-  ok("0 KNOWN-GOOD: untagged row reports slot=0 and no glyphs", leaf.slotCount === 0 && leaf.glyphs.length === 0, JSON.stringify({ c: leaf.slotCount, g: leaf.glyphs }));
+  // ── KNOWN-GOOD ARM: the untagged row really reports no slot and no glyphs ────
+  ok("0 KNOWN-GOOD: untagged row reports NO slot and no glyphs", leaf.slot === false && leaf.glyphs.length === 0, JSON.stringify({ slot: leaf.slot, g: leaf.glyphs }));
 
-  // ── 2 alignment ──────────────────────────────────────────────────────────────
+  // ── 2 no reserved gap ────────────────────────────────────────────────────────
   const s2 = await state(page, 2), s3 = await state(page, 3), s4 = await state(page, 4);
-  ok("2 names align across rows with 0 / 1 / 2 icons", s2.nameLeft === s3.nameLeft && s3.nameLeft === s4.nameLeft && s2.nameLeft != null, `left=${s2.nameLeft}/${s3.nameLeft}/${s4.nameLeft}`);
-  ok("2 the slot is the same width for 0 / 1 / 2 icons", s2.slotW === s3.slotW && s3.slotW === s4.slotW && s2.slotW >= 36, `w=${s2.slotW}/${s3.slotW}/${s4.slotW}`);
   const s1 = await state(page, 1), s5 = await state(page, 5);
-  ok("2 phases (level 0) align with each other", s1.nameLeft === s5.nameLeft, `${s1.nameLeft}/${s5.nameLeft}`);
+  ok("2 untagged phase: the chevron sits right against the name (no blank slot between)", s1.slot === false && s1.nameLeft - s1.chevRight <= 1.5 && s1.nameLeft - s1.chevRight >= -0.5, `gap=${(s1.nameLeft - s1.chevRight).toFixed(1)}`);
+  ok("2 untagged phases align with each other", s1.nameLeft === s5.nameLeft, `${s1.nameLeft}/${s5.nameLeft}`);
+  ok("2 an untagged leaf's name starts one chevron-width in from its indent (no icon slot)", s2.slot === false && Math.abs((s2.nameLeft - s2.cellLeft) - (4 + 14 + 16)) <= 1.5, `off=${(s2.nameLeft - s2.cellLeft).toFixed(1)}`);
+  ok("2 a tagged leaf reads icon(s) · name with tight spacing (icon ≤ 6px from the name, 1 icon vs 2 icons)", s3.slot && s4.slot && (s3.nameLeft - s3.lastIconRight) <= 6 && (s4.nameLeft - s4.lastIconRight) <= 6 && (s3.nameLeft - s3.lastIconRight) >= 0, `gap1=${(s3.nameLeft - s3.lastIconRight).toFixed(1)} gap2=${(s4.nameLeft - s4.lastIconRight).toFixed(1)}`);
+  ok("2 the slot is exactly as wide as its icons (2 icons wider than 1, icons start at the indent)", s4.lastIconRight - s4.firstIconLeft > s3.lastIconRight - s3.firstIconLeft && Math.abs((s3.firstIconLeft - s3.cellLeft) - (4 + 14 + 16 + 2)) <= 1.5, `${(s3.firstIconLeft - s3.cellLeft).toFixed(1)}`);
   ok("2 the child indents one step further than its parent", s2.nameLeft > s1.nameLeft, `${s1.nameLeft} → ${s2.nameLeft}`);
   ok("2 two icons are drawn as real images (Twemoji SVG + inline SVG), none broken",
     await page.evaluate(() => { const imgs = [...document.querySelectorAll('[data-task-row] [data-task-icon] img')]; return imgs.length > 0 && imgs.every(i => i.complete && i.naturalWidth > 0); }));
 
-  // ── 3 hover-only add glyph ───────────────────────────────────────────────────
-  const op = () => page.evaluate(() => getComputedStyle(document.querySelector('[data-task-row="2"] .ti-slot-add')).opacity);
+  // ── 3 hovering an untagged row shows nothing ─────────────────────────────────
   await page.mouse.move(5, 5); await pacedWait(page, 200);
-  const rest = await op();
+  const before = await state(page, 2);
   const box = await page.locator(row(2)).boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pacedWait(page, 250);
-  const hov = await op();
-  ok("3 add-icon glyph is invisible at rest and visible on row hover", Number(rest) === 0 && Number(hov) > 0.2, `rest=${rest} hover=${hov}`);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pacedWait(page, 300);
+  const nameBox = await page.locator(`${row(2)} [data-col-key="name"]`).boundingBox();
+  await page.mouse.move(nameBox.x + 60, nameBox.y + nameBox.height / 2); await pacedWait(page, 300);   // and directly over the name cell
+  const hov = await state(page, 2);
+  ok("3 hovering an untagged row renders NO add-icon glyph or slot (not in the DOM, not visible)", hov.hasAddGlyph === false && hov.slot === false && before.hasAddGlyph === false, JSON.stringify({ g: hov.hasAddGlyph, slot: hov.slot }));
+  ok("3 the name cell is byte-for-byte the same hovered as at rest", hov.cellHtml === before.cellHtml);
+  ok("3 no element in the hovered name cell paints a glyph other than the name", await page.evaluate(() => { const c = document.querySelector('[data-task-row="2"] [data-col-key="name"]'); return [...c.querySelectorAll("i, img, svg")].length === 0; }));
 
   // ── 4 picker ─────────────────────────────────────────────────────────────────
-  await page.locator(`${row(2)} [data-task-icon-slot]`).click(); await pacedWait(page, 250);
+  const menu0 = await rightClickName(page, 2);
+  ok("4 right-click on an untagged task: the menu offers “Set icon…” only (no Change / Remove)", JSON.stringify(menu0) === JSON.stringify(["Set icon…"]), JSON.stringify(menu0));
+  await menuItem(page, "Set icon…").click(); await pacedWait(page, 300);
   const picker = page.locator("[data-task-icon-picker]");
-  ok("4 clicking the slot opens the picker", await picker.count() === 1);
+  ok("4 “Set icon…” opens the picker", await picker.count() === 1);
+  const pBox = await picker.boundingBox(), nm2 = await state(page, 2);
+  ok("4 the picker is anchored at THAT task's name (left edge on the name, just below it)", Math.abs(pBox.x - nm2.nameLeft) <= 3 && pBox.y >= nm2.nameBottom - 2 && pBox.y - nm2.nameBottom <= 24, `pickerX=${pBox.x} nameX=${nm2.nameLeft} dy=${(pBox.y - nm2.nameBottom).toFixed(1)}`);
+  ok("4 the context menu closed when the picker opened", (await page.locator("div", { hasText: /^Set icon…$/ }).count()) === 0);
   const groupTitles = await picker.locator("[data-icon-group]").evaluateAll(els => els.map(e => e.firstChild.textContent));
   ok("4 categories appear in the specified order", JSON.stringify(groupTitles) === JSON.stringify(["Acquisition and diligence", "Entitlements and permits", "Design", "Utilities", "Sitework", "Building", "Leasing and finance", "Status and milestones"]), groupTitles.join(" | "));
   ok("4 no icon id appears twice inside one category", await picker.locator("[data-icon-group]").evaluateAll(gs => gs.every(g => { const ids = [...g.querySelectorAll("[data-icon-id]")].map(b => b.getAttribute("data-icon-id")); return new Set(ids).size === ids.length; })));
@@ -203,7 +238,7 @@ try {
   await picker.locator("input").fill("roof"); await picker.locator('[data-icon-id="c:roof"]').click(); await pacedWait(page, 150);
   ok("4 a THIRD pick replaces the OLDEST", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["c:manhole", "c:roof"]), JSON.stringify((await state(page, 2)).glyphs));
   const s2b = await state(page, 2);
-  ok("2 name stays aligned after picks (fixed slot)", s2b.nameLeft === s2.nameLeft, `${s2.nameLeft} → ${s2b.nameLeft}`);
+  ok("2 the first icon appears between the indent and the name; the name moves right by exactly the icons' width", s2b.slot && s2b.nameLeft > s2.nameLeft && (s2b.nameLeft - s2b.lastIconRight) <= 6, `${s2.nameLeft} → ${s2b.nameLeft}`);
   await picker.locator('[data-icon-id="c:roof"]').click(); await pacedWait(page, 150);
   ok("4 clicking a picked icon removes it", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["c:manhole"]));
   await picker.locator("[data-icon-clear]").click(); await pacedWait(page, 150);
@@ -219,38 +254,41 @@ try {
   ok("4 Done closes the picker", await picker.count() === 0);
 
   // ── 6 name edit leaves icons alone ───────────────────────────────────────────
+  const s2now = await state(page, 2);   // one icon now (c:roof), so the name sits right of it
   await page.locator(`${row(2)} [data-col-key="name"]`).dblclick({ position: { x: 150, y: 8 } }); await pacedWait(page, 250);
   const editor = page.locator(`${row(2)} [data-col-key="name"] input`);
   ok("6 the name editor opens", await editor.count() === 1);
   const padL = await editor.evaluate(i => parseFloat(getComputedStyle(i).paddingLeft));
-  ok("6 the editor's text starts where the displayed name started", Math.abs(padL - (s2.nameLeft - (await page.locator(`${row(2)} [data-col-key="name"]`).evaluate(c => c.getBoundingClientRect().left)))) <= 1.5, `pad=${padL}`);
+  ok("6 the editor's text starts where the displayed name started (icons' width included)", Math.abs(padL - (s2now.nameLeft - s2now.cellLeft)) <= 1.5, `pad=${padL} name=${(s2now.nameLeft - s2now.cellLeft).toFixed(1)}`);
   await editor.fill("Submit TIA (revised)"); await page.keyboard.press("Enter"); await pacedWait(page, 300);
   const s2c = await state(page, 2);
   ok("6 renaming the task leaves its icons intact", JSON.stringify(s2c.glyphs) === JSON.stringify(["c:roof"]) && s2c.cellText.includes("Submit TIA (revised)"), JSON.stringify(s2c.glyphs));
 
   // ── 7 collapsed-phase summary ────────────────────────────────────────────────
   const exp = await state(page, 1);
-  ok("7 an EXPANDED phase shows no summary", exp.summary === null);
+  ok("7 an EXPANDED phase shows no summary", exp.hasPhaseIcons === false);
   await page.locator(`${row(1)} span[title="Collapse"]`).click(); await pacedWait(page, 300);
   const col = await state(page, 1);
-  ok("7 the count is generated content: the row's cell text is still just the task name", col.cellTextHasCount === false && col.cellText.trim() === "Entitlements");
+  ok("7 NO “N tasks” count: no text, no count node, the cell text is just the task name", col.cellTextHasCount === false && col.hasCountNode === false && col.cellText.trim() === "Entitlements", JSON.stringify(col.cellText));
   ok("7 collapsed phase: chevron-right icon", col.toggle?.icon.includes("ti-chevron-right"), JSON.stringify(col.toggle));
-  ok("7 collapsed phase: distinct leaf icons + “3 tasks” (roof, 📮, plat, 🗳️ → 4 icons)", col.summaryIcons === 4 && /3 tasks/.test(col.summary || ""), JSON.stringify({ icons: col.summaryIcons, text: col.summary }));
+  ok("7 collapsed phase: the faded icon summary still shows the distinct leaf icons (roof, 📮, plat, 🗳️ → 4)", col.hasPhaseIcons && col.summaryIcons === 4, JSON.stringify({ icons: col.summaryIcons }));
   if (SHOTS) await page.screenshot({ path: SHOT_DIR + "collapsed-summary.png" });
   await page.locator(`${row(5)} span[title="Collapse"]`).click(); await pacedWait(page, 300);
-  const col5 = await state(page, 2 + 1 /* rows renumber? use the phase by position */);
-  const sitework = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-task-row]")].find(x => x.querySelector('[data-col-key="name"]').innerText.includes("Sitework")); const c = r.querySelector("[data-phase-icons]"); return { text: c?.querySelector("[data-phase-count]")?.getAttribute("data-phase-count"), n: c?.querySelectorAll("img, svg").length }; });
-  ok("7 shared icons are listed once (Sitework: dump + pond → 2 icons, “2 tasks”)", sitework.n === 2 && /2 tasks/.test(sitework.text || ""), JSON.stringify(sitework));
+  const sitework = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-task-row]")].find(x => x.querySelector('[data-col-key="name"]').innerText.includes("Sitework")); const c = r.querySelector("[data-phase-icons]"); return { n: c?.querySelectorAll("img, svg").length, count: !!r.querySelector("[data-phase-count]") || /\d+\s*tasks?\b/i.test(r.querySelector('[data-col-key="name"]').innerText) }; });
+  ok("7 shared icons are listed once (Sitework: dump + pond → 2 icons) and still no count", sitework.n === 2 && sitework.count === false, JSON.stringify(sitework));
+  await page.locator(`${row(9)} span[title="Collapse"]`).click(); await pacedWait(page, 300);
+  const emptyPhase = await state(page, 9);
+  ok("7 a collapsed phase with NO icons inside shows nothing after its name (no summary, no count)", emptyPhase.hasPhaseIcons === false && emptyPhase.hasCountNode === false && emptyPhase.cellText.trim() === "Closeout", JSON.stringify(emptyPhase.cellText));
+  await page.locator(`${row(9)} span[title="Expand"]`).click(); await pacedWait(page, 250);
   await page.locator(`${row(1)} span[title="Expand"]`).click(); await pacedWait(page, 250);
-  ok("7 expanding removes the summary", (await state(page, 1)).summary === null);
-  void col5;
+  ok("7 expanding removes the summary", (await state(page, 1)).hasPhaseIcons === false);
 
   // ── 8 persistence + undo ─────────────────────────────────────────────────────
   // The sandbox page has no signed-in cloud (storage answers 401), so a literal reload would drop the fixture. What a reload
   // MUST preserve is exactly what the app hands to storage — so capture the app's own "auto" save payload, then load THAT through
   // the app's own import path into a fresh page. (The signed-in reload on planyr.io is V-logged separately.)
   await page.evaluate(() => { window.__saves = []; const o = window.storage.set; window.storage.set = function (k, v, opts) { if (opts && opts.label === "auto") window.__saves.push(v); return o.apply(this, arguments); }; });
-  await page.locator(`${row(8)} [data-task-icon-slot]`).click(); await pacedWait(page, 200);
+  await rightClickName(page, 8); await menuItem(page, "Set icon…").click(); await pacedWait(page, 250);
   await picker.locator("input").fill("lease"); await picker.locator("[data-icon-id]").first().click(); await pacedWait(page, 150);
   await page.keyboard.press("Escape"); await pacedWait(page, 200);
   const picked = (await state(page, 8)).glyphs;
@@ -271,6 +309,38 @@ try {
   ok("8 Ctrl+Z undoes the pick", (await state(page, 8)).glyphs.length === 0, JSON.stringify((await state(page, 8)).glyphs));
   await page.keyboard.press("Control+y"); await pacedWait(page, 300);
   ok("8 Ctrl+Y brings it back", (await state(page, 8)).glyphs.length === 1);
+
+  // ── 11 right-click: Set icon… → Change icon… / Remove icon, on a LEAF row and on a PHASE row, surviving a reload ────────────────
+  const reloaded = async () => {   // hand the app's own latest "auto" save to a fresh page, exactly as section 8 does
+    await pacedWait(page, 2600);
+    const payload = await page.evaluate(() => window.__saves[window.__saves.length - 1] || null);
+    const sv = JSON.parse(payload);
+    sv.aPid = sv.aPid ?? Object.keys(sv.projects).find(k => sv.projects[k].name === "Task Icons Fixture"); sv.view = sv.view || "grid"; sv.section = sv.section || "projects";
+    const np = await ctx.newPage(); await boot(np, url, sv); return np;
+  };
+  for (const [label, id, word] of [["leaf", 10, "tia"], ["phase", 9, "sewer"]]) {
+    const m1 = await rightClickName(page, id);
+    ok(`11 ${label}: untagged → the menu offers “Set icon…” only`, JSON.stringify(m1) === JSON.stringify(["Set icon…"]), JSON.stringify(m1));
+    await menuItem(page, "Set icon…").click(); await pacedWait(page, 300);
+    await picker.locator("input").fill(word); await picker.locator("[data-icon-id]").first().click(); await pacedWait(page, 200);
+    await page.keyboard.press("Escape"); await pacedWait(page, 250);
+    const st = await state(page, id);
+    ok(`11 ${label}: the icon appears on the row`, st.slot && st.glyphs.length === 1, JSON.stringify(st.glyphs));
+    if (st.chevRight != null) ok(`11 ${label}: reads chevron · icon · name (chevron ≤4px from the icon, icon ≤6px from the name)`, st.firstIconLeft - st.chevRight >= -0.5 && st.firstIconLeft - st.chevRight <= 4 && st.nameLeft - st.lastIconRight <= 6, `c→i=${(st.firstIconLeft - st.chevRight).toFixed(1)} i→n=${(st.nameLeft - st.lastIconRight).toFixed(1)}`);
+    const m2 = await rightClickName(page, id);
+    ok(`11 ${label}: tagged → the menu offers “Change icon…” and “Remove icon” (no “Set icon…”)`, JSON.stringify([...m2].sort()) === JSON.stringify(["Change icon…", "Remove icon"]), JSON.stringify(m2));
+    await menuItem(page, "Change icon…").click(); await pacedWait(page, 300);
+    ok(`11 ${label}: “Change icon…” opens the picker with the current icon already chosen`, await picker.count() === 1 && await picker.locator('[aria-pressed="true"]').count() === 1);
+    await page.keyboard.press("Escape"); await pacedWait(page, 250);
+    const np = await reloaded(); const rl = await state(np, id);
+    ok(`11 ${label}: the icon survives a reload`, rl && JSON.stringify(rl.glyphs) === JSON.stringify(st.glyphs), JSON.stringify(rl?.glyphs)); await np.close();
+    await rightClickName(page, id); await menuItem(page, "Remove icon").click(); await pacedWait(page, 300);
+    const gone = await state(page, id);
+    ok(`11 ${label}: “Remove icon” clears it (no glyphs, the slot leaves the DOM)`, gone.glyphs.length === 0 && gone.slot === false, JSON.stringify(gone.glyphs));
+    if (gone.chevRight != null) ok(`11 ${label}: after removal the chevron is flush against the name again`, gone.nameLeft - gone.chevRight <= 1.5, `gap=${(gone.nameLeft - gone.chevRight).toFixed(1)}`);
+    const np2 = await reloaded(); const rl2 = await state(np2, id);
+    ok(`11 ${label}: the removal survives a reload`, rl2 && rl2.glyphs.length === 0 && rl2.slot === false, JSON.stringify(rl2?.glyphs)); await np2.close();
+  }
 
   // ── 10 duplicate schedule ────────────────────────────────────────────────────
   const dupOk = await (async () => {

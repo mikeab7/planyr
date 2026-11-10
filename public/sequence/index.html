@@ -377,13 +377,9 @@ select.ei { cursor: pointer; }
 .rowgrip { opacity: .55; transition: opacity .1s; cursor: grab; }
 [data-grid-scroll]:not([data-kbnav]) .drow:hover .rowgrip { opacity: 1; }
 .rowgrip:active { cursor: grabbing !important; }
-/* NEW-1 (task icons, 2026-11-06) — the icon slot in the Task cell. Blank at rest; the faint "add icon" glyph shows only while
-   the row is hovered (or the picker is open). A schedule with no icons looks like today apart from the chevron. */
-.ti-slot-add { opacity: 0; transition: opacity .1s; color: var(--mut); }
-[data-grid-scroll]:not([data-kbnav]) .drow:hover .ti-slot-add, [data-task-icon-slot][aria-expanded="true"] .ti-slot-add { opacity: .4; }
-[data-task-icon-slot]:hover .ti-slot-add { opacity: .8 !important; }
+/* NEW-1 (task icons, 2026-11-06; amended 2026-11-09, B2671196 ×2) — the icon slot in the Task cell exists ONLY while the task has icons
+   (zero width otherwise), and nothing appears on hover: icons are added from the row's right-click menu ("Set icon…"). */
 [data-task-icon-slot]:hover { background: rgba(9,105,218,.08); }
-.ti-count::after { content: attr(data-phase-count); }
 .ti-chev:hover { background: #dce8fd; color: var(--blue) !important; }
 .ti-pick-cell { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; position: relative;
   border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer; padding: 0; }
@@ -9223,6 +9219,7 @@ function App() {
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [projCtx,    setProjCtx]    = useState(null);
   const [taskCtx,    setTaskCtx]    = useState(null);
+  const [iconPickerCtx, setIconPickerCtx] = useState(null);   // {taskId, projId, x, y} — the task-icon picker opened from the row's right-click menu (B2671196 ×2)
   // Task-level clipboard for Ctrl+C / Ctrl+X / Ctrl+V. Held in a ref because the
   // global keydown handler runs in a stable effect and would otherwise capture a
   // stale value. Shape: { mode: "copy"|"cut", tasks: [deep-copied subtree(s), concatenated], sourceProjId, sourceRootIds }
@@ -12608,6 +12605,10 @@ function App() {
         <PDFExportModal data={data} activePid={data.aPid} setData={setData} onClose={() => setPdfExportOpen(false)} />
       )}
 
+      {iconPickerCtx && (
+        <TaskIconPickerHost ctx={iconPickerCtx} tasks={(data.projects[iconPickerCtx.projId] || {}).tasks || []} updateTask={updateTask} onClose={() => setIconPickerCtx(null)} />
+      )}
+
       {taskCtx && (
         <TaskContextMenu
           x={taskCtx.x} y={taskCtx.y}
@@ -12696,6 +12697,9 @@ function App() {
           }}
           deleteCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
           onSetHealth={hk => { updateTask(taskCtx.task.id, {health: hk}, taskCtx.projId); setTaskCtx(null); }}
+          hasIcons={window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0}
+          onSetIcon={() => { setIconPickerCtx({taskId: taskCtx.task.id, projId: taskCtx.projId, x: taskCtx.x, y: taskCtx.y}); setTaskCtx(null); }}
+          onRemoveIcon={() => { updateTask(taskCtx.task.id, {icons: []}, taskCtx.projId); setTaskCtx(null); }}
           fmt={ctxFmtState()}
           onSetRowColor={color => applyFormatAndSync({fill: color ?? null})}
           onSetBold={v   => applyFormatAndSync({bold: v})}
@@ -13117,7 +13121,7 @@ const FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar(
 // the sibling FormatMiniToolbar above, which this component portals alongside itself and
 // shares open/close lifecycle with (Escape, click-away, scroll, or choosing any command
 // closes both as one unit).
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
   const toolbarRef = useRef(null);
 
@@ -13144,7 +13148,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   // bottom of the viewport, top shifts up so the menu stays fully visible. Recomputed
   // when row padding changed below — better to slightly overestimate.
   // NEW-1 shrank this considerably once the formatting strip + swatch rows moved out.
-  const mw = 220, mh = 420;
+  const mw = 220, mh = 460;
   const left = x + mw > vw ? vw - mw - 8 : x;
   const top  = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
 
@@ -13297,6 +13301,10 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
             </div>
           )}
         </div>
+        <Sep />
+        {/* B2671196 ×2 — the ONLY way to give a task its first icon (the hover "add" glyph and the empty slot are gone). Every row, phase or leaf. */}
+        <Item icon="ti-icons"             label={hasIcons ? "Change icon…" : "Set icon…"} onClick={onSetIcon} />
+        {hasIcons && <Item icon="ti-icons-off" label="Remove icon" onClick={onRemoveIcon} />}
         <Sep />
         <Item icon="ti-copy"              label="Duplicate Row"                 onClick={onDuplicate} />
         <Item icon="ti-scissors"          label="Cut"               hint="Ctrl+X" onClick={onCutTask} />
@@ -15096,14 +15104,12 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                   if (c.k === "name") inner = creating ? (
                     <span style={{...cs, paddingLeft:4+lvl*14, gap:0, flex:1, minWidth:0}}>
                       <span style={{width:16, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"#16a34a"}}><i className="ti ti-plus" style={{fontSize:12}}/></span>
-                      <span aria-hidden="true" style={{width:ICON_SLOT_W, flexShrink:0}} />   {/* NEW-1 — the icon slot, so proposed names line up with real rows */}
                       <span style={{color:"#15803d", fontWeight:600, fontSize:12, overflow:"hidden", textOverflow:"ellipsis", minWidth:0}}>{rv.newName || "New task"}</span>
                       <span style={{flexShrink:0, marginLeft:6, fontSize:8.5, fontWeight:700, color:"#15803d", background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"1px 4px", letterSpacing:".04em"}}>NEW</span>
                     </span>
                   ) : (
                     <span style={{...cs, paddingLeft:4+lvl*14, gap:0, flex:1, minWidth:0}}>
                       <span style={{width:16, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"var(--amber)"}}><i className="ti ti-corner-down-right" style={{fontSize:12}}/></span>
-                      <span aria-hidden="true" style={{width:ICON_SLOT_W, flexShrink:0}} />
                       <span style={{color:"var(--amber)", fontWeight:600, fontStyle:"italic", fontSize:12, overflow:"hidden", textOverflow:"ellipsis", minWidth:0}}>proposed</span>
                     </span>
                   );
@@ -15732,7 +15738,11 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 // The library, search, 2-icon rule and phase summary are PURE and live in /sequence/taskIcons.js (window.PlanyrTaskIcons);
 // this is only the drawing. Emoji draw as bundled Twemoji SVGs (a missing file falls back to the plain character, never a
 // broken image); "c:<name>" ids draw as inline SVG. Icons are their own task field — editing a name never touches them.
-const ICON_SLOT_W = 38;   // fits two 16px icons; FIXED so names align within a level whether a row has 0, 1 or 2 icons
+// Amended 2026-11-09 (B2671196 ×2): the slot takes ZERO width when a task has no icons (the chevron sits right against the name) and
+// exactly its icons' width when it has some — the old fixed width that kept names aligned across 0/1/2 icons is intentionally gone.
+// taskIconsW is the one place that width is computed, so the name EDITOR's text starts where the displayed name starts.
+const TASK_ICON_PX = 16, TASK_ICON_GAP = 2, TASK_ICON_PAD = 2, TASK_ICON_AFTER = 2;
+const taskIconsW = n => n > 0 ? n * TASK_ICON_PX + (n - 1) * TASK_ICON_GAP + 2 * TASK_ICON_PAD + TASK_ICON_AFTER : 0;
 function TaskIconGlyph({id, size = 16, faded = false}) {
   const [failed, setFailed] = React.useState(false);
   const TI = window.PlanyrTaskIcons;
@@ -15815,33 +15825,52 @@ function TaskIconSlot({task, updateTask}) {
   const ref = React.useRef(null);
   const icons = TI.normalizeTaskIcons(task.icons);
   const close = React.useCallback(() => setOpen(false), []);
+  // No icons → NOTHING is rendered (no hover glyph, no reserved width). The first icon is added from the right-click menu.
+  if (icons.length === 0) return null;
   return (
     <>
       <span ref={ref} data-task-icon-slot={icons.length} role="button" aria-label="Task icons" aria-haspopup="dialog" aria-expanded={open}
-        title={icons.length ? undefined : "Add an icon"}
         onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
         onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
-        style={{width:ICON_SLOT_W, height:ROW_H - 2, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"flex-start", gap:2, paddingLeft:2, borderRadius:3, cursor:"pointer", userSelect:"none"}}>
-        {icons.length === 0
-          ? <i className="ti ti-mood-plus ti-slot-add" aria-hidden="true" style={{fontSize:14}} />
-          : icons.map(id => <span key={id} data-task-icon={id} title={TI.iconLabel(id)} style={{display:"inline-flex"}}><TaskIconGlyph id={id} size={16} /></span>)}
+        style={{height:ROW_H - 2, flexShrink:0, display:"inline-flex", alignItems:"center", justifyContent:"flex-start", gap:TASK_ICON_GAP, padding:"0 " + TASK_ICON_PAD + "px", marginRight:TASK_ICON_AFTER, borderRadius:3, cursor:"pointer", userSelect:"none"}}>
+        {icons.map(id => <span key={id} data-task-icon={id} title={TI.iconLabel(id)} style={{display:"inline-flex"}}><TaskIconGlyph id={id} size={TASK_ICON_PX} /></span>)}
       </span>
       {open && <TaskIconPicker anchorRef={ref} icons={icons} onChange={next => updateTask(task.id, {icons: next})} onClose={close} />}
     </>
   );
 }
 
-// Collapsed summary/phase row: the distinct icons of every leaf task inside it (faded) + a muted "N tasks". Nothing when expanded.
+// The picker opened from the row's RIGHT-CLICK menu ("Set icon…" / "Change icon…"). It lives at the app level (the menu does) and
+// anchors to that task's NAME in the grid; if the name column is hidden or the row is not in the grid (Gantt-only), it anchors to
+// the point that was right-clicked. It reads the LIVE task, so every pick is written through and shows on the row at once.
+function TaskIconPickerHost({ctx, tasks, updateTask, onClose}) {
+  const anchorRef = React.useRef(null);
+  const pointRef = React.useRef(null);
+  if (!anchorRef.current) {
+    let el = document.querySelector('[data-task-row="' + ctx.taskId + '"] [data-task-name]');
+    if (el) { const s = anchorSurroundings(el); if (anchorHidden(el.getBoundingClientRect(), s.area, s.occluders)) el = null; }   // name scrolled out of sight → use the click point instead of closing at once
+    if (!el) {
+      el = document.createElement("span");   // a 1px marker where the right-click happened (name column hidden, or a Gantt-only view)
+      el.style.cssText = "position:fixed;width:1px;height:1px;pointer-events:none;visibility:hidden;left:" + ctx.x + "px;top:" + ctx.y + "px";
+      document.body.appendChild(el); pointRef.current = el;
+    }
+    anchorRef.current = el;
+  }
+  React.useEffect(() => () => { if (pointRef.current) pointRef.current.remove(); }, []);
+  const task = (tasks || []).find(t => t.id === ctx.taskId);
+  if (!task) return null;
+  return <TaskIconPicker anchorRef={anchorRef} icons={window.PlanyrTaskIcons.normalizeTaskIcons(task.icons)} onChange={next => updateTask(ctx.taskId, {icons: next}, ctx.projId)} onClose={onClose} />;
+}
+
+// Collapsed summary/phase row: the distinct icons of every leaf task inside it (faded). No task count (owner, 2026-11-09). Nothing when expanded.
 function PhaseIconSummary({tasks, taskId}) {
   const sum = window.PlanyrTaskIcons.phaseIconSummary(tasks, taskId);
-  if (!sum.leaves) return null;
+  if (!sum.icons.length) return null;   // amended 2026-11-09: there is no "N tasks" count any more — no icons inside, nothing shown
   const MAXI = 8, vis = sum.icons.slice(0, MAXI), more = sum.icons.length - vis.length;
   return (
     <span data-phase-icons style={{display:"inline-flex", alignItems:"center", gap:3, marginLeft:8, flex:"0 1000 auto", minWidth:0, overflow:"hidden", whiteSpace:"nowrap"}}>   {/* shrinks ~1000x faster than the name: in a narrow column the summary yields first, the phase name keeps its room */}
       {vis.map(id => <TaskIconGlyph key={id} id={id} size={13} faded />)}
       {more > 0 && <span style={{fontSize:10, color:"var(--mut)"}}>+{more}</span>}
-      {/* the count is generated content (CSS ::after), so a collapsed row's cell TEXT stays just its task name — name lookups by text keep working */}
-      <span className="ti-count" aria-label={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} data-phase-count={sum.leaves + (sum.leaves === 1 ? " task" : " tasks")} style={{fontSize:10.5, color:"var(--mut)", marginLeft:vis.length ? 3 : 0, fontWeight:500}} />
     </span>
   );
 }
@@ -15915,7 +15944,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         return (
           <input {...NO_AUTOFILL} autoFocus className="ei"
             defaultValue={seedVal}
-            style={{fontSize:fSize, fontWeight:fw, fontStyle:fs, color:fColor, textDecoration:fUnderline, paddingLeft:20+ICON_SLOT_W+task.level*14}}
+            style={{fontSize:fSize, fontWeight:fw, fontStyle:fs, color:fColor, textDecoration:fUnderline, paddingLeft:20+taskIconsW(window.PlanyrTaskIcons.normalizeTaskIcons(task.icons).length)+task.level*14}}
             onFocus={e => { if (editStartChar == null) e.target.select(); }}
             onBlur={e => commit(task.id, "name", e.target.value)}
             onKeyDown={e => {
@@ -16039,7 +16068,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         {(() => { const ls=[{fontSize:13,fontWeight:600},{fontSize:12,fontWeight:500},{fontSize:11.5,fontWeight:400},{fontSize:11,fontWeight:400}][Math.min(task.level,3)]; const cf = task.cellFmt?.name; const isEmpty = !task.name; const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight; const fs = (task.italic || cf?.italic || isEmpty) ? "italic" : "normal";
           // NEW-2 — same cell-overrides-row-overrides-default precedence as fw/fs, for a value not a boolean.
           const fSize = cf?.size ?? task.fontSize ?? ls.fontSize; const fColor = cf?.color ?? task.textColor; const fUnderline = (task.underline || cf?.underline) ? "underline" : "none"; return (
-          <span title={task.name || undefined} style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":(fColor||"#1f2328"),fontStyle:fs,fontSize:fSize,fontWeight:fw,textDecoration:fUnderline,minWidth:0}}>
+          <span title={task.name || undefined} data-task-name style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":(fColor||"#1f2328"),fontStyle:fs,fontSize:fSize,fontWeight:fw,textDecoration:fUnderline,minWidth:0}}>
             {task.name || "New task"}
           </span>
         ); })()}
