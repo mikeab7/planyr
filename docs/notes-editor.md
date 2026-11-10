@@ -117,6 +117,7 @@ writes are Planyr's to normalise. Nothing the audit could replace was left in pl
 - **It can fail:** a teeth arm runs the judge on an empty document and VOIDS the run if any fixture survives; a known-good arm (plain text lands) VOIDS
   the run if a paste is invisible to the harness. `test/notesPasteBank.test.js` fails when a fixture is committed to any of the three directories with no
   entry, and unit-tests the judge on hand-built documents (a space in an empty cell, a lost merge, a lost bold, a lost colour, a `·` paragraph).
+- **2026-11-10 additions:** `browser-block-styles` (the REAL Chrome clipboard for a red serif page, captured by `ui-audit/capture-chrome-copy.mjs`; red/serif/16px on each `<p>`) and `word-class-font` (Word desktop, document font in `p.MsoNormal`, a highlighter) — both red on the previous main. `ui-audit/verify-notes-paste-menu.mjs` (also a required `build` step) drives the paste-options menu's Ctrl tap / keys / mouse and judges what Keep Source / Merge / Keep Text Only / Values keep, with `checkPasteOption` in `ui-audit/lib/pasteBank.mjs`.
 - **Adding a clipboard:** drop `<name>.html` + `<name>.txt` in `test/fixtures/clipboard-bank/`, add an entry (`kind` + `expect`) to its `bank.json`, run
   `node ui-audit/verify-notes-paste-bank.mjs` against `vite preview`. A bug report that arrives as a clipboard becomes a fixture first, red, then a fix.
 - **Red on unmodified main (`3faee5d`, Tiptap 3.29.2), the final bank: 56 passed, 6 failed** — three bugs, each on both landings: `<font color face>` lost

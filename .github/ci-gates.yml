@@ -225,6 +225,15 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-paste-bank.mjs
+      # Notes PASTE-OPTIONS MENU (NEW-1 + NEW-2, owner report 2026-11-10: "I push Control … the paste options doesn't take the keys or the mouse …
+      # and keep source formatting takes away the font"). Drives, in a real browser: a LONE Ctrl tap opens the menu and moves focus into it (Ctrl+V /
+      # Ctrl+C / Ctrl+A / Ctrl+click / Ctrl+wheel never do); arrows, Home, End, Tab, Enter, the K/M/T letters and the mouse each pick an option; Escape
+      # gives the caret back; nothing under the menu hears a press on it; and what Keep Source / Merge / Keep Text Only (and a table's Values) keep from
+      # a browser, a Word and an Excel clipboard. Known-good arms + a judge teeth arm VOID the run. 41 of 89 checks red on unmodified main.
+      - name: Notes paste-options menu (Ctrl tap, keys, mouse, focus; what each option keeps - NEW-1/NEW-2, 2026-11-10)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-paste-menu.mjs
       # Notes ENGINE CONTRACT (NEW-1, 2026-11-05). What the editor relies on from Tiptap, pinned at the browser so an upgrade cannot change a
       # decided behaviour silently: Tab at the start of a paragraph after a list stays a tab character (3.33's list keymap would have
       # moved the paragraph INTO the last bullet), a dragged-then-undone column width leaves no stale <col> width, a right-click keeps a

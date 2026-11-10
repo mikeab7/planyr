@@ -292,6 +292,128 @@
      }
     ]
    }
+  },
+  "browser-block-styles": {
+   "kind": "runs",
+   "about": "NEW-2 (2026-11-10): THE REAL CLIPBOARD of Chromium 1254 after Ctrl+C on a styled page (captured by selecting two paragraphs whose red serif font comes from a stylesheet class; ui-audit/capture-chrome-copy.mjs). Chrome writes the computed colour / font-family / font-size on each <p> itself — never on a span — and the parser only reads a font, size or colour off a span, so Keep Source Formatting took the font, size and colour away. Every run must keep all three, plus bold / italic / underline / strike / highlight / link.",
+   "expect": {
+    "noTables": true,
+    "plainText": "Red serif paragraph copied from a chat answer in a browser.Then bold words, italic words, underlined words, struck words, highlighted words and a link.",
+    "runs": [
+     {
+      "text": "Red serif paragraph",
+      "color": "#cc0000",
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "bold words",
+      "marks": [
+       "bold"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "italic words",
+      "marks": [
+       "italic"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "underlined words",
+      "marks": [
+       "underline"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "struck words",
+      "marks": [
+       "strike"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "highlighted words",
+      "highlight": true,
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "a link",
+      "marks": [
+       "link"
+      ],
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     }
+    ]
+   }
+  },
+  "word-class-font": {
+   "kind": "runs",
+   "about": "NEW-2 (2026-11-10): Word desktop. The document font is NOT on the run — it comes from `p.MsoNormal { font-family: Calibri; font-size: 11pt }` in the clipboard's <style>, so a run with only a colour lost its font; a highlighter is `background:yellow;mso-highlight:yellow` on a span. Every run keeps the font and size the page showed; the explicit Cambria 14pt red run keeps its own.",
+   "expect": {
+    "noTables": true,
+    "runs": [
+     {
+      "text": "Red words in the document font",
+      "color": "#c00000",
+      "fontFamily": "Calibri",
+      "fontSize": "14.67px"
+     },
+     {
+      "text": "plain words",
+      "fontFamily": "Calibri",
+      "fontSize": "14.67px"
+     },
+     {
+      "text": "bold words",
+      "marks": [
+       "bold"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "italic words",
+      "marks": [
+       "italic"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "underlined words",
+      "marks": [
+       "underline"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "struck words",
+      "marks": [
+       "strike"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "highlighted words",
+      "highlight": true,
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Large red Cambria words",
+      "color": "#c00000",
+      "fontFamily": "Cambria",
+      "fontSize": "18.67px"
+     }
+    ]
+   }
   }
  }
 }
