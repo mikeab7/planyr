@@ -12,6 +12,11 @@
  *   2. send the request; if the API answers 401, refresh the session ONCE and send the request ONCE more;
  *   3. a second 401 is returned to the caller as the answer (it is a real "sign in again"); a refresh that is
  *      itself refused means the person is signed out — reported as a failure, never retried in a loop.
+ *   4. (NEW-1, 2026-11-10) EITHER of those ends is a SIGN-IN FAILURE, and the helper says so: `authedFetch`
+ *      returns `signIn: true`, and `signInMessage(action)` is the one sentence every surface shows for it
+ *      ("Your sign-in expired — sign in again to <action>."). A surface never prints the server's raw string or a
+ *      status code for it ("Invalid or expired session (403)." was reaching the Library's Drive footer);
+ *      `apiErrorText(status, serverError, fallback)` is the one place a non-ok answer becomes words.
  *
  * Not for: PostgREST / Storage calls made through supabase-js (it manages its own token), nor the
  * unload-time keepalive pushes (`optimisticUpsert`, `elementApi` — they must read a token synchronously and
@@ -27,6 +32,9 @@ export const NEAR_EXPIRY_MS = 60 * 1000;
 // "unreachable": the renewal could not be asked (offline) — says nothing about the sign-in itself.
 export const FAIL_SIGNED_OUT = "signed-out";
 export const FAIL_UNREACHABLE = "unreachable";
+
+import { signInMessage, isSignInAnswer, apiErrorText } from "./signInText.js";
+export { signInMessage, isSignInAnswer, apiErrorText };
 
 const inflight = new WeakMap(); // client -> the one refreshSession() in flight (single-flight)
 
@@ -82,20 +90,24 @@ export async function getApiToken({ client = defaultClient, now = Date.now, refr
  *     failure null | "signed-out" | "unreachable" — set when there is no usable sign-in. When the 401 retry's
  *             renewal fails, `resp` is still the original 401 so the caller can read its body.
  *     refreshed true when the request that produced `resp` carried a renewed token
+ *     signIn    true exactly when the SIGN-IN is the cause: no session, a refused renewal, or a 401 that survived the
+ *               renewal. Show `signInMessage(...)` (and offer sign-in); never `resp`'s own error text.
  * Never throws for auth reasons; a network error from fetch itself propagates (callers already catch it). */
 export async function authedFetch(url, init = {}, { client = defaultClient, fetchImpl, now } = {}) {
   const doFetch = fetchImpl || ((u, i) => fetch(u, i));
   const send = (token) => doFetch(url, { ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${token}` } });
 
   const first = await getApiToken({ client, now });
-  if (!first.token) return { resp: null, refreshed: false, failure: first.failure };
+  if (!first.token) return { resp: null, refreshed: false, failure: first.failure, signIn: first.failure === FAIL_SIGNED_OUT };
   const resp = await send(first.token);
-  if (resp.status !== 401) return { resp, refreshed: first.refreshed, failure: null };
+  if (resp.status !== 401) return { resp, refreshed: first.refreshed, failure: null, signIn: false };
 
   // The server refused this token. Renew the session ONCE and ask ONCE more — no loop.
   const second = await getApiToken({ client, now, refresh: true });
-  if (!second.token) return { resp, refreshed: false, failure: second.failure };
-  return { resp: await send(second.token), refreshed: true, failure: null };
+  if (!second.token) return { resp, refreshed: false, failure: second.failure, signIn: second.failure === FAIL_SIGNED_OUT };
+  const retry = await send(second.token);
+  // A second 401 is the server still refusing a freshly renewed token: a real "sign in again".
+  return { resp: retry, refreshed: true, failure: null, signIn: retry.status === 401 };
 }
 
 /* For code that already speaks in thrown errors and a bare Response (the chunked uploader's `fetchImpl`):
@@ -114,6 +126,8 @@ export class SignInError extends Error {
 
 export async function authedFetchResponse(url, init = {}, opts = {}) {
   const r = await authedFetch(url, init, opts);
-  if (!r.resp) throw new SignInError(r.failure || FAIL_SIGNED_OUT);
+  // A 401 that survived the renewal is also a dead sign-in: throw it (sessionLost → the uploader stops, no 5× backoff,
+  // and the person reads the sign-in sentence instead of the server's "Invalid or expired session (403)").
+  if (!r.resp || r.signIn) throw new SignInError(r.failure || FAIL_SIGNED_OUT);
   return r.resp;
 }

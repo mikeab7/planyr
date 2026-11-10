@@ -69,6 +69,6 @@ export function resendNote(status, body, address) {
   if (status === 200 && body && body.ok) return { ok: true, text: `We sent a confirmation to ${body.email || address}.` };
   if (status === 429) return { ok: false, throttled: true, text: "Just sent \u2014 check your inbox, or try again in a minute." };
   if (status === 404) return { ok: false, text: "There's no invitation waiting for this account any more." };
-  if (status === 401) return { ok: false, text: "Sign in again to resend it." };
+  if (status === 401 || /invalid or expired session/i.test(String((body && body.error) || ""))) return { ok: false, signIn: true, text: "Your sign-in expired \u2014 sign in again to resend it." };
   return { ok: false, text: (body && body.error) || "Couldn't send the email \u2014 try again in a moment." };
 }

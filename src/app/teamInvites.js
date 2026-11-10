@@ -110,7 +110,8 @@ export async function resendInvitation(uid, address) {
   try {
     const { authedFetch } = await import("../shared/auth/apiAuth.js"); // lazy: this module is in the entry chunk every route downloads
     const r = await authedFetch("/api/team/invite-resend", { method: "POST" }, { client: supabase });
-    if (!r.resp) return { ok: false, text: "Sign in again to resend it." };
+    if (r.signIn) return { ok: false, signIn: true, text: "Your sign-in expired \u2014 sign in again to resend it." }; // a 401 that survived the renewal reads the same as a refused renewal
+    if (!r.resp) return { ok: false, text: "Couldn't reach Planyr \u2014 try again." };
     const resp = r.resp;
     status = resp.status;
     body = await resp.json().catch(() => null);

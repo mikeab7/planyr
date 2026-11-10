@@ -149,18 +149,20 @@ export async function sendInviteEmail(teamId, email) {
   if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
   try {
     // Lazy on purpose: this module rides the Site route, and a static import would add the helper as its own chunk to a plain Site load.
-    const { authedFetch } = await import("../../../shared/auth/apiAuth.js");
+    const { authedFetch, signInMessage, apiErrorText } = await import("../../../shared/auth/apiAuth.js");
     const r = await authedFetch("/api/team/invite-email", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ teamId, email: lower(email) }),
     }, { client: supabase });
-    if (!r.resp) return { ok: false, error: "Not signed in." };
+    // NEW-1 (2026-11-10): a dead sign-in is said in plain words, never the server's "Invalid or expired session (403)." or "HTTP 401".
+    if (r.signIn) return { ok: false, signIn: true, error: signInMessage("send the invitation email") };
+    if (!r.resp) return { ok: false, error: "Couldn't reach Planyr — check your connection." };
     const resp = r.resp;
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
     if (resp.ok && jr.ok) return { ok: true };
     if (resp.status === 429) return { ok: false, throttled: true, retryAfterSeconds: jr.retryAfterSeconds || 60, error: "Just sent — try again in a minute." };
-    return { ok: false, error: jr.error || `HTTP ${resp.status}` };
+    return { ok: false, error: apiErrorText(resp.status, jr.error, { action: "send the invitation email" }) };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
