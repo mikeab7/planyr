@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "efa12b85c",
-        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "dark": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "efa12b85c",
-        "note": "Oklahoma screening (B2535056): the map landing page opens centred on 36.9,-95.85 (inside Oklahoma) and the Layers panel scopes by view centre, so it now lists the Oklahoma rows and a Jurisdictions group it did not have [CI-authored by run 40957727327 on efa12b85cb16d7d3da6c1e5379ac2304fe9049f3]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "light--phone": {
         "approvedAt": "2026-10-29",
@@ -28,14 +28,14 @@
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "dark": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "light--phone": {
         "approvedAt": "2026-10-29",
@@ -50,14 +50,14 @@
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "dark": {
-        "approvedAt": "2026-10-29",
-        "approvedCommit": "52e1779f4",
-        "note": "B2479568: the map landing view is centred mid-country (a located point in a state the app has no region for), so Texas-only layer rows no longer list there; the Jurisdictions group disappears from the Imagery & Layers card's left list on the first screen until the map is over a place a source serves. [CI-authored by run 40798609879 on 52e1779f4fd83b640cd92e4202b786a428509ee8]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "light--phone": {
         "approvedAt": "2026-10-29",
@@ -72,14 +72,14 @@
     },
     "library": {
       "light": {
-        "approvedAt": "2026-11-02",
-        "approvedCommit": "f351045d3",
-        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "dark": {
-        "approvedAt": "2026-11-02",
-        "approvedCommit": "f351045d3",
-        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
+        "approvedAt": "2026-11-10",
+        "approvedCommit": "d77355216",
+        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
       },
       "light--phone": {
         "approvedAt": "2026-11-02",

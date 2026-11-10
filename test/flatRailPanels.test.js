@@ -68,7 +68,8 @@ describe("status rows read label-left / value-right (no left-gutter chip)", () =
     expect(strip).toContain("data-verdict-status");
   });
   it("the phone panel stops at the Tools edge tab so it can never cover the header ×", () => {
-    expect(src).toContain("calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px)");
+    // NEW-1 (B2671209): the rail width is `leftRailW` (54 on a touch device, 62 with the reserved scrollbar strip), never a literal.
+    expect(src).toContain("calc(100vw - ${leftRailW + TOOLS_TAB_WIDTH_PX}px)");
   });
 });
 
