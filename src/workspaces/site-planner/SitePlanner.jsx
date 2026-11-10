@@ -387,6 +387,7 @@ import { followDrives } from "./lib/driveFollow.js";
 import { RAMP_DEFAULTS, RAMP_MAX_GRADE_PCT, RAMP_LAYOUTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampWidthFt, rampGradePct, rampLayout, rampDir, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, gradeText, rampGeometry, fitAlongTheWall, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
+import { TAPER_MAX_FT } from "./lib/roadTaper.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS } from "./lib/roadClasses.js";
@@ -14400,7 +14401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape" || e.type === "driveInRamp")) : null;
   const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
     if (e.type === "road") {
-      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), undefined) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
+      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), roundTrim(e)) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
     }
     if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
     return [];
@@ -21473,6 +21474,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return { ...x, xsection: next };
     }));
   };
+  /* NEW-1 (2026-11-10) — the owner's own length for the taper at one end of a road that meets a narrower (or wider) one end to end
+     (lib/roadTaper.js). `end` is "s" | "e"; a blank/zero clears it back to the automatic length. The ONLY stored fact about a taper —
+     whether a road tapers at all is derived from the roads, never saved. */
+  const setRoadTaper = (el, end, ft) => {
+    const want = Number.isFinite(+ft) && +ft > 0;
+    const cur = el.taper && Number.isFinite(+el.taper[end]) ? +el.taper[end] : null;
+    if (!want && cur == null) return;                     // nothing to clear — no history frame for a no-op
+    if (want && cur === +ft) return;
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id) return x;
+      const next = { ...(x.taper || {}) };
+      if (want) next[end] = Math.min(+ft, TAPER_MAX_FT); else delete next[end];
+      const { taper: _drop, ...rest } = x;
+      return Object.keys(next).length ? { ...rest, taper: next } : rest;
+    }));
+  };
   const setRoadLength = (el, len) => {
     pushHistory();
     const L = Math.max(1, len);
@@ -24047,12 +24065,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pavingFlags.forEach((f, i) => {
       const el = (els || []).find((x) => x.id === f.id);
       if (!el || elHidden(hiddenGroups, el)) return;
-      const ring = isCenterlineRoad(el) ? roadStripRing(el, settings, sharpFor(el), undefined) : ringOf(el);
+      const ring = isCenterlineRoad(el) ? roadStripRing(el, settings, sharpFor(el), roundTrim(el)) : ringOf(el);
       if (!ring || ring.length < 3) return;
       out.push({ key: `pvf${f.id}-${f.parcelId}-${i}`, id: f.id, sf: Math.round(f.areaSf), ring, at: polylabel(ring) });
     });
     return out;
-  }, [pavingFlags, els, hiddenGroups, settings, sharpFor]);
+  }, [pavingFlags, els, hiddenGroups, settings, sharpFor, roundTrim]);
   const roadRadiusFlags = useMemo(() => {
     const out = [];
     if (!radiusReviewOn) return out; // NEW-3 — the min-radius review is hidden (one flag, default OFF): no corner dot, no pill
@@ -28156,7 +28174,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const court = els.find((x) => x.attachedTo === host.id && x.truckCourt && x.truckCourt.side === rec.side && !x.points);
             const courtDepth = court ? (rec.side === "top" || rec.side === "bottom" ? hostAxisExtents(host, court).dimBY : hostAxisExtents(host, court).dimBX) : null;
             const stackIds = new Set(els.filter((x) => x.attachedTo === host.id && (x.truckCourt || x.forCourt || x.forTrailer || x.prevZone || x.stackSide)).map((x) => x.id));
-            const flagRing = (x) => { try { return isCenterlineRoad(x) ? roadStripRing(x, settings, sharpFor(x), undefined) : ringOf(x); } catch (_) { return null; } };
+            const flagRing = (x) => { try { return isCenterlineRoad(x) ? roadStripRing(x, settings, sharpFor(x), roundTrim(x)) : ringOf(x); } catch (_) { return null; } };
             const others = els.filter((x) => x.id !== selEl.id && x.id !== host.id && !stackIds.has(x.id))
               .map((x) => ({ id: x.id, name: x.dogEar ? "the corner bump-out" : `the ${(TYPE[x.type]?.label || "another element").split(" / ")[0].toLowerCase()}`, ring: flagRing(x) }));
             const allowedRings = parcels.filter((pc) => pc.active !== false && pc.points && pc.points.length >= 3).map((pc) => { const sb = parcelSetbacks(pc); return (sb.some((v) => v > 0) ? offsetPolygon(pc.points, sb) : null) || pc.points; });
@@ -28460,6 +28478,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           })}
                         </Collapse>
                       )}
+                      {/* NEW-1 (2026-11-10) — TAPER: only on a road that actually has a tapered joint (it meets a road of a different width end to
+                          end). One line per tapered end; blank = the automatic length (10 ft per foot each edge steps in); the value drawn is
+                          shortened to the road's last straight stretch. Its own section, so nothing crowds the cross-section button above. */}
+                      {cl && (() => {
+                        const tp = roundTrim(selEl) && roundTrim(selEl).taper;
+                        const ends = tp ? ["s", "e"].filter((k) => tp[k]) : [];
+                        if (!ends.length) return null;
+                        return (
+                          <Collapse sectionId="road-taper" title="Taper" defaultOpen summary={ends.map((k) => `${Math.round(tp[k].lenFt)} ft`).join(" · ")}>
+                            {ends.map((k) => (
+                              <Field key={k} gutter={ROAD_GUTTER_W} oneLine label={ends.length > 1 ? (k === "s" ? "Start length" : "End length") : "Length"} title="How far back from the joint this road narrows (or widens) to meet the road it joins. Blank = automatic.">
+                                {stepBox({ ariaLabel: ends.length > 1 ? (k === "s" ? "Taper length at the start" : "Taper length at the end") : "Taper length", testid: `road-taper-${k}`, placeholder: String(Math.round(tp[k].lenFt)), value: tp[k].auto ? null : Math.round(tp[k].reqFt), seed: Math.round(tp[k].lenFt), min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadTaper(selEl, k, n) })}
+                              </Field>
+                            ))}
+                          </Collapse>
+                        );
+                      })()}
                       {/* NEW-3 (road-panel redesign) — HIDDEN, NOT DELETED: the min-radius review (the warning + Fix radius,
                           and "Curve at vertex") renders only behind `roadRadiusReviewOn()`, default OFF. Owner: "it should
                           just let me be wrong; it's not good enough yet, keep it in the background". */}

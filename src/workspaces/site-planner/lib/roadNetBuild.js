@@ -8,6 +8,7 @@ import {
   roadNetworkStats, dissolveRingsSteps, clipPolylineOutside, clusterIds, regionEdgeSegments, rectOutlineCutSegments, polygonOutlineCutSegments,
 } from "./roadNetwork.js";
 import { teeJunctionsOf, driveJunctionsOf } from "./roadJunctions.js";
+import { roadTapersOf, taperJointCover } from "./roadTaper.js";
 import { fieldInsidesOf } from "./parkingApproach.js";
 import { junctionMouthCuts, stripeRunsNearOutline, trimPolylineOutsideRings, snapPieceEnd } from "./roadDeco.js";
 import {
@@ -25,6 +26,10 @@ const STRIPE_JOIN_REACH_FT = 80;
 export const roadOuterHalf = (el) => Math.max(0, (+el.travelW || 0) / 2) + roadCurbWidth(el); // centerline → back-of-curb
 export function weldJunctionsOf(els) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  /* NEW-1 (2026-11-10) — a weld between two roads of DIFFERENT widths is a TAPER (lib/roadTaper.js): the wider road's end already
+   * narrows to the narrow road's width, so the cover for that joint is only the outside-corner wedge at that width (a hull at the
+   * wide road's width would bulge back over the taper). Keyed by the same sorted member list this function dedupes on. */
+  const taperJoints = new Map(roadTapersOf(els, TEE_COINCIDE_FT).joints.map((j) => [j.key, j]));
   const armAt = (R, ei) => {                                         // road R's endpoint ei → { dir(neighbor→P), halfW }
     const P = R.pts[ei];
     const nb = R.pts[ei === 0 ? 1 : R.pts.length - 2];
@@ -53,7 +58,8 @@ export function weldJunctionsOf(els) {
       const key = [...members].sort().join("|");                    // dedupe: found once per member endpoint
       if (seen.has(key)) continue;
       seen.add(key);
-      const cover = weldCoverPolygon({ x: PA.x, y: PA.y }, arms);
+      const tj = taperJoints.get(key);
+      const cover = tj ? taperJointCover(tj.P, tj.dirWide, tj.dirNarrow, tj.halfW) : weldCoverPolygon({ x: PA.x, y: PA.y }, arms);
       if (cover) out.push({ ids: members.map((m) => m.split(":")[0]), P: { x: PA.x, y: PA.y }, cover });
     }
   }
@@ -93,8 +99,17 @@ export function* roadNetSteps(inp) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
   if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
+  /* NEW-1 (2026-11-10) — a taper narrows INTO the road it meets; a partner that is hidden is not on the drawing, so that end keeps its width. */
+  const trimFor = (r) => {
+    const t = roundabouts.trims.get(r.id);
+    if (!t || !t.taper) return t;
+    const tp = {};
+    for (const k of ["s", "e"]) if (t.taper[k] && byId.has(t.taper[k].otherId)) tp[k] = t.taper[k];
+    if (Object.keys(tp).length === Object.keys(t.taper).length) return t;
+    return { ...t, taper: Object.keys(tp).length ? tp : undefined };
+  };
   const strip = new Map();
-  for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))); yield; }
+  for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), trimFor(r))); yield; }
   /* NEW-1 (road → parking) — what each car field does about the roads around it (lib/parkingApproach.js): the stalls a drive takes, a road through the field, a
    * drive running ALONG its aisle-mouth face. Decided once here (VIEW-INDEPENDENT-ONCE); `stallClips` / the outline cuts / the mouths below are read from it. */
   const inside = fieldInsidesOf({ els, settings, junctions: driveJunctions.filter((dj) => byId.has(dj.sideId)), roads, stripOf: (r) => strip.get(r.id), halfOf: roadOuterHalf, isHidden: (T) => elHidden(hiddenGroups, T) });
@@ -223,7 +238,7 @@ export function* roadNetSteps(inp) {
        * stripe carried along the strip edge THROUGH the interior of the merged pavement beside the fillet — a line between the road's body and its curve. The
        * return's own stripe (below) takes over from that point. (A through road's far stripe is NOT in this set — it runs on across the mouth.) */
       others.push(...(mouth.side.get(id) || []));
-      pieces.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
+      pieces.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), trimFor(byId.get(id))).flatMap((cl) => clipPolylineOutside(cl, others)));
       /* NEW-1 (B1783376 ×3) — the face of curb CONTINUES around every curb return (`siteGeometry.driveJunctionCurbStripes` / `teeJunctionCurbStripes`, see their
        * header): a true-circle arc a curb-width inside the pavement, oriented side-road end first. A DRIVE's arc is cut exactly at the pad face (it used to run on
        * one curb-width INTO the pad — the tick at the top of each arc); then, either way, only the runs a curb-width inside the pavement's OUTLINE are kept
