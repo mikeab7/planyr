@@ -13,7 +13,7 @@
 import { test, expect } from "@playwright/test";
 import { startBlank } from "./drawKinds.js";
 
-test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"], args: ["--no-sandbox", "--ignore-certificate-errors"], ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}) } });
+test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"], args: ["--no-sandbox"], ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}) } });
 
 async function open(page, viewport, theme = "light") {
   await page.addInitScript((t) => { try { localStorage.setItem("planyr.theme", t); } catch { /* ignore */ } }, theme);
