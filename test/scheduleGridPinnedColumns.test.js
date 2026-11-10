@@ -44,7 +44,7 @@ describe("Schedule grid — pinned columns (NEW-1)", () => {
     expect(seq).toMatch(/top:4,right:14\+pinRW,zIndex:30/);
   });
   it("the Task name carries its full text as a tooltip", () => {
-    expect(seq).toMatch(/<span title=\{task\.name \|\| undefined\} style=\{\{overflow:"hidden",textOverflow:"ellipsis"/);
+    expect(seq).toMatch(/<span title=\{task\.name \|\| undefined\}(?: data-task-name)? style=\{\{overflow:"hidden",textOverflow:"ellipsis"/);
   });
 });
 

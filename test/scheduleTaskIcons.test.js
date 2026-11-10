@@ -201,9 +201,51 @@ describe("wiring in public/sequence/index.html", () => {
     expect(block).toContain('title={task.isExpanded?"Collapse":"Expand"}');   // harnesses find the toggle by this
     expect(block).toMatch(/!task\.isExpanded && task\.hasChildren && <PhaseIconSummary/);
   });
-  it("the name EDITOR's text starts where the displayed name starts (slot width folded in)", () => {
-    expect(page).toContain("paddingLeft:20+ICON_SLOT_W+task.level*14");
-    expect(page).toMatch(/const ICON_SLOT_W = 38;/);
+  it("the name EDITOR's text starts where the displayed name starts (the icons' own width folded in — zero when there are none)", () => {
+    expect(page).toContain("paddingLeft:20+taskIconsW(window.PlanyrTaskIcons.normalizeTaskIcons(task.icons).length)+task.level*14");
+    const fn = page.match(/const taskIconsW = n => [^\n]*;/)[0];
+    const taskIconsW = new Function(`const TASK_ICON_PX = 16, TASK_ICON_GAP = 2, TASK_ICON_PAD = 2, TASK_ICON_AFTER = 2; ${fn}; return taskIconsW;`)();
+    expect(taskIconsW(0)).toBe(0);                                // no icons → no reserved width at all
+    expect(taskIconsW(2)).toBeGreaterThan(taskIconsW(1));         // width follows the icons
+    expect(page).not.toContain("ICON_SLOT_W");                    // the fixed-width slot is gone (owner, 2026-11-09)
+  });
+  it("NO hover 'add icon' glyph: an empty slot renders nothing and no add-glyph markup / CSS remains (owner: \"This is a serious software\")", () => {
+    const i = page.indexOf("function TaskIconSlot(");
+    const body = page.slice(i, page.indexOf("function TaskIconPickerHost(", i));
+    expect(body).toMatch(/if \(icons\.length === 0\) return null;/);
+    expect(body).not.toMatch(/ti-mood|ti-slot-add|Add an icon/);
+    expect(page).not.toMatch(/ti-mood-plus|ti-slot-add/);
+  });
+  it("NO 'N tasks' count on a collapsed phase; the faded icon summary stays, and an icon-free phase shows nothing", () => {
+    const i = page.indexOf("function PhaseIconSummary(");
+    const body = page.slice(i, page.indexOf("function Cell(", i));
+    expect(body).not.toMatch(/ti-count|data-phase-count|" tasks"|sum\.leaves/);
+    expect(body).toContain("if (!sum.icons.length) return null;");
+    expect(body).toContain("faded");
+    expect(page).not.toContain(".ti-count");
+  });
+  it("proposed (review) rows reserve no icon slot", () => {
+    expect(page).not.toMatch(/aria-hidden="true" style=\{\{width:ICON/);
+  });
+  it("the row's right-click menu carries Set icon… / Change icon… / Remove icon, wired to the app-level picker host", () => {
+    const m = page.slice(page.indexOf("function TaskContextMenu("), page.indexOf("// ── HealthColHeader"));
+    expect(m).toContain('label={hasIcons ? "Change icon…" : "Set icon…"}');
+    expect(m).toMatch(/\{hasIcons && <Item icon="ti-icons-off" label="Remove icon" onClick=\{onRemoveIcon\} \/>\}/);
+    expect(page).toContain("hasIcons={window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0}");
+    expect(page).toContain("onRemoveIcon={() => { updateTask(taskCtx.task.id, {icons: []}, taskCtx.projId); setTaskCtx(null); }}");
+    expect(page).toMatch(/onSetIcon=\{\(\) => \{ setIconPickerCtx\(\{taskId: taskCtx\.task\.id/);
+    expect(page).toContain("<TaskIconPickerHost ctx={iconPickerCtx}");
+    // not gated on a task kind: phase (hasChildren) and leaf rows both get it
+    expect(m.slice(m.indexOf("Set icon"), m.indexOf("Set icon") + 5)).toBe("Set i");
+    expect(m).not.toMatch(/hasChildren[^\n]*Set icon/);
+  });
+  it("the picker host anchors to the task's NAME (data-task-name), falling back to the click point; it writes through the live task", () => {
+    const i = page.indexOf("function TaskIconPickerHost(");
+    const body = page.slice(i, page.indexOf("// Collapsed summary/phase row", i));
+    expect(body).toContain("[data-task-name]");
+    expect(body).toContain("anchorHidden(");
+    expect(body).toContain("updateTask(ctx.taskId, {icons: next}, ctx.projId)");
+    expect(page).toContain("title={task.name || undefined} data-task-name style=");
   });
   it("the picker: no-autofill search box; portal root carries the grid-press isolation; anchored popover; Clear + Done + Esc", () => {
     const i = page.indexOf("function TaskIconPicker(");
