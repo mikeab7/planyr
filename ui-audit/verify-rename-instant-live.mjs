@@ -88,8 +88,12 @@ try {
   if (await page.getByTestId("plan-footer").isVisible().catch(() => false)) await page.getByTestId("plan-crumb").click();
   const planRows = (await dbRows()).filter((r) => !r.deleted_at);
   ok("setup: the throwaway project has 2 live plans", planRows.length === 2, `${planRows.length}`);
-  const curId = await page.evaluate(() => { const m = location.hash.match(/plan\/([^/]+)/); return m ? m[1] : null; });
-  const otherRow = planRows.find((r) => r.id !== curId) || planRows[1];
+  // the CURRENT plan is whichever row the menu marks current (never guessed from database order — after Duplicate the copy is current)
+  await page.getByTestId("plan-crumb").click();
+  const curId = await page.getByTestId("plan-current-row").getAttribute("data-plan-id");
+  await page.getByTestId("plan-crumb").click();
+  const otherRow = planRows.find((r) => r.id !== curId);
+  ok("setup: found the OTHER plan (not the current one)", !!curId && !!otherRow && otherRow.id !== curId, `current=${curId} other=${otherRow && otherRow.id}`);
 
   /* ---- 1 · the CURRENT plan, cloud writes held ---- */
   mode = "hold"; held = 0;
@@ -120,7 +124,7 @@ try {
   /* ---- 3 · the PROJECT ---- */
   held = 0;
   await page.evaluate(() => { window.__frame = null; });
-  await arm({ projectCrumb: '[data-testid="project-crumb-name"]' });
+  await arm({ projectCrumb: '[data-mode-active="true"] [data-testid="project-crumb-name"]' });   // scoped to the ACTIVE module: the page keeps others mounted, each with its own crumb
   await crumb().click(); await page.getByTestId(`project-row-${gid}`).hover(); await page.getByTestId(`project-kebab-${gid}`).click(); await page.getByTestId("project-rename").click();
   const NAME3 = `${PROJ}-renamed`;
   const i3 = page.getByRole("textbox", { name: /^Rename / }); await i3.fill(NAME3); await i3.press("Enter");
