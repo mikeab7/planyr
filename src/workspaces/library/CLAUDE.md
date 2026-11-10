@@ -33,6 +33,7 @@ via the Shell `onOpenReviewInDocReview` intent.
   the honest Drive-mirror status — "Synced · N min ago" / progress / not-connected / loud error
   (B701). `embedded` mode = the unified view's left rail (selection, per-folder counts,
   publishes rows up).
+- `lib/organizerRun.js` (NEW-1, 2026-11-09) — one run of the one-time organizer, pure: `runOrganizer` writes the done-marker exactly when the walk finished clean for the same account, and returns the banner state (`signIn: true` offers the app's sign-in). The banner is PLAIN WORDS only — no project name, no status code (`folders.js` `ORGANIZER_SIGNIN_EXPIRED` / `organizerFailureMessage`; technical lines go to telemetry). Every `/api/folders` call goes through the shared `apiAuth` helper under `src/shared/auth/` (fresh token; one refresh + one retry on 401) — never a bare `fetch` with a Bearer. A sign-in problem stops the walk and un-marks the account so signing in re-runs it. Guard: repo-root `test/` **apiAuthRefresh**.
 - `lib/folders.js` — the folder-index store: reads/writes the tree in Supabase (`project_folders`,
   own-row RLS) and triggers the one-way Google Drive mirror via `/api/folders` (loops the server's
   20-op chunks with progress — the B662 502 fix). Also the B663 one-time organizer

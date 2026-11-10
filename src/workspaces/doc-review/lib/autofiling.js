@@ -18,6 +18,7 @@
 import { createIndexProvider } from "../../../shared/files/fileFacts.js";
 import { emptyPlacementFacts, mergePlacementFacts } from "../../../shared/placement/placementFacts.js";
 import { supabase } from "../../site-planner/lib/supabase.js";
+import { getApiToken } from "../../../shared/auth/apiAuth.js";
 import { localTitleBlockRead } from "./localRead.js";
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? "").trim());
@@ -51,7 +52,7 @@ export function interpretResponse(status, body) {
 }
 
 async function sessionToken() {
-  try { const { data } = await supabase.auth.getSession(); return (data && data.session && data.session.access_token) || null; } catch (_) { return null; }
+  return (await getApiToken({ client: supabase })).token || null; // NEW-1: a token that is not about to expire
 }
 
 /* File one drawing — PLAIN CODE FIRST, AI only as fallback (B312, owner direction).
@@ -78,12 +79,19 @@ export async function autofile(file, projects = [], { endpoint = DEFAULT_ENDPOIN
   const token = await getToken();
   if (!token) return { ok: false, skipped: true, error: "Sign in to auto-file." };
   let resp;
+  const send = (t) => fetchImpl(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/pdf", authorization: `Bearer ${t}`, "x-planyr-projects": encodeProjects(projects) },
+    body: file,
+  });
   try {
-    resp = await fetchImpl(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/pdf", authorization: `Bearer ${token}`, "x-planyr-projects": encodeProjects(projects) },
-      body: file,
-    });
+    resp = await send(token);
+    // NEW-1: the server refused the token — renew the sign-in ONCE and ask once more (the default token source only;
+    // an injected getToken is the caller's own business).
+    if (resp.status === 401 && getToken === sessionToken) {
+      const again = await getApiToken({ client: supabase, refresh: true });
+      if (again.token) resp = await send(again.token);
+    }
   } catch (e) { return { ok: false, skipped: true, error: (e && e.message) || "Network error." }; }
   let body = {};
   try { body = await resp.json(); } catch (_) { /* non-JSON */ }
