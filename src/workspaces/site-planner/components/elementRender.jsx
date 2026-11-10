@@ -2,6 +2,7 @@
  * (B1064 step 1). A pure text move: nothing here reads the planner component's state, and nothing imports back from
  * SitePlanner.jsx. SVG output is byte-identical (ui-audit/capture-plan-html.mjs). @planner-extract */
 import { memo } from "react";
+import { taperedOffset, taperedOffsetScaled } from "../lib/roadTaper.js";
 import { rot2, elCorners, carStalls, trailerStalls, CURB, curbEdgesOf, isCenterlineRoad, roadCurbWidth, roadDenseCenterline, roadStripRing, roadCurbLines } from "../lib/siteGeometry.js";
 import { dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, dimFontScale, stallStripesExplicit, segmentsPath } from "../lib/labelLayout.js";
 import { pondContours, contourLabelPoint } from "../lib/pondGeom.js";
@@ -526,6 +527,11 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         // at all, and a single-band road can carry a designated ROW with no bands to gate on).
         const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
         const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+        /* NEW-1 (2026-11-10) — an end that tapers into a narrower road (lib/roadTaper.js): the section's band edges, lane seams and
+           ROW lines narrow with it. `xsOff` = a designed-section edge at an offset; a road with no taper is plain `offsetPolyline`. */
+        const xsTaper = roadNet && roadNet.trims && roadNet.trims.get(el.id) ? roadNet.trims.get(el.id).taper : undefined;
+        const xsHalf = Math.max(0, (+el.travelW || 0) / 2);
+        const xsOff = (offFt) => (xsTaper && taperedOffsetScaled(xsDense, xsTaper, offFt, xsHalf)) || offsetPolyline(xsDense, offFt);
 
         // NEW-1 — a road carrying a REAL designed cross-section (2+ bands) paints its within-curb
         // bands as distinct fills + lane markings, INSIDE the same pavement ring computed above: the
@@ -556,7 +562,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           // polygon is built the identical way, from the SAME trimmed xsDense, so it is already correctly
           // bounded lengthwise and needs no clip of its own.
           const bandFillFor = (e) => {
-            const left = offsetPolyline(xsDense, e.from), right = offsetPolyline(xsDense, e.to);
+            const left = xsOff(e.from), right = xsOff(e.to);
             if (!left || !right) return null;
             return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
           };
@@ -565,7 +571,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const bandFillsOut = xsLayout.edges.filter((e) => !bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type] && bandVisible(e)).map(bandFillFor).filter(Boolean);
           const markW = Math.max(0.8, lfK);
           const drawSeam = (offFt, key, style) => {
-            const line = offsetPolyline(xsDense, offFt);
+            const line = xsOff(offFt);
             if (!line || line.length < 2) return null;
             return <polyline key={key} points={toPts(line)} fill="none" stroke="#f2f2f2" strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
           };
@@ -614,7 +620,9 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         const rowMargin = rowFt != null ? rowMarginFt(el.xsection) : null;
         if (rowMargin != null && settings.showRowLines !== false) {
           const rowHw = rowFt / 2;
-          const rowLineL = offsetPolyline(xsDense, rowHw), rowLineR = offsetPolyline(xsDense, -rowHw);
+          // the ROW lines taper only against a narrow road that designates a ROW of its own (rowHalf); with none there is nothing to meet
+          const rowEdge = (sign) => (xsTaper && taperedOffset(xsDense, xsTaper, rowHw, sign, "rowHalf")) || offsetPolyline(xsDense, sign * rowHw);
+          const rowLineL = rowEdge(1), rowLineR = rowEdge(-1);
           const rowDash = `${9 * lfK} ${5 * lfK}`;
           [rowLineL, rowLineR].forEach((line, i) => {
             if (!line || line.length < 2) return;
