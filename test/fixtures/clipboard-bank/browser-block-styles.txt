@@ -1,0 +1,3 @@
+Red serif paragraph copied from a chat answer in a browser.
+
+Then bold words, italic words, underlined words, struck words, highlighted words and a link.

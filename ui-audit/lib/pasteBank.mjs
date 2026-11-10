@@ -303,6 +303,8 @@ export function checkEntry(entry, summary) {
     if (!r) { p.push(`run "${w.text}" is missing`); continue; }
     if (w.color && normColor(r.marks.color) !== normColor(w.color)) p.push(`run "${w.text}" colour is ${r.marks.color || "none"}, wanted ${normColor(w.color)}`);
     if (w.fontFamily && !String(r.marks.fontFamily || "").toLowerCase().includes(w.fontFamily.toLowerCase())) p.push(`run "${w.text}" font is ${r.marks.fontFamily || "none"}, wanted ${w.fontFamily}`);
+    if (w.fontSize && Math.abs(parseFloat(r.marks.fontSize) - parseFloat(w.fontSize)) > 0.05) p.push(`run "${w.text}" size is ${r.marks.fontSize || "none"}, wanted ${w.fontSize}`);
+    if (w.highlight && !r.marks.highlight) p.push(`run "${w.text}" lost its highlight`);
     for (const k of w.marks || []) if (!r.marks[k]) p.push(`run "${w.text}" lost its ${k}`);
   }
   if (e.noTables && summary.tables.length) p.push(`${summary.tables.length} table(s) arrived where none was expected`);
@@ -310,5 +312,40 @@ export function checkEntry(entry, summary) {
     const got = summary.runs.map((r) => r.text).join("");
     if (got !== e.plainText) p.push(`text differs\n        want ${JSON.stringify(e.plainText)}\n        got  ${JSON.stringify(got)}`);
   }
+  return p;
+}
+
+/* ── WHAT EACH PASTE OPTION OWES THE TEXT (NEW-2, 2026-11-10) ─────────────────────────────────────────────────────────── */
+
+const APPEARANCE = ["color", "fontFamily", "fontSize", "highlight"];     // what Merge Formatting takes away
+const EMPHASIS = ["bold", "italic", "underline", "strike", "link"];      // what it keeps
+
+/** Problems with the document AFTER a paste option was chosen, judged against the document as the paste first landed (`base`).
+ *  · `source` (Keep Source Formatting)  — the paste exactly as it landed: every mark, byte for byte
+ *  · `merge`  (Merge Formatting)        — the same words, with the source's font, size, colour and highlight GONE and its bold,
+ *                                          italic, underline, strike and links KEPT, run for run
+ *  · `text`   (Keep Text Only)          — the same words and nothing else: no mark of any kind
+ *  · `values` (a table's Values)        — the same words, no mark
+ *  · `valuesFormat`                     — the same words with the source's bold and colour (and font, size) kept
+ *  Empty array = the option did what it says. Text is compared run-joined, so a split in how runs fall never fails an option. */
+export function checkPasteOption(mode, base, after) {
+  const p = [];
+  const b = runsOf(base); const a = runsOf(after);
+  const text = (runs) => runs.map((r) => r.text).join("").replace(/\s+/g, " ").trim();
+  if (mode === "source") {
+    if (JSON.stringify(base) !== JSON.stringify(after)) p.push("Keep Source Formatting is not the paste as it landed");
+    return p;
+  }
+  if (text(a) !== text(b)) p.push(`the words changed:\n        want ${JSON.stringify(text(b))}\n        got  ${JSON.stringify(text(a))}`);
+  // characters of each flag in `base`, so a run split differently still compares fairly
+  const flagChars = (runs, flag) => runs.filter((r) => r.marks[flag]).map((r) => r.text).join("").replace(/\s+/g, "");
+  if (mode === "merge") {
+    for (const r of a) for (const k of APPEARANCE) if (r.marks[k]) p.push(`Merge Formatting left "${r.text.slice(0, 24)}" with its source ${k}`);
+    for (const k of EMPHASIS) if (flagChars(a, k) !== flagChars(b, k)) p.push(`Merge Formatting changed which words are ${k}: want "${flagChars(b, k).slice(0, 40)}", got "${flagChars(a, k).slice(0, 40)}"`);
+  } else if (mode === "text" || mode === "values") {
+    for (const r of a) if (Object.keys(r.marks).length) p.push(`${mode === "text" ? "Keep Text Only" : "Values"} left a mark on "${r.text.slice(0, 24)}": ${Object.keys(r.marks).join(", ")}`);
+  } else if (mode === "valuesFormat") {
+    for (const k of ["bold", "italic", "color", "fontFamily"]) if (flagChars(b, k) && !flagChars(a, k)) p.push(`Values and Source Formatting lost the ${k}`);
+  } else p.push(`unknown paste option "${mode}"`);
   return p;
 }

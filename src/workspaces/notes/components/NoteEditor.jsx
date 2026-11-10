@@ -59,7 +59,7 @@ import {
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES, textOfNode, plainTextToContent } from "../lib/notesPastePlain.js";
 import {
-  PASTE_MODE_META, pasteSetFor, modeForKey, analyzePaste, applyPasteModeToTr, revertToBase, withSourceFills,
+  PASTE_MODE_META, pasteSetFor, modesOfSet, modeForKey, analyzePaste, applyPasteModeToTr, revertToBase, withSourceFills,
 } from "../lib/notesPasteModes.js";
 import { prepareTablePicture } from "../lib/notesTablePicture.js";
 import { newId } from "../lib/notesModel.js";
@@ -1023,6 +1023,12 @@ function boxHasContent(node) {
   return any;
 }
 
+/** Is keyboard focus inside the paste-options menu right now? (Module scope: used by the editor's blur guard and by closePasteMenu.) */
+function pasteMenuHasFocus() {
+  const a = typeof document !== "undefined" ? document.activeElement : null;
+  return !!(a && a.closest && a.closest("[data-testid='note-paste-options']"));
+}
+
 /** ⛔ WORD'S AND EXCEL'S PASTE OPTIONS, and it is NOT a dialog (house rule) — B36051, then NEW-1 (Office-style).
  *
  *  After a paste that carried formatting a small bordered TAB — a clipboard, "(Ctrl)", a caret — sits at the end of the
@@ -1039,10 +1045,17 @@ function boxHasContent(node) {
  *  React would remount it out from under its own click. The flyout is clamped into the visible mat in a LAYOUT effect
  *  (measured before paint, so it never shows at an unclamped spot) and flips above the line when it would run off the
  *  bottom — it has to fit a phone, where the buttons also grow to a thumb-sized target. */
-function PasteOptions({ offer, expanded, onExpand, onPick }) {
+function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
   const rootRef = useRef(null);
   const [tip, setTip] = useState(null);
   const [place, setPlace] = useState(null);
+  /* ⛔ THE HIGHLIGHT (NEW-1, 2026-11-10). One option is "current" — the one a key would act on. It starts on the option applied now
+   * and follows the arrow keys and the pointer, and it is the one real DOM focus sits on (a roving tabindex), so Enter / Space press
+   * it natively and a screen reader says its name. `null` = "the applied one". */
+  const [active, setActive] = useState(null);
+  const order = offer ? modesOfSet(pasteSetFor(offer)) : [];
+  const cur = order.includes(active) ? active : (order.includes(offer?.applied) ? offer.applied : order[0]);
+  useEffect(() => { if (!expanded) setActive(null); }, [expanded]);
   const x = offer?.x; const y = offer?.y; const yTop = offer?.yTop;
   const kind = offer?.kind;
   useLayoutEffect(() => {
@@ -1057,6 +1070,28 @@ function PasteOptions({ offer, expanded, onExpand, onPick }) {
     const tipRight = left + 250 > hw;
     setPlace((prev) => (prev && prev.left === left && prev.top === top && prev.tipRight === tipRight ? prev : { left, top, tipRight }));
   }, [x, y, yTop, expanded, kind]);
+  /* ⛔ OPENING THE MENU HANDS IT THE KEYBOARD (NEW-1). It used to open while the editor kept focus, so the arrow keys moved the
+   * caret / the selected box and "use the arrows" did nothing. Focus lands on the current option; Escape or a pick gives it back
+   * to the caret (NoteEditor `closePasteMenu` / `applyPasteMode`). Not on a touch screen (`focusIn` false there): moving focus
+   * off the editor would drop the soft keyboard and re-lay the page under the finger. */
+  useLayoutEffect(() => {
+    if (!expanded || !focusIn || !rootRef.current) return;
+    const btn = rootRef.current.querySelector(`[data-testid="note-paste-${cur}"]`);
+    if (btn && document.activeElement !== btn) btn.focus({ preventScroll: true });
+  }, [expanded, focusIn, cur, offer?.kind]);
+  /* ⛔ NOTHING UNDER THE MENU HEARS A PRESS ON IT (NEW-1). The canvas around it pans on a drag, zooms on the wheel, places a caret on
+   * a press, drags a box by its body and opens its own right-click menu — all from listeners on the canvas, which a press on this
+   * panel would reach. Stopped natively here (a React `stopPropagation` cannot stop a native listener on an ancestor); `click` is
+   * left alone because the buttons' own React onClick rides it, and `mousedown` is cancelled so the editor's selection survives. */
+  const menuUp = !!offer;
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const stop = (e) => { e.stopPropagation(); if (e.type === "mousedown" || e.type === "contextmenu") e.preventDefault(); };
+    const types = ["pointerdown", "pointerup", "mousedown", "mouseup", "dblclick", "touchstart", "touchend", "wheel", "contextmenu"];
+    for (const t of types) el.addEventListener(t, stop, { passive: false });
+    return () => { for (const t of types) el.removeEventListener(t, stop); };
+  }, [menuUp, expanded]);
   if (!offer) return null;
   const box = {
     position: "absolute", left: place ? place.left : Math.max(6, x), top: place ? place.top : y + 4, zIndex: 40,
@@ -1073,7 +1108,6 @@ function PasteOptions({ offer, expanded, onExpand, onPick }) {
           title="Paste Options (Ctrl)"
           aria-label="Paste Options (Ctrl)"
           aria-expanded={false}
-          onMouseDown={(e) => e.preventDefault()}
           onClick={onExpand}
           className="planyr-paste-tab"
         >
@@ -1087,6 +1121,23 @@ function PasteOptions({ offer, expanded, onExpand, onPick }) {
   const set = pasteSetFor(offer);
   return (
     <div ref={rootRef} data-testid="note-paste-options" data-paste-kind={offer.kind} role="group" aria-label="Paste Options"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        /* Arrows, Tab and Home / End move the highlight; Enter / Space press the focused button natively; the option's own
+         * letter and Escape are NoteEditor's (they must work from outside the menu's focus too). */
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const i = order.indexOf(cur);
+        const n = order.length;
+        let next = null;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) next = order[(i + 1) % n];
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) next = order[(i - 1 + n) % n];
+        else if (e.key === "Home") next = order[0];
+        else if (e.key === "End") next = order[n - 1];
+        if (!next) return;
+        e.preventDefault(); e.stopPropagation();
+        setActive(next);
+        rootRef.current?.querySelector(`[data-testid="note-paste-${next}"]`)?.focus({ preventScroll: true });
+      }}
       className="planyr-paste-ctx" style={{ ...box, padding: "6px 8px 8px" }}>
       <div className="planyr-paste-head">Paste Options:</div>
       {set.map((g) => (
@@ -1104,11 +1155,16 @@ function PasteOptions({ offer, expanded, onExpand, onPick }) {
                   aria-label={`${meta.label} (${meta.key})`}
                   aria-keyshortcuts={meta.key}
                   aria-pressed={offer.applied === mode}
-                  onMouseDown={(e) => e.preventDefault()}
+                  data-active={mode === cur ? "1" : undefined}
+                  tabIndex={mode === cur ? 0 : -1}
                   onClick={() => onPick(mode)}
-                  onMouseEnter={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onMouseEnter={(e) => {
+                    setActive(mode);
+                    if (rootRef.current?.contains(document.activeElement)) e.currentTarget.focus({ preventScroll: true });
+                    setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight });
+                  }}
                   onMouseLeave={() => setTip((t) => (t && t.mode === mode ? null : t))}
-                  onFocus={(e) => setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight })}
+                  onFocus={(e) => { setActive(mode); setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight }); }}
                   onBlur={() => setTip((t) => (t && t.mode === mode ? null : t))}
                   className="planyr-paste-btn"
                 >
@@ -2741,7 +2797,9 @@ const NoteEditor = forwardRef(function NoteEditor({
       const aid = editingRef.current;
       if (!aid) return;
       clearTimeout(t);
-      t = setTimeout(() => { if (!editor.isDestroyed && !editor.view.hasFocus()) settleBox(aid); }, 120);
+      /* Focus handed to the paste-options menu is not a person leaving the box: settling would resize it, which is an edit, which
+       * retires the very offer whose menu they are using. Escape / a pick gives the caret back. */
+      t = setTimeout(() => { if (!editor.isDestroyed && !editor.view.hasFocus() && !pasteMenuHasFocus()) settleBox(aid); }, 120);
     };
     editor.on("blur", onBlur);
     return () => { clearTimeout(t); editor.off("blur", onBlur); };
@@ -5313,7 +5371,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         tables: found.tables, cells: found.cells, preTable: found.preTable || null,
         meta: facts.meta || { tables: [] }, applied: "source", at: Date.now(),
       });
-      setPasteExpanded(false);
+      setPasteExpanded(false); setPasteFocusIn(false);
     };
     return () => { offerPasteOptionsRef.current = null; };
   }, [editor]);
@@ -5335,6 +5393,23 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* Word's tab goes away on its own rather than sitting there for the rest of the session — but never while the flyout
    * is open under somebody's pointer. */
   const [pasteExpanded, setPasteExpanded] = useState(false);
+  /* Does the open flyout hold keyboard focus? Yes for a pointer / keyboard person; no on a touch screen (see PasteOptions). */
+  const [pasteFocusIn, setPasteFocusIn] = useState(false);
+  const openPasteMenu = useCallback((focusIn = true) => {
+    const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches;
+    setPasteFocusIn(!!focusIn && !touch);
+    setPasteExpanded(true);
+  }, []);
+  /** Close the flyout. `giveBack`: focus was in the menu, so the caret gets it back (Escape, a second Ctrl tap) — never leave focus on
+   *  a button that is about to unmount, where it would fall to <body> and the next key would go nowhere. */
+  const closePasteMenu = useCallback((giveBack = true) => {
+    setPasteExpanded(false);
+    setPasteFocusIn(false);
+    if (giveBack && editor && !editor.isDestroyed && pasteMenuHasFocus()) {
+      try { editor.view.focus(); } catch (_) { /* the view can be gone */ }
+    }
+  }, [editor]);
+  const ctrlArmedRef = useRef(false);
   useEffect(() => {
     if (!pasteOffer || pasteExpanded) return undefined;
     const t = setTimeout(() => setPasteOffer(null), 12000);
@@ -5356,7 +5431,8 @@ const NoteEditor = forwardRef(function NoteEditor({
    * back to Keep Source Formatting) never compounds a loss. Picture is the one async option: it draws the table first. */
   const applyPasteMode = useCallback(async (mode) => {
     const offer = pasteRef.current;
-    setPasteExpanded(false);
+    /* The pick works on the EDITOR's selection, so a pick made from inside the menu gives the caret back first. */
+    closePasteMenu(true);
     if (!offer || !editor || editor.isDestroyed) return;
     if (mode === offer.applied) return;
     const sizeUp = (txt) => onPrintNotice?.(txt);
@@ -5451,31 +5527,64 @@ const NoteEditor = forwardRef(function NoteEditor({
     const { ok, end } = run((tr) => applyPasteModeToTr(tr, mode, offer));
     if (!ok) { sizeUp(`Planyr couldn't apply ${PASTE_MODE_META[mode].label} to that paste.`); return; }
     setPasteOffer((cur) => (cur === offer ? { ...offer, applied: mode, curTo: end, dom: null } : cur));
-  }, [editor, onPrintNotice]);
+  }, [editor, onPrintNotice, closePasteMenu]);
 
-  /* Ctrl on its own opens the flyout — Word's shortcut, and the reason the tab can be a tab rather than a row of buttons
-   * permanently in the way. While it is open each option's letter picks it (the same letter means Keep Text Only in the
-   * text set and Transpose in the table set — `modeForKey` reads the set on screen); Escape closes it, then the tab; a
-   * press outside it closes it. */
+  /* ⛔ A LONE CTRL TAP OPENS THE FLYOUT AND HANDS IT THE KEYBOARD — Word's shortcut (NEW-1, 2026-11-10; it used to open on the
+   * Ctrl KEYDOWN, so Ctrl+V / Ctrl+Z / Ctrl+C all popped it, and left focus in the editor so the arrows moved the page).
+   * Armed by a Control keydown, DISARMED by anything else that happens before the key comes up — another key, a press, a
+   * Ctrl+wheel zoom, the window losing focus — and opens on the Control KEYUP. A Control that was already down when the offer
+   * appeared (the one that pasted) never armed anything, so releasing it does nothing. While it is open each option's letter picks
+   * it (the same letter means Keep Text Only in the text set and Transpose in the table set — `modeForKey` reads the set on
+   * screen); the arrows / Tab / Home / End are the menu's own (PasteOptions); Escape closes it and gives the caret back, WITHOUT
+   * also backing the box out of editing; a press outside it closes it. */
   useEffect(() => {
-    if (!pasteOffer) { setPasteExpanded(false); return undefined; }
+    if (!pasteOffer) { setPasteExpanded(false); setPasteFocusIn(false); ctrlArmedRef.current = false; return undefined; }
     const set = pasteSetFor(pasteOffer);
+    const disarm = () => { ctrlArmedRef.current = false; };
     const onKey = (e) => {
-      if (e.key === "Control") { if (!e.repeat) setPasteExpanded(true); return; }
-      if (e.key === "Escape") { if (pasteExpanded) setPasteExpanded(false); else setPasteOffer(null); return; }
+      if (e.key === "Control") {
+        if (!e.repeat && !e.shiftKey && !e.altKey && !e.metaKey) ctrlArmedRef.current = true;
+        return;
+      }
+      disarm();                                           // any other key (Shift included) makes it a chord, not a tap
+      if (e.key === "Escape") {
+        if (pasteExpanded) { e.preventDefault(); e.stopPropagation(); closePasteMenu(true); }
+        else setPasteOffer(null);
+        return;
+      }
       if (!pasteExpanded || e.ctrlKey || e.metaKey || e.altKey) return;
       const hit = modeForKey(set, e.key);
       if (hit) { e.preventDefault(); e.stopPropagation(); applyPasteMode(hit); }
     };
+    const onKeyUp = (e) => {
+      if (e.key !== "Control") return;
+      const tap = ctrlArmedRef.current;
+      ctrlArmedRef.current = false;
+      if (!tap) return;
+      if (pasteExpanded) closePasteMenu(true); else openPasteMenu(true);
+    };
     const onDown = (e) => {
+      disarm();
       if (!pasteExpanded) return;
       if (e.target instanceof Element && e.target.closest("[data-testid='note-paste-options']")) return;
-      setPasteExpanded(false);
+      closePasteMenu(false);
     };
+    const onWheel = (e) => { if (e.ctrlKey) disarm(); };
     document.addEventListener("keydown", onKey, true);
+    document.addEventListener("keyup", onKeyUp, true);
     document.addEventListener("mousedown", onDown, true);
-    return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("mousedown", onDown, true); };
-  }, [pasteOffer, pasteExpanded, applyPasteMode]);
+    document.addEventListener("pointerdown", disarm, true);
+    document.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    window.addEventListener("blur", disarm);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keyup", onKeyUp, true);
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("pointerdown", disarm, true);
+      document.removeEventListener("wheel", onWheel, true);
+      window.removeEventListener("blur", disarm);
+    };
+  }, [pasteOffer, pasteExpanded, applyPasteMode, closePasteMenu, openPasteMenu]);
 
   /** Ctrl/Cmd+Shift+V, and the right-click menu's item, land here. LOUD-FAILURE: a browser
    *  that refuses clipboard access must SAY so and name the shortcut that always works,
@@ -5846,7 +5955,8 @@ const NoteEditor = forwardRef(function NoteEditor({
         <PasteOptions
           offer={pasteAt && pasteOffer ? { ...pasteOffer, ...pasteAt } : null}
           expanded={pasteExpanded}
-          onExpand={() => setPasteExpanded(true)}
+          focusIn={pasteFocusIn}
+          onExpand={() => openPasteMenu(true)}
           onPick={applyPasteMode}
         />
         {/* THE SLASH MENU (NEW-1). Drawn over the mat at the `/` itself; every decision
