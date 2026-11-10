@@ -33,7 +33,7 @@ import { autofilingProvider } from "../doc-review/lib/autofiling.js";
 import { cloudReady, listProjects as listCloudProjects } from "../doc-review/lib/reviewStore.js";
 import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
-import { migrateAllProjects } from "./lib/folders.js";
+import { runOrganizer } from "./lib/organizerRun.js";
 import { listPins, togglePin, subscribePins, migrateLocalPinsToCloud } from "../../shared/pins/pinStore.js";
 
 // One-time account migration marker (B663): "this account's existing projects were organized
@@ -54,6 +54,8 @@ const pinsMigrationStartedFor = new Set();
 export default function Library({
   shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject,
   onOpenReviewInDocReview,
+  // NEW-1 (2026-11-09) — opens the app's sign-in panel; the organizer banner offers it when the cause is the sign-in.
+  onOpenAuth,
   // The active project comes from the URL route (Work Item A) so it survives a module
   // switch; `projectId` is the route's Site-group id (null = pick-a-project), `crossProject`
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
@@ -188,7 +190,7 @@ export default function Library({
   // standard tree + move its already-uploaded files into the right Drive folders. Runs once
   // per account (marker), automatically, the first time the Library opens signed-in; honest
   // progress + a Retry on failure (LOUD-FAILURE — never a silent half-migration).
-  const [migrate, setMigrate] = useState({ status: "idle", text: "" });
+  const [migrate, setMigrate] = useState({ status: "idle", text: "", signIn: false });
   const runMigration = useCallback(async () => {
     // Pin the identity for the whole run (B663 review #9): the walk stops — and the done-
     // marker is never written — if a different account signs in mid-run.
@@ -206,8 +208,9 @@ export default function Library({
     // do NOT write the permanent marker, do NOT claim success (B663 review #2). The next
     // Library open re-checks cheaply.
     if (!projects.length) { setMigrate({ status: "idle", text: "" }); return; }
-    const r = await migrateAllProjects(projects, {
-      checkIdentity: sameUser,
+    const out = await runOrganizer({
+      projects, uid, checkIdentity: sameUser,
+      markDone: (id) => { try { localStorage.setItem(MIGRATE_KEY(id), new Date().toISOString()); } catch (_) { /* full/blocked storage just means a harmless re-run later */ } },
       onProgress: ({ index, total, project, phase, mirrorDone, mirrorTotal, moved }) => {
         const step = `${index + 1} of ${total}`;
         const detail = phase === "mirror" && mirrorTotal ? ` — mirroring folders ${mirrorDone} of ${mirrorTotal}`
@@ -215,15 +218,19 @@ export default function Library({
         setMigrate({ status: "running", text: `Organizing ${project} (${step})${detail}` });
       },
     });
-    if (r.ok && (await sameUser())) {
-      try { localStorage.setItem(MIGRATE_KEY(uid), new Date().toISOString()); } catch (_) { /* full/blocked storage just means a harmless re-run later */ }
-      setMigrate({ status: "done", text: `All ${r.projects} project${r.projects === 1 ? "" : "s"} organized${r.movedFiles ? ` · ${r.movedFiles} file${r.movedFiles === 1 ? "" : "s"} moved into folders` : ""}.` });
-    } else if (r.ok) {
-      setMigrate({ status: "idle", text: "" }); // account changed right at the end — no marker, no claim
-    } else {
-      setMigrate({ status: "error", text: r.errors[0] || "The one-time folder organization hit a problem." });
+    if (out.status === "error") {
+      // NEW-1 — plain words only (the technical lines go to telemetry, never the banner). The server has already
+      // been asked twice by the time we get here (shared/auth/apiAuth.js refreshes the sign-in and retries once).
+      const r = out.result;
+      try { import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("library-organizer-failed", "one-time folder organizer did not finish", { authExpired: !!r.authExpired, errors: (r.errors || []).slice(0, 3) })).catch(() => {}); } catch (_) { /* telemetry never blocks the banner */ }
+      // A sign-in problem must not leave this account marked "started": signing in again re-runs the organizer by itself.
+      if (r.authExpired) migrationStartedFor.delete(uid);
     }
+    setMigrate({ status: out.status, text: out.text, signIn: out.signIn });
   }, []);
+  // Signing in (again) is the cure for an expired sign-in: re-check, and the effect below re-runs the organizer.
+  const [authTick, setAuthTick] = useState(0);
+  useEffect(() => onAuthChange((event) => { if (event === "SIGNED_IN") setAuthTick((n) => n + 1); }), []);
   useEffect(() => {
     if (!signedIn) return;
     let live = true;
@@ -240,7 +247,7 @@ export default function Library({
       runMigration();
     })();
     return () => { live = false; };
-  }, [signedIn, runMigration]);
+  }, [signedIn, runMigration, authTick]);
 
   // The breadcrumb project name resolves from the local site list (instant; the per-user
   // cloud cache feeds it), falling back to the id. { id, name } | null.
@@ -313,7 +320,10 @@ export default function Library({
           background: "var(--surface-raised)",
         }}>
           <span>{migrate.status === "running" ? "↻" : migrate.status === "done" ? "✓" : "⚠"}</span>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{migrate.text}</span>
+          <span style={{ flex: 1, minWidth: 0 }}>{migrate.text}</span>
+          {migrate.status === "error" && migrate.signIn && onOpenAuth && (
+            <button onClick={onOpenAuth} data-testid="library-organizer-signin" style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>Sign in</button>
+          )}
           {migrate.status === "error" && (
             <button onClick={runMigration} style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>Retry</button>
           )}

@@ -83,11 +83,12 @@ let seq = 0;
 const pageErrors = [];
 const watch = (pg) => pg.on("pageerror", (e) => pageErrors.push(e.message));
 if (SIGNED_IN) {
-  signed = await openSignedIn({ base: BASE });
+  /* the E2E flag has to be set by an init script the sign-in helper installs BEFORE its first load: a page.addInitScript added afterwards never runs for the
+   * hash-only goto below (same document, no reload), so the Univer read hook stayed unarmed and waitForGrid timed out (found 2026-11-10, V1898576). */
+  signed = await openSignedIn({ base: BASE, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
   page = signed.page;
   projectId = FIXTURE_SITE_ID;
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
-  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
   watch(page);
 } else {
   browser = await chromium.launch({ executablePath: existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
@@ -97,7 +98,7 @@ if (SIGNED_IN) {
 const fresh = async () => {
   if (SIGNED_IN) {
     if (!seq++) { await page.goto(`${BASE}/#/project/${projectId}/spreadsheet`, { waitUntil: "load" }); await waitForGrid(page); await assertMeasurable(page, "verify-spreadsheet-keyboard"); }
-    await inSheet(page, (api, ws) => { ws.getRange(0, 0, 200, 40).clear(); });
+    await inSheet(page, (api, ws) => { ws.getRange(0, 0, Math.min(200, ws.getMaxRows()), ws.getMaxColumns()).clear(); });
     await page.waitForTimeout(300);
     return;
   }

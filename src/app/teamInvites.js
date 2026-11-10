@@ -108,10 +108,10 @@ export async function resendInvitation(uid, address) {
   if (!supabase || !uid) return { ok: false, text: "Sign in to resend it." };
   let status = 0, body = null;
   try {
-    const { data } = await supabase.auth.getSession();
-    const token = data && data.session && data.session.access_token;
-    if (!token) return { ok: false, text: "Sign in again to resend it." };
-    const resp = await fetch("/api/team/invite-resend", { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    const { authedFetch } = await import("../shared/auth/apiAuth.js"); // lazy: this module is in the entry chunk every route downloads
+    const r = await authedFetch("/api/team/invite-resend", { method: "POST" }, { client: supabase });
+    if (!r.resp) return { ok: false, text: "Sign in again to resend it." };
+    const resp = r.resp;
     status = resp.status;
     body = await resp.json().catch(() => null);
   } catch (e) { return { ok: false, text: (e && e.message) || "Couldn't reach Planyr \u2014 try again." }; }

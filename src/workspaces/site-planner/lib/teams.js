@@ -148,14 +148,15 @@ export async function listInvites(teamId) {
 export async function sendInviteEmail(teamId, email) {
   if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
   try {
-    const { data } = await supabase.auth.getSession();
-    const token = data && data.session && data.session.access_token;
-    if (!token) return { ok: false, error: "Not signed in." };
-    const resp = await fetch("/api/team/invite-email", {
+    // Lazy on purpose: this module rides the Site route, and a static import would add the helper as its own chunk to a plain Site load.
+    const { authedFetch } = await import("../../../shared/auth/apiAuth.js");
+    const r = await authedFetch("/api/team/invite-email", {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ teamId, email: lower(email) }),
-    });
+    }, { client: supabase });
+    if (!r.resp) return { ok: false, error: "Not signed in." };
+    const resp = r.resp;
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
     if (resp.ok && jr.ok) return { ok: true };
     if (resp.status === 429) return { ok: false, throttled: true, retryAfterSeconds: jr.retryAfterSeconds || 60, error: "Just sent — try again in a minute." };
