@@ -10,14 +10,21 @@
  *                   one refresh, and the banner must stay the running status.
  *   C  DEAD SIGN-IN  every /api/folders call is 401 and the refresh is refused: nothing may print a status code or a
  *                   project name; the person is told their sign-in expired; ONE call only (no loop).
+ *   D  TWO 401s ON THE DRIVE FOOTER  (NEW-1 follow-up, 2026-11-10) on a THROWAWAY project of the test account (never the
+ *                   owner's): the folder tree's footer first reads "Synced to Google Drive" (known-good arm), then every
+ *                   /api/folders call is answered 401 (the refresh stays REAL, 200) and "Sync now" is pressed. The footer
+ *                   must say "Your sign-in expired — sign in again to sync." and offer Sign in — no "(403)", no "HTTP",
+ *                   no "Invalid or expired session". Exactly one real refresh, two /api/folders calls (no loop).
  * Only the FIRST /api/folders exchange is observed (the test account holds ~100 leftover projects, so the full walk takes minutes);
  * the done-marker itself is pinned by test/apiAuthRefresh.test.js. The page is closed as soon as the exchange is seen.
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-api-auth-refresh-live.mjs [base] [--sha=<merge commit>]  */
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
 
 const BASE = process.argv.slice(2).find((a) => a.startsWith("http")) || "https://planyr.io";
 const SHA = (process.argv.find((a) => a.startsWith("--sha=")) || "").slice(6);
+const PROJECT_D = `${LIVE_PREFIX}ncd-${Date.now().toString(36)}`; // case D's THROWAWAY project — never the fixture, never a real one
 let failures = 0;
 const brief = (rows) => JSON.stringify(rows.slice(0, 4)) + (rows.length > 4 ? ` …(+${rows.length - 4} more)` : "");
 const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
@@ -104,6 +111,34 @@ try {
   ok("B the banner is the running status, not an error", !/expired|couldn.t finish|403|HTTP/i.test(b.text) && /Organizing/i.test(b.text), b.text);
   await page.unroute("**/api/folders").catch(() => {});
 
+  // ── D: two 401s on the folder tree's Drive footer, on a throwaway project (BEFORE C — C ends signed out on purpose) ──
+  await page.unroute("**/api/folders").catch(() => {});
+  await plant({}); // the good session B left, with the done-marker cleared…
+  await page.evaluate((mk) => localStorage.setItem(mk, String(Date.now())), markerKey); // …then SET, so the organizer walk stays out of D's way
+  await seedThrowawayPlan(page, PROJECT_D);
+  await page.goto(`${BASE}/?cb=${Date.now()}#/project/${PROJECT_D}/library`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="folder-tree"]', { timeout: 60000 });
+  await page.waitForTimeout(2500);
+  if (!(await page.locator('[data-testid="folder-row"]').count())) {
+    await page.getByRole("button", { name: /Create the standard/i }).first().click();
+    await page.waitForSelector('[data-testid="folder-row"]', { timeout: 60000 });
+  }
+  const footer = () => page.evaluate(() => { const t = document.querySelector('[data-testid="folder-tree"]'); const f = [...(t ? t.querySelectorAll("div") : [])].filter((d) => /Synced to Google Drive|Mirroring|sign-in|Invalid|Retry|Sync now/.test(d.innerText || "") && d.children.length <= 4 && (d.innerText || "").length < 160).pop(); return f ? f.innerText.replace(/\s+/g, " ").trim() : ""; });
+  const footerWhen = async (re, ms) => { const end = Date.now() + ms; let t = ""; while (Date.now() < end) { t = await footer(); if (re.test(t)) return t; await page.waitForTimeout(700); } return t; };
+  const dKnown = await footerWhen(/Synced to Google Drive/, 90000);
+  ok("D KNOWN-GOOD ARM: with a working sign-in the footer reads 'Synced to Google Drive'", /Synced to Google Drive/.test(dKnown), dKnown);
+  if (!/Synced to Google Drive/.test(dKnown)) throw new Error("void run — the footer never reached 'Synced', so D cannot see the thing it tests");
+  net.length = 0;
+  await page.route("**/api/folders", (route) => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ ok: false, error: "Invalid or expired session (403)." }) }));
+  await page.getByRole("button", { name: /^Sync now$/ }).first().click();
+  const dText = await footerWhen(/sign-in|Invalid|\(\d{3}\)/i, 60000);
+  const dFolders = net.filter((n) => n.kind === "folders"), dRefresh = net.filter((n) => n.kind === "refresh");
+  ok("D PRECONDITION: the footer's /api/folders call was refused 401 twice with ONE real refresh between", dFolders.length === 2 && dFolders.every((n) => n.status === 401) && dRefresh.length === 1 && dRefresh[0].status < 300, brief(net));
+  ok("D the footer says the sign-in expired, in plain words", /Your sign-in expired \u2014 sign in again to sync\./.test(dText), dText);
+  ok("D no '(403)', 'HTTP', status code or 'Invalid or expired session' in the footer", !/\(\d{3}\)|HTTP|\b40[0-3]\b|Invalid or expired session/i.test(dText), dText);
+  ok("D the footer offers Sign in", (await page.locator('[data-testid="library-drive-signin"]').count()) === 1);
+  await page.unroute("**/api/folders").catch(() => {});
+
   // ── C: a genuinely dead sign-in — the server refuses every /api/folders call AND the sign-in refresh is refused ──
   await page.route("**/api/folders", (route) => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ ok: false, error: "Invalid or expired session (403)." }) }));
   await page.route(/\/auth\/v1\/token\?grant_type=refresh_token/, (route) => route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: 400, error_code: "refresh_token_not_found", msg: "Invalid Refresh Token: Refresh Token Not Found" }) }));
@@ -116,10 +151,17 @@ try {
   ok("C nothing prints a status code, 'HTTP' or 'Invalid or expired session'", !/\(\d{3}\)|HTTP \d{3}|Invalid or expired session/i.test(c.body));
   ok("C only ONE /api/folders call was made before giving up (no retry loop)", net.filter((n) => n.kind === "folders").length === 1, brief(net.filter((n) => n.kind === "folders")));
   ok("C no done-marker was written over the failure", !(await marker()));
+
 } catch (e) {
   console.error("ERROR", e.message);
   failures++;
 } finally {
+  try {
+    await page.unroute("**/api/folders").catch(() => {});
+    const pf = await page.evaluate(async (pid) => { await window.pfSupabase.from("project_folders").delete().eq("project_id", pid); return ((await window.pfSupabase.from("project_folders").select("id").eq("project_id", pid)).data || []).length; }, PROJECT_D).catch(() => "unknown");
+    const cl = await cleanupLive(page, { planId: PROJECT_D }).catch((e) => ({ errors: [String(e)], left: {} }));
+    ok("D cleanup: throwaway project + its folders removed (verified)", pf === 0 && cl.left.site === 0, `folders left: ${pf}, project left: ${cl.left.site}, errors: ${(cl.errors || []).join("; ") || "none"}`);
+  } catch (e) { console.error("cleanup ERROR", e.message); failures++; }
   await s.close();
 }
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");

@@ -373,6 +373,7 @@ export default function Library({
               embedded
               projectId={projectId}
               signedIn={signedIn}
+              onOpenAuth={onOpenAuth}
               projectName={projectName}
               selectedId={selectedFolderId}
               onSelect={onSelectFolder}

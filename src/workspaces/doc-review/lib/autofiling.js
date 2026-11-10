@@ -18,7 +18,7 @@
 import { createIndexProvider } from "../../../shared/files/fileFacts.js";
 import { emptyPlacementFacts, mergePlacementFacts } from "../../../shared/placement/placementFacts.js";
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { getApiToken } from "../../../shared/auth/apiAuth.js";
+import { getApiToken, signInMessage, isSignInAnswer } from "../../../shared/auth/apiAuth.js";
 import { localTitleBlockRead } from "./localRead.js";
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? "").trim());
@@ -48,6 +48,8 @@ export function encodeProjects(projects = []) {
 export function interpretResponse(status, body) {
   if (status === 404 || status === 503) return { ok: false, skipped: true, error: (body && body.error) || "Auto-filing isn't enabled yet." };
   if (status >= 200 && status < 300 && body && body.ok) return { ok: true, decision: body.decision, placement: body.placement, facts: body.facts };
+  // NEW-1 (2026-11-10): a refused token is the person's sign-in, in plain words — never the server's "Invalid or expired session (403)."
+  if (isSignInAnswer(status, body && body.error)) return { ok: false, skipped: false, signIn: true, error: signInMessage("auto-file") };
   return { ok: false, skipped: false, error: (body && body.error) || `Auto-filing failed (HTTP ${status}).` };
 }
 

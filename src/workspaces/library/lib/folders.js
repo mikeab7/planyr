@@ -15,7 +15,7 @@ import { supabase } from "../../site-planner/lib/supabase.js";
 import { FOLDER_TEMPLATE, TEMPLATE_VERSION } from "../../../shared/folders/folderTemplate.js";
 import { buildSeedRows, subtreeIds, childrenOf } from "../../../shared/folders/folderTree.js";
 import { ensureProjectExists } from "../../../shared/projects/projects.js";
-import { authedFetch, FAIL_UNREACHABLE } from "../../../shared/auth/apiAuth.js";
+import { authedFetch, FAIL_UNREACHABLE, signInMessage, apiErrorText, isSignInAnswer } from "../../../shared/auth/apiAuth.js";
 
 const COLS = "id,parent_id,name,sort_order,trashed,drive_folder_id";
 
@@ -38,7 +38,6 @@ function makeId() {
 // (shared/auth/apiAuth.js): a token that is not expired, and on a 401 one refresh + one retry. The old
 // bare getSession → Bearer sent a stale token as-is, so a tab left open over a weekend made the
 // one-time organizer print "Invalid or expired session (403)".
-const SIGNED_OUT = "Not signed in.";
 
 async function postFolders(payload) {
   const r = await authedFetch("/api/folders", {
@@ -47,6 +46,9 @@ async function postFolders(payload) {
     body: JSON.stringify(payload),
   });
   if (!r.resp) return { failure: r.failure || "signed-out" };
+  // A 401 that survived the renewal is the same dead sign-in as a refused renewal (NEW-1, 2026-11-10): report it as one,
+  // so no caller ever has to read the server's "Invalid or expired session (403)." string.
+  if (r.signIn) return { failure: "signed-out" };
   return { resp: r.resp };
 }
 
@@ -54,12 +56,13 @@ async function postFolders(payload) {
 // already reads as signed out; `authExpired` is the new, explicit flag (the sign-in is the cause).
 function noSignIn(failure, extra = {}) {
   if (failure === FAIL_UNREACHABLE) return { ok: false, error: "Couldn't reach Planyr — check your connection.", ...extra };
-  return { ok: false, skipped: true, authExpired: true, error: SIGNED_OUT, ...extra };
+  return { ok: false, skipped: true, authExpired: true, error: signInMessage(), ...extra };
 }
 
 // A non-ok API answer. A 401 that survived the refresh-and-retry is a real "sign in again".
 function apiFailure(resp, jr, extra = {}) {
-  return { ok: false, error: (jr && jr.error) || `HTTP ${resp.status}`, ...(resp.status === 401 ? { authExpired: true } : {}), ...extra };
+  const signIn = isSignInAnswer(resp.status, jr && jr.error);
+  return { ok: false, error: apiErrorText(resp.status, jr && jr.error), ...(signIn ? { authExpired: true } : {}), ...extra };
 }
 
 // All of a project's folder rows (trashed included, so subtree math is correct), client-shaped.
@@ -398,13 +401,13 @@ export async function purgeProjectFolders(projectId) {
   try {
     const call = await postFolders({ action: "purge-project", projectId });
     if (call.failure) {
-      drive = { ok: false, error: call.failure === FAIL_UNREACHABLE ? "Couldn't reach Planyr — check your connection." : SIGNED_OUT };
+      drive = { ok: false, error: call.failure === FAIL_UNREACHABLE ? "Couldn't reach Planyr — check your connection." : signInMessage("finish deleting this project") };
     } else {
       const resp = call.resp;
       if (resp.status === 404 || resp.status === 503) drive = { ok: true, trashed: false, skipped: true }; // Drive not enabled — nothing there to trash
       else {
         let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-        drive = resp.ok && jr.ok ? jr : { ok: false, live: !!jr.live, error: jr.error || `HTTP ${resp.status}` };
+        drive = resp.ok && jr.ok ? jr : { ok: false, live: !!jr.live, error: apiErrorText(resp.status, jr.error, { action: "finish deleting this project", fallback: `Drive cleanup failed (HTTP ${resp.status}).` }) };
       }
     }
   } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }

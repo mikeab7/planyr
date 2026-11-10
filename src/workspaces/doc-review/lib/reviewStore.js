@@ -26,7 +26,7 @@ import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
 import { categoryFor, FILE_STATES } from "../../../shared/files/fileFacts.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
-import { getApiToken, authedFetch, authedFetchResponse } from "../../../shared/auth/apiAuth.js";
+import { getApiToken, authedFetch, authedFetchResponse, signInMessage, apiErrorText } from "../../../shared/auth/apiAuth.js";
 import { notifyLibraryChanged } from "../../../shared/library/libraryChanged.js";
 
 export const BUCKET = "doc-review-files";
@@ -872,12 +872,14 @@ export async function downloadFromDrive(driveKey) {
 export async function getShareLink(driveKey) {
   if (!supabase || !driveKey) return { ok: false, error: "No file to share." };
   try {
-    const { resp } = await authedFetch(`/api/files/share?key=${encodeURIComponent(driveKey)}`, { method: "POST" }, { client: supabase });
-    if (!resp) return { ok: false, error: "Sign in to share." };
+    const r = await authedFetch(`/api/files/share?key=${encodeURIComponent(driveKey)}`, { method: "POST" }, { client: supabase });
+    const resp = r.resp;
+    if (!resp) return r.failure === "unreachable" ? { ok: false, error: "Couldn’t reach Planyr — check your connection." } : { ok: false, signIn: true, error: signInMessage("share this file") };
+    if (r.signIn) return { ok: false, signIn: true, error: signInMessage("share this file") }; // a 401 that survived the renewal
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
     if (resp.status === 503) return { ok: false, error: "Drive isn’t enabled yet." };
     if (resp.status === 404) return { ok: false, error: jr.error || "This file isn’t stored in Drive, so there’s no shareable link." };
-    return resp.ok && jr.ok && jr.url ? { ok: true, url: jr.url } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+    return resp.ok && jr.ok && jr.url ? { ok: true, url: jr.url } : { ok: false, error: apiErrorText(resp.status, jr.error, { action: "share this file" }) };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
