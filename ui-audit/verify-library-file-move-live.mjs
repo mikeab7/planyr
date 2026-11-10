@@ -127,7 +127,11 @@ try {
   const inp = page.locator('[data-testid="library-rename-input"]');
   await inp.waitFor({ timeout: 8000 });
   await inp.fill(NEWNAME);
+  /* NEW-1 (B2671215) — the row must read the new title at the FIRST frame after Enter, not after the load + save round trips. */
+  await page.evaluate(() => { window.__renameFrame = null; window.addEventListener("keydown", (e) => { if (e.key === "Enter" && !window.__renameFrame) requestAnimationFrame(() => { window.__renameFrame = document.body.innerText.includes("renamed") ? "new" : "old"; }); }, true); });
   await inp.press("Enter");
+  await page.waitForFunction(() => window.__renameFrame, null, { timeout: 5000 });
+  ok("Rename: the row shows the NEW title on the first frame after Enter (before the save finishes)", (await page.evaluate(() => window.__renameFrame)) === "new");
   await settle(page, 3500);
   rec = await dbRec(reviewId);
   ok("Rename: Enter saved the stored title (typed titles are flagged so a project rename can't overwrite them)", rec.title === NEWNAME && rec.data.titleAuto === false, rec.title);

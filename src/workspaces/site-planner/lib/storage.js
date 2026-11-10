@@ -2224,7 +2224,7 @@ export function notifySitesListChanged() {
 // can never lose the edit, but snapshotting on every drag frame would spam the ring — the debounced
 // settle-tick save (no flag) is the single, natural history-snapshot point. (doc-review already
 // splits immediate-mirror from debounced-cloud this way; this brings the Site Planner to parity.)
-export function saveSite(partial, { skipHistory = false } = {}) {
+export function saveSite(partial, { skipHistory = false, planRename = false } = {}) {
   if (!partial || !partial.id) return false;
   const sites = readSharedStore();     // NEW-1 (B217540 ×3): shared objects, READ-ONLY — only `existing` is ever changed, and it is a private copy
   const existing = sites[partial.id] ? plainCopy(sites[partial.id]) : sites[partial.id];
@@ -2248,6 +2248,18 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   }
   if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
   let model = { ...createSiteModel(merged), updatedAt: nextUpdatedAt() };
+  /* ⛔ NEW-1 (B2671215) — A CONTENT SAVE MAY NEVER MOVE A PLAN'S NAME. Only a deliberate rename (`planRename: true`, the plan menu's one rename
+   * through `renamePlan`) may change the `name` of a record that already exists. The planner's autosave sends `...metaRef.current`, and
+   * `metaRef.current.name` is a COPY of the plan's name taken at render time — so an autosave whose payload was built before a rename (the
+   * 50 ms mirror write, the 400 ms settle tick, a flush on leaving) wrote the OLD name straight back over the new one, in storage and then,
+   * through the push, in the cloud. Measured on a seeded plan: "Scheme Z" saved, then "Concept A" again 50-200 ms later in 3 of 8 runs
+   * (2 of 8 even before the instant-display fix above) — a rename silently undone. The same shape as the project-name split below, one
+   * level down: a copy of a name written back over the source of truth. For a record the store already holds, the store's name stands;
+   * a brand-new record (no `existing`) still takes the name it is born with. */
+  if (existing && !planRename && typeof existing.name === "string" && existing.name.trim() && model.name !== existing.name) {
+    reportClientEvent("plan-name-write-corrected", "a save tried to move a plan's name without being a rename — corrected before it could reach the cloud", { id: model.id, attempted: model.name, kept: existing.name });
+    model = { ...model, name: existing.name };
+  }
   /* ⛔ NEW-1 — THE WRITE CHOKE POINT. A plan may never be written carrying a name that contradicts
    * its own project. Every local write lands here, so enforcing the group's authority at this one
    * spot is what makes "a stale plan hydrating later READS the project name, never re-publishes its
@@ -2355,7 +2367,14 @@ export function saveSite(partial, { skipHistory = false } = {}) {
     // shared "planarfit:sites" channel too, so a still-mounted map/Sites panel, project switcher
     // or Notes/Model project list refreshes without a reload. A plain content edit (geometry,
     // dates, …) leaves neither of those fields different from `existing` and stays quiet.
-    if (!existing || existing.site !== model.site || existing.status !== model.status ||
+    //
+    // ⛔ NEW-1 (B2671215, owner 2026-11-10: "I renamed it and it took a second for it to go into effect") — A PLAN'S OWN
+    // `name` IS IDENTITY TOO. This condition named the project's `site` and not the plan's `name`, so a plan rename wrote
+    // the device copy and announced NOTHING: the names store (`usePlanName` → the crumb and the plan menu's current row)
+    // keeps a 2 s id→name index that only this signal clears, so the old name stayed on screen until the cache expired AND
+    // something else happened to re-render the planner. Measured on the owner's Quiddity plan: the new name was in storage
+    // at once and still absent from the DOM 9 s later. Do not narrow this back to `site`.
+    if (!existing || existing.site !== model.site || existing.name !== model.name || existing.status !== model.status ||
         existing.role !== model.role || groupKeyOf(existing) !== groupKeyOf(model))
       notifySitesListChanged();
   }

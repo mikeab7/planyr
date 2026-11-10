@@ -121,7 +121,7 @@ describe("planStore / saveSite report a refused device write", () => {
     planStore.configure({ makeRoom: hook });
     try {
       const longName = "Renamed while full " + "R".repeat(400);
-      expect(saveSite({ id: "src1", name: longName })).toBe(false);
+      expect(saveSite({ id: "src1", name: longName }, { planRename: true })).toBe(false);
       await new Promise((r) => setTimeout(r, 10));
       expect(hook).toHaveBeenCalledTimes(1);
       expect(events("plan-store-write-retried")).toHaveLength(1);
