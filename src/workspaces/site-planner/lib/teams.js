@@ -10,7 +10,6 @@
  * invite from the account menu (Accept / Decline — src/app/teamInvites.js); nothing joins them silently.
  */
 import { supabase } from "./supabase.js";
-import { authedFetch } from "../../../shared/auth/apiAuth.js";
 
 const lower = (s) => (s == null ? "" : String(s)).trim().toLowerCase();
 const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lower(s));
@@ -149,6 +148,8 @@ export async function listInvites(teamId) {
 export async function sendInviteEmail(teamId, email) {
   if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
   try {
+    // Lazy on purpose: this module rides the Site route, and a static import would add the helper as its own chunk to a plain Site load.
+    const { authedFetch } = await import("../../../shared/auth/apiAuth.js");
     const r = await authedFetch("/api/team/invite-email", {
       method: "POST",
       headers: { "content-type": "application/json" },
