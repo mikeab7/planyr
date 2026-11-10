@@ -68,6 +68,24 @@
  *  direction is closest to its own (outward normals, length-weighted); only when the two neighbours face it
  *  within FACING_TIE_DEG of equally (a convex corner piece facing both) does length break the tie. The
  *  detection of the pieces is unchanged — only who they are handed to.
+ *
+ * ── NEW-1 (owner 2026-11-09, the same lot's other half, "Parcel 1 · B": "that northwest corner shouldn't be part of the
+ *    rest of the western boundary") — the "about six" count does not make a side turn a corner ──────────────────────
+ *  MEASURED on the real outline (test/fixtures/academyNwStubParcel.json): the corner detector DOES keep both ends of
+ *  that piece (vertices 24 and 26 survive the chamfer rule — 569 ft apart, farther than the smoothing window), so it
+ *  is a 570 ft candidate section: the 270 ft diagonal across the corner plus the 300 ft run before the curve, facing
+ *  NNW. Only the escalating floor that pulls a parcel down to TARGET_SECTIONS folded it into the WEST, and the facing
+ *  rule picked west purely because it was the LESS wrong side (63° off west, 87° off the curve): "nearer" is not
+ *  "facing". The cure is NOT a facing limit — Silvestri's SCHIEL has 339/446 ft pieces with the same facing gaps that
+ *  must still fold. The difference is the SHAPE: schiel's pieces zig-zag (turns −57°, +90°, −90°: a jog, absorbing it
+ *  keeps the side straight), the Academy piece turns one way the whole time (+46°, +35°, +50° = 131°: it ROUNDS a
+ *  corner, so absorbing it makes the neighbour bend round that corner). Now a count-driven (escalated) pass refuses a
+ *  piece that (a) turns one way throughout for CORNER_PIECE_MIN_TURN_DEG or more AND (b) faces neither neighbour — more
+ *  than CORNER_PIECE_MIN_GAP_DEG off the better of the two (a cap on a hairpin corner, the two sides it joins facing
+ *  100°+ apart): it stands as its own small section (such a parcel may show 7 — TARGET_SECTIONS is a target, not a
+ *  wall). (b) is what leaves a genuine CHAMFER alone: a 45° cut corner sits equally between its sides, so it still
+ *  merges into one exactly as before (a rectangle with four clipped corners stays 4 sections). The first, size-driven
+ *  sliver pass and every jog, notch and gentle bend merge exactly as before.
  */
 
 import { STREET_ABUT_FT } from "./setbackRoles.js";
@@ -85,6 +103,9 @@ export const NEIGHBOUR_COINCIDENT_FT = 3;
 export const TARGET_SECTIONS = 6;
 export const ESCALATE_FLOOR_FRACS = [0.045, 0.06, 0.075];
 export const FACING_TIE_DEG = 12;
+export const CORNER_PIECE_MIN_TURN_DEG = 80;
+export const CORNER_PIECE_MIN_GAP_DEG = 50;
+export const CORNER_PIECE_WOBBLE_DEG = 2;
 export const SMOOTH_MIN_FT = 40;
 export const SMOOTH_MAX_FT = 300;
 export const SMOOTH_PERIM_FRAC = 0.04;
@@ -427,7 +448,20 @@ function buildSections(points, opts) {
   // a handful of sections: while more than TARGET_SECTIONS remain, the "tiny" floor is raised a notch
   // (never past MAX_FLOOR_FRAC of the perimeter, so a 12-sided outline of equal sides stays 12).
   const perimFt = sum(g.len, (l) => l);
-  const mergeTiny = (floorFt) => {
+  // total turn of a piece's path, from the heading before it to the heading after it, when every turn goes one way
+  // (wobbles under CORNER_PIECE_WOBBLE_DEG ignored); 0 for a zig-zag (a jog), which is never a corner.
+  const cornerTurnOf = (startV, endV) => {
+    let sumT = 0, pos = false, neg = false;
+    for (let v = startV, guard = 0; guard <= n; guard++, v = (v + 1) % n) {
+      const t = g.turns[v];
+      if (t > CORNER_PIECE_WOBBLE_DEG) pos = true;
+      else if (t < -CORNER_PIECE_WOBBLE_DEG) neg = true;
+      sumT += t;
+      if (v === endV) break;
+    }
+    return pos && neg ? 0 : Math.abs(sumT);
+  };
+  const mergeTiny = (floorFt, escalated = false) => {
     for (;;) {
       if (brk.length < 2) return;
       const secs = brk.map((_, k) => ({ k, ...stats(edgesOf(k, brk)) }));
@@ -453,6 +487,9 @@ function buildSections(points, opts) {
           if (Math.abs(ga - gb) > FACING_TIE_DEG) return ga - gb;
           return b.nb.len - a.nb.len;
         });
+        // the count-driven passes never fold a corner-rounding piece into a side it does not face (NEW-1 note up top)
+        if (escalated && facingGap(t.out, cands[0].nb.out) > CORNER_PIECE_MIN_GAP_DEG
+            && cornerTurnOf(brk[t.k], brk[(t.k + 1) % m]) >= CORNER_PIECE_MIN_TURN_DEG) continue;
         brk = brk.filter((v) => v !== cands[0].drop);
         merged = true;
         break;
@@ -463,7 +500,7 @@ function buildSections(points, opts) {
   mergeTiny(Math.max(MIN_SECTION_FT, MIN_SECTION_PERIM_FRAC * perimFt));
   for (const frac of ESCALATE_FLOOR_FRACS) {
     if (brk.length <= TARGET_SECTIONS) break;
-    mergeTiny(frac * perimFt);
+    mergeTiny(frac * perimFt, true);
   }
 
   // neighbours that border the SAME road / water / neighbour with the same stated setback are ONE section
