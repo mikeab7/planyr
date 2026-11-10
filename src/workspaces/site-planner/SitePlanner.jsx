@@ -133,7 +133,7 @@ const GradingController = lazy(() => import("./components/GradingController.jsx"
 const GradingPanel = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
-import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX, LEFT_RAIL_W, LEFT_RAIL_W_TOUCH } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -19840,6 +19840,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ATTRIBUTES & SETTINGS (what a parcel HAS — its acreage, county record, taxes, setbacks,
   // active/locked state). The panel id stays `parcel` — it keys persisted panel state and the
   // `setLeftPanel("parcel")` call sites, and renaming it would orphan them for no user gain.
+  // NEW-1 — the rail is 54 of label room + a reserved thin-scrollbar gutter (`.left-rail`, index.css). A classic scrollbar (Windows
+  // Chrome) takes real width, so 54 alone left ~43 and the labels spilled under it and sideways; a phone's overlay scrollbar takes none,
+  // so a touch device keeps 54. Every place that sits beside the rail reads THIS number, never a literal.
+  const leftRailW = narrow && coarsePointer ? LEFT_RAIL_W_TOUCH : LEFT_RAIL_W;
   const leftTabs = withGradingTab([
     { id: "parcel", label: PARCEL_SURFACES.panel.name },
     { id: "analysis", label: "Analysis" },
@@ -20030,7 +20034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
-    padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
+    padding: "10px 0", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`, whiteSpace: "nowrap", minWidth: 0,
     background: on ? PAL.accentSoft : "transparent", color: on ? PAL.chromeInk : PAL.chromeMuted,
     cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.01em",
   });
@@ -27255,8 +27259,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               than the canvas row has to give it, and a rail with no scroll affordance clips its
               last entries with no way to reach them. Harmless on a normal desktop window, where
               the rail already fits and no scrollbar appears. */}
-          <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
-            overflowY: "auto", minHeight: 0,
+          <div className="left-rail" data-testid="left-module-rail" style={{ width: leftRailW, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
+            overflowY: "auto", overflowX: "hidden", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 0, top: 0, bottom: 0, zIndex: 1105,
               // B1215682 — the phone Properties BOTTOM SHEET stays solo: the icon rail is a
               // left-side drawer affordance that has nothing to do with a sheet rising from the
@@ -27336,12 +27340,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
               transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
             } : {
-              width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
+              width: narrow ? `min(320px, calc(100vw - ${leftRailW + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
               flex: "none", background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
               // NEW-2 (lib/panelWidth.js) — the panel paints at `leftWidth` but reserves only `leftFlowWidth` (whole
               // notches), so the canvas edge never lands between pixel grids; the < one-notch leftover overlaps it.
               ...(!narrow && leftOverlap > 0 ? { marginRight: -leftOverlap, position: "relative", zIndex: 3 } : null),
-              ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
+              ...(narrow ? { position: "absolute", left: leftRailW, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
             {/* B1215682/NEW-1 — CONTROL_H caps at 30 (lg), below the 44px touch floor, so every

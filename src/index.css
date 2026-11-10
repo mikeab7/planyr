@@ -750,6 +750,19 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .dark-scroll.rail-scroll::-webkit-scrollbar { width: 7px; }
 .dark-scroll.rail-scroll::-webkit-scrollbar-track { background: var(--rail-scroll-track); border-radius: 4px; }
 .dark-scroll.rail-scroll::-webkit-scrollbar-thumb, .dark-scroll.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--rail-scroll-thumb); border: 0; border-radius: 4px; }
+/* NEW-1 — LEFT MODULE RAIL (Land · Analysis · Drainage · Yield · Properties · …; SitePlanner.jsx, lib/mapChromeStack.js LEFT_RAIL_W).
+   It never scrolls sideways, and its vertical scrollbar sits in a RESERVED gutter beside the labels (7 wide; the rail is 8 wider than
+   its label room, so nothing is covered or clipped). A classic scrollbar takes real width on Windows Chrome — the global 10px one left
+   43 of 54 and the labels spilled under it. Touch devices keep their overlay scrollbar (no styling, no gutter). `::-webkit-scrollbar`
+   and `scrollbar-width` are mutually exclusive in Chrome, so Chrome/Safari get the fixed 7px and only Firefox gets `scrollbar-width`. */
+.left-rail { overflow-x: hidden; }
+@media (pointer: fine) {
+  .left-rail { scrollbar-gutter: stable; }
+  .left-rail::-webkit-scrollbar { width: 7px; height: 0; }
+  .left-rail::-webkit-scrollbar-track { background: var(--rail-scroll-track); }
+  .left-rail::-webkit-scrollbar-thumb, .left-rail::-webkit-scrollbar-thumb:hover { background: var(--rail-scroll-thumb); border: 0; border-radius: 4px; }
+}
+@supports (-moz-appearance: none) { .left-rail { scrollbar-width: thin; scrollbar-color: var(--rail-scroll-thumb) var(--rail-scroll-track); } }
 .rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 var(--rail-hdr-inset, 7px);
   font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--chrome-muted); }
 .rail-hdr::after { content: ""; flex: 1; height: 1px; background: var(--chrome-divider); }
