@@ -19,7 +19,8 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, scheduleHistoryHydration, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, siteExistsLocally, lastSaveRefusal, requestPlanStoreRoom, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
-import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
+import { cloudParcelRows, cloudElementRecency, onSiteSynced } from "./lib/cloudSync.js";
+import { PLAN_RENAME_TEXT, PROJECT_RENAME_TEXT, renameBannerText, isAuthExpiredError } from "./lib/renameSyncNotice.js";
 import { summarizeParcelRowsAsync } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
 import { STATUS_META, roleOf } from "./lib/siteModel.js";
@@ -38,7 +39,7 @@ const SitePlanner = lazy(loadPlanner);
 import { nextConceptName } from "./lib/conceptName.js";
 import { runMint, describePushFailure, saveRefusedMessage, PUSH_MISSING } from "./lib/planMint.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, clearCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, clearCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, clearCloudWriteFailuresFor, WHAT_RENAME, WHAT_PLAN_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer, userLeftOnSignOut } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -222,14 +223,26 @@ export default function App({
   // NEW-1 (B######) — a callback that re-attempts whatever produced the CURRENT pushError, wired
   // up by whichever writer set it. Cleared alongside pushError so a stale retry can never fire.
   const pushErrorRetryRef = useRef(null);
-  const setPushErrorWithRetry = (msg, retry) => { setPushError(msg); pushErrorRetryRef.current = retry || null; };
-  const dismissPushError = () => { setPushError(""); pushErrorRetryRef.current = null; clearAllCloudWriteFailures(); };
+  /* NEW-1 (B2671215 follow-up) — A BANNER THAT IS ABOUT THE DURABLE FAILURE LOG goes away by itself the moment the log empties. `pushErrorKeyRef` is
+   * `{ log: true }` for exactly those banners (a cloud write that failed and was recorded); a banner about anything else (a device refusal, a mint refusal)
+   * carries null and is never settled by a sync. A later successful sync of the plan / group (onSiteSynced, Retry, the browser coming back online) drops the
+   * log entries it proves are landed and calls `reconcileBannerWithLog`: log empty → banner gone; entries left → the banner is re-worded over what is left. */
+  const LOG_BANNER = { log: true };
+  const pushErrorKeyRef = useRef(null);
+  const setPushErrorWithRetry = (msg, retry, key) => { setPushError(msg); pushErrorRetryRef.current = retry || null; pushErrorKeyRef.current = key || null; };
+  const dismissPushError = () => { setPushError(""); pushErrorRetryRef.current = null; pushErrorKeyRef.current = null; clearAllCloudWriteFailures(); };
+  const reconcileBannerWithLog = () => {
+    if (!pushErrorKeyRef.current || !pushErrorKeyRef.current.log) return;
+    const pending = readCloudWriteFailures().filter((e) => !(e && e.error === PUSH_MISSING));
+    if (!pending.length) { setPushError(""); pushErrorRetryRef.current = null; pushErrorKeyRef.current = null; return; }
+    raisePendingWriteFailureBanner(pending);
+  };
   // NEW-1 (B1204736) — a Retry click must NOT forget the durable log before anything has actually
   // landed (the "clears the log before a single row is attempted" bug): it clears only the
   // in-memory banner, so an interrupted retry still has its record to re-surface on the next boot.
   // The X button (dismissPushError, above) is the deliberately different one — it forgets the log,
   // because that's the owner saying they've dealt with it.
-  const beginPushRetry = () => { setPushError(""); pushErrorRetryRef.current = null; };
+  const beginPushRetry = () => { setPushError(""); pushErrorRetryRef.current = null; pushErrorKeyRef.current = null; };
   // NEW-1 (B1204736) — the ONE atomic replay adapter for the durable write-failure queue: a
   // queued "rename" entry replays through the SAME renameSiteGroup RPC the live rename path uses
   // (one statement, one stamp), never a per-row fan-out. The local store's CURRENT name is
@@ -254,10 +267,13 @@ export default function App({
   // PARTLY synced instead — true whether the original action touched one row or many.
   const raisePendingWriteFailureBanner = (pending) => {
     const last = pending[pending.length - 1];
-    const summary = pending.length === 1
+    /* NEW-1 (B2671215 follow-up) — a pending set that is ALL renames reads in the rename sentence (the same words the live failure used), not the generic
+     * "N changes may not have fully synced". */
+    const renameOnly = renameBannerText(pending);
+    const summary = renameOnly ? renameOnly : pending.length === 1
       ? `${last.what} may not have fully synced to the cloud earlier. It's saved on this device — please check it and try again if anything looks off online.`
       : `${pending.length} changes may not have fully synced to the cloud earlier (most recently: ${last.what}). They're saved on this device — please check them and try again if anything looks off online.`;
-    setPushErrorWithRetry(summary, attemptCloudWriteRetry);
+    setPushErrorWithRetry(summary, attemptCloudWriteRetry, LOG_BANNER);
   };
   // NEW-1 (B1204736) — replay the durable queue and raise the banner over whatever is STILL
   // unconfirmed afterward; a fully-confirmed retry clears itself silently. Re-reads the log fresh
@@ -285,6 +301,30 @@ export default function App({
     const pending = all.filter((e) => !(e && e.error === PUSH_MISSING));
     if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
+  /* NEW-1 (B2671215 follow-up, owner 2026-11-11) — A FAILED RENAME'S BANNER ENDS WHEN THE CLOUD HOLDS THE NAME, not only when Retry is pressed.
+   *   • onSiteSynced — any successful header write of a plan (Retry, an ordinary edit's autosave, a boot re-push) whose pushed NAME is the one this device
+   *     holds settles that plan's logged failures; the banner then clears (log empty) or is re-worded over what is left. A push built before the rename
+   *     carries the old name and settles nothing.
+   *   • "online" — the browser getting its connection back replays the logged failures once (offline → online clears the banner by itself).
+   *   A dead sign-in keeps its record in the log while the shell's own notice does the talking; the banner (with Retry) comes back on the next load. There
+   *   is deliberately NO automatic replay on sign-in: it would race the pull that sign-in starts, and a push built from a pre-pull copy must never win. */
+  useEffect(() => {
+    const off = onSiteSynced((id, held) => {
+      const mine = readCloudWriteFailures().filter((e) => e && e.siteId === id);
+      if (!mine.length) return;
+      const local = loadSite(id);
+      if (held && local && typeof held.name === "string" && typeof local.name === "string" && held.name !== local.name) return; // an older push landed
+      if (clearCloudWriteFailuresFor({ siteId: id })) reconcileBannerWithLog();
+    });
+    const onOnline = () => {
+      const pending = readCloudWriteFailures().filter((e) => e && e.error !== PUSH_MISSING);
+      if (!pending.length) return;
+      beginPushRetry();
+      attemptCloudWriteRetry();
+    };
+    window.addEventListener("online", onOnline);
+    return () => { off(); window.removeEventListener("online", onOnline); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- handlers only touch state setters, refs and imports, so the first render's closures are the live ones
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
   // element-level undo stack (Ctrl+Z can't reach it — different component, sometimes not even
   // mounted). This toast is the "obvious, working undo" for it instead, reusing the shared B673
@@ -660,7 +700,20 @@ export default function App({
   // Not data loss (the device copy is authoritative and the next autosave/pull heal re-pushes),
   // but silence is the B209 class. One dismissible banner; notify-only, no retry loop. Returns
   // ok so multi-plan loops can aggregate to a single banner instead of N.
-  const pushLoud = async (id, what) => {
+  /* NEW-1 (B2671215 follow-up) — A DEAD SIGN-IN IS NOT A CLOUD OUTAGE. The write was refused because the token is expired / invalid: ask the shared session
+   * helper (the ONE place that renews a session) to renew it. Renewed → the caller retries once. Refused → the person is signed out; supabase-js raises
+   * SIGNED_OUT and the shell's existing "You were signed out. Sign in to continue." notice speaks — we add NO second banner, and the record stays in the
+   * durable log so the sign-in that follows replays it. */
+  const settleAuthExpiry = async () => {
+    try {
+      // dynamic: only a refused write ever needs it, so it must not become a chunk of the plain Site route (perf-bundle-audit's allowlist)
+      const { getApiToken, FAIL_SIGNED_OUT } = await import("../../shared/auth/apiAuth.js");
+      const r = await getApiToken({ refresh: true });
+      return r.token ? "renewed" : (r.failure === FAIL_SIGNED_OUT ? "signed-out" : "unreachable");
+    }
+    catch (_) { return "unreachable"; }
+  };
+  const pushLoud = async (id, what, _afterRenew = false) => {
     try {
       const r = await pushSiteToCloud(id);
       if (r && r.ok === false) throw new Error(r.error || "push failed");
@@ -678,8 +731,15 @@ export default function App({
       // chunkReload's auto-reload, which may navigate away before this banner ever paints. The
       // durable log (shared/cloud/writeFailureLog.js) is what makes that recoverable.
       recordCloudWriteFailure({ what, siteId: id, error: (e && e.message) || "" });
-      setPushErrorWithRetry(why.text, () => pushLoud(id, what));
       reportClientEvent("cloud-push-failed", `background push failed (${what})`, { id, error: (e && e.message) || "" });
+      if (isAuthExpiredError(e)) {
+        const state = await settleAuthExpiry();
+        if (state === "renewed" && !_afterRenew) return pushLoud(id, what, true);   // the token was merely stale — one honest retry
+        if (state === "signed-out") return false;                                    // the shell's sign-in notice speaks; the log keeps the record
+      }
+      // A plan's rename has its own plain sentence (the cloud copy still holds the old name); every other write keeps the generic one.
+      const text = what === WHAT_PLAN_RENAME ? PLAN_RENAME_TEXT : why.text;
+      setPushErrorWithRetry(text, () => pushLoud(id, what), LOG_BANNER);
       return false;
     }
   };
@@ -1068,19 +1128,24 @@ export default function App({
     const groupId = rec ? groupOf(rec) : idOrGroup;
     const done = renameSiteGroup(groupId, site);
     refreshSites(); // optimistic — the local half of the rename has already been written
-    return Promise.resolve(done).then((res) => {
+    return Promise.resolve(done).then(async (res) => {
       refreshSites(); // authoritative — rebuilt only AFTER the cloud write settled
+      if (res && res.ok === true) {
+        // NEW-1 (B2671215 follow-up) — the cloud holds the project's name now: drop what an earlier failed attempt logged and the banner about it.
+        if (clearCloudWriteFailuresFor({ groupId, what: WHAT_RENAME })) reconcileBannerWithLog();
+      }
       if (res && res.ok === false) {
         // NEW-1 — see pushLoud's comment: this must be recorded BEFORE anything else in case the
         // same chunk-load failure that caused this also triggers an auto-reload out from under it.
-        recordCloudWriteFailure({ what: WHAT_RENAME, kind: "rename", groupId, error: (res && res.error) || "" });
-        // B1048400 (NEW-2) — the group's cloud rows can be PARTLY renamed at this point (the
-        // non-atomic fallback path writes one row at a time and can fail partway through), so
-        // don't claim the cloud side is simply untouched — some plans could already show the new
-        // name online and others the old one.
-        setPushErrorWithRetry(`“${site}” is saved on this device, but the rename may not have fully reached the cloud — some plans in this project could still show the old name online until this succeeds. Check your connection and try again.`,
-          () => renameSite(groupId, (loadSite(groupId) || {}).site || site));
-        reportClientEvent("cloud-push-failed", "project rename did not reach the cloud", { id: groupId, error: (res && res.error) || "" });
+        recordCloudWriteFailure({ what: WHAT_RENAME, kind: "rename", groupId, error: (res && (res.rawError || res.error)) || "" });
+        reportClientEvent("cloud-push-failed", "project rename did not reach the cloud", { id: groupId, error: (res && (res.rawError || res.error)) || "" });
+        // A dead sign-in is the shell's "You were signed out" notice, not a second banner; the log keeps the record for the sign-in that follows.
+        if (res.authExpired && (await settleAuthExpiry()) === "signed-out") return { ...res, bannered: true };
+        // B1048400 (NEW-2) — the group's cloud rows can be PARTLY renamed at this point (the non-atomic fallback path writes one row at a time and can
+        // fail partway through), so the words say "didn't FULLY save" / "may still see" — never that the cloud is simply untouched.
+        setPushErrorWithRetry(PROJECT_RENAME_TEXT, () => renameSite(groupId, (loadSite(groupId) || {}).site || site), LOG_BANNER);
+        // `bannered`: this banner IS the signal — the callers (the checked rename, the breadcrumb) must not add a toast with the same news.
+        return { ...res, bannered: true };
       }
       return res;
     });
@@ -1089,7 +1154,7 @@ export default function App({
     /* NEW-1 (2026-11-03): a rename the device refused is not "saved on this device" — say so and push nothing. A false from the resurrection guard (a
      * deleted plan) carries no refusal and keeps the old quiet path. */
     if (!saveSite({ id, name }, { planRename: true }) && lastSaveRefusal(id)) { raiseMintRefused(saveRefusedMessage("The plan rename", lastSaveRefusal(id).reason), () => renamePlan(id, name)); refreshSites(); return; }
-    pushLoud(id, "The plan rename"); refreshSites();
+    pushLoud(id, WHAT_PLAN_RENAME); refreshSites();
   };
 
   // The planner dropped a blank, unedited site (never saved). Forget it.

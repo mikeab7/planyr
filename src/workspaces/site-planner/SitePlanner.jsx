@@ -22559,7 +22559,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // every project (current or not) renames through the shared checked rename, so the header
   // label updates live off the names store. Both ultimately call renameSiteGroup. (header consolidation)
   const renameProjectFromHeader = (id, name) => {
-    renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
+    return renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
   };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
