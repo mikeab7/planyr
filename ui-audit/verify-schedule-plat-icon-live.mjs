@@ -34,7 +34,9 @@ const TASKS = [
   task({ id: 6, name: "Spacer two" }),
 ];
 
-const s = await openSignedIn({ base, viewport: { width: 1400, height: 800 } });
+// device ratio 4 for the whole session (a 1 px street is only measurable at 4x); screenshots happen only in step 4
+const DSF = 4;
+const s = await openSignedIn({ base, viewport: { width: 1400, height: 800 }, contextOptions: { deviceScaleFactor: DSF } });
 const liveIds = () => s.page.evaluate(async () => { const q = await window.pfSupabase.from("schedules").select("id").is("deleted_at", null); if (q.error) throw new Error(q.error.message); return q.data.map((r) => r.id); });
 const before = new Set(await liveIds());
 const errs = [];
@@ -133,10 +135,6 @@ try {
   await page2.close();
 
   // ── 4 looks: pixels at device ratio 4 ───────────────────────────────────────
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 800, deviceScaleFactor: 4, mobile: false });
-  await pacedWait(page, 800);
-  const DSF = 4;
   const pixels = async () => {
     const svg = page.locator(`${row(1)} [data-task-icon="svg:plat"] svg`).first();
     const r = await svg.boundingBox(); const M = 3;
@@ -149,7 +147,10 @@ try {
   };
   const near = (a, b, t = 3) => a.slice(0, 3).every((v, i) => Math.abs(v - b[i]) <= t);
   const differs = (a, b, t = 8) => a.slice(0, 3).some((v, i) => Math.abs(v - b[i]) >= t);
-  const judge = (label, p) => ok(`4 ${label}: street and bulb read as OPEN (the row's own background), the lots are shaded`, near(p.street, p.bg) && near(p.bulb, p.bg) && differs(p.lot, p.bg) && differs(p.below, p.bg), JSON.stringify(p));
+  const judge = (label, p) => {
+    ok(`4 [known-good] ${label}: the sampled row background is an OPAQUE pixel (a transparent sample means the instrument returned a blank image)`, p.bg[3] === 255, JSON.stringify(p.bg));
+    ok(`4 ${label}: street and bulb read as OPEN (the row's own background), the lots are shaded`, near(p.street, p.bg) && near(p.bulb, p.bg) && differs(p.lot, p.bg) && differs(p.below, p.bg), JSON.stringify(p));
+  };
   await page.mouse.move(5, 5); await pacedWait(page, 250);
   judge("normal row", await pixels());
   const sl = await page.locator(`${row(1)} [data-task-icon-slot]`).boundingBox();
@@ -159,7 +160,6 @@ try {
   const nb = await page.locator(`${row(1)} [data-col-key="name"]`).boundingBox();
   await page.locator(`${row(1)} [data-col-key="name"]`).click({ position: { x: nb.width - 14, y: 8 } }); await pacedWait(page, 400);
   judge("selected row", await pixels());
-  await cdp.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
 
   // ── 5 nothing else moved ────────────────────────────────────────────────────
   const g2b = await glyphs(page, 2);
