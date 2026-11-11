@@ -35,11 +35,17 @@ export function findOpenTab(tabs, ref) {
   if (ref.id) { const t = tabs.find((x) => x.id === ref.id); if (t) return t; }
   if (ref.name && ref.size != null) {
     const pid = ref.projectId || null;
-    return tabs.find((x) => x.srcKey && x.srcKey === `${ref.name}\u0000${ref.size}` && (x.projectId || null) === pid) || null;
+    const key = srcKeyOf(ref.name, ref.size);
+    return tabs.find((x) => x.srcKey && normSrcKey(x.srcKey) === key && (x.projectId || null) === pid) || null;
   }
   return null;
 }
-export const srcKeyOf = (name, size) => (name && size != null ? `${name}\u0000${size}` : "");
+/** B2671221 — the separator must be storable in a jsonb account copy: Postgres rejects U+0000 (22P05), which failed the
+ *  whole `profiles.prefs` upsert and kept every open tab off the account. U+001F is legal in jsonb and never in a file name. */
+const SRC_SEP = "\u001f";
+/** A key written by the older NUL-separated build (still in someone's localStorage) is read as the same key. */
+export const normSrcKey = (k) => String(k || "").replace(/\u0000/g, SRC_SEP);
+export const srcKeyOf = (name, size) => (name && size != null ? `${name}${SRC_SEP}${size}` : "");
 
 /** Close one tab. Returns { tabs, next } — `next` is the id to activate when the CLOSED tab was the active one
  *  (the neighbour to its right, or to its left when it was last; null when nothing is left), else `activeId` unchanged. */
@@ -96,7 +102,7 @@ export function cleanTabState(s) {
 export function serializeTabs({ uid = null, tabs, activeId, states, at = 0 }) {
   return JSON.stringify({
     v: 1, uid: uid || null, active: activeId || null, at: at || 0,
-    tabs: tabs.slice(0, MAX_RESTORED_TABS).map((t) => ({ id: t.id, name: t.name, projectId: t.projectId || null, project: t.project || "", kind: t.kind || "pdf", srcKey: t.srcKey || "", ...cleanTabState(states && states[t.id]) })),
+    tabs: tabs.slice(0, MAX_RESTORED_TABS).map((t) => ({ id: t.id, name: t.name, projectId: t.projectId || null, project: t.project || "", kind: t.kind || "pdf", srcKey: normSrcKey(t.srcKey), ...cleanTabState(states && states[t.id]) })),
   });
 }
 
@@ -111,7 +117,7 @@ export function parseTabs(raw, uid = null) {
   for (const t of p.tabs.slice(0, MAX_RESTORED_TABS)) {
     if (!t || typeof t.id !== "string" || !t.id || seen.has(t.id)) continue;
     seen.add(t.id);
-    tabs.push({ id: t.id, name: String(t.name || ""), projectId: t.projectId || null, project: String(t.project || ""), kind: t.kind === "doc" ? "doc" : "pdf", srcKey: String(t.srcKey || ""), state: cleanTabState(t) });
+    tabs.push({ id: t.id, name: String(t.name || ""), projectId: t.projectId || null, project: String(t.project || ""), kind: t.kind === "doc" ? "doc" : "pdf", srcKey: normSrcKey(t.srcKey), state: cleanTabState(t) });
   }
   if (!tabs.length) return null;
   const active = tabs.some((t) => t.id === p.active) ? p.active : tabs[0].id;
@@ -171,7 +177,7 @@ export function mergeLiveRecord(stored, live, keys = null) {
 
 /** The part of a tab's view state that travels: page + zoom. (Pan, tool, selection, Word cursor/undo stay local.) */
 export const syncState = (st) => { const c = cleanTabState(st); return { ...(c.page ? { page: c.page } : {}), ...(c.scale ? { scale: Math.round(c.scale * 1000) / 1000 } : {}) }; };
-const syncTab = (t, states) => ({ id: t.id, name: t.name, projectId: t.projectId || null, project: t.project || "", kind: t.kind === "doc" ? "doc" : "pdf", srcKey: t.srcKey || "", ...syncState(states && states[t.id]) });
+const syncTab = (t, states) => ({ id: t.id, name: t.name, projectId: t.projectId || null, project: t.project || "", kind: t.kind === "doc" ? "doc" : "pdf", srcKey: normSrcKey(t.srcKey), ...syncState(states && states[t.id]) });
 
 /** Identity of what would be pushed — no timestamp, so "nothing changed" is decidable and two devices cannot ping-pong. */
 export const syncSig = ({ tabs, activeId, states }) => JSON.stringify([activeId || null, tabs.slice(0, MAX_RESTORED_TABS).map((t) => syncTab(t, states))]);
@@ -187,7 +193,7 @@ export function parseSyncDoc(doc) {
   for (const t of doc.tabs.slice(0, MAX_RESTORED_TABS)) {
     if (!t || typeof t.id !== "string" || !t.id || seen.has(t.id)) continue;
     seen.add(t.id);
-    tabs.push({ id: t.id, name: String(t.name || ""), projectId: t.projectId || null, project: String(t.project || ""), kind: t.kind === "doc" ? "doc" : "pdf", srcKey: String(t.srcKey || ""), state: syncState(t) });
+    tabs.push({ id: t.id, name: String(t.name || ""), projectId: t.projectId || null, project: String(t.project || ""), kind: t.kind === "doc" ? "doc" : "pdf", srcKey: normSrcKey(t.srcKey), state: syncState(t) });
   }
   return { tabs, active: tabs.some((t) => t.id === doc.active) ? doc.active : null, at: doc.at };
 }

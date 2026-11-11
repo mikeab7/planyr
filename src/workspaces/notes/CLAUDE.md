@@ -241,7 +241,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   own header for why an unranked pair must never be labelled as ranked.
 - `lib/notesRedline.js` — PURE: flattens a document's raw ProseMirror JSON into leaf blocks
   (paragraph/heading/code, plus an OPAQUE node — a picture/attachment/sketch/box/table — carrying
-  its real content through to the renderer; diffing INSIDE one of those stays out of scope, and
+  its real content through to the renderer — EXCEPT a box (`noteAnchor`), which is a WRAPPER whose paragraphs are walked like a blockquote's (B2671222: a real page is one box, so an opaque box made the per-paragraph merge unreachable); diffing INSIDE the other opaque kinds stays out of scope, and
   it says so rather than silently mishandling it), block-matches the two sides with
   `lib/notesConflictDiff.js`'s `lcsAlign` (the shared LCS primitive both files now use — one DP,
   not two copies), and runs a WORD-level diff (marks preserved) inside a matched pair so a
