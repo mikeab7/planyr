@@ -8,6 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
+import { PROJECT_RENAME_TEXT, isAuthExpiredError } from "./renameSyncNotice.js";
 import * as planStore from "./planStore.js";
 import { plainCopy } from "./planStore.js";
 import { elsProven, recordElsProof } from "./elsProof.js";
@@ -1437,10 +1438,10 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
     return pushSiteToCloud(groupId).then((r) => {
       if (r && r.ok === false) {
         reportClientEvent("cloud-push-failed", "a renamed never-drawn project's row failed to reach the cloud (kept on this device)", { id: groupId, error: r.error || "" });
-        return { ok: false, groupId, name, plans: 1, materialized: true, error: r.error || "The new name is saved on this device but couldn't reach the cloud yet." };
+        return { ok: false, groupId, name, plans: 1, materialized: true, error: PROJECT_RENAME_TEXT, rawError: r.error || "", authExpired: isAuthExpiredError(r.error) };
       }
       return renameSiteGroup(groupId, name, true); // once only — the row exists now, so the group rename can match it
-    }).catch((e) => ({ ok: false, groupId, name, plans: 1, materialized: true, error: (e && e.message) || "rename failed" }));
+    }).catch((e) => ({ ok: false, groupId, name, plans: 1, materialized: true, error: PROJECT_RENAME_TEXT, rawError: (e && e.message) || "rename failed", authExpired: isAuthExpiredError(e) }));
   }
   const at = Math.max(Date.now(), maxStampOf(localPlans) + 1);
   localPlans.forEach((s) => saveSite({ id: s.id, site: name, siteRenamedAt: at }));
@@ -1448,8 +1449,8 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
   // LOADED ON DEMAND — see lib/cloudRename.js. A rename is rare and user-initiated, so its cloud
   // path (an RPC plus the whole un-migrated-DB degrade) stays off the chunk every page load pays for.
   return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUid(), groupId, name, at))
-    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error }))
-    .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
+    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error, authExpired: !!(cloud && cloud.authExpired) }))
+    .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: PROJECT_RENAME_TEXT, rawError: (e && e.message) || "rename failed", authExpired: isAuthExpiredError(e) }));
 }
 
 /* B843792 (NEW-1) — THE ONE ROLE FLIP, mirroring renameSiteGroup's exact shape above (LOCAL
