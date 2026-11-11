@@ -5,7 +5,9 @@
  * test/scheduleTaskIcons.test.js, which evaluates this very file — there is no second copy to drift.
  *
  * DATA MODEL: a task carries `icons: string[]` (0–2 entries), NEVER inside the task name. An entry is either an emoji
- * character (drawn as a bundled Twemoji SVG) or a custom id "c:<name>" (drawn as the inline SVG below). Absent = none.
+ * character (drawn as a bundled Twemoji SVG), a custom id "c:<name>" (a coloured 36x36 drawing, below), or a built-in
+ * line-art id "svg:<name>" (BUILTIN_SVG, below: drawn in currentColor so it follows the row's text colour). The stored
+ * value is only ever the KEY — never markup. Absent = none.
  *
  * Emoji art: Twemoji 15.1.0 (jdecked/twemoji), graphics © Twitter, Inc. and other contributors, CC-BY 4.0.
  * Files are bundled in /sequence/vendor/twemoji/ (see CREDITS.txt there) — nothing is hot-linked at runtime.
@@ -46,6 +48,7 @@
       ["🌧️", "SWPPP / stormwater", "SWPPP NOI TCEQ stormwater"],
       ["🚒", "Fire marshal", "fire marshal"],
       ["c:plat", "Plat / replat", "plat replat recordation lots"],
+      ["svg:plat", "Plat", "plat final plat mylar recordation subdivision lots"],
       ["🏦", "MUD / district / bond", "MUD district bond"],
       ["💸", "Tax abatement / incentive", "tax abatement incentive"],
       ["🗳️", "Variance / hearing / vote", "variance hearing vote"],
@@ -140,8 +143,30 @@
     hydrant: '<rect x="9" y="31" width="18" height="3" fill="#99AAB5"/><rect x="12" y="13" width="12" height="18" rx="2" fill="#DD2E44"/><path d="M12 13a6 6 0 0 1 12 0z" fill="#BE1931"/><rect x="16" y="3" width="4" height="5" rx="1" fill="#BE1931"/><rect x="6.5" y="17" width="6" height="5" rx="1" fill="#BE1931"/><rect x="23.5" y="17" width="6" height="5" rx="1" fill="#BE1931"/><rect x="11" y="12" width="14" height="2" fill="#A0041E"/>'
   };
 
+  // Built-in line-art icons, "svg:<name>". Inner markup of <svg viewBox=... fill="none" stroke="currentColor"
+  // stroke-linecap="round" stroke-linejoin="round"> (the component sets those root attributes), so the drawing takes the
+  // colour of whatever text it sits in: light/dark, hovered, selected, striped rows all stay right with no per-theme art.
+  // PLAT (owner-approved artwork, 2026-11-11, picked from eight variants — do not redesign): lots shaded, a street with its
+  // cul-de-sac bulb set in from the right edge so the three pie lots past it read as lots, lot lines, outer frame.
+  // The street is a TRUE cut-out: the shading is ONE outline that walks round the street (down the left edge to the street's
+  // lower kerb, round the bulb, back to the upper kerb) rather than a full square with something painted over it — so there is
+  // no background colour in the drawing and no <mask id> to collide when many rows draw it at once.
+  var BUILTIN_SVG = {
+    plat: {
+      viewBox: "0 0 24 24",
+      markup: '<path d="M4 2.5H20A1.5 1.5 0 0 1 21.5 4V20A1.5 1.5 0 0 1 20 21.5H4A1.5 1.5 0 0 1 2.5 20V13.3H10.75A3.5 3.5 0 1 0 10.75 10.7H2.5V4A1.5 1.5 0 0 1 4 2.5Z" fill="currentColor" fill-opacity=".2" stroke="none"/>' +
+        '<path d="M2.5 10.7H10.75A3.5 3.5 0 1 1 10.75 13.3H2.5" stroke-width="1.3"/>' +
+        '<path d="M7 2.5V10.7M12 2.5V9.13M7 13.3V21.5M12 14.87V21.5M16.47 9.53L21.5 4.5M17.5 12H21.5M16.47 14.47L21.5 19.5" stroke-width="1"/>' +
+        '<rect x="2.5" y="2.5" width="19" height="19" rx="1.5" stroke-width="1.4"/>'
+    }
+  };
+
   var isCustom = function (id) { return typeof id === "string" && id.slice(0, 2) === "c:"; };
   var customName = function (id) { return id.slice(2); };
+  var isBuiltinSvg = function (id) { return typeof id === "string" && id.slice(0, 4) === "svg:"; };
+  var svgName = function (id) { return id.slice(4); };
+  // "Drawn for Planyr" = either drawn kind (the coloured "c:" ones and the line-art "svg:" ones).
+  var isDrawn = function (id) { return isCustom(id) || isBuiltinSvg(id); };
 
   // Twemoji file name for an emoji: hex codepoints joined by "-", with fe0f (the emoji-presentation selector) dropped.
   var twemojiFile = function (emoji) {
@@ -160,7 +185,7 @@
     CATEGORIES.forEach(function (c) { c.items.forEach(function (it) { if (!seen[it[0]]) { seen[it[0]] = 1; out.push(it[0]); } }); });
     return out;
   })();
-  var EMOJI_IDS = ALL_IDS.filter(function (id) { return !isCustom(id); });
+  var EMOJI_IDS = ALL_IDS.filter(function (id) { return !isDrawn(id); });
   var knownId = {};
   ALL_IDS.forEach(function (id) { knownId[id] = true; });
 
@@ -204,7 +229,7 @@
       }
     }
     base = base || String(id);
-    return isCustom(id) ? base + " · drawn for Planyr" : base;
+    return isDrawn(id) ? base + " · drawn for Planyr" : base;
   };
 
   // What a task's `icons` field may hold: an array of 1–2 short, distinct, non-empty strings (newest kept when more
@@ -263,8 +288,8 @@
 
   var api = {
     MAX_ICONS: MAX_ICONS,
-    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS,
-    isCustom: isCustom, customName: customName, isKnown: function (id) { return !!knownId[id]; },
+    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, BUILTIN_SVG: BUILTIN_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS,
+    isCustom: isCustom, customName: customName, isBuiltinSvg: isBuiltinSvg, svgName: svgName, isDrawn: isDrawn, isKnown: function (id) { return !!knownId[id]; },
     twemojiFile: twemojiFile,
     searchTaskIcons: searchTaskIcons, iconLabel: iconLabel,
     normalizeTaskIcons: normalizeTaskIcons, toggleTaskIcon: toggleTaskIcon,

@@ -382,7 +382,7 @@ select.ei { cursor: pointer; }
 [data-task-icon-slot]:hover { background: rgba(9,105,218,.08); }
 .ti-chev:hover { background: #dce8fd; color: var(--blue) !important; }
 .ti-pick-cell { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; position: relative;
-  border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer; padding: 0; }
+  border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--txt); cursor: pointer; padding: 0; }   /* color: currentColor icons (svg:*) draw in the text colour; a <button> does not inherit it */
 .ti-pick-cell:hover { background: var(--surf); border-color: var(--bd2); }
 .ti-pick-cell[aria-pressed="true"] { background: #e8f0fe; border-color: var(--blue); }
 /* NEW-ROWMOVE-2BAND — the drag insertion line's leading dot. A plain 2-3px line reads fine at a
@@ -15752,6 +15752,11 @@ function TaskIconGlyph({id, size = 16, faded = false}) {
     if (!m) return null;   // an id from a newer client: keep it stored, draw nothing
     return <svg viewBox="0 0 36 36" width={size} height={size} aria-hidden="true" style={st} dangerouslySetInnerHTML={{__html: m}} />;
   }
+  if (TI.isBuiltinSvg(id)) {   // built-in line art ("svg:<name>"): currentColor, so it follows the text colour of the row / picker it sits in
+    const b = TI.BUILTIN_SVG[TI.svgName(id)];
+    if (!b) return null;   // an id from a newer client: keep it stored, draw nothing
+    return <svg viewBox={b.viewBox} width={size} height={size} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={st} dangerouslySetInnerHTML={{__html: b.markup}} />;
+  }
   if (failed) return <span aria-hidden="true" style={{...st, width:size, height:size, fontSize:Math.round(size*0.8), lineHeight:size+"px", textAlign:"center"}}>{id}</span>;
   return <img src={"/sequence/vendor/twemoji/" + TI.twemojiFile(id) + ".svg"} width={size} height={size} alt="" draggable={false} style={st} onError={() => setFailed(true)} />;
 }
@@ -15799,7 +15804,7 @@ function TaskIconPicker({anchorRef, icons, onChange, onClose}) {
                   <button key={it.id} type="button" className="ti-pick-cell" data-icon-id={it.id} aria-pressed={on} aria-label={lab} title={lab}
                     onClick={() => onChange(TI.toggleTaskIcon(shown, it.id))}>
                     <TaskIconGlyph id={it.id} size={22} />
-                    {TI.isCustom(it.id) && <span aria-hidden="true" style={{position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:"#16a34a"}} />}
+                    {TI.isDrawn(it.id) && <span aria-hidden="true" style={{position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:"#16a34a"}} />}
                   </button>
                 );
               })}

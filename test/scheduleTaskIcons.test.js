@@ -28,10 +28,11 @@ describe("the icon library", () => {
   it("has the eight categories in the owner's order", () => {
     expect(TI.CATEGORIES.map(c => c.title)).toEqual(["Acquisition and diligence", "Entitlements and permits", "Design", "Utilities", "Sitework", "Building", "Leasing and finance", "Status and milestones"]);
   });
-  it("offers 77 distinct icons: 61 emoji + the 16 drawn for Planyr", () => {
-    expect(TI.ALL_IDS.length).toBe(77);
+  it("offers 78 distinct icons: 61 emoji + the 16 coloured c: drawings + 1 built-in line-art svg:", () => {
+    expect(TI.ALL_IDS.length).toBe(78);
     expect(TI.EMOJI_IDS.length).toBe(61);
     expect(TI.ALL_IDS.filter(TI.isCustom).length).toBe(16);
+    expect(TI.ALL_IDS.filter(TI.isBuiltinSvg)).toEqual(["svg:plat"]);
   });
   it("every custom id has inline SVG markup, and nothing in CUSTOM_SVG is unused", () => {
     const used = new Set(TI.ALL_IDS.filter(TI.isCustom).map(TI.customName));
@@ -65,6 +66,47 @@ describe("the icon library", () => {
     expect(where("c:dump")[2]).toMatch(/grading/);
     expect(where("c:roof")[2]).toMatch(/roof/);
     expect(where("c:civil")[0]).not.toBe(where("📐")[0]);
+  });
+});
+
+describe("the built-in Plat icon (svg:plat, B2671217)", () => {
+  const plat = TI.BUILTIN_SVG.plat;
+  it("is a stored KEY, kept by normalize, and is recognised as a built-in drawing (not an emoji, not a c: id)", () => {
+    expect(TI.isBuiltinSvg("svg:plat")).toBe(true);
+    expect(TI.isBuiltinSvg("c:plat")).toBe(false);
+    expect(TI.isBuiltinSvg("🗺️")).toBe(false);
+    expect(TI.svgName("svg:plat")).toBe("plat");
+    expect(TI.isKnown("svg:plat")).toBe(true);
+    expect(TI.normalizeTaskIcons(["🚦", "svg:plat"])).toEqual(["🚦", "svg:plat"]);
+    expect(TI.normalizeTaskIcons(["svg:from-a-newer-client"])).toEqual(["svg:from-a-newer-client"]);   // kept, just not drawn
+    expect(TI.toggleTaskIcon(["svg:plat"], "🚦")).toEqual(["svg:plat", "🚦"]);
+  });
+  it("is offered once, in Entitlements and permits, labelled Plat, and found by every keyword the owner named", () => {
+    const cats = TI.CATEGORIES.filter(c => c.items.some(i => i[0] === "svg:plat"));
+    expect(cats.map(c => c.key)).toEqual(["ent"]);
+    for (const q of ["plat", "final plat", "mylar", "recordation", "subdivision", "lots"]) expect(ids(TI.searchTaskIcons(q)), q).toContain("svg:plat");
+    expect(ids(TI.searchTaskIcons("zoning"))).not.toContain("svg:plat");
+    expect(TI.iconLabel("svg:plat")).toBe("Plat · drawn for Planyr");
+    expect(TI.EMOJI_IDS).not.toContain("svg:plat");   // no Twemoji file is looked up for it
+  });
+  it("the older c:plat is untouched: still offered, still drawable", () => {
+    expect(TI.ALL_IDS).toContain("c:plat");
+    expect(TI.CUSTOM_SVG.plat).toBeTruthy();
+  });
+  it("carries the approved artwork exactly (24x24, frame, street outline, lot lines)", () => {
+    expect(plat.viewBox).toBe("0 0 24 24");
+    expect(plat.markup).toContain('<path d="M2.5 10.7H10.75A3.5 3.5 0 1 1 10.75 13.3H2.5" stroke-width="1.3"/>');
+    expect(plat.markup).toContain('<path d="M7 2.5V10.7M12 2.5V9.13M7 13.3V21.5M12 14.87V21.5M16.47 9.53L21.5 4.5M17.5 12H21.5M16.47 14.47L21.5 19.5" stroke-width="1"/>');
+    expect(plat.markup).toContain('<rect x="2.5" y="2.5" width="19" height="19" rx="1.5" stroke-width="1.4"/>');
+  });
+  it("the street is a TRUE cut-out: one shading outline that walks round the street; no mask, no id, no fixed colour", () => {
+    expect(plat.markup).not.toMatch(/<mask|\sid=|url\(|#[0-9a-fA-F]{3,8}\b|rgb|white|black/);
+    expect(plat.markup).toMatch(/currentColor/);
+    const shade = plat.markup.match(/<path d="([^"]+)" fill="currentColor" fill-opacity="\.2" stroke="none"\/>/);
+    expect(shade, "shading path").toBeTruthy();
+    expect((shade[1].match(/M/g) || []).length).toBe(1);                 // ONE outline (not a square with a second shape on it)
+    expect(shade[1]).toContain("H10.75A3.5 3.5 0 1 0 10.75 10.7H2.5");   // it goes round the cul-de-sac bulb, the long way
+    expect(plat.markup).not.toMatch(/<rect[^>]*fill-opacity/);           // the old "full shaded square" form is gone
   });
 });
 
@@ -117,7 +159,7 @@ describe("search", () => {
     expect(ids(TI.searchTaskIcons("fire zzz"))).toEqual([]);
   });
   it("empty search = everything, in order; nothing matching = no groups", () => {
-    expect(ids(TI.searchTaskIcons("")).length).toBeGreaterThan(77);   // 80 slots (3 ids sit in two categories)
+    expect(ids(TI.searchTaskIcons("")).length).toBeGreaterThan(78);   // 81 slots (3 ids sit in two categories)
     expect(TI.searchTaskIcons("   ").length).toBe(8);
     expect(TI.searchTaskIcons("qqqq")).toEqual([]);
   });
@@ -265,6 +307,15 @@ describe("wiring in public/sequence/index.html", () => {
     const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
     expect(body).toContain("onError={() => setFailed(true)}");
     expect(body).toMatch(/if \(failed\) return <span[^>]*>\{id\}<\/span>/);
+  });
+  it("TaskIconGlyph draws an svg: key as inline currentColor line art (no image fetch), a newer client's unknown svg: key as nothing", () => {
+    const i = page.indexOf("function TaskIconGlyph(");
+    const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
+    expect(body).toContain("TI.isBuiltinSvg(id)");
+    expect(body).toContain("TI.BUILTIN_SVG[TI.svgName(id)]");
+    expect(body).toContain('stroke="currentColor"');
+    expect(body).toMatch(/if \(!b\) return null;/);
+    expect(page).toContain("TI.isDrawn(it.id) && <span");   // the picker's green "drawn for Planyr" dot covers both drawn kinds
   });
   it("a Duplicate schedule carries the icons (a fresh array, not shared)", () => {
     const fn = extractFn("const buildDuplicateProject = (src, newId) => {");
