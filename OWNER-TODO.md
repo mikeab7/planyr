@@ -5,7 +5,13 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-11-04._
+_Last updated: 2026-11-11._
+
+## 🧾 Three decisions from the pending-check triage (2026-11-11)
+Every pending check was sorted. The checks that truly need your own devices or accounts (an iPhone, Bluebeam, the admin pages, your real plans) are listed once each, with item numbers, in `docs/VERIFICATION-TRIAGE-2026-11-11.md` under "Bucket B" — that is a reference list, not an assignment. Only the three decisions below are yours:
+- [ ] **Say "go" or "no" on the cleanup of the two throwaway sign-in accounts** (`michael+resettest@` and `michael+invitetest@planyr.io`). Both still exist on the live database, along with two small proof rows; I did not touch them. The cleanup file is `src/shared/auth/db/test_accounts_cleanup_2026-11-04.sql`.
+- [ ] **Decide what happens to the unmerged Tarrant County work (draft PR #2543, open since 2026-10-24).** Its check (V1895680) cannot run until that work ships; merge it or close it, then the check is either runnable or retirable.
+- [ ] **Decide whether the 14 "superseded" checks listed under "Bucket C" in the same document should be retired.** Nothing was deleted.
 
 ## 🗂 A decision: your "that felt slow just now" recordings no longer have a screen (B2660320)
 - [x] **Decided 2026-11-04: RETIRE.** The old Storage dialog file and the test that guarded it are deleted (B2666224). The recordings still save on your computer, capped at three, and still go to the server when you press "Something was slow just now" — nothing visible changed.
