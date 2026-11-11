@@ -747,9 +747,14 @@ export default function ProjectBreadcrumb({
     // reconciling `refresh()` now runs ONLY here, once the write has actually settled — an earlier
     // synchronous call (removed) raced the same dynamic import above and clobbered the optimistic
     // patch with the stale pre-rename read.
-    const done = bridged ? onRenameProject(resolvedId, v) : storeRename(id, v);
+    /* NEW-1 (B2671215 follow-up, owner 2026-11-11) — A HOST THAT GAVE US ITS OWN RENAME USES IT, controlled or not. The Site Planner's `onRenameProject` is
+     * the writer that raises the sticky "didn't save to the cloud" banner (with Retry), records the failure for the next load and clears itself when the cloud
+     * catches up; the uncontrolled `storeRename` below it wrote the same cloud rows but told the person nothing except a toast in raw words ("TypeError:
+     * Failed to fetch") and left the cloud badge green. A breadcrumb with no host writer (the other modules) keeps `storeRename`. */
+    const hostRename = !controlled && typeof onRenameProject === "function";
+    const done = (bridged || hostRename) ? onRenameProject(hostRename ? id : resolvedId, v) : storeRename(id, v);
     Promise.resolve(done).then((res) => {
-      if (res && res.ok === false) flashToast(res.error || `“${v}” is saved on this device but couldn't be saved to the cloud — it may come back under its old name when you reload.`);
+      if (res && res.ok === false && !res.bannered) flashToast(res.error || `“${v}” is saved on this device but couldn't be saved to the cloud — it may come back under its old name when you reload.`);
       if (!bridged) { refresh(); notifyStoreChange(); }
     }).catch(() => {});
   };
