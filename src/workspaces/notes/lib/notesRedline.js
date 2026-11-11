@@ -127,7 +127,7 @@ function opaqueBlock(tag, label, node, path) {
 /** Walk one document model into a flat, in-order list of leaf blocks (paragraphs, headings,
  *  code blocks, and opaque non-text nodes) — never throws on a node type it doesn't know;
  *  an unrecognised node's own content is walked as more blocks, so nothing silently vanishes. */
-export function flattenBlocks(doc) {
+export function flattenBlocks(doc, opts = {}) {
   const out = [];
   let anchorOrdinal = 0;
 
@@ -226,7 +226,13 @@ export function flattenBlocks(doc) {
          * rebuilt page would come back as several boxes. A box's identity is its `aid` (or, for a legacy unstamped box,
          * its order among the boxes of this document), so both sides produce the same wrapper. */
         anchorOrdinal += 1;
-        const p2 = [...path, { type: "noteAnchor", aid: node.attrs?.aid || null, raw: node.attrs || null, uid: node.attrs?.aid ? `anchor:${node.attrs.aid}` : `anchor#${anchorOrdinal}` }];
+        /* B2671222 (flat-base case) — a page last saved BEFORE it had boxes is wrapped into ONE box when each device opens it,
+         * and each device mints that box's `aid` on its own, so the same box carries a different name on every side. When the
+         * merge base has no box at all (`pinFirstAnchor`), the first box on each side IS that one wrapping, so it gets one
+         * shared identity (no aid, ordinal 0) and the paragraphs inside it can be compared. Later boxes keep their own aid. */
+        const pinned = !!opts.pinFirstAnchor && anchorOrdinal === 1;
+        const aid = pinned ? null : (node.attrs?.aid || null);
+        const p2 = [...path, { type: "noteAnchor", aid, raw: pinned && opts.pinRaw ? opts.pinRaw : (node.attrs || null), uid: aid ? `anchor:${aid}` : `anchor#${pinned ? 1 : anchorOrdinal}` }];
         node.content.forEach((k) => walk(k, p2));
         return;
       }
