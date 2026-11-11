@@ -5,12 +5,13 @@
  *
  * What counts as ours: titles starting "ZZ throwaway" (what the harnesses name their pages) and "Recovered — W" (the page the app itself
  * salvages when a placement test's lone typed "W" outlives its page). Everything else in the Bin belongs to someone else and is never touched.
- * Returns { pagesLeft, binLeft } — both must be 0. */
+ * `match` (default MINE) lets a one-off cleanup name a wider pattern (e.g. every "Recovered — …" page the TEST account piled up); it is always
+ * applied to the page list and the Bin of whoever is signed in — the test account only. Returns { pagesLeft, binLeft } — both must be 0. */
 import { openSignedIn } from "./signedInSession.mjs";
 
 export const MINE = /^(ZZ throwaway|Recovered — W$)/;
 
-export async function sweepNotesThrowaways({ base = "https://planyr.io", log = console.log } = {}) {
+export async function sweepNotesThrowaways({ base = "https://planyr.io", log = console.log, match = MINE } = {}) {
   let s = null;
   for (let i = 0; i < 12 && !s; i++) {
     try { s = await openSignedIn({ base, viewport: { width: 1400, height: 900 } }); }
@@ -23,8 +24,8 @@ export async function sweepNotesThrowaways({ base = "https://planyr.io", log = c
     await p.waitForSelector('[data-testid="notes-view-bin"]', { timeout: 45000 });
     await p.waitForTimeout(2500);
     const rowTitles = () => p.evaluate(() => [...document.querySelectorAll('[data-testid^="notes-row-"]')].map((r) => r.innerText.split("\n")[0].trim()));
-    for (let guard = 0; guard < 30; guard++) {
-      const idx = (await rowTitles()).findIndex((t) => MINE.test(t));
+    for (let guard = 0; guard < 120; guard++) {
+      const idx = (await rowTitles()).findIndex((t) => match.test(t));
       if (idx < 0) break;
       const row = p.locator('[data-testid^="notes-row-"]').nth(idx);
       await row.click({ button: "right" }); await p.waitForTimeout(300);
@@ -32,18 +33,18 @@ export async function sweepNotesThrowaways({ base = "https://planyr.io", log = c
       const yes = p.locator('button[aria-label*="Confirm" i], button:has-text("✓")').first();
       if (await yes.count()) { await yes.click(); await p.waitForTimeout(1200); }
     }
-    const pagesLeft = (await rowTitles()).filter((t) => MINE.test(t)).length;
+    const pagesLeft = (await rowTitles()).filter((t) => match.test(t)).length;
     await p.locator('[data-testid="notes-view-bin"]').click(); await p.waitForTimeout(1500);
     const binTitles = () => p.evaluate(() => [...document.querySelectorAll('[data-testid^="notes-bin-tr_"]')].map((e) => ({ id: e.dataset.testid.replace("notes-bin-", ""), t: e.innerText.split("\n")[0].trim() })));
-    for (let guard = 0; guard < 40; guard++) {
-      const m = (await binTitles()).find((r) => MINE.test(r.t));
+    for (let guard = 0; guard < 120; guard++) {
+      const m = (await binTitles()).find((r) => match.test(r.t));
       if (!m) break;
       await p.locator(`[data-testid="notes-bin-purge-${m.id}"]`).click(); await p.waitForTimeout(500);
       const yes = p.locator('button[aria-label*="Confirm" i], button:has-text("✓"), button:has-text("Delete forever")').last();
       if (await p.locator(`[data-testid="notes-bin-purge-${m.id}"]`).count() && await yes.count()) await yes.click().catch(() => {});
       await p.waitForTimeout(900);
     }
-    const binLeft = (await binTitles()).filter((r) => MINE.test(r.t)).length;
+    const binLeft = (await binTitles()).filter((r) => match.test(r.t)).length;
     log(`notesSweep: throwaway pages left in the list ${pagesLeft}, in the Bin ${binLeft}`);
     return { pagesLeft, binLeft };
   } finally { await s.close(); }
