@@ -385,6 +385,58 @@ function OnTheMap({ showOnMap, showContours, showPaper, showSpots, onShowOnMap, 
   );
 }
 
+/* "Fit the biggest building" (NEW-1) — the inverse of everything above: the biggest building the ground holds. One button; the search runs in the
+ * background (the Regrading… banner), then a ghost outline on the map and this short card: size, dimensions, finished floor, cut / fill / net, at
+ * most ONE alternative as a text link. Nothing changes in the plan until "Use this". Presentational — every number comes from `fit` (the controller). */
+const nfmt = (n) => Math.round(n).toLocaleString("en-US");
+const cyRound = (v) => { const a = Math.abs(v); return a >= 10000 ? Math.round(v / 1000) * 1000 : Math.round(v / 100) * 100; };
+export function fitNetWords(netCy) {
+  if (!Number.isFinite(netCy)) return "…";
+  if (Math.abs(netCy) < 500) return "balanced";
+  return `${nfmt(Math.abs(cyRound(netCy)))} CY ${netCy > 0 ? "import" : "export"}`;
+}
+export function FitBuildingRow({ fit }) {
+  if (!fit) return null;
+  const busy = fit.status === "running";
+  const c = fit.status === "ready" ? fit.card : null;
+  return (
+    <div data-section="fit-building" data-fit-status={fit.status} style={{ ...hairline, padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Button variant="secondary" size="sm" data-testid="grading-fit-building" disabled={busy || (fit.status === "idle" && !fit.ready)}
+          title={fit.status === "idle" && !fit.ready ? "Available once the ground has loaded" : "Find the biggest building this ground holds, with its courts and parking, inside the limits"}
+          onClick={() => fit.run && fit.run()}>{busy ? "Fitting…" : "Fit the biggest building"}</Button>
+      </div>
+      {fit.status === "failed" && <div data-fit-note="failed" style={{ ...muted, color: "var(--warn-text)" }}>Couldn't finish the search.</div>}
+      {fit.status === "nofit" && (
+        <div data-fit-note="nofit" style={{ ...muted, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span>{fit.why === "no-ground" ? "No ground to search yet." : "No building fits inside the limits with these rules."}</span>
+          <button type="button" style={linkBtn} onClick={() => fit.dismiss && fit.dismiss()}>Dismiss</button>
+        </div>
+      )}
+      {c && (
+        <div data-testid="grading-fit-card" data-fit-shown={fit.shownIs} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span data-fit-sf="1" style={{ fontSize: FONT_SIZE.display, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{nfmt(c.sf)} SF</span>
+            <span data-fit-dims="1" style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>{nfmt(c.lengthFt)} × {nfmt(c.depthFt)} ft</span>
+          </div>
+          <div data-fit-ffe="1" style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>Finished floor {f1(c.ffe).replace(/\.0$/, "")}</div>
+          <div data-fit-earthwork="1" style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>Cut {nfmt(cyRound(c.cutCy))} · Fill {nfmt(cyRound(c.fillCy))} · {fitNetWords(c.netCy)}</div>
+          {c.pastLimit > 0 && <div data-fit-note="past-limit" style={{ ...muted, color: "var(--warn-text)" }}>Its slope runs past the limit.</div>}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", paddingTop: 3 }}>
+            <Button variant="primary" size="sm" data-testid="grading-fit-use" onClick={() => fit.use && fit.use()}>Use this</Button>
+            <Button variant="ghost" size="sm" data-testid="grading-fit-dismiss" onClick={() => fit.dismiss && fit.dismiss()}>Dismiss</Button>
+          </div>
+          {fit.other && (
+            <button type="button" data-testid="grading-fit-alt" style={linkBtn} onClick={() => fit.swap && fit.swap()}>
+              {fit.shownIs === "best" ? `Or balance the dirt: ${nfmt(fit.other.sf)} SF, FFE ${f1(fit.other.ffe).replace(/\.0$/, "")}` : `Or the biggest: ${nfmt(fit.other.sf)} SF, FFE ${f1(fit.other.ffe).replace(/\.0$/, "")}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* The 3D viewer's door (NEW-1, 2026-11-11). It lives past the panel's "Grade this plan is off" early return, so a plan that has not opted in has no
  * button — and the panel itself is mounted only for the owner. Opening it loads three.js on demand (SitePlanner's lazy mount); nothing here imports it.
  * Disabled (with its reason on hover) until the proposed surface exists. */
@@ -533,6 +585,7 @@ const GradingPanelBody = React.memo(function GradingPanelBody({ planOn = true, s
           )
           : <div data-grading-empty={view.state} style={{ ...muted, paddingBottom: 8 }}>{view.line}</div>}
       </div>
+      <FitBuildingRow fit={model.fit} />
       <OnTheMap showOnMap={showOnMap} showContours={showContours} showPaper={showPaper} showSpots={showSpots} onShowOnMap={onShowOnMap} onShowContours={onShowContours} onShowPaper={onShowPaper} onShowSpots={onShowSpots} PAL={PAL} />
       <View3dRow ready={view3dReady} onOpen={onView3d} />
       <GroundSection model={model} buildableOn={buildableOn} onToggleBuildable={onToggleBuildable} />
@@ -597,6 +650,18 @@ export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rpp
   const showCutfillLabels = !!cfg.layers.cutfill && cfg.layers.spots !== false;   // NEW-1: the "Spot elevations" pill hides the labels, not the picture
   return (
     <g data-grading-layers="1" pointerEvents="none">
+      {/* NEW-1 ("Fit the biggest building") — the ghost of the answer: the building's outline and, fainter, the courts / rows / ends it brings. Screen
+          chrome only: nothing here is the plan, and it never prints. */}
+      {model.fit && model.fit.ghost && (
+        <g data-layer="fit-ghost" data-export="skip">
+          {model.fit.ghost.zones.map((z, i) => (
+            <polygon key={`${z.kind}${i}`} data-fit-zone={z.kind} points={z.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
+              fill={PAL.accent} fillOpacity={0.06} stroke={PAL.accent} strokeOpacity={0.7} strokeWidth={1} strokeDasharray="5 4" strokeLinejoin="round" />
+          ))}
+          <polygon data-fit-building="1" points={model.fit.ghost.building.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
+            fill={PAL.accent} fillOpacity={0.16} stroke={PAL.accent} strokeWidth={2} strokeDasharray="9 5" strokeLinejoin="round" />
+        </g>
+      )}
       {buildable && buildable.dataUrl && (
         <g data-layer="buildable">
           {img(buildable, "bimg", true)}

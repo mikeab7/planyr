@@ -25,6 +25,7 @@
  * grading model on), passed in. Cards, picture and earthwork rows therefore cannot disagree. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as regrade from "../lib/regradeProgress.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { buildProposedSurfaceSteps, contourLatticeSteps } from "../lib/proposedSurface.js";
 import {
   assemblyIds, cardEarthwork, scopeIds, describeFlag, withFfe, shiftAssembly, findFfeFix, findMoveFix, runChunked,
@@ -35,6 +36,9 @@ import { LIMIT_MODE_LABEL, unionRings, bufferRings, bandRegions, pointInRegions 
 import { limitSigOf, tracedOnLimit, publishedContours, publishedBand } from "../lib/gradingPicture.js";
 import { suggestFfe, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps } from "../lib/ffeSuggest.js";
 import { feetToLatLngPair } from "../lib/mapLock.js";
+import { templateFromBuilding, defaultTemplate, frontageDegOf, lengthAxisDeg, fitAssemblyEls, syntheticAssemblyEls } from "../lib/fitTemplate.js";
+import { gradedAreaEarthwork } from "../lib/buildingGrade.js";
+import { GRADING_DEFAULTS } from "../lib/gradingBase.js";
 import { driveLabelPoints } from "../lib/driveGrade.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
@@ -735,6 +739,118 @@ export default function GradingController({ input, onModel }) {
     return r && !r.stale ? r : null;
   };
 
+
+  /* ---------------- NEW-1: "Fit the biggest building" ---------------- */
+  // The inverse of everything above: the biggest building (with its courts and parking) the ground holds under the plan's rules. The
+  // SEARCH runs in the terrain worker (lib/fitBuilding.js); the answer is then re-priced here by the REAL surface engine on the fitted
+  // layout, so the card's cut / fill / net are exactly what the Grading panel will read after "Use this". Nothing touches the plan until
+  // Use this (SitePlanner's `actions.applyFit` — one undoable action).
+  const [fit, setFit] = useState({ status: "idle" });
+  const fitRef = useRef({ seq: 0, job: null, key: "", token: null, shown: "best" });
+  const fitKey = `${geoKey}|${cfg.slopeRatio}|${cfg.maxCutFillFt}|${cfg.pavementSlopePct}|${input.dockDropFt}|${base.sig}|${setback ? setback.sig : ""}`;
+  const stopFit = () => {
+    const F = fitRef.current;
+    F.seq++;
+    if (F.job) { try { F.job.cancel(); } catch (_) { /* already gone */ } F.job = null; }
+    if (F.token != null) { regrade.cancel("fit", F.token); F.token = null; }
+  };
+  // any change to what the search read (the layout, the rules, the ground, the fence) makes the answer stale: clear it
+  useEffect(() => {
+    const F = fitRef.current;
+    if (F.key && F.key !== fitKey) { stopFit(); F.key = ""; setFit({ status: "idle" }); }
+  }, [fitKey]);
+  useEffect(() => () => stopFit(), []);
+
+  const pricedByEngine = async (cand, src, my) => {
+    const gi = inRef.current.gsInputs;
+    const els2 = src.building
+      ? fitAssemblyEls(gi.els, src.building.id, assemblyIds(gi.els, src.building.id), src.box, cand.box, src.template.axis, cand.ffe)
+      : [...gi.els, ...syntheticAssemblyEls(cand.box, src.settings, cand.ffe)];
+    const surface = await runChunked(buildProposedSurfaceSteps({ ...gi, els: els2 }), { isStale: () => my !== fitRef.current.seq });
+    if (!surface || surface.stale || !surface.grid) return null;
+    const ew = gradedAreaEarthwork(surface.grid);
+    const out = surface.grid.outside;
+    return ew ? { cutCy: ew.cutCy, fillCy: ew.fillCy, netCy: ew.netCy, pastLimit: out ? out.count : 0 } : null;
+  };
+  const runFit = async () => {
+    const I = inRef.current;
+    if (!demReady || !setback || !I.fit) return;
+    stopFit();
+    const F = fitRef.current, my = F.seq;
+    F.key = fitKey; F.shown = "best";
+    setFit({ status: "running" });
+    F.token = regrade.begin("fit"); regrade.progress("fit", F.token, null);
+    const t0 = Date.now();
+    try {
+      const raw = I.fit.source(focusId);          // { building, kids, roads, parcelRings, settings } straight from the plan
+      const template = raw.building ? templateFromBuilding(raw.building, raw.kids, { dockDropFt: I.dockDropFt }) : defaultTemplate(raw.settings, { dockDropFt: I.dockDropFt });
+      const src = {
+        building: raw.building, template, settings: raw.settings,
+        box: raw.building ? { cx: raw.building.cx, cy: raw.building.cy, w: raw.building.w, h: raw.building.h, rot: raw.building.rot || 0 } : null,
+      };
+      const pack = I.base.pack;
+      const client = await import("../lib/buildableClient.js");
+      const job = client.fitBuildingJob({
+        origin, parcelRings: setback.parcelRings, setbackRings: setback.rings, holes: setback.holes,
+        fence: { rings: pack.setbackRings, holes: pack.limit.setbackHoles || [] },
+        template, frontageDeg: frontageDegOf(raw.roads, setback.parcelRings), currentDeg: raw.building ? lengthAxisDeg(raw.building) : null,
+        params: { s: cfg.slopeRatio, D: cfg.maxCutFillFt, shoulderFt: cfg.shoulderFt, dockDropFt: I.dockDropFt, pavementSlopePct: cfg.pavementSlopePct, lotDropFt: GRADING_DEFAULTS.lotDropFt },
+        dem: demReady,
+      });
+      F.job = job;
+      const reply = await job.promise;
+      if (my !== F.seq || reply.cancelled) return;
+      F.job = null;
+      const r = reply.result;
+      if (!r || !r.best) { regrade.end("fit", F.token, { ok: true }); F.token = null; setFit({ status: "nofit", why: r && r.why, ms: Date.now() - t0 }); return; }
+      // the numbers on the card come from the real engine; if it cannot price (no ground) the search's own estimate stands, labelled so
+      const finish = async (c) => {
+        if (!c) return null;
+        let p = null;
+        try { p = await pricedByEngine(c, src, my); } catch (_) { p = null; }
+        if (my !== F.seq) return null;
+        return { ...c, engine: !!p, ...(p || {}), searchNetCy: c.netCy, searchCutCy: c.cutCy, searchFillCy: c.fillCy };
+      };
+      const best = await finish(r.best);
+      if (my !== F.seq) return;
+      const alt = await finish(r.alt);
+      if (my !== F.seq) return;
+      regrade.end("fit", F.token, { ok: true }); F.token = null;
+      setFit({ status: "ready", best, alt, src, ms: Date.now() - t0, searchMs: r.stats ? r.stats.ms : null, stats: r.stats || null });
+    } catch (e) {
+      if (my !== F.seq) return;
+      if (F.token != null) { regrade.end("fit", F.token, { ok: false }); F.token = null; }
+      reportClientEvent("fit-building-failed", String((e && e.message) || e), {});
+      setFit({ status: "failed", error: String((e && e.message) || e) });
+    }
+  };
+  const dismissFit = () => { stopFit(); fitRef.current.key = ""; setFit({ status: "idle" }); };
+  const swapFit = () => { fitRef.current.shown = fitRef.current.shown === "best" ? "alt" : "best"; setFit((f) => ({ ...f })); };
+  const useFit = () => {
+    const F = fitRef.current;
+    const shown = F.shown === "alt" && fit.alt ? fit.alt : fit.best;
+    if (!shown || !inRef.current.fit) return;
+    inRef.current.fit.apply(shown, { buildingId: fit.src && fit.src.building ? fit.src.building.id : null });
+    stopFit(); F.key = ""; setFit({ status: "idle" });
+  };
+  // the model's functions are stable wrappers over the CURRENT closures (they read focusId / cfg / fitKey of the latest render)
+  const fitFns = useRef(null); fitFns.current = { runFit, dismissFit, swapFit, useFit };
+  const fitStable = useRef({ run: () => fitFns.current.runFit(), dismiss: () => fitFns.current.dismissFit(), swap: () => fitFns.current.swapFit(), use: () => fitFns.current.useFit() }).current;
+  const hasFit = !!input.fit;   // a boolean, never the object: the planner hands a fresh `fit` every render and a memo keyed on it would republish the model forever
+  const fitModel = useMemo(() => {
+    if (fit.status === "idle") return { status: "idle", ready: !!(demReady && setback && hasFit), run: fitStable.run };
+    if (fit.status !== "ready") return { status: fit.status, error: fit.error || null, why: fit.why || null, run: fitStable.run, dismiss: fitStable.dismiss };
+    const showAlt = fitRef.current.shown === "alt" && !!fit.alt;
+    const c = showAlt ? fit.alt : fit.best, other = showAlt ? fit.best : fit.alt;
+    return {
+      status: "ready", run: fitStable.run, dismiss: fitStable.dismiss, use: fitStable.use, swap: fitStable.swap, ms: fit.ms, searchMs: fit.searchMs, stats: fit.stats,
+      createsBuilding: !(fit.src && fit.src.building), shownIs: showAlt ? "alt" : "best",
+      card: { sf: c.sfRounded, lengthFt: c.lengthFt, depthFt: c.depthFt, ffe: c.ffe, cutCy: c.cutCy, fillCy: c.fillCy, netCy: c.netCy, engine: c.engine, pastLimit: c.pastLimit || 0, balanced: Math.abs(c.netCy) <= 0.05 * Math.max(1, c.cutCy) },
+      other: other ? { sf: other.sfRounded, ffe: other.ffe, balanced: Math.abs(other.netCy) <= 0.05 * Math.max(1, other.cutCy) } : null,
+      ghost: { building: c.building, zones: c.zones },
+    };
+  }, [fit, demReady, setback, hasFit]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ---------------- publish ---------------- */
   const buildingName = (id) => (input.buildingNames && input.buildingNames.get(id)) || "the building";
   // ROUND 4 — the graded area line: the limit's mode, source, acreage and the elements an edited limit grew to include
@@ -752,6 +868,7 @@ export default function GradingController({ input, onModel }) {
     autoFfe, buildable, cutfill, labels, cards, focusId, limit: limitInfo, contours, paper, seams: gradeSurface && gradeSurface.grid ? gradeSurface.grid.seams || [] : [],
     rock: { status: rock.status, error: rock.error, retry: () => setRockRetry((n) => n + 1), count: rock.polys ? rock.polys.length : 0 },
     solving: solvingId,
+    fit: fitModel,
     layerRows: [
       { id: "buildable", label: `Level-Pad Limit at ${cfg.slopeRatio}:1`, on: cfg.layers.buildable,
         sub: cfg.layers.buildable && maskE != null
@@ -775,7 +892,7 @@ export default function GradingController({ input, onModel }) {
       editLimit: (span) => inRef.current.actions.editLimit && inRef.current.actions.editLimit(span || null),
       doneEditLimit: () => inRef.current.actions.doneEditLimit && inRef.current.actions.doneEditLimit(),
       resetLimit: () => inRef.current.actions.resetLimit && inRef.current.actions.resetLimit() },
-  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey, limitInfo, contours, paper, gl, gradeSurface]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [cfg, setback, input.groundBasis, base.dem, ground, best, autoFfe, buildable, cutfill, labels, cards, focusId, rock, solvingId, maskE, maskSource, selBuildingId, namesKey, limitInfo, contours, paper, gl, gradeSurface, fitModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { onModel(model); }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onModel(null), []); // eslint-disable-line react-hooks/exhaustive-deps
