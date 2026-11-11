@@ -19,6 +19,8 @@ import { pointInRegions } from "../../src/workspaces/site-planner/lib/gradingLim
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { dockSidesFor } from "../../src/workspaces/site-planner/lib/dockZones.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
+import { fitAssemblyEls } from "../../src/workspaces/site-planner/lib/fitTemplate.js";
+import { assemblyIds } from "../../src/workspaces/site-planner/lib/gradingMembership.js";
 import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 // ROUND 5 (NEW-4) — the picture arms: the EXISTING contours the app's Leaflet layer would draw (traced here off the same
 // DEM with the same tracer, cut OUTSIDE the graded area by the same clipper), the paper background, and a framing
@@ -159,6 +161,21 @@ function Harness({ data }) {
     limitEditing: !!limitEdit, limitHighlight: limitEdit ? limitEdit.highlight : null,
     rawBuildings: new Map(hostBuildings.map((e) => [e.id, e])), buildingNames: new Map(hostBuildings.map((e, i) => [e.id, `Building ${i + 1}`])), buildingOrder: hostBuildings.map((e) => e.id),
     pondCutCy: pondCy, siteFloorFt: null, rockPolys, dockDropFt: 4, groundBasis: "grid", accent: "#0e7a52", isDragging: () => dragRef.current,
+    // NEW-1 ("Fit the biggest building"): the same two doors SitePlanner gives the controller — what the plan holds, and the one way an answer goes back.
+    // The harness has no refitChildren, so Use this re-fits the assembly's rings with fitAssemblyEls (the same mapping that priced the candidate).
+    fit: {
+      source: (id) => { const b = els.find((e) => e.id === id && e.type === "building" && !e.dogEar); return { building: b || null, kids: b ? els.filter((e) => e.attachedTo === b.id) : [], roads: [], settings: {} }; },
+      apply: (cand, { buildingId } = {}) => {
+        window.__fitApplied = (window.__fitApplied || 0) + 1;
+        setEls((a) => {
+          const b = a.find((e) => e.id === buildingId); if (!b) return a;
+          const old = { cx: b.cx, cy: b.cy, w: b.w, h: b.h, rot: b.rot || 0 }, axis = b.dockAxis === "y" ? "y" : "x";
+          const ffe = Math.round(cand.ffe * 2) / 2;
+          return fitAssemblyEls(a.map((e) => ({ ...e, ring: e.ring })), b.id, assemblyIds(a.map((e) => ({ ...e, hostId: hosts.get(e.id) })), b.id), old, cand.box, axis, ffe)
+            .map((e) => (e.id === b.id ? { ...e, cx: cand.box.cx, cy: cand.box.cy, w: cand.box.w, h: cand.box.h, rot: cand.box.rot, padElevFt: ffe, ffeBasis: "typed" } : e));
+        });
+      },
+    },
     actions: { patchBuilding: (id, p) => patchBuilding(id, p), ...limitActions,
       moveAssembly: (id, dx, dy, freeze) => setEls((a) => shiftAssembly(a, new Set(a.map((e) => e.id)), dx, dy).map((e) => (e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freeze) ? { ...e, padElevFt: freeze, ffeBasis: "typed" } : e))) } };
   window.__harnessExistAt = existAt;
