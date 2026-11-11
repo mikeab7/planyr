@@ -16833,8 +16833,8 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
     return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
       left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
-      fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold),
-      fontStyle:task.italic?"italic":"normal", textDecoration:task.underline?"underline":"none", color:GANTT_INK,
+      fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold || task.cellFmt?.name?.bold),
+      fontStyle:(task.italic || task.cellFmt?.name?.italic)?"italic":"normal", textDecoration:(task.underline || task.cellFmt?.name?.underline)?"underline":"none", color:GANTT_INK,
       fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7}}>{task.name}</span>;
   };
 
@@ -19763,7 +19763,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
       // co-dated labels never overprint each other (B402), then drawn on the top layer.
       nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
-        weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, underline:!!t.underline, str:escapeHtml(nm)});
+        weight:ganttNameWeight(depth, kind, t.bold || t.cellFmt?.name?.bold), italic:!!(t.italic || t.cellFmt?.name?.italic), underline:!!(t.underline || t.cellFmt?.name?.underline), str:escapeHtml(nm)});
     }
     const unsched = blank ? `<text x="${LABEL_W+6}" y="${y+ROW_H*0.68}" font-size="7.5" fill="#9aa0a6" font-style="italic" font-family="Arial,sans-serif">Unscheduled</text>` : "";
     rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
