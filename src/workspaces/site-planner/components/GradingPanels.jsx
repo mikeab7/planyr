@@ -118,6 +118,9 @@ function GradingSettings({ model, dockDropFt, onCfg, onDockDrop }) {
       <Row label="Limit corner radius"><NumField value={cfg.cornerRadiusFt} min={0} step={5} unit="ft" testid="grading-corner-radius" ariaLabel="Limit corner radius" onCommit={(v) => onCfg({ cornerRadiusFt: v })} /></Row>
       <Row label="Max pavement slope"><NumField value={cfg.maxPavementSlopePct} min={0.5} step={0.5} unit="%" testid="grading-max-pavement-slope" ariaLabel="Max pavement slope" onCommit={(v) => onCfg({ maxPavementSlopePct: v })} /></Row>
       <Row label="Open-ground slope"><NumField value={cfg.openGroundSlopePct} min={0} step={0.5} unit="%" testid="grading-open-ground-slope" ariaLabel="Open-ground slope" onCommit={(v) => onCfg({ openGroundSlopePct: v })} /></Row>
+      <Row label="Max drive grade"><NumField value={cfg.driveMaxGradePct} min={0.5} step={0.5} unit="%" testid="grading-drive-max-grade" ariaLabel="Max drive grade" onCommit={(v) => onCfg({ driveMaxGradePct: v })} /></Row>
+      <Row label="Drive landing at the road"><NumField value={cfg.driveLandingFt} min={0} step={5} unit="ft" testid="grading-drive-landing" ariaLabel="Drive landing length at the road" onCommit={(v) => onCfg({ driveLandingFt: v })} /></Row>
+      <Row label="Drive landing slope"><NumField value={cfg.driveLandingPct} min={0} step={0.5} unit="%" testid="grading-drive-landing-pct" ariaLabel="Drive landing slope" onCommit={(v) => onCfg({ driveLandingPct: v })} /></Row>
       <Row label="Undisturbed buffer"><NumField value={cfg.undisturbedBufferFt} min={0} step={5} unit="ft" testid="grading-undisturbed-buffer" ariaLabel="Undisturbed buffer along every property line" onCommit={(v) => onCfg({ undisturbedBufferFt: v })} /></Row>
       {rockLine && <span data-rock-status={rock.status} style={muted}>{rockLine}</span>}
       {rock.status === "failed" && (
@@ -759,6 +762,20 @@ export const GradingCanvas = React.memo(function GradingCanvas({ model, f2p, rpp
                     );
                   })}
                   {sp.tag && spotPill(`${sp.elId}:tag`, "fall", sp.tag.text)}
+                </g>
+              );
+            })}
+            {(L.drives || []).map((dr) => {
+              // NEW-1 (2026-11-11): the drive's tie-in spot, its fall arrow and its grade tag (placed with the court's labels by lib/spotLabelPlacement)
+              const a = f2p(dr.arrow.from), z = f2p(dr.arrow.to);
+              const ang = Math.atan2(z.y - a.y, z.x - a.x), h = 6;
+              const head = `${z.x},${z.y} ${z.x - h * Math.cos(ang - 0.45)},${z.y - h * Math.sin(ang - 0.45)} ${z.x - h * Math.cos(ang + 0.45)},${z.y - h * Math.sin(ang + 0.45)}`;
+              return (
+                <g key={dr.id} data-drive-set={dr.id} data-drive-too-steep={dr.tooSteep ? "1" : "0"}>
+                  <line x1={a.x} y1={a.y} x2={z.x} y2={z.y} stroke={PAL.ink} strokeWidth={1.6} />
+                  <polygon points={head} fill={PAL.ink} />
+                  {spotPill(`${dr.id}:tie`, "drive-tie", dr.tie.text)}
+                  {spotPill(`${dr.id}:fall`, "drive-fall", dr.tag.text)}
                 </g>
               );
             })}

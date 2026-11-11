@@ -484,6 +484,7 @@ import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
+import { driveTieOf, driveRingOnSite } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
@@ -14410,6 +14411,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
     return [];
   }) : null;
+  // NEW-1 (2026-11-11) — DRIVES: a centerline road that ties into the property line grades from the ROAD'S elevation there to the court / lot it
+  // serves (lib/driveGrade.js). Which roads are drives is decided from the centerlines and the property lines alone, memoised on their values.
+  const grDriveParcels = grPlanOn ? drainActive.map((p) => p.points).filter((r) => r && r.length >= 3) : null;
+  const grDriveSig = grPlanOn
+    ? `${els.filter(isCenterlineRoad).map((e) => `${e.id}:${e.pts.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}`).join("|")}#${grDriveParcels.map((r) => ringHash(r)).join(",")}`
+    : "";
+  const grDriveTies = useMemo(() => {
+    const m = new Map();
+    if (!grDriveSig) return m;
+    for (const e of els) {
+      if (!isCenterlineRoad(e)) continue;
+      let t = null;
+      try { t = driveTieOf(e.pts, grDriveParcels); } catch (_) { t = null; }
+      if (t) m.set(e.id, t);
+    }
+    return m;
+  }, [grDriveSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback, extraRings: grLimitExtraRings, aisleFt: Number.isFinite(settings.aisle) && settings.aisle > 0 ? settings.aisle : 24 });
   const grOn = grBase.on;
   const grHosts = grOn ? grHostsPre : null;
@@ -14452,6 +14470,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ...(grOn && e.type === "building" && grHosts.get(e.id) ? { hostId: grHosts.get(e.id) } : {}),
     };
   }).filter(Boolean);
+  // NEW-1 (2026-11-11) — a drive joins the graded elements ONLY while grading is on. Its graded footprint is the road's strip CLIPPED to the
+  // grading fence (the property line ± the margin): past the line the only work is the tie-in itself, at the road's own elevation.
+  if (grOn && grDriveTies.size) {
+    const fence = grBase.pack && grBase.pack.setbackRings && grBase.pack.setbackRings.length ? grBase.pack.setbackRings : grDriveParcels;
+    for (const e of els) {
+      const D = grDriveTies.get(e.id);
+      if (!D) continue;
+      let ring = null;
+      try { ring = driveRingOnSite(roadStripRing(e, settings, sharpFor(e), roundTrim(e)), fence, D.far); } catch (_) { ring = null; }
+      if (ring && ring.length >= 3) gsEls.push({ id: e.id, type: "drive", ring, dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: D.tie, path: D.path } });
+    }
+  }
   // Drainage target: the largest pond's centroid (the outfall/low side when no pond is
   // drawn falls back per element to "away from the building" inside the engine — the
   // B705 flow field stays a hint only; there is no persisted site-wide flow field).
@@ -14485,7 +14515,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
     gsApronRatio, gsDaylightAsap ? 1 : 0, gsEasementRings.map((r) => ringHash(r)).join(","),
     gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
-    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}${e.ramp ? `:r${e.ramp.riseFt.toFixed(2)}/${e.ramp.lengthFt.toFixed(1)}` : ""}`).join("|"),
+    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}${e.ramp ? `:r${e.ramp.riseFt.toFixed(2)}/${e.ramp.lengthFt.toFixed(1)}` : ""}${e.drive ? `:dr${e.drive.path.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}` : ""}`).join("|"),
     gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
     ...(grOn ? [`gr:${grBase.sig}`, gsEls.map((e) => e.hostId ?? "").join(",")] : []),
   ].join("~");

@@ -197,6 +197,16 @@ export function layoutLabelSet(L, f2p, rppf, view = null) {
       items.push({ key: `${sp.elId}:far${i}`, text: st.far.label, x: far.x, y: far.y, anchor: at(st.far.a, st.b), axes });
     });
   }
+  // NEW-1 (2026-11-11): a DRIVE's labels — the tie-in spot ("road 805.2", set a little way in along the drive so it sits on the pavement, not on the road) and
+  // the grade tag beside the fall arrow; the arrow is a thin line later labels keep off, like the court stations' arrows
+  for (const dr of L.drives || []) {
+    const t = f2p(dr.tie.pt), ti = f2p(dr.tie.inward || dr.tie.pt), u = unit(ti.x - t.x, ti.y - t.y);
+    items.push({ key: `${dr.id}:tie`, text: dr.tie.text, x: t.x + u.x * 30, y: t.y + u.y * 30, anchor: t, axes: { f: u, s: { x: -u.y, y: u.x } } });
+    const a = f2p(dr.arrow.from), z = f2p(dr.arrow.to), n = Math.max(1, Math.ceil(Math.hypot(z.x - a.x, z.y - a.y) / 6));
+    for (let i = 0; i <= n; i++) obstacles.discs.push({ x: a.x + ((z.x - a.x) * i) / n, y: a.y + ((z.y - a.y) * i) / n, r: 3 });
+    const m = f2p(dr.tag.pt), au = unit(z.x - a.x, z.y - a.y);
+    items.push({ key: `${dr.id}:fall`, text: dr.tag.text, x: m.x - au.y * 22, y: m.y + au.x * 22, anchor: m, axes: { f: au, s: { x: -au.y, y: au.x } } });
+  }
   const spots = placeLabels(items, obstacles, view);
   let hiddenCount = 0;
   for (const v of spots.values()) if (v.hidden) hiddenCount++;
