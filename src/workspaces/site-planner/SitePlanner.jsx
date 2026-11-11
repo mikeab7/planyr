@@ -141,6 +141,7 @@ import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import RegradeBanner from "./components/RegradeBanner.jsx";
 import View3dMount from "./components/View3dMount.jsx";   // NEW-1 (2026-11-11): the 3D viewer's three.js-free door (loading / failure screens, event seal)
+import View3dButton from "./components/View3dButton.jsx";   // NEW-2 (2026-11-11): the map's "3D" button — three-free, rendered only while `grOn`
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
@@ -23342,7 +23343,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
                 showSpots={(settings.grading || {}).layers?.spots !== false} onShowSpots={(v) => grSetLayer("spots", v)} PAL={PAL}
                 onPullLimit={(id, span) => grEditLimit(span)}
-                onView3d={() => setGrView3d(true)} view3dReady={!!(gradeSurface && gradeSurface.grid)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
                 onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
@@ -26340,6 +26340,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               screen, so the card's left edge ran 28px off the screen (under the Panels tab) and the View chip was entirely off it. On
               narrow they stack — the chip above, the card below it, right-aligned inside the two edge tabs' columns. Desktop is untouched. */}
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0, ...(narrow ? { flexDirection: "column", alignItems: "flex-end" } : null) }}>
+          {/* NEW-2 (B2671227) — the owner-only "3D" button, leftmost in the row so View and Imagery & Layers keep their places. Present only while `grOn`
+              (the owner gate AND this plan's "Grade this plan"), whether or not the Grading panel is open. */}
+          {grOn && (
+            <div style={{ pointerEvents: "auto", display: "flex", ...(narrow ? { flex: "none" } : null) }}>
+              <View3dButton ready={!!(gradeSurface && gradeSurface.grid)} onOpen={() => setGrView3d(true)} pal={PAL} />
+            </div>
+          )}
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0, ...(narrow ? { flex: "none" } : null) }}>
             {/* NEW-1 — counts come from the MODEL (`els`, `parcels`, …), never from the draw sets:
                 a hidden group must still report how much it is hiding, or the menu becomes a mirror

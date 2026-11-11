@@ -269,3 +269,13 @@ export const NoteIcon = ({ size = 16 }) => (
     <path d="M7.5 9h9M7.5 12.75h6" />
   </svg>
 );
+
+/* NEW-2 (2026-11-11, B2671227) — a cube in perspective: the map's "3D" button (the owner-only 3D cut-and-fill viewer). Stroke idiom like LayersIcon beside it. */
+export const CubeIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9Z" />
+    <path d="M4 7.5 12 12l8-4.5M12 12v9" />
+  </svg>
+);

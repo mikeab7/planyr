@@ -14,10 +14,11 @@
 import {
   WebGLRenderer, Scene, PerspectiveCamera, BufferGeometry, BufferAttribute, Mesh, LineSegments, MeshLambertMaterial, MeshBasicMaterial,
   LineBasicMaterial, DirectionalLight, AmbientLight, Group, Plane, Vector3, Vector2, Raycaster, DoubleSide, CylinderGeometry, Color, ColorManagement,
-  LinearSRGBColorSpace,
+  LinearSRGBColorSpace, Sprite, SpriteMaterial, CanvasTexture,
 } from "three";
 import { frame, clampState, cameraPosition, orbitBy, panBy, zoomBy, boundsOf, FOV_DEG } from "./orbit.js";
-import { VOID_HEX, HANDLE_HEX, STRATA_RGB, OUTLINE_RGB } from "./colors.js";
+import { VOID_HEX, HANDLE_HEX, STRATA_RGB, OUTLINE_RGB, NORTH_HEX } from "./colors.js";
+import { northMarkerSpec, markerFramingFactor } from "./compass.js";
 import { buildSlice, shiftLine, slideRange } from "./meshBuild.js";
 import { fieldAt } from "./field.js";
 
@@ -38,7 +39,21 @@ function geometryOf({ positions, normals = null, colors = null, indices = null }
   return g;
 }
 
-export function createViewerScene(host, { onSliceLine = null, onDragState = null } = {}) {
+/* The standing "N": a ring and a bold letter on a transparent square, drawn once into a canvas texture (white, so it reads on the black void). */
+function northTexture() {
+  const c = document.createElement("canvas"); c.width = 128; c.height = 128;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, 128, 128);
+  g.strokeStyle = NORTH_HEX; g.fillStyle = NORTH_HEX; g.lineWidth = 7;
+  g.beginPath(); g.arc(64, 64, 54, 0, Math.PI * 2); g.stroke();
+  g.font = "bold 78px Arial, Helvetica, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText("N", 64, 69);
+  const t = new CanvasTexture(c);
+  return t;
+}
+
+/* onCamera(az): called on every drawn frame with the camera's azimuth, so the viewer's compass turns with the orbit (no React render per frame). */
+export function createViewerScene(host, { onSliceLine = null, onDragState = null, onCamera = null } = {}) {
   const renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.outputColorSpace = LinearSRGBColorSpace;
   renderer.setPixelRatio(Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2));
@@ -60,7 +75,9 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
   const root = new Group();          // the lit model: Y is scaled by the height stretch
   const sliceGroup = new Group();    // the section face and its lines: also Y-scaled
   const handleGroup = new Group();   // the handle: positioned in stretched world units, never clipped
-  scene.add(root, sliceGroup, handleGroup);
+  const northGroup = new Group();    // the "N" on the ground off the model's north edge: stretched world units, never clipped, never Y-scaled
+  scene.add(root, sliceGroup, handleGroup, northGroup);
+
 
   // the clipping plane that removes the near half of the model when the slice is on (off = a plane that keeps everything)
   const plane = new Plane(new Vector3(0, 1, 0), 1e9);
@@ -77,12 +94,19 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
   const propLineMat = track(new LineBasicMaterial({ color: rgbHex(OUTLINE_RGB) }));
   const handleMat = track(new MeshBasicMaterial({ color: new Color(HANDLE_HEX), side: DoubleSide }));
   const poleMat = track(new LineBasicMaterial({ color: new Color(HANDLE_HEX) }));
+  // the north sign: NOT clipped by the slice plane and never hidden behind the block (depthTest off), drawn last
+  const northTex = northTexture();
+  const northSpriteMat = track(new SpriteMaterial({ map: northTex, transparent: true, depthTest: false, depthWrite: false }));
+  const northArrowMat = track(new MeshBasicMaterial({ color: new Color(NORTH_HEX), side: DoubleSide, depthTest: false, depthWrite: false }));
+  const northSprite = new Sprite(northSpriteMat); northSprite.frustumCulled = false; northSprite.renderOrder = 20; northSprite.visible = false;
+  northGroup.add(northSprite);
 
   let model = null, stretch = 3, ghostOn = true;
   let sliceOn = false, line = null, keepSign = 1, lineBase = null, range = null;
   let bounds = null, cam = null, home = null;
   let dirty = false, raf = 0, disposed = false, dragging = null;
-  const meshes = { top: null, walls: null, ghost: null, outline: null, face: null, strata: null, existing: null, proposed: null, handle: null, pole: null };
+  const meshes = { top: null, walls: null, ghost: null, outline: null, face: null, strata: null, existing: null, proposed: null, handle: null, pole: null, northArrow: null };
+  let marker = null;
 
   const dropObject = (o) => { if (!o) return; if (o.parent) o.parent.remove(o); if (o.geometry) { o.geometry.dispose(); live.geometries--; live.disposed++; } };
   const render = () => {
@@ -93,6 +117,7 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
     camera.lookAt(cam.tx, cam.ty, cam.tz);
     camera.updateMatrixWorld();
     renderer.render(scene, camera);
+    if (onCamera) onCamera(cam.az);
   };
   const requestRender = () => { if (dirty || disposed) return; dirty = true; raf = requestAnimationFrame(render); };
 
@@ -104,11 +129,24 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
     sun.position.set(bounds.cx - bounds.radius * 1.2, bounds.cy + bounds.radius * 2.2, bounds.cz - bounds.radius * 0.9);
     sun.target.position.set(bounds.cx, bounds.cy, bounds.cz);
     camera.near = Math.max(1, bounds.radius * 0.01); camera.far = bounds.radius * 60; camera.updateProjectionMatrix();
+    placeNorth();
   };
+  /* The "N" sign: standing sprite + flat arrow at the model's top level, just off its north edge (compass.js says where, and why not the base plane). */
+  function placeNorth() {
+    marker = northMarkerSpec(bounds);
+    const m = marker;
+    northSprite.position.set(m.sprite.x, m.sprite.y, m.sprite.z); northSprite.scale.set(m.sprite.size, m.sprite.size, 1); northSprite.visible = true;
+    const a = m.arrow;
+    const g = geometryOf({ positions: Float32Array.of(a.tip.x, a.tip.y, a.tip.z, a.left.x, a.left.y, a.left.z, a.right.x, a.right.y, a.right.z), indices: Uint16Array.of(0, 1, 2) });
+    const tri = new Mesh(g, northArrowMat); tri.frustumCulled = false; tri.renderOrder = 19;
+    setMesh("northArrow", northGroup, tri);
+  }
+  /* Reset view frames the MODEL exactly as before; the camera only backs off if the sign would fall outside what that framing fits (compass.markerFramingFactor). */
+  const framingFactor = () => (marker ? markerFramingFactor(bounds, marker) : 1);
   const aspect = () => (host.clientWidth || 1) / (host.clientHeight || 1);
   const resetView = () => {
     if (!bounds) return;
-    cam = frame(bounds, aspect()); home = { ...cam };
+    cam = frame(bounds, aspect()); const k = framingFactor(); if (k > 1) cam.dist *= k; home = { ...cam };
     requestRender();
   };
 
@@ -258,6 +296,7 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
     for (const k of Object.keys(meshes)) { dropObject(meshes[k]); meshes[k] = null; }
     for (const m of mats) { m.dispose(); live.materials--; }
     mats.length = 0;
+    northTex.dispose();
     renderer.dispose();
     if (renderer.forceContextLoss) renderer.forceContextLoss();
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
@@ -269,9 +308,16 @@ export function createViewerScene(host, { onSliceLine = null, onDragState = null
     const r = canvas.getBoundingClientRect();
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
   }
+  /* Where the ground "N" sign (and the tip of its arrow) is on screen right now, for a harness: client px, plus whether it lies inside the canvas. */
+  function northScreen() {
+    if (!marker || !cam) return null;
+    const r = canvas.getBoundingClientRect();
+    const at = (v3) => { const v = v3.clone().project(camera); const x = r.left + ((v.x + 1) / 2) * r.width, y = r.top + ((1 - v.y) / 2) * r.height; return { x, y, inView: v.z > -1 && v.z < 1 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom }; };
+    return { sign: at(northSprite.position), tip: at(new Vector3(marker.arrow.tip.x, marker.arrow.tip.y, marker.arrow.tip.z)), size: marker.size };
+  }
   function state() {
     return {
-      handleScreen: handleScreen(),
+      handleScreen: handleScreen(), north: northScreen(),
       az: cam && cam.az, el: cam && cam.el, dist: cam && cam.dist, stretch, ghostOn, sliceOn, keepSign,
       line: line && { ...line }, triangles: model ? model.top.triangleCount + model.walls.triangleCount : 0,
       info: { geometries: renderer.info.memory.geometries, programs: renderer.info.programs ? renderer.info.programs.length : 0, calls: renderer.info.render.calls },
