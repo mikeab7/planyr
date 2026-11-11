@@ -216,6 +216,11 @@ export const FloatingToolButton = forwardRef(function FloatingToolButton({ activ
     }} {...rest}>{children}</button>
   );
 });
+/* FloatingToolLabel — plain text inside a FloatingToolbar (NEW-1, 2026-11-11, the 3D grading viewer's "Height" and legend words). Same fixed-dark
+ * skin as the buttons beside it, so a label never invents its own colour on the black. */
+export function FloatingToolLabel({ style, children, ...rest }) {
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 8px", fontSize: FONT.md, fontWeight: 500, color: FT_TEXT, whiteSpace: "nowrap", ...style }} {...rest}>{children}</span>;
+}
 export function FloatingToolDivider() {
   return <span aria-hidden="true" style={{ width: 1, height: 20, background: FT_RULE, margin: "0 6px", flex: "none" }} />;
 }
