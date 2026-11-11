@@ -155,6 +155,19 @@ export function seamFlags(steps, planes, maxPavementSlopePct, { max = 2 } = {}) 
   }
   return out;
 }
+/* A drive that cannot reach the road within the max drive grade (NEW-1, 2026-11-11, lib/driveGrade.js). ONE plain flag per drive, threshold-only like
+ * the others: the plane still meets the road and the court at the grade it needs (nothing is cut past the line to hide it), the flag says so. */
+export function driveFlags(planes, { max = 2 } = {}) {
+  const out = [];
+  for (const p of planes && planes.values ? planes.values() : []) {
+    const d = p && p.drive;
+    if (!d || !d.tooSteep) continue;
+    const pct = Math.round(Math.abs(d.gradePct) * 10) / 10, cap = Math.round(d.maxGradePct * 10) / 10;
+    out.push({ id: `drive-${p.elId}`, kind: "drive", ft: Math.abs(d.gradePct), text: `Drive too steep to reach the road. It needs ${pct}% over ${Math.round(d.lengthFt)} ft; ${cap}% is the most.`, actions: [] });
+    if (out.length >= max) break;
+  }
+  return out;
+}
 /* Cut that runs into rock: a threshold (bedrock depth less 2 ft) like the others. `v` = ffeSuggest.rockViolation. */
 export function rockFlag(v, where) {
   if (!v || !(v.raiseFt > 0.04)) return null;

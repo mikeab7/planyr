@@ -91,6 +91,7 @@ function roleOfPlane(plane, dockN, el) {
   if (plane.classId === "buildingPad") return "building";
   if (plane.classId === "dockApron") return el && el.type === "trailer" ? "trailer" : "court";
   if (plane.classId === "driveInRamp") return "ramp";
+  if (plane.classId === "driveRoad") return "drive";   // NEW-1 (2026-11-11)
   if (!dockN || !plane.wall) return "lot";
   const dot = plane.wall.n.x * dockN.x + plane.wall.n.y * dockN.y;
   if (dot > 0.9) return "lot-dock-side";
@@ -100,7 +101,7 @@ function roleOfPlane(plane, dockN, el) {
 const ROLE_PHRASE = {
   building: "the building", court: "the truck court", trailer: "the trailer parking",
   "lot-dock-side": "the dock-side parking", "lot-opposite": "the parking opposite the docks",
-  "lot-end": "the end-wall parking", lot: "the parking", ramp: "the drive-in ramp",
+  "lot-end": "the end-wall parking", lot: "the parking", ramp: "the drive-in ramp", drive: "the drive",
 };
 export const rolePhrase = (r) => ROLE_PHRASE[r] || "the building";
 
