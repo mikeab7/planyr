@@ -8,8 +8,12 @@
  *   2 paste the committed Excel fixture (clipboard-bank/excel-mixed-cells) with its exact bytes AND through the browser clipboard
  *     (a trusted Ctrl+V), judged by the SAME structural judge the CI bank uses (ui-audit/lib/pasteBank.mjs)
  *   3 the paste-options tab → "Values and Source Formatting" brings the shading; Ctrl+Z puts the table back as pasted
- *   4 fill a row, then No fill · drag a row's lower line · move a box by its border · Ctrl+Z
- *   5 reload with a cache-busting query: everything persisted
+ *   4 fill a row, then No fill · drag a row's lower line
+ *   B move a box by its TOP and LEFT border + Ctrl+Z at three stages — before the paste (after formatting), after the paste options,
+ *     and after fill + row drag. Every one of those arms MUST be reached (a "not exercised" arm fails the run: V2115860's gap was exactly
+ *     an arm that was skipped and passed quietly). (Not between the paste and its options tab: any other action ends that offer, as
+ *     in Word.) Then one last border move that is KEPT, whose position must survive the reload
+ *   5 reload with a cache-busting query: everything persisted (formatting, table, and that box position)
  *   6 delete the throwaway and prove it is gone from the list and the Bin (ui-audit/lib/notesSweep.mjs)
  * `BASE_URL` (default https://planyr.io) · `EXPECT_BUILD=<sha>` fails if /version.json differs (read in the same run).
  * Known-good arms VOID the run (exit 2): a real bold lights B; the Excel paste lands a table at all. */
@@ -168,7 +172,6 @@ try {
   { const t = tableOf(await live()); if (!t) voided("the Excel paste did not land a table at all"); }
   { const problems = checkEntry(fx, summariseDoc(await live())); ok("exact-bytes paste: rows, columns, merge, empty cell, bold, red text, no imported shading", problems.length === 0, problems.join("\n      ")); }
 
-  if (process.env.BISECT) await boxMoveTest("after the paste");
   console.log("\n=== 3 · paste options ===");
   { const chip = page.locator('[data-testid="note-paste-badge"]');
     ok("the paste-options tab is offered", (await chip.count()) === 1);
@@ -183,7 +186,7 @@ try {
     } }
 
   await dump("after-options");
-  if (process.env.BISECT) await boxMoveTest("after the paste option + undo");
+  await boxMoveTest("after the paste option + undo");
   console.log("\n=== 4 · fill, row height, box move ===");
   await enter("Plain");
   await tool("nt-fill"); await page.locator('[data-testid="nt-fill-yellow"]').click(); await settle(1000);
@@ -191,7 +194,6 @@ try {
   await tool("nt-fill"); await page.locator('[data-testid="nt-fill-none"]').click(); await settle(1000);
   { const row = tableOf(await live()).content[2]; ok("No fill clears it", row.content.every((c) => !c.attrs?.background || c.attrs.background === "transparent")); }
   await dump("after-fill");
-  if (process.env.BISECT) await boxMoveTest("after fill + clear");
   {
     const rect = await page.evaluate(() => { const td = [...document.querySelectorAll(".ProseMirror td")].find((c) => c.textContent.trim() === "Plain"); const r = td.getBoundingClientRect(); return { x: r.left + r.width / 2, bottom: r.bottom }; });
     await page.mouse.move(rect.x, rect.bottom - 1); await settle(200);
@@ -201,11 +203,29 @@ try {
   }
   await dump("after-rowdrag");
   await boxMoveTest("after the paste, fill and row drag");
-  ok("the border-move arms that could be reached were exercised (at least the two taken right after formatting)", exercisedArms.filter((a) => /^right after formatting.*:yes$/.test(a)).length === 2, exercisedArms.join(" "));
+  { const stages = ["right after formatting", "after the paste option + undo", "after the paste, fill and row drag"];
+    const want = stages.flatMap((st) => ["top", "left"].map((sd) => `${st}/${sd}:yes`));
+    const missing = want.filter((w) => !exercisedArms.includes(w));
+    ok("every border-move arm was exercised (top and left, before the paste and at both stages after it) — none skipped as 'covered'", missing.length === 0, `not reached: ${missing.join(", ")} · saw: ${exercisedArms.join(" ")}`); }
+  /* one last border move that is KEPT (no Ctrl+Z): its position must be what the reload brings back */
+  let keptPos = null;
+  {
+    const start = await posOf();
+    const r = await page.evaluate(() => { const b = [...document.querySelectorAll(".planyr-anchor")].find((a) => a.textContent.includes("Alpha")); const q = b.getBoundingClientRect(); return { l: q.left, t: q.top, w: q.width }; });
+    const at = { x: r.l + r.w / 2, y: r.t - 1 };
+    await page.mouse.move(at.x, at.y, { steps: 4 }); await settle(200);
+    const onBand = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest?.(".planyr-anchor-edge"), [at.x, at.y]);
+    ok("the kept move: the top border is under the pointer", onBand);
+    if (onBand) {
+      await page.mouse.down(); await page.mouse.move(at.x + 50, at.y + 35, { steps: 8 }); await page.mouse.move(at.x + 50, at.y + 35, { steps: 2 }); await page.mouse.up(); await settle(1500);
+      keptPos = await posOf();
+      ok("the kept move moved the box (X and Y)", !!keptPos && keptPos[0] > start[0] + 25 && keptPos[1] > start[1] + 20, `${JSON.stringify(start)} → ${JSON.stringify(keptPos)}`);
+    }
+  }
   await dump("end-of-4");
   console.log("\n=== 5 · reload with a cache-busting query ===");
   const snap = await live();
-  const want = { bravo: markNames(runsOf(snap, "bravo")[0]).sort().join("|"), grid: JSON.stringify(summariseDoc(snap).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) };
+  const want = { pos: keptPos, bravo: markNames(runsOf(snap, "bravo")[0]).sort().join("|"), grid: JSON.stringify(summariseDoc(snap).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) };
   await page.waitForTimeout(4000);
   await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid^="notes-row-"]', { timeout: 30000 }); await settle(2500);
@@ -216,6 +236,8 @@ try {
     ok("this is the throwaway page after the reload", JSON.stringify(after).includes("Alpha"), "page did not reopen on the throwaway");
     ok("the formatted word has marks to persist (not a vacuous comparison)", want.bravo.length > 0, want.bravo);
     ok("formatting persisted", markNames(runsOf(after, "bravo")[0]).sort().join("|") === want.bravo, markNames(runsOf(after, "bravo")[0]).join(" "));
+    { const b = boxes(after).find((n) => n.attrs.aid === "fmt");
+      ok("the box position persisted (the border move made after the paste is where the box reopens)", !!want.pos && !!b && b.attrs.x === want.pos[0] && b.attrs.y === want.pos[1], `wanted ${JSON.stringify(want.pos)}, reopened at ${JSON.stringify(b && [b.attrs.x, b.attrs.y])}`); }
     ok("the table persisted (same cells, same merge)", JSON.stringify(summariseDoc(after).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) === want.grid);
     const sv = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json())); console.log("   served build after reload:", sv.build); }
 } catch (e) {

@@ -114,10 +114,11 @@ export async function renameProjectChecked(groupId, raw, write = renameProject) 
     // ROLL BACK what only this call put in the store (an unsaved-project pending name); a name
     // the persisted store already took is local-first and is retried by the caller's banner.
     if (!storedProjectName(groupId)) clearPendingProjectName(groupId);
-    announceNameNotice(res.error || `“${v.name}” couldn't be saved.`);
+    // `bannered` (NEW-1, B2671215 follow-up): the writer already raised the sticky "didn't save to the cloud" banner — the same news as a toast is noise.
+    if (!res.bannered) announceNameNotice(res.error || `“${v.name}” couldn't be saved.`);
   }
   if (!(res && res.ok === false)) clearPendingProjectName(groupId); // the persisted store owns the name now
-  return { ...v, ok: !(res && res.ok === false), error: (res && res.error) || "" };
+  return { ...v, ok: !(res && res.ok === false), error: (res && res.error) || "", bannered: !!(res && res.bannered) };
 }
 
 export async function renamePlanChecked(siteId, raw, write) {

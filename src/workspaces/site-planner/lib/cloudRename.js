@@ -21,6 +21,7 @@
 import { supabase } from "./supabase.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { _siteVersions as siteVersions, _lastHeaderSig as lastHeaderSig } from "./cloudSync.js";
+import { PROJECT_RENAME_TEXT, isAuthExpiredError } from "./renameSyncNotice.js";
 
 /* NEW-1/NEW-2 — RENAME A PROJECT AT THE SOURCE OF TRUTH, IN ONE WRITE.
  *
@@ -46,7 +47,7 @@ import { _siteVersions as siteVersions, _lastHeaderSig as lastHeaderSig } from "
  * noticing the name had reverted. */
 export async function cloudRenameGroup(uid, groupId, site, renamedAt) {
   if (!supabase || !uid || !groupId || typeof site !== "string" || !site.trim()) {
-    return { ok: false, rows: 0, atomic: false, error: "not ready" };
+    return { ok: false, rows: 0, atomic: false, error: PROJECT_RENAME_TEXT, rawError: "not ready" };
   }
   const at = Number(renamedAt) || Date.now();
   const { data, error } = await supabase.rpc("rename_site_group", {
@@ -69,7 +70,9 @@ export async function cloudRenameGroup(uid, groupId, site, renamedAt) {
   }
   if (isMissingFunction(error)) return cloudRenameGroupFallback(uid, groupId, site, at);
   reportClientEvent("cloud-write-failed", "project rename failed (rename_site_group)", { groupId, error: error.message || "" });
-  return { ok: false, rows: 0, atomic: true, error: error.message || "rename failed" };
+  /* NEW-1 (B2671215 follow-up) — `error` is what the PERSON may read: a fetch failure's own text ("TypeError: Failed to fetch") was reaching a toast.
+   * The raw message stays on `rawError` for telemetry and for `isAuthExpiredError` (a dead sign-in is told by the shell's own notice, not a rename banner). */
+  return { ok: false, rows: 0, atomic: true, error: PROJECT_RENAME_TEXT, rawError: error.message || "rename failed", authExpired: isAuthExpiredError(error) };
 }
 
 // PostgREST reports an unknown RPC as PGRST202 ("Could not find the function … in the schema cache").
@@ -88,7 +91,7 @@ async function cloudRenameGroupFallback(uid, groupId, site, at) {
   const sel = await supabase.from("sites").select("id, data");
   if (sel.error) {
     reportClientEvent("cloud-read-failed", "project rename fallback couldn't read the group", { groupId, error: sel.error.message || "" });
-    return { ok: false, rows: 0, atomic: false, error: sel.error.message || "couldn't read the project" };
+    return { ok: false, rows: 0, atomic: false, error: PROJECT_RENAME_TEXT, rawError: sel.error.message || "couldn't read the project", authExpired: isAuthExpiredError(sel.error) };
   }
   // Match on the SAME key the client's groupOf() uses — the group_id column is a mirror that drifts.
   const rows = (sel.data || []).filter((r) => r && r.data && ((r.data.groupId || r.data.id) === groupId));
@@ -102,7 +105,7 @@ async function cloudRenameGroupFallback(uid, groupId, site, at) {
   }
   if (failed) {
     reportClientEvent("cloud-write-failed", "project rename fallback partly failed", { groupId, failed, total: rows.length });
-    return { ok: false, rows: rows.length - failed, atomic: false, error: "Part of the project couldn't be renamed in the cloud." };
+    return { ok: false, rows: rows.length - failed, atomic: false, error: PROJECT_RENAME_TEXT, rawError: "Part of the project couldn't be renamed in the cloud." };
   }
   return { ok: true, rows: rows.length, atomic: false };
 }

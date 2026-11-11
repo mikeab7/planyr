@@ -121,7 +121,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
 - `lib/notesResolvedValue.js` — **a control reports the RESOLVED VALUE, never whether a mark is
   stored.** `inherit` is not a colour; an absent font mark is still a font. One black spelled
   three ways must read as one colour, and "Default" is not the name of a typeface.
-- `components/IntegrityBanner.jsx` — the bar for the two findings nothing could previously mention (a note in two projects; a note that had lost its place). **Its own lazy chunk** — it renders only when something is actually wrong, so its bytes have no business on the rail's first paint.
+- `components/IntegrityBanner.jsx` — the bar for the two findings nothing could previously mention (a note in two projects; a note that had lost its place). **The recovered-notes list scrolls inside a fixed ceiling (`LIST_MAX_PX`) — the bar is in flow above the page and must never be as tall as the count** (see the carry-forward file's 2026-11-11 entry). **Its own lazy chunk** — it renders only when something is actually wrong, so its bytes have no business on the rail's first paint.
 - **`components/ConflictNotice.jsx` — THE COMPACT NOTICE (NEW-3 of the follow-up brief, amending
   B842624).** The owner: *"it shouldn't just pop up with this massive banner, i should be able to
   click something that takes me to this but on full screen for review."* One line of text plus a

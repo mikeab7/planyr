@@ -131,6 +131,8 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 const GradingController = lazy(() => import("./components/GradingController.jsx"));
 const GradingPanel = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
+// NEW-1 (2026-11-11): the owner-only 3D grading viewer — its own lazy chunk, and the ONLY one that loads three.js (lib/grading3d/threeScene.js).
+const Grading3DViewer = lazy(() => import("./components/Grading3DViewer.jsx"));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
 import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX, LEFT_RAIL_W, LEFT_RAIL_W_TOUCH } from "./lib/mapChromeStack.js";
@@ -138,6 +140,7 @@ import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import RegradeBanner from "./components/RegradeBanner.jsx";
+import View3dMount from "./components/View3dMount.jsx";   // NEW-1 (2026-11-11): the 3D viewer's three.js-free door (loading / failure screens, event seal)
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
@@ -14392,6 +14395,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The model GradingController publishes (declared here, ahead of the surface inputs, because its SUGGESTED finish
   // elevations feed them — see `padElevFt` below).
   const [grModel, setGrModel] = useState(null);
+  const [grView3d, setGrView3d] = useState(false);   // the 3D viewer is open (owner-only; rendered only while `grOn`, so it closes itself if grading is switched off)
   // Per-plan switch (NEW-1, amends B2315856): `gradingOn` is the owner gate; grading WORKS on this plan only when the owner has
   // also switched it on in the Grading panel. While off, `grOn` is false and everything below is the non-owner planner.
   const grPlanOn = gradingOn && (settings.grading || {}).enabled === true;
@@ -22559,7 +22563,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // every project (current or not) renames through the shared checked rename, so the header
   // label updates live off the names store. Both ultimately call renameSiteGroup. (header consolidation)
   const renameProjectFromHeader = (id, name) => {
-    renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
+    return renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
   };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
@@ -23338,6 +23342,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
                 showSpots={(settings.grading || {}).layers?.spots !== false} onShowSpots={(v) => grSetLayer("spots", v)} PAL={PAL}
                 onPullLimit={(id, span) => grEditLimit(span)}
+                onView3d={() => setGrView3d(true)} view3dReady={!!(gradeSurface && gradeSurface.grid)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
                 onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
@@ -31574,6 +31579,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </ContextMenu>
         );
       })()}
+
+      {/* NEW-1 (2026-11-11) — the owner-only 3D cut-and-fill viewer. Mounted only while grading is ON for this plan (`grOn` = the owner gate AND the
+          per-plan switch), so it closes itself if grading is switched off and a non-owner can never reach it. Portalled to <body> (a fixed overlay
+          must not live inside a transformed ancestor); View3dMount seals React's event bubbling and holds the loading / failure screens. */}
+      {grOn && grView3d && createPortal(
+        <View3dMount onClose={() => setGrView3d(false)}>
+          <Grading3DViewer grid={gradeSurface ? gradeSurface.grid : null} existAt={gsExistAt} parcelRings={gsParcelRings} els={gsEls} onClose={() => setGrView3d(false)} />
+        </View3dMount>, document.body)}
 
       {/* NEW-2 (B845585) — Alt+hover stack picker. A portal (never clipped, same reasoning as
           ContextMenu) but deliberately NOT that shared component: this is hover-driven, not
