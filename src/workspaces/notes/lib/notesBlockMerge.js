@@ -71,6 +71,7 @@
  * the dispatch brief this file answers.
  */
 import { flattenBlocks } from "./notesRedline.js";
+import { migrateFlowBody } from "./notesFlowMigration.js";
 import { lcsAlign } from "./notesConflictDiff.js";
 
 /* ---- step 2/3: one side's diff against base, as ordered disputed ranges ------------------ */
@@ -271,9 +272,19 @@ function flatToDoc(flat) {
 export function mergeNoteDocs({ baseDoc, localDoc, serverDoc }) {
   if (baseDoc == null || localDoc == null || serverDoc == null) return null;
 
-  const baseBlocks = flattenBlocks(baseDoc);
-  const localBlocks = flattenBlocks(localDoc);
-  const serverBlocks = flattenBlocks(serverDoc);
+  /* B2671222 — a base saved before the page had boxes is flat; both live copies are that same flow wrapped into one box (by
+   * `migrateFlowBody`, each device minting its own box id). Wrap the base the same way and pin the first box's identity on
+   * every side, so the paragraphs are compared instead of every one reading as changed on both sides. */
+  const hasBox = (d) => Array.isArray(d.content) && d.content.some((n) => n && n.type === "noteAnchor");
+  const pinBox = !hasBox(baseDoc) && (hasBox(localDoc) || hasBox(serverDoc));
+  const norm = (d) => (pinBox ? migrateFlowBody(d) : d);   // a no-op for a doc that already has its box
+  const firstBox = (d) => (d.content || []).find((n) => n && n.type === "noteAnchor");
+  // one box in the rebuilt page: it carries THIS device's box attrs (id, place, width), the copy that gets pushed
+  const opts = pinBox ? { pinFirstAnchor: true, pinRaw: (firstBox(localDoc) || firstBox(serverDoc) || {}).attrs || null } : undefined;
+  const base = norm(baseDoc);
+  const baseBlocks = flattenBlocks(base, opts);
+  const localBlocks = flattenBlocks(norm(localDoc), opts);
+  const serverBlocks = flattenBlocks(norm(serverDoc), opts);
   const baseSigs = baseBlocks.map((b) => b.sig);
 
   const localRanges = disputedRanges(baseSigs, localBlocks);
@@ -282,7 +293,7 @@ export function mergeNoteDocs({ baseDoc, localDoc, serverDoc }) {
     // Neither side touched anything relative to base — the docs are identical to it (and so
     // to each other). `judgeConflict`'s "identical" path already covers this; reaching here
     // with nothing to do is harmless.
-    return { clean: true, mergedDoc: baseDoc, regions: 0 };
+    return { clean: true, mergedDoc: base, regions: 0 };
   }
 
   const clusters = clusterRegions(localRanges, serverRanges, baseBlocks);
