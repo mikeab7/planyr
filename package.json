@@ -126,6 +126,7 @@
     "react-grid-layout": "1.5.4",
     "rxjs": "7.8.2",
     "tesseract.js": "^6.0.1",
+    "three": "0.170.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
