@@ -19,6 +19,7 @@ import { pointInRegions } from "../../src/workspaces/site-planner/lib/gradingLim
 import { gradingCfg, gradingSetback, gradingPack, demSampler, hostIdMap } from "../../src/workspaces/site-planner/lib/gradingBase.js";
 import { dockSidesFor } from "../../src/workspaces/site-planner/lib/dockZones.js";
 import { shiftAssembly } from "../../src/workspaces/site-planner/lib/buildingGrade.js";
+import { driveTieOf, driveRingOnSite } from "../../src/workspaces/site-planner/lib/driveGrade.js";
 import { CHEHAW_CROSS_DOCK_ROWS, CHEHAW_CONCEPT_A_ROWS, rowRing, OWNER_ORIGIN } from "../lib/chehawCrossDock.mjs";
 // ROUND 5 (NEW-4) — the picture arms: the EXISTING contours the app's Leaflet layer would draw (traced here off the same
 // DEM with the same tracer, cut OUTSIDE the graded area by the same clipper), the paper background, and a framing
@@ -69,6 +70,7 @@ function Harness({ data }) {
       return ROWS.filter((e) => ["building", "paving", "parking", "trailer"].includes(e.type)).map((e) => ({
         id: e.id, type: e.type, attachedTo: e.attachedTo, truckCourt: !!e.truckCourt, ring: rowRing(e).map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
         // NEW-1 (2026-11-04): the building's real geometry — the label placer derives its edit buttons / grips from the element (SitePlanner passes `rawBuildings`)
+        ...(e.type === "building" && QS.get("ffe") ? { padElevFt: +QS.get("ffe"), ffeBasis: "typed" } : {}),   // `?ffe=793` — a typed finish elevation (the drive arms judge a fixed floor)
         ...(e.type === "building" ? { cx: e.cx + o.x, cy: e.cy + o.y, w: e.w, h: e.h, rot: e.rot, dock: QS.get("single") === "1" ? "single" : e.dock, dockAxis: e.dockAxis, dockSide: e.dockSide } : {}),
         ...(e.truckCourt || e.forCourt ? { dockStack: hc } : {}),
       }));
@@ -126,13 +128,36 @@ function Harness({ data }) {
       ...(e.type === "building" && hosts.get(e.id) ? { hostId: hosts.get(e.id) } : {}) };
   });
   const hostBuildings = els.filter((e) => e.type === "building" && !hosts.has(e.id));
-  const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: gradingPack(cfg, setback) };
-  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + cfg.openGroundSlopePct + cfg.gradingMarginFt + cfg.undisturbedBufferFt + JSON.stringify(cfg.limitRing || null);
+  // NEW-1 (2026-11-11) — `?drive=1` adds a 30-ft entrance drive from OUTSIDE the west property line to the nearest trailer row (the owner's Georgia
+  // Concept A shape: a drive off Chehaw Rd). `?drive=1` grades it as a DRIVE (starts at the road's elevation at the line, lib/driveGrade.js);
+  // `?drive=ring` is the BEFORE arm — the drive only a ring in the grading limit, no plane, as on main. `?zoom=drive` frames the tie-in.
+  const driveQ = QS.get("drive");
+  const driveGeo = useMemo(() => {
+    if (!driveQ) return null;
+    const cxOf = (e) => e.ring.reduce((a, p) => a + p.x, 0) / e.ring.length;
+    const west = (type) => els.filter((e) => e.type === type).sort((a, b) => cxOf(a) - cxOf(b))[0];
+    const tgt = west("trailer") || west("paving");   // the west-most trailer row / court: the one nearest the west property line
+    if (!tgt) return null;
+    const minX = Math.min(...setback.parcelRings[0].map((p) => p.x));
+    const tcy = tgt.ring.reduce((a, p) => a + p.y, 0) / tgt.ring.length;
+    const probe = { x: minX, y: tcy - 300 };
+    let best = null, bd = Infinity;
+    for (let i = 0; i < tgt.ring.length; i++) { const a = tgt.ring[i], c = tgt.ring[(i + 1) % tgt.ring.length]; for (let t = 0; t <= 1; t += 0.01) { const q = { x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t }; const d = Math.hypot(q.x - probe.x, q.y - probe.y); if (d < bd) { bd = d; best = q; } } }
+    const dx = best.x - probe.x, dy = best.y - probe.y, L = Math.hypot(dx, dy) || 1, start = { x: best.x - (dx / L) * (L + 150), y: best.y - (dy / L) * (L + 150) };
+    const nx = -(dy / L) * 15, ny = (dx / L) * 15;
+    const full = [{ x: start.x + nx, y: start.y + ny }, { x: best.x + nx, y: best.y + ny }, { x: best.x - nx, y: best.y - ny }, { x: start.x - nx, y: start.y - ny }];
+    const t = driveTieOf([start, best], setback.parcelRings);
+    return t ? { full, best, tie: t.tie, path: t.path } : null;
+  }, [driveQ, els, setback]); // eslint-disable-line react-hooks/exhaustive-deps
+  const packBase = gradingPack(cfg, setback, driveGeo && driveQ === "ring" ? { extraRings: [driveGeo.full] } : undefined);
+  if (driveGeo && driveQ === "1") gsEls.push({ id: "drv", type: "drive", ring: driveRingOnSite(driveGeo.full, packBase.setbackRings, driveGeo.best), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: driveGeo.tie, path: driveGeo.path } });
+  const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: packBase };
+  const gsSig = JSON.stringify(gsEls.map((e) => [e.id, e.padElevFt, e.ring[0]])) + settings.grading?.pavementSlopePct + cfg.slopeRatio + cfg.maxCutFillFt + cfg.limitMode + cfg.shoulderFt + cfg.cornerRadiusFt + cfg.maxPavementSlopePct + cfg.openGroundSlopePct + (driveGeo ? `d${driveQ}${driveGeo.tie.x.toFixed(1)}` : "") + cfg.gradingMarginFt + cfg.undisturbedBufferFt + JSON.stringify(cfg.limitRing || null);
   const anyFfe = gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // SitePlanner's wiring: the grading layer builds the surface OFF the render path and holds it while a drag is in flight.
   const dragRef = React.useRef(false);
   const gradeSurface = useGradeSurface({ inputs: gsInputs, sig: gsSig, enabled: anyFfe, offRender: true, isDragging: () => dragRef.current });
-  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: gradingPack(cfg, setback), existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.layers.spots, cfg.terraceDepthFt, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => ({ on: true, cfg, setback, dem: { status: "ready", dem, error: null, retry() {} }, existAt, pack: packBase, existKey: "h", sig: "h" }), [cfg.slopeRatio, cfg.maxCutFillFt, cfg.pavementSlopePct, cfg.layers.buildable, cfg.layers.cutfill, cfg.layers.contours, cfg.layers.paper, cfg.layers.spots, cfg.terraceDepthFt, cfg.limitMode, cfg.shoulderFt, cfg.cornerRadiusFt, cfg.maxPavementSlopePct, cfg.openGroundSlopePct, cfg.gradingMarginFt, cfg.undisturbedBufferFt, cfg.limitRing, setback, dem, existAt, driveGeo, driveQ]); // eslint-disable-line react-hooks/exhaustive-deps
   const patchBuilding = (id, patch) => setEls((a) => a.map((e) => { if (e.id !== id) return e; const n = { ...e }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete n[k]; else n[k] = v; } return n; }));
   const qs = QS;
   const rockFt = qs.get("rock") ? +qs.get("rock") : null, pondCy = +(qs.get("pond") || 0);
@@ -185,6 +210,7 @@ function Harness({ data }) {
     const fitBox = (x0, y0, x1, y1, pad) => { const ppf0 = Math.min(CW / (x1 - x0 + 2 * pad), CH / (y1 - y0 + 2 * pad)); const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; return { ppf: ppf0, ox: CW / 2 - cx * ppf0, oy: CH / 2 - cy * ppf0 }; };
     const b = els.length ? els[0].ring : ring;
     const bx = b.map((p) => p.x), by = b.map((p) => p.y);
+    if (zoom === "drive" && driveGeo) return fitBox(driveGeo.tie.x - 120, driveGeo.tie.y - 330, driveGeo.tie.x + 420, driveGeo.tie.y + 330, 0);   // NEW-1 (2026-11-11): the tie-in and the drive down to its court
     if (zoom === "bldg") return fitBox(Math.min(...bx), Math.min(...by), Math.max(...bx), Math.max(...by), 220);
     // ROUND 9 (B2500224 ×2): the owner's views of 2026-10-30 — the building's NE / SW CORNER (the footprint vertex furthest
     // north-east / south-west, so a rotated building is framed on its real corner) out past the limit, at about the 50-ft
@@ -225,7 +251,7 @@ function Harness({ data }) {
     if (zoom === "nw") { const all = els.flatMap((e) => e.ring); const cx = Math.min(...all.map((p) => p.x)), cy = Math.min(...all.map((p) => p.y)); return fitBox(cx - 330, cy - 200, cx + 170, cy + 160, 0); }
     const rx = ring.map((p) => p.x), ry = ring.map((p) => p.y);
     return fitBox(Math.min(...rx), Math.min(...ry), Math.max(...rx), Math.max(...ry), 40);
-  }, [qs.get("zoom"), qs.get("scale"), els.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [qs.get("zoom"), qs.get("scale"), els.length, driveGeo]); // eslint-disable-line react-hooks/exhaustive-deps
   // round 8 (perf): a live zoom about the canvas centre — `window.__harness.zoomBy(1.25)` is one wheel-notch-sized step
   const [zoomMul, setZoomMul] = useState(+(qs.get("zm") || 1));   // ROUND 10: `?zm=` — the 125-ft view is the 50-ft one at 0.4×
   const ppf = frame.ppf * zoomMul;
@@ -321,6 +347,7 @@ function Harness({ data }) {
         )}
         {planOn && model && <GradingCanvas model={model} f2p={f2p} rppf={ppf} PAL={PAL} viewRect={viewRectFt} viewPx={VIEW_PX} />}
         {els.map((e) => <polygon key={e.id} points={e.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#333" strokeWidth="1" />)}
+        {driveGeo && <polygon data-harness-drive="1" points={driveGeo.full.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="#7c3aed" strokeWidth="1.5" strokeDasharray="5 3" />}
         {/* NEW-2 / NEW-5: the selected building's edit buttons, drawn the way SitePlanner's sideAddNodes draws them — through the SAME layout
             (lib/buildingButtons.js: every button OUTSIDE its wall, in one row; the grading corner tags are INSIDE the footprint) — on top of the
             grading layer, so the picture shows exactly what the tags have to clear. Both dock walls here are the long ones (top / bottom). */}
