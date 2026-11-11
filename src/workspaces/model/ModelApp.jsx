@@ -87,7 +87,7 @@ import KeyTipOverlay from "./components/KeyTipOverlay.jsx";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
-import { orgCloudOutcome } from "./lib/orgWorkbookOps.js";
+import { orgCloudOutcome, mergeOrgWorkbookLists } from "./lib/orgWorkbookOps.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
@@ -660,9 +660,8 @@ export default function ModelApp({
       const r = await listOrgWorkbooksCloud();
       if (!live) return;
       if (r.ok) {
-        const cloudIds = new Set(r.rows.map((w) => w.id));
-        const localOnly = readLocalOrgIndex(userId).filter((w) => !cloudIds.has(w.id));
-        const merged = [...r.rows, ...localOnly].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        // B2671225 — a cached entry the cloud once listed and no longer does was deleted elsewhere: drop it.
+        const merged = mergeOrgWorkbookLists(r.rows, readLocalOrgIndex(userId));
         setOrgWorkbooks(merged);
         writeLocalOrgIndex(userId, merged);
       } else if (r.reason === "not-provisioned") {

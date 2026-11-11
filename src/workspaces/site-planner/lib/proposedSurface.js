@@ -37,7 +37,8 @@
  *   • off every graded edge the ground holds that edge's elevation for a 5′ SHOULDER, then slopes at the
  *     grading slope (2:1 default) until it daylights on existing ground;
  *   • graded cells outside the SETBACK polygon are counted and located (`grid.outside`) — the flag.
- * Access and drive grading are out of scope; volumes are bank volumes (no shrink/swell).
+ * A DRIVE (a road that ties into the property line, `el.drive`) is graded too (NEW-1, 2026-11-11, lib/driveGrade.js): it starts at the existing
+ * ground at the line, a near-flat landing, then one constant grade to the court / lot edge it serves. Volumes are bank volumes (no shrink/swell).
  *
  * ROUND 4 (B2349120/B2349121, 2026-10-19 — "the calcs seemed awfully rectangular"): with `grading.limit` present the
  * engine grades the site as ONE PAD inside a GRADING LIMIT (lib/gradingLimit.js — the rounded union of every graded
@@ -57,6 +58,7 @@
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
+import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, driveProfile, driveZAt } from "./driveGrade.js";
 
 /* Run a step generator to completion, synchronously. Its return value is the answer. */
 export function drainSteps(gen) {
@@ -171,6 +173,7 @@ export function wedgeDz(zEdge, g0, od, ratio, shoulder = 0) {
 export function classifyGradeElement(el) {
   if (!el) return null;
   if (el.type === "building") return "buildingPad";
+  if (el.type === "drive") return "driveRoad"; // NEW-1 (2026-11-11): an entrance drive — road elevation at the property line → the court/lot it serves (lib/driveGrade.js)
   if (el.type === "driveInRamp") return "driveInRamp"; // NEW-1 (2026-10-30): a drive-in ramp — its own plane, apron → FFE (lib/driveInRamp.js)
   if (el.dockStack) return "dockApron";
   if (el.type === "trailer") return "trailerParking";
@@ -196,8 +199,9 @@ export function slopeBand(classId, rule) {
  * Returns { planes: Map(id → plane), skipped: [ids with no derivable elevation] }.
  * plane: { elId, classId, label, baseElevFt, anchor, dir, slopePct, floating,
  *          check (validateSlopeAgainstRule vs the BASE rule), zAt(pt) }. Pure. */
-export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null } = {}) {
+export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null, existAt = null } = {}) {
   const planes = new Map();
+  const driveEls = [];
   const byIdEl = grading ? new Map(els.filter((e) => e && e.id != null).map((e) => [e.id, e])) : null;
   const pavSlopeG = grading ? Math.max(GRADING_DEFAULTS.minPavementSlopePct, Number.isFinite(grading.pavementSlopePct) ? grading.pavementSlopePct : GRADING_DEFAULTS.pavementSlopePct) : 0;
   const lotDropG = grading && Number.isFinite(grading.lotDropFt) ? grading.lotDropFt : GRADING_DEFAULTS.lotDropFt;
@@ -219,6 +223,7 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     if (!el || !Array.isArray(el.ring) || el.ring.length < 3) continue;
     const classId = classifyGradeElement(el);
     if (!classId) continue;
+    if (classId === "driveRoad") { driveEls.push(el); continue; }   // built after the courts / lots it serves (second pass below)
     // A DRIVE-IN RAMP is a pad member of its host building whose surface climbs from apron grade (host FFE − rise) at the low end to the FFE at the door.
     // Its geometry (`el.ramp`: lowPt / axis / lengthFt / riseFt) is prepared by the planner off lib/driveInRamp.js; only the host's FINISH elevation — typed or
     // suggested, known here and nowhere else — is added. Not an ordinary paved plane: it has no wall, no slope rule and is exempt from seam bending.
@@ -300,6 +305,41 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       zAt: (pt) => z0 - s * ((pt.x - ax) * dx + (pt.y - ay) * dy),
     });
   }
+  // NEW-1 (2026-11-11) — SECOND PASS: a DRIVE ties into the road's grade at the property line (lib/driveGrade.js). Its far end meets the edge
+  // elevation of the court / lot it serves (read off THAT element's plane at the drive's end point), its near end is the existing ground at the
+  // tie-in. It needs a ground sampler and a served plane; without either it is simply not a plane (the old behaviour), never a guess.
+  for (const el of driveEls) {
+    const D = el.drive;
+    if (!D || !Array.isArray(D.path) || D.path.length < 2 || !Array.isArray(el.ring) || el.ring.length < 3 || typeof existAt !== "function") { skipped.push(el.id); continue; }
+    const far = D.path[D.path.length - 1];
+    let target = null, td = Infinity;
+    for (const e2 of els) {
+      const pl = planes.get(e2.id);
+      if (!pl || pl.classId === "buildingPad" || pl.classId === "driveInRamp" || pl.classId === "driveRoad" || !Array.isArray(e2.ring)) continue;
+      const q = pointInRing(far, e2.ring) ? far : nearestOnRing(far, e2.ring);
+      const dd = q ? Math.hypot(far.x - q.x, far.y - q.y) : Infinity;
+      if (dd < td) { td = dd; target = pl; }
+    }
+    const zTie = existAt(D.tie);
+    if (!target || td > DRIVE_TARGET_REACH_FT || !Number.isFinite(zTie)) { skipped.push(el.id); continue; }
+    let lengthFt = 0;
+    for (let i = 0; i + 1 < D.path.length; i++) lengthFt += Math.hypot(D.path[i + 1].x - D.path[i].x, D.path[i + 1].y - D.path[i].y);
+    const g0 = grading || {};
+    const prof = driveProfile({
+      lengthFt, zTie, zEnd: target.zAt(far),
+      landingFt: Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt,
+      landingPct: Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct,
+      maxGradePct: Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct,
+    });
+    if (!prof) { skipped.push(el.id); continue; }
+    const dirV = norm(far.x - D.tie.x, far.y - D.tie.y);
+    planes.set(el.id, {
+      elId: el.id, classId: "driveRoad", label: "Drive", baseElevFt: zTie, anchor: D.tie, dir: dirV, slopePct: Math.abs(prof.gradePct), floating: false,
+      hostId: target.hostId ?? null, graded: true, drive: { ...prof, tie: D.tie, path: D.path, far, targetId: target.elId, nearestFt: td },
+      check: { ok: null, violation: null, bound: null, limitPct: null, unknown: true },
+      zAt: driveZAt(D.path, prof),
+    });
+  }
   return { planes, skipped };
 }
 
@@ -320,7 +360,7 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
   const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
-  const prec = (el) => (el.type === "building" ? 0 : el.type === "driveInRamp" ? 0.5 : el.dockStack ? 1 : 2); // a ramp lies INSIDE its court: it wins that overlap
+  const prec = (el) => (el.type === "building" ? 0 : el.type === "driveInRamp" ? 0.5 : el.dockStack ? 1 : el.type === "drive" ? 3 : 2);   // a drive meets its court at the court's edge: the court owns the overlap // a ramp lies INSIDE its court: it wins that overlap
   const graded = els
     .filter((e) => e && planes.has(e.id) && Array.isArray(e.ring) && e.ring.length >= 3)
     .map((e) => ({ el: e, plane: planes.get(e.id), bbox: ringBBox(e.ring) }))
@@ -704,7 +744,7 @@ export function buildSeams(graded, { maxPavementSlopePct = 5 } = {}) {
   const seams = new Map();
   const steps = [];
   // A drive-in ramp is held by its wing walls: its sides meet the court with a step by design (like the dock wall), so it never bends or bends others.
-  const paved = graded.filter((g) => g.plane.classId !== "buildingPad" && g.plane.classId !== "driveInRamp");
+  const paved = graded.filter((g) => g.plane.classId !== "buildingPad" && g.plane.classId !== "driveInRamp" && g.plane.classId !== "driveRoad");
   for (const E of paved) {
     const samples = sampleRing(E.el.ring, SEAM_SAMPLE_FT);
     const c = ringCentroid(E.el.ring);
@@ -1627,7 +1667,7 @@ export function daylightRings({ planes, els = [], existAt = null, apronRatio = G
   return out;
 }
 
-const SEAM_WORD = { dockApron: "The court", trailerParking: "The trailer row", carParkingGeneral: "The lot", carParkingAccessible: "The lot", driveAisles: "The paving" };
+const SEAM_WORD = { driveRoad: "The drive", dockApron: "The court", trailerParking: "The trailer row", carParkingGeneral: "The lot", carParkingAccessible: "The lot", driveAisles: "The paving" };
 const seamName = (planes, id) => { const p = planes && planes.get ? planes.get(id) : null; const w = p ? SEAM_WORD[p.classId] : null; return w || "The pavement"; };
 /* ---- violations — data WITH copy (short ≤ the B823 one-line cap, detail = the ⓘ) ---- */
 export function surfaceViolations({ planes, grid } = {}) {
@@ -1656,6 +1696,14 @@ export function surfaceViolations({ planes, grid } = {}) {
     short: `A surface exceeds its class slope cap — check the override (${n(byBound.max)}).`,
     detail: byBound.max.map((p) => `${p.label} at ${f2(p.slopePct)}% (cap ${f2(p.check.limitPct)}%)`).join("; ") + ". Planyr screening bands — confirm intent with your civil engineer.",
   });
+  for (const p of (planes ? planes.values() : [])) {
+    if (!p.drive || !p.drive.tooSteep) continue;
+    out.push({
+      kind: "drive-steep", legal: false, elId: p.elId,
+      short: "Drive too steep to reach the road.",
+      detail: `A drive from the road at the property line to the court or lot it serves needs ${f2(Math.abs(p.drive.gradePct))}% over ${Math.round(p.drive.lengthFt)} ft; the most allowed is ${f2(p.drive.maxGradePct)}%. Lengthen the drive, move the court or lot, or raise the allowed drive grade in Standards.`,
+    });
+  }
   if (grid && grid.plFillSf > 200) out.push({
     kind: "pl-fill", legal: false,
     short: `${f2(grid.plFillSf / SQFT_PER_ACRE)} AC of graded fill lies OUTSIDE the parcel — no fill across the property line.`,
@@ -1695,7 +1743,7 @@ export function buildProposedSurface(args) { return drainSteps(buildProposedSurf
  * (lib/useGradeSurface.js, GradingController) so no step holds the main thread past a lattice column.
  * `buildProposedSurface` drains it synchronously: one implementation, identical results. */
 export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
-  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading });
+  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading, existAt });
   if (!planes.size) return null;
   yield;
   // The grading model rides OPTS into the lattice (maxCells defaults up so a 520′ building keeps ~8′ cells).
@@ -1716,10 +1764,10 @@ export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt 
     easementRings.length ? `es:${easementRings.map((r) => ringHash(r)).join(",")}` : "",
     // GRADING MODEL inputs join the identity (the B807 stale-memo discipline) — and only then, so an
     // account without the model gets the key it always had.
-    grading ? `gr:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${grading.openGroundSlopePct ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
+    grading ? `gr:${grading.driveMaxGradePct ?? ""}:${grading.driveLandingFt ?? ""}:${grading.driveLandingPct ?? ""}:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${grading.openGroundSlopePct ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
     // ROUND 4 — the limit's inputs join the identity (the surface itself is cached by them inside gradingLimit.js)
     grading && grading.limit ? `lm:${grading.limit.mode || "layout"}:${grading.limit.shoulderFt ?? ""}:${grading.limit.cornerRadiusFt ?? ""}:${grading.limit.aisleFt ?? ""}:${grading.limit.maxPavementSlopePct ?? ""}:${grading.limit.maxCutFillFt ?? ""}:${grading.limit.edited ? ringHash(grading.limit.edited) : "-"}:${(grading.limit.extraRings || []).map((r) => ringHash(r)).join(",")}:${(grading.limit.setbackHoles || []).map((r) => ringHash(r)).join(",")}:${pondRings.map((r) => ringHash(r)).join(",")}` : "",
-    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}`).join("|"),
+    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}${e.drive ? `:dr${e.drive.path.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}` : ""}`).join("|"),
   ].join("~");
   return { planes, grid, violations, skipped, daylight, fieldT: clamp01(fieldT), surfaceKey };
 }

@@ -35,13 +35,14 @@ import { LIMIT_MODE_LABEL, unionRings, bufferRings, bandRegions, pointInRegions 
 import { limitSigOf, tracedOnLimit, publishedContours, publishedBand } from "../lib/gradingPicture.js";
 import { suggestFfe, padDepths, padSpotWord, fourWay, rockDepthLookup, rockViolationSteps } from "../lib/ffeSuggest.js";
 import { feetToLatLngPair } from "../lib/mapLock.js";
+import { driveLabelPoints } from "../lib/driveGrade.js";
 import {
   maskOutlinePath, maskHatchPixels, maskVisualCentre, maskTightBox, cellsPixels, cellsOutlinePath, slopeOnly, pixelsToDataUrl, hexToRgb,
   ringsPathD, contourLinesToFeet, ringsToLatticePx, GRADING_PAPER_RGB, GRADING_PAPER_OPACITY, bandField, bandRingsToFeet,
 } from "../lib/gradingPaint.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 import {
-  gridDepthStats, floorStatsOf, haulTile, cutTile, fillTile, depthFlags, limitFlagSentence, seamFlags, rockFlag, sweepFloorStats, floorRows,
+  gridDepthStats, floorStatsOf, haulTile, cutTile, fillTile, depthFlags, limitFlagSentence, seamFlags, driveFlags, rockFlag, sweepFloorStats, floorRows,
 } from "../lib/gradingPanelModel.js";
 
 const EMPTY = [];
@@ -169,7 +170,9 @@ export default function GradingController({ input, onModel }) {
   const totalPad = [...padArea.values()].reduce((a, v) => a + v, 0) || 1;
   const pondShareOf = (id) => Math.round((pondTotal * (padArea.get(id) || 0) / totalPad) / 100) * 100;
   const floorFt = Number.isFinite(input.siteFloorFt) ? input.siteFloorFt : null;
-  const cfgSig = `${cfg.pavementSlopePct}|${cfg.slopeRatio}|${cfg.maxCutFillFt}|${input.dockDropFt}|${base.existKey}|${setback ? setback.sig : ""}|${floorFt ?? ""}|${pondTotal}|${rockKey}`;
+  // NEW-1 (2026-11-11): a drive changes the earthwork the suggested floor balances, so its footprint + its profile settings join the signature
+  const driveSig = els.filter((e) => e.type === "drive").map((e) => `${e.id}:${e.ring.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(";")}`).join("¦") + `|${cfg.driveMaxGradePct}|${cfg.driveLandingFt}|${cfg.driveLandingPct}`;
+  const cfgSig = `${driveSig}|${cfg.pavementSlopePct}|${cfg.slopeRatio}|${cfg.maxCutFillFt}|${input.dockDropFt}|${base.existKey}|${setback ? setback.sig : ""}|${floorFt ?? ""}|${pondTotal}|${rockKey}`;
 
   const autoRef = useRef(new Map());           // id → { sig, ffe, info } | { sig, failed }
   // NEW-1: the balanced ("no haul") floor of the FOCUSED building while its floor is TYPED — the panel's floors table needs it, and
@@ -415,6 +418,8 @@ export default function GradingController({ input, onModel }) {
       if (F && F.flag) flags.push({ id: "limit", kind: "limit", text: limitFlagSentence(F.flag), span: F.flag.span, actions: ["ffe", "limit"] });
       flags.push(...focusDepth.flags);
       if (grid) flags.push(...seamFlags(grid.seams, gradeSurface && gradeSurface.planes, cfg.maxPavementSlopePct));
+      // NEW-1 (2026-11-11): a drive that cannot reach the road within the max drive grade — only the drives that serve THIS building's assembly
+      if (gradeSurface && F) flags.push(...driveFlags(new Map([...gradeSurface.planes].filter(([, pl]) => pl.drive && F.aIds.has(pl.drive.targetId)))));
       const rv = rockLive.key === rockLiveKey ? rockLive.byId.get(b.id) : null;
       const rf = rockFlag(rv, rv && rv.at && F ? (() => { const sd = fourWay(rv.at.x - F.centre.x, rv.at.y - F.centre.y, 30); return sd ? `${sd} end` : null; })() : null);
       if (rf) flags.push(rf);
@@ -464,10 +469,25 @@ export default function GradingController({ input, onModel }) {
         const sp = spotElevationsFor(plane, el.ring, (pt) => grid.zOf(owner, pt));
         if (sp) spots.push(sp);
       }
+      // NEW-1 (2026-11-11): the drives that serve this building's assembly — one spot at the tie-in ("road 805.2") and the fall arrow + % tag along
+      // the constant-grade stretch, like the courts have
+      const drives = [];
+      for (const [eid, pl] of gradeSurface.planes) {
+        const D = pl.drive;
+        if (!D || !F.aIds.has(D.targetId)) continue;
+        const pts = driveLabelPoints(D.path, D);
+        const downhill = D.grade <= 0;
+        drives.push({
+          id: eid, tooSteep: !!D.tooSteep,
+          tie: { pt: D.path[0], inward: D.path.length > 1 ? D.path[1] : D.path[0], text: `road ${f1(D.zTie)}` },
+          tag: { pt: pts.tagAt, text: `${(Math.round(Math.abs(D.gradePct) * 10) / 10).toString().replace(/\.0$/, "")}% ${downhill ? "fall" : "rise"}` },
+          arrow: downhill ? { from: pts.arrowFrom, to: pts.arrowTo } : { from: pts.arrowTo, to: pts.arrowFrom },
+        });
+      }
       const cs = padCorners(b.ring);
       const minSideFt = cs ? Math.min(Math.hypot(cs[1].x - cs[0].x, cs[1].y - cs[0].y), Math.hypot(cs[2].x - cs[1].x, cs[2].y - cs[1].y)) : 0;
       out.push({
-        id, centre: F.centre, minSideFt, spots,
+        id, centre: F.centre, minSideFt, spots, drives,
         corners: padCornerSpots(b.ring, ffe, gsInputs.existAt),
         // NEW-2 (2026-10-30): the pad's four corners + whether this building is the SELECTED one (its edit buttons are on screen), so the
         // canvas can slide a corner tag clear of them (lib/padCornerTag.js)

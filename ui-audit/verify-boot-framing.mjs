@@ -226,8 +226,12 @@ async function backgroundedArm() {
       elId = el.getAttribute("data-el-id");
       const b = el.getBoundingClientRect();
       const t = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
-      const owner = t && t.closest ? t.closest("[data-el-id]") : null;
-      hit = owner ? owner.getAttribute("data-el-id") : (t ? `<${(t.tagName || "?").toLowerCase()}>` : null);
+      /* B2671224 — chrome painted ON an element (its label, dimension, grips) carries its owner's
+         data-feature key but not its data-el-id, so asking only for [data-el-id] reported a press that
+         DID reach the element's own feature as "<text>" (a blank-canvas verdict). Any feature owner
+         is the answer; only a bare tag with no feature owner means the press missed. */
+      const owner = t && t.closest ? t.closest("[data-el-id], [data-feature]") : null;
+      hit = owner ? (owner.getAttribute("data-el-id") || owner.getAttribute("data-feature")) : (t ? `<${(t.tagName || "?").toLowerCase()}>` : null);
     }
     /* el-tier: `els` is this arm's VACUITY PRECONDITION, not a census of plan contents — an arm
        whose fixture drew no element cannot ask whether a press reaches one, and must say so
