@@ -14648,6 +14648,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freezeFfe) ? { ...m, padElevFt: freezeFfe, ffeBasis: "typed" } : m;
     }));
   };
+  /* NEW-1 ("Fit the biggest building") — what the lazy fit code reads off the plan, and the ONE way its answer goes back on it. Both are called
+   * from the grading controller (owner-only); nothing here imports the search. `source`: the building the template comes from (null = none on
+   * the plan → a default cross-dock), its attached elements, the centerline roads, the plan's standards. `apply`: ONE undoable action —
+   * the selected building is resized / moved / turned through the planner's OWN resize path (`refitChildren`: its courts, trailer rows, buffers,
+   * walks and bump-outs are re-laid exactly as a hand resize does) and takes the fitted finished floor as a typed one; with no building a
+   * cross-dock is created with its court + trailer row + buffer on each long side. */
+  const grFitSource = (buildingId) => {
+    const b = buildingId ? els.find((x) => x.id === buildingId && x.type === "building" && !x.dogEar && !x.points) : null;
+    return {
+      building: b || null,
+      kids: b ? els.filter((x) => x.attachedTo === b.id) : [],
+      roads: els.filter((e) => e.type === "road" && Array.isArray(e.pts) && e.pts.length >= 2).map((e) => e.pts),
+      settings,
+    };
+  };
+  const grApplyFit = (cand, { buildingId } = {}) => {
+    const box = cand && cand.box;
+    if (!box) return;
+    const ffe = Math.round(cand.ffe * 2) / 2;
+    const b = buildingId ? els.find((x) => x.id === buildingId && x.type === "building") : null;
+    pushHistory();
+    if (b) {
+      const kids = wallKids(b);
+      setEls((a) => refitChildren(a, b.id, { cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: box.rot }, kids, { userResize: true, dragAxis: { w: true, h: true } })
+        .map((x) => (x.id === b.id ? { ...x, padElevFt: ffe, ffeBasis: "typed" } : x)));
+      setSel({ kind: "el", id: b.id });
+      return;
+    }
+    const nb = { id: uid(), type: "building", cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: ((box.rot % 360) + 360) % 360, dock: "cross", dockAxis: "x", dockSide: "bottom", padElevFt: ffe, ffeBasis: "typed" };
+    setEls((a) => {
+      let next = [...a, nb];
+      for (const side of ["top", "bottom"]) {
+        const court = makeCourtZone(nb, side), tz = makeTrailerZone(nb, court), bz = makeBufferZone(nb, tz);
+        next = relayoutSide([...next, court, tz, bz], nb, side);
+      }
+      return next;
+    });
+    setSel({ kind: "el", id: nb.id });
+  };
+  // E2E-gated read of the two doors above (same `window.__PLANYR_E2E` gate as the other hooks; never runs in production): the owner gate keeps the Fit
+  // button off for every test account, so e2e/fit-building-apply drives the planner's real apply path through this.
+  const grFitDoorRef = useRef(null);
+  grFitDoorRef.current = { source: grFitSource, apply: grApplyFit };
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
+    const hook = { source: (...a) => grFitDoorRef.current.source(...a), apply: (...a) => grFitDoorRef.current.apply(...a) };
+    window.__plannerFit = hook;
+    return () => { if (window.__plannerFit === hook) window.__plannerFit = null; };
+  }, []);
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
   // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
   const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
@@ -14965,6 +15014,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
     accent: PAL.accent, isDragging: () => !!drag.current,
     limitEditing: !!grLimitEdit, limitHighlight: grLimitEdit ? grLimitEdit.highlight : null,
+    fit: { source: grFitSource, apply: grApplyFit },
     actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly, setLimitMode: grSetLimitMode, editLimit: grEditLimit, doneEditLimit: grDoneEditLimit, resetLimit: grResetLimit },
   } : null;
 
@@ -25708,7 +25758,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* Owner-only grading layers ("Level-pad limit at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
-              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
+              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit || (grModel.fit && grModel.fit.ghost)) && (
                 <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} viewPx={canvasBoxPx} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {

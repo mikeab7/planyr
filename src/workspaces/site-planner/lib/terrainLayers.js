@@ -106,15 +106,22 @@ function workerSlot(label) {
     };
     return worker;
   };
-  // post one job → a promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash)
-  const post = (msg, transfer = []) => new Promise((resolve, reject) => {
+  // post one job → { id, promise }: the promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash). The id is
+  // what a caller cancels by ("Fit the biggest building" — the worker never answers a cancel).
+  const postJob = (msg, transfer = []) => {
     const id = ++seq;
-    pending.set(id, { resolve, reject });
-    try { get().postMessage({ id, ...msg }, transfer); }
-    catch (e) { pending.delete(id); reject(e); }
-  });
+    const promise = new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      try { get().postMessage({ id, ...msg }, transfer); }
+      catch (e) { pending.delete(id); reject(e); }
+    });
+    return { id, promise };
+  };
+  const post = (msg, transfer = []) => postJob(msg, transfer).promise;
+  // fire-and-forget (a cancel): no reply is registered
+  const fire = (msg) => { try { if (worker) worker.postMessage({ id: ++seq, ...msg }); } catch (_) { /* a dead worker has nothing left to cancel */ } };
   const dispose = () => { try { worker && worker.terminate(); } catch (_) {} worker = null; };
-  return { post, dispose };
+  return { post, postJob, fire, dispose };
 }
 const tileWorker = workerSlot("terrain");
 const gradingWorker = workerSlot("grading");
@@ -125,6 +132,12 @@ if (import.meta.hot) import.meta.hot.dispose(() => { tileWorker.dispose(); gradi
  * resolves with the worker's reply, rejects LOUDLY. */
 export function runBuildableJob(payload) {
   return gradingWorker.post({ kind: "buildable", ...payload });
+}
+/* NEW-1 ("Fit the biggest building") — the search for the biggest building the ground holds, on the GRADING worker: resolves with the worker's
+ * reply ({ result } or { cancelled: true }), rejects LOUDLY; `cancel()` tells the worker to stop it at the next slice. */
+export function runFitJob(payload) {
+  const j = gradingWorker.postJob({ kind: "buildable", op: "fit", ...payload });
+  return { promise: j.promise, cancel: () => gradingWorker.fire({ kind: "fit-cancel", target: j.id }) };
 }
 /* ROUND 7 (NEW-1) — trace the slope band's outline on the grading worker: { values: Float32Array (the band field), nx, ny }
  * → { rings, holes } in lattice pixels. The values buffer is TRANSFERRED. */
