@@ -13,6 +13,7 @@
  * server-side (export image) so each agency's standard symbology comes through.
  */
 import * as EL from "esri-leaflet";
+import { guardRasterErrors } from "./parcelOpacityGuard.js"; // NEW-1 (2026-11-12): an /export image failing after its row was switched off must not throw "removeLayer of null"
 import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
@@ -2153,7 +2154,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // <img> — the proxy caching win isn't worth a swap dance inside a child layerGroup.
           buildRaster: () => {
             const fb = cfg.imageFallback || {};
-            return EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, lyrPane, { proxy: false }));
+            return guardRasterErrors(EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, lyrPane, { proxy: false })));
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
@@ -2219,8 +2220,8 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             const buildRaster = (part, proxy) => {
               const pc = partOf(part), pp = paneOf(part.role, above).pane;
               return cfg.kind === "esriImage"
-                ? EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy }))
-                : EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy }));
+                ? guardRasterErrors(EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy })))
+                : guardRasterErrors(EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy })));
             };
             // Honest status wiring (NEW-3/B790): status starts at "loading" and settles ONLY on the
             // real 'load' event; a stall watchdog flips it to amber "slow" if the export never lands
