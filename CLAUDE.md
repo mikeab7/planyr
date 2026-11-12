@@ -14,6 +14,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **`docs/REFERENCE.md`** — deep implementation detail (Site Model schema, layer/GIS
 >   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
 > - **`docs/VERIFICATION-TRIAGE-2026-11-11.md`** (+ `.json`) — the 2026-11-11 sort of every pending `V#` into A (a session can do it: harness named) / B (only Michael: deduplicated sittings) / C (dead paper). **Start here when working the pending verification queue**; re-read each item's live text first — it is a snapshot.
+> - **`docs/ACTIVE-AREAS.md`** — the weekly "where people are working" sweep's ledger: one section per `sites.county` key (counts + parcels/tax/zoning/water/site-killers checklist + open `B#`s), REPLACED each sweep. Read it when choosing which county to harden next.
 > - **`docs/DATA.md`** — the data bible: entity ownership, invariants, one-answer functions,
 >   causal units, the failure contract, the destructive-action contract (read below).
 > - **`docs/AGENT-RULES.md`** — the verification, measurement, and merge rules already paid for
