@@ -31,6 +31,9 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — Hamilton County TN's own ArcGIS Server (Live_Parcels, the Assessor's tax-map parcels), MEASURED through this relay before tn_hamilton was wired. The two other
    * probe hosts (pwgis.chattanooga.gov, gis.mcgtn.org) were measured the same way and are NOT listed: nothing uses them. */
   "mapsdev.hamiltontn.gov", // Hamilton County TN GIS
+  /* NEW-3 (Metro Nashville sweep, 2026-11-12) — Metro Nashville's own ArcGIS Server: the NashvilleNext Community Character Policy (Planning/CCM/MapServer/2, 33,105 polygons, measured by the 2026-11-01 sweep).
+   * The build sandbox is refused (CONNECT 403) and the browser CORS header is unmeasured, so the policy row reads it through here; the PR preview's relay is where it is first measured. */
+  "maps.nashville.gov", // Metro Nashville & Davidson County GIS server
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   /* NEW-1 (Mississippi due-diligence layers) — MDEQ's own two ArcGIS servers (Land & Water / Geology, and Pollution Control); the build sandbox reaches neither, so every layer on them was
    * MEASURED through this relay on the PR preview. (MARIS, gis.mississippi.edu, is listed above.) */

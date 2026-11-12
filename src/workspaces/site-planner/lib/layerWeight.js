@@ -153,6 +153,8 @@ export const LAYER_TIER = {
   sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network
   sl_water_valves: "reference", sl_water_control_valves: "reference", sl_manholes: "reference", sl_cleanouts: "reference",
   sl_lift_stations: "reference", sl_wwtp: "reference", sl_water_plants: "reference", sl_water_wells: "reference",
+  // Metro Nashville (NEW-1, 2026-11-12): zoning, overlays, the downtown code and PUDs are look-ups; the NashvilleNext policy is planning-intent wash.
+  tn_nash_zoning: "reference", tn_nash_overlays: "reference", tn_nash_dtc: "reference", tn_nash_pud: "reference", tn_nash_ccm: "context",
   sl_flu: "context",
   sl_zoning_cup: "context",
   sl_zoning_exception: "context",

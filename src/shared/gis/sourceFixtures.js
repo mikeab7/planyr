@@ -23,6 +23,7 @@
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
 // NEW-1 (2026-11-12) — known parcels the NIGHTLY parcel health job re-queries by id (ui-audit/parcel-source-health-sweep.mjs).
@@ -33,6 +34,7 @@ export const SOURCE_FIXTURES = {
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
   ...SUGARLAND_FIXTURES,
+  ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
@@ -1507,6 +1509,7 @@ export const SOURCE_DOCS = {
 ...FLORIDA_DOCS,
   ...OK_DOCS,
   ...SUGARLAND_DOCS,
+  ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },
