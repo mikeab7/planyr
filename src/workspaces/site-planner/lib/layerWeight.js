@@ -298,6 +298,13 @@ export const LAYER_TIER = {
   tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
   tn_cemeteries: "reference",
   tn_crit_habitat: "reference",
+  // Metro Nashville (NEW-1 / NEW-2): the water-quality buffers take land off a site (stormwater rules forbid building in them); the pending / preliminary flood maps are not adopted, so a look-up fact until they are.
+  nash_stream_buffer: "constraint",
+  nash_pond_buffer: "constraint",
+  nash_wetland_buffer: "constraint",
+  nash_floodway_buffer: "constraint",
+  nash_flood_pending: "reference",
+  nash_flood_preliminary: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

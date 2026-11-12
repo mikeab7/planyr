@@ -122,6 +122,20 @@ const COUNTY_AREA = (key, name, label) => {
   if (!rec) throw new Error(`${label} not found in the county polygon asset`);
   areas[key] = { label, source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 };
+/* NEW-1 (Nashville stream/pond/wetland buffers + Metro pending flood maps): davidson_tn, Davidson County TN (Nashville-Davidson), from METRO'S OWN county boundary (DavidsonCountyBoundaryBuffer layer 0, the same ArcGIS Online
+ * org as the buffer and flood services). State-suffixed because Davidson County NC exists. NOT the bundled county polygons: those are a 38-vertex outline that leaves out the county's north tip (Goodlettsville / Joelton,
+ * ~1.6% of Metro's buffer polygons — measured 2026-11-12), and a region that errs toward HIDING a layer where its data exists is the one thing a region must not do.
+ * Metro's stormwater regulation buffers and its FEMA pending / preliminary maps are declared for this area. Server-simplified to ~50 m; `serviceAreas.areaContains` probes a ring around the site on top of that. */
+if (want("davidson_tn")) {
+  const gj = await q("https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/DavidsonCountyBoundaryBuffer/FeatureServer/0/query", { where: "1=1", maxAllowableOffset: 0.0005 });
+  if (!gj.features || gj.features.length !== 1) throw new Error(`davidson_tn: expected Metro's single boundary feature, got ${gj.features && gj.features.length}`);
+  /* ⛔ the layer is a MASK, not the county: its outer ring is the county buffered outward and the COUNTY itself is the hole (measured 2026-11-12: ring 0 = the buffer, bbox -87.062..-86.508 × 35.962..36.411; ring 1 = the county,
+   * -87.055..-86.515 × 35.968..36.406; ring 2 = a 5-vertex notch). Taking the polygon whole would offer the layers everywhere in the mask but not inside the county, so the region is the LARGEST INNER RING. */
+  const area = (r) => Math.abs(r.reduce((a, [x1, y1], i) => { const [x2, y2] = r[(i + 1) % r.length]; return a + (x1 * y2 - x2 * y1); }, 0) / 2);
+  const rings = polysOf(gj).flatMap((poly) => poly.slice(1)).sort((a, b) => area(b) - area(a));
+  if (!rings.length) throw new Error("davidson_tn: Metro's boundary layer no longer has an inner ring — it was a mask when this was written; read the layer again");
+  areas.davidson_tn = { label: "Davidson County (Nashville), TN", source: "Metro Nashville & Davidson County — county boundary (the inner ring of DavidsonCountyBoundaryBuffer layer 0, services2.arcgis.com/HdTo6HJqh92wn4D8)", polys: [[rings[0]]] };
+}
 if (want("co_weld")) COUNTY_AREA("co_weld", "weld", "Weld County, CO");
 if (want("co_adams")) COUNTY_AREA("co_adams", "adams", "Adams County, CO");
 if (want("co_aurora")) {
