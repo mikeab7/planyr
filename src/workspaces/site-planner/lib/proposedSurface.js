@@ -58,7 +58,7 @@
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
-import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, driveProfile, driveZAt } from "./driveGrade.js";
+import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, driveProfile, driveZAt, driveZNear } from "./driveGrade.js";
 
 /* Run a step generator to completion, synchronously. Its return value is the answer. */
 export function drainSteps(gen) {
@@ -202,6 +202,7 @@ export function slopeBand(classId, rule) {
 export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null, existAt = null } = {}) {
   const planes = new Map();
   const driveEls = [];
+  const driveWhy = new Map();   // drive id → why it is not a plane (read-only; the live diagnostic prints it)
   const byIdEl = grading ? new Map(els.filter((e) => e && e.id != null).map((e) => [e.id, e])) : null;
   const pavSlopeG = grading ? Math.max(GRADING_DEFAULTS.minPavementSlopePct, Number.isFinite(grading.pavementSlopePct) ? grading.pavementSlopePct : GRADING_DEFAULTS.pavementSlopePct) : 0;
   const lotDropG = grading && Number.isFinite(grading.lotDropFt) ? grading.lotDropFt : GRADING_DEFAULTS.lotDropFt;
@@ -310,18 +311,32 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
   // tie-in. It needs a ground sampler and a served plane; without either it is simply not a plane (the old behaviour), never a guess.
   for (const el of driveEls) {
     const D = el.drive;
-    if (!D || !Array.isArray(D.path) || D.path.length < 2 || !Array.isArray(el.ring) || el.ring.length < 3 || typeof existAt !== "function") { skipped.push(el.id); continue; }
+    if (!D || !Array.isArray(D.path) || D.path.length < 2 || !Array.isArray(el.ring) || el.ring.length < 3 || typeof existAt !== "function") { skipped.push(el.id); driveWhy.set(el.id, typeof existAt !== "function" ? "no ground sampler yet" : "no usable centerline or footprint"); continue; }
     const far = D.path[D.path.length - 1];
+    // the paved plane the drive serves: the one its far END touches (or lies within DRIVE_TARGET_REACH_FT of) — or that any corner of the drive's own footprint lies inside
+    // (a drive laid over the edge of a court meets it even where its end point sits a little short)
     let target = null, td = Infinity;
     for (const e2 of els) {
       const pl = planes.get(e2.id);
       if (!pl || pl.classId === "buildingPad" || pl.classId === "driveInRamp" || pl.classId === "driveRoad" || !Array.isArray(e2.ring)) continue;
       const q = pointInRing(far, e2.ring) ? far : nearestOnRing(far, e2.ring);
-      const dd = q ? Math.hypot(far.x - q.x, far.y - q.y) : Infinity;
+      let dd = q ? Math.hypot(far.x - q.x, far.y - q.y) : Infinity;
+      if (dd > 0) for (const v of el.ring) if (pointInRing(v, e2.ring)) { dd = 0; break; }
       if (dd < td) { td = dd; target = pl; }
     }
-    const zTie = existAt(D.tie);
-    if (!target || td > DRIVE_TARGET_REACH_FT || !Number.isFinite(zTie)) { skipped.push(el.id); continue; }
+    // the road's elevation at the line: the ground at the tie-in — and, where the sampler has no value exactly there (a void on the edge of the data), the first value a few
+    // feet along the drive; a drive with no ground under it at all is not graded, and says so
+    let zTie = existAt(D.tie);
+    if (!Number.isFinite(zTie)) for (const sFt of [3, 8, 15]) {
+      const v = driveZNear(D.path, sFt);
+      const zz = v ? existAt(v) : null;
+      if (Number.isFinite(zz)) { zTie = zz; break; }
+    }
+    if (!target || td > DRIVE_TARGET_REACH_FT || !Number.isFinite(zTie)) {
+      skipped.push(el.id);
+      driveWhy.set(el.id, !target || td > DRIVE_TARGET_REACH_FT ? `its far end is ${Number.isFinite(td) ? Math.round(td) + " ft" : "far"} from any graded court / lot (needs to touch one, within ${DRIVE_TARGET_REACH_FT} ft)` : "no ground elevation at the property line");
+      continue;
+    }
     let lengthFt = 0;
     for (let i = 0; i + 1 < D.path.length; i++) lengthFt += Math.hypot(D.path[i + 1].x - D.path[i].x, D.path[i + 1].y - D.path[i].y);
     const g0 = grading || {};
@@ -331,7 +346,7 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       landingPct: Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct,
       maxGradePct: Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct,
     });
-    if (!prof) { skipped.push(el.id); continue; }
+    if (!prof) { skipped.push(el.id); driveWhy.set(el.id, "no profile (zero length or a non-numeric elevation)"); continue; }
     const dirV = norm(far.x - D.tie.x, far.y - D.tie.y);
     planes.set(el.id, {
       elId: el.id, classId: "driveRoad", label: "Drive", baseElevFt: zTie, anchor: D.tie, dir: dirV, slopePct: Math.abs(prof.gradePct), floating: false,
@@ -340,7 +355,7 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       zAt: driveZAt(D.path, prof),
     });
   }
-  return { planes, skipped };
+  return { planes, skipped, driveWhy };
 }
 
 /* ---- composite grid ----
@@ -1743,7 +1758,7 @@ export function buildProposedSurface(args) { return drainSteps(buildProposedSurf
  * (lib/useGradeSurface.js, GradingController) so no step holds the main thread past a lattice column.
  * `buildProposedSurface` drains it synchronously: one implementation, identical results. */
 export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
-  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading, existAt });
+  const { planes, skipped, driveWhy } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading, existAt });
   if (!planes.size) return null;
   yield;
   // The grading model rides OPTS into the lattice (maxCells defaults up so a 520′ building keeps ~8′ cells).
@@ -1769,7 +1784,7 @@ export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt 
     grading && grading.limit ? `lm:${grading.limit.mode || "layout"}:${grading.limit.shoulderFt ?? ""}:${grading.limit.cornerRadiusFt ?? ""}:${grading.limit.aisleFt ?? ""}:${grading.limit.maxPavementSlopePct ?? ""}:${grading.limit.maxCutFillFt ?? ""}:${grading.limit.edited ? ringHash(grading.limit.edited) : "-"}:${(grading.limit.extraRings || []).map((r) => ringHash(r)).join(",")}:${(grading.limit.setbackHoles || []).map((r) => ringHash(r)).join(",")}:${pondRings.map((r) => ringHash(r)).join(",")}` : "",
     els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}${e.drive ? `:dr${e.drive.path.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}` : ""}`).join("|"),
   ].join("~");
-  return { planes, grid, violations, skipped, daylight, fieldT: clamp01(fieldT), surfaceKey };
+  return { planes, grid, violations, skipped, driveWhy, daylight, fieldT: clamp01(fieldT), surfaceKey };
 }
 
 /* Net dirt in CY: + = import (buy dirt), − = export (haul off). shrinkFactor converts

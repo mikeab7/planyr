@@ -15,6 +15,7 @@
  * Pure, no DOM, feet and ft NAVD88. Screening only. */
 import ClipperLib from "clipper-lib";
 import { pointInRing } from "./pondGeom.js";
+import { unionRings } from "./gradingLimit.js";
 
 export const GRADING_DRIVE_DEFAULTS = Object.freeze({
   driveMaxGradePct: 8,     // the steepest constant grade a drive may run (a Standards value; the panel gear edits it)
@@ -182,4 +183,44 @@ export function driveRingOnSite(ring, parcelRings, farPt = null) {
   const area = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a / 2); };
   if (farPt) { const hold = rings.filter((r) => pointInRing(farPt, r)); if (hold.length) return hold.sort((a, b) => area(b) - area(a))[0]; }
   return rings.sort((a, b) => area(b) - area(a))[0];
+}
+
+/* THE PROPERTY LINE, properly: the OUTER boundary of the union of the active parcels. A site is often several lots (county lots, a split, a combine); the line a road
+ * ties into is the edge of the whole, never a lot line shared with a neighbour that is also on the site (a road that starts inside the next lot would otherwise read as
+ * "inside" and never tie). Returns outer rings only; falls back to the raw rings if the union fails. */
+export function propertyLineRings(parcelRings) {
+  const rings = (parcelRings || []).filter((r) => r && r.length >= 3);
+  if (rings.length < 2) return rings;
+  try { const u = unionRings(rings).map((g) => g.outer).filter((r) => r && r.length >= 3); return u.length ? u : rings; } catch (_) { return rings; }
+}
+
+/* WHY a centerline is or is not a drive — the read-only explanation behind `driveTieOf` (the diagnostic `window.__plannerGradeDrive` prints it, so a live check says
+ * "not a drive because …" instead of leaving a road that looks like one unexplained). Never used to decide anything. */
+export function driveDiagnose(pts, parcelRings, { snapFt = DRIVE_SNAP_FT } = {}) {
+  const rings = (parcelRings || []).filter((r) => r && r.length >= 3);
+  if (!Array.isArray(pts) || pts.length < 2) return { drive: false, reason: "not a centerline road" };
+  if (!rings.length) return { drive: false, reason: "no active parcel" };
+  const ends = [0, pts.length - 1].map((idx) => {
+    const p = pts[idx], nr = nearestOnRings(p, rings);
+    return { idx, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, inside: insideAny(p, rings), edgeFt: nr ? Math.round(nr.d * 10) / 10 : null };
+  });
+  const t = driveTieOf(pts, rings, { snapFt });
+  if (t) return { drive: true, ends, tie: { x: Math.round(t.tie.x * 10) / 10, y: Math.round(t.tie.y * 10) / 10 }, tieEnd: t.tieEnd };
+  const ins = ends.filter((e) => e.inside).length;
+  const reason = ins === 2 ? "both ends are inside the property and neither ends within " + snapFt + " ft of the line"
+    : ins === 0 ? "neither end is on the property (it crosses the whole site or lies outside it)"
+    : "one end is on the property, the other end is outside, but the line was not crossed on the site";
+  return { drive: false, reason, ends };
+}
+
+/* The point `sFt` along a drive's centerline path from the tie-in (clamped to the far end). */
+export function driveZNear(path, sFt) {
+  let acc = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i], b = path[i + 1], L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L < EPS) continue;
+    if (sFt <= acc + L) { const t = (sFt - acc) / L; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; }
+    acc += L;
+  }
+  return path.length ? path[path.length - 1] : null;
 }

@@ -9,7 +9,7 @@
 // "profile", and "no grading past the line" all fail there (the drive type does not exist). The Chehaw arm replays the owner's bug on the real ground.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { driveTieOf, driveProfile, driveZAt, driveRingOnSite, GRADING_DRIVE_DEFAULTS } from "../src/workspaces/site-planner/lib/driveGrade.js";
+import { driveTieOf, driveProfile, driveZAt, driveRingOnSite, propertyLineRings, driveDiagnose, driveZNear, GRADING_DRIVE_DEFAULTS } from "../src/workspaces/site-planner/lib/driveGrade.js";
 import { buildProposedSurface, buildPlanes, __setDrainGeometryCache, __clearDrainGeometry } from "../src/workspaces/site-planner/lib/proposedSurface.js";
 import { gradingCfg, gradingPack, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { driveFlags } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
@@ -306,5 +306,74 @@ describe("the FFE search rebuilds the surface many times — a drive's profile f
     expect(on796.grid.cells.length).toBe(off796.grid.cells.length);
     for (let i = 0; i < on796.grid.cells.length; i++) expect(on796.grid.cells[i].dzFt).toBe(off796.grid.cells[i].dzFt);
     expect(on796.surfaceKey).not.toBe(on790.surfaceKey);
+  });
+});
+
+/* ---- V2115881 re-opened (2026-11-12): the owner's live check on a plain Road drawn from just outside the west line to a trailer row ---- */
+describe("the property line is the OUTER edge of the whole site, not a lot line inside it", () => {
+  const WEST = rect(-400, 0, 400, 600), EAST = rect(0, 0, 1000, 600);          // two active lots sharing the line x = 0; the road starts in the WEST lot
+  it("propertyLineRings dissolves adjoining lots into one outline", () => {
+    const u = propertyLineRings([WEST, EAST]);
+    expect(u.length).toBe(1);
+    const xs = u[0].map((p) => p.x);
+    expect(Math.min(...xs)).toBeCloseTo(-400, 6); expect(Math.max(...xs)).toBeCloseTo(1000, 6);
+    expect(propertyLineRings([EAST]).length).toBe(1);
+  });
+  it("a road that starts OUTSIDE the west lot ties at the site's real edge; judged against the raw lots (the shared line) it would not", () => {
+    const pts = [{ x: -460, y: 300 }, { x: 330, y: 300 }];
+    const t = driveTieOf(pts, propertyLineRings([WEST, EAST]));
+    expect(t.tie.x).toBeCloseTo(-400, 3);
+  });
+  it("a road that starts INSIDE the neighbouring lot, 3 ft off the shared line, is NOT a drive (that line is not the property line)", () => {
+    expect(driveTieOf([{ x: -3, y: 300 }, { x: 330, y: 300 }], propertyLineRings([WEST, EAST]))).toBeNull();
+  });
+});
+
+describe("driveDiagnose — says WHY a centerline is or is not a drive (the live diagnostic prints it)", () => {
+  it("a tied road: drive, with the tie and the end that is out on the road side", () => {
+    const d = driveDiagnose([{ x: -60, y: 300 }, { x: 330, y: 300 }], [PARCEL]);
+    expect(d.drive).toBe(true); expect(d.tie.x).toBeCloseTo(0, 1); expect(d.tieEnd).toBe(0);
+  });
+  it("names each way it can fail", () => {
+    expect(driveDiagnose([{ x: 100, y: 300 }, { x: 330, y: 300 }], [PARCEL]).reason).toMatch(/both ends are inside/);
+    expect(driveDiagnose([{ x: -200, y: 300 }, { x: -50, y: 300 }], [PARCEL]).reason).toMatch(/neither end is on the property/);
+    expect(driveDiagnose([{ x: 100, y: 300 }, { x: 330, y: 300 }], []).reason).toMatch(/no active parcel/);
+  });
+});
+
+describe("the drive finds the court it serves, and says why it could not", () => {
+  const cfg = () => gradingCfg({ enabled: true });
+  const pack = () => gradingPack(cfg(), { parcelRings: [PARCEL], holes: [], rings: [PARCEL] });
+  const els0 = () => ([
+    { id: "b", type: "building", ring: rect(500, 150, 400, 300), padElevFt: 790, dockStack: null, accessible: false, slopeOverridePct: null },
+    { id: "c", type: "paving", ring: rect(330, 150, 170, 300), dockStack: { x: 700, y: 300 }, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b", truckCourt: true },
+  ]);
+  const drive = (toX, width = 30) => {
+    const centre = [{ x: -60, y: 300 }, { x: toX, y: 300 }], t = driveTieOf(centre, [PARCEL]);
+    return { id: "d", type: "drive", ring: driveRingOnSite(rect(-60, 300 - width / 2, toX + 60, width), pack().setbackRings, centre[1]), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: t.tie, path: t.path } };
+  };
+  it("a drive that ends 10 ft short of the court still meets it (within the reach)", () => {
+    const { planes } = buildPlanes({ els: [...els0(), drive(320)], ffeFt: null, dockDropFt: 4, existAt: () => 805, grading: pack() });
+    expect(planes.get("d").drive.targetId).toBe("c");
+  });
+  it("a drive whose END is short but whose own footprint runs over the court's edge meets it too", () => {
+    const d = drive(322, 30);                                                   // the strip is clipped at the fence but its far end overlaps nothing: widen it over the edge
+    d.ring = driveRingOnSite(rect(-60, 285, 410, 30), pack().setbackRings, { x: 322, y: 300 });
+    const { planes } = buildPlanes({ els: [...els0(), d], ffeFt: null, dockDropFt: 4, existAt: () => 805, grading: pack() });
+    expect(planes.has("d")).toBe(true);
+  });
+  it("a drive that ends in open ground, far from any court, is not a plane — and the surface says exactly why", () => {
+    const s = buildProposedSurface({ els: [...els0(), drive(150)], ffeFt: null, dockDropFt: 4, existAt: () => 805, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "why" }, grading: pack() });
+    expect(s.planes.has("d")).toBe(false);
+    expect(s.driveWhy.get("d")).toMatch(/far end is .* ft from any graded court \/ lot/);
+  });
+  it("a hole in the ground data exactly at the line: the first value a few feet along the drive stands in; no ground at all → not a plane, said so", () => {
+    const tie = driveTieOf([{ x: -60, y: 300 }, { x: 330, y: 300 }], [PARCEL]).tie;
+    const hole = (pt) => (Math.hypot(pt.x - tie.x, pt.y - tie.y) < 1 ? null : 805);
+    const a = buildPlanes({ els: [...els0(), drive(330)], ffeFt: null, dockDropFt: 4, existAt: hole, grading: pack() });
+    expect(a.planes.get("d").drive.zTie).toBe(805);
+    const b = buildPlanes({ els: [...els0(), drive(330)], ffeFt: null, dockDropFt: 4, existAt: () => null, grading: pack() });
+    expect(b.planes.has("d")).toBe(false); expect(b.driveWhy.get("d")).toMatch(/no ground elevation/);
+    expect(driveZNear([{ x: 0, y: 0 }, { x: 10, y: 0 }], 4)).toEqual({ x: 4, y: 0 });
   });
 });
