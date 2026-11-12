@@ -50,7 +50,7 @@ export function groupEntriesFor(layers, panelGroup) {
 /* ── Location ───────────────────────────────────────────────────────────────────────────────── */
 
 /* DECLARED region scopes. A registry row names the region(s) its source can serve with `regions: [...]`; two kinds of name:
- *   · a CIRCLE in this table — only `houston_metro`, the USGS growth-fault STUDY extent (a metro-scale study, not an agency's area);
+ *   · a CIRCLE in this table — only `houston_metro`, the USGS growth-fault STUDY extent (a metro-scale study, not an agency's area) — or a BOX (`tx_gulf_evac`, the extent of the Zip-Zone layer);
  *   · a real BOUNDARY in lib/serviceAreas.js (built into serviceAreaData.js): `harris` (HCFCD's channels), `houston` (the City of
  *     Houston limits + ETJ — its water / sewer / storm / hydrant data), `bkdd` (the Brookshire–Katy Drainage District).
  * Declared, never inferred from coverage (owner 2026-10-11) — coverage is a live, view-dependent guess, a region is a standing fact
@@ -58,6 +58,9 @@ export function groupEntriesFor(layers, panelGroup) {
  * Brazoria; none of those sources serves them — B2436066.) */
 export const REGION_ZONES = Object.freeze({
   houston_metro: Object.freeze({ lat: 29.7604, lng: -95.3698, radiusMiles: 65, label: "Houston metro (growth-fault study area)" }),
+  /* A BOX, not a circle (NEW-3, 2026-11-12): the extent of the Harris County GIS hurricane evacuation Zip-Zone layer (Web-Mercator extent -10736722..-10481985, 3291241..3499243 read as lon/lat) —
+   * Brazoria to the Chambers / Jefferson line. `bbox` is [west, south, east, north]. */
+  tx_gulf_evac: Object.freeze({ bbox: Object.freeze([-96.45, 28.33, -94.16, 29.97]), label: "Texas Gulf coast hurricane evacuation Zip-Zone extent" }),
 });
 
 const toRad = (d) => (d * Math.PI) / 180;
@@ -75,6 +78,7 @@ export function inRegion(region, loc) {
   if (!loc) return null;
   const lat = Number(loc.lat), lng = Number(loc.lng != null ? loc.lng : loc.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (z.bbox) { const [w, s, e, n] = z.bbox; return lng >= w && lng <= e && lat >= s && lat <= n; }
   return distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles;
 }
 

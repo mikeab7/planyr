@@ -96,6 +96,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/oklahomaLayers.js", // NEW-1 (Oklahoma screening) — registry rows of the same kind as layers.js: map ink for drawn wells, cleanup sites, dams, tribal areas and protected waters
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
   "src/workspaces/site-planner/lib/sugarLandLayers.js", // NEW-1 (City of Sugar Land) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn washes, lines and points (the legend colours), not chrome
+  "src/workspaces/site-planner/lib/houstonMetroLayers.js", // NEW-1/2/3 (Houston-metro sweep, 2026-11-12) — registry rows of the same kind as layers.js / sugarLandLayers.js: map ink for the thoroughfare-plan classes (the City's own renderer colours), the nine airport tiers and the evacuation zones, plus their legend swatches — not chrome
   "src/workspaces/site-planner/lib/sugarLandZoning.js", // NEW-1 (City of Sugar Land) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js
   "src/workspaces/site-planner/lib/sugarLandThoroughfare.js", // NEW-1 (City of Sugar Land) — the thoroughfare-class line ink (map ink and legend read one table), not chrome
   "src/workspaces/site-planner/lib/sugarLandUtilities.js", // NEW-1 (City of Sugar Land water / sewer, 2026-11-06) — the water / sewer line and point ink (map ink and legend read one table), not chrome

@@ -147,6 +147,9 @@ export const LAYER_TIER = {
   // City of Sugar Land (NEW-1, 2026-11-02): a height zone around the airport binds the parcel; the rest are look-ups or orientation / incentive wash.
   sl_airport_zoning: "constraint",
   sl_thoroughfare: "reference",
+  harris_mtfp: "reference",         // NEW-1 (2026-11-12): the City of Houston thoroughfare plan — a fact you look up
+  has_airport_tiers: "constraint",   // NEW-2: the City regulates building height by airport tier
+  tx_evac_zones: "reference",        // NEW-3: an insurance / emergency-planning flag, not the floodplain
   sl_zoning: "reference",
   sl_public_land: "reference",
   sl_hydrants: "reference",
