@@ -16881,6 +16881,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
     // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
     etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
+    // NEW-1 — a city's own detention policy (Baytown, Mont Belvieu): additive, no rate behind it.
+    cityNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "city-note"),
     // B861 (chat NEW-2) — drainage-district membership (additive to the county). BKDD is the
     // first; districtFailed distinguishes a boundary-source outage ("membership unverified")
     // from a clean "not in a district".
