@@ -16,6 +16,7 @@ import { etjNamesOf } from "../src/workspaces/site-planner/lib/etjNames.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 import { VECTOR_SOURCES, fetchVectorFeatures } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
+import { SOURCE_FIXTURES } from "../src/shared/gis/sourceFixtures.js";
 
 function makeStore() {
   const map = new Map();
@@ -51,6 +52,16 @@ describe("the four points the brief names", () => {
     expect(j.city).toEqual(["Mont Belvieu"]);
     expect(formatJurisdictionBadge(j).text).toMatch(/Mont Belvieu/);
     expect(formatJurisdictionBadge(j).text).not.toMatch(/Unincorporated/);
+  });
+  it("Targa is inside BOTH Mont Belvieu's limits and its published ETJ polygon (measured 2026-11-12) — the city wins, the ETJ claim is withheld, never printed as 'City of Mont Belvieu ETJ'", async () => {
+    const j = await run(TARGA[0], TARGA[1], {
+      ...COUNTY, "Texas_City_Boundaries": () => [{ attributes: { city_name: "Mont Belvieu" }, geometry: sq(TARGA[0], TARGA[1]) }],
+      ...ETJ_ALL_EMPTY, [needleOf("etj_montbelvieu")]: () => [{ attributes: { NAME: "MONT BELVIEU ETJ" }, geometry: sq(TARGA[0], TARGA[1], 0.05) }],
+    });
+    expect(j.city).toEqual(["Mont Belvieu"]);
+    expect(j.etj).toEqual([]);
+    expect(formatJurisdictionBadge(j).text).toMatch(/Mont Belvieu/);
+    expect(formatJurisdictionBadge(j).text).not.toMatch(/ETJ/);
   });
   it("(-94.86, 29.89) → Mont Belvieu ETJ", async () => {
     const j = await run(MB_ETJ[0], MB_ETJ[1], {
@@ -126,6 +137,15 @@ describe("both rows are relayed, routed by bbox, and cost a Houston click nothin
       expect(GIS_SOURCES[id].states).toEqual(["TX"]);
     }
   });
+  it("every fixture point of both rows is routed to its OWN source (a bbox typo would strand the publisher)", () => {
+    for (const id of ["etj_montbelvieu", "etj_chambers_neighbors"]) {
+      for (const f of SOURCE_FIXTURES[id].fixtures) {
+        const [lng, lat] = f.point;
+        expect(etjSourcesForPoint(lat, lng).map((s) => s.id), `${id} @ ${f.label}`).toContain(id);
+      }
+      expect(SOURCE_FIXTURES[id].fixtures.length, id).toBeGreaterThanOrEqual(2);
+    }
+  });
   it("every named point is routed to the new rows; Houston, Katy and Dallas are not", () => {
     for (const [lng, lat] of [MB_ETJ, TARGA, NRG_COVE, AMERIPORT]) {
       const ids = etjSourcesForPoint(lat, lng).map((s) => s.id);
@@ -136,8 +156,8 @@ describe("both rows are relayed, routed by bbox, and cost a Houston click nothin
     expect(etjSourcesForPoint(29.79, -95.82).map((s) => s.id)).toEqual(["etj_hgac"]);          // Katy
     expect(etjSourcesForPoint(32.78, -96.8).map((s) => s.id)).not.toContain("etj_montbelvieu"); // Dallas
   });
-  it("the registry audit has no complaint about either new row's shape, state scope or tier", () => {
-    const { problems } = auditRegistry({ etj_montbelvieu: GIS_SOURCES.etj_montbelvieu, etj_chambers_neighbors: GIS_SOURCES.etj_chambers_neighbors });
-    expect(problems.filter((p) => !/fixture/i.test(p))).toEqual([]);
+  it("the registry audit (with its fixtures and reach rule) has no complaint about either new row", () => {
+    const { problems } = auditRegistry({ etj_montbelvieu: GIS_SOURCES.etj_montbelvieu, etj_chambers_neighbors: GIS_SOURCES.etj_chambers_neighbors }, SOURCE_FIXTURES);
+    expect(problems).toEqual([]);
   });
 });

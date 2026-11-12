@@ -18,6 +18,7 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
+import { CHAMBERS_LAYERS, CHAMBERS_VINTAGE, CHAMBERS_MERGE_GROUPS } from "./chambersLayers.js"; // NEW-1 (Chambers County: Mont Belvieu + Baytown zoning, utilities, Master Drainage Plan, B2671240, 2026-11-12)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
@@ -131,6 +132,7 @@ export const MERGE_GROUPS = {
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
   ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
+  ...CHAMBERS_MERGE_GROUPS, // NEW-1 (Chambers County, B2671240): Storm Drains + the two Master Drainage Plan rows
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
 };
 
@@ -1324,7 +1326,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...CHAMBERS_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1420,6 +1422,7 @@ export const LAYER_VINTAGE = {
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
   ...SUGARLAND_VINTAGE,
+  ...CHAMBERS_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,

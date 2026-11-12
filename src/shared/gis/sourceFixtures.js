@@ -976,16 +976,20 @@ export const SOURCE_FIXTURES = {
     { label: "Sunnyvale ETJ — south", point: [-96.51406, 32.75078], expectMinCount: 1 },
   ],
   },
-  /* NEW-1 (2026-11-12) — Mont Belvieu. The first point is the brief's measured Mont Belvieu ETJ site (2026-11-01); the Targa plant is the same layer's LIMITS neighbour (layer 0) and is asserted in
-   * test/chambersEtj.test.js, where a zero-count fixture would carry no weight. Second points are filled from the PR-preview measurement (the build sandbox cannot reach www.cmbgis.com). */
+  /* NEW-1 (2026-11-12) — Mont Belvieu. Every point below was verified against the live service on 2026-11-12 through the PR preview's /gis-proxy relay (the build sandbox cannot reach
+   * www.cmbgis.com): each lies inside its polygon with a 0.004° margin on all four sides, and the ETJ points lie OUTSIDE the city's limits (layer 0). The Targa plant is the reason the limits-outrank-ETJ
+   * rule matters here — it is inside BOTH layer 0 and layer 1 — and is asserted in test/chambersEtj.test.js, where a zero-count fixture would carry no weight. */
   etj_montbelvieu: {
   fixtures: [
-    { label: "Mont Belvieu ETJ — north-east of the city", point: [-94.86, 29.89], expectMinCount: 1 },
+    { label: "Mont Belvieu ETJ — north-east of the city (the brief's site, outside the limits)", point: [-94.86, 29.89], expectMinCount: 1 },
+    { label: "Mont Belvieu ETJ — far west edge, outside the limits", point: [-94.96078, 29.89792], expectMinCount: 1 },
   ],
   },
   etj_chambers_neighbors: {
   fixtures: [
-    { label: "Mont Belvieu's copy of the neighbouring ETJs — placeholder until measured on the preview", point: [-94.86, 29.89], expectMinCount: 0 },
+    { label: "Beach City ETJ — southern end", point: [-94.90825, 29.66029], expectMinCount: 1 },
+    { label: "Cove ETJ — centre", point: [-94.82899, 29.80138], expectMinCount: 1 },
+    { label: "Old River-Winfree ETJ — northern end", point: [-94.83045, 29.89004], expectMinCount: 1 },
   ],
   },
   mud: {
