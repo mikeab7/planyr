@@ -414,6 +414,335 @@
      }
     ]
    }
+  },
+  "outlook-nested-cycle": {
+   "kind": "outline",
+   "about": "NEW-1 (2026-11-12): Outlook / Word desktop (mso-list paragraphs, Word 15 markup, modelled on the committed word-numbered-outline) — a 3-level numbered outline (1. / a. / i.) with red runs and an empty <o:p> paragraph. Must arrive as three real nested levels, red and Calibri kept, no empty items, no character lost.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-legal": {
+   "kind": "outline",
+   "about": "NEW-1: the same outline numbered 1. / 1.1. / 1.1.1. (Word's legal style — the owner's own 'the 1 / 1.1 / 1.1.1 outline'). `classifyMarker` read '1.1.' as a BULLET, so the sub-levels arrived as bullets.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-restart": {
+   "kind": "outline",
+   "about": "NEW-1: decimal numbering restarting at every level (1. / 1. / 1. — how the owner described the source) and the number itself inside the red run (<span style='color:red'><![if !supportLists]>…).",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-restart-blanks": {
+   "kind": "outline",
+   "about": "NEW-1: as outlook-nested-restart, plus Word's EMPTY numbered paragraphs (a marker and nothing else) after the items — 1, 2, 1 and 2 of them, the exact counts the owner saw as blank '1.' items. None may arrive.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-restart-blanks": {
+   "kind": "outline",
+   "about": "NEW-1 (the one that matches the owner's symptoms): the blank-paragraph outline above RE-COPIED OUT OF A CHROMIUM PAGE with a real Ctrl+C (ui-audit/capture-chrome-copy.mjs — what Outlook on the web / the new Outlook / any browser puts on the clipboard). Chromium rebuilds each style attribute from its own property table, which has no `mso-list`, so the list information is GONE: each item is a hanging-indent paragraph that begins with its number as TEXT ('1.' + eight non-breaking spaces). Before the fix: the markers stayed in the text, every level read as level 1 (they are all '1.'), and the empty ones were numbered blank items.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-cycle": {
+   "kind": "outline",
+   "about": "NEW-1: the 1. / a. / i. outline re-copied out of Chromium (mso-list gone; margin shorthand `margin: 0in 0in 0in 1in`). Levels come from the margins.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-legal": {
+   "kind": "outline",
+   "about": "NEW-1: the 1. / 1.1. / 1.1.1. outline re-copied out of Chromium. Levels come from the number's depth.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
   }
  }
 }

@@ -234,6 +234,19 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-paste-menu.mjs
+      # Notes PASTE-OPTION LIVE PREVIEW (NEW-2, owner ask 2026-11-12: "like Word"). Hovering an option, or arrowing to it, shows the paste in that form in
+      # place; leaving restores it exactly; a preview adds no undo step and no save; a pick commits and one Ctrl+Z returns to the paste; Excel's table set
+      # previews too. A known-good arm (a hover on Merge must visibly change the live document) VOIDS the run; mutation-checked (history / save).
+      - name: Notes paste-option live preview (hover / arrows preview, leave restores, no undo step, no save - NEW-2, 2026-11-12)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-paste-preview.mjs
+      # Notes CARET SNAP-BACK RECORDER (NEW-3, 2026-11-12). The owner's "I click a line above the caret and it jumps back" was not reproduced, so the
+      # editor reports it when it happens (structure only). A forced snap-back MUST be recorded or the run is VOID.
+      - name: Notes caret snap-back recorder (a normal click sends nothing, a snap-back sends one structure-only event - NEW-3, 2026-11-12)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-caret-snapback.mjs
       # Notes ENGINE CONTRACT (NEW-1, 2026-11-05). What the editor relies on from Tiptap, pinned at the browser so an upgrade cannot change a
       # decided behaviour silently: Tab at the start of a paragraph after a list stays a tab character (3.33's list keymap would have
       # moved the paragraph INTO the last bullet), a dragged-then-undone column width leaves no stale <col> width, a right-click keeps a
