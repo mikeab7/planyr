@@ -1689,6 +1689,70 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-29",
   },
+  /* NEW-2 (Bartow sweep, 2026-11-12): Bartow County Water Department's own pipe network (`Water/waterdepartmentapp` on the county's ArcGIS Server, the same host as the zoning row). Measured through the relay 2026-11-12:
+   * layer 21 WaterPipe 62,770 lines — size and material are the STRING fields `SIZE_D` ("3/4"…"36") and `MAT_D` ("DIP", "PVC", "C900", "HDPE"…); the numeric `DIAMETER` / `MATERIAL` columns are NULL on every row, so nothing may read them. `DISPOSTN_D` is "EXIST" on every row (no abandoned pipe is carried).
+   * Scope is the COUNTY water department only — Cartersville and Adairsville run their own systems and publish no GIS (the card says so). The point-query endpoint errors intermittently; fixtures use envelopes, like the zoning row. */
+  gaBartowWater: {
+    key: "gaBartowWater",
+    label: "Water mains — Bartow County Water Department (Bartow County GIS)",
+    provider: "Bartow County Water Department — water pipes (the county's own ArcGIS Server, Water/waterdepartmentapp layer 21)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/Water/waterdepartmentapp/MapServer/21",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { size: "SIZE_D", material: "MAT_D" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  /* NEW-2: the same department's sanitary sewer (`Water/waterdepartmentapp` layer 7): 13,111 lines; `SIZE_D` / `MAT_D` as above; `FORCEMAIN` = 'Y' (pressure main) / 'N' / 'None'. Same scope and caveats as gaBartowWater. */
+  gaBartowSewer: {
+    key: "gaBartowSewer",
+    label: "Sanitary sewer — Bartow County Water Department (Bartow County GIS)",
+    provider: "Bartow County Water Department — sanitary sewer pipes (the county's own ArcGIS Server, Water/waterdepartmentapp layer 7)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/Water/waterdepartmentapp/MapServer/7",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { size: "SIZE_D", material: "MAT_D", forceMain: "FORCEMAIN" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  /* NEW-3 (Bartow sweep, 2026-11-12): US Army Corps of Engineers, Mobile District — the Shoreline Management Program viewer (`SAD_Shoreline_Management_Web_Viewer`, AGOL org sdTb0lsRURdKFejG, CORS-open, no relay).
+   * Layer 6 "Lake Boundary": per the service's own description, "the reservoir boundaries of projects participating in the SAD Shoreline Management Program. Polygons should portray Normal Pool water Levels" — i.e. the WATER, not the fee-owned land
+   * around it. Allatoona Lake is RPSUID 167791 (3 polygons: the lake and two Lake Acworth pieces); the same service holds other Corps projects, so the row filters. Layer 5 "Shoreline Allocation Areas": the Corps-managed SHORE land
+   * classified by `ZONECLASSIFICATION` (limitedDevelopment · prohibitedAccess · protected · publicRecreation · specialUse · tbd; 154 polygons for Allatoona, lastEdit 2026-08-28). NO flowage-easement layer is published. */
+  gaAllatoonaLake: {
+    key: "gaAllatoonaLake",
+    label: "Allatoona Lake normal-pool boundary (USACE Mobile District)",
+    provider: "U.S. Army Corps of Engineers, Mobile District — Shoreline Management Program, Lake Boundary (ArcGIS Online services2.arcgis.com/sdTb0lsRURdKFejG)",
+    serviceUrl: "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer/6",
+    layerId: null,
+    where: "RPSUID=167791",
+    geometryType: "polygon",
+    fields: { name: "FEATURENAME", project: "RPSUID" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  gaAllatoonaShoreline: {
+    key: "gaAllatoonaShoreline",
+    label: "Allatoona Lake shoreline allocation areas (USACE Mobile District)",
+    provider: "U.S. Army Corps of Engineers, Mobile District — Shoreline Management Program, Shoreline Allocation Areas (ArcGIS Online services2.arcgis.com/sdTb0lsRURdKFejG)",
+    serviceUrl: "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer/5",
+    layerId: null,
+    where: "RPSUID=167791",
+    geometryType: "polygon",
+    fields: { zone: "ZONECLASSIFICATION", name: "FEATURENAME", kind: "FEATUREDESCRIPTION", project: "RPSUID" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
   /* NEW-1 (California) — the California counterpart of `county` / `countyCo` / `countyGa`. Its OWN row with
    * `states: ["CA"]`; the Texas, Colorado and Georgia rows are untouched. VERIFIED LIVE 2026-10-02 from the
    * build sandbox: exactly 58 county polygons (California's full roster), one per county, ArcGIS-Online hosted
@@ -3826,6 +3890,10 @@ export const SOURCE_FIXTURE_REACH = {
   mngwpd: ["regional", "The Metropolitan North Georgia Water Planning District is 15 metro-Atlanta counties — one polygon about 100 km across."],
   // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — rows whose real extent is a region, not the state.
   gaBartowZoning: ["regional", "Bartow County's zoning polygons — one county by definition (and the incorporated cities inside it are marked 'Incorporated', not zoned)."],
+  gaBartowWater: ["regional", "Bartow County Water Department's pipes — one county department by definition (Cartersville and Adairsville run their own systems and publish no GIS)."],
+  gaBartowSewer: ["regional", "Bartow County Water Department's sanitary sewer — one county department by definition."],
+  gaAllatoonaLake: ["regional", "Allatoona Lake's normal-pool boundary — one reservoir on the Bartow / Cherokee / Cobb line (the service's other projects are filtered out by RPSUID)."],
+  gaAllatoonaShoreline: ["regional", "Allatoona Lake's USACE shoreline allocation areas — one reservoir (the service's other projects are filtered out by RPSUID)."],
   gaProtectedMountain: ["regional", "Protected mountains (2,200 ft + 25% slope) exist only in the north Georgia mountains — probing one in Savannah would assert a guaranteed zero."],
   gaMrpaCorridor: ["regional", "The Chattahoochee River Corridor under the Metropolitan River Protection Act — one river through metro Atlanta."],
   gaMrpaVegBuffer: ["regional", "The MRPA 50-ft river buffer — one river through metro Atlanta."],

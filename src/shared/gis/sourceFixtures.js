@@ -725,6 +725,30 @@ export const SOURCE_FIXTURES = {
     { label: "rural Bartow \u2014 west", bbox: [-84.91, 34.24, -84.89, 34.26], expectMinCount: 1 }, // live 2026-10-29: 79
   ],
   },
+  gaBartowWater: {
+  fixtures: [
+    { label: "Cartersville \u2014 Gerdau area", bbox: [-84.8, 34.23, -84.78, 34.25], expectMinCount: 1 }, // live 2026-11-12: 249
+    { label: "Allatoona Business Center (south Bartow)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 443
+  ],
+  },
+  gaBartowSewer: {
+  fixtures: [
+    { label: "Cartersville \u2014 Gerdau area", bbox: [-84.8, 34.23, -84.78, 34.25], expectMinCount: 1 }, // live 2026-11-12: 149
+    { label: "Allatoona Business Center (south Bartow)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 12
+  ],
+  },
+  gaAllatoonaLake: {
+  fixtures: [
+    { label: "Allatoona Lake \u2014 south arm (Bartow / Cobb shore)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 1
+    { label: "Allatoona Lake \u2014 upper arm (Cherokee shore)", bbox: [-84.56, 34.16, -84.54, 34.18], expectMinCount: 1 }, // live 2026-11-12: 1
+  ],
+  },
+  gaAllatoonaShoreline: {
+  fixtures: [
+    { label: "Allatoona Lake \u2014 south arm", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 2
+    { label: "Allatoona Lake \u2014 upper arm", bbox: [-84.56, 34.16, -84.54, 34.18], expectMinCount: 1 }, // live 2026-11-12: 1
+  ],
+  },
   countyCa: {
   fixtures: [
     // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
@@ -2060,6 +2084,22 @@ export const SOURCE_DOCS = {
   gaBartowZoning: {
   notes:
     "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. REZONING is the county's case reference; ZONINGTEXT is its free-text note (mostly ordinance ids). Both are shown as published.",
+  },
+  gaBartowWater: {
+  notes:
+    "Bartow County Water Department's water pipes (county GIS server; read through the planyr.io relay). Size and material are the STRING fields SIZE_D / MAT_D — the numeric DIAMETER / MATERIAL columns are empty on every row. County department only: Cartersville and Adairsville run their own systems and publish no GIS. The envelope query the map uses answers; the point-query endpoint errors intermittently.",
+  },
+  gaBartowSewer: {
+  notes:
+    "Bartow County Water Department's sanitary sewer pipes (county GIS server; read through the planyr.io relay): FORCEMAIN = Y marks a pressure main. County department only — the cities run their own systems.",
+  },
+  gaAllatoonaLake: {
+  notes:
+    "USACE Mobile District Shoreline Management Program lake boundaries; the row keeps Allatoona Lake (RPSUID 167791). The service describes the polygons as the NORMAL POOL water level — the water, not the Corps' fee-owned shore land (that is the allocation-areas layer). No flowage-easement layer is published; flowage easements are found on the title.",
+  },
+  gaAllatoonaShoreline: {
+  notes:
+    "USACE Allatoona Lake shoreline allocation areas (limited development · prohibited access · protected · public recreation · special use · to be determined) — the Corps-managed shore land and the use class the Shoreline Management Plan gives it. The service holds other Corps projects too; the row keeps Allatoona (RPSUID 167791).",
   },
   countyCa: {
   notes:

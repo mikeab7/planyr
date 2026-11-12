@@ -18,7 +18,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 import { ALL_LAYERS, MERGE_GROUPS, LAYER_GROUP_ORDER, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import {
   GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE, susceptibilityStyle, SUSCEPTIBILITY_COLORS, conservationStyle, conservationKind, CONSERVATION_COLORS,
-  jtcStyle, JTC_COLORS, causeWords, relayUrl, roadOwnerStyle, roadOwnerGroup, ROAD_OWNER_COLORS, bartowZoneClass, BARTOW_COLORS, bartowStyle, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
+  jtcStyle, JTC_COLORS, causeWords, relayUrl, roadOwnerStyle, roadOwnerGroup, ROAD_OWNER_COLORS, bartowZoneClass, BARTOW_COLORS, bartowStyle, bartowPipeLabel, bartowSewerStyle, bartowWaterStyle, BARTOW_WATER_COLORS, ALLATOONA_CLASS_LABEL, ALLATOONA_COLORS, ALLATOONA_RULE, allatoonaClass, allatoonaStyle, spaldingZoneClass, SPALDING_COLORS, spaldingStyle, impairedCategories, solidWasteType, sentence,
 } from "../src/workspaces/site-planner/lib/georgiaLayers.js";
 import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPanelModel.js";
 import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceAreas.js";
@@ -36,8 +36,8 @@ const DAHLONEGA = { lat: 34.53, lng: -83.98 }, HOUSTON = { lat: 29.76, lng: -95.
 const shown = (id, loc) => layerAvailableHere(ALL_LAYERS[id], { loc });
 
 describe("every Georgia due-diligence row is declared complete and Georgia-only", () => {
-  it("the module registers twenty-three rows and every one reaches ALL_LAYERS", () => {
-    expect(IDS.length).toBe(23);
+  it("the module registers twenty-seven rows and every one reaches ALL_LAYERS", () => {
+    expect(IDS.length).toBe(27);
     for (const id of IDS) expect(ALL_LAYERS[id], id).toBe(GEORGIA_LAYERS[id]);
   });
   it("each row is states:[GA], an esriFeature, in a real panel group, with a label, source, note, role and order", () => {
@@ -64,6 +64,7 @@ describe("every Georgia due-diligence row is declared complete and Georgia-only"
       ga_conservation: "gaConservation", ga_mrpa_corridor: "gaMrpaCorridor", ga_mrpa_buffer_150: "gaMrpaImpBuffer", ga_mrpa_buffer_50: "gaMrpaVegBuffer", ga_mrpa_buffer_35: "gaMrpaTributaryBuffer",
       ga_opportunity_zones: "gaOpportunityZones", ga_jtc_tiers: "gaJobTaxCredit", ga_spalding_zoning: "gaSpaldingZoning",
       ga_road_ownership: "gaRoadOwnership", ga_rare_species: "gaRareSpecies", ga_mineral: "gaMineral", ga_bartow_zoning: "gaBartowZoning",
+      ga_bartow_water: "gaBartowWater", ga_bartow_sewer: "gaBartowSewer", ga_allatoona_lake: "gaAllatoonaLake", ga_allatoona_shoreline: "gaAllatoonaShoreline",
     };
     expect(Object.keys(KEY).sort()).toEqual([...IDS].sort());
     for (const [id, key] of Object.entries(KEY)) {
@@ -169,6 +170,8 @@ describe("the click cards print plain words — never a raw field, 'null' or 'un
     ga_opportunity_zones: { NAMELSAD10: "Census Tract 78.05", County: "Fulton" }, ga_jtc_tiers: { fullName: "Spalding County", Tier26: "Tier 2", Rank26: 72, Tier25: "Tier 1" }, ga_spalding_zoning: { LABEL: "C2", DESCRIPTION: "MANUFACTURING--LIGHT" },
     ga_road_ownership: { Group_Name: "County Owned", OWNERSHIP_ENTITY: "7340", route_id: "00001" }, ga_rare_species: { SCOMNAME: "Mountain Witch-alder", SNAME: "Fothergilla major", USESA: " ", SPROT: "T", GROUP_: "Plants" },
     ga_mineral: { site_name: "OLD QUARRY", dev_stat: "Past Producer", commod1: "Granite", oper_type: "Surface", county: "Bartow" }, ga_bartow_zoning: { STZONECODE: "A-1", ZONINGTEXT: "Existing Industrial Use" },
+    ga_bartow_water: { SIZE_D: "16", MAT_D: "DIP", INSTAL_DATE: "1998" }, ga_bartow_sewer: { SIZE_D: "8", MAT_D: "PVC", FORCEMAIN: "N" },
+    ga_allatoona_lake: { FEATURENAME: "Allatoona Lake" }, ga_allatoona_shoreline: { ZONECLASSIFICATION: "limitedDevelopment", FEATURENAME: "Limited Development Lease" },
   };
   it("every row has a sample and a card", () => { expect(Object.keys(samples).sort()).toEqual([...IDS].sort()); for (const id of IDS) expect(typeof GEORGIA_LAYERS[id].identifyCard, id).toBe("function"); });
   it("no card prints a raw field name, a null, or an undefined — and every card has a title", () => {
@@ -270,7 +273,7 @@ describe("card wording that the adversarial review caught", () => {
 });
 
 describe("the relay rows (GDOT road ownership, DNR rare species, USGS mineral sites, Bartow zoning)", () => {
-  const RELAY = ["ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning"];
+  const RELAY = ["ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning", "ga_bartow_water", "ga_bartow_sewer"];
   it("each reads through /gis-proxy, never the upstream host directly, and the host is on the relay's allow-list", async () => {
     const { ALLOWED_HOSTS } = await import("../functions/gis-proxy/[[path]].js");
     for (const id of RELAY) {
@@ -306,14 +309,14 @@ describe("the relay rows (GDOT road ownership, DNR rare species, USGS mineral si
     expect(GEORGIA_LAYERS.ga_rare_species.identifyCard({ SCOMNAME: "Y" }).rows.some((r) => r.label === "Status")).toBe(false);
     expect(GEORGIA_LAYERS.ga_rare_species.note).toMatch(/NOT an all-clear/);
   });
-  it("Bartow zoning: codes class by letter (never a district name); 'Incorporated' means a city zones it and says so; unknown is neutral", () => {
-    for (const [code, k] of [["A-1", "agricultural"], ["A1CU", "agricultural"], ["A1 (wC)", "agricultural"], ["R-4", "residential"], ["RE2CU", "residential"], ["R3 (wC)", "residential"], ["C-1", "commercial"], ["CN", "commercial"], ["BPD (wC)", "other"], ["BPD", "other"], ["O/I", "commercial"], ["I-2", "industrial"], ["M1 (wC)", "industrial"], ["I1CU", "industrial"], ["PUD (wC)", "planned"], ["Incorporated", "city"], ["", "other"], [null, "other"], ["ZZ9", "other"]]) expect(bartowZoneClass(code), String(code)).toBe(k);
+  it("Bartow zoning: codes class by their Sec. 4.1 district; 'Incorporated' means a city zones it and says so; unknown is neutral", () => {
+    for (const [code, k] of [["A-1", "agricultural"], ["A1CU", "agricultural"], ["A1 (wC)", "agricultural"], ["R-4", "residential"], ["RE2CU", "residential"], ["R3 (wC)", "residential"], ["C-1", "commercial"], ["CN", "commercial"], ["BPD (wC)", "businessPark"], ["BPD", "businessPark"], ["O/I", "commercial"], ["I-2", "industrial"], ["M1 (wC)", "industrial"], ["I1CU", "industrial"], ["PUD (wC)", "planned"], ["Incorporated", "city"], ["", "other"], [null, "other"], ["ZZ9", "other"]]) expect(bartowZoneClass(code), String(code)).toBe(k);
     const c = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "Incorporated", ZONINGTEXT: "Annexed 2006" });
     expect(c.title).toBe("Inside a city"); expect(c.rows[0].text).toMatch(/city zones this ground/); expect(c.rows.find((r) => r.label === "County note").text).toBe("Annexed 2006");
     const z = GEORGIA_LAYERS.ga_bartow_zoning.identifyCard({ STZONECODE: "I-1", ZONINGTEXT: " " });
-    expect(z.title).toBe("Zone I-1"); expect(z.rows.some((r) => r.label === "County note")).toBe(false);
+    expect(z.title).toBe("I-1 — General Industrial District"); expect(z.rows.some((r) => r.label === "County note")).toBe(false);
     expect(bartowStyle({ STZONECODE: "Incorporated" }, 1).dashArray).toBeTruthy(); expect(bartowStyle({ STZONECODE: "I-1" }, 1).fillColor).toBe(BARTOW_COLORS.industrial);
-    expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/District names are not shown/); expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/Adairsville and Cartersville/);
+    expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/zoning ordinance \(Sec\. 4\.1\)/); expect(GEORGIA_LAYERS.ga_bartow_zoning.note).toMatch(/Adairsville and Cartersville/);
   });
 });
 
@@ -363,5 +366,71 @@ describe("the protected-river tier of the Stream Buffers layer", () => {
   it("its vector source reads the registry row and the fields it asks for exist on that row", () => {
     expect(VECTOR_SOURCES.ga_protected_rivers.query.url).toBe(GIS_SOURCES.gaProtectedRiver.serviceUrl + "/query");
     expect(VECTOR_SOURCES.ga_protected_rivers.query.outFields).toEqual(["FENAME"]);
+  });
+});
+
+describe("NEW-2 / NEW-3 (Bartow sweep, 2026-11-12) — Bartow County water & sewer, Allatoona Lake (USACE)", () => {
+  const WATER = GEORGIA_LAYERS.ga_bartow_water, SEWER = GEORGIA_LAYERS.ga_bartow_sewer, LAKE = GEORGIA_LAYERS.ga_allatoona_lake, SHORE = GEORGIA_LAYERS.ga_allatoona_shoreline;
+  const GERDAU = { lat: 34.24, lng: -84.79 }, CHEROKEE_SHORE = { lat: 34.185, lng: -84.545 }, ALLATOONA_BC = { lat: 34.09, lng: -84.736 };
+  it("the pipe rows join the Water & Sewer group, read the county's STRING fields (SIZE_D / MAT_D) and never the empty numeric DIAMETER / MATERIAL", () => {
+    for (const c of [WATER, SEWER]) {
+      expect(c.mergeGroup).toBe("water_sewer"); expect(c.group).toBe("utilities"); expect(c.role).toBe("line"); expect(c.regions).toEqual(["bartow_ga"]);
+      expect(c.minZoom).toBeGreaterThanOrEqual(14); expect(c.fetchAll, "the county answers 2,000 lines a request; a z14 cell holds more").toBe(true); expect(c.fields).toBeUndefined();
+      expect(c.lineLabel.field).toBe("SIZE_D");
+      expect(JSON.stringify(c.identifyCard({ DIAMETER: 12, MATERIAL: "XX", SIZE_D: "8", MAT_D: "PVC" }))).not.toMatch(/DIAMETER|MATERIAL|\b12\b|XX/);
+    }
+    expect(MERGE_GROUPS.water_sewer).toBeTruthy();
+  });
+  it("the label on the line is the size with its material — 16\" DIP — and nothing when the county gave no size", () => {
+    const L = (c, p) => c.lineLabel.format(p.SIZE_D, p);
+    expect(L(WATER, { SIZE_D: "16", MAT_D: "DIP" })).toBe('16" DIP'); expect(L(WATER, { SIZE_D: "3/4", MAT_D: "COPPER" })).toBe('3/4" COPPER'); expect(L(SEWER, { SIZE_D: "8", MAT_D: "None" })).toBe('8"');
+    expect(L(SEWER, { SIZE_D: "8", MAT_D: "UN" })).toBe('8"'); expect(L(WATER, { SIZE_D: "None", MAT_D: "PVC" })).toBeNull(); expect(L(WATER, {})).toBeNull();
+    expect(bartowPipeLabel({ SIZE_D: " 24 ", MAT_D: " DIP " })).toBe('24" DIP');
+  });
+  it("the cards say the scope (county water department only; Cartersville and Adairsville are their own systems) and read in words", () => {
+    const w = WATER.identifyCard({ SIZE_D: "16", MAT_D: "DIP", INSTAL_DATE: "1998" });
+    expect(w.title).toBe('16" DIP water main'); expect(w.rows.find((r) => r.label === "Material").text).toBe("DIP (ductile iron)"); expect(w.rows.find((r) => r.label === "Installed").text).toBe("1998");
+    expect(w.note).toMatch(/Cartersville and Adairsville run their own/);
+    expect(WATER.identifyCard({ SIZE_D: "6", MAT_D: "ZZ", INSTAL_DATE: "0" }).rows.find((r) => r.label === "Material").text).toBe("ZZ"); // not an abbreviation we know: as the county wrote it
+    expect(WATER.identifyCard({ SIZE_D: "6", MAT_D: "ZZ", INSTAL_DATE: "0" }).rows.some((r) => r.label === "Installed")).toBe(false);
+    expect(SEWER.identifyCard({ SIZE_D: "8", MAT_D: "PVC" }).rows.find((r) => r.label === "Material").text).toBe("PVC"); // not "PVC (PVC)"
+    expect(WATER.identifyCard({ SIZE_D: "6", MAT_D: "C900" }).rows.find((r) => r.label === "Material").text).toBe("C900 (PVC pressure pipe)");
+    const f = SEWER.identifyCard({ SIZE_D: "12", MAT_D: "DIP", FORCEMAIN: "Y" }), g = SEWER.identifyCard({ SIZE_D: "8", MAT_D: "PVC", FORCEMAIN: "N" }), n = SEWER.identifyCard({ SIZE_D: "8", FORCEMAIN: "None" });
+    expect(f.title).toBe("Sewer force main"); expect(g.title).toBe("Sanitary sewer main"); expect(n.title).toBe("Sanitary sewer main");
+    expect(f.rows.find((r) => r.label === "Type").text).toMatch(/pressurised/); expect(g.note).toMatch(/Cartersville and Adairsville/);
+    expect(bartowSewerStyle({ FORCEMAIN: "Y" }, 1).color).toBe(BARTOW_WATER_COLORS.force); expect(bartowSewerStyle({ FORCEMAIN: "N" }, 1).color).toBe(BARTOW_WATER_COLORS.gravity); expect(bartowWaterStyle()({}, 1).color).toBe(BARTOW_WATER_COLORS.water);
+  });
+  it("water & sewer show in Bartow (Gerdau, Allatoona Business Center) and not in Atlanta, Savannah, Griffin or neighbouring Floyd", () => {
+    for (const id of ["ga_bartow_water", "ga_bartow_sewer"]) {
+      for (const p of [GERDAU, ALLATOONA_BC]) expect(shown(id, p), `${id} ${JSON.stringify(p)}`).toBe(true);
+      for (const p of [ATLANTA, SAVANNAH, GRIFFIN, { lat: 34.26, lng: -85.16 }]) expect(shown(id, p), `${id} ${JSON.stringify(p)}`).toBe(false);
+    }
+  });
+  it("the Allatoona rows are filtered to the lake (RPSUID 167791) — the service holds other Corps projects — and read the Corps' AGOL service directly, not the relay", () => {
+    for (const c of [LAKE, SHORE]) { expect(c.where).toBe("RPSUID=167791"); expect(c.url).toMatch(/^https:\/\/services2\.arcgis\.com\/sdTb0lsRURdKFejG\//); expect(c.group).toBe("jurisdiction"); expect(c.role).toBe("area"); expect(c.fields).toBeUndefined(); }
+    expect(LAKE.url).toMatch(/FeatureServer\/6$/); expect(SHORE.url).toMatch(/FeatureServer\/5$/);
+  });
+  it("the Allatoona rows are offered across the lake (Bartow, Cherokee and Cobb shores) and not in Atlanta, Savannah, Griffin or Rome", () => {
+    for (const id of ["ga_allatoona_lake", "ga_allatoona_shoreline"]) {
+      for (const p of [ALLATOONA_BC, GERDAU, CHEROKEE_SHORE]) expect(shown(id, p), `${id} ${JSON.stringify(p)}`).toBe(true);
+      for (const p of [ATLANTA, SAVANNAH, GRIFFIN, { lat: 34.26, lng: -85.16 }]) expect(shown(id, p), `${id} ${JSON.stringify(p)}`).toBe(false);
+    }
+    expect(shown("ga_bartow_zoning", CHEROKEE_SHORE), "the Cherokee shore is not Bartow's zoning").toBe(false);
+  });
+  it("the shoreline card says federal project land, the permit rule with its citations, and that flowage easements are on the title; the legend matches the style", () => {
+    const c = SHORE.identifyCard({ ZONECLASSIFICATION: "publicRecreation", FEATURENAME: "Public Recreation Lease" });
+    expect(c.title).toBe("Federal project land (USACE Allatoona Lake)");
+    expect(c.rows.find((r) => r.label === "Shoreline class").text).toBe("Public recreation");
+    expect(c.rows.find((r) => r.label === "Private use").text).toMatch(/Corps permit \(36 CFR 327; Allatoona Shoreline Management Plan\)/);
+    expect(c.rows.find((r) => r.label === "Flowage easements").text).toMatch(/on the title/);
+    expect(JSON.stringify(c)).not.toMatch(/ZONECLASSIFICATION|publicRecreation|null|undefined/);
+    expect(SHORE.legend.map((l) => l.label)).toEqual(["Public recreation", "Limited development", "Protected", "Prohibited access", "Special use", "To be determined"]);
+    for (const k of Object.keys(ALLATOONA_CLASS_LABEL)) expect(allatoonaStyle({ ZONECLASSIFICATION: k }, 1).fillColor).toBe(ALLATOONA_COLORS[k]);
+    expect(allatoonaClass("weird")).toBe("other"); expect(allatoonaClass(null)).toBe("other");
+  });
+  it("the lake card is the WATER at normal pool (the service's own description), not the Corps' land, and points to the shoreline layer for the land", () => {
+    const c = LAKE.identifyCard({ FEATURENAME: "Allatoona Lake" });
+    expect(c.title).toBe("Allatoona Lake"); expect(c.rows[0].text).toMatch(/normal pool/); expect(c.note).toMatch(/Shoreline Allocation/);
+    expect(LAKE.note).toMatch(/water, not the land/); expect(ALLATOONA_RULE).toMatch(/36 CFR 327/);
   });
 });
