@@ -8,6 +8,8 @@
  *   online    — starts exactly ON the west line
  *   inside    — ends inside the parcel SHORT of the line (not a drive: must change nothing, no tie-in label)
  *   east      — crosses the EAST line (lower ground) to the east trailer row
+ *   gap41     — ROUND 3 (V2115881, owner 2026-11-12): ends ~41 ft SHORT of the trailer row (nothing within the old 15-ft reach); must still be a drive served by the row's edge
+ *   gap200    — ROUND 3: ends ~200 ft short of every graded element (past the 120-ft reach): a drive that runs to the existing ground, never "not a plane"
  *   node      — the same `outside` road through the Node engine, for the number to compare
  * VOID RULES: the known-bad arm is `--base <a build without the fix>`; a run whose `outside` case shows no road on the map is VOID.
  *   node ui-audit/verify-grading-drive-live.mjs [--base https://planyr.io] [--case outside|online|inside|east|all] [--out dir] */
@@ -49,6 +51,8 @@ const CASES = {
   short: () => { const g = roadFrom({ x: -600, y: 480 }, "e340olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
   short2: () => { const g = roadFrom({ x: -640, y: 100 }, "e340olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
   east: () => { const g = roadFrom({ x: 1000, y: -400 }, "e338olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
+  gap41: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, -41); return { pts: [g.start, g.far], g }; },
+  gap200: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, -200); return { pts: [g.start, g.far], g }; },
 };
 const siteWith = (id, pts) => {
   const travelW = 26, curb = 0.5, vtx = pts.map(() => ({}));
@@ -62,7 +66,7 @@ const siteWith = (id, pts) => {
   };
 };
 
-const names = which === "all" ? ["outside", "online", "inside", "east"] : which.split(",");
+const names = which === "all" ? ["outside", "online", "inside", "east", "gap41", "gap200"] : which.split(",");
 const s = await openSignedIn({ base, viewport: { width: 1600, height: 1000 } });
 const { page, context } = s;
 const results = {};
@@ -111,4 +115,22 @@ try {
     console.log("  cleanup: throwaway rows left =", left);
   }
   if (!results.outside || !results.outside.road) console.log("VOID — the road never reached the map");
+  // THE VERDICT (ROUND 3): for every case that ran — the road reached the map, it is a PLANE (a drive) or says exactly why not, and nothing is graded past the property line
+  // (no pastLine cells, no "past the line" sentence on the panel).
+  let bad = 0;
+  for (const [name, r] of Object.entries(results)) {
+    const d = r.diag && typeof r.diag === "object" ? r.diag : null;
+    const road = d && d.roads && d.roads[0];
+    const checks = {
+      road: !!r.road,
+      diagnostic: !!d,
+      isPlane: !!(road && road.plane),
+      pastLine: !d || !d.pastLine || (d.pastLine.cells === 0),
+      noPastSentence: !(r.text || []).some((t) => /past the (property )?line/.test(t)),
+    };
+    const ok = Object.values(checks).every(Boolean);
+    if (!ok) bad++;
+    console.log(`VERDICT ${name.padEnd(8)} ${ok ? "PASS" : "FAIL"} ${JSON.stringify(checks)}${road && road.plane ? ` served=${road.plane.servedBy} nearest=${road.plane.nearestElementFt}` : road ? ` why=${road.notAPlaneBecause}` : ""}`);
+  }
+  if (bad) process.exitCode = 1;
 } finally { await s.close().catch(() => {}); }

@@ -423,7 +423,7 @@ export default function GradingController({ input, onModel }) {
       flags.push(...focusDepth.flags);
       if (grid) flags.push(...seamFlags(grid.seams, gradeSurface && gradeSurface.planes, cfg.maxPavementSlopePct));
       // NEW-1 (2026-11-11): a drive that cannot reach the road within the max drive grade — only the drives that serve THIS building's assembly
-      if (gradeSurface && F) flags.push(...driveFlags(new Map([...gradeSurface.planes].filter(([, pl]) => pl.drive && F.aIds.has(pl.drive.targetId)))));
+      if (gradeSurface && F) flags.push(...driveFlags(new Map([...gradeSurface.planes].filter(([, pl]) => pl.drive && (pl.drive.targetId != null ? F.aIds.has(pl.drive.targetId) : (buildings[0] && buildings[0].id === b.id))))));   // ROUND 3: a drive served by the GROUND (no court / lot within reach) belongs to no assembly — the first building's card carries its flag
       const rv = rockLive.key === rockLiveKey ? rockLive.byId.get(b.id) : null;
       const rf = rockFlag(rv, rv && rv.at && F ? (() => { const sd = fourWay(rv.at.x - F.centre.x, rv.at.y - F.centre.y, 30); return sd ? `${sd} end` : null; })() : null);
       if (rf) flags.push(rf);
@@ -478,7 +478,7 @@ export default function GradingController({ input, onModel }) {
       const drives = [];
       for (const [eid, pl] of gradeSurface.planes) {
         const D = pl.drive;
-        if (!D || !F.aIds.has(D.targetId)) continue;
+        if (!D || !(D.targetId != null ? F.aIds.has(D.targetId) : id === labelIds[0])) continue;   // ROUND 3: a ground-served drive (targetId null) is labelled with the first label set
         const pts = driveLabelPoints(D.path, D);
         const downhill = D.grade <= 0;
         drives.push({
