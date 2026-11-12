@@ -485,7 +485,7 @@ import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
-import { driveTieOf, driveRingOnSite } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
+import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
@@ -14421,10 +14421,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grDriveTies = useMemo(() => {
     const m = new Map();
     if (!grDriveSig) return m;
+    // the PROPERTY LINE is the outer edge of the whole site (the union of the active lots) — a lot line shared with a neighbour that is also on the site is not a line
+    const grDriveLine = propertyLineRings(grDriveParcels);
     for (const e of els) {
       if (!isCenterlineRoad(e)) continue;
       let t = null;
-      try { t = driveTieOf(e.pts, grDriveParcels); } catch (_) { t = null; }
+      try { t = driveTieOf(e.pts, grDriveLine); } catch (_) { t = null; }
       if (t) m.set(e.id, t);
     }
     return m;
@@ -14584,6 +14586,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     window.__plannerGradeReadout = hook;
     return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
+  }, [grOn]);
+  /* NEW-1 (2026-11-12, V2115881 re-opened) — `window.__plannerGradeDrive()`: WHY each road is or is not graded as a drive, and who owns the grading past the property line, in ONE call
+   * — so a live check answers "is this plain Road a drive?" without a reproduction. Owner-only (installed while the grading gate is on), READ-ONLY, armed at CALL time
+   * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the tab, or the E2E flag; otherwise it returns null. */
+  const gradeDriveRef = useRef(null);
+  gradeDriveRef.current = { els, gsEls, gradeSurface, grDriveTies, grDriveParcels, grOn, settings };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = () => {
+      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
+      const L = gradeDriveRef.current || {};
+      const surf = L.gradeSurface || null, planes = surf && surf.planes ? surf.planes : new Map(), why = surf && surf.driveWhy ? surf.driveWhy : new Map();
+      const line = propertyLineRings(L.grDriveParcels || []);
+      const roads = (L.els || []).filter(isCenterlineRoad).map((e) => {
+        const tie = L.grDriveTies && L.grDriveTies.get(e.id);
+        const pl = planes.get(e.id);
+        return {
+          id: e.id, travelW: e.travelW ?? null, points: e.pts.length, ends: [e.pts[0], e.pts[e.pts.length - 1]].map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })),
+          diagnose: driveDiagnose(e.pts, line), tied: !!tie, inGraded: !!(L.gsEls || []).find((g) => g.id === e.id && g.type === "drive"),
+          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId } : null,
+          notAPlaneBecause: why.get(e.id) || null,
+        };
+      });
+      const out = surf && surf.grid && surf.grid.outside ? surf.grid.outside : null;
+      return {
+        grOn: !!L.grOn, hasSurface: !!surf, build: surf ? surf.surfaceKey && String(surf.surfaceKey).length : null, roads,
+        pastLine: out ? { cells: out.count, beyondParcel: out.beyondParcel ?? null, perElement: Object.entries(out.perEl || {}).map(([id, p]) => ({ id, type: ((L.gsEls || []).find((g) => g.id === id) || {}).type || null, cells: p.count, maxPastFt: Math.round(p.maxPastFt * 10) / 10, at: { x: Math.round(p.centroid.x), y: Math.round(p.centroid.y) } })) } : null,
+      };
+    };
+    window.__plannerGradeDrive = hook;
+    return () => { if (window.__plannerGradeDrive === hook) window.__plannerGradeDrive = null; };
   }, [grOn]);
   /* NEW-1 (2026-11-01) — `window.__plannerPerf()`: the last minute of long frames WITH script attribution, the blocked-vs-waiting
    * split, repeating timers and which grading layers were drawn — so a "the graded plan is slow" report is answered in one call,

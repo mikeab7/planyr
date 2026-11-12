@@ -43,7 +43,14 @@ const insert = (site) => page.evaluate(async (st) => {
   const r = await window.pfSupabase.from("sites").insert({ id: st.id, group_id: st.groupId, site: st.site, name: st.name, county: st.county, updated_at: new Date().toISOString(), data: st, user_id: u.user.id });
   return r.error ? String(r.error.message) : null;
 }, site);
-const remove = (id) => page.evaluate(async (i) => { await window.pfSupabase.from("sites").delete().eq("id", i); const r = await window.pfSupabase.from("sites").select("id").eq("id", i); return (r.data || []).length; }, id);
+/* The database refuses to permanently delete a LIVE plan (guard `sites_block_delete_live_group`: "not in the trash"), so a bare delete leaves the row behind — the first
+ * live run left both throwaway plans standing. Trash first (deleted_at), then delete for good, then ask again: the count returned is what is still there. */
+const remove = (id) => page.evaluate(async (i) => {
+  await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i);
+  await window.pfSupabase.from("sites").delete().eq("id", i);
+  const r = await window.pfSupabase.from("sites").select("id").eq("id", i);
+  return (r.data || []).length;
+}, id);
 const openPlan = async (id, diag = false) => {
   await page.goto(`${BASE}/?cb=${Date.now()}${diag ? "&planyrDiag=1" : ""}#/project/${id}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
@@ -127,6 +134,7 @@ try {
   check("F. the owner sees NO 3D button on a plan that never turned grading on", !f.btn && !f.card, JSON.stringify(f));
 } finally {
   const left = [];
+  try { await page.goto(`${BASE}/?cb=${Date.now()}#/library`, { waitUntil: "load" }); await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 30000 }); } catch (_) { /* cleanup still tries below */ }   // away from the planner, so it cannot re-save a row mid-delete
   for (const id of [ON.id, OFF.id]) { try { left.push(await remove(id)); } catch (e) { left.push("err " + e.message); } }
   check("the throwaway plans are deleted and verified gone (constraint #15)", left.every((n) => n === 0), JSON.stringify(left));
   console.log(`served build ${built} · run ${RUN}`);
