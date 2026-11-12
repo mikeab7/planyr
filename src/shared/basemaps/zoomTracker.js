@@ -78,6 +78,12 @@ export function createZoomTracker(map, host, { onStart, onEnd } = {}) {
   };
 
   return {
+    /* NEW-2 (2026-11-12, `client_errors`: "Cannot read properties of undefined (reading '_leaflet_pos')", stack
+     * `getPosition → _getMapPanePos → latLngToContainerPoint ← zoomTracker frame`): Leaflet's `map.remove()` does
+     * `delete this._mapPane`, so a frame queued before the map was torn down (plan switch, workspace unmount) projects
+     * through a map with no pane and throws. `alive` is the ONE answer a layer asks at the top of a frame — it must
+     * stop drawing (and detach) when it reads false, never project. */
+    get alive() { return !!map._mapPane; },
     get animating() { return !!anim; },
     /* Where the zoom is heading ({ center, zoom }) while animating, else null. */
     get target() { return anim ? { center: anim.center, zoom: anim.b.z } : null; },
