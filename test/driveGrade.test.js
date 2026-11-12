@@ -369,6 +369,17 @@ describe("the drive finds the court it serves, and says why it could not", () =>
     expect(s.driveWhy.has("d")).toBe(false);
     expect(pastLine(s.grid)).toBe(0);
   });
+  it("ROUND 3: a SHORT ground-served drive over ground that rises a little follows it as far as its landing + max grade allow — no false 'too steep' flag", () => {
+    const rising = (pt) => 805 + (pt.x < 0 ? 0 : Math.min(2.4, pt.x * 0.04));        // ground climbs ~2.4 ft within 60 ft of the line
+    const centre = [{ x: -60, y: 300 }, { x: 56, y: 300 }], t = driveTieOf(centre, [PARCEL]);
+    const d = { id: "d", type: "drive", ring: driveRingOnSite(rect(-60, 285, 116, 30), pack().setbackRings, centre[1]), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: t.tie, path: t.path } };
+    const s = buildProposedSurface({ els: [...els0(), d], ffeFt: null, dockDropFt: 4, existAt: rising, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "shortground" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D.drive.servedBy).toBe("ground"); expect(D.drive.tooSteep).toBe(false);
+    expect(driveFlags(s.planes)).toEqual([]);
+    expect(s.violations.some((v) => v.kind === "drive-steep")).toBe(false);
+    expect(pastLine(s.grid)).toBe(0);
+  });
   it("ROUND 3 (the owner's measured case): a drive whose far end is ~41 ft from the nearest graded trailer row is served by THAT row's edge elevation", () => {
     // trailer row on the court's west side at x 250…330 (a dock-stack member, one plane with the court); the drive stops 41 ft short of it
     const trailer = { id: "t", type: "trailer", ring: rect(250, 150, 80, 300), dockStack: { x: 700, y: 300 }, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b", forCourt: true };

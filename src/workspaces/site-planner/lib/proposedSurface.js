@@ -345,6 +345,14 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     let lengthFt = 0;
     for (let i = 0; i + 1 < D.path.length; i++) lengthFt += Math.hypot(D.path[i + 1].x - D.path[i].x, D.path[i + 1].y - D.path[i].y);
     const g0 = grading || {};
+    // A drive served by the GROUND has no court it must reach, so it follows the ground only as far as its own profile allows (the near-flat landing, then the max drive grade):
+    // a short drive over ground that rises a couple of feet must not raise a "too steep to reach the road" flag for an end nobody asked it to meet. (A drive that serves a
+    // court / lot still meets it exactly and flags when it cannot.)
+    if (servedBy === "ground") {
+      const lf = Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt, lp = Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct, mg = Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct;
+      const land = Math.min(Math.max(0, lf), lengthFt), reach = (lp / 100) * land + (mg / 100) * Math.max(0, lengthFt - land), dz = zEndV - zTie;
+      if (Math.abs(dz) > reach) zEndV = zTie + Math.sign(dz) * reach * 0.999;
+    }
     const prof = driveProfile({
       lengthFt, zTie, zEnd: zEndV,
       landingFt: Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt,

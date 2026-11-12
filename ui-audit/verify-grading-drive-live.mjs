@@ -44,6 +44,19 @@ function roadFrom(probe, targetId, outsideFt, inFt) {
   const start = { x: far.x + ux * (cross + outsideFt), y: far.y + uy * (cross + outsideFt) };
   return { start, far, crossing: { x: far.x + ux * cross, y: far.y + uy * cross }, len: cross + outsideFt };
 }
+/* ROUND 3 gap cases: the road's far end is pulled back toward the road until it sits `gapFt` from the NEAREST graded paved row (any of them — court, trailer rows, lots), so the
+ * case really is "ends N ft short of everything", not "short of one row" (the first cut of gap41 / gap200 ended 5 / 24 ft from another row and proved nothing). */
+function gapCase(gapFt) {
+  const g0 = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, 10);
+  const paved = CHEHAW_CONCEPT_A_ROWS.filter((e) => e.type !== "building").map(rowRing);
+  const dist = (p) => Math.min(...paved.map((r) => (ptIn(p, r) ? 0 : Math.hypot(p.x - nearestOn(p, r).x, p.y - nearestOn(p, r).y))));
+  const dx = g0.start.x - g0.far.x, dy = g0.start.y - g0.far.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+  let far = null;
+  for (let t = 0; t <= L; t += 0.5) { const p = { x: g0.far.x + ux * t, y: g0.far.y + uy * t }; if (!ptIn(p, ring)) break; if (dist(p) >= gapFt) { far = p; break; } }
+  if (!far) throw new Error(`gap case ${gapFt}: no point on the road is ${gapFt} ft clear of every paved row inside the parcel`);
+  const g = { ...g0, far, len: Math.hypot(g0.start.x - far.x, g0.start.y - far.y), gapActual: Math.round(dist(far)) };
+  return { pts: [g0.start, far], g };
+}
 const CASES = {
   outside: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
   online: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 0, 10); return { pts: [g.crossing, g.far], g }; },
@@ -51,8 +64,8 @@ const CASES = {
   short: () => { const g = roadFrom({ x: -600, y: 480 }, "e340olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
   short2: () => { const g = roadFrom({ x: -640, y: 100 }, "e340olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
   east: () => { const g = roadFrom({ x: 1000, y: -400 }, "e338olvzwe", 25, 10); return { pts: [g.start, g.far], g }; },
-  gap41: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, -41); return { pts: [g.start, g.far], g }; },
-  gap200: () => { const g = roadFrom({ x: -700, y: -300 }, "e340olvzwe", 25, -200); return { pts: [g.start, g.far], g }; },
+  gap41: () => gapCase(41),
+  gap200: () => gapCase(200),
 };
 const siteWith = (id, pts) => {
   const travelW = 26, curb = 0.5, vtx = pts.map(() => ({}));
@@ -101,7 +114,7 @@ try {
     }));
     // the read-only diagnostic (`?planyrDiag=1` / the session latch): WHY each road is or is not a drive, and who owns any grading past the line
     const diag = await page.evaluate(() => { try { sessionStorage.setItem("planyr:diag", "1"); } catch (_) {} return typeof window.__plannerGradeDrive === "function" ? window.__plannerGradeDrive() : "no hook (build predates it)"; });
-    results[name] = { tie: g.crossing, lenFt: Math.round(g.len), ...info, diag };
+    results[name] = { tie: g.crossing, lenFt: Math.round(g.len), ...(g.gapActual != null ? { gapFt: g.gapActual } : {}), ...info, diag };
     console.log(name.padEnd(8), JSON.stringify(results[name]));
     await page.screenshot({ path: `${OUT}drive-live-${name}.png` });
     await page.goto(`${base}/#/`, { waitUntil: "load" }); await page.waitForTimeout(1500);
@@ -114,7 +127,7 @@ try {
     }, id);
     console.log("  cleanup: throwaway rows left =", left);
   }
-  if (!results.outside || !results.outside.road) console.log("VOID — the road never reached the map");
+  for (const [n, r] of Object.entries(results)) if (!r.road) console.log(`VOID — case ${n}: the road never reached the map`);
   // THE VERDICT (ROUND 3): for every case that ran — the road reached the map, it is a PLANE (a drive) or says exactly why not, and nothing is graded past the property line
   // (no pastLine cells, no "past the line" sentence on the panel).
   let bad = 0;
