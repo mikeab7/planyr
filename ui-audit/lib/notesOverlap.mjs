@@ -104,7 +104,7 @@ export async function runSweep(ctx) {
     await enter(LINES.a); await key("Home"); await page.keyboard.down("Shift"); await key("End"); await page.keyboard.up("Shift"); await key("Control+c"); await settle(300);
     await key("Escape"); await key("Escape");
     await enter(LINES.b); await key("Home"); await key("Control+v"); await settle(900);
-  }, { reportNested: true });
+  }, { grows: false, nestCheck: true });
   const WORD = '<html><body><!--StartFragment--><p style="font-family:Calibri;font-size:11pt">Lead <b>bold word</b> and <i>italic</i> then <span style="color:#C00000;font-family:Georgia;font-size:20pt">big red serif</span> and a <a href="https://example.com/x">link</a>, followed by a good deal more text so that it must wrap more than once inside the box it lands in.</p><!--EndFragment--></body></html>';
   for (const [mode, letter] of [["source", "K"], ["merge", "M"], ["text", "T"]]) {
     add(`paste-option-${mode}`, `paste with option: ${mode === "source" ? "Keep Source Formatting" : mode === "merge" ? "Merge Formatting" : "Keep Text Only"}`, async () => {
@@ -116,12 +116,12 @@ export async function runSweep(ctx) {
   for (const e of loadBank().filter((b) => /^clipboard-(bank|tables)\//.test(b.id) && b.html).slice(0, 8)) {
     add(`paste-bank-${e.name}`, `paste from Word / Outlook / Excel / Chrome: ${e.name}`, async () => { await enter(LINES.b, true); await key("End"); await synthPaste(e.html, e.text); await settle(1500); }, { chip: true, grows: false, undo: 0 });
   }
-  add("bullets", "bulleted list", async () => { await enter(LINES.b, true); await key("End"); await key("Enter"); await page.keyboard.type("second item that is long enough to be a real sentence in a list"); await tool("nt-bullet"); await key("Enter"); await page.keyboard.type("third item"); });
-  add("numbered", "numbered list", async () => { await enter(LINES.b, true); await key("End"); await key("Enter"); await page.keyboard.type("second item that is long enough to be a real sentence in a list"); await tool("nt-ordered"); await key("Enter"); await page.keyboard.type("third item"); });
+  add("bullets", "bulleted list", async () => { await enter(LINES.b, true); await key("End"); await key("Enter"); await page.keyboard.type("second item that is long enough to be a real sentence in a list"); await tool("nt-bullet"); await key("Enter"); await page.keyboard.type("third item"); }, { undo: "all" });
+  add("numbered", "numbered list", async () => { await enter(LINES.b, true); await key("End"); await key("Enter"); await page.keyboard.type("second item that is long enough to be a real sentence in a list"); await tool("nt-ordered"); await key("Enter"); await page.keyboard.type("third item"); }, { undo: "all" });
   add("indent", "indent / outdent", async () => {
     await enter(LINES.b, true); await key("End"); await tool("nt-bullet"); await key("Enter"); await page.keyboard.type("nested item with enough words to wrap once it has been indented a few times over");
     for (let i = 0; i < 3; i++) await key("Tab"); await settle(400); await key("Shift+Tab");
-  }, { grows: false });
+  }, { grows: false, undo: "all" });
   add("font-size", "changing the font size", async () => {
     await enter(LINES.b, true); await key("Home"); await page.keyboard.down("Shift"); await key("End"); await page.keyboard.up("Shift");
     await tool("nt-size");
@@ -134,7 +134,7 @@ export async function runSweep(ctx) {
     const opt = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="nt-block-opt-"]')].map((b) => b.getAttribute("data-testid")).find((t) => /1|h1|heading/i.test(t)));
     if (opt) await page.locator(`[data-testid="${opt}"]`).first().click(); await settle(500);
     await tool("nt-bold");
-  });
+  }, { undo: "all" });
   add("table", "inserting a table", async () => {
     await enter(LINES.b, true); await key("End"); await tool("nt-table");
     await page.locator('[data-testid="nt-table-grid"] [role="grid"] > *').nth(2 * 8 + 2).click(); await settle(900);
@@ -144,7 +144,7 @@ export async function runSweep(ctx) {
     await page.locator('[data-testid="nt-table-grid"] [role="grid"] > *').nth(1 * 8 + 1).click(); await settle(700);
     for (let i = 0; i < 4; i++) await tool("nt-row-after");
     await tool("nt-row-del");
-  });
+  }, { undo: "all" });
   add("image", "inserting an image", async () => {
     await enter(LINES.b, true); await key("End");
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAU0lEQVR4nO3PQQ0AAAgEoJv9O1ZwcLhAAZ0JU3qSKUnJkEnEwTEx4A0KAAAAAElFTkSuQmCC", "base64");
@@ -197,7 +197,18 @@ export async function runSweep(ctx) {
         const z = posMap(doc).z; ok(`${sc.label}: the far-away box did not move`, !!z && z[0] === 760 && z[1] === 100, JSON.stringify(z));
       }
       if (sc.chip) { const c = await chipCoverage(page); ok(`${sc.label}: the paste-options tab covers no text`, c.covered === 0, `${c.covered}px² over "${(c.hits || []).join('", "')}"`); }
-      if (sc.undo) {
+      if (sc.undo === "all") {
+        /* A COMPOSITE action (type, toggle a list, Enter, type…) is several edits and each is rightly its own undo step. What must hold is
+         * that undoing step by step never shows an overlap, never strands a pushed neighbour, and ends exactly at the seed. */
+        let steps = 0; let stranded = ""; let never = true; let ur = rects; let up = posMap(doc);
+        const atSeed = () => Object.keys(seedPos).every((id) => up[id] && up[id][0] === seedPos[id][0] && up[id][1] === seedPos[id][1]);
+        for (; steps < 14 && !atSeed(); steps++) {
+          await page.keyboard.press("Control+z"); await settle(450);
+          ur = await readRects(page); up = posMap(await readDoc(page));
+          if (overlapPairs(ur).length) never = false;
+        }
+        ok(`${sc.label}: undoing step by step never overlaps and ends exactly at the seed (${steps} steps)`, never && atSeed(), `${never ? "" : "an overlap appeared while undoing; "}${JSON.stringify(up)} vs ${JSON.stringify(seedPos)}`);
+      } else if (sc.undo) {
         await page.keyboard.press("Control+z"); await settle(900);
         const ur = await readRects(page); const ud = await readDoc(page);
         const up = posMap(ud); const same = Object.keys(seedPos).every((id) => up[id] && up[id][0] === seedPos[id][0] && up[id][1] === seedPos[id][1]);

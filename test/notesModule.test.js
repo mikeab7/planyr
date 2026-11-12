@@ -85,6 +85,8 @@ const ALL_NOTES_FILES = [
   "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
   // NEW-2/NEW-3 — a block that stays where you put it, and the workspace the page sits on.
   "lib/notesAnchorNode.js", "lib/notesViewport.js",
+  // B2671237 / B2671238 — nothing draws on top of anything after an edit (nested boxes, box growth, the paste tab).
+  "lib/notesAnchorNest.js", "lib/notesBoxClear.js", "lib/notesBoxClearPlugin.js", "lib/notesChipPlace.js",
   // An abandoned press leaves nothing behind: the ONE definition of an empty block.
   "lib/notesAnchorPrune.js",
   // How far apart the lines are — a BLOCK property, never a text style.

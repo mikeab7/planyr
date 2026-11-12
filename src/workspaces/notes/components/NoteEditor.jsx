@@ -1732,9 +1732,9 @@ const NoteEditor = forwardRef(function NoteEditor({
    * migrations: on the way in, never a transaction, saved only once the person edits (pressing Enter is that edit). */
   /* ⛔ AND A BOX INSIDE A BOX IS UNWRAPPED HERE TOO (B2671237, lib/notesAnchorNest.js): a page that already stored one (a paste
    * of text copied from a box used to nest it) opens flat; same on-read, never-a-transaction rule as the two above. */
-  const [initialDoc] = useState(() => normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
-    unnestDoc((typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC),
-  ))));
+  const [initialDoc] = useState(() => unnestDoc(normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
+    (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
+  )))));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
   /* ⛔ NEW-5 — whether DOM focus is currently in the title `<input>`, so the toolbar knows to
    * read/write `titleStyle` instead of the document selection. A plain boolean, not derived
