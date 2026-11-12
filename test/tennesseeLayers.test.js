@@ -71,7 +71,7 @@ describe("every Tennessee row is Tennessee-only and registered whole", () => {
       const src = Object.values(GIS_SOURCES).find((s) => s.serviceUrl === canonical(ALL_LAYERS[id].url));
       expect(src.states, id).toEqual(["TN"]);
       expect(src.tier, id).toBe("production");
-      expect(src.lastVerified, id).toMatch(/^2026-10-/);
+      expect(src.lastVerified, id).toMatch(/^2026-1[01]-/);
     }
   });
   it("the computed buffer row's source is registered (USGS NHD) and its status line carries what it does NOT draw", () => {
@@ -141,10 +141,12 @@ describe("the vector rows have their VECTOR_SOURCES entry (a vector row without 
 
 describe("location scope — offered at Tennessee points, nowhere else", () => {
   for (const [name, [lat, lng]] of Object.entries(TN_POINTS)) {
-    it(`${name} is Tennessee and is offered every Tennessee row`, () => {
+    it(`${name} is Tennessee and is offered every statewide Tennessee row`, () => {
       expect(siteState({ lat, lng })).toBe("TN");
       const offered = offeredAt(lat, lng);
-      for (const id of TN_LAYER_IDS) expect(offered.has(id), id).toBe(true);
+      // a row that declares `regions` (the four Rutherford zoning members, NEW-1 2026-11-12) serves that area only — test/rutherfordZoning pins where it is offered
+      for (const id of TN_LAYER_IDS.filter((x) => !ALL_LAYERS[x].regions)) expect(offered.has(id), id).toBe(true);
+      for (const id of TN_LAYER_IDS.filter((x) => ALL_LAYERS[x].regions)) expect(offered.has(id), id).toBe(name === "christiana");
     });
   }
   for (const [name, [lat, lng]] of Object.entries(NOT_TN)) {

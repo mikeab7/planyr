@@ -97,6 +97,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
   "src/workspaces/site-planner/lib/sugarLandLayers.js", // NEW-1 (City of Sugar Land) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn washes, lines and points (the legend colours), not chrome
   "src/workspaces/site-planner/lib/sugarLandZoning.js", // NEW-1 (City of Sugar Land) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js
+  "src/workspaces/site-planner/lib/rutherfordZoning.js", // NEW-1 (Rutherford County TN, 2026-11-12) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js / sugarLandZoning.js
   "src/workspaces/site-planner/lib/sugarLandThoroughfare.js", // NEW-1 (City of Sugar Land) — the thoroughfare-class line ink (map ink and legend read one table), not chrome
   "src/workspaces/site-planner/lib/sugarLandUtilities.js", // NEW-1 (City of Sugar Land water / sewer, 2026-11-06) — the water / sewer line and point ink (map ink and legend read one table), not chrome
   "src/workspaces/site-planner/lib/mississippiLayers.js", // B2539744 — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn points, lines and washes (the legend colours), not chrome
