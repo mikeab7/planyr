@@ -25,6 +25,10 @@ import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
+// NEW-1 (2026-11-12) — known parcels the NIGHTLY parcel health job re-queries by id (ui-audit/parcel-source-health-sweep.mjs).
+// Keyed by COUNTY key, not registry key, so it sits BESIDE SOURCE_FIXTURES rather than in it (auditRegistry is not involved).
+export { PARCEL_FIXTURES as parcelFixtures } from "./sourceFixturesParcels.js";
+
 export const SOURCE_FIXTURES = {
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,

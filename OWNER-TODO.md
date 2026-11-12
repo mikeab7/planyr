@@ -5,7 +5,10 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-11-11._
+_Last updated: 2026-11-12._
+
+## 🗺 One file to run: switch on the "plans with no county" nightly alarm (B2671251)
+- [ ] **Open the Supabase SQL editor for the production database and run `src/workspaces/admin/db/admin_ops_county_watch.sql` once** (it is a small read-only counter; it needs the same digest token you already set up). Until you do, the nightly step just says "not set up yet" and stays green. Today it would already count **3** plans that have drawn lots but no county — they drop out of every county feature, and I did not touch them.
 
 ## 🧾 Three decisions from the pending-check triage (2026-11-11)
 Every pending check was sorted. The checks that truly need your own devices or accounts (an iPhone, Bluebeam, the admin pages, your real plans) are listed once each, with item numbers, in `docs/VERIFICATION-TRIAGE-2026-11-11.md` under "Bucket B" — that is a reference list, not an assignment. Only the three decisions below are yours:

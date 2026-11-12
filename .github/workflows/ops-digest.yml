@@ -56,3 +56,14 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           OPS_INGEST_TOKEN: ${{ secrets.OPS_INGEST_TOKEN }}
+      # NEW-1 (2026-11-12) — unresolved-county watch. Aggregate-only, read-only on plans (see scripts/ops-county-watch.mjs).
+      # RED when plans with drawn parcels and no county persist for more than a week; green-with-a-warning while that is
+      # shorter, or while the SQL function / token is not set up yet. Runs on the 3-hourly schedule and on manual dispatch (not on the
+      # per-merge trigger, which only exists to refresh the digest); the "more than a week" clock lives in the database, so frequency does not matter.
+      - name: Unresolved-county watch
+        if: always() && github.event_name != 'workflow_run'
+        run: node scripts/ops-county-watch.mjs
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          OPS_INGEST_TOKEN: ${{ secrets.OPS_INGEST_TOKEN }}
