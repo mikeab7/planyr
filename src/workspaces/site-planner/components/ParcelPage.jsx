@@ -21,6 +21,7 @@ import { fetchTaxUnits, tableFromUnits, accountOf, TAX_UNIT_COUNTIES } from "../
 import { taxTableForCombined } from "../lib/taxRates.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
 import { countyRecord, apprAll } from "../lib/appraisal.js";
+import { agUseLine, AG_USE_RULES } from "../lib/agUseRules.js";
 import { accountOf as recordAccountOf } from "../lib/parcelOrigin.js";
 
 const eyebrow = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
@@ -64,7 +65,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField }) {
+export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, countyState }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -79,7 +80,7 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
   const kind = origin.kind;
   const stated = parcel.statedAcres != null && parcel.statedAcres !== "" ? Number(parcel.statedAcres) : null;
   const hasTypedFacts = !!(parcel.owner || parcel.acct || stated != null);
-  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField }) : null;
+  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField, state: countyState || null }) : null;
   const deedAc = rec && rec.deedAcres != null ? rec.deedAcres : stated;
 
   return (
@@ -138,6 +139,9 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
             <Fact label="Address">{rec.address}</Fact>
             <Fact label="Deed acres">{deedAc != null ? <>{fmt(deedAc)} <span style={{ color: "var(--text-secondary)" }}>· drawn {fmt(drawnAcresOf(parcel))}</span></> : null}</Fact>
             <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{[cadName ? `Source: ${cadName}` : "Source: county appraisal district", rec.taxYear ? `tax year ${rec.taxYear}` : null].filter(Boolean).join(" · ")}</div>
+            {(() => { const line = agUseLine(rec.agUse); return line ? (
+              <div data-testid="parcel-ag-use" title={AG_USE_RULES[rec.agUse.ruleId].note} style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm, overflowWrap: "anywhere" }}>{line}</div>
+            ) : null; })()}
             {parcel.attrs && (
               <details data-testid="parcel-more-fields" style={{ marginTop: SPACE.sm }}>
                 <summary style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--accent-site-text, var(--text-primary))", cursor: "pointer" }}>More county fields</summary>
