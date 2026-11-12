@@ -719,7 +719,10 @@ export default function Shell() {
       if (g.status === "missing") writeLastRoute({ module: "site-planner", projectId: null, cross: false, org: false });
     });
     return () => { live = false; };
-  }, [projectId, cross, org, gateRecheck]);
+    // NEW-1 (B2671231) — `authKnown` + the signed-in id are inputs: a check asked before the session was
+    // known fails open (no uid), and without these deps nothing asked again until the tab next regained
+    // focus. `cloudCheckDeleted` only ever answers "missing" for a read PROVEN to be the signed-in user's.
+  }, [projectId, cross, org, gateRecheck, authKnown, user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // B1953796 (R9) — the gate above ran once per projectId; a project deleted from another tab while
   // this one sat open stayed editable. Re-check whenever this tab regains focus.
   useEffect(() => {

@@ -20,17 +20,36 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * `id`, once by `group_id` — since a project is every row sharing a group, not the single row
  * whose id happens to equal it (see that function's own header).
  */
-const h = vi.hoisted(() => ({ rows: [], error: null }));
+const h = vi.hoisted(() => ({
+  rows: [], error: null,
+  // NEW-1 (B2671231) — what the mocked Supabase CLIENT is doing: its session ("valid" | "expired" | "none" |
+  // "other-user"), whether the next `anonFor` row queries are answered AS THE ANONYMOUS ROLE (row-level
+  // security gives zero rows and NO error — the false "missing"), a late-resolving read, and a query counter.
+  session: "valid", anonFor: 0, anonAlways: false, delay: 0, queries: 0,
+}));
 vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabase: {
+    auth: {
+      getSession: async () => {
+        const now = Math.floor(Date.now() / 1000);
+        const mk = (uid, exp) => ({ data: { session: { user: { id: uid }, expires_at: exp } }, error: null });
+        if (h.session === "valid") return mk("u1", now + 3600);
+        if (h.session === "expired") return mk("u1", now - 60);
+        if (h.session === "other-user") return mk("someone-else", now + 3600);
+        return { data: { session: null }, error: null };
+      },
+    },
     from: () => ({
       select: () => ({
         // cloudCheckDeleted awaits this directly (Promise.all of two `.eq()` calls, no
         // `.maybeSingle()`) — PostgREST-array style: every row matching `field === val`.
-        eq: (field, val) => Promise.resolve({
-          data: h.error ? null : h.rows.filter((r) => r && r[field] === val),
-          error: h.error,
-        }),
+        eq: (field, val) => {
+          h.queries++;
+          const anon = h.anonAlways || h.anonFor > 0;
+          if (h.anonFor > 0) h.anonFor--;
+          const out = { data: h.error ? null : (anon ? [] : h.rows.filter((r) => r && r[field] === val)), error: h.error };
+          return h.delay ? new Promise((res) => setTimeout(() => res(out), h.delay)) : Promise.resolve(out);
+        },
         // cloudDeletedRows: `.not("deleted_at", "is", null).order(...)` — every soft-deleted row,
         // most-recently-deleted first (listDeletedProjects's own input).
         not: (field) => ({
@@ -83,8 +102,11 @@ function mockLocalStorage() {
   };
 }
 
+// Every test starts with the mocked client SIGNED IN and answering as that user (NEW-1, B2671231).
+beforeEach(() => { h.session = "valid"; h.anonFor = 0; h.anonAlways = false; h.delay = 0; h.queries = 0; });
+
 describe("cloudCheckDeleted — the one question a routed project id must answer before a workspace mounts", () => {
-  beforeEach(() => { h.rows = []; h.error = null; });
+  beforeEach(() => { h.rows = []; h.error = null; h.session = "valid"; h.anonFor = 0; h.anonAlways = false; h.delay = 0; h.queries = 0; });
 
   it("no signed-in uid → inconclusive, never a positive answer either way", async () => {
     const res = await cloudCheckDeleted(null, "s1");
@@ -622,5 +644,145 @@ describe("DeletedProjectNotice — NEW-1: scope-aware copy (plan vs. project)", 
 
   it("publishes the resolved scope on the DOM for a live check to assert against", () => {
     expect(NOTICE).toContain("data-scope={scope}");
+  });
+});
+
+
+/* ⛔ NEW-1 (B2671231, owner report 2026-11-12 ~1:14 PM) — "A real, live project briefly shows 'This project
+ * doesn't exist'." Bain (group smr9olizi5ue) was fully intact in the database the whole time, so the card was a
+ * FALSE "missing" verdict. The mechanism these tests pin: supabase-js sends the ANONYMOUS key whenever it cannot
+ * hand back a usable session (a refresh that failed on a slow / dropped connection, a tab that just regained focus
+ * with an expired token), and row-level security answers an anonymous read with ZERO rows and NO error — the very
+ * answer a really-deleted project gives. Shell.jsx re-asks on every tab refocus, so the card appeared and, on the
+ * next good read, went away "on its own".
+ *
+ * The rule: the card (status "missing") may only render for a verdict the app can PROVE — the client's session is
+ * the signed-in user's, AND two reads, one after that proof, both came back empty. Anything else is inconclusive
+ * (`ok:false`), which `projectGateStatus` turns into "live" (the workspace stays mounted; no card, ever).
+ * Each "never" test below is RED on the pre-fix `cloudCheckDeleted` (it answered `exists:false` on the first
+ * empty read) — verified by stashing the fix. */
+describe("NEW-1 (B2671231) — a project that exists never reads as missing, at any point of the check", () => {
+  const BAIN = [
+    { id: "smr9olizi5ue", group_id: "smr9olizi5ue", site: "Bain", name: "Concept - Original", deleted_at: null },
+    { id: "smwax0krth1h", group_id: "smr9olizi5ue", site: "Bain", name: "Concept B", deleted_at: null },
+    { id: "smthnjl2cxyg", group_id: "smr9olizi5ue", site: "Bain", name: "Shared plan (another owner)", deleted_at: null },
+  ];
+  const gate = (res, freshlyCreated = false) => projectGateStatus({ res, freshlyCreated }).status;
+  beforeEach(() => { h.rows = BAIN.map((r) => ({ ...r })); h.error = null; setActiveUser("u1"); });
+
+  it("THE CORE REPRO: the client fell back to the anonymous role (no usable session) → empty rows, no error → NOT 'missing'", async () => {
+    h.session = "none"; h.anonAlways = true;
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(false);
+    expect(res.exists).toBe(false);
+    expect(gate(res)).toBe("live");
+    expect(gate(res)).not.toBe("missing");
+  });
+
+  it("a session that is ABOUT to lapse is not proof either — an empty answer under it is inconclusive", async () => {
+    h.session = "expired"; h.anonAlways = true;
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(false);
+    expect(gate(res)).toBe("live");
+  });
+
+  it("a session that belongs to a DIFFERENT user than the one the store thinks is active proves nothing", async () => {
+    h.session = "other-user"; h.anonAlways = true;
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(false);
+    expect(gate(res)).toBe("live");
+  });
+
+  it("the first read was anonymous (token not applied yet) but the session is good: the second read sees the project → LIVE", async () => {
+    h.anonFor = 2; // the first read's two queries are answered as the anonymous role
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(true);
+    expect(res.exists).toBe(true);
+    expect(res.deleted).toBe(false);
+    expect(gate(res)).toBe("live");
+  });
+
+  it("every phase of a LATE-resolving read (still pending, then answered) never produces a 'missing' verdict", async () => {
+    h.delay = 25;
+    const seen = [];
+    const p = checkProjectDeletionStatus("smr9olizi5ue");
+    seen.push("pending"); // while the read is in flight the gate has no verdict at all — the workspace stays mounted
+    const res = await p;
+    seen.push(gate(res));
+    expect(seen).toEqual(["pending", "live"]);
+    expect(res.exists).toBe(true);
+  });
+
+  it("a late read that resolves EMPTY first and good second (slow network) still ends LIVE, and never 'missing' on the way", async () => {
+    h.delay = 15; h.anonFor = 2;
+    const res = await checkProjectDeletionStatus("smwax0krth1h");
+    expect(gate(res)).toBe("live");
+  });
+
+  it("an ERRORED read (5xx, timeout, 403, offline) is inconclusive → live, never the doesn't-exist wording", async () => {
+    h.error = { message: "FetchError: network timeout", code: "" };
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(false);
+    expect(gate(res)).toBe("live");
+    h.error = { message: "permission denied", code: "42501", status: 403 };
+    expect(gate(await checkProjectDeletionStatus("smr9olizi5ue"))).toBe("live");
+  });
+
+  it("a read that returns NO array at all (not an error, not a list) is not an answer", async () => {
+    h.rows = null; // the mock's .filter would throw → the read is rejected → inconclusive
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(res.ok).toBe(false);
+    expect(gate(res)).toBe("live");
+  });
+
+  it("the URL id is a PLAN id (not the group id) of a live project, and a SHARED project's plan → live", async () => {
+    expect(gate(await checkProjectDeletionStatus("smwax0krth1h"))).toBe("live");
+    expect(gate(await checkProjectDeletionStatus("smthnjl2cxyg"))).toBe("live");
+  });
+
+  // ── the other half: the card is still shown when it is TRUE ──────────────────────────────────────────────
+  it("a genuinely unknown id, with the session proven and both reads empty, STILL reads missing (the card is kept for a real dead link)", async () => {
+    const res = await checkProjectDeletionStatus("never-existed");
+    expect(res.ok).toBe(true);
+    expect(res.exists).toBe(false);
+    expect(gate(res)).toBe("missing");
+    expect(h.queries).toBe(4); // two reads × (by id, by group) — the empty answer was confirmed, not trusted once
+  });
+
+  it("a genuinely hard-deleted project (no rows anywhere) still reads missing, and a locally-minted one still doesn't", async () => {
+    h.rows = [];
+    const res = await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(gate(res)).toBe("missing");
+    expect(gate(res, true)).toBe("live");
+  });
+
+  it("a genuinely soft-deleted project still reads deleted (Restore), unaffected", async () => {
+    h.rows = [{ id: "gone", group_id: "gone", site: "Old Deal", name: "Concept A", deleted_at: "2026-08-01T00:00:00+00:00" }];
+    const res = await checkProjectDeletionStatus("gone");
+    expect(gate(res)).toBe("deleted");
+  });
+
+  it("a positive answer needs NO extra round trips (the proof is only paid on an empty answer)", async () => {
+    await checkProjectDeletionStatus("smr9olizi5ue");
+    expect(h.queries).toBe(2);
+  });
+
+  it("signed out: no uid → inconclusive → live (no soft-delete concept), whatever the client is doing", async () => {
+    setActiveUser(null);
+    h.session = "none"; h.anonAlways = true;
+    expect(gate(await checkProjectDeletionStatus("smr9olizi5ue"))).toBe("live");
+  });
+});
+
+/* The Shell half: the gate is an effect that runs once per (project, recheck) — it must also re-run when the
+ * session settles, or a check asked before sign-in (it fails open, no uid) is never asked again until the tab next
+ * regains focus. Source assertion: Shell.jsx is a very large component and the dependency list IS the contract. */
+describe("NEW-1 (B2671231) — Shell.jsx re-asks the gate once the session is known", () => {
+  const SHELL = readFileSync(resolve(HERE, "../src/app/Shell.jsx"), "utf8");
+  it("the gate effect depends on authKnown and the signed-in user id", () => {
+    expect(SHELL).toMatch(/\[projectId, cross, org, gateRecheck, authKnown, user && user\.id\]/);
+  });
+  it("'missing' is the only verdict that swaps the workspace for the notice, and it still goes through projectGateStatus", () => {
+    expect(SHELL).toMatch(/projectGateStatus\(\{ res, freshlyCreated \}\)/);
   });
 });
