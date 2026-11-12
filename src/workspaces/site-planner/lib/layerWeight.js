@@ -139,6 +139,10 @@ export const LAYER_TIER = {
   ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
   ga_mineral: "reference",               // a 2005 register of pits and quarries
   ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
+  ga_bartow_water: "reference",          // NEW-2: the county water department's mains — a look-up, like the Olive Branch water rows
+  ga_bartow_sewer: "reference",          // NEW-2: the county water department's sewer — a look-up
+  ga_allatoona_lake: "reference",        // NEW-3: the lake at normal pool — a fact you look up
+  ga_allatoona_shoreline: "constraint",  // NEW-3: Corps-managed shore land — no private use without a Corps permit; it takes land off the table
   ga_opportunity_zones: "context",       // a tax-incentive wash
   ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan

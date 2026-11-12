@@ -133,7 +133,7 @@ if (want("co_aurora")) {
  *   mngwpd       the 15-county Metropolitan North Georgia Water Planning District (ARC's `MNGWPD_Boundary` layer 1 — the SAME outline the stream-buffer rule uses).
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.
  *   spalding_ga  Spalding County GA, from the SAME bundled county polygons as `harris` (no network) — the county's own unincorporated zoning layer.
- * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,mrpa_corridor` rebuilds just these five and keeps every other area as committed. */
+ * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,allatoona_ga,mrpa_corridor` rebuilds just these six and keeps every other area as committed. */
 /* NEW-1 (B2539744 review, finding 2) — ms_tn_line: the Mississippi counties that touch Tennessee (a ring vertex at/above 34.95°N: DeSoto, Marshall, Tippah,
  * Alcorn, Tishomingo, Benton — printed below), from the SAME bundled county polygons. The Tennessee county lines (State of Tennessee STS, TN only) are offered across
  * the state line there, where a Mississippi view reaches Shelby / Fayette / Hardeman / McNairy / Hardin counties — and nowhere else in Mississippi (Jackson, Vicksburg,
@@ -181,6 +181,20 @@ if (want("bartow_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^bartow$/i.test(c.name.replace(/ county$/i, "")));
   if (!rec) throw new Error("Bartow County GA not found in the county polygon asset");
   areas.bartow_ga = { label: "Bartow County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+if (want("allatoona_ga")) {
+  /* NEW-3 (Bartow sweep, 2026-11-12): Allatoona Lake's USACE rows are declared for `["bartow_ga", "allatoona_ga"]` — the lake lies on the Bartow / Cherokee / Cobb line, so the Bartow county polygon alone would hide them for a Cherokee or Cobb shore site.
+   * The region is the union of the published data extents of the Corps' Lake Boundary (layer 6) and Shoreline Allocation Areas (layer 5) for Allatoona (RPSUID 167791; returnExtentOnly, WGS84, ArcGIS Online — reachable from a build sandbox), padded 0.02° (≈1.4 mi)
+   * — a rectangle, honestly "on or near Allatoona Lake". */
+  const SAD = "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer";
+  let ext = null;
+  for (const l of [5, 6]) {
+    const u = new URL(`${SAD}/${l}/query`); for (const [k, v] of Object.entries({ f: "json", where: "RPSUID=167791", returnExtentOnly: "true", outSR: 4326 })) u.searchParams.set(k, v);
+    const j = await (await fetch(u)).json(); if (!j.extent) throw new Error(`Allatoona layer ${l} → no extent ${JSON.stringify(j)}`);
+    const e = j.extent; ext = ext ? { xmin: Math.min(ext.xmin, e.xmin), ymin: Math.min(ext.ymin, e.ymin), xmax: Math.max(ext.xmax, e.xmax), ymax: Math.max(ext.ymax, e.ymax) } : e;
+  }
+  const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
+  areas.allatoona_ga = { label: "On or near Allatoona Lake (USACE project), GA", source: "Union of the data extents of the USACE Mobile District Shoreline Management Program Lake Boundary and Shoreline Allocation Areas layers for Allatoona Lake (RPSUID 167791), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
 if (want("spalding_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^spalding$/i.test(c.name.replace(/ county$/i, "")));

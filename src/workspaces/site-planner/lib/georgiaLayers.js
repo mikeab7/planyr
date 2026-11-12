@@ -22,6 +22,7 @@ import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { approvalDate } from "./desotoZoning.js";
 import { ROAD_AUTHORITY_COLORS } from "./jurisdiction.js";
 import { riverExclusionAt } from "./georgiaRiverExclusions.js";
+import { parseBartowCode, bartowZoneTitle, bartowModifierWords, bartowLegend, BARTOW_ORDINANCE_URL, BARTOW_ORDINANCE_CITATION } from "./bartowZoningNames.js";
 
 /* ⛔ NO ROW SETS `fields` (the outFields limiter). esri-leaflet keys every feature by its OBJECT ID, and a request that leaves the id field out of `outFields` gets features
  * with no id — they all collapse into ONE feature, so a layer returning 50 river segments drew exactly one (caught on the real map by verify-georgia-due-diligence, not by
@@ -164,27 +165,47 @@ export const STATE_STATUS = { E: "State endangered", T: "State threatened" };
 
 /* ───────────────────────────── Bartow County zoning ───────────────────────────── */
 
-/* The county's CODE → a colour class. 'Incorporated' is the county's own marker for land inside a city, whose zoning is the city's and is not in this layer. A code not recognised
- * is neutral, never guessed; no district NAME is shown (a name comes from the ordinance). */
-export function bartowZoneClass(code) {
-  const raw = String(code == null ? "" : code).trim();
-  if (!raw) return "other";
-  if (/^incorporated$/i.test(raw)) return "city";
-  const z = raw.toUpperCase().replace(/\(.*?\)/g, "").replace(/W\/C/g, "").replace(/[\s-]/g, "");
-  if (/^(I|M)\d?(CU)?$/.test(z)) return "industrial";
-  if (/^(C\d?|CN|OI|O\/I)(CU)?$/.test(z)) return "commercial"; // BPD is left neutral: its meaning is the ordinance's, and the ordinance was not reachable
-  if (/^PUD/.test(z)) return "planned";
-  if (/^A\d?(CU)?$/.test(z)) return "agricultural";
-  if (/^R(E)?\d*(CU)?$/.test(z)) return "residential";
-  return "other";
-}
-export const BARTOW_COLORS = { industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", planned: "#0f766e", city: "#94a3b8", other: "#6b7280" };
-export const BARTOW_CLASS_LABEL = { industrial: "Industrial / manufacturing", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural", planned: "Planned development", city: "Inside a city (the city zones it)", other: "Other" };
+/* The county's CODE → a colour class, read off the Sec. 4.1 district it parses to (bartowZoningNames.js — the ONE parse of the county's spellings: A-1 / A1CU / A1 (wC) / BPD…).
+ * 'Incorporated' is the county's own marker for land inside a city, whose zoning is the city's and is not in this layer. A code that parses to no Sec. 4.1 district is neutral, never guessed. */
+export const bartowZoneClass = (code) => parseBartowCode(code).cls;
+export const BARTOW_COLORS = { industrial: "#7c3aed", businessPark: "#2563eb", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", planned: "#0f766e", city: "#94a3b8", other: "#6b7280" };
+export const BARTOW_CLASS_LABEL = { industrial: "Industrial / manufacturing", businessPark: "Business park", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural", planned: "Planned development", city: "Inside a city (the city zones it)", other: "Other" };
 export const bartowStyle = (props, opacity) => {
   const k = bartowZoneClass(props && props.STZONECODE);
   const c = BARTOW_COLORS[k];
   return { color: c, weight: 0.8, opacity, fill: true, fillColor: c, fillOpacity: opacity * (k === "city" ? 0.12 : 0.5), ...(k === "city" ? { dashArray: "4 3" } : {}) };
 };
+
+/* ───────────────────────────── Bartow County Water Department pipes (NEW-2, 2026-11-12) ───────────────────────────── */
+
+/* The county department's pipe size and material are the STRING fields SIZE_D ("16", "3/4") and MAT_D ("DIP", "PVC"); the numeric DIAMETER / MATERIAL columns are empty on every row and are never read.
+ * Only the abbreviations that are standard in the water industry are spelled out; any other value is shown as the county wrote it. */
+export const PIPE_MATERIAL_WORDS = { DIP: "ductile iron", PVC: "PVC", C900: "PVC pressure pipe", "C-900": "PVC pressure pipe", CI: "cast iron", AC: "asbestos-cement", HDPE: "HDPE", PEX: "PEX", RCP: "reinforced concrete", VCP: "vitrified clay", STEEL: "steel", COPPER: "copper", CONCRETE: "concrete" };
+const pipeSize = (p) => { const t = text(p && p.SIZE_D); return t && /\d/.test(t) ? t : ""; };
+const pipeMaterial = (p) => { const t = text(p && p.MAT_D); return t && !/^(un|unknown)$/i.test(t) ? t : ""; };
+/* 16" DIP — the label printed on the line; nothing when the county gave no size. */
+export const bartowPipeLabel = (p) => { const s = pipeSize(p); return s ? `${s}"${pipeMaterial(p) ? ` ${pipeMaterial(p)}` : ""}` : null; };
+export const isForceMain = (p) => /^y/i.test(text(p && p.FORCEMAIN));
+export const BARTOW_WATER_COLORS = { water: "#0070ff", gravity: "#16a34a", force: "#9333ea" };
+export const bartowWaterStyle = () => (_props, opacity) => ({ color: BARTOW_WATER_COLORS.water, weight: 2, opacity });
+export const bartowSewerStyle = (props, opacity) => ({ color: isForceMain(props) ? BARTOW_WATER_COLORS.force : BARTOW_WATER_COLORS.gravity, weight: 2, opacity });
+/* "DIP (ductile iron)"; the code alone when it already is the word (PVC) or is not one we spell out. */
+const materialWords = (mat) => { const w = mat && PIPE_MATERIAL_WORDS[mat.toUpperCase()]; return !mat ? "" : !w || w.toLowerCase() === mat.toLowerCase() ? mat : `${mat} (${w})`; };
+const pipeRows = (p) => {
+  const size = pipeSize(p), mat = pipeMaterial(p), install = /^(19|20)\d\d$/.test(text(p && p.INSTAL_DATE)) ? text(p.INSTAL_DATE) : "";
+  return [rowIf("Size", size ? `${size}"` : ""), rowIf("Material", materialWords(mat)), rowIf("Installed", install)];
+};
+export const BARTOW_UTILITY_SCOPE = "Bartow County Water Department only — Cartersville and Adairsville run their own water and sewer systems and publish no map, so a missing line here is not proof there is none.";
+
+/* ───────────────────────────── Allatoona Lake (USACE Mobile District) (NEW-3, 2026-11-12) ───────────────────────────── */
+
+/* The Corps' Shoreline Management Program classes (the service's own coded-value domain, ZONECLASSIFICATION). The Shoreline Management Plan defines what each allows; no definition is paraphrased here. */
+export const ALLATOONA_CLASS_LABEL = { limitedDevelopment: "Limited development", prohibitedAccess: "Prohibited access", protected: "Protected", publicRecreation: "Public recreation", specialUse: "Special use", tbd: "To be determined" };
+export const ALLATOONA_COLORS = { limitedDevelopment: "#d97706", prohibitedAccess: "#9d174d", protected: "#0f766e", publicRecreation: "#16a34a", specialUse: "#7c3aed", tbd: "#6b7280", other: "#6b7280" };
+export const allatoonaClass = (code) => { const c = String(code == null ? "" : code).trim(); return ALLATOONA_CLASS_LABEL[c] ? c : "other"; };
+export const allatoonaStyle = (props, opacity) => { const c = ALLATOONA_COLORS[allatoonaClass(props && props.ZONECLASSIFICATION)]; return { color: c, weight: 1, opacity, fill: true, fillColor: c, fillOpacity: opacity * 0.4 }; };
+export const ALLATOONA_RULE = "Federal project land (USACE Allatoona Lake) — no private use without a Corps permit (36 CFR 327; Allatoona Shoreline Management Plan).";
+export const ALLATOONA_FLOWAGE = "The Corps publishes no flowage-easement layer — flowage easements are found on the title.";
 
 /* ───────────────────────────── The rows ───────────────────────────── */
 
@@ -447,19 +468,76 @@ export const GEORGIA_LAYERS = {
   ga_bartow_zoning: row("gaBartowZoning", {
     label: "Zoning (Bartow County)", source: "Bartow County, GA — Zoning Districts", ...JUR, regions: ["bartow_ga"], role: "area", order: 25, minZoom: 15, simplifyFactor: 1, vertexBudget: 200000,
     color: BARTOW_COLORS.commercial, styleFn: bartowStyle,
-    legend: ["industrial", "commercial", "residential", "agricultural", "planned", "city"].map((k) => ({ label: BARTOW_CLASS_LABEL[k], color: BARTOW_COLORS[k] })),
+    legend: ["industrial", "businessPark", "commercial", "residential", "agricultural", "planned", "city"].map((k) => ({ label: BARTOW_CLASS_LABEL[k], color: BARTOW_COLORS[k] })),
+    /* the Zoning dropdown lists the districts IN VIEW under one "Bartow County" heading, one row per Sec. 4.1 district with its ordinance name (owner constraint #50) */
+    viewLegend: (features) => bartowLegend((features || []).map((f) => { const c = f && f.properties && f.properties.STZONECODE; return { code: c, color: BARTOW_COLORS[bartowZoneClass(c)] }; })),
     lineLabel: { field: "STZONECODE", minZoom: 16, format: (v) => { const t = text(v); return t && !/^incorporated$/i.test(t) ? t : null; } },
     hoverTitle: "Zoning", hoverSource: "Bartow County", hoverFields: [{ names: ["STZONECODE"], label: "zone" }],
     identifyCard: (props) => {
       const p = props || {};
-      const code = text(p.STZONECODE), city = bartowZoneClass(code) === "city";
-      return card(city ? "Inside a city" : `Zone ${code || "(code not published)"}`,
+      const code = text(p.STZONECODE), parsed = parseBartowCode(code), city = parsed.city;
+      const title = city ? "Inside a city" : bartowZoneTitle(code) || `Zone ${code || "(code not published)"}`;
+      /* what the county's map writes, when that differs from the district's own code: "A1CU" = conditional use, "I2 (wC)" = with conditions, "BPD" = the ordinance's BP */
+      const written = !city && parsed.base && code && code !== parsed.base
+        ? [{ label: "County map code", text: [code, bartowModifierWords(code) || (parsed.base === "BP" ? "the ordinance's BP, Business Park" : "")].filter(Boolean).join(" — ") }] : [];
+      return card(title,
         [[{ label: "Jurisdiction", text: city ? "A city zones this ground — Bartow County's map does not carry the city's zoning (ask the city's planning office)" : "Bartow County's own zoning map (unincorporated county)" }],
-          city ? [] : rowIf("Colour class", BARTOW_CLASS_LABEL[bartowZoneClass(code)]), rowIf("Rezoning / case", text(p.REZONING)), rowIf("County note", text(p.ZONINGTEXT))],
+          written, rowIf("Rezoning / case", text(p.REZONING)), rowIf("County note", text(p.ZONINGTEXT)),
+          city ? [] : [{ label: "Ordinance", text: "Bartow County zoning ordinance (PDF)", href: BARTOW_ORDINANCE_URL }]],
         city ? "The county's case reference and note, if any, as the county typed them." : "The county's case reference and note are shown as published. A code ending 'CU' or '(wC)' usually has a case in the county's file; when none is shown here, ask the county.");
     },
-    note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The county's rezoning case reference and its free-text note are shown as typed. District names are not shown: a name comes from the ordinance. Confirm the district and any conditions with Bartow County Planning & Development.",
-    infoCaveat: "County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is usually, not always, shown here — ask the county. Confirm with Bartow County.",
+    note: "Bartow County's own zoning districts, parcel by parcel (colour = a coarse use class; the code prints at close zoom). Land inside a city — Adairsville and Cartersville included — is marked INCORPORATED in the county's map and is zoned by the city; that zoning is not in this layer. The card names the district from the county's zoning ordinance (Sec. 4.1) and links it; a code the ordinance does not list stays as the bare code. 'CU' means conditional use and '(wC)' with conditions. The county's rezoning case reference and its free-text note are shown as typed. Confirm the district and any conditions with Bartow County Planning & Development.",
+    infoCaveat: `County-published polygons; a rezoning or condition may post later, and the case behind a 'CU' or '(wC)' code is usually, not always, shown here — ask the county. ${BARTOW_ORDINANCE_CITATION}`,
+  }),
+  /* ---- NEW-2 (Bartow sweep, 2026-11-12): Bartow County Water Department's water and sewer lines, read through the /gis-proxy relay ---- */
+  ga_bartow_water: row("gaBartowWater", {
+    label: "Water Mains (Bartow County)", source: "Bartow County Water Department", group: "utilities", mergeGroup: "water_sewer", regions: ["bartow_ga"], role: "line", order: 40, minZoom: 14, fetchAll: true, simplifyFactor: 1,
+    color: BARTOW_WATER_COLORS.water, weight: 2, opacity: 0.55, styleFn: bartowWaterStyle(),
+    lineLabel: { field: "SIZE_D", minZoom: 16, format: (_v, props) => bartowPipeLabel(props) },
+    legend: [{ label: "Water main", color: BARTOW_WATER_COLORS.water }],
+    hoverTitle: "Water main", hoverSource: "Bartow County Water Department", hoverFields: [{ names: ["SIZE_D"], label: "Size" }, { names: ["MAT_D"], label: "Material" }],
+    identifyCard: (props) => card(bartowPipeLabel(props) ? `${bartowPipeLabel(props)} water main` : "Water main", pipeRows(props || {}), BARTOW_UTILITY_SCOPE),
+    note: "Bartow County Water Department's water mains, labelled with pipe size and material at close zoom. " + BARTOW_UTILITY_SCOPE + " The county's own mapping, not a survey or an as-built; confirm availability, size and a tap with the department.",
+    infoCaveat: "County-published lines (no edition date); a recent extension may post late. Confirm service and capacity with the Bartow County Water Department before relying on a tap.",
+  }),
+  ga_bartow_sewer: row("gaBartowSewer", {
+    label: "Sanitary Sewer (Bartow County)", source: "Bartow County Water Department", group: "utilities", mergeGroup: "water_sewer", regions: ["bartow_ga"], role: "line", order: 41, minZoom: 14, fetchAll: true, simplifyFactor: 1,
+    color: BARTOW_WATER_COLORS.gravity, weight: 2, opacity: 0.55, styleFn: bartowSewerStyle,
+    lineLabel: { field: "SIZE_D", minZoom: 16, format: (_v, props) => bartowPipeLabel(props) },
+    legend: [{ label: "Gravity sewer", color: BARTOW_WATER_COLORS.gravity }, { label: "Force main (pressure)", color: BARTOW_WATER_COLORS.force }],
+    hoverTitle: "Sanitary sewer", hoverSource: "Bartow County Water Department", hoverFields: [{ names: ["SIZE_D"], label: "Size" }, { names: ["MAT_D"], label: "Material" }],
+    identifyCard: (props) => {
+      const p = props || {};
+      return card(isForceMain(p) ? "Sewer force main" : "Sanitary sewer main",
+        [...pipeRows(p), [{ label: "Type", text: isForceMain(p) ? "Force main (pressurised)" : "Gravity main" }]], BARTOW_UTILITY_SCOPE);
+    },
+    note: "Bartow County Water Department's sanitary sewer lines, labelled with pipe size and material at close zoom (purple = pressurised force main). " + BARTOW_UTILITY_SCOPE + " The county's own mapping, not a survey or an as-built; invert elevations are not shown.",
+    infoCaveat: "County-published lines (no edition date). Confirm that sewer reaches a parcel, and its capacity, with the Bartow County Water Department.",
+  }),
+  /* ---- NEW-3 (Bartow sweep, 2026-11-12): Allatoona Lake, US Army Corps of Engineers (Mobile District) ---- */
+  ga_allatoona_lake: row("gaAllatoonaLake", {
+    label: "Allatoona Lake (USACE)", source: "US Army Corps of Engineers, Mobile District — Shoreline Management Program", ...JUR, regions: ["bartow_ga", "allatoona_ga"], role: "area", order: 26, minZoom: 10, simplifyFactor: 1,
+    color: "#0369a1", styleFn: washStyle("#0369a1", 0.18, 1), legend: [{ label: "Allatoona Lake at normal pool (Corps project water)", color: "#0369a1" }],
+    hoverTitle: "Allatoona Lake", hoverSource: "US Army Corps of Engineers", hoverFields: [],
+    identifyCard: (props) => card(sentence(props && props.FEATURENAME) || "Allatoona Lake", [[{ label: "What this is", text: "The lake at normal pool — water of a US Army Corps of Engineers project" }], [{ label: "Flowage easements", text: ALLATOONA_FLOWAGE }]],
+      "The Corps' own lake boundary at the normal-pool level; the land around the lake is in the Shoreline Allocation layer."),
+    note: "The US Army Corps of Engineers' boundary for Allatoona Lake (and the Lake Acworth pieces) at the normal-pool water level, from the Mobile District's Shoreline Management Program. It is the water, not the land around it — the Corps-managed shore land is in the Shoreline Allocation Areas layer. " + ALLATOONA_FLOWAGE,
+    infoCaveat: "The Corps portrays normal pool; the shoreline moves with the water level. Confirm any lake-edge site with the Corps' Allatoona Lake Management Office.",
+  }),
+  ga_allatoona_shoreline: row("gaAllatoonaShoreline", {
+    label: "Allatoona Shoreline Allocation (USACE)", source: "US Army Corps of Engineers, Mobile District — Shoreline Management Program", ...JUR, regions: ["bartow_ga", "allatoona_ga"], role: "area", order: 27, minZoom: 11, simplifyFactor: 1,
+    color: ALLATOONA_COLORS.limitedDevelopment, styleFn: allatoonaStyle,
+    legend: ["publicRecreation", "limitedDevelopment", "protected", "prohibitedAccess", "specialUse", "tbd"].map((k) => ({ label: ALLATOONA_CLASS_LABEL[k], color: ALLATOONA_COLORS[k] })),
+    hoverTitle: "Shoreline allocation", hoverSource: "US Army Corps of Engineers", hoverFields: [{ names: ["ZONECLASSIFICATION"], label: "class" }],
+    identifyCard: (props) => {
+      const p = props || {}, k = allatoonaClass(p.ZONECLASSIFICATION);
+      return card("Federal project land (USACE Allatoona Lake)",
+        [rowIf("Shoreline class", ALLATOONA_CLASS_LABEL[k] || sentence(p.ZONECLASSIFICATION)), rowIf("Corps record", sentence(p.FEATURENAME)),
+          [{ label: "Private use", text: "No private use without a Corps permit (36 CFR 327; Allatoona Shoreline Management Plan)" }], [{ label: "Flowage easements", text: ALLATOONA_FLOWAGE }]],
+        "The Shoreline Management Plan says what each class allows; ask the Corps' Allatoona Lake Management Office.");
+    },
+    note: "The Corps-managed shore land around Allatoona Lake and the use class the Shoreline Management Plan gives each piece (public recreation, limited development, protected, prohibited access, special use). " + ALLATOONA_RULE + " " + ALLATOONA_FLOWAGE + " A site beside this land needs the Corps' permission to reach the water across it.",
+    infoCaveat: "Corps-published polygons (layer last edited 2026-08-28). A class is the plan's, not a survey of the Corps' fee line — confirm any lake-edge parcel with the Corps and the title commitment.",
   }),
 };
 
@@ -499,5 +577,9 @@ export const GEORGIA_VINTAGE = {
   ga_road_ownership: "Georgia DOT roadway ownership — as of August 2022",
   ga_rare_species: "Georgia DNR Natural Heritage rare-species locations — generalised; edition date not published",
   ga_mineral: "USGS MRDS / MAS-MILS Georgia digest — 2005",
-  ga_bartow_zoning: "Bartow County zoning districts — current county edition (layer edited by the county; date not published)",
+  ga_bartow_water: "Bartow County Water Department water pipes — county GIS, no edition date published",
+  ga_bartow_sewer: "Bartow County Water Department sanitary sewer pipes — county GIS, no edition date published",
+  ga_allatoona_lake: "USACE Mobile District Shoreline Management Program lake boundary (Allatoona RPSUID 167791) — service edited 2026-08-28",
+  ga_allatoona_shoreline: "USACE Mobile District Shoreline Management Program shoreline allocation areas (Allatoona RPSUID 167791) — service edited 2026-08-28",
+  ga_bartow_zoning: "Bartow County zoning districts — current county edition (layer edited by the county; date not published); district names from the county zoning ordinance Sec. 4.1, edition amended through 2020-11-04",
 };

@@ -42,7 +42,9 @@ const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_ceme
   "ga_recharge", "ga_gw_susceptibility", "ga_protected_rivers", "ga_protected_mountains", "ga_swsw", "ga_swsw_protected", "ga_karst", "ga_solid_waste", "ga_brownfields", "ga_dams",
   "ga_impaired_streams", "ga_conservation", "ga_mrpa_corridor", "ga_mrpa_buffer_150", "ga_mrpa_buffer_50", "ga_mrpa_buffer_35", "ga_opportunity_zones", "ga_jtc_tiers", "ga_spalding_zoning",
   // follow-up: hosts reached through the /gis-proxy relay
-  "ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning"];
+  "ga_road_ownership", "ga_rare_species", "ga_mineral", "ga_bartow_zoning",
+  // NEW-2 / NEW-3 (Bartow sweep, 2026-11-12)
+  "ga_bartow_water", "ga_bartow_sewer", "ga_allatoona_lake", "ga_allatoona_shoreline"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
 describe("the layer registry's state coverage", () => {
@@ -109,7 +111,7 @@ describe("every Georgia layer row is complete (a row an inline comment swallowed
 describe("the Georgia GIS registry rows", () => {
   const KEYS = ["countyGa", "cityGa", "hsiGa", "ustGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries",
     "gaRecharge", "gaPollutionSusc", "gaProtectedRiver", "gaProtectedMountain", "gaCarbonate", "gaSolidWaste", "gaBrownfields", "gaConservation", "gaDams", "gaImpaired", "gaOpportunityZones", "gaJobTaxCredit",
-    "gaMrpaCorridor", "gaMrpaVegBuffer", "gaMrpaImpBuffer", "gaMrpaTributaryBuffer", "gaSwsw", "gaSwswProtected", "gaSpaldingZoning", "gaRoadOwnership", "gaRareSpecies", "gaMineral", "gaBartowZoning"];
+    "gaMrpaCorridor", "gaMrpaVegBuffer", "gaMrpaImpBuffer", "gaMrpaTributaryBuffer", "gaSwsw", "gaSwswProtected", "gaSpaldingZoning", "gaRoadOwnership", "gaRareSpecies", "gaMineral", "gaBartowZoning", "gaBartowWater", "gaBartowSewer", "gaAllatoonaLake", "gaAllatoonaShoreline"];
   it("each is Georgia-scoped, production-tier, and not on a test/staging path", () => {
     for (const k of KEYS) {
       const s = GIS_SOURCES[k];
