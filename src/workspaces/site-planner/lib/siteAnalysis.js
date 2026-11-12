@@ -31,7 +31,7 @@ import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { classifyCcn } from "./ccnClassify.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
-import { summarizeWells } from "./wellStatus.js";
+import { summarizeWells, STORAGE_WELL_CAVEAT } from "./wellStatus.js";
 // NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState, US_STATE_NAMES } from "./siteRegion.js";
@@ -128,7 +128,7 @@ export const ANALYSIS_SOURCES = [
     plural: "well(s)",
     absentLabel: "No mapped oil & gas wells within a quarter-mile",
     classifyProx: (scr, ctx) => summarizeWells(scr, ctx),
-    caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). A well on the pad is an offset/replug risk — an old plug may not meet modern standards, and a producing well forces setbacks. An RRC records search — possibly a survey — is the real check.",
+    caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). A well on the pad is an offset/replug risk — an old plug may not meet modern standards, and a producing well forces setbacks. An RRC records search — possibly a survey — is the real check. " + STORAGE_WELL_CAVEAT,
   },
   {
     id: "pipelines", category: "Pipelines", label: "Pipelines (RRC T-4)", kind: "polygon",
