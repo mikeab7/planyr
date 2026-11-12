@@ -98,6 +98,20 @@ describe("the row in each state", () => {
     const h = html(ready({ other: null, card: { sf: 439000, lengthFt: 784, depthFt: 560, ffe: 795, cutCy: 1, fillCy: 1, netCy: 0, pastLimit: 12 } }));
     expect(h).not.toContain("grading-fit-alt"); expect(h).toContain("Its slope runs past the limit.");
   });
+  it("V2115882 — a building that breaks a rule shows the card as usual PLUS one plain line naming the rule and the amount", () => {
+    const card = { sf: 86000, lengthFt: 392, depthFt: 220, ffe: 794, cutCy: 9000, fillCy: 12000, netCy: 3000, pastLimit: 0 };
+    const h = html(ready({ card: { ...card, breaks: [{ rule: "cutfill", limitFt: 2, actualFt: 4.5 }] } }));
+    expect(h).toContain("grading-fit-card"); expect(h).toContain("Use this"); expect(h).toContain("Dismiss");
+    expect(h).toContain("Breaks the max cut / fill: 4.5 ft under the building, the limit is 2 ft.");
+    const h2 = html(ready({ card: { ...card, pastLimit: 3, pastFt: 12.4, breaks: [{ rule: "cutfill", limitFt: 2, actualFt: 45 }, { rule: "limit" }] } }));
+    expect(h2).toContain("Breaks the max cut / fill: 45 ft under the building, the limit is 2 ft.");
+    expect(h2).toContain("Breaks the limits: its slope runs about 12 ft past them.");
+    expect(h2).not.toContain("Its slope runs past the limit.");
+    expect(html(ready({ card: { ...card, breaks: [] } }))).not.toContain("Breaks the");
+  });
+  it("the only message left for 'nothing fits' is a setback that cannot hold the smallest building — said as that", () => {
+    expect(html({ status: "nofit", why: "no-room", dismiss() {} })).toContain("The setbacks leave no room for even the smallest building.");
+  });
   it("nothing fits / failed are one plain line each", () => {
     expect(html({ status: "nofit", why: "no-fit", dismiss() {} })).toContain("No building fits inside the limits with these rules.");
     expect(html({ status: "failed" })).toContain("Couldn't finish the search.");
