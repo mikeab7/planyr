@@ -4,7 +4,7 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
@@ -166,6 +166,7 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 // macrotask, see scheduleSaveSitesFrame below) is caller glue, same as terrainLayers.js's own.
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
+import { stackNote } from "./lib/parcelStack.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
 import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
 import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
@@ -3318,7 +3319,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   /* Stable per-parcel key (county-namespaced — OBJECTIDs are only unique within one
      CAD layer, so a multi-county assembly could otherwise collide). */
   const parcelKey = (county, rings, attrs) => {
-    return parcelKeyOf(attrs, rings, { namespace: county });
+    return parcelKeyOf(attrs, rings, { namespace: county, stack: stackRuleForCounty(county) }); // NEW-1 — a county whose layer stacks rows on one lot keys the LOT, not the row
   };
 
   /* B441 — find the parcel outline already DRAWN under a click, with zero network.
@@ -3750,6 +3751,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
       addr: situsAddress(added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
+      stackNote: stackNote(hit.feature), // NEW-1/2/3 — "N owners on record" / "another lot overlaps this spot" (parcelStack.js), never a silent drop
       backup: viaBackup || hit.fallback ? backupCountyLabel(hit.feature.attributes || {}) : null,
       ...(hit.fallback ? { backupNote: fallbackBackup(hit).text, backupKind: hit.fallback.kind } : {}),
     });

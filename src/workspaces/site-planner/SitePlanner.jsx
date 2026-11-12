@@ -255,7 +255,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
@@ -553,6 +553,7 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
+import { stackNote } from "./lib/parcelStack.js";
 import { snapPanelWidth, panelFlowWidth } from "./lib/panelWidth.js";
 import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
@@ -17120,12 +17121,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
   // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
-  const parcelGisKey = (attrs, rings) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}` });
+  const parcelGisKey = (attrs, rings, county) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}`, stack: county ? stackRuleForCounty(county) : null }); // NEW-1 — a layer that stacks rows on a lot (Bartow) keys the LOT (counties.js dedupeBy)
   // rings (4326) → planner parcels in the site frame, each carrying its gisKey + attrs.
   // Every outer part of a multipart parcel ("TRS 3 & 5") becomes its own parcel (B36c),
   // locked by default like every county-pulled lot (B99).
-  const parcelsFromRings = (rings, addr, attrs) => {
-    const key = parcelGisKey(attrs, rings);
+  const parcelsFromRings = (rings, addr, attrs, county) => {
+    const key = parcelGisKey(attrs, rings, county);
     return rings
       .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
       .filter((pc) => pc.points.length >= 3);
@@ -17310,7 +17311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
       const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
-      const key = parcelGisKey(attrs, rings);
+      const key = parcelGisKey(attrs, rings, hit.county);
       // Re-click a lot added THIS session → toggle it back off.
       if (identifyAddedRef.current.has(key)) {
         const ids = identifyAddedRef.current.get(key);
@@ -17323,13 +17324,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       // Already in the plan from before → select + inform, never add a duplicate.
-      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key); // recomputed from attrs — legacy geo: gisKeys still match
+      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key || p.gisKey === key); // recomputed from attrs — legacy geo: gisKeys still match; a lot keyed by its stack field (pid:) matches its own stored gisKey
       if (dupe.length) {
         setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
         setRes({ already: true, addr });
         return;
       }
-      const pcs = parcelsFromRings(rings, addr, attrs);
+      const pcs = parcelsFromRings(rings, addr, attrs, hit.county);
       if (!pcs.length) { setRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
       pushHistory();
       setParcels((a) => [...a, ...pcs]);
@@ -17337,7 +17338,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, stackNote: stackNote(feat), ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
     } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
@@ -23134,6 +23135,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
                           </div>
                           {identifyRes.fromFallback && <div data-testid="identify-from-fallback" style={{ color: PAL.warn, marginBottom: 5 }}>{identifyRes.fromFallback}</div>}
+                          {identifyRes.stackNote && <div data-testid="identify-stack" style={{ color: PAL.muted, marginBottom: 4 }}>{identifyRes.stackNote}</div>}
                           {identifyRes.county && <Suspense fallback={null}><ParcelCopyNote county={identifyRes.county} point={{ lat: identifyRes.lat, lng: identifyRes.lng }} testId="identify-copy" style={{ marginTop: 6, marginBottom: 4 }} /></Suspense>}
                           {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
                             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>

@@ -79,7 +79,7 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
   const kind = origin.kind;
   const stated = parcel.statedAcres != null && parcel.statedAcres !== "" ? Number(parcel.statedAcres) : null;
   const hasTypedFacts = !!(parcel.owner || parcel.acct || stated != null);
-  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField }) : null;
+  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField, ringAcres: acres }) : null;
   const deedAc = rec && rec.deedAcres != null ? rec.deedAcres : stated;
 
   return (

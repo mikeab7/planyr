@@ -2,7 +2,8 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl, stackRuleForUrl } from "./counties.js";
+import { pickAtPoint } from "./parcelStack.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -172,6 +173,21 @@ export async function queryFeatures(
 }
 
 
+/* NEW-1 (stacked rows) — the DISTINCT values of one field among the rows a where-clause matches, no geometry. A layer that stacks up to 170 rows on a lot (Bartow's parcel x improvement join)
+ * fills a 10-row window with ten copies of one lot; asking for the distinct keys first makes the window count LOTS. Measured on Bartow: returnDistinctValues works, but answers 400 when
+ * combined with resultRecordCount, so the cap is applied here, not on the wire. Returns an array of values (strings/numbers) in the server's order. */
+export async function queryDistinctValues(layerUrl, { where = "1=1", field, count = 10, timeoutMs } = {}) {
+  const j = await fetchJson(trim(layerUrl) + "/query", { where, outFields: field, returnDistinctValues: "true", returnGeometry: "false" }, { timeoutMs });
+  const out = [];
+  for (const f of j.features || []) {
+    const a = f.attributes || {};
+    const v = field in a ? a[field] : a[Object.keys(a)[0]];
+    if (v !== null && v !== undefined && v !== "" && !out.includes(v)) out.push(v);
+    if (out.length >= count) break;
+  }
+  return out;
+}
+
 // Area-weighted centroid of a ring [[x,y],…] — unbiased by vertex density (a plain
 // vertex average drifts toward a densely-digitized curved edge). Falls back to the
 // vertex mean only for a degenerate (zero-area) ring (B36c).
@@ -290,6 +306,8 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
     }, { timeoutMs });
     const feats = j.features || [];
+    const rule = stackRuleForUrl(layerUrl);
+    if (rule) return pickAtPoint(feats, rule, lng, lat, featureContainsLngLat) || null; // NEW-1/2/3 — one lot per key, the others at the spot remembered
     return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0] || null;
   }
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
@@ -304,6 +322,8 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       outSR: 4326,
       ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}), // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
     }, { timeoutMs });
+    const rule = stackRuleForUrl(layerUrl);
+    if (rule) return pickAtPoint(j.features || [], rule, lng, lat, featureContainsLngLat) || null; // NEW-1/2/3 (parcelStack.js) — rows of one lot collapse to one; a second lot at the spot is remembered, not dropped
     return (j.features || [])[0] || null;
   } catch (e) {
     // A MapServer that advertises Query but has the layer /query op disabled returns a

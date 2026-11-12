@@ -625,7 +625,27 @@ export function streetFromParts(attrs) {
   return [num, pick(STREET_PART.pfx), name, pick(STREET_PART.sfx)].filter(Boolean).join(" ");
 }
 
-export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null } = {}) {
+/* NEW-3 (stacked rows) — on a JOINED account x shape layer (Chambers CCAD: `…Accounts.Acres` beside `…TaxParcels.*`) one account that owns TWO polygons repeats its TOTAL acreage on each (Parcel_Id 3939, two polygons
+ * of 112.834 ac, the account total). Given the ring's own measured acres, the shape's stated area (`StatedArea`, accepted only when it agrees with the ring — its unit is not published) wins; the account total is kept
+ * only when it agrees with the ring; otherwise the polygon has no deeded figure of its own (null — the card falls back to the measured ring, never a total that belongs to two shapes). Pure; null = no opinion
+ * (not a joined layer, or no ring). */
+const AGREE = 0.25;
+const agrees = (a, b) => a > 0 && b > 0 && Math.abs(a - b) / b <= AGREE;
+export function shapeDeedAcres(attrs, ringAcres) {
+  if (!attrs || !(ringAcres > 0)) return null;
+  const keys = Object.keys(attrs);
+  const acctKey = keys.find((k) => /\.accounts\.acres$/i.test(k));
+  if (!acctKey || !keys.some((k) => /\.taxparcels\./i.test(k))) return null;
+  const num = (v) => { const n = Number(String(v ?? "").replace(/[^0-9.]/g, "")); return Number.isFinite(n) ? n : 0; };
+  const stKey = keys.find((k) => /(^|\.)statedarea$/i.test(k));
+  const stated = stKey ? num(attrs[stKey]) : 0;
+  if (agrees(stated, ringAcres)) return { acres: stated, basis: "shape" };
+  const acct = num(attrs[acctKey]);
+  if (agrees(acct, ringAcres)) return { acres: acct, basis: "account" };
+  return { acres: null, basis: "none" };
+}
+
+export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null, ringAcres = null } = {}) {
   /* The county's DECLARED id / address column (lib/counties.js) is the fallback when the generic resolvers
    * miss it: the registry already names the column each service publishes its account and situs in. */
   const declared = (name) => {
@@ -641,6 +661,8 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
   let deed = null;
   const ac = row("Acreage");
   if (ac != null) { const n = Number(String(ac).replace(/[^0-9.]/g, "")); deed = Number.isFinite(n) && n > 0 ? n : null; }
+  const shape = shapeDeedAcres(attrs, ringAcres); // NEW-3 — an account's total repeated on each of its shapes is not this polygon's acreage
+  if (shape) deed = shape.acres;
   let taxYear = null;
   for (const k of Object.keys(attrs || {})) if (/^(tax_?yea?r|taxyr|tax_yr|appraisal_?year|apprYear)$/i.test(k)) { const v = String(attrs[k] ?? "").trim(); if (/^\d{4}$/.test(v)) { taxYear = v; break; } }
   return {

@@ -2642,6 +2642,11 @@ const COUNTIES_MAP_RAW = {
     // matches this entry's own bbox (a real CAD), with txgio_statewide appended after it.
     layerUrl:
       "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
+    /* NEW-3 (stacked rows, 2026-11-12) — this joined layer stacks rows on one point: co-owners (one TaxParcels shape, Accounts.Sequence 1/2/3 with the interest split) and two different overlapping
+     * polygons (Parcel_Id 8039 / 8040). `dedupeBy` is the SHAPE table's OBJECTID — one shape is one lot, whatever its owner rows — `dedupeOrder` picks the primary owner (Sequence 1) by sorting CLIENT-side:
+     * the host is not reachable from the build sandbox, so a server-side orderByFields on a table-prefixed name was never measured and a rejected clause would break every Chambers click. A point that
+     * holds a second shape says so (lib/parcelStack.js `stackNote`); the account's acreage is not the polygon's when one account owns >1 shape (appraisal.countyRecord). */
+    dedupeBy: "ChambersCADWeb.DBO.TaxParcels.OBJECTID", dedupeOrder: "Sequence",
   },
   waller: {
     state: "TX",
@@ -3251,7 +3256,10 @@ const COUNTIES_MAP_RAW = {
   ga_screven: { state: "GA", center: [32.7657, -81.6262], zoom: 10, bbox: [32.49, -81.87, 33.04, -81.39], mapServer: null, layerUrl: COUNTIES.ga_screven.layerUrl },
   ga_bryan: { state: "GA", center: [31.9845, -81.4585], zoom: 10, bbox: [31.74, -81.78, 32.23, -81.14], mapServer: null, layerUrl: COUNTIES.ga_bryan.layerUrl },
   ga_liberty: { state: "GA", center: [31.8460, -81.4783], zoom: 10, bbox: [31.60, -81.82, 32.09, -81.14], mapServer: null, layerUrl: COUNTIES.ga_liberty.layerUrl },
-  ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl },
+  /* NEW-1 (stacked rows, 2026-11-12) — Bartow's layer is a parcel x improvement JOIN: one lot is up to 170 rows of identical geometry that differ only in FinishedArea / AccessoryArea (measured via the relay
+   * 2026-11-12: PARCELID 0080-0202-001 -> 170, C003-0013-001 -> 12). `dedupeBy` makes the lot ONE lot everywhere (search list, outlines, click, lot key — lib/parcelStack.js); `dedupeDistinct` lets the
+   * search ask the server for the distinct PARCELIDs first (returnDistinctValues works here, but NOT together with a record cap — measured 400), so 10 copies never fill the 10-result window. */
+  ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl, dedupeBy: "PARCELID", dedupeDistinct: true, dedupeOutlines: true },
   ga_cobb: { state: "GA", center: [33.9300, -84.5558], zoom: 11, bbox: [33.75, -84.74, 34.11, -84.38], mapServer: null, layerUrl: COUNTIES.ga_cobb.layerUrl },
   ga_cherokee: { state: "GA", center: [34.2475, -84.4595], zoom: 11, bbox: [34.08, -84.66, 34.41, -84.26], mapServer: null, layerUrl: COUNTIES.ga_cherokee.layerUrl },
   // NEW-1 (2026-09-24, third pass) — center/bbox derived from public/geo/county-polygons.json
@@ -3390,6 +3398,9 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [35.84, -86.42], zoom: 10,
     bbox: [35.60, -86.72, 36.12, -86.12], displayMinZoom: 16,
     mapServer: null, layerUrl: COUNTIES.tn_rutherford.layerUrl,
+    /* NEW-2 (stacked rows, 2026-11-12) — three industrial ParcelIDs carry TWO rows (126-050.14-000 Prologis: a 0.12-ac sliver beside the 74.60-ac lot; 113-020.03-000; 126-041.00-000); the id search took the
+     * first. One ParcelID is one lot and the LARGEST ring is the lot (lib/parcelStack.js). */
+    dedupeBy: "ParcelID", dedupePrefer: "largest",
   },
   tn_williamson: {
     state: "TN", center: [35.86, -86.90], zoom: 10,
@@ -4144,6 +4155,18 @@ export const POINT_ORDER_BY_LAYERS = Object.freeze(
   Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
 );
 export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
+
+/* NEW-1/2/3 (stacked rows, 2026-11-12) — a layer that returns SEVERAL ROWS FOR ONE LOT declares how they collapse, once, on its map entry, and keyed by URL exactly like pointOrderBy above (the search, the point query
+ * and the outline layer are all handed a URL, not a county key). `dedupeBy` the field one lot shares across its rows (matched by exact name or, for a joined layer, its last dotted segment) · `dedupeOrder` a field the
+ * rows are sorted by ascending before the first is kept · `dedupePrefer: "largest"` keep the row with the largest ring · `dedupeDistinct` the search asks the server for distinct keys first · `dedupeOutlines` the
+ * outline layer keys its lots by `dedupeBy`. The pure collapse itself is lib/parcelStack.js. */
+export const STACK_RULE_LAYERS = Object.freeze(
+  Object.fromEntries(Object.entries(COUNTIES_MAP).filter(([, c]) => c.dedupeBy).map(([k, c]) => [trimLayerUrl(c.layerUrl), Object.freeze({
+    county: k, by: c.dedupeBy, order: c.dedupeOrder || null, prefer: c.dedupePrefer || null, distinct: !!c.dedupeDistinct, outlines: !!c.dedupeOutlines, labelField: (COUNTIES[k] && COUNTIES[k].idField) || null,
+  })])),
+);
+export const stackRuleForUrl = (url) => STACK_RULE_LAYERS[trimLayerUrl(url)] || null;
+export const stackRuleForCounty = (county) => { const c = COUNTIES_MAP[county]; return c && c.dedupeBy ? stackRuleForUrl(c.layerUrl) : null; };
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a
