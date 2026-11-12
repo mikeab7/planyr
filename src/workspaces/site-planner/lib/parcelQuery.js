@@ -11,7 +11,8 @@
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
 import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
-import { isPlaceholderValue, countyRecord } from "./appraisal.js";
+import { isPlaceholderValue, countyRecord, composeSitus, situsAddress } from "./appraisal.js";
+import { findColumn, hasAddrParts } from "./addrParts.js";
 import { normalizeIdFor } from "./tnParcelId.js";
 
 // A field name gets interpolated into the where-clause and may come from a live (or a
@@ -20,12 +21,60 @@ import { normalizeIdFor } from "./tnParcelId.js";
 // scope (B47).
 export const okField = (f) => /^[A-Za-z0-9_.]+$/.test(f || "");
 
+/* Street TYPES and directionals a typed address ends / starts with. A layer that keeps the type or the direction in its OWN column holds
+ * "AMERICAN PETROLEUM" in the name column and "RD" in the type column, so a typed "American Petroleum Rd" must not ask the NAME column for the
+ * type as well. Only stripped when the county declares that column (`sfx` / `dir`), and a name containing the type still matches, because
+ * the LIKE is a contains-match on what is left. */
+const STREET_TYPES = new Set(["ST","STREET","RD","ROAD","AVE","AVENUE","DR","DRIVE","LN","LANE","BLVD","BOULEVARD","PKWY","PARKWAY","HWY","HIGHWAY","CT","COURT","WAY","PL","PLACE","CIR","CIRCLE","TRL","TRAIL","LOOP","PIKE","TER","TERRACE","PASS","RUN","XING","CROSSING","FWY","FREEWAY","EXPY","EXPRESSWAY"]);
+const DIRECTIONS = new Set(["N","S","E","W","NE","NW","SE","SW","NORTH","SOUTH","EAST","WEST"]);
+
+/* NEW-1..4 (2026-11) — the ONE where-builder for a split-situs county. Splits a leading house number off the typed text and ANDs the
+ * number column with the street LIKE; a bare street searches the name column only; a bare number searches the number column only. A
+ * layer that does not carry the declared name column (the CAD renamed it) returns null so the caller falls back to the single address
+ * column; one that lacks only the NUMBER column searches by street alone. The column names are the county row's BARE declarations
+ * (a joined layer's prefixed field accepts its bare name in `where`); the number column's TYPE comes from the live metadata. Pure. */
+export function addressWhereFromParts({ fields, parts, value }) {
+  if (!hasAddrParts(parts)) return null;
+  const list = fields || [];
+  const names = list.map((f) => f && f.name).filter(Boolean);
+  const live = (bare) => (bare && okField(bare) && (!names.length || findColumn(names, bare)) ? bare : null);
+  const nameCol = live(parts.name);
+  if (!nameCol) return null;
+  const numCol = live(parts.num);
+  const typed = String(value ?? "").trim().replace(/\s+/g, " ");
+  if (!typed) return null;
+  let num = null, street = typed;
+  const m = typed.match(/^(\d+)[A-Za-z]?\s+(\S.*)$/);
+  if (m) { num = m[1]; street = m[2]; } else if (/^\d+$/.test(typed)) { num = typed; street = ""; }
+  if (street) {
+    let toks = street.toUpperCase().split(" ");
+    if (parts.sfx && toks.length > 1 && STREET_TYPES.has(toks[toks.length - 1])) toks = toks.slice(0, -1);
+    if (parts.dir && toks.length > 1 && DIRECTIONS.has(toks[0])) toks = toks.slice(1);
+    street = toks.join(" ");
+  }
+  const clauses = [];
+  if (num && numCol) {
+    const f = list.find((x) => x && findColumn([x.name], parts.num));
+    const numeric = f && /integer|double|single|oid|smallinteger/i.test(f.type || "");
+    clauses.push(numeric ? `${numCol} = ${Number(num)}` : `${numCol} = '${num}'`);
+  } else if (num && !street) return null; // a bare number with no number column to ask — let the single-column fallback try
+  if (street) clauses.push(`UPPER(${nameCol}) LIKE UPPER('%${street.replace(/'/g, "''")}%')`);
+  return clauses.length ? clauses.join(" AND ") : null;
+}
+
+/* The situs line for a county's parcel — the composer when the county declares split columns, else the generic ladder. The ONE answer
+ * for every surface that stamps or compares an address (map Add parcel, planner quick-add, the address-snap). */
+export function situsFor(county, attrs) {
+  const c = COUNTIES[county] || COUNTIES_MAP[county];
+  return (c?.addrParts && composeSitus(attrs, c.addrParts)) || situsAddress(attrs);
+}
+
 /* Build the where-clause for one search. `meta` is the layer's live field metadata
  * (used to pick equality-vs-LIKE for a numeric id field and to confirm the scope
  * field exists). Throws a plain Error for a config problem (missing/odd field name) —
  * distinct from a ParcelFetchError, so a caller can tell "bad query" from "server
  * down". */
-export function buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere }) {
+export function buildParcelWhere({ meta, mode, value, idField, addrField, addrParts = null, scopeWhere }) {
   if (idField && !okField(idField)) throw new Error("Unexpected parcel-ID field name on this layer.");
   if (addrField && !okField(addrField)) throw new Error("Unexpected address field name on this layer.");
   const v = String(value ?? "").trim();
@@ -38,8 +87,14 @@ export function buildParcelWhere({ meta, mode, value, idField, addrField, scopeW
     const numeric = fld && /integer|double|single|oid|smallinteger/i.test(fld.type);
     where = numeric && /^\d+$/.test(v) ? `${idField} = ${v}` : `UPPER(${idField}) LIKE UPPER('%${esc}%')`;
   } else {
-    if (!addrField) throw new Error("No address field on this layer — try an account/ID search.");
-    where = `UPPER(${addrField}) LIKE UPPER('%${esc}%')`;
+    /* A county whose situs is split across columns (lib/addrParts.js) is searched on those columns; the single `addrField` LIKE is the
+     * fallback when none is declared or the layer no longer carries the declared ones. */
+    const byParts = addrParts ? addressWhereFromParts({ fields, parts: addrParts, value: v }) : null;
+    if (byParts) where = byParts;
+    else {
+      if (!addrField) throw new Error("No address field on this layer — try an account/ID search.");
+      where = `UPPER(${addrField}) LIKE UPPER('%${esc}%')`;
+    }
   }
   // Statewide layers (TxGIO covers all 254 counties) need a county scope or an
   // ID/address search could match a like-named/numbered parcel in another county.
@@ -109,12 +164,12 @@ export function idAttrFor(county, attrs) {
 
 // Run one ID/address query against a single layer; returns the matched features plus
 // the resolved layer + detected field names (so the caller can import a result).
-async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr, timeoutMs }) {
+async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, addrParts, scopeWhere, pinId, pinAddr, timeoutMs }) {
   const layerUrl = await resolveLayerUrl(rawUrl, { timeoutMs });
   const meta = await getLayerInfo(layerUrl, { timeoutMs });
   const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
   const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
-  const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
+  const where = buildParcelWhere({ meta, mode, value, idField, addrField, addrParts, scopeWhere });
   // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot (counties.js `pointOrderBy`) is asked newest-first, and one lot is listed once.
   const orderBy = pointOrderByForUrl(layerUrl);
   let feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs, ...(orderBy ? { orderBy } : {}) }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
@@ -140,6 +195,7 @@ export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs 
       mode, value,
       idHint: COUNTIES[county]?.idField,
       addrHint: COUNTIES[county]?.addrField,
+      addrParts: COUNTIES[county]?.addrParts,
       scopeWhere: COUNTIES[county]?.scopeWhere,
       pinId: !!COUNTIES[county]?.pinIdField,
       pinAddr: !!COUNTIES[county]?.pinAddrField,

@@ -4,6 +4,7 @@
  * panel (SitePlanner.jsx) and the map finder's address-search parcel info card
  * (MapFinder.jsx), so the two never diverge (B233). No React here — just data.
  */
+import { findColumn, hasAddrParts } from "./addrParts.js"; // leaf module (no imports) — the declared split-situs shape
 
 /* ---- SITUS vs. the OWNER'S MAILING address (NEW-2) ---------------------------------------------
  *
@@ -73,7 +74,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. (`^prop_?loc$` is New Jersey MOD-IV's PROP_LOC, the property location; its ST_ADDRESS / CITY_STATE are the OWNER's mailing lines — see MAILING_KEY_RE.) `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$|^property_?l(oc(ation)?)?$|^prop_?loc$)/i, // Kentucky (NEW-1): Simpson's `Property_L` is the situs line beside a mailing `Address_Li`
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$|^gpdata__pr$|^property_?l(oc(ation)?)?$|^prop_?loc$|^formatted_?loc(ation)?$)/i, // Rutherford TN (NEW-2, 2026-11): `FormattedLocation` is the situs line, populated on 122,955 of 123,298 lots while `STREETADDRESS` holds 48; `LocationCity` / `LocationZip` are NOT the line and do not match. Kentucky (NEW-1): Simpson's `Property_L` is the situs line beside a mailing `Address_Li`
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -386,7 +387,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
  * a GIS column whose value doesn't actually look like a number", which also protects any other
  * source that ever publishes a genuinely garbled GIS-area column. A malformed GIS value now falls
  * through to LEGAL_AREA exactly as if the GIS column were absent. */
-const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac|^l15parce_4$)/i;
+const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac|^l15parce_4$|^total_?acres$)/i; // + ^total_?acres$: Bartow GA's TOTALACRES (NEW-3, 2026-11)
 const LEGAL_ACRE_RE = /(legal_?acre|legal_?area)/i;
 // A bare, fully-formed decimal number (optionally negative) — deliberately stricter than
 // `Number.isFinite(Number(v))` alone would read to a human: it exists to make the intent explicit
@@ -435,7 +436,7 @@ export const APPR_FIELDS = [
   [/^county_?name$/i, "County"],
   // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
   // ^acre matches CCAD's Acres.
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac|^l15parce_4$)/i, "Acreage"],
+  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac|^l15parce_4$|^total_?acres$)/i, "Acreage"],
   [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
   [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
   // ...|market_?val matches CCAD's Market_Value (and TxGIO mkt_value).
@@ -456,6 +457,10 @@ export const APPR_FIELDS = [
   [/^fema_?link$/i, "FEMA map"],
   [/^tax_?info$/i, "Tax info"],
   [/^tax_?map$/i, "Tax map"],
+  // NEW-3 (Bartow GA, 2026-11) — the county tax district's NAME (`Tax_District_Desc`, "Bartow County"; the bare `Tax_District` is a code and is not shown) and the SUBDIVISION name (`Subdivision_Name`, "COM - CASS WHITE CORRIDOR"),
+  // which is a neighbourhood tag and was being titled "Legal". Exact-name matches, so no other county's SUBDIVISION column (a real legal line on Rutherford TN) is relabelled.
+  [/^tax_?district_?desc$/i, "Tax district"],
+  [/^subdivision_?name$/i, "Subdivision / neighbourhood"],
   // ...|^legal matches CCAD's Legal1–Legal4 (first match, Legal1, wins).
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
 ];
@@ -483,7 +488,7 @@ export const apprRows = (attrs) => {
         // (see `acreageKey`'s own header), regardless of the service's key order.
         : label === "Acreage"
           ? acreageKey(attrs, { skip: used })
-          : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]));
+          : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]) && !(label === "Year built" && Number(attrs[key]) === 0)); // a year built of 0 is a column filler (Bartow GA), never a year
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : label === "Owner" ? ownerWithFirstName(attrs, k) : attrs[k] }); }
   }
   return rows;
@@ -625,7 +630,35 @@ export function streetFromParts(attrs) {
   return [num, pick(STREET_PART.pfx), name, pick(STREET_PART.sfx)].filter(Boolean).join(" ");
 }
 
-export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null } = {}) {
+/* NEW-1..4 (2026-11) — THE ONE per-county situs composer. A county that splits its street address across columns declares
+ * `addrParts` (lib/addrParts.js: num · dir · name · sfx · postDir · city · zip) and this turns one record's columns into the line
+ * a person reads: "3525 FM 565, BAYTOWN", "12801 AMERICAN PETROLEUM RD". Padded values are trimmed, a house number of 0 / blank
+ * is omitted ("0" is a filler, never an address), a street TYPE already at the end of the name is not appended twice (CCAD bakes
+ * "FM 565 RD" into the name on some rows), and a record with no street NAME has no composed address (null) — the parcel
+ * card then shows nothing, never "0". The parcel CARD (`countyRecord`) and the typed SEARCH (`parcelQuery.buildParcelWhere`)
+ * both read the same declaration, so what is found is what is shown. Pure. */
+export function composeSitus(attrs, parts) {
+  if (!attrs || !hasAddrParts(parts)) return null;
+  const keys = Object.keys(attrs);
+  const get = (role) => {
+    const k = findColumn(keys, parts[role]);
+    if (!k || isPlaceholderValue(attrs[k]) || looksLikeJsonBlob(attrs[k])) return null;
+    const v = String(attrs[k]).replace(/\s+/g, " ").trim();
+    return v || null;
+  };
+  const name = get("name");
+  if (!name) return null;
+  let num = get("num");
+  if (num && /^0+$/.test(num)) num = null; // HCAD / Bartow publish 0 for "no house number"
+  let sfx = get("sfx");
+  if (sfx && name.toUpperCase().split(" ").pop() === sfx.toUpperCase()) sfx = null; // already in the name
+  const street = [num, get("dir"), name, sfx, get("postDir")].filter(Boolean).join(" ");
+  const zip = get("zip");
+  const tail = [get("city"), zip].filter(Boolean).join(" ");
+  return tail ? `${street}, ${tail}` : street;
+}
+
+export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null, addrParts = null } = {}) {
   /* The county's DECLARED id / address column (lib/counties.js) is the fallback when the generic resolvers
    * miss it: the registry already names the column each service publishes its account and situs in. */
   const declared = (name) => {
@@ -650,7 +683,8 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
     /* …and where the generic resolver caught a GEOID — South Carolina RFA's statewide layer carries `GeoID` (the county/district FIPS-style code, "4500720" for every Aiken lot) beside its real tax-map number
      * `T_Map_Number` — it is a jurisdiction code, never the account, so the county's declared parcel column wins over it. */
     account: (() => { const gen = clean(row("Account / ID")), dec = declared(idField); const geoOnly = !!(gen && dec && Object.keys(attrs || {}).some((key) => /^geo_?id$/i.test(leafKey(key)) && clean(attrs[key]) === gen)); return gen && dec && !geoOnly && dec.length > gen.length && dec.includes(gen) ? dec : (geoOnly ? dec : (gen || dec || clean(acct))); })(),
-    address: cleanAddr(situsAddress(attrs)) || streetFromParts(attrs) || cleanAddr(declared(addrField)) || cleanAddr(addr),
+    /* A county that DECLARES its split situs columns is answered by the composer first: CCAD's rung-2 match is `Prop_Street` — the street NAME alone ("FM 565") — and would otherwise win over the number + suffix + city. */
+    address: cleanAddr(composeSitus(attrs, addrParts)) || cleanAddr(situsAddress(attrs)) || streetFromParts(attrs) || cleanAddr(declared(addrField)) || cleanAddr(addr),
     deedAcres: deed,
     taxYear,
   };
