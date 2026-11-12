@@ -9,7 +9,7 @@
 // "profile", and "no grading past the line" all fail there (the drive type does not exist). The Chehaw arm replays the owner's bug on the real ground.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { driveTieOf, driveProfile, driveZAt, driveRingOnSite, propertyLineRings, driveDiagnose, driveZNear, GRADING_DRIVE_DEFAULTS } from "../src/workspaces/site-planner/lib/driveGrade.js";
+import { driveTieOf, driveProfile, driveZAt, driveRingOnSite, propertyLineRings, driveDiagnose, driveZNear, roadLimitRings, driveFenceFor, DRIVE_SERVE_REACH_FT, GRADING_DRIVE_DEFAULTS } from "../src/workspaces/site-planner/lib/driveGrade.js";
 import { buildProposedSurface, buildPlanes, __setDrainGeometryCache, __clearDrainGeometry } from "../src/workspaces/site-planner/lib/proposedSurface.js";
 import { gradingCfg, gradingPack, GRADING_DEFAULTS } from "../src/workspaces/site-planner/lib/gradingBase.js";
 import { driveFlags } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
@@ -187,9 +187,7 @@ describe("adjacent cases", () => {
     expect(Math.max(...onDrive.map((c) => Math.abs(c.dzFt)))).toBeLessThan(0.25);
   });
   it("a drive TOO SHORT for the climb fires ONE plain flag (and one violation) and still grades nothing past the line", () => {
-    const { s } = site({ driveToX: 150 });                                   // the court is at 330: the drive would be ~330 ft; stop short → it must reach the court edge to count
-    // the drive no longer reaches a graded element → not a plane (the old behaviour), so use a real short one: move the court edge in instead
-    expect(s.planes.get("d")).toBeUndefined();
+    // (a drive ending far from any court is NOT too steep for that — it runs to the ground, see "ROUND 3" below; here the court edge is moved in so the climb cannot fit)
     const short = (() => {
       const cfg = gradingCfg({ enabled: true });
       const setback = { parcelRings: [PARCEL], holes: [], rings: [PARCEL] };
@@ -362,10 +360,58 @@ describe("the drive finds the court it serves, and says why it could not", () =>
     const { planes } = buildPlanes({ els: [...els0(), d], ffeFt: null, dockDropFt: 4, existAt: () => 805, grading: pack() });
     expect(planes.has("d")).toBe(true);
   });
-  it("a drive that ends in open ground, far from any court, is not a plane — and the surface says exactly why", () => {
+  it("ROUND 3: a drive that ends in open ground, far from any court, is STILL a plane — it ties in at the line and runs to the existing ground, nothing past the line", () => {
     const s = buildProposedSurface({ els: [...els0(), drive(150)], ffeFt: null, dockDropFt: 4, existAt: () => 805, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "why" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D).toBeTruthy();
+    expect(D.drive.servedBy).toBe("ground"); expect(D.drive.targetId).toBe(null);
+    expect(D.drive.zTie).toBe(805); expect(D.drive.zEnd).toBe(805); expect(D.drive.tooSteep).toBe(false);
+    expect(s.driveWhy.has("d")).toBe(false);
+    expect(pastLine(s.grid)).toBe(0);
+  });
+  it("ROUND 3: a SHORT ground-served drive over ground that rises a little follows it as far as its landing + max grade allow — no false 'too steep' flag", () => {
+    const rising = (pt) => 805 + (pt.x < 0 ? 0 : Math.min(2.4, pt.x * 0.04));        // ground climbs ~2.4 ft within 60 ft of the line
+    const centre = [{ x: -60, y: 300 }, { x: 56, y: 300 }], t = driveTieOf(centre, [PARCEL]);
+    const d = { id: "d", type: "drive", ring: driveRingOnSite(rect(-60, 285, 116, 30), pack().setbackRings, centre[1]), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: t.tie, path: t.path } };
+    const s = buildProposedSurface({ els: [...els0(), d], ffeFt: null, dockDropFt: 4, existAt: rising, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "shortground" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D.drive.servedBy).toBe("ground"); expect(D.drive.tooSteep).toBe(false);
+    expect(driveFlags(s.planes)).toEqual([]);
+    expect(s.violations.some((v) => v.kind === "drive-steep")).toBe(false);
+    expect(pastLine(s.grid)).toBe(0);
+  });
+  it("ROUND 3 (the owner's measured case): a drive whose far end is ~41 ft from the nearest graded trailer row is served by THAT row's edge elevation", () => {
+    // trailer row on the court's west side at x 250…330 (a dock-stack member, one plane with the court); the drive stops 41 ft short of it
+    const trailer = { id: "t", type: "trailer", ring: rect(250, 150, 80, 300), dockStack: { x: 700, y: 300 }, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b", forCourt: true };
+    const s = buildProposedSurface({ els: [...els0(), trailer, drive(209)], ffeFt: null, dockDropFt: 4, existAt: () => 805, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "t41" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D).toBeTruthy();
+    expect(D.drive.servedBy).toBe("element"); expect(D.drive.targetId).toBe("t");
+    expect(D.drive.nearestFt).toBeGreaterThan(35); expect(D.drive.nearestFt).toBeLessThan(DRIVE_SERVE_REACH_FT);
+    expect(D.drive.zEnd).toBeCloseTo(s.planes.get("t").zAt({ x: 250, y: 300 }), 3);   // the row's own edge elevation, not the ground
+    expect(pastLine(s.grid)).toBe(0);
+  });
+  it("ROUND 3: a drive ENDING ON a trailer row (inside it) counts that row as the thing it serves", () => {
+    const trailer = { id: "t", type: "trailer", ring: rect(250, 150, 80, 300), dockStack: { x: 700, y: 300 }, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b", forCourt: true };
+    const s = buildProposedSurface({ els: [...els0(), trailer, drive(290)], ffeFt: null, dockDropFt: 4, existAt: () => 805, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "ton" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D.drive.targetId).toBe("t"); expect(D.drive.nearestFt).toBe(0);
+    expect(pastLine(s.grid)).toBe(0);
+  });
+  it("ROUND 3: a car lot counts too (any paved graded element is a target)", () => {
+    const lot = { id: "p", type: "parking", ring: rect(200, 250, 120, 100), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b" };
+    const s = buildProposedSurface({ els: [...els0(), lot, drive(190)], ffeFt: null, dockDropFt: 4, existAt: () => 805, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "lot" }, grading: pack() });
+    const D = s.planes.get("d");
+    expect(D).toBeTruthy(); expect(D.drive.nearestFt).toBeLessThan(DRIVE_SERVE_REACH_FT);
+    expect(pastLine(s.grid)).toBe(0);
+  });
+  it("ROUND 3: with nothing at all to serve and NO GROUND at the far end the drive is not a plane — it says so, and (it is not an element of the limit) nothing is graded past the line", () => {
+    const tie = driveTieOf([{ x: -60, y: 300 }, { x: 150, y: 300 }], [PARCEL]).tie;
+    const groundOnlyAtLine = (pt) => (Math.hypot(pt.x - tie.x, pt.y - tie.y) < 40 ? 805 : null);
+    const s = buildProposedSurface({ els: [...els0(), drive(150)], ffeFt: null, dockDropFt: 4, existAt: groundOnlyAtLine, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "noend" }, grading: pack() });
     expect(s.planes.has("d")).toBe(false);
-    expect(s.driveWhy.get("d")).toMatch(/far end is .* ft from any graded court \/ lot/);
+    expect(s.driveWhy.get("d")).toMatch(/no ground elevation at its far end/);
+    expect(pastLine(s.grid)).toBe(0);
   });
   it("a hole in the ground data exactly at the line: the first value a few feet along the drive stands in; no ground at all → not a plane, said so", () => {
     const tie = driveTieOf([{ x: -60, y: 300 }, { x: 330, y: 300 }], [PARCEL]).tie;
@@ -375,5 +421,48 @@ describe("the drive finds the court it serves, and says why it could not", () =>
     const b = buildPlanes({ els: [...els0(), drive(330)], ffeFt: null, dockDropFt: 4, existAt: () => null, grading: pack() });
     expect(b.planes.has("d")).toBe(false); expect(b.driveWhy.get("d")).toMatch(/no ground elevation/);
     expect(driveZNear([{ x: 0, y: 0 }, { x: 10, y: 0 }], 4)).toEqual({ x: 4, y: 0 });
+  });
+});
+
+describe("ROUND 3 — a road never carries the grading limit past the property line, drive or not", () => {
+  const pack0 = () => gradingPack(gradingCfg({ enabled: true }), { parcelRings: [PARCEL], holes: [], rings: [PARCEL] });
+  it("roadLimitRings keeps only the pieces inside the fence (and the ring as given with no fence known)", () => {
+    const fence = driveFenceFor([PARCEL], 10, 0);
+    const road = rect(-60, 285, 400, 30);                                          // crosses the west line
+    const pieces = roadLimitRings(road, fence);
+    expect(pieces.length).toBe(1);
+    expect(Math.min(...pieces[0].map((p) => p.x))).toBeGreaterThanOrEqual(9.9);    // nothing past the fence (10 ft inside the line)
+    expect(roadLimitRings(road, [])).toEqual([road]);
+    expect(roadLimitRings(rect(-300, 285, 100, 30), fence)).toEqual([]);          // wholly outside: contributes nothing
+  });
+  it("the fence helper is exactly the ring gradingPack hands the engine", () => {
+    const f = driveFenceFor([PARCEL], 10, 0), pk = pack0().setbackRings;
+    const bb = (rs) => rs.flat().reduce((a, p) => ({ x0: Math.min(a.x0, p.x), x1: Math.max(a.x1, p.x), y0: Math.min(a.y0, p.y), y1: Math.max(a.y1, p.y) }), { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity });
+    expect(bb(f)).toEqual(bb(pk));
+  });
+  it("RED PROOF (the owner's 28 ft): a road ring that crosses the line, joined to the limit unclipped, throws its slope past the line; clipped to the fence it does not", () => {
+    // a long road stub across the west line with NO plane (no drive) and a higher ground west of the line than inside: the old extra ring reached the fence edge
+    const ground = (pt) => (pt.x < 0 ? 830 : 805);
+    const mk = (extra) => {
+      const cfg = gradingCfg({ enabled: true });
+      const pk = gradingPack(cfg, { parcelRings: [PARCEL], holes: [], rings: [PARCEL] }, { extraRings: extra });
+      const building = { id: "b", type: "building", ring: rect(500, 150, 400, 300), padElevFt: 790, dockStack: null, accessible: false, slopeOverridePct: null };
+      const court = { id: "c", type: "paving", ring: rect(330, 150, 170, 300), dockStack: { x: 700, y: 300 }, accessible: false, slopeOverridePct: null, padElevFt: null, hostId: "b", truckCourt: true };
+      return buildProposedSurface({ els: [building, court], ffeFt: null, dockDropFt: 4, existAt: ground, parcelRings: [PARCEL], pondRings: [], easementRings: [], opts: { existKey: "r3-" + extra.length + (extra[0] ? extra[0].length : "") }, grading: pk });
+    };
+    const road = rect(-200, 285, 560, 30);
+    const raw = mk([road]);
+    const clipped = mk(roadLimitRings(road, driveFenceFor([PARCEL], GRADING_DEFAULTS.gradingMarginFt, 0)));
+    const pastRaw = pastLine(raw.grid), pastClip = pastLine(clipped.grid);
+    expect(pastRaw).toBeGreaterThan(0);                                            // the owner's symptom, reproduced on the unclipped ring
+    expect(pastClip).toBeLessThanOrEqual(pastRaw);
+  });
+  it("source scan — the planner drops a tie road from the extra rings, clips every other road to the fence, and labels ground-served drives", () => {
+    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    expect(sp).toMatch(/if \(grDriveTies\.has\(e\.id\)\) return \[\];/);
+    expect(sp).toMatch(/roadLimitRings\(r, grFence\)/);
+    expect(sp.indexOf("const grDriveTies = useMemo")).toBeLessThan(sp.indexOf("const grLimitExtraRings"));
+    const gc = readFileSync("src/workspaces/site-planner/components/GradingController.jsx", "utf8");
+    expect(gc).toMatch(/targetId != null \? F\.aIds\.has\(D\.targetId\) : id === labelIds\[0\]/);
   });
 });

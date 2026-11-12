@@ -484,8 +484,8 @@ import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
-import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
-import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
+import { useGradingBase, hostIdMap, gradingCfg } from "./lib/gradingBase.js";
+import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
@@ -14405,13 +14405,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the site and the walks / landscape strips hosted by a building. The graded planes themselves (FM_FILL_TYPES) join
   // through gsEls. Fresh array per render; useGradingBase memoises it on its value signature.
   const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape" || e.type === "driveInRamp")) : null;
-  const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
-    if (e.type === "road") {
-      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), roundTrim(e)) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
-    }
-    if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
-    return [];
-  }) : null;
   // NEW-1 (2026-11-11) — DRIVES: a centerline road that ties into the property line grades from the ROAD'S elevation there to the court / lot it
   // serves (lib/driveGrade.js). Which roads are drives is decided from the centerlines and the property lines alone, memoised on their values.
   const grDriveParcels = grPlanOn ? drainActive.map((p) => p.points).filter((r) => r && r.length >= 3) : null;
@@ -14431,6 +14424,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return m;
   }, [grDriveSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ROUND 3 (V2115881, owner 2026-11-12) — the FENCE, known before the grading base is: the property line ± the margin (the same ring `gradingPack` hands the engine).
+  // A road's ring joins the grading limit only inside it, and a road that ties into the line is a DRIVE (a graded plane through `gsEls`) — never an extra ring — so no road,
+  // plane or not, can carry the limit (and its slope) past the property line.
+  const grFenceMarginFt = grPlanOn ? gradingCfg(settings.grading).gradingMarginFt : 0, grFenceBufferFt = grPlanOn ? gradingCfg(settings.grading).undisturbedBufferFt : 0;
+  const grFence = useMemo(() => (grDriveSig ? driveFenceFor(grDriveParcels, grFenceMarginFt, grFenceBufferFt) : []), [grDriveSig, grFenceMarginFt, grFenceBufferFt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
+    if (e.type === "road") {
+      // ROUND 3: a road that ties into the line is a drive (a plane in gsEls), never an extra ring; any other road joins the limit only INSIDE the fence
+      if (grDriveTies.has(e.id)) return [];
+      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), roundTrim(e)) : ringOf(e); return r && r.length >= 3 ? roadLimitRings(r, grFence) : []; } catch (_) { return []; }
+    }
+    if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
+    return [];
+  }) : null;
   const grBase = useGradingBase({ enabled: grPlanOn && !!origin, origin, parcels: drainActive, gradingSettings: settings.grading, baseSetback: settings.setback, extraRings: grLimitExtraRings, aisleFt: Number.isFinite(settings.aisle) && settings.aisle > 0 ? settings.aisle : 24 });
   const grOn = grBase.on;
   const grHosts = grOn ? grHostsPre : null;
@@ -14605,7 +14613,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return {
           id: e.id, travelW: e.travelW ?? null, points: e.pts.length, ends: [e.pts[0], e.pts[e.pts.length - 1]].map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })),
           diagnose: driveDiagnose(e.pts, line), tied: !!tie, inGraded: !!(L.gsEls || []).find((g) => g.id === e.id && g.type === "drive"),
-          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId } : null,
+          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId, servedBy: pl.drive.servedBy || null, nearestElementFt: pl.drive.nearestFt != null ? Math.round(pl.drive.nearestFt) : null } : null,
           notAPlaneBecause: why.get(e.id) || null,
         };
       });

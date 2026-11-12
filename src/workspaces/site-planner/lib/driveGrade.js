@@ -15,7 +15,7 @@
  * Pure, no DOM, feet and ft NAVD88. Screening only. */
 import ClipperLib from "clipper-lib";
 import { pointInRing } from "./pondGeom.js";
-import { unionRings } from "./gradingLimit.js";
+import { unionRings, propertyLimit } from "./gradingLimit.js";
 
 export const GRADING_DRIVE_DEFAULTS = Object.freeze({
   driveMaxGradePct: 8,     // the steepest constant grade a drive may run (a Standards value; the panel gear edits it)
@@ -23,7 +23,8 @@ export const GRADING_DRIVE_DEFAULTS = Object.freeze({
   driveLandingPct: 2,      // …at no more than this grade
 });
 export const DRIVE_SNAP_FT = 8;            // a drive that ENDS this close inside the line (or at it) ties in at the nearest point of the line
-export const DRIVE_TARGET_REACH_FT = 15;   // the far end must touch (or be this close to) a graded court / lot to be a drive at all
+export const DRIVE_TARGET_REACH_FT = 15;   // a far end this close to a graded paved element "touches" it
+export const DRIVE_SERVE_REACH_FT = 120;   // …and out to here the drive still runs to the nearest paved element's EDGE elevation; beyond it, to the existing ground at its far end to be a drive at all
 const EPS = 1e-9;
 
 const insideAny = (pt, rings) => { for (const r of rings) if (r && r.length >= 3 && pointInRing(pt, r)) return true; return false; };
@@ -171,18 +172,23 @@ export function driveLabelPoints(path, profile) {
  * the property line is graded — past the line the only work is the tie-in itself, at the road's own elevation. Clipped against the property
  * lines; the largest piece wins (a drive that clips to several pieces keeps the one holding its far end). Returns a ring, or null. */
 export function driveRingOnSite(ring, parcelRings, farPt = null) {
-  if (!Array.isArray(ring) || ring.length < 3) return null;
+  const rings = clipRingToRings(ring, parcelRings);
+  if (!rings.length) return null;
+  const area = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a / 2); };
+  if (farPt) { const hold = rings.filter((r) => pointInRing(farPt, r)); if (hold.length) return hold.sort((a, b) => area(b) - area(a))[0]; }
+  return rings.sort((a, b) => area(b) - area(a))[0];
+}
+/* A ring's pieces that lie inside the property lines (every piece, not only the largest). Used for any road ring that joins the grading limit: a road may never
+ * carry the limit past the property line, drive or not. */
+export function clipRingToRings(ring, parcelRings) {
+  if (!Array.isArray(ring) || ring.length < 3) return [];
   const SC = 100, toP = (r) => r.map((p) => ({ X: Math.round(p.x * SC), Y: Math.round(p.y * SC) }));
   const c = new ClipperLib.Clipper();
   c.AddPath(toP(ring), ClipperLib.PolyType.ptSubject, true);
   for (const r of parcelRings || []) if (r && r.length >= 3) c.AddPath(toP(r), ClipperLib.PolyType.ptClip, true);
   const sol = new ClipperLib.Paths();
   c.Execute(ClipperLib.ClipType.ctIntersection, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-  const rings = sol.map((path) => path.map((q) => ({ x: q.X / SC, y: q.Y / SC }))).filter((r) => r.length >= 3);
-  if (!rings.length) return null;
-  const area = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a / 2); };
-  if (farPt) { const hold = rings.filter((r) => pointInRing(farPt, r)); if (hold.length) return hold.sort((a, b) => area(b) - area(a))[0]; }
-  return rings.sort((a, b) => area(b) - area(a))[0];
+  return sol.map((path) => path.map((q) => ({ x: q.X / SC, y: q.Y / SC }))).filter((r) => r.length >= 3);
 }
 
 /* THE PROPERTY LINE, properly: the OUTER boundary of the union of the active parcels. A site is often several lots (county lots, a split, a combine); the line a road
@@ -223,4 +229,19 @@ export function driveZNear(path, sFt) {
     acc += L;
   }
   return path.length ? path[path.length - 1] : null;
+}
+
+/* A road's ring as it may join the grading LIMIT: only the pieces inside the FENCE (the property line ± the margin), every piece. With no fence known it is the ring as given. */
+export function roadLimitRings(ring, fenceRings) {
+  if (!Array.isArray(ring) || ring.length < 3) return [];
+  if (!fenceRings || !fenceRings.length) return [ring];
+  return clipRingToRings(ring, fenceRings);
+}
+
+/* The fence BEFORE the grading base exists: the property line of the whole site (outer union of the active lots) moved by the signed margin + the undisturbed buffer —
+ * the very ring `gradingPack` builds (`propertyLimit`), so the two cannot disagree. */
+export function driveFenceFor(parcelRings, marginFt, bufferFt) {
+  const line = propertyLineRings(parcelRings);
+  if (!line.length) return [];
+  try { return propertyLimit({ parcelRings: line, holes: [], marginFt, bufferFt }).rings; } catch (_) { return line; }
 }

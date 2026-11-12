@@ -58,7 +58,7 @@
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
-import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, driveProfile, driveZAt, driveZNear } from "./driveGrade.js";
+import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, DRIVE_SERVE_REACH_FT, driveProfile, driveZAt, driveZNear } from "./driveGrade.js";
 
 /* Run a step generator to completion, synchronously. Its return value is the answer. */
 export function drainSteps(gen) {
@@ -313,16 +313,21 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     const D = el.drive;
     if (!D || !Array.isArray(D.path) || D.path.length < 2 || !Array.isArray(el.ring) || el.ring.length < 3 || typeof existAt !== "function") { skipped.push(el.id); driveWhy.set(el.id, typeof existAt !== "function" ? "no ground sampler yet" : "no usable centerline or footprint"); continue; }
     const far = D.path[D.path.length - 1];
-    // the paved plane the drive serves: the one its far END touches (or lies within DRIVE_TARGET_REACH_FT of) — or that any corner of the drive's own footprint lies inside
-    // (a drive laid over the edge of a court meets it even where its end point sits a little short)
-    let target = null, td = Infinity;
+    // WHAT THE DRIVE SERVES (V2115881 re-check 2026-11-12: the owner's plan measured a road whose far end sat 41 ft from the nearest graded element and was dropped
+    // as "not a drive", leaving it at court level at the line). ANY paved graded element counts — a court, a trailer row, a car lot, paving — and the NEAREST one wins:
+    // distance is 0 where the end point or any corner of the drive's own footprint lies inside it. Within DRIVE_TARGET_REACH_FT it is "touching" (as before);
+    // out to DRIVE_SERVE_REACH_FT the drive still runs to that element's EDGE elevation (read at the nearest edge point); beyond that, or with nothing graded at all,
+    // it runs to the EXISTING GROUND at its far end. Never back to "not a plane": a road that ties into the line is always graded from the road's own elevation.
+    let target = null, td = Infinity, tEdge = null;
     for (const e2 of els) {
       const pl = planes.get(e2.id);
       if (!pl || pl.classId === "buildingPad" || pl.classId === "driveInRamp" || pl.classId === "driveRoad" || !Array.isArray(e2.ring)) continue;
-      const q = pointInRing(far, e2.ring) ? far : nearestOnRing(far, e2.ring);
+      const inside = pointInRing(far, e2.ring);
+      const q = inside ? far : nearestOnRing(far, e2.ring);
       let dd = q ? Math.hypot(far.x - q.x, far.y - q.y) : Infinity;
-      if (dd > 0) for (const v of el.ring) if (pointInRing(v, e2.ring)) { dd = 0; break; }
-      if (dd < td) { td = dd; target = pl; }
+      let qq = q;
+      if (dd > 0) for (const v of el.ring) if (pointInRing(v, e2.ring)) { dd = 0; qq = v; break; }
+      if (dd < td) { td = dd; target = pl; tEdge = qq; }
     }
     // the road's elevation at the line: the ground at the tie-in — and, where the sampler has no value exactly there (a void on the edge of the data), the first value a few
     // feet along the drive; a drive with no ground under it at all is not graded, and says so
@@ -332,16 +337,24 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       const zz = v ? existAt(v) : null;
       if (Number.isFinite(zz)) { zTie = zz; break; }
     }
-    if (!target || td > DRIVE_TARGET_REACH_FT || !Number.isFinite(zTie)) {
-      skipped.push(el.id);
-      driveWhy.set(el.id, !target || td > DRIVE_TARGET_REACH_FT ? `its far end is ${Number.isFinite(td) ? Math.round(td) + " ft" : "far"} from any graded court / lot (needs to touch one, within ${DRIVE_TARGET_REACH_FT} ft)` : "no ground elevation at the property line");
-      continue;
-    }
+    if (!Number.isFinite(zTie)) { skipped.push(el.id); driveWhy.set(el.id, "no ground elevation at the property line"); continue; }
+    let zEndV = null, servedBy = "ground";
+    if (target && td <= DRIVE_SERVE_REACH_FT && tEdge) { const zz = target.zAt(tEdge); if (Number.isFinite(zz)) { zEndV = zz; servedBy = "element"; } }
+    if (zEndV == null) { const zg = existAt(far); if (Number.isFinite(zg)) zEndV = zg; }
+    if (zEndV == null) { skipped.push(el.id); driveWhy.set(el.id, "no ground elevation at its far end and no graded element within reach"); continue; }
     let lengthFt = 0;
     for (let i = 0; i + 1 < D.path.length; i++) lengthFt += Math.hypot(D.path[i + 1].x - D.path[i].x, D.path[i + 1].y - D.path[i].y);
     const g0 = grading || {};
+    // A drive served by the GROUND has no court it must reach, so it follows the ground only as far as its own profile allows (the near-flat landing, then the max drive grade):
+    // a short drive over ground that rises a couple of feet must not raise a "too steep to reach the road" flag for an end nobody asked it to meet. (A drive that serves a
+    // court / lot still meets it exactly and flags when it cannot.)
+    if (servedBy === "ground") {
+      const lf = Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt, lp = Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct, mg = Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct;
+      const land = Math.min(Math.max(0, lf), lengthFt), reach = (lp / 100) * land + (mg / 100) * Math.max(0, lengthFt - land), dz = zEndV - zTie;
+      if (Math.abs(dz) > reach) zEndV = zTie + Math.sign(dz) * reach * 0.999;
+    }
     const prof = driveProfile({
-      lengthFt, zTie, zEnd: target.zAt(far),
+      lengthFt, zTie, zEnd: zEndV,
       landingFt: Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt,
       landingPct: Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct,
       maxGradePct: Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct,
@@ -350,7 +363,8 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     const dirV = norm(far.x - D.tie.x, far.y - D.tie.y);
     planes.set(el.id, {
       elId: el.id, classId: "driveRoad", label: "Drive", baseElevFt: zTie, anchor: D.tie, dir: dirV, slopePct: Math.abs(prof.gradePct), floating: false,
-      hostId: target.hostId ?? null, graded: true, drive: { ...prof, tie: D.tie, path: D.path, far, targetId: target.elId, nearestFt: td },
+      hostId: servedBy === "element" && target ? target.hostId ?? null : null, graded: true,
+      drive: { ...prof, tie: D.tie, path: D.path, far, targetId: servedBy === "element" && target ? target.elId : null, servedBy, nearestFt: Number.isFinite(td) ? td : null },
       check: { ok: null, violation: null, bound: null, limitPct: null, unknown: true },
       zAt: driveZAt(D.path, prof),
     });
