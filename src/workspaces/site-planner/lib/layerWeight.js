@@ -148,6 +148,7 @@ export const LAYER_TIER = {
   sl_airport_zoning: "constraint",
   sl_thoroughfare: "reference",
   sl_zoning: "reference",
+  richmond_zoning: "reference", fulshear_zoning: "reference", fulshear_zoning_newer: "reference", stafford_zoning: "reference", // NEW-1 (Texas city zoning) — the same tier as Sugar Land's
   sl_public_land: "reference",
   sl_hydrants: "reference",
   sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network

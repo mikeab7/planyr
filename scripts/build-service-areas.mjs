@@ -96,6 +96,15 @@ if (want("olivebranch")) {
   const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
   areas.olivebranch = { label: "Olive Branch, MS and its utility service area", source: "Union of the data extents of the City of Olive Branch ArcGIS Online utility, planning-area and annexation layers (services9.arcgis.com/VGtdH6iTQlVulSnr), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
+/* NEW-1 / NEW-2 (Texas city zoning, 2026-11-12): the CITY LIMITS of the four Houston-area cities whose own zoning layers the Layers panel carries — richmond, fulshear, stafford, webster — each from TxGIO's
+ * Texas_City_Boundaries (full-purpose limits; the same service the Houston area above uses). Zoning applies inside a city's limits only, so no ETJ is added. maxAllowableOffset ≈ 40 m keeps
+ * the edge honest for a city a few miles across (the Houston fetch above is 10× coarser, which would swallow Stafford). A hole is kept: it is another government's enclave. */
+for (const [key, name] of [["richmond", "Richmond"], ["fulshear", "Fulshear"], ["stafford", "Stafford"], ["webster", "Webster"]]) {
+  if (!want(key)) continue;
+  const gj = await q("https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0/query", { where: `city_name='${name}'`, maxAllowableOffset: 0.0004 });
+  if (!gj.features.length) throw new Error(`TxGIO City_Boundaries holds no city_name='${name}'`);
+  areas[key] = { label: `City of ${name} limits`, source: `TxGIO Texas_City_Boundaries (city_name='${name}'), full-purpose city limits`, polys: polysOf(gj) };
+}
 if (want("sugarland")) {
   /* NEW-1 (Sugar Land city layers, 2026-11-02): the City of Sugar Land's limits (layer 0, one polygon) ∪ its ETJ (layer 1, 14 polygons), from the city's own CityLimits_ETJ map service.
    * The city's ArcGIS Server is not reachable from a build sandbox, so it is read through planyr.io's same-origin relay (a browser-style User-Agent is needed: Cloudflare refuses a bare
