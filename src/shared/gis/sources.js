@@ -30,6 +30,7 @@
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -3621,6 +3622,7 @@ export const GIS_SOURCES = {
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
 };
 
 /* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
@@ -3918,6 +3920,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.

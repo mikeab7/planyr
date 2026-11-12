@@ -53,6 +53,13 @@ if (want("desoto")) {
   if (!rec) throw new Error("DeSoto County MS not found in the county polygon asset");
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Rutherford County TN zoning): `rutherford` = Rutherford County TN, from the SAME bundled county polygons as `harris` (no network). The county / Murfreesboro / Smyrna / La Vergne
+ * zoning rows are declared for this area, so a Texas, Georgia, Mississippi or Nashville-side Tennessee site never lists them. */
+if (want("rutherford")) {
+  const rec = index.counties.find((c) => c.state === "TN" && /^rutherford$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Rutherford County TN not found in the county polygon asset");
+  areas.rutherford = { label: "Rutherford County, TN", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 /* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
  *   broward / miamidade               the county, from the SAME bundled county polygons as `harris` (no network).
  *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted

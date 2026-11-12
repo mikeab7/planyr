@@ -172,6 +172,10 @@ export const LAYER_TIER = {
   ms_dcrua_main: "reference",
   ms_dcrua_structures: "reference",
   ms_desoto_zoning: "reference",
+  tn_rz_murfreesboro: "reference", // NEW-1 (Rutherford County TN zoning) — a look-up wash under the plan, like every zoning row
+  tn_rz_smyrna: "reference",
+  tn_rz_lavergne: "reference",
+  tn_rz_county: "reference",
   ms_psc_electric: "reference",
   ms_psc_gas: "reference",
   ms_psc_water: "reference",
