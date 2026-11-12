@@ -105,6 +105,7 @@ function Harness({ data }) {
     limitMode: QS.get("mode") === "boundary" ? "boundary" : "layout",
     // round 8: the grading margin inside the property line (?margin=, default 10) and the undisturbed buffer (?buffer=)
     ...(QS.get("margin") != null ? { gradingMarginFt: +QS.get("margin") } : {}),
+    ...(QS.get("maxcf") != null ? { maxCutFillFt: +QS.get("maxcf") } : {}),   // `?maxcf=1` — the plan's max cut / fill (the fit's dead-end arm, V2115882)
     ...(QS.get("buffer") != null ? { undisturbedBufferFt: +QS.get("buffer") } : {}),
     layers: { buildable: QS.get("buildable") !== "0", cutfill: QS.get("cutfill") !== "0", contours: QS.get("contours") === "1",
       paper: QS.get("paper") !== "0" } } });

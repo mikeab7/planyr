@@ -277,3 +277,107 @@ describe("no building on the plan — the synthetic cross-dock", () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBe(400 + 2 * 185);
   });
 });
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * V2115882 (owner 2026-11-11, build 7890542): on Georgia Test Site › Concept A the button answered "No building fits inside the limits with
+ * these rules." and stopped — a dead end on a 74-acre site. Two defects: (a) the plan's max cut / fill was held against the WHOLE assembly
+ * (courts, trailer rows, lots) instead of the building PAD, and (b) nothing fell back when nothing fit. Now the max cut / fill binds the pad
+ * only, and when nothing fits the rule is relaxed in steps and the closest building comes back with `breaks` naming the rule and the amount.
+ * ------------------------------------------------------------------------------------------------------------------------------- */
+describe("never a dead end (V2115882)", () => {
+  const { inputs, existAt } = chehawInputs({ owner: 2 });
+  const base = inputs(793, "layout", "fit-dead-end");
+  const ring = base.parcelRings[0];
+  let minY = Infinity; for (const p of ring) minY = Math.min(minY, p.y);
+  const sb = ring.map((a, i) => { const c = ring[(i + 1) % ring.length]; return (a.y + c.y) / 2 < minY + 400 ? 50 : 25; });
+  const setback = gradingSetback([{ id: "pc", points: ring, setbacks: sb, active: true }], 25);
+  const fence = propertyLimit({ parcelRings: setback.parcelRings, holes: setback.holes, marginFt: 0, bufferFt: 0 });   // the owner's Limits of disturbance: 0 ft
+  const lattice = buildLattice({ bbox: sweepBBox(setback.parcelRings, 200), cell: 10, sample: (x, y) => existAt({ x, y }) });
+  const ctx = prepareFit({ lattice, setbackRings: setback.rings, setbackHoles: setback.holes, fenceRings: fence.rings, fenceHoles: fence.holes });
+  // the owner's exact template: single-load, 650 deep, a 235-ft court + trailer rows (two 50-ft rows' worth) on the one dock side, 65-ft ends
+  const SINGLE = { axis: "x", dockMode: "single", negDepth: 0, posDepth: 235, negDrop: 0.5, posDrop: 4, lotDrop: 0.5, endNeg: 65, endPos: 65, bayFt: 56, minBays: 5, depths: depthLadder({ dockMode: "single", templateDepthFt: 650 }) };
+  const CROSSDOCK = { ...SINGLE, dockMode: "cross", negDepth: 200, negDrop: 4, depths: depthLadder({ dockMode: "cross", templateDepthFt: 650 }) };
+  const DEFAULT = defaultTemplate({}, { dockDropFt: 4 });
+
+  for (const [name, template] of [["single-load, 650 deep, two trailer rows", SINGLE], ["cross-dock", CROSSDOCK], ["no building on the plan (the default template)", DEFAULT]]) {
+    for (const s of [2, 3]) {
+      it(`${name}, ${s}:1 slopes, max cut / fill 4 ft: a building comes back, its pad inside the limit, nothing named broken`, () => {
+        const r = runFitSync({ ctx, template, params: { D: 4, s }, currentDeg: 79 });
+        expect(r.best).toBeTruthy();
+        expect(r.best.sf).toBeGreaterThan(0);
+        expect(r.best.padCutFillFt).toBeLessThanOrEqual(4.0001);
+        expect(r.best.breaks).toEqual([]);
+      });
+      it(`${name}, ${s}:1 slopes, max cut / fill 1 ft: the CLOSEST building, with the broken rule and the amount`, () => {
+        const r = runFitSync({ ctx, template, params: { D: 1, s }, currentDeg: 79 });
+        expect(r.best).toBeTruthy();
+        expect(r.stats.tier).toBeGreaterThanOrEqual(1);
+        const br = r.best.breaks.find((x) => x.rule === "cutfill");
+        expect(br).toBeTruthy();
+        expect(br.limitFt).toBe(1);
+        expect(br.actualFt).toBeGreaterThan(1);
+        expect(br.actualFt).toBeCloseTo(r.best.padCutFillFt, 5);
+      });
+    }
+  }
+
+  it("the max cut / fill binds the PAD only: a bigger limit grows the building, and the courts may sit deeper than it", () => {
+    const small = runFitSync({ ctx, template: SINGLE, params: { D: 4 }, currentDeg: 79 });
+    const big = runFitSync({ ctx, template: SINGLE, params: { D: 12 }, currentDeg: 79 });
+    expect(big.best.sf).toBeGreaterThan(small.best.sf);
+    expect(big.best.padCutFillFt).toBeLessThanOrEqual(12.0001);
+    expect(big.best.breaks).toEqual([]);
+  });
+
+  it("the relaxed answer is the SMALLEST exceedance: no more cut / fill than the smallest building needs", () => {
+    const r1 = runFitSync({ ctx, template: SINGLE, params: { D: 1 }, currentDeg: 79 });
+    const r4 = runFitSync({ ctx, template: SINGLE, params: { D: 4 }, currentDeg: 79 });
+    expect(r1.best.padCutFillFt).toBeLessThanOrEqual(Math.max(4, r4.best.padCutFillFt) + 0.0001);
+  });
+
+  it("the REAL grading engine prices a relaxed answer on the owner's ground: its dirt is within a quarter of what the card says", () => {
+    const r = runFitSync({ ctx, template: DEFAULT, params: { D: 1 }, currentDeg: 79 });
+    expect(r.best.breaks.map((x) => x.rule)).toEqual(["cutfill"]);
+    const gi = inputs(r.best.ffe, "layout", "fit-relaxed");
+    gi.els = [...gi.els.filter((e) => e.type !== "building" && e.attachedTo == null && !e.hostId), ...syntheticAssemblyEls(r.best.box, {}, r.best.ffe)];
+    const s = buildProposedSurface(gi);
+    const ew = gradedAreaEarthwork(s.grid);
+    expect(ew).toBeTruthy();
+    expect(Math.abs(ew.cutCy - r.best.cutCy) / Math.max(1, r.best.cutCy)).toBeLessThan(0.25);
+  });
+
+  // ---- synthetic ground: the tiers are derivable on paper
+  const bare = { axis: "x", negDepth: 0, posDepth: 0, endNeg: 0, endPos: 0, depths: ladder(160, 800), bayFt: 56, minBays: 5 };
+  it("tier 1: a 10% plane with a 2-ft limit — the smallest building needs ~8 ft of pad cut / fill, and it says so", () => {
+    // 10% grade: the shallowest building (160 ft across the fall) spans 16 ft of ground, so the pad needs ±8 ft
+    const r = runFitSync({ ctx: site((x) => 0.1 * x), template: bare, params: { D: 2 } });
+    expect(r.stats.tier).toBe(1);
+    expect(r.best.sf).toBeGreaterThan(0);
+    const br = r.best.breaks[0];
+    expect(br.rule).toBe("cutfill"); expect(br.limitFt).toBe(2);
+    expect(br.actualFt).toBeGreaterThan(7); expect(br.actualFt).toBeLessThan(9);
+    expect(r.best.breaks.some((x) => x.rule === "limit")).toBe(false);
+  });
+  it("within the limit nothing is named broken (same ground, a limit big enough for the smallest building)", () => {
+    const r = runFitSync({ ctx: site((x) => 0.1 * x), template: bare, params: { D: 12 } });
+    expect(r.stats.tier).toBe(0);
+    expect(r.best.breaks).toEqual([]);
+  });
+  it("tier 2: ground too steep for any slope to daylight inside the fence — the building still comes back, naming BOTH rules", () => {
+    const r = runFitSync({ ctx: site((x) => 0.6 * x), template: bare, params: { D: 2 } });
+    expect(r.stats.tier).toBe(2);
+    expect(r.best.sf).toBeGreaterThan(0);
+    expect(r.best.breaks.map((x) => x.rule)).toEqual(["cutfill", "limit"]);
+  });
+  it("only a setback that cannot hold the smallest building at any cut / fill is a 'no-room' (never the old bare 'no-fit')", () => {
+    const lattice2 = buildLattice({ bbox: [-300, -300, 700, 700], cell: 10, sample: () => 100 });
+    const tiny = prepareFit({ lattice: lattice2, setbackRings: [rect(200, 200)], fenceRings: [rect(260, 260, -30, -30)] });
+    const r = runFitSync({ ctx: tiny, template: bare });
+    expect(r.best).toBeNull();
+    expect(r.why).toBe("no-room");
+  });
+  it("a cancelled relaxed search stops", () => {
+    const r = runFitSync({ ctx: site((x) => 0.1 * x), template: bare, params: { D: 2 }, shouldAbort: () => true });
+    expect(r.aborted).toBe(true);
+  });
+});
