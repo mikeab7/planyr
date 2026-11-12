@@ -18,6 +18,10 @@
  *     via serviceNeighbourWalk.mjs's shared `measureParcelLayer`);
  *   • the layer has at least one feature (a service that answers cleanly but reports 0 features
  *     is the same "quietly gone empty" failure as a hard error).
+ *   • (2026-11, the weekly parcels sweep) every column the county row DECLARES — `idField`, `addrField` and each `addrParts` role — still
+ *     exists on the live layer's field list (leaf name, case-blind). HCAD dropped `LocAddr` and the address search answered HTTP 400 for
+ *     weeks before anyone noticed; this catches the next CAD schema change the night it happens. A declared column is a HINT in
+ *     the runtime (detection wins unless pinned), so a miss here is reported as "column drift", not as an outage.
  * A `serviceUrl`-only entry (no direct `layerUrl` — the app auto-resolves its layer at request
  * time) is skipped by this pass; every currently-wired statewide source and the great majority of
  * county CADs use `layerUrl` directly, so this is real coverage, not a token check, but it is not
@@ -40,6 +44,7 @@
  *   node ui-audit/parcel-source-health-sweep.mjs --json
  */
 import { COUNTIES, COUNTIES_MAP } from "../src/workspaces/site-planner/lib/counties.js";
+import { missingDeclaredColumns } from "../src/workspaces/site-planner/lib/addrParts.js";
 import { fetchJson } from "./probe-statewide-parcels.mjs";
 import { measureParcelLayer, walkForReplacement } from "./lib/serviceNeighbourWalk.mjs";
 import { fileURLToPath } from "node:url";
@@ -50,22 +55,30 @@ const JSON_OUT = process.argv.includes("--json");
  * statewide layer's failure names every affected key, not just the first one found). Pure. */
 export function collectWiredLayerUrls(registries = [COUNTIES, COUNTIES_MAP]) {
   const byUrl = new Map(); // url -> Set(labels)
+  const cfgsByUrl = new Map(); // url -> [{ label, cfg }] — the rows whose DECLARED columns are held against the live field list
   for (const registry of registries) {
     for (const [key, cfg] of Object.entries(registry || {})) {
       if (!cfg || !cfg.layerUrl) continue; // serviceUrl-only entries are out of scope for this pass
       const url = String(cfg.layerUrl).replace(/\/+$/, "");
-      if (!byUrl.has(url)) byUrl.set(url, new Set());
-      byUrl.get(url).add(cfg.state ? `${cfg.state}/${key}` : key);
+      const label = cfg.state ? `${cfg.state}/${key}` : key;
+      if (!byUrl.has(url)) { byUrl.set(url, new Set()); cfgsByUrl.set(url, []); }
+      byUrl.get(url).add(label);
+      if (cfg.idField || cfg.addrField || cfg.addrParts) cfgsByUrl.get(url).push({ label, cfg });
     }
   }
-  return [...byUrl.entries()].map(([url, labels]) => ({ url, labels: [...labels].sort() }));
+  return [...byUrl.entries()].map(([url, labels]) => ({ url, labels: [...labels].sort(), cfgs: cfgsByUrl.get(url) }));
 }
 
 /* Check one source: alive, has data, and (on failure) what its own server's neighbours look like.
  * Never throws — every outcome, including a network exception, comes back as a result row. */
-async function checkOne({ url, labels }) {
+async function checkOne({ url, labels, cfgs = [] }) {
   const measured = await measureParcelLayer(url, { fetchJson });
   if (measured.ok && (measured.featureCount == null || measured.featureCount > 0)) {
+    /* The layer answers with data — now hold each row's declared columns against its live field list. No replacement walk: the service is
+     * fine, one column moved. */
+    const drift = [];
+    for (const { label, cfg } of cfgs) for (const m of missingDeclaredColumns(cfg, measured.fieldNames)) drift.push(`${label}: ${m.kind} "${m.name}"`);
+    if (drift.length) return { url, labels, healthy: false, columnDrift: true, problem: `column drift — declared column(s) not on the live layer: ${drift.join("; ")}`, candidate: null, candidatesChecked: 0 };
     return { url, labels, healthy: true, featureCount: measured.featureCount };
   }
   const problem = measured.ok
@@ -101,6 +114,8 @@ function report(sw) {
     lines.push(`   ${r.problem}`);
     if (r.candidate) {
       lines.push(`   → candidate on the same server: ${r.candidate.url} (name similarity ${r.candidate.similarity.toFixed(2)}, ${r.candidate.featureCount ?? "?"} features)`);
+    } else if (r.columnDrift) {
+      lines.push("   → the layer is up; fix the county row's declared column(s) in counties.js (and its search/card test).");
     } else {
       lines.push(`   → no plausible candidate found on the same server (${r.candidatesChecked} checked) — needs manual research.`);
     }

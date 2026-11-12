@@ -65,8 +65,8 @@ export const COUNTY_VERIFICATION = {
   chambers: {
     publisher: "own",
     publisherName: "Chambers County Appraisal District (Pandai-hosted)",
-    verifiedOn: null,
-    verifiedNote: "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " + "draws. It could NOT be re-probed on 2026-07-29 because gisdata.pandai.com is blocked by this " + "build environment's egress policy — a sandbox limitation, not a sign the endpoint moved. Kept " + "as the primary: demoting a working Texas source to the statewide composite would be a " + "behaviour change, which the Colorado work is not permitted to make.",
+    verifiedOn: "2026-11-01",
+    verifiedNote: "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " + "draws. 2026-11-01 (weekly parcels sweep, NEW-4): gisdata.pandai.com ANSWERS from the build sandbox when the query is well-formed — 38,529 rows, 52 table-prefixed fields; the earlier " + "\"blocked by egress\" note was a mis-read of a malformed query (HTTP 400 for `spatialRel=esriIntersects` — the server wants `esriSpatialRelIntersects`; \"Failed to execute query.\" for UNprefixed names in `outFields` or `returnCentroid=true`; unprefixed names ARE accepted in `where`). " + "Situs is split across Prop_Street_Number / _Dir / Prop_Street / _Suffix / Prop_City (declared as `addrParts`). It was NOT re-probed on 2026-11-12: the build sandbox's proxy refused the tunnel (403) that day.",
   },
   /* ═══ B209503 — the five counties that complete the Houston metro ═══════════════════════════
    * All five were probed LIVE from this build environment on 2026-08-06 (every one is on Esri's

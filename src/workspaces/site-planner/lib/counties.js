@@ -192,8 +192,15 @@ const COUNTIES_RAW = {
     label: "Harris County · HCAD",
     layerUrl:
       "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+    // NEW-1 (2026-11) — HCAD dropped `LocAddr` (the live layer, 1.55M rows, has NO such field): situs is split across site_str_pfx / site_str_num (Integer) /
+    // site_str_name / site_str_sfx / site_str_sfx_dir / site_city, so the address search asked the service for a column it no longer had (HTTP 400 "Failed to execute
+    // query") and `addrParts` now says which column plays which part. `addrField` is the street-NAME column — the single-column fallback if the parts ever fail.
+    // `pinIdField` because plain detection picked `LOWPARCELID`, which differs from HCAD_NUM on 77,003 stacked rows (HCAD_NUM 1094450000015 <-> LOWPARCELID 1094440000001):
+    // an id search for a stacked account missed, and the card's account could show the wrong one.
     idField: "HCAD_NUM",
-    addrField: "LocAddr",
+    pinIdField: true,
+    addrField: "site_str_name",
+    addrParts: { num: "site_str_num", dir: "site_str_pfx", name: "site_str_name", sfx: "site_str_sfx", postDir: "site_str_sfx_dir" },
     help: "Search by HCAD account number (13 digits) or a site address.",
   },
   fortbend: {
@@ -241,7 +248,11 @@ const COUNTIES_RAW = {
     // table-prefixed field list (parcelLotNumbers.resolveLotNumberField), so no prefix is hard-coded.
     lotNumberField: "Account",
     addrField: "Prop_Street",
-    help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a street name.",
+    // NEW-4 (2026-11) — the street NUMBER, direction, type and city live in their own columns (`Prop_Street_Number` / `_Dir` / `Prop_Street` / `_Suffix` / `Prop_City`), and
+    // nothing composed them: the card read "FM 565" and a typed "3525 FM 565" found nothing (`Prop_Street LIKE '%3525 FM 565%'` -> 0). Some rows bake the type into
+    // Prop_Street ("FM 565 RD"), which the composer does not append twice. Bare names: this joined layer's `where` accepts them unprefixed (its `outFields` does not).
+    addrParts: { num: "Prop_Street_Number", dir: "Prop_Street_Dir", name: "Prop_Street", sfx: "Prop_Street_Suffix", city: "Prop_City" },
+    help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a site address (e.g. 3525 FM 565).",
   },
   waller: {
     state: "TX",
@@ -1674,7 +1685,10 @@ const COUNTIES_RAW = {
     state: "GA", label: "Bartow County, GA",
     layerUrl: "https://www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2",
     idField: "PARCELID", addrField: "STREET_NAM",
-    help: "Bartow County tax parcels (county GIS). Search by parcel ID or a street name.",
+    // NEW-3 (2026-11) — the house number is its own column (HOUSE_NO, an integer; 0 = none), so the card had no address at all and "384 Old Grassdale" found nothing.
+    // `STREET_NAM` is cut at 25 characters by the county ("ADAIRSVILLE PLEASANT VALL"): a typed full name still matches by contains-LIKE on the part that is there.
+    addrParts: { num: "HOUSE_NO", name: "STREET_NAM" },
+    help: "Bartow County tax parcels (county GIS). Search by parcel ID or a site address.",
   },
   ga_cobb: {
     // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 279,635 parcel polygons —
@@ -2251,7 +2265,7 @@ const COUNTIES_RAW = {
   tn_rutherford: {
     state: "TN", label: "Rutherford County, TN",
     layerUrl: "https://services.arcgis.com/36I6IHIdr660pAyH/arcgis/rest/services/ParcelsCAMA1/FeatureServer/0",
-    idField: "ParcelID", pinIdField: true, addrField: "STREETADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control",
+    idField: "ParcelID", pinIdField: true, addrField: "FormattedLocation", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control", // NEW-2 (2026-11): STREETADDRESS is filled on 48 of 123,364 lots, FormattedLocation ("1975 JOE B JACKSON PKWY") on 123,014
     help: "Rutherford County GIS parcels (CAMA-linked) — covers Murfreesboro, Smyrna, La Vergne, Eagleville, Christiana and the rest of the county. Search by parcel ID (e.g. 156-027.00-000) or a site address.",
   },
   /* NEW-2 (Tennessee pass 2, B2408834, 2026-10-22) — WILLIAMSON COUNTY, TN (Franklin, Brentwood, Spring Hill), on Williamson County government's OWN ArcGIS Online

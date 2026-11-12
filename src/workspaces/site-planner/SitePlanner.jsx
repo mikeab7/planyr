@@ -259,7 +259,7 @@ import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, li
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
-import { lookupParcels } from "./lib/parcelQuery.js";
+import { lookupParcels, situsFor } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
   largestRingLngLat,
@@ -271,7 +271,7 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
-import { apprRows, apprVal, situsAddress } from "./lib/appraisal.js";
+import { apprRows, apprVal } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
@@ -13390,6 +13390,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
   const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
   const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
+  const parcelAddrParts = (COUNTIES[restored?.county] || {}).addrParts || null;
   const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField, overlapPairs: parcelOverlapPairs }), [parcels, parcelCadName, parcelIdField, parcelOverlapPairs]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
@@ -17309,7 +17310,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
       if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
-      const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
+      const addr = situsFor(hit.county, attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder); a county that declares split situs columns is composed (addrParts)
       const key = parcelGisKey(attrs, rings);
       // Re-click a lot added THIS session → toggle it back off.
       if (identifyAddedRef.current.has(key)) {
@@ -22836,7 +22837,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} />
     );
   };
   /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is
