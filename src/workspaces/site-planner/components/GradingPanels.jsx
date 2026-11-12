@@ -437,17 +437,9 @@ export function FitBuildingRow({ fit }) {
   );
 }
 
-/* The 3D viewer's door (NEW-1, 2026-11-11). It lives past the panel's "Grade this plan is off" early return, so a plan that has not opted in has no
- * button — and the panel itself is mounted only for the owner. Opening it loads three.js on demand (SitePlanner's lazy mount); nothing here imports it.
- * Disabled (with its reason on hover) until the proposed surface exists. */
-export function View3dRow({ ready, onOpen }) {
-  return (
-    <div data-section="view3d" style={{ ...hairline, padding: "10px 0" }}>
-      <Button variant="ghost" size="sm" data-testid="grading-view-3d" disabled={!ready} title={ready ? "Open the full-screen 3D view of the grading" : "Available once the grading has finished calculating"}
-        onClick={() => onOpen && onOpen()}>View in 3D</Button>
-    </div>
-  );
-}
+/* (NEW-2, 2026-11-11, B2671227: the "View in 3D" row that lived here is GONE — the 3D viewer is opened from the map's own "3D" button, components/View3dButton.jsx,
+ * so it never has to be hunted for at the bottom of this panel. Do not put a 3D row back in the panel.) */
+
 
 /* 7 — GROUND: a severity pill, then TWO numbers. The only prose is behind the ⓘ. */
 export function GroundSection({ model, onToggleBuildable, buildableOn = false }) {
@@ -541,8 +533,8 @@ export function GradingPanel(props) {
   for (const k of GRADING_PANEL_CALLBACKS) pass[k] = typeof props[k] === "function" ? stable.current[k] : props[k];
   return <GradingPanelBody {...pass} />;
 }
-const GRADING_PANEL_CALLBACKS = ["onView3d", "onPlanOn", "onShowOnMap", "onShowContours", "onShowPaper", "onShowSpots", "onCfg", "onDockDrop", "onSelectBuilding", "onApplyFfeFix", "onApplyMoveFix", "onToggleBuildable", "onPullLimit"];
-const GradingPanelBody = React.memo(function GradingPanelBody({ planOn = true, showOnMap = false, showContours = false, showPaper = true, showSpots = true, onPlanOn = null, onShowOnMap = null, onShowContours = null, onShowPaper = null, onShowSpots = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null, PAL = null, onView3d = null, view3dReady = false }) {
+const GRADING_PANEL_CALLBACKS = ["onPlanOn", "onShowOnMap", "onShowContours", "onShowPaper", "onShowSpots", "onCfg", "onDockDrop", "onSelectBuilding", "onApplyFfeFix", "onApplyMoveFix", "onToggleBuildable", "onPullLimit"];
+const GradingPanelBody = React.memo(function GradingPanelBody({ planOn = true, showOnMap = false, showContours = false, showPaper = true, showSpots = true, onPlanOn = null, onShowOnMap = null, onShowContours = null, onShowPaper = null, onShowSpots = null, model, headerSlot = null, dockDropFt, onCfg, onDockDrop, onSelectBuilding, onApplyFfeFix, onApplyMoveFix, onToggleBuildable, buildableOn = false, onPullLimit = null, PAL = null }) {
   const view = gradingPanelView(model);
   const head = headerSlot && createPortal(<GradingHeaderActions model={planOn ? model : null} planOn={planOn} onPlanOn={onPlanOn} dockDropFt={dockDropFt} onCfg={onCfg} onDockDrop={onDockDrop} />, headerSlot);
   if (!planOn) {
@@ -587,7 +579,6 @@ const GradingPanelBody = React.memo(function GradingPanelBody({ planOn = true, s
       </div>
       <FitBuildingRow fit={model.fit} />
       <OnTheMap showOnMap={showOnMap} showContours={showContours} showPaper={showPaper} showSpots={showSpots} onShowOnMap={onShowOnMap} onShowContours={onShowContours} onShowPaper={onShowPaper} onShowSpots={onShowSpots} PAL={PAL} />
-      <View3dRow ready={view3dReady} onOpen={onView3d} />
       <GroundSection model={model} buildableOn={buildableOn} onToggleBuildable={onToggleBuildable} />
     </div>
   );

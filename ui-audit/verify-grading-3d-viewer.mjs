@@ -15,6 +15,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
+import { northHeadingDeg, cardinalHeadings } from "../src/workspaces/site-planner/lib/grading3d/compass.js";
+import { DEFAULT_AZ } from "../src/workspaces/site-planner/lib/grading3d/orbit.js";
 
 const PORT = 5197, BASE = `http://localhost:${PORT}`;
 const CHEHAW = process.argv.includes("--chehaw");
@@ -131,6 +133,69 @@ try {
   check("Reset view returns to the opening view", Math.abs(sReset.dist - s0.homeDist) < 1e-6 * s0.homeDist + 0.01 && Math.abs(sReset.az - s0.az) < 1e-6, `${sReset.dist.toFixed(1)} vs ${s0.homeDist.toFixed(1)}`);
   await settle(); await shot(`${tag}-4-after-reset`);
 
+  // ================= 4b. cardinal directions (B2671226): the compass turns with the camera; the ground "N" marks north on the model =================
+  const compass = async () => page.evaluate(() => { const r = document.querySelector('[data-testid="grading-3d-compass"]'); if (!r) return null;
+    const L = {}; for (const k of ["N", "E", "S", "W"]) { const t = r.querySelector(`[data-testid="grading-3d-compass-${k}"]`); L[k] = t ? [+t.getAttribute("x"), +t.getAttribute("y")] : null; }
+    return { heading: +r.getAttribute("data-heading"), az: +r.getAttribute("data-az"), letters: L, needle: (r.querySelector('[data-testid="grading-3d-compass-needle"]') || {}).getAttribute?.("transform") }; });
+  const angDiff = (a, b) => Math.abs((((a - b) % 360) + 540) % 360 - 180);   // the smallest angle between two headings, 0..180
+  const toAz = async (target) => { const cur = (await st()).az; await page.evaluate((dx) => window.__grading3d.drive({ orbit: [dx, 0] }), (cur - target) / 0.0058); await settle(); };
+  const cm0 = await compass();
+  check("a compass is in the viewer, with N, E, S and W", !!cm0 && ["N", "E", "S", "W"].every((k) => cm0.letters[k]), JSON.stringify(cm0 && cm0.letters));
+  check("at the opening view the compass reads the camera's default azimuth (what Reset view restores)", !!cm0 && Math.abs(cm0.heading - northHeadingDeg(DEFAULT_AZ)) < 0.02 && Math.abs(cm0.az - DEFAULT_AZ) < 1e-6, `heading ${cm0 && cm0.heading} for az ${cm0 && cm0.az}`);
+  const lettersOk = (cm) => { const h = cardinalHeadings(cm.az); return ["N", "E", "S", "W"].every((k) => { const dx = cm.letters[k][0] - 50, dy = cm.letters[k][1] - 50; return angDiff((Math.atan2(dx, -dy) * 180) / Math.PI, h[k]) < 0.1 && Math.abs(Math.hypot(dx, dy) - 31) < 0.05; }); };
+  check("N, E, S, W sit a quarter turn apart on one ring, N at the north heading", lettersOk(cm0), JSON.stringify(cm0.letters));
+  const turned = [];
+  for (const az of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 1.9]) {
+    await toAz(az); const cm = await compass(), sx = await st();
+    turned.push(`${(sx.az).toFixed(2)}→${cm.heading.toFixed(1)}`);
+    if (!(Math.abs(cm.heading - northHeadingDeg(sx.az)) < 0.02 && Math.abs(cm.az - sx.az) < 1e-9 && lettersOk(cm))) turned.push("MISMATCH");
+  }
+  check("orbiting turns the compass live — its heading equals the heading math for the camera's own azimuth at 0°, 90°, 180°, 270° and an odd angle", !turned.includes("MISMATCH"), turned.join("  "));
+  // top-down (el at its clamp ~88°) the ground "N" must lie, from the screen centre (= the camera's target), in the very direction the compass points
+  await page.evaluate(() => window.__grading3d.drive({ orbit: [0, 4000] })); await settle();
+  const cvb = await (await page.$('[data-grading-3d-canvas]')).boundingBox();
+  const ctr = { x: cvb.x + cvb.width / 2, y: cvb.y + cvb.height / 2 };
+  const aligned = [];
+  for (const az of [0, 0.9, Math.PI / 2, 2.6, Math.PI, -2.2, -Math.PI / 2, -0.7]) {
+    await toAz(az); const sx = await st(), cm = await compass();
+    const n = sx.north && sx.north.sign;
+    const screenHeading = n ? (Math.atan2(n.x - ctr.x, -(n.y - ctr.y)) * 180) / Math.PI : NaN;
+    const dd = n ? angDiff(screenHeading, cm.heading) : 999;
+    aligned.push(`${az.toFixed(2)}: sign ${Number.isFinite(screenHeading) ? ((screenHeading + 360) % 360).toFixed(1) : "?"}° vs compass ${cm.heading.toFixed(1)}° (Δ${dd.toFixed(1)})`);
+    if (dd > 8) aligned.push("MISMATCH");
+  }
+  check("looking down, the ground 'N' lies in the compass's direction from the centre of the view (the two always agree) at eight azimuths", !aligned.includes("MISMATCH"), aligned.join(" | "));
+  // KNOWN-GOOD: with the camera north of the site, looking south (az 180°), the N must be on the NEAR side (low on the screen); standing south it is up the screen
+  await toAz(0); const sSouth = await st(); await toAz(Math.PI); const sNorth = await st();
+  check("KNOWN-GOOD: standing south the 'N' is up the screen, standing north it is down the screen, standing east it is to the right", sSouth.north.sign.y < ctr.y - 40 && sNorth.north.sign.y > ctr.y + 40, `y ${sSouth.north.sign.y.toFixed(0)} (south view) · ${sNorth.north.sign.y.toFixed(0)} (north view) · centre ${ctr.y.toFixed(0)}`);
+  await toAz(Math.PI / 2); const sEast = await st();
+  check("…and east of the site, looking west, north is on the right", sEast.north.sign.x > ctr.x + 40, `x ${sEast.north.sign.x.toFixed(0)} vs centre ${ctr.x.toFixed(0)}`);
+  // back to the opening view; the sign must be on screen and BRIGHT at every Height stretch, and with the slice on
+  await page.click('[data-testid="grading-3d-reset"]'); await settle();
+  const whiteNear = (img, p, r = 36) => { let n = 0; for (let y = Math.max(0, Math.round(p.y - r)); y < Math.min(img.height, Math.round(p.y + r)); y++) for (let x = Math.max(0, Math.round(p.x - r)); x < Math.min(img.width, Math.round(p.x + r)); x++) { const q = px(img, x, y); if (q[0] > 225 && q[1] > 225 && q[2] > 225) n++; } return n; };
+  const seen = {};
+  for (const k of [1, 2, 3, 5]) {
+    await page.click(`[data-testid="grading-3d-stretch-${k}"]`); await settle();
+    const sk = await st(), img = await shot(`${tag}-4b-north-stretch-${k}`);
+    const covers = (() => { const c = census(img, { x: Math.max(0, Math.round(sk.north.sign.x - 26)), y: Math.max(0, Math.round(sk.north.sign.y - 26)), w: 52, h: 52 }); return c.rust + c.blue; })();
+    seen[k] = { inView: !!(sk.north && sk.north.sign.inView && sk.north.tip.inView), white: whiteNear(img, sk.north.sign), covers, at: [Math.round(sk.north.sign.x), Math.round(sk.north.sign.y)] };
+  }
+  const voidWhite = whiteNear(await shot(`${tag}-4b-control`), { x: 30, y: 450 }, 24);
+  check("KNOWN-GOOD: a patch of empty void reads no white at all (the white count can tell a sign from nothing)", voidWhite === 0, `${voidWhite} px`);
+  check("the 'N' sign (and its arrow tip) is inside the window at 1×, 2×, 3× and 5× Height", Object.values(seen).every((v) => v.inView), JSON.stringify(seen));
+  check("…and it sits OFF the model: no cut / fill pixel under the sign at any stretch (it never paints over the grading)", Object.values(seen).every((v) => v.covers === 0), JSON.stringify(Object.fromEntries(Object.entries(seen).map(([k, v]) => [k + "×", v.covers]))));
+  check("…and it is drawn there — bright ring and letter pixels at every stretch", Object.values(seen).every((v) => v.white > 120), JSON.stringify(Object.fromEntries(Object.entries(seen).map(([k, v]) => [k + "×", v.white]))));
+  await page.click('[data-testid="grading-3d-stretch-3"]'); await settle();
+  const noSlice = await st();
+  await page.click('[data-testid="grading-3d-slice"]'); await settle();
+  const withSlice = await st(), imgSlice = await shot(`${tag}-4b-north-with-slice`);
+  const wSlice = whiteNear(imgSlice, withSlice.north.sign);
+  check("with the Slice ON the 'N' is still drawn where it was (the cut's clipping plane does not take it away)", withSlice.north.sign.inView && Math.hypot(withSlice.north.sign.x - noSlice.north.sign.x, withSlice.north.sign.y - noSlice.north.sign.y) < 1 && wSlice > 120, `${wSlice} white px`);
+  await page.click('[data-testid="grading-3d-slice"]'); await settle();
+  await page.click('[data-testid="grading-3d-reset"]'); await page.click('[data-testid="grading-3d-stretch-3"]'); await settle();
+  const cmEnd = await compass(), sEnd = await st();
+  check("after Reset view the compass is back at the opening heading and agrees with the camera", Math.abs(cmEnd.heading - northHeadingDeg(DEFAULT_AZ)) < 0.02 && Math.abs(sEnd.az - DEFAULT_AZ) < 1e-6, `${cmEnd.heading.toFixed(2)}°`);
+
   // ================= 5. slice =================
   const before = await shot(`${tag}-5a-before-slice`); const cBefore = census(before, modelBox);
   await page.click('[data-testid="grading-3d-slice"]'); await settle();
@@ -162,7 +227,8 @@ try {
   await page.evaluate(() => window.__grading3d.drive({ zoom: -450 })); await settle();
   const close = await shot(`${tag}-5e-section-closeup`); const cc = census(close, modelBox);
   check("the section seen head-on carries the rust wedge (cut), the blue wedge (fill), earth and the white lines", cc.rust > 120 && cc.blue > 120 && cc.brown > 2000 && cc.white > 80, `rust ${cc.rust}, blue ${cc.blue}, brown ${cc.brown}, white ${cc.white}`);
-  await page.click('[data-testid="grading-3d-reset"]'); await page.click('[data-testid="grading-3d-stretch-3"]'); await settle();
+  // Reset view frames from the CURRENT Height stretch, so set 3× FIRST — the "before" picture (5a) was framed at 3×, and the two must be the same camera
+  await page.click('[data-testid="grading-3d-stretch-3"]'); await page.click('[data-testid="grading-3d-reset"]'); await settle();
   await page.click('[data-testid="grading-3d-slice"]'); await settle();
   const full = await shot(`${tag}-5d-slice-off`);
   check("Slice OFF = the full model again", census(full, modelBox).lit > 0.95 * cBefore.lit, `${census(full, modelBox).lit} vs ${cBefore.lit}`);
@@ -182,10 +248,10 @@ try {
 
   // ================= 6b. a narrow window (Chromium emulated at 390 wide — NOT an iPhone): the chrome wraps, never overflows or overlaps =================
   await page.setViewportSize({ width: 390, height: 780 }); await settle();
-  const boxes = await page.evaluate(() => ["grading-3d-legend", "grading-3d-controls", "grading-3d-close"].map((id) => { const r = document.querySelector(`[data-testid="${id}"]`).getBoundingClientRect(); return { id, l: r.left, r: r.right, t: r.top, b: r.bottom }; }));
-  const [lg, ct, cl] = boxes, overlap = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
-  check("at 390 wide the legend, the controls and the close button all sit inside the window", boxes.every((b) => b.l >= 0 && b.r <= 390 && b.t >= 0 && b.b <= 780), JSON.stringify(boxes.map((b) => [b.id, Math.round(b.l), Math.round(b.r)])));
-  check("…and none of the three overlaps another", !overlap(lg, ct) && !overlap(lg, cl) && !overlap(ct, cl));
+  const boxes = await page.evaluate(() => ["grading-3d-legend", "grading-3d-controls", "grading-3d-close", "grading-3d-compass-card"].map((id) => { const r = document.querySelector(`[data-testid="${id}"]`).getBoundingClientRect(); return { id, l: r.left, r: r.right, t: r.top, b: r.bottom }; }));
+  const [lg, ct, cl, cp] = boxes, overlap = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  check("at 390 wide the legend, the compass, the controls and the close button all sit inside the window", boxes.every((b) => b.l >= 0 && b.r <= 390 && b.t >= 0 && b.b <= 780), JSON.stringify(boxes.map((b) => [b.id, Math.round(b.l), Math.round(b.r)])));
+  check("…and none of them overlaps another — the compass sits under the legend, clear of the controls and the close button", !overlap(lg, ct) && !overlap(lg, cl) && !overlap(ct, cl) && !overlap(cp, lg) && !overlap(cp, ct) && !overlap(cp, cl), JSON.stringify(boxes.map((b) => [b.id, Math.round(b.t), Math.round(b.b)])));
   await shot(`${tag}-6c-narrow`);
   await page.setViewportSize({ width: 1400, height: 900 }); await settle();
 

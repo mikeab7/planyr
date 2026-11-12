@@ -1,6 +1,7 @@
 /* verify-grading-3d-gate-live — NEW-1 (2026-11-11), the NEGATIVE half of V2115879, run signed in as the TEST account on the deployed site.
  * The 3D grading viewer is owner-only (constraint #25). The test account has no admin row, so on planyr.io it must see: no Grading panel,
- * no "View in 3D", and the viewer's lazy chunk (the only code that carries three.js) must never be requested. Also proves the chunk IS
+ * no "3D" button on the map (B2671227 moved the button out of the Grading panel to the map's top-right row, beside "View" and "Imagery & Layers" —
+ * `grading-3d-open`) and no "View in 3D" anywhere, and the viewer's lazy chunk (the only code that carries three.js) must never be requested. Also proves the chunk IS
  * deployed and served (the owner's positive check can only fail for a reason other than a missing file). The served build is read from
  * /version.json in the SAME page evaluation as the assertions.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-grading-3d-gate-live.mjs [https://planyr.io] [expectedBuildPrefix] */
@@ -22,11 +23,15 @@ try {
   const r = await page.evaluate(async () => {
     const build = await fetch("/version.json", { cache: "no-store" }).then((x) => x.json()).catch(() => null);
     const txt = document.body.innerText;
-    return { build, viewIn3d: /View in 3D/.test(txt), gradingPanel: !!document.querySelector('[data-testid="grading-panel"], [data-testid="grading-metrics"]'), railGrading: [...document.querySelectorAll("button")].some((b) => /^\s*Grading\s*$/.test(b.textContent || "")), email: window.pfSupabase && window.pfSupabase.auth ? "has-client" : "no-client", res: performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /\/assets\/(SitePlanner|SitePlannerApp)-/.test(n)) };
+    const mapRow = document.querySelector('[data-testid="view-menu-btn"]');                         // the card the 3D button sits beside (View)
+    const threeDButtons = [...document.querySelectorAll("button")].filter((b) => /^\s*3D\s*$/.test(b.textContent || "") || b.getAttribute("data-testid") === "grading-3d-open");
+    return { build, viewIn3d: /View in 3D/.test(txt), threeD: threeDButtons.length, threeDCard: !!document.querySelector('[data-testid="grading-3d-card"]'), viewBtn: !!mapRow, layersChip: !!document.querySelector('[data-testid="layers-expand"], [data-testid="layers-panel"]'), gradingPanel: !!document.querySelector('[data-testid="grading-panel"], [data-testid="grading-metrics"]'), railGrading: [...document.querySelectorAll("button")].some((b) => /^\s*Grading\s*$/.test(b.textContent || "")), email: window.pfSupabase && window.pfSupabase.auth ? "has-client" : "no-client", res: performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /\/assets\/(SitePlanner|SitePlannerApp)-/.test(n)) };
   });
   check("signed in as the test account (proof from the helper)", !!s.proof && s.proof.email === "e2e@planyr.test", JSON.stringify(s.proof && s.proof.email));
   check(`served build is ${WANT || "(any)"}`, !WANT || (r.build && String(r.build.build).startsWith(WANT)), JSON.stringify(r.build));
   check("the plan editor chunk was loaded (the planner really rendered — a known-good arm)", r.res.some((n) => /SitePlanner-/.test(n)), r.res.map((n) => n.split("/").pop()).join(", "));
+  check("KNOWN-GOOD: the map's View button and the Imagery & Layers control are there — the row the 3D button would sit in is on the page, so 'no 3D button' can be seen", r.viewBtn && r.layersChip, JSON.stringify({ view: r.viewBtn, layers: r.layersChip }));
+  check("no \"3D\" button on the map for a non-owner (neither the button nor its card exists)", r.threeD === 0 && !r.threeDCard, JSON.stringify({ buttons: r.threeD, card: r.threeDCard }));
   check("no \"View in 3D\" anywhere on the page", !r.viewIn3d);
   check("no Grading panel in the DOM for a non-owner", !r.gradingPanel);
   check("the viewer chunk / three.js was NEVER requested while the planner ran", requested.length === 0, requested.join(", "));

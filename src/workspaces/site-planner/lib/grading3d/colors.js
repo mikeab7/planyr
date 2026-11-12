@@ -43,3 +43,5 @@ export const earthRgb = (f) => mix(EARTH_DEEP_RGB, EARTH_TOP_RGB, Math.max(0, Ma
 
 // design-exempt: the slice handle's amber — a fixed ink on the black void, the same family as the planner's selection grips
 export const HANDLE_HEX = "#F2B233";
+
+export const NORTH_HEX = "#FFFFFF"; // design-exempt: the "N" sign standing on the ground off the model's north edge — white ink on the black void, the same family as the building outline
