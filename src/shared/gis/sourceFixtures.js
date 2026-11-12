@@ -976,6 +976,18 @@ export const SOURCE_FIXTURES = {
     { label: "Sunnyvale ETJ — south", point: [-96.51406, 32.75078], expectMinCount: 1 },
   ],
   },
+  /* NEW-1 (2026-11-12) — Mont Belvieu. The first point is the brief's measured Mont Belvieu ETJ site (2026-11-01); the Targa plant is the same layer's LIMITS neighbour (layer 0) and is asserted in
+   * test/chambersEtj.test.js, where a zero-count fixture would carry no weight. Second points are filled from the PR-preview measurement (the build sandbox cannot reach www.cmbgis.com). */
+  etj_montbelvieu: {
+  fixtures: [
+    { label: "Mont Belvieu ETJ — north-east of the city", point: [-94.86, 29.89], expectMinCount: 1 },
+  ],
+  },
+  etj_chambers_neighbors: {
+  fixtures: [
+    { label: "Mont Belvieu's copy of the neighbouring ETJs — placeholder until measured on the preview", point: [-94.86, 29.89], expectMinCount: 0 },
+  ],
+  },
   mud: {
   fixtures: [
     // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.

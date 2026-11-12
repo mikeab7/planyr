@@ -312,6 +312,11 @@ export const JURISDICTION_SOURCES = {
   },
 };
 
+/* The City of Mont Belvieu's own ArcGIS Server (NEW-1, 2026-11-12), reached through the same-origin /gis-proxy relay — see GIS_SOURCES.etj_montbelvieu. */
+export const MONT_BELVIEU_RELAY = "/gis-proxy/www.cmbgis.com/arcgis/rest/services";
+/* The https address a row's URL stands for: a relayed row (`/gis-proxy/<host>/…`) is the host's own server, which the weekly verifier and the audits reach directly. Any other URL is returned unchanged. */
+export const etjUpstreamUrl = (source) => String((source && source.url) || "").replace(/^\/gis-proxy\//, "https://");
+
 /* ETJ (extraterritorial jurisdiction) sources — fragmented by region, so this is a
  * LIST, each row scoped to a metro `bbox` [latMin, lonMin, latMax, lonMax]. A click is
  * routed to only the source(s) whose bbox covers it (`etjSourcesForPoint`), so:
@@ -353,6 +358,31 @@ export const ETJ_SOURCES = [
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "City of Baytown GIS", coverage: "City of Baytown ETJ",
     note: "City of Baytown ETJ, from the city's own layer (the H-GAC regional ETJ mosaic does not include Baytown). Screening only; verify with the city.",
+  },
+  /* ⛔ NEW-1 (2026-11-12) — CHAMBERS COUNTY. Neither H-GAC's mosaic (zero Chambers cities) nor Baytown's own ETJ carries Mont Belvieu, Cove, Beach City or Old River-Winfree, so a site at (-94.86, 29.89) read
+   * "Unincorporated". The City of Mont Belvieu's own server publishes its ETJ and a copy of its neighbours' ETJ lines; both are read through the same-origin relay (the server's CORS is unmeasured). The
+   * copy row has no publish date and says so (`copy`, constraint #40), and its roster is the honest bound: Baytown stays on its own publisher's row, Dayton / Liberty are not claimed. */
+  {
+    id: "etj_montbelvieu", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Mont Belvieu", bbox: [29.70, -95.00, 30.08, -94.62],
+    url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/1",
+    fields: { name: null }, nameConst: "Mont Belvieu",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Mont Belvieu GIS", coverage: "City of Mont Belvieu ETJ",
+    note: "City of Mont Belvieu ETJ, from the city's own layer (H-GAC's regional ETJ mosaic carries no Chambers County city). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_chambers_neighbors", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Chambers County (Beach City · Cove · Old River-Winfree)", bbox: [29.62, -95.00, 30.08, -94.55],
+    url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/5",
+    fields: GIS_SOURCES.etj_chambers_neighbors.fields, nameStrip: GIS_SOURCES.etj_chambers_neighbors.nameStrip,
+    nameDisplay: { "Old River": "Old River-Winfree" }, titleCaseName: true,
+    where: GIS_SOURCES.etj_chambers_neighbors.where,
+    roster: GIS_SOURCES.etj_chambers_neighbors.roster,
+    ttl: 7 * 24 * 3600 * 1000,
+    copy: { publisher: "City of Mont Belvieu GIS", asOf: null }, // a COPY of neighbouring cities' lines — constraint #40: say so, and say the date is not published
+    sourceName: "City of Mont Belvieu GIS (a copy of neighbouring cities' ETJ lines; date not published)", coverage: "Beach City, Cove and Old River-Winfree ETJ — a copy, not the cities' own layers",
+    note: "Beach City, Cove and Old River-Winfree ETJ as copied into the City of Mont Belvieu's GIS (not the cities' own layers; edition date not published). Screening only; verify with the city.",
   },
   {
     id: "etj_austin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
