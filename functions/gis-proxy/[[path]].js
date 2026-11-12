@@ -41,6 +41,9 @@ export const ALLOWED_HOSTS = new Set([
    * It sends no CORS header and the build sandbox's egress refuses it, so every layer on it is read through this relay and was MEASURED on the PR preview. Login-gated folders
    * (PW_Utilities, CIP, CityHall, CWOL_Services, GTG) are never read. */
   "interactivemaps.sugarlandtx.gov",
+  /* NEW-2 (Webster zoning, 2026-11-12) — the City of Webster's own ArcGIS Server (Landbase/Zoning). It sends no CORS header and the build sandbox's egress refuses it (403 on CONNECT), so the layer
+   * is read through this relay and was MEASURED through planyr.io/gis-proxy after this host landed. Only the Landbase/Zoning service is ever read. */
+  "www1.cityofwebster.com",
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
    * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */
   "adairgis.integritygis.com", "audraingis.integritygis.com", "barrygis.integritygis.com", "bartongis.integritygis.com", "bentongis.integritygis.com",
