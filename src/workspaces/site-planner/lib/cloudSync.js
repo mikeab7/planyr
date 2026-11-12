@@ -711,22 +711,58 @@ export async function cloudDeletedRows(uid) {
  *                  the group, `name`/`groupId` come from that same row, so a caller can offer a
  *                  restore without a second round trip. A single LIVE row anywhere in the group is
  *                  enough to answer `deleted:false` — that is the whole fix. */
+/* ⛔ NEW-1 (B2671231, owner report 2026-11-12 — a live project, Bain, briefly showed "This project doesn't
+ * exist") — AN EMPTY ANSWER IS NOT "MISSING" UNTIL THE READ IS PROVEN TO HAVE BEEN MADE AS THE SIGNED-IN
+ * USER. supabase-js sends the ANONYMOUS key whenever it cannot hand back a usable session (a token refresh
+ * that failed on a slow / dropped connection, a tab that just regained focus with an expired token), and the
+ * database's row-level security answers an anonymous read with ZERO rows and NO error — byte-for-byte the
+ * answer a project that really is gone gives. So `exists:false` is issued only when (1) the client's own
+ * session is the caller's (`sessionProves`) and (2) a second read, taken after that proof, is empty too;
+ * anything less is `ok:false` (inconclusive), which every caller fails OPEN on. Positive facts (a row came
+ * back) need no such proof — an anonymous read cannot invent rows. */
+async function sessionProves(uid) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const s = data && data.session;
+    if (!s || !s.user || s.user.id !== uid) return false;
+    const exp = Number(s.expires_at) * 1000;
+    return !Number.isFinite(exp) || exp - Date.now() > 15000; // a token about to lapse is not proof
+  } catch (_) { return false; }
+}
+
+async function readGroupRows(id) {
+  const cols = "id, group_id, site, name, deleted_at";
+  const [byId, byGroup] = await Promise.all([
+    supabase.from("sites").select(cols).eq("id", id),
+    supabase.from("sites").select(cols).eq("group_id", id),
+  ]);
+  const error = byId.error || byGroup.error;
+  if (error) return { error };
+  // A read that neither errored nor returned an array is not an answer (never "an empty list").
+  if (!Array.isArray(byId.data) || !Array.isArray(byGroup.data)) return { error: { message: "deletion check returned no rows array" } };
+  const rows = new Map();
+  for (const r of [...byId.data, ...byGroup.data]) if (r && r.id) rows.set(r.id, r);
+  return { all: [...rows.values()] };
+}
+
 export async function cloudCheckDeleted(uid, id) {
   if (!supabase || !uid || !id) return { ok: false, exists: false, deleted: false };
   try {
-    const cols = "id, group_id, site, name, deleted_at";
-    const [byId, byGroup] = await Promise.all([
-      supabase.from("sites").select(cols).eq("id", id),
-      supabase.from("sites").select(cols).eq("group_id", id),
-    ]);
-    const error = byId.error || byGroup.error;
+    let read = await readGroupRows(id);
+    if (!read.error && !read.all.length) {
+      // Empty: only believe it with the session proven before AND an agreeing second read after.
+      if (!(await sessionProves(uid))) return { ok: false, exists: false, deleted: false, error: "session not ready — an empty answer proves nothing" };
+      read = await readGroupRows(id);
+      if (!read.error && !read.all.length && !(await sessionProves(uid))) {
+        return { ok: false, exists: false, deleted: false, error: "session lapsed during the check — an empty answer proves nothing" };
+      }
+    }
+    const error = read.error;
     if (error) {
       if (isMissingColumn(error, "deleted_at")) return { ok: true, exists: true, deleted: false };
       return { ok: false, exists: false, deleted: false, error: error.message || "deletion check failed" };
     }
-    const rows = new Map();
-    for (const r of [...(byId.data || []), ...(byGroup.data || [])]) if (r && r.id) rows.set(r.id, r);
-    const all = [...rows.values()];
+    const all = read.all;
     if (!all.length) return { ok: true, exists: false, deleted: false };
     const live = all.find((r) => !r.deleted_at);
     if (live) {
