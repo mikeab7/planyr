@@ -197,16 +197,27 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
  * it returns null (and this never mounts) for every county that has no reliable per-account source. */
 function TaxTable({ data }) {
   const rows = data.rows || data.perLot || [];
+  const mills = data.unit === "mills"; // Georgia: mills per $1,000 of ASSESSED value (40% of FMV), not Texas's rate per $100
+  const dp = mills ? 3 : 6;
+  if (data.held) {
+    return (
+      <PageSection title="Tax rates" testid="parcel-tax-table">
+        <div data-testid="parcel-tax-held" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{data.held}</div>
+        {data.caption && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.caption}</div>}
+      </PageSection>
+    );
+  }
   return (
     <PageSection title="Tax rates" testid="parcel-tax-table">
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
-        <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? "Rate per $100" : "Total"}</th></tr></thead>
+        <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? (mills ? "Mills" : "Rate per $100") : "Total"}</th></tr></thead>
         <tbody>
-          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(6)}</td></tr>)}
-          <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(6) : "—"}</td></tr>
+          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(dp)}</td></tr>)}
+          <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(dp) : "—"}</td></tr>
         </tbody>
       </table>
-      {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.year ? ` · ${data.year}` : ""}</div>}
+      {data.caption && <div data-testid="parcel-tax-caption" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.caption}</div>}
+      {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: data.caption ? SPACE.xs : SPACE.sm }}>{data.source}{data.year && !data.caption ? ` · ${data.year}` : ""}</div>}
     </PageSection>
   );
 }

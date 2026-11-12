@@ -34,6 +34,9 @@
  * An account's codes come from parcel attrs[codeField] (comma separated). Any code missing from
  * `units` => the list is incomplete => null (hide).
  */
+import { millageTableFor } from "./georgiaMillage.js";
+import bartowMillage from "./data/gaMillage-ga_bartow-2025.json";
+
 export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
@@ -46,7 +49,18 @@ export const TAX_COVERAGE = {
   galveston: { covered: false, reason: "Parcels carry ENTITIES codes but no reachable code legend/rates." },
   liberty: { covered: false, reason: "Only school/city/county fields; incomplete membership." },
   austintx: { covered: false, reason: "Only school/city/county fields; incomplete membership." },
+  /* NEW-1 (Bartow GA): the table is BUILT and tested (georgiaMillage.js + lib/data/gaMillage-ga_bartow-2025.json — mills on the
+   * 40% assessed value, one Tax_District code → a list of levies) but the county stays HIDDEN until EVERY code's 2025 rates
+   * are transcribed. Sourced for 2025: county incorporated / unincorporated, Bartow County Schools, Cartersville M&O + BID +
+   * City Schools, Adairsville. NOT yet found: Emerson, Euharlee, Kingston, Taylorsville, White, the Cartersville parks bond,
+   * Red Top Mtn CID — they are in GA DOR's 2025 millage PDF (dor.georgia.gov is blocked from the build sandbox; read it with
+   * pdfplumber from a network that reaches it). District 12 (E Main Street TAD #1) also needs its base jurisdiction named.
+   * Flip `covered` to true only when `pendingDistricts(bartowMillage)` is empty (test/georgiaMillage.test.js enforces it). */
+  ga_bartow: { covered: false, reason: "Bartow tax-district table built; 2025 millage not yet transcribed for Emerson, Euharlee, Kingston, Taylorsville, White, the Cartersville parks bond and Red Top Mtn CID (GA DOR 2025 digest PDF), and district 12's base jurisdiction is unnamed — hidden until complete." },
 };
+
+// Georgia counties whose table is a tax-DISTRICT code → levy list in MILLS (georgiaMillage.js), not the per-$100 CAD-unit shape.
+export const MILLAGE_DATA = { ga_bartow: bartowMillage };
 
 // county key -> () => import("./data/taxRates-<county>-<year>.json"). Empty until real data lands.
 export const DATA_LOADERS = {};
@@ -63,6 +77,7 @@ export async function loadTaxTable(parcel, ctx = {}) {
 /** Sync; `ctx.data` is a loaded data file. Null = hide. */
 export function taxTableFor(parcel, ctx = {}) {
   const county = ctx.county || parcel?.county || null;
+  if (county && MILLAGE_DATA[county]) return millageTableFor(parcel, ctx.data || MILLAGE_DATA[county], { covered: ctx.covered ?? !!(TAX_COVERAGE[county] && TAX_COVERAGE[county].covered) });
   const data = ctx.data || loaded[county];
   if (!county || !data || !data.units || !data.codeField || !data.year || !data.source) return null;
   const raw = parcel?.attrs?.[data.codeField];
@@ -81,7 +96,7 @@ export function taxTableFor(parcel, ctx = {}) {
 
 export function taxTableForCombined(parcels, ctx = {}) {
   const tableOf = ctx.tableOf || ((p) => taxTableFor(p, ctx)); // B2158065: async per-account tables plug in here
-  const per = (parcels || []).map((p) => ({ name: p?.label || p?.name || p?.acct || "Lot", t: tableOf(p) }));
+  const per = (parcels || []).map((p) => { const t = tableOf(p); return { name: p?.label || p?.name || p?.acct || "Lot", t: t && t.held ? null : t }; }); // a PILOT-held lot has no total, so a combine that includes one hides
   if (!per.length || per.some((x) => !x.t)) return null;
   const totals = per.map((x) => x.t.total);
   const allShare = totals.every((t) => t === totals[0]);
