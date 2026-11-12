@@ -23,12 +23,14 @@
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1 / NEW-2 (Metro Nashville buffers + pending flood maps)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
 export const SOURCE_FIXTURES = {
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
   ...SUGARLAND_FIXTURES,
+  ...NASHVILLE_FIXTURES,
   flood: {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
@@ -1467,6 +1469,7 @@ export const SOURCE_DOCS = {
 ...FLORIDA_DOCS,
   ...OK_DOCS,
   ...SUGARLAND_DOCS,
+  ...NASHVILLE_DOCS,
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },
