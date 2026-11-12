@@ -910,6 +910,42 @@ export const SOURCE_FIXTURES = {
     { label: "None on the Houston coast (layer is Fort Worth-only)", bbox: [-95.5, 29.5, -95.2, 29.8], expectMinCount: 0 },
   ],
   },
+  /* NEW-1 (Fort Bend, 2026-11-12) — every point below was read live 2026-11-12 from the county's own layers (Origin: https://planyr.io).
+   * The release points are interior points of the named /16 polygons (OID 14: Fulshear 4,663.8 ac, filed 2023-09-28; OID 9162: Rosenberg
+   * Ordinance 2026-16); at each one /5 answers NOTHING (the county removed the ground) while H-GAC still answers FULSHEAR / ROSENBERG. */
+  etj_fortbend: {
+  fixtures: [
+    { label: "Fulshear ETJ (Fulshear cluster)", point: [-95.9235, 29.7488], expectMinCount: 1 },
+    { label: "Inside the Fulshear 4,663.8-ac release — the county table no longer holds it", point: [-95.85373, 29.6276], expectMinCount: 0 },
+  ],
+  },
+  etj_release_fortbend: {
+  fixtures: [
+    { label: "Fulshear 4,663.8-ac petition release (filed 2023-09-28)", point: [-95.85373, 29.6276], expectMinCount: 1 },
+    { label: "Rosenberg Ordinance 2026-16 removal", point: [-95.93562, 29.44609], expectMinCount: 1 },
+    { label: "Houston downtown (no release area)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  city_fortbend: {
+  fixtures: [
+    { label: "Sugar Land", point: [-95.63, 29.6], expectMinCount: 1 },
+    { label: "Rosenberg", point: [-95.81, 29.557], expectMinCount: 1 },
+  ],
+  },
+  county_fortbend: {
+  fixtures: [
+    { label: "Sugar Land (inside Fort Bend County)", point: [-95.63, 29.6], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  etj_harris: {
+  fixtures: [
+    { label: "Houston ETJ, north Harris (the owner's sweep point)", point: [-95.75, 30.05], expectMinCount: 1 },
+    // Both read live 2026-11-12 where H-GAC answers NOTHING (H-GAC's roster has neither city) — the cases the fallback exists for.
+    { label: "La Porte ETJ (H-GAC answers nothing here)", point: [-95.05901, 29.71901], expectMinCount: 1 },
+    { label: "Katy ETJ (H-GAC answers nothing here)", point: [-95.90246, 29.77651], expectMinCount: 1 },
+  ],
+  },
   etj_dallasco: {
   fixtures: [
     { label: "Seagoville ETJ (Dallas County)", point: [-96.60143, 32.62008], expectMinCount: 1 },

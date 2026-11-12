@@ -52,3 +52,13 @@ export function netEtjFeatures(etjFeatures, cityPolys, { ref, minWidthM = 0 } = 
   }
   return { features: out, touched, dropped };
 }
+
+/** NEW-1 / NEW-2 — cut ESRI ETJ features by the ground ANOTHER set of ESRI features covers (not by city limits). Two uses on the drawn layer:
+ *   • Fort Bend County's own ETJ table replaces H-GAC's inside the county, so H-GAC's polygons are cut by the COUNTY LINE;
+ *   • Harris County's table is the fallback where H-GAC draws nothing, so Harris's polygons are cut by H-GAC's own.
+ * Same engine and the same contract as `netEtjFeatures` (a feature no cutter's box meets comes back untouched; release features are never cut). */
+export function cutEtjBy(etjFeatures, byFeatures, opts = {}) {
+  const polys = [];
+  for (const f of byFeatures || []) if (f && f.geometry) polys.push(...esriPolygons(f.geometry));
+  return netEtjFeatures(etjFeatures, polys, opts);
+}
