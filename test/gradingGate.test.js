@@ -76,7 +76,7 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
   });
   it("only the gate and the small glue are static", () => {
     expect(sp).toMatch(/import \{ useGradingEnabled \} from "\.\/lib\/gradingGate\.js"/);
-    expect(sp).toMatch(/import \{ useGradingBase, hostIdMap \} from "\.\/lib\/gradingBase\.js"/);
+    expect(sp).toMatch(/import \{ useGradingBase, hostIdMap, gradingCfg \} from "\.\/lib\/gradingBase\.js"/);   // V2115881 round 3: + gradingCfg (the fence margin) — the same already-static module, no new edge
   });
   it("every render site is behind grOn (the gate)", () => {
     expect(sp).toMatch(/\{grOn && grInput && \(\s*<Suspense fallback=\{null\}><GradingController/);
