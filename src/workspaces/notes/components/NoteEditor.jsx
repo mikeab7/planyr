@@ -47,6 +47,8 @@ import {
 } from "../lib/notesBlankPaper.js";
 import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import { normalizeFakeBullets } from "../lib/notesFakeBullets.js";
+import { unnestDoc } from "../lib/notesAnchorNest.js";
+import { placeChip } from "../lib/notesChipPlace.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -1064,9 +1066,26 @@ function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
     if (!el || !host) { setPlace(null); return; }
     const w = el.offsetWidth; const h = el.offsetHeight;
     const hw = host.clientWidth; const hh = host.clientHeight;
-    const left = Math.max(6, Math.min(x, hw - w - 6));
-    let top = y + 4;
-    if (top + h > hh - 6) top = Math.max(6, (yTop ?? y) - h - 4);
+    /* ⛔ IT COVERS NO TEXT (B2671237, owner screenshot: "(Ctrl) v" printed over the next box's words). Every line of text on the
+     * page is an obstacle; `placeChip` takes the historic spot when it is clear and otherwise the nearest clear one. */
+    let obstacles = [];
+    try {
+      const pm = host.querySelector(".ProseMirror");
+      const hr = host.getBoundingClientRect();
+      if (pm) {
+        const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        const range = document.createRange();
+        let node;
+        while ((node = walker.nextNode())) {
+          if (!node.nodeValue || !node.nodeValue.trim()) continue;
+          range.selectNodeContents(node);
+          for (const r of range.getClientRects()) obstacles.push({ left: r.left - hr.left, top: r.top - hr.top, right: r.right - hr.left, bottom: r.bottom - hr.top });
+        }
+      }
+    } catch (_) { obstacles = []; }
+    const spot = placeChip({ chip: { w, h }, at: { x, y, yTop }, obstacles, host: { w: hw, h: hh } });
+    const left = spot.left;
+    const top = spot.top;
     const tipRight = left + 250 > hw;
     setPlace((prev) => (prev && prev.left === left && prev.top === top && prev.tipRight === tipRight ? prev : { left, top, tipRight }));
   }, [x, y, yTop, expanded, kind]);
@@ -1711,8 +1730,10 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* ⛔ AND "BULLETS" THAT ARE JUST TEXT BECOME REAL LISTS HERE TOO (lib/notesFakeBullets.js): a Word / OneNote outline pasted
    * before the Office-list fix is paragraphs that begin with the glyph, so Enter has no list to continue. Same rule as the two
    * migrations: on the way in, never a transaction, saved only once the person edits (pressing Enter is that edit). */
+  /* ⛔ AND A BOX INSIDE A BOX IS UNWRAPPED HERE TOO (B2671237, lib/notesAnchorNest.js): a page that already stored one (a paste
+   * of text copied from a box used to nest it) opens flat; same on-read, never-a-transaction rule as the two above. */
   const [initialDoc] = useState(() => normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
-    (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
+    unnestDoc((typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC),
   ))));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
   /* ⛔ NEW-5 — whether DOM focus is currently in the title `<input>`, so the toolbar knows to
@@ -5420,7 +5441,8 @@ const NoteEditor = forwardRef(function NoteEditor({
    * would silently act on the wrong text is worse than no option. (Not the edit a pick makes itself.) */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const retire = () => { if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
+    /* The box-clearing push (lib/notesBoxClearPlugin.js) is layout housekeeping after the paste, not further editing: it must not retire the offer. */
+    const retire = (e) => { if (e?.transaction?.getMeta?.("planyrBoxClear")) return; if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);

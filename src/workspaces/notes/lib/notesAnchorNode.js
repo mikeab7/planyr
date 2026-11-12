@@ -48,6 +48,9 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import { moveSelection } from "./notesMarquee.js";
 import { cascadeRemoveArrows } from "./notesArrows.js";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { unnestTr } from "./notesAnchorNest.js";
+import { boxClearPlugin } from "./notesBoxClearPlugin.js";
 /* The ONE shared drag-cursor pin (owner convention 2026-10-20). A drag keeps ITS cursor for the whole
  * gesture even once the pointer has left the box — pointer capture keeps the events coming, but what the
  * browser PAINTS is decided by whatever element is under the pointer (or the capture target's own rule). */
@@ -256,6 +259,17 @@ export const NoteAnchor = Node.create({
 
   parseHTML() {
     return [{ tag: "div[data-anchor-x]" }];
+  },
+
+  /** ⛔ A BOX IS NEVER INSIDE ANOTHER BOX (B2671237) — read `notesAnchorNest.js`. A paste of text copied from a box carries
+   *  the box as its context and used to land a SECOND box inside the receiving one, drawn at the source's x/y from the
+   *  receiving box's corner (indented, and over its neighbours). The repair is an `appendTransaction`, so it shares the
+   *  paste's undo step. */
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: new PluginKey("noteAnchorNoNest"),
+      appendTransaction: (trs, _old, newState) => (trs.some((t) => t.docChanged) ? unnestTr(newState) : null),
+    }), boxClearPlugin()];   // ⛔ AND A BOX THAT GROWS ONTO ANOTHER MOVES IT CLEAR (B2671237/4) — lib/notesBoxClear.js
   },
 
   /** ⛔ THE POSITION IS IN THE MARKUP, NOT IN A STYLESHEET. `renderHTML` is what the PRINT
