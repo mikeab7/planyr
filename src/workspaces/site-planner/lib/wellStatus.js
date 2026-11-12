@@ -13,6 +13,10 @@ export function classifyWell(attrs = {}) {
   const desc = String(attrs.GIS_SYMBOL_DESCRIPTION || "").toLowerCase();
   const n = Number(attrs.SYMNUM);
   if (/plugged/.test(desc) || [7, 8, 10, 116, 152].includes(n)) return "plugged";
+  // Salt-dome cavern storage wells (RRC "Storage Well", SYMNUM 88 — Mont Belvieu, Stratton Ridge, Markham). Asked
+  // BEFORE oil/gas/injection: a description like "Gas Storage" would otherwise read as an ordinary producer. An ACTIVE
+  // hydrocarbon-storage wellhead, not an old hole: it carries operations setbacks, not a replug question.
+  if (/storage/.test(desc) || n === 88) return "storage";
   if (/\bdry\b/.test(desc) || n === 3) return "dry";
   if (/cancel|abandon/.test(desc) || n === 9) return "abandoned";
   if (/shut-?in/.test(desc) || [19, 20].includes(n)) return "shutin";
@@ -22,12 +26,16 @@ export function classifyWell(attrs = {}) {
 }
 
 // A category is a "replug-class" well (a physical hole that may sit under a pad): plugged,
-// abandoned, dry, or producing/shut-in. Permitted-only / observation are not. Pure.
-const PHYSICAL = new Set(["plugged", "abandoned", "dry", "producing", "shutin", "injection"]);
+// abandoned, dry, producing/shut-in, or a salt-dome storage cavern well. Permitted-only / observation are not. Pure.
+const PHYSICAL = new Set(["plugged", "abandoned", "dry", "producing", "shutin", "injection", "storage"]);
 
 /* Summarize the wells the proximity screen returned (`scr` = screenProximity result) into a
  * status-aware finding. `total` is the exact count within the buffer (returnCountOnly); the
  * ranked sample drives the breakdown + on-site risk. Returns { status, summary, detail }. Pure. */
+/* The sentence both well cards add when salt-dome storage wells are in the picture. One home, so the legacy card and
+ * the trusted-row card cannot word it differently. */
+export const STORAGE_WELL_CAVEAT = "Salt-dome storage wells (Mont Belvieu, Stratton Ridge, Markham) are active cavern wellheads — an operations setback matter with the operator, not an old plug.";
+
 export function summarizeWells(scr, { total = null, bufferMi = 0.25 } = {}) {
   const ranked = (scr && scr.ranked) || [];
   const n = total != null ? total : ranked.length;
@@ -44,11 +52,14 @@ export function summarizeWells(scr, { total = null, bufferMi = 0.25 } = {}) {
   if (producing) parts.push(`${producing} producing`);
   if (cats.dry) parts.push(`${cats.dry} dry`);
   if (cats.injection) parts.push(`${cats.injection} injection`);
+  if (cats.storage) parts.push(`${cats.storage} storage (cavern)`);
 
   let summary = `${n} well${n === 1 ? "" : "s"} within ${bufferMi} mi`;
   if (parts.length) summary += ` — ${parts.join(", ")}`;
   if (ranked.length && ranked.length < n) summary += ` (breakdown from the nearest ${ranked.length})`;
   if (onSite.length) summary += ` · ⚑ ${onSite.length} on the site — offset/replug risk`;
+  const storageOnSite = onSite.filter((f) => classifyWell(f.attrs) === "storage").length;
+  if (storageOnSite) summary += ` (${storageOnSite} salt-dome storage — active operations, setback)`;
 
   const detail = ranked.slice(0, 8).map((f) => {
     const d = f.attrs.GIS_SYMBOL_DESCRIPTION || classifyWell(f.attrs);

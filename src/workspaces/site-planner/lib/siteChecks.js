@@ -17,7 +17,7 @@
 import ClipperLib from "clipper-lib";
 import { siteState, TEXAS_OUTLINE } from "./siteRegion.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
-import { classifyWell } from "./wellStatus.js";
+import { classifyWell, STORAGE_WELL_CAVEAT } from "./wellStatus.js";
 import { toGrid, screenProximity, planeForRings } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
@@ -451,12 +451,17 @@ export function buildWellsRow(m, t = CHECK_THRESHOLDS) {
   if (sev === SEVERITY.green) return { ...base, figure: "None", line: NONE_NEAR, sentences: ["No mapped well sits on the site or within a quarter mile of it."] };
   const cats = {};
   for (const f of m.inRadius) { const c = classifyWell(f.attrs); cats[c] = (cats[c] || 0) + 1; }
-  const words = { plugged: "plugged", abandoned: "abandoned", dry: "dry hole", shutin: "shut-in", injection: "injection", producing: "producing", other: "other" };
+  const words = { plugged: "plugged", abandoned: "abandoned", dry: "dry hole", shutin: "shut-in", injection: "injection", producing: "producing", storage: "storage (cavern)", other: "other" };
   const mix = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${n} ${words[k] || k}`).join(", ");
+  const storageNear = (cats.storage || 0) > 0;
+  const onSiteStorage = m.onSite > 0 && m.inRadius.some((f) => f.distFt <= t.onSiteFt && classifyWell(f.attrs) === "storage");
+  if (storageNear) base.caveat = `${base.caveat} ${STORAGE_WELL_CAVEAT}`;
   const figure = m.onSite > 0 ? `${m.onSite} on site` : `${m.nearLabel} within ¼ mi`;
   const line = m.onSite > 0 ? `${plural(m.onSite, "well", "wells")} on the site${m.near > m.onSite ? `, ${m.near - m.onSite} more within ¼ mile` : ""}${mix ? ` · ${mix}` : ""}` : `${mix || plural(m.near, "well", "wells")}`;
   return { ...base, figure, line,
-    sentences: [m.onSite > 0
+    sentences: [onSiteStorage
+      ? "A mapped salt-dome storage well sits on the site. It is an active cavern wellhead — expect operator setbacks and no building over it."
+      : m.onSite > 0
       ? "A mapped well sits on the site. An old plug may not meet modern standards, and a producing well forces setbacks."
       : `The nearest mapped well is ${fmtApproxFt(m.nearestFt)} away. Setbacks and access can still reach the site.`] };
 }
