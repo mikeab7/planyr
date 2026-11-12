@@ -204,10 +204,12 @@ const COUNTIES_RAW = {
     // gis.fbcad.org server, which is chronically down (503s / TLS resets — the whole
     // Fort Bend trouble history B137/B244/B382) and has already migrated servers once
     // ("serverarcgis2"). This hosted "FBCAD Public Parcel Data" layer carries all ~385k
-    // county parcels, is refreshed daily, is natively EPSG:2278 (State Plane feet, our
+    // county parcels, is natively EPSG:2278 (State Plane feet, our
     // coordinate spine), and has the full appraisal schema (owner, land/imp/total value,
     // situs, legal, acreage, land use). The statewide TxGIO layer stays the automatic
-    // outage fallback (statewideFallbackFor). Old self-hosted URL retired as primary:
+    // outage fallback (statewideFallbackFor). HOW CURRENT IT IS is never asserted here: the service's own editingInfo.lastEditDate read 2026-08-14 on 2026-10-30 and 2026-11-12 on
+    // 2026-11-12 (NEW-2, 2026-11-12), so "refreshed daily" was a claim nobody had measured — the parcel card reads the real date at runtime (lib/parcelCopies.js
+    // `readLiveCopyAsOf`) and says "date not published" when it cannot. Old self-hosted URL retired as primary:
     //   https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer
     layerUrl:
       "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
@@ -2533,37 +2535,17 @@ const JURISDICTION_LAYERS_RAW = {
       // overlay group (lib/layers.js JURISDICTIONS.jur_mud, B176) — now a STATEWIDE TCEQ
       // source (covers Fort Bend + Harris + everywhere), available regardless of which
       // county is in view. The old Fort-Bend-only layer was removed here to avoid a dupe.
-      fb_contours: {
-        // B469/B691 — explicit dynamic (server-rendered export-image) layer. Its host
-        // (arcgisweb.fortbendcountytx.gov) sends no CORS headers: a direct ?f=json probe can never
-        // be read AND prints an uncatchable red console error per attempt, so `noCors: true` makes
-        // probeService health-check through the same-origin B445 cache proxy ONLY (see layers.js).
-        // Proxy disabled/undeployed/unreachable → the same optimistic add a direct CORS failure
-        // produced (never a hard dependency on the proxy); the f=image export already proxies and
-        // renders via a CORS-exempt <img>.
-        kind: "dynamic",
-        noCors: true,
-        // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
-        // single-layer county, so it no longer gets its own dropdown). Label names the county
-        // + authority since it sits next to the statewide USGS contours there.
-        label: "1-Ft Contours (Fort Bend DD)",
-        url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
-        layers: null,
-        // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
-        // other server-rendered layer now pins its data sublayers so an agency cannot paint its
-        // own LABEL sublayer over the plan. This host sends no CORS headers and its services
-        // catalog is unreachable from the build sandbox, so the sublayer ids cannot be READ —
-        // and inventing them would silently blank the layer, which is worse than an annotation
-        // risk on a contour service that publishes hairlines rather than point labels.
-        // Re-check on the next live pass with a browser that can reach the county host.
-        sublayersUnpinned: "county host sends no CORS headers; its sublayer catalog cannot be read from here — pin the ids on the next live pass",
-        note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else. Health checked via the same-origin proxy (county host sends no CORS headers).",
-        // NEW-1 stacking role (lib/mapStack.js): contour hairlines — they draw OVER the site
-        // elements, so a building placed on the plan never hides the ground it sits on.
-        role: "line",
-        opacity: 0.7,
-      },
+      //
+      // NEW-2 (2026-11-12) — THE 1-FT CONTOUR ROW (`fb_contours`, FLOODZONE/Contours_1Foot on arcgisweb.fortbendcountytx.gov) IS REMOVED, NOT KEPT AS A HEALTHY-LOOKING ROW:
+      // the whole host answers HTTP 200 with {"status":"error","messages":["Could not access any server machines…"]} for every path, /rest/info included (measured 2026-10-30
+      // and again 2026-11-12), and the old health probe read that body as a live service. The moved-server check (owner constraint #39) was done: the county's current public server
+      // (gisportal.fortbendcountytx.gov) lists no contour, elevation, LiDAR or DEM service in any public folder (the token-gated ones answer 499). Fort Bend's contours are the statewide "Contour Lines" row
+      // (USGS 3DEP, traced from LiDAR at the interval you pick), which covers the county. If the district republishes a service, add it back as a row with a real
+      // `GIS_SOURCES` entry and fixtures; saved plans that had the old key on simply drop it (layerPrefs ignores unknown keys).
+      //
+      // The county's own drainage / district / thoroughfare layers are in lib/fortBendLayers.js (NEW-1, 2026-11-12), not here.
     },
+    note: "Fort Bend's county-specific layers (levees, LIDs, Brazos studies, TIRZ, management districts, development agreements, proposed thoroughfares) sit in the Flood & Drainage, Jurisdictions and Access groups, shown only on a Fort Bend site. The county's 1-ft contour service has been down since at least 2026-10-30 — the Contour Lines row (USGS 3DEP) covers Fort Bend.",
   },
   chambers: {
     label: "Chambers County",

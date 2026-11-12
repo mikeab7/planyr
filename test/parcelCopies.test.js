@@ -12,6 +12,7 @@ import { COUNTY_VERIFICATION } from "../src/workspaces/site-planner/lib/counties
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 import {
   PARCEL_COPIES, PARCEL_COPY_EXEMPT, parcelCopyNotice, parcelCopyLine, formatCopyAsOf, PARCEL_COPY_ASK,
+  PARCEL_COPY_LIVE_DATE, asOfFromEditDate, readLiveCopyAsOf, _resetLiveCopyAsOf,
 } from "../src/workspaces/site-planner/lib/parcelCopies.js";
 import { PARCEL_REQUEST_LABEL } from "../src/workspaces/site-planner/lib/parcelGaps.js";
 import ParcelInfoCard from "../src/workspaces/site-planner/components/ParcelInfoCard.jsx";
@@ -101,5 +102,65 @@ describe("the parcel card", () => {
   it("a statewide-layer lot and a lot with no county key render nothing extra", () => {
     expect(render(found("ny_statewide"))).not.toContain("parcel-card-copy");
     expect(render(found(undefined))).not.toContain("parcel-card-copy");
+  });
+});
+
+/* NEW-2 (2026-11-12) — Fort Bend's copy date was a typed "2026-10"; the hosted layer's own lastEditDate read 2026-08-14 on 2026-10-30, so the typed month overstated it. A live-date county
+ * never carries a typed month: the date is READ from the service, or the line says "date not published". */
+describe("a live-date copy county (Fort Bend) shows the date the service reports, never a typed one", () => {
+  const FB_URL = COUNTIES.fortbend.layerUrl;
+  const jsonOk = (body) => async () => ({ ok: true, json: async () => body });
+  const EDIT = Date.UTC(2026, 7, 14, 12); // 2026-08-14 — what the sweep read on 2026-10-30
+  it("Fort Bend is registered live-date and its static date is null (so the old '2026-10' can never come back)", () => {
+    expect(PARCEL_COPY_LIVE_DATE).toContain("fortbend");
+    expect(PARCEL_COPIES.fortbend[1]).toBeNull();
+    for (const k of PARCEL_COPY_LIVE_DATE) expect(PARCEL_COPIES[k][1], k).toBeNull();
+  });
+  it("with no live reading the line says 'date not published' — it does NOT claim October 2026", () => {
+    const n = parcelCopyNotice("fortbend");
+    expect(n.line).toContain("(date not published)");
+    expect(n.line).not.toContain("October 2026");
+    expect(n.asOf).toBeNull();
+  });
+  it("with a live reading the line carries that month", () => {
+    expect(parcelCopyNotice("fortbend", null, "2026-08").line).toContain("as of August 2026");
+  });
+  it("a typed-date county ignores a live reading passed to it", () => {
+    expect(parcelCopyNotice("ny_chenango", null, "2030-01").line).toContain("June 2026");
+  });
+  it("asOfFromEditDate: a real epoch → YYYY-MM; zero, junk, a pre-2000 or a future value → null", () => {
+    expect(asOfFromEditDate(EDIT, EDIT + 1000)).toBe("2026-08");
+    expect(asOfFromEditDate(0)).toBeNull();
+    expect(asOfFromEditDate("x")).toBeNull();
+    expect(asOfFromEditDate(Date.UTC(1999, 0, 1))).toBeNull();
+    expect(asOfFromEditDate(EDIT + 400 * 86400000, EDIT)).toBeNull();
+  });
+  it("readLiveCopyAsOf asks the county layer's own ?f=json and returns the edit month; the answer is cached (one request)", async () => {
+    _resetLiveCopyAsOf();
+    let calls = 0; const urls = [];
+    const f = async (u) => { calls++; urls.push(u); return { ok: true, json: async () => ({ editingInfo: { lastEditDate: EDIT } }) }; };
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: f, now: EDIT + 1000 })).toBe("2026-08");
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: f, now: EDIT + 1000 })).toBe("2026-08");
+    expect(calls).toBe(1);
+    expect(urls[0]).toBe(`${FB_URL}?f=json`);
+  });
+  it("a service that errors, has no editingInfo, throws, or is not a live-date county reads null — never a guessed month — and a failure is retried next time", async () => {
+    _resetLiveCopyAsOf();
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: jsonOk({ error: { code: 500 } }) })).toBeNull();
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: jsonOk({}) })).toBeNull();
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } })).toBeNull();
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: async () => ({ ok: false, status: 503 }) })).toBeNull();
+    let calls = 0;
+    const f = async () => { calls++; return { ok: true, json: async () => ({ editingInfo: { lastEditDate: EDIT } }) }; };
+    expect(await readLiveCopyAsOf("fortbend", { fetchImpl: f, now: EDIT + 1000 })).toBe("2026-08"); // not poisoned by the failures above
+    expect(calls).toBe(1);
+    const never = async () => { throw new Error("must not be called"); };
+    expect(await readLiveCopyAsOf("ny_chenango", { fetchImpl: never })).toBeNull();
+    expect(await readLiveCopyAsOf(undefined, { fetchImpl: never })).toBeNull();
+  });
+  it("the layer's registry comment no longer says 'refreshed daily'", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/counties.js", import.meta.url), "utf8");
+    expect(src).not.toMatch(/is refreshed daily/);
   });
 });

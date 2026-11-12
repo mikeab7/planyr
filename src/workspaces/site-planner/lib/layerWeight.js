@@ -77,7 +77,6 @@ export const LAYER_TIER = {
   hcfcd_row: "constraint",         // channel right-of-way, same
   bkdd_drainage: "constraint",     // district streams / BFE / sub-watersheds
   bkdd_dmp: "constraint",          // master-plan floodplains (advisory, but land-taking if adopted)
-  fb_contours: "constraint",
   mhfd_drainage: "constraint",     // NEW-2 — the Colorado district tier
   mhfd_easements: "constraint",
 
@@ -153,6 +152,10 @@ export const LAYER_TIER = {
   sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network
   sl_water_valves: "reference", sl_water_control_valves: "reference", sl_manholes: "reference", sl_cleanouts: "reference",
   sl_lift_stations: "reference", sl_wwtp: "reference", sl_water_plants: "reference", sl_water_wells: "reference",
+  // NEW-1 (Fort Bend County, 2026-11-12)
+  fb_levees: "constraint", fb_brazos_inundation: "constraint", fb_brazos_floodplain: "constraint", fb_mtp_proposed: "constraint",
+  fb_lid: "reference", fb_dev_agreements: "reference",
+  fb_tirz: "context", fb_mmd: "context",
   sl_flu: "context",
   sl_zoning_cup: "context",
   sl_zoning_exception: "context",

@@ -50,7 +50,6 @@ export const LAYER_SCOPE = {
   coh_hydrants: "regional",     // City of Houston
   hcfcd_row: "regional",        // Harris County Flood Control District
   coh_ww: "regional", coh_storm: "regional", coh_water: "regional", // City of Houston utilities
-  fb_contours: "regional",      // Fort Bend Drainage District
   // B1075 — the Brookshire–Katy DD family. All three are regional: their extents are the
   // district (and, for the master plan, a much SMALLER western-Waller study area). The DMP
   // gate is the one that matters most: every DMP layer correctly returned nothing at the
