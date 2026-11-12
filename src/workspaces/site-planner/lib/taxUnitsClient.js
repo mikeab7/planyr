@@ -11,20 +11,24 @@ import { r6 } from "./taxRates.js";
 import { countyRecord } from "./appraisal.js";
 
 // Counties whose per-account answer is wired server-side. A county not listed here never fetches.
-export const TAX_UNIT_COUNTIES = new Set(["harris"]);
+export const TAX_UNIT_COUNTIES = new Set(["harris", "fortbend"]);
 
 const cache = new Map(); // key -> Promise<response|null>
 
 export const acctKey = (county, acct) => `${county}:${String(acct || "").trim()}`;
 
 /** The CAD account number off a stored county lot, or null. Pure. */
-export function accountOf(parcel, idField) {
+export function accountOf(parcel, idField, county) {
   const a = parcel?.attrs || {};
   /* B2194744 — the county record's own account FIRST (any lot with an attribute bag), the stored `acct` only as the
    * fallback. 36 of 136 Harris lots carry no stored `acct`, and the caller used to pass `COUNTIES_MAP[c].idField`
    * (always undefined — the registry keeps idField on COUNTIES), so those lots never fetched and showed no table. */
   const rec = parcel?.attrs ? countyRecord(a, { idField }).account : null;
   const v = (idField && a[idField]) ?? rec ?? parcel?.acct ?? null;
+  if (county === "fortbend") { // FBCAD accounts are "R33231" (QUICKREFID) — the R is part of the account
+    const m = /R\s*0*(\d+)/i.exec(v == null ? "" : String(v));
+    return m ? `R${m[1]}` : null;
+  }
   const s = v == null ? "" : String(v).replace(/\D/g, "");
   return s || null;
 }
@@ -45,8 +49,8 @@ export function fetchTaxUnits(county, acct, fetchImpl = (typeof fetch === "funct
 export function tableFromUnits(resp) {
   if (!resp || resp.complete !== true || !Array.isArray(resp.units) || !resp.units.length || !resp.year || !resp.source) return null;
   if (resp.units.some((u) => !u || !u.name || typeof u.rate !== "number" || !Number.isFinite(u.rate))) return null;
-  const rows = resp.units.map((u) => ({ unit: u.name, rate: u.rate }));
-  return { year: resp.year, source: resp.source, sourceUrl: resp.sourceUrl || "", rows, total: r6(rows.reduce((s, r) => s + r.rate, 0)) };
+  const rows = resp.units.map((u) => ({ unit: u.name, rate: u.rate, ...(u.note ? { note: u.note } : {}) }));
+  return { year: resp.year, source: resp.source, sourceUrl: resp.sourceUrl || "", rows, ...(resp.caption ? { caption: resp.caption } : {}), ...(resp.staleState && resp.staleState !== "current" ? { staleState: resp.staleState, rollYear: resp.rollYear || resp.year } : {}), total: r6(rows.reduce((s, r) => s + r.rate, 0)) };
 }
 
 export function _resetTaxUnitsCache() { cache.clear(); }
