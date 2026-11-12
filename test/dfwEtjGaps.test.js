@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ETJ_SOURCES, etjSourcesForPoint, identifyJurisdiction, formatJurisdictionBadge, etjPointCoverage,
+  ETJ_SOURCES, etjUpstreamUrl, etjSourcesForPoint, identifyJurisdiction, formatJurisdictionBadge, etjPointCoverage,
   buildIdentifyParams,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { VECTOR_SOURCES, fetchVectorFeatures } from "../src/workspaces/site-planner/lib/vectorLayers.js";
@@ -28,7 +28,7 @@ function makeStore() {
     removeItem: (k) => map.delete(k), get length() { return map.size; }, key: (i) => Array.from(map.keys())[i] ?? null };
 }
 const freshCache = () => createGisCache({ store: makeStore(), now: () => 1_000_000 });
-const needleOf = (id) => new URL(ETJ_SOURCES.find((s) => s.id === id).url).pathname;
+const needleOf = (id) => new URL(etjUpstreamUrl(ETJ_SOURCES.find((s) => s.id === id))).pathname;
 const row = (id) => ETJ_SOURCES.find((s) => s.id === id);
 const NONE = () => [];
 const attr = (a) => [{ attributes: a }];
@@ -188,7 +188,7 @@ describe("the drawn ETJ layer fans out only to what the view needs, and does not
     await fetchVectorFeatures(VECTOR_SOURCES.jur_etj, HOUSTON, { fetchJson: async (u) => { urls.push(u); return { features: [] }; } });
     expect(urls.length).toBeGreaterThan(0);
     for (const id of [...NEW_IDS, "etj_collin", "etj_denton", "etj_rockwall"]) {
-      const path = new URL(row(id).url).pathname;
+      const path = new URL(etjUpstreamUrl(row(id))).pathname;
       expect(urls.some((u) => u.includes(path)), id).toBe(false);
     }
   });
@@ -201,7 +201,7 @@ describe("the drawn ETJ layer fans out only to what the view needs, and does not
     };
     const { features } = await fetchVectorFeatures(VECTOR_SOURCES.jur_etj, DFW, { fetchJson });
     for (const id of ["etj_collin", "etj_denton", "etj_dallasco", "etj_ellis", "etj_johnson", "etj_fortworth", "etj_mansfield"]) {
-      expect(seen.some((u) => u.includes(new URL(row(id).url).pathname)), id).toBe(true);
+      expect(seen.some((u) => u.includes(new URL(etjUpstreamUrl(row(id))).pathname)), id).toBe(true);
     }
     expect(features).toHaveLength(1);
     expect(features[0].attributes).toEqual({ CITY: "Undetermined (disputed)", _src: "etj_denton", _undetermined: true, CLAIMANTS: "Denton / Cross Roads" });   // disputed: no city named, claimants kept as claims

@@ -93,7 +93,7 @@ describe("B2472945 — the drawn ETJ layer never covers ground a city's limits h
     const fc = await drawnEtj(fakeFetch());
     expect(fc.netted.cityFeatures).toBeGreaterThan(0);
     expect(fc.netted.touched).toBeGreaterThan(0);
-    expect(vectorKey(VECTOR_SOURCES.jur_etj, BBOX, null)).toMatch(/!r3$/);
+    expect(vectorKey(VECTOR_SOURCES.jur_etj, BBOX, null)).toMatch(/!r4$/);
     expect(VECTOR_SOURCES.jur_etj.query.netAgainst).toBe("jur_city");
   });
 

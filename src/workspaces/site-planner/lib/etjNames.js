@@ -12,7 +12,7 @@
  * that is a legal determination this app does not make).
  *
  * A row declares its rules as DATA — `nameSplit` (separator), `nameStrip` (regex SOURCES, applied to
- * each part), `titleCaseName`, `nameConst` — so another publisher is a registry row, never new code.
+ * each part), `titleCaseName`, `nameDisplay` (short form → legal name), `nameConst` — so another publisher is a registry row, never new code.
  */
 
 const titleCase = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -32,6 +32,8 @@ export function etjNamesOf(row, raw) {
     for (const re of strips) p = p.replace(re, "").trim();
     if (!p) continue;
     if (row.titleCaseName) p = titleCase(p);
+    /* A row may map the publisher's short form onto the city's legal name ("Old River" → "Old River-Winfree"). Display only, matched case-insensitively. */
+    if (row.nameDisplay) { const k = Object.keys(row.nameDisplay).find((n) => n.toLowerCase() === p.toLowerCase()); if (k) p = row.nameDisplay[k]; }
     if (!out.some((n) => n.toLowerCase() === p.toLowerCase())) out.push(p);
   }
   return out;

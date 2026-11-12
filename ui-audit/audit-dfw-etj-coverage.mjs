@@ -93,7 +93,7 @@ skip("disputed strip (Denton 'Undetermined') → 'ETJ undetermined (disputed)', 
 }
 // 7 — forced failure of every ETJ service
 {
-  const etjHosts = J.ETJ_SOURCES.map((s) => new URL(s.url).pathname);
+  const etjHosts = J.ETJ_SOURCES.map((s) => new URL(J.etjUpstreamUrl(s)).pathname);
   const { fetchArcgisJson } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/gisFetch.js"));
   const failingFetch = (url, o) => {
     if (etjHosts.some((p) => url.includes(p))) return Promise.reject(new Error("forced failure (audit)"));

@@ -144,6 +144,14 @@ export const LAYER_TIER = {
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
   ms_ob_water_main: "reference",
   ms_ob_hydrants: "reference",
+  // Chambers County (B2671240, 2026-11-12): zoning and the utility networks are look-ups; the Master Drainage Plan is a consultant's PROPOSAL (watersheds, potential ponds, improvements, culverts), so it is orientation, never louder than the plan.
+  tx_mb_zoning: "reference", tx_baytown_zoning: "reference",
+  tx_mb_water_main: "reference", tx_mb_hydrants: "reference", tx_mb_sewer_gravity: "reference", tx_mb_sewer_force: "reference", tx_mb_lift_stations: "reference",
+  tx_mb_storm_main: "reference", tx_mb_storm_culverts: "reference", tx_mb_storm_outfalls: "reference",
+  tx_mb_plan_watershed_cherry: "context", tx_mb_plan_subbasins_cherry: "context", tx_mb_plan_watershed_cotton: "context", tx_mb_plan_watershed_hackberry: "context",
+  tx_mb_plan_watershed_smith: "context", tx_mb_plan_watershed_oldriver: "context", tx_mb_plan_watershed_cedar: "context", tx_mb_plan_grand_parkway: "context",
+  tx_mb_plan_ponds: "context", tx_mb_plan_cherry_detention: "context", tx_mb_plan_cotton_detention: "context",
+  tx_mb_plan_cherry_improvements: "context", tx_mb_plan_cotton_improvements: "context", tx_mb_plan_culverts: "context",
   // City of Sugar Land (NEW-1, 2026-11-02): a height zone around the airport binds the parcel; the rest are look-ups or orientation / incentive wash.
   sl_airport_zoning: "constraint",
   sl_thoroughfare: "reference",

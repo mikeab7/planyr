@@ -2568,7 +2568,7 @@ const JURISDICTION_LAYERS_RAW = {
   chambers: {
     label: "Chambers County",
     layers: {},
-    note: "No public utility/infrastructure GIS is published for Chambers County — parcels only. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Chambers County itself publishes parcels only. The City of Mont Belvieu publishes its own zoning, water, sewer, storm and Master Drainage Plan, and the City of Baytown its zoning (its Chambers side included) — those appear in the Layers panel only on ground they cover. FEMA, wetlands and TxRRC layers above still apply.",
   },
   waller: {
     label: "Waller County",
