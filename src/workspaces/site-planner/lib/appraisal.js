@@ -5,6 +5,8 @@
  * (MapFinder.jsx), so the two never diverge (B233). No React here — just data.
  */
 
+import { isDavidsonRecord, davidsonRows } from "./davidsonParcel.js"; // NEW-2 (Metro Nashville parcel card rows, 2026-11-12)
+
 /* ---- SITUS vs. the OWNER'S MAILING address (NEW-2) ---------------------------------------------
  *
  * A parcel record carries at least two addresses: where the LAND is (the situs) and where the tax
@@ -485,6 +487,14 @@ export const apprRows = (attrs) => {
           ? acreageKey(attrs, { skip: used })
           : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]));
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : label === "Owner" ? ownerWithFirstName(attrs, k) : attrs[k] }); }
+  }
+  /* NEW-2 (2026-11-12) — a Metro Nashville lot swaps the generic Zoning / Land use rows for the assessor's own, labelled as such, and adds Tax district, Council district and the assessor's portal (davidsonParcel.js).
+   * A placeholder polygon for a lot across the county line gets none of them — and no zoning at all. */
+  if (isDavidsonRecord(attrs)) {
+    const kept = rows.filter((r) => r.label !== "Zoning" && r.label !== "Land use");
+    const at = kept.findIndex((r) => r.label === "Legal");
+    kept.splice(at < 0 ? kept.length : at, 0, ...davidsonRows(attrs));
+    return kept;
   }
   return rows;
 };
