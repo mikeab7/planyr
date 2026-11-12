@@ -38,7 +38,7 @@ const DALLAS_VIEW = { s: 32.70, w: -96.90, n: 32.90, e: -96.70 };
 // ---------------------------------------------------------------------------
 describe("LAYER_SCOPE — national | statewide | regional", () => {
   it("tags the blank-outside-the-region utility layers as regional", () => {
-    for (const id of ["coh_water", "coh_ww", "coh_storm", "coh_hydrants", "hcfcd_row", "fb_contours", "jur_etj"])
+    for (const id of ["coh_water", "coh_ww", "coh_storm", "coh_hydrants", "hcfcd_row", "jur_etj"])
       expect(layerScope(id)).toBe("regional");
     for (const id of ["coh_water", "hcfcd_row"]) expect(isRegional(id)).toBe(true);
   });

@@ -18,6 +18,7 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
+import { FORTBEND_LAYERS, FORTBEND_VINTAGE, FORTBEND_MERGE_GROUPS } from "./fortBendLayers.js"; // NEW-1 (Fort Bend County layers, 2026-11-12)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
@@ -131,6 +132,7 @@ export const MERGE_GROUPS = {
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
   ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
+  ...FORTBEND_MERGE_GROUPS, // NEW-1 (Fort Bend County): the Brazos River Studies row of two
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
 };
 
@@ -1324,7 +1326,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...FORTBEND_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1417,9 +1419,9 @@ export const LAYER_VINTAGE = {
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
-  fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
   ...SUGARLAND_VINTAGE,
+  ...FORTBEND_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
@@ -1509,6 +1511,13 @@ async function probeOnce(probeUrl) {
     const r = await fetchWithRetry(probeUrl, {}, 3);
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}`, httpStatus: r.status };
     const j = await r.json().catch(() => ({}));
+    /* NEW-2 (2026-11-12) — ArcGIS Server answers a DEAD site (the web adaptor up, no server machines behind it) with HTTP 200 and the ADMIN-style body
+     * {"status":"error","messages":["Could not access any server machines…"]} — no `error` key. Fort Bend's whole arcgisweb host did exactly that for weeks, and this
+     * probe read the body as a live service, so the contour row sat at a green "loaded" dot over nothing. `status:"error"` is a failure, with the server's own words. */
+    if (j && !j.error && String(j.status || "").toLowerCase() === "error") {
+      const msg = Array.isArray(j.messages) ? j.messages.map((m) => String(m)).filter(Boolean).join(" ") : "";
+      return { ok: false, error: msg || "service error" };
+    }
     return j && j.error
       ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
       // Capture the service's own data extent (fullExtent, or `extent` on a FeatureServer/layer)

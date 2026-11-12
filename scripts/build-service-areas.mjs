@@ -53,6 +53,12 @@ if (want("desoto")) {
   if (!rec) throw new Error("DeSoto County MS not found in the county polygon asset");
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Fort Bend County layers, 2026-11-12): `fortbend` — Fort Bend County TX, from the SAME bundled county polygons as `harris` (no network). Rebuild just it with `--only=fortbend`. */
+if (want("fortbend")) {
+  const rec = index.counties.find((c) => c.state === "TX" && /^fort ?bend$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Fort Bend County TX not found in the county polygon asset");
+  areas.fortbend = { label: "Fort Bend County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 /* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
  *   broward / miamidade               the county, from the SAME bundled county polygons as `harris` (no network).
  *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted
