@@ -101,6 +101,25 @@ try {
   const [cutT, fillT] = (await tiles()).map(num);
   const cardCut = num((/Cut ([\d,]+)/.exec(c2.work) || [])[1]), cardFill = num((/Fill ([\d,]+)/.exec(c2.work) || [])[1]);
   check("the Grading panel's cut / fill after Use this agree with the card (within 5%)", Math.abs(cutT - cardCut) / cardCut < 0.05 && Math.abs(fillT - cardFill) / cardFill < 0.05, `panel ${cutT}/${fillT} vs card ${cardCut}/${cardFill}`);
+  // ---- V2115882: never a dead end. The owner's plan: a single-load building, a tight max cut / fill, Limits of disturbance 0 ----
+  {
+    const p2 = await (await browser.newContext({ viewport: { width: 1500, height: 1000 } })).newPage();
+    p2.on("pageerror", (e) => errs.push(String(e)));
+    await p2.goto(`${BASE}/ui-audit/harness/grading-harness.html?owner=2&app=1&banner=1&planyrDiag=1&single=1&margin=0&maxcf=1`);
+    await assertMeasurable(p2, "verify-fit-building");
+    await p2.waitForFunction(() => window.__ready, null, { timeout: 90000 });
+    await p2.waitForFunction(() => { const e = document.querySelector("[data-grading-earthwork]"); return e && e.getAttribute("data-grading-earthwork") !== "pending"; }, null, { timeout: 180000 });
+    await p2.waitForTimeout(1000);
+    const t1 = Date.now();
+    await p2.click('[data-testid="grading-fit-building"]');
+    await p2.waitForFunction(() => document.querySelector('[data-testid="grading-fit-card"]') || document.querySelector('[data-fit-note="nofit"]'), null, { timeout: 90000 });
+    const dead = await p2.locator('[data-fit-note="nofit"]').count();
+    check("tight max cut / fill (1 ft), single-load, limits 0: NOT a dead end — a card comes back", dead === 0 && (await p2.locator('[data-testid="grading-fit-card"]').count()) === 1, `${Date.now() - t1} ms`);
+    const brk = await p2.locator('[data-fit-note="breaks"]').allTextContents();
+    check("…and says plainly which rule it breaks and by how much", brk.length >= 1 && /Breaks the max cut \/ fill: [\d.]+ ft under the building, the limit is 1 ft\./.test(brk[0]), brk.join(" | "));
+    check("…with the ghost on the map and Use this / Dismiss as usual", (await p2.locator('[data-layer="fit-ghost"]').count()) >= 1 && (await p2.locator('[data-testid="grading-fit-use"]').count()) === 1 && (await p2.locator('[data-testid="grading-fit-dismiss"]').count()) === 1);
+    console.log(`\nTight-limit arm: ${await p2.locator("[data-fit-sf]").textContent()} ${await p2.locator("[data-fit-dims]").textContent()}; ${brk.join(" ")}\n`);
+  }
   const realErrs = errs.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_RESET|Failed to load resource/.test(e));   // the sandbox's blocked outbound hosts (soil / GIS reads), not this feature
   check("no page errors (no render loop, no worker error)", realErrs.length === 0, realErrs.slice(0, 3).join(" | "));
   console.log(`\nFit the biggest building on Chehaw (Concept A): ${card.sf} (${card.dims}) ${card.ffe}; ${card.work}; ${card.alt}; ${ms} ms click → card\n`);

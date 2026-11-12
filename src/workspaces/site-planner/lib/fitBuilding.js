@@ -159,7 +159,7 @@ export function rotatedGrid(ctx, thetaDeg, P) {
     const u = bs.x[q] * cu + bs.y[q] * su, v = -bs.x[q] * su + bs.y[q] * cu;
     bcx[q] = (u - uMin) / c - 0.5; bcy[q] = (v - vMin) / c - 0.5;
   }
-  return { thetaDeg, cu, su, uMin, vMin, nu, nv, cell: c, z, fenceIn, sbIn, bcx, bcy, bz: bs.z, masks: new Map(), P };
+  return { thetaDeg, cu, su, uMin, vMin, nu, nv, cell: c, z, fenceIn, sbIn, bcx, bcy, bz: bs.z, shared: new Map(), masks: new Map(), P };
 }
 
 const toWorld = (g, u, v) => ({ x: u * g.cu - v * g.su, y: u * g.su + v * g.cu });
@@ -175,25 +175,48 @@ function rightRuns(ok, nu, nv) {
   return run;
 }
 
-/* The two run arrays at required elevation e: runS (fence only — pavement), runP (fence AND setback — the building). Cached. */
-function masksAt(g, e) {
-  let m = g.masks.get(e);
+/* The fence-only run array at required elevation e (the pavement: courts, trailer rows, lots — the stacks). Cached on the BASE grid,
+ * so it is shared by every derived grid (a different D never recomputes it: the daylight test does not depend on D).
+ * THE MAX CUT / FILL (P.D) BINDS THE BUILDING PAD ONLY (V2115882, owner 2026-11-11): the courts, trailer rows and lots are paved
+ * planes that fall away from the wall, so their depth under the surface is the template's, not the pad's rule; they need only to
+ * daylight inside the fence (`P.Dstack`, unlimited unless a caller sets it). `P.noDaylight` (the last-resort tier) skips the
+ * daylight test and keeps the fence + setback, so the assembly stays inside the limit but its slope may run past it. */
+function stackRuns(g, e) {
+  const key = (g.P.noDaylight ? "n" : "d") + e;
+  let m = g.shared.get(key);
   if (m) return m;
-  const { nu, nv, cell, z, fenceIn, sbIn, P } = g;
+  const { nu, nv, cell, z, fenceIn, P } = g;
   const N = nu * nv;
   const ok = new Uint8Array(N);
+  const DS = P.Dstack ?? Infinity;
   for (let k = 0; k < N; k++) {
     if (!fenceIn[k]) continue;
     const zz = z[k];
-    if (zz === zz && Math.abs(e - zz) <= P.D) ok[k] = 1;
+    if (zz === zz && Math.abs(e - zz) <= DS) ok[k] = 1;
   }
-  blockByBoundary(ok, nu, nv, cell, g.bcx, g.bcy, g.bz, e, P.s, P.shoulderFt);
-  const runS = rightRuns(ok, nu, nv);
-  for (let k = 0; k < N; k++) if (!sbIn[k]) ok[k] = 0;
-  const runP = rightRuns(ok, nu, nv);
-  m = { runS, runP };
-  g.masks.set(e, m);
+  if (!P.noDaylight) blockByBoundary(ok, nu, nv, cell, g.bcx, g.bcy, g.bz, e, P.s, P.shoulderFt);
+  m = { ok, runS: rightRuns(ok, nu, nv) };
+  g.shared.set(key, m);
   return m;
+}
+
+/* The building's run array at required elevation e: the stack mask AND the setback AND the pad's cut / fill band (P.D). Per derived grid. */
+function padRuns(g, e) {
+  const key = e;
+  let r = g.masks.get(key);
+  if (r) return r;
+  const { nu, nv, sbIn, z, P } = g;
+  const { ok } = stackRuns(g, e);
+  const N = nu * nv, okP = new Uint8Array(N);
+  for (let k = 0; k < N; k++) if (ok[k] && sbIn[k] && Math.abs(e - z[k]) <= P.D) okP[k] = 1;
+  r = rightRuns(okP, nu, nv);
+  g.masks.set(key, r);
+  return r;
+}
+
+/* The same grid under other rules (D, daylight): shares the arrays and the stack-mask cache, owns its pad-run cache. */
+export function deriveGrid(g, P) {
+  return { ...g, P, masks: new Map() };
 }
 
 /* ---------------- the template's profile ---------------- */
@@ -210,7 +233,7 @@ function stackMin(g, E, rows, drop, dir) {
   if (rows <= 0) { out.fill(BIG); return out; }
   const slope = P.pavementSlopePct / 100;
   const runs = [];
-  for (let m = 0; m < rows; m++) runs.push(masksAt(g, Math.round(fallE(E, drop, slope, (m + 0.5) * cell))).runS);
+  for (let m = 0; m < rows; m++) runs.push(stackRuns(g, Math.round(fallE(E, drop, slope, (m + 0.5) * cell))).runS);
   for (let j = 0; j < nv; j++) {
     const base = j * nu;
     // a row is only usable if all `rows` stack rows exist
@@ -237,7 +260,7 @@ function evalUnit(g, tpl, E, collect = null) {
   const eN = rowsOf(tpl.endNeg, c), eP = rowsOf(tpl.endPos, c);
   const ladder = tpl.depthRows;
   const kMax = ladder[ladder.length - 1];
-  const runPad = masksAt(g, E).runP;
+  const runPad = padRuns(g, E);
   const sA = stackMin(g, E, rowsA, tpl.negDrop, -1);
   const sB = stackMin(g, E, rowsB, tpl.posDrop, +1);
   const cur = new Int16Array(nu);
@@ -360,10 +383,12 @@ function supportsAt(g, tpl, cand, E) {
   const rowsA = rowsOf(tpl.negDepth, c), rowsB = rowsOf(tpl.posDepth, c);
   const eN = rowsOf(tpl.endNeg, c), eP = rowsOf(tpl.endPos, c);
   const nL = Math.ceil(cand.L / c - 1e-9);
-  const pad = masksAt(g, Math.round(E)).runP;
+  const pad = padRuns(g, Math.round(E));
+  // the masks read whole feet; a half-foot finish must still keep the pad inside the cut / fill band exactly
+  if (padExceedFt(g, { ...cand, E }) > P.D + 1e-6) return false;
   for (let r = 0; r < cand.r; r++) if (pad[(cand.j0 + r) * nu + cand.i] < nL + eN + eP) return false;
-  for (let m = 0; m < rowsA; m++) if (masksAt(g, Math.round(fallE(E, tpl.negDrop, slope, (m + 0.5) * c))).runS[(cand.j0 - 1 - m) * nu + cand.i0] < nL) return false;
-  for (let m = 0; m < rowsB; m++) if (masksAt(g, Math.round(fallE(E, tpl.posDrop, slope, (m + 0.5) * c))).runS[(cand.j0 + cand.r + m) * nu + cand.i0] < nL) return false;
+  for (let m = 0; m < rowsA; m++) if (stackRuns(g, Math.round(fallE(E, tpl.negDrop, slope, (m + 0.5) * c))).runS[(cand.j0 - 1 - m) * nu + cand.i0] < nL) return false;
+  for (let m = 0; m < rowsB; m++) if (stackRuns(g, Math.round(fallE(E, tpl.posDrop, slope, (m + 0.5) * c))).runS[(cand.j0 + cand.r + m) * nu + cand.i0] < nL) return false;
   return true;
 }
 
@@ -398,36 +423,108 @@ function prepareTemplate(tpl, P, cell) {
   };
 }
 
-/* The generator. Yields `{ progress }` (0..1) once per unit; returns the result object (never throws on "nothing fits": `best` is null).
- *   input: { ctx (prepareFit), template, params?, frontageDeg?, currentDeg?, shouldAbort? } */
+/* The biggest cut or fill (ft) under the candidate's PAD — the number P.D limits. */
+function padExceedFt(g, cand) {
+  const { nu, cell: c } = g;
+  const nL = Math.ceil(cand.L / c - 1e-9);
+  let mx = 0;
+  for (let r = 0; r < cand.r; r++) {
+    const b = (cand.j0 + r) * nu;
+    for (let i = cand.i0; i < cand.i0 + nL; i++) { const zz = g.z[b + i]; if (zz === zz) { const d = Math.abs(cand.E - zz); if (d > mx) mx = d; } }
+  }
+  return mx;
+}
+
+/* The generator. Yields `{ progress }` (0..1) once per unit; returns the result object. NEVER A DEAD END (V2115882, owner
+ * 2026-11-11): when nothing fits under the plan's max cut / fill, the rule is RELAXED in steps and the biggest building that comes
+ * closest is returned with `breaks` naming what it breaks and by how much:
+ *   tier 0  the rules as set (the max cut / fill binds the pad only);
+ *   tier 1  the smallest pad cut / fill (1-ft steps) at which the template's smallest building fits — then the biggest building at it
+ *           (the search shrinks length — 5 bays minimum — and depth — the template's realistic ladder — on its own);
+ *   tier 2  the daylight test off (the building and its pavement still inside the limit; the slope may run past it) with the
+ *           smallest cut / fill that fits.
+ * Only a setback that cannot hold the smallest building at any cut / fill is `why: "no-room"`.
+ *   input: { ctx (prepareFit), template, params?, frontageDeg?, currentDeg?, angles?, shouldAbort? } */
 export function* fitBuildingSteps(input) {
   const { ctx, template } = input;
-  const P = { ...FIT_DEFAULTS, ...(input.params || {}) };
+  const P0 = { ...FIT_DEFAULTS, ...(input.params || {}) };
   const t0 = Date.now();
   const lat = ctx.lattice, c = lat.cell;
-  const tpl = prepareTemplate(template, P, c);
+  const tpl = prepareTemplate(template, P0, c);
   if (!tpl.depthRows.length || !(ctx.setbackCells > 0) || !(ctx.fenceCells > 0)) return { best: null, alt: null, why: "no-ground", stats: { units: 0, ms: 0 } };
   const baseAngles = Array.isArray(input.angles) && input.angles.length ? input.angles.map((d) => ({ deg: mod180(d), label: "pinned" })) : fitBaseAngles({
     frontageDeg: input.frontageDeg ?? null, longAxis: longAxisDeg(lat, ctx.fenceInside),
-    currentDeg: input.currentDeg ?? null, contourDeg: contourAxisDeg(lat, ctx.setbackInside), sameAngleDeg: P.sameAngleDeg,
+    currentDeg: input.currentDeg ?? null, contourDeg: contourAxisDeg(lat, ctx.setbackInside), sameAngleDeg: P0.sameAngleDeg,
   });
-  const slope = P.pavementSlopePct / 100;
-  const maxFall = Math.max(tpl.negDrop + slope * tpl.negDepth, tpl.posDrop + slope * tpl.posDepth, tpl.lotDrop + slope * Math.max(tpl.endNeg, tpl.endPos));
+  const slope0 = P0.pavementSlopePct / 100;
+  const maxFall = Math.max(tpl.negDrop + slope0 * tpl.negDepth, tpl.posDrop + slope0 * tpl.posDepth, tpl.lotDrop + slope0 * Math.max(tpl.endNeg, tpl.endPos));
   const eLo = Math.floor(ctx.zMin), eHi = Math.ceil(ctx.zMax + (tpl.negDepth || tpl.posDepth || tpl.endNeg || tpl.endPos ? maxFall : 0));
+  const aborted = () => !!(input.shouldAbort && input.shouldAbort());
+  // the base grids, kept across the tiers (their stack masks are shared by every D); derived per rule set
+  const bases = new Map();
+  const baseFor = (deg) => {
+    const key = Math.round(deg * 4);
+    let g = bases.get(key);
+    if (g === undefined) { if (bases.size >= 6) bases.delete(bases.keys().next().value); g = rotatedGrid(ctx, deg, P0); bases.set(key, g); }
+    return g;
+  };
+  const coarseEs = []; for (let E = eLo; E <= eHi; E += P0.coarseStep) coarseEs.push(E);
+  let unitCount = 0;
+
+  // ---- tier 1 / 2 probe: the smallest pad cut / fill (D0 + k, whole feet) at which the template's SMALLEST building fits some unit
+  const tplMin = { ...tpl, depthRows: [tpl.depthRows[0]] };
+  const dCap = Math.max(P0.D, Math.ceil(ctx.zMax - ctx.zMin + maxFall) + 1);
+  const kCap = Math.max(0, Math.ceil(dCap - P0.D));
+  const findMinD = function* (noDaylight) {
+    let kBest = kCap + 1;                                        // sentinel: none yet
+    for (const a of baseAngles) {
+      const g0 = baseFor(a.deg);
+      if (!g0) continue;
+      const gAt = (k) => deriveGrid(g0, { ...P0, D: P0.D + k, noDaylight });
+      for (const E of coarseEs) {
+        if (aborted()) return -2;
+        const hi = kBest - 1;
+        if (hi < 0) return 0;
+        const feasible = (k) => !!evalUnit(gAt(k), tplMin, E);
+        if (feasible(hi)) {
+          let lo = -1, up = hi;                                   // lo infeasible (virtually), up feasible
+          while (up - lo > 1) { const mid = (lo + up) >> 1; if (feasible(mid)) up = mid; else lo = mid; }
+          kBest = up;
+          if (kBest === 0) return 0;
+        }
+        unitCount++;
+        yield { progress: Math.min(0.45, unitCount / (baseAngles.length * coarseEs.length + 1) * 0.45) };
+      }
+    }
+    return kBest > kCap ? -1 : kBest;
+  };
+
+  let tier = 0, noDaylight = false, kUsed = 0;
+  let k = yield* findMinD(false);
+  if (k === -2) return { aborted: true };
+  if (k === -1) {                                                  // not even with unlimited cut / fill under the daylight rule
+    noDaylight = true; tier = 2;
+    k = yield* findMinD(true);
+    if (k === -2) return { aborted: true };
+    if (k === -1) return { best: null, alt: null, why: "no-room", stats: { units: unitCount, ms: Date.now() - t0, tier: 2 } };
+  } else if (k > 0) tier = 1;
+  kUsed = k;
+  if (noDaylight && k === 0) tier = 2;
+  const P = { ...P0, D: P0.D + kUsed, noDaylight };
   const grids = new Map();
   const gridFor = (deg) => {
     const key = Math.round(deg * 4);
     let g = grids.get(key);
-    if (!g) { if (grids.size >= 3) grids.delete(grids.keys().next().value); g = rotatedGrid(ctx, deg, P); grids.set(key, g); }
+    if (g === undefined) { const b = baseFor(deg); g = b ? deriveGrid(b, P) : null; grids.set(key, g); }
     return g;
   };
   const units = new Map();      // `${θ}|${E}` → { deg, E, cand, ew, balanced }
-  let unitCount = 0;
-  const totalGuess = (baseAngles.length + 4) * Math.ceil((eHi - eLo + 1) / P.coarseStep) + 40;
+  const totalGuess = (baseAngles.length + 4) * coarseEs.length + 40;
+  const progBase = tier === 0 ? 0.05 : 0.45;
   const evalE = function* (deg, E) {
     const key = `${Math.round(deg * 4)}|${E}`;
     if (units.has(key)) return units.get(key);
-    if (input.shouldAbort && input.shouldAbort()) return null;
+    if (aborted()) return null;
     const g = gridFor(deg);
     let rec = null;
     if (g) {
@@ -439,13 +536,12 @@ export function* fitBuildingSteps(input) {
     }
     units.set(key, rec);
     unitCount++;
-    yield { progress: Math.min(0.97, unitCount / totalGuess) };
+    yield { progress: Math.min(0.97, progBase + (0.97 - progBase) * unitCount / totalGuess) };
     return rec;
   };
-  const coarseEs = []; for (let E = eLo; E <= eHi; E += P.coarseStep) coarseEs.push(E);
-  const bestOf = (deg) => { let b = 0; for (const [k, r] of units) if (r && k.startsWith(`${Math.round(deg * 4)}|`) && r.cand.sf > b) b = r.cand.sf; return b; };
+  const bestOf = (deg) => { let b = 0; for (const [k2, r] of units) if (r && k2.startsWith(`${Math.round(deg * 4)}|`) && r.cand.sf > b) b = r.cand.sf; return b; };
   // stage 1: the base orientations, coarse finish
-  for (const a of baseAngles) for (const E of coarseEs) { yield* evalE(a.deg, E); if (input.shouldAbort && input.shouldAbort()) return { aborted: true }; }
+  for (const a of baseAngles) for (const E of coarseEs) { yield* evalE(a.deg, E); if (aborted()) return { aborted: true }; }
   // stage 2: ±spread around the two best bases
   const ranked = input.angles ? [] : baseAngles.map((a) => ({ a, sf: bestOf(a.deg) })).sort((p, q) => q.sf - p.sf).filter((x) => x.sf > 0).slice(0, 2);
   const spreadAngles = [];
@@ -453,7 +549,7 @@ export function* fitBuildingSteps(input) {
     const deg = mod180(a.deg + d);
     if (![...baseAngles, ...spreadAngles].some((b) => angDiff180(b.deg, deg) < P.sameAngleDeg)) spreadAngles.push({ deg, label: `${a.label}${d > 0 ? "+" : "−"}${P.spreadDeg}` });
   }
-  for (const a of spreadAngles) for (const E of coarseEs) { yield* evalE(a.deg, E); if (input.shouldAbort && input.shouldAbort()) return { aborted: true }; }
+  for (const a of spreadAngles) for (const E of coarseEs) { yield* evalE(a.deg, E); if (aborted()) return { aborted: true }; }
   // stage 3: the odd feet around what mattered, for the three best orientations
   const allAngles = [...baseAngles, ...spreadAngles];
   const top = allAngles.map((a) => ({ a, sf: bestOf(a.deg) })).sort((p, q) => q.sf - p.sf).filter((x) => x.sf > 0).slice(0, 3);
@@ -465,7 +561,7 @@ export function* fitBuildingSteps(input) {
     const bal = mine.filter((r) => r.balanced).sort((p, q) => q.cand.sf - p.cand.sf)[0];
     if (bal) around(bal.E);
     else { const nearZero = [...mine].sort((p, q) => Math.abs(p.ew.netCy) - Math.abs(q.ew.netCy))[0]; if (nearZero) around(nearZero.E); }
-    for (const E of wanted) { yield* evalE(a.deg, E); if (input.shouldAbort && input.shouldAbort()) return { aborted: true }; }
+    for (const E of wanted) { yield* evalE(a.deg, E); if (aborted()) return { aborted: true }; }
   }
   // rank
   const all = [...units.values()].filter(Boolean);
@@ -481,6 +577,7 @@ export function* fitBuildingSteps(input) {
     tuned.push(tuneFinish(g, tpl, rec, P));
     if (tuned.length % 6 === 0) yield { progress: 0.97 };
   }
+  // a relaxed search ranks by SF, then by how little it breaks (a finish the half-foot tuning moved off the whole-foot one may sit a hair past D*)
   let bestRec = tuned[0]; for (const r of tuned) if (better(r, bestRec)) bestRec = r;
   let altRec = null; for (const r of tuned) if (r.balanced && (!altRec || better(r, altRec))) altRec = r;
   if (altRec && altRec === bestRec) altRec = null;
@@ -491,13 +588,13 @@ export function* fitBuildingSteps(input) {
     let bestRec2 = rec;
     if (pos.length > 1) {
       const step = Math.max(1, Math.ceil(pos.length / P.maxPositions));
-      for (let k = 0; k < pos.length; k += step) {
-        const p = pos[k];
+      for (let k2 = 0; k2 < pos.length; k2 += step) {
+        const p = pos[k2];
         const cand = { E: rec.E, j0: p.j0, i: p.i, i0: p.i0, r: p.r, L: p.L, W: p.r * c, sf: p.L * p.r * c };
         if (!supportsAt(g, tpl, cand, rec.E)) continue;
         const t = tuneFinish(g, tpl, { deg: rec.deg, E: rec.E, cand, ew: estimateEarthwork(g, tpl, cand) }, P);
         if (Math.abs(t.ew.netCy) < Math.abs(bestRec2.ew.netCy)) bestRec2 = t;
-        if (k % (step * 8) === 0) yield { progress: 0.98 };
+        if (k2 % (step * 8) === 0) yield { progress: 0.98 };
       }
     }
     return { rec: bestRec2, g };
@@ -506,17 +603,22 @@ export function* fitBuildingSteps(input) {
   const finish = function* (rec) {
     const { rec: r, g } = yield* refine(rec);
     const geo = candidateGeometry(g, tpl, r.cand);
+    const padFt = padExceedFt(g, r.cand);
+    const breaks = [];
+    if (padFt > P0.D + 0.05) breaks.push({ rule: "cutfill", limitFt: P0.D, actualFt: Math.round(padFt * 10) / 10 });
+    if (noDaylight) breaks.push({ rule: "limit" });
     return {
       sf: r.cand.sf, sfRounded: roundSf(r.cand.sf), lengthFt: geo.lengthFt, depthFt: geo.depthFt, ffe: r.E,
       uDeg: geo.uDeg, box: geo.box, centre: geo.centre, building: geo.building, zones: geo.zones,
       cutCy: r.ew.cutCy, fillCy: r.ew.fillCy, netCy: r.ew.netCy, balanced: isBalanced(r.ew, P.balancedFrac),
+      padCutFillFt: Math.round(padFt * 10) / 10, breaks,
     };
   };
   out.best = yield* finish(bestRec);
   out.alt = altRec ? yield* finish(altRec) : null;
   // an alternative the owner could not tell from the best (same size, same floor) is not an alternative
   if (out.alt && out.alt.sfRounded === out.best.sfRounded && Math.abs(out.alt.ffe - out.best.ffe) < 0.5) out.alt = null;
-  out.stats = { units: unitCount, ms: Date.now() - t0, angles: allAngles.length, finishRange: [eLo, eHi], anglesUsed: allAngles.map((a) => ({ deg: Math.round(a.deg * 10) / 10, label: a.label })) };
+  out.stats = { units: unitCount, ms: Date.now() - t0, angles: allAngles.length, finishRange: [eLo, eHi], tier, dUsedFt: P.D, anglesUsed: allAngles.map((a) => ({ deg: Math.round(a.deg * 10) / 10, label: a.label })) };
   yield { progress: 1 };
   return out;
 }

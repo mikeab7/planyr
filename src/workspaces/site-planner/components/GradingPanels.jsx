@@ -395,6 +395,18 @@ export function fitNetWords(netCy) {
   if (Math.abs(netCy) < 500) return "balanced";
   return `${nfmt(Math.abs(cyRound(netCy)))} CY ${netCy > 0 ? "import" : "export"}`;
 }
+/* The rules a fitted building breaks (V2115882: the search is never a dead end — when nothing fits under the plan's rules it returns the
+ * closest building and SAYS which rule it breaks and by how much). `breaks` come from the search ({rule:"cutfill",limitFt,actualFt} |
+ * {rule:"limit"}); `pastFt` is the real engine's own measure of how far the slope runs past the limit. One plain sentence per rule. */
+export function fitBreakWords(breaks, pastFt = 0) {
+  const out = [];
+  for (const b of breaks || []) {
+    if (b.rule === "cutfill") out.push(`Breaks the max cut / fill: ${f1(b.actualFt).replace(/\.0$/, "")} ft under the building, the limit is ${f1(b.limitFt).replace(/\.0$/, "")} ft.`);
+    else if (b.rule === "limit") out.push(pastFt >= 1 ? `Breaks the limits: its slope runs about ${nfmt(pastFt)} ft past them.` : "Breaks the limits: its slope runs past them.");
+  }
+  return out;
+}
+export const fitNoFitWords = (why) => (why === "no-ground" ? "No ground to search yet." : why === "no-room" ? "The setbacks leave no room for even the smallest building." : "No building fits inside the limits with these rules.");
 export function FitBuildingRow({ fit }) {
   if (!fit) return null;
   const busy = fit.status === "running";
@@ -409,7 +421,7 @@ export function FitBuildingRow({ fit }) {
       {fit.status === "failed" && <div data-fit-note="failed" style={{ ...muted, color: "var(--warn-text)" }}>Couldn't finish the search.</div>}
       {fit.status === "nofit" && (
         <div data-fit-note="nofit" style={{ ...muted, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span>{fit.why === "no-ground" ? "No ground to search yet." : "No building fits inside the limits with these rules."}</span>
+          <span>{fitNoFitWords(fit.why)}</span>
           <button type="button" style={linkBtn} onClick={() => fit.dismiss && fit.dismiss()}>Dismiss</button>
         </div>
       )}
@@ -421,7 +433,8 @@ export function FitBuildingRow({ fit }) {
           </div>
           <div data-fit-ffe="1" style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>Finished floor {f1(c.ffe).replace(/\.0$/, "")}</div>
           <div data-fit-earthwork="1" style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>Cut {nfmt(cyRound(c.cutCy))} · Fill {nfmt(cyRound(c.fillCy))} · {fitNetWords(c.netCy)}</div>
-          {c.pastLimit > 0 && <div data-fit-note="past-limit" style={{ ...muted, color: "var(--warn-text)" }}>Its slope runs past the limit.</div>}
+          {fitBreakWords(c.breaks, c.pastFt).map((w, i) => <div key={i} data-fit-note="breaks" style={{ ...muted, color: "var(--warn-text)" }}>{w}</div>)}
+          {c.pastLimit > 0 && !(c.breaks || []).some((b) => b.rule === "limit") && <div data-fit-note="past-limit" style={{ ...muted, color: "var(--warn-text)" }}>Its slope runs past the limit.</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center", paddingTop: 3 }}>
             <Button variant="primary" size="sm" data-testid="grading-fit-use" onClick={() => fit.use && fit.use()}>Use this</Button>
             <Button variant="ghost" size="sm" data-testid="grading-fit-dismiss" onClick={() => fit.dismiss && fit.dismiss()}>Dismiss</Button>

@@ -770,7 +770,7 @@ export default function GradingController({ input, onModel }) {
     if (!surface || surface.stale || !surface.grid) return null;
     const ew = gradedAreaEarthwork(surface.grid);
     const out = surface.grid.outside;
-    return ew ? { cutCy: ew.cutCy, fillCy: ew.fillCy, netCy: ew.netCy, pastLimit: out ? out.count : 0 } : null;
+    return ew ? { cutCy: ew.cutCy, fillCy: ew.fillCy, netCy: ew.netCy, pastLimit: out ? out.count : 0, pastFt: out ? out.maxPastFt || 0 : 0 } : null;
   };
   const runFit = async () => {
     const I = inRef.current;
@@ -845,7 +845,7 @@ export default function GradingController({ input, onModel }) {
     return {
       status: "ready", run: fitStable.run, dismiss: fitStable.dismiss, use: fitStable.use, swap: fitStable.swap, ms: fit.ms, searchMs: fit.searchMs, stats: fit.stats,
       createsBuilding: !(fit.src && fit.src.building), shownIs: showAlt ? "alt" : "best",
-      card: { sf: c.sfRounded, lengthFt: c.lengthFt, depthFt: c.depthFt, ffe: c.ffe, cutCy: c.cutCy, fillCy: c.fillCy, netCy: c.netCy, engine: c.engine, pastLimit: c.pastLimit || 0, balanced: Math.abs(c.netCy) <= 0.05 * Math.max(1, c.cutCy) },
+      card: { sf: c.sfRounded, lengthFt: c.lengthFt, depthFt: c.depthFt, ffe: c.ffe, cutCy: c.cutCy, fillCy: c.fillCy, netCy: c.netCy, engine: c.engine, pastLimit: c.pastLimit || 0, pastFt: c.pastFt || 0, breaks: c.breaks || [], balanced: Math.abs(c.netCy) <= 0.05 * Math.max(1, c.cutCy) },
       other: other ? { sf: other.sfRounded, ffe: other.ffe, balanced: Math.abs(other.netCy) <= 0.05 * Math.max(1, other.cutCy) } : null,
       ghost: { building: c.building, zones: c.zones },
     };
