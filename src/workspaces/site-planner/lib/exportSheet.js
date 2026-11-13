@@ -201,13 +201,13 @@ export function createExportSheet(ctx) {
   // `paper`/`orient` (the last two args) name the sheet the plan is headed for, so the label
   // tier can size itself to that paper. Omitted → the notional letter-landscape box (the PNG
   // case, and any caller that just wants the plan SVG).
-  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true) =>
+  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true, includeScaleBar = true) =>
     withFullRender(
-      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable),
+      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable, includeScaleBar),
       sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride),
     );
 
-  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true) => {
+  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true, includeScaleBar = true) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -450,7 +450,7 @@ export function createExportSheet(ctx) {
     // regardless of the toggle (buildingSfRows returns an empty rows array, and furnitureLayout
     // treats that identically to omitting it — no corner spent, nothing drawn).
     const bldgTable = includeBuildingsTable ? buildingSfRows(els) : { rows: [], total: 0 };
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0 });
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0, showScaleBar: includeScaleBar !== false });
     root.appendChild(furn);
     return { clone, w, h };
   };
@@ -1165,7 +1165,12 @@ export function createExportSheet(ctx) {
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
    * disclaimer note, which is part of the band, not a separate thing being evaded). */
-  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, annotate = false) => {
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, annotate = false, includeScaleBar = true) => {
+    // NEW-1 (2026-11-13) — "Scale bar" OFF removes the DRAWN scale from the sheet: the graphic bar (buildExportSvgRaw) AND the stated
+    // scale in the title block, together, so no empty title-block row is reserved either (printSheetLayout's titleBlockExtra reads this).
+    // It never touches the PDF's embedded measurement scale — that is the annotation set's /VP + /Measure (ftPerPt), computed below
+    // from the frame alone, so Bluebeam / Acrobat still calibrate with the bar off.
+    const titleScale = includeScaleBar === false ? "" : scaleLabelText;
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
@@ -1173,7 +1178,7 @@ export function createExportSheet(ctx) {
     // NEW-1 (B1783056) — `pageOverride` (Fit-to-frame page) replaces the standard paper/orient
     // page lookup everywhere below that would otherwise re-derive it, so the label tier and the
     // final page geometry can never disagree about which page this sheet is actually printing to.
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride, includeBuildingsTable); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride, includeBuildingsTable, includeScaleBar); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) return null;
     // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
     // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
@@ -1185,7 +1190,7 @@ export function createExportSheet(ctx) {
     // the SAME outer SVG coordinate system.
     const metricPairs = printMetricPairs();
     const swBars = printStormwaterBars();
-    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
+    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(titleScale || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
     // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
@@ -1252,7 +1257,7 @@ export function createExportSheet(ctx) {
       layout, planSvg,
       title: siteLabel, sub: planLabel,
       date: formatDateStamp(),
-      scale: scaleLabelText, preparedBy,
+      scale: titleScale, preparedBy,
       metrics: metricPairs,
       stormwater: swBars,
       note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
@@ -1266,13 +1271,13 @@ export function createExportSheet(ctx) {
   // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
   // exact pre-existing behaviour (markups burned into the page); the DEFAULT HERE is true so any other
   // caller is untouched — the compose screen is what passes the user's remembered choice (default OFF).
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) => {
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true, includeScaleBar = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups);
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups, includeScaleBar);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
       const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage = 0 } = composed;
       mark("composed sheet");
