@@ -7701,25 +7701,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
     setMulti(refs); setSel(refs[0] || null); setDrillId(null);
   };
-  // B910 / NEW-1 — clicking a measurement used to be inert unless you'd first switched to the
-  // Select tool: the Measure tool STAYS active after you draw (so you can measure many things in a
-  // row), but the hit target + this handler both gated on tool==="select", so the measurement you
-  // just drew swallowed clicks silently. Now a click grabs a finished measurement from the Measure
-  // tool too and drops back to Select (the handles / × / highlight are all gated on Select), so the
-  // selection is immediately visible and editable — mirroring how every other drawn item becomes
-  // grabbable the instant its tool hands back to Select. A repeated click cycles the selection down
-  // through anything stacked under the cursor (smaller-area-wins so a tiny measurement on top of a
-  // big one is reachable first). Mid-draw (a new measurement in progress) we do NOT steal the click:
-  // it falls through to place the next vertex, even when that vertex lands on an existing measurement.
-  // NEW — one press both SELECTS the measurement (repeat-click cycles the stack) AND arms a
+  // B910 / NEW-1 — a click on a finished measurement SELECTS it (repeat-click cycles the stack,
+  // smaller-area-wins so a tiny measurement on top of a big one is reachable first) AND arms a
   // whole-measurement MOVE, so a drag repositions it and a plain click (no travel) just selects.
-  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail. This is what makes
-  // "click and drag a measurement" work — previously the body press only ever selected.
+  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail.
+  // ⛔ B2671280 (owner constraint #56) — SELECT TOOL ONLY. B910 also let this grab a finished measurement
+  // from the Measure tool and silently drop to Select; that EAT the first click of the next measurement
+  // whenever it landed on (or, for an Area, anywhere inside) an existing one — "the first click after
+  // switching measure tools doesn't register". While a Measure tool is armed a press is ALWAYS a point
+  // (onBgDown); a measurement is picked in Select, or by right-click (`onMeasureContext`, which still
+  // selects from any tool). The render's `canGrab` and this guard say the same thing.
   const startMoveMeasure = (e, i) => {
     if (e.button !== 0) return;
-    if (tool === "measure" && measDraft.length > 0) return; // mid-draw: let onBgDown place the next vertex
+    if (tool !== "select") return;
     e.stopPropagation();
-    if (tool !== "select") setTool("select"); // drop to Select so the grips / × / highlight render
     const fp = p2f(e.clientX, e.clientY);
     const order = measuresUnderPoint(measures, fp, 12 / view.ppf); // 12px hit buffer → feet
     const next = nextMeasureSelection(order, sel?.kind === "measure" ? sel.i : -1);
@@ -24323,16 +24318,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
-                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
-                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
-                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
-                // arms a whole-measurement drag on the same press).
-                // NEW-1 (B1253248) — but NOT mid-draft: startMoveMeasure already lets a click through
-                // to place the new measurement's next vertex while `measDraft.length > 0` (see the
-                // guard at its top), so the "move" cursor this drove was pure misdirection — it
-                // promised a grab that would not happen, over the exact vertex the user was aiming
-                // past to place their next point.
-                const canGrab = tool === "select" || (tool === "measure" && !measDraft.length);
+                // A finished measurement is grabbable from the SELECT tool only (B2671280, owner constraint
+                // #56). B910 also offered it from the Measure tool, which ate the first click of the next
+                // measurement whenever it landed on (or inside, for an Area) an existing one — the band, the
+                // "move" cursor and the press handler all stay out of the way while a Measure tool is armed,
+                // draft or no draft. `canGrab` is the PRESS (and the "move" cursor): Select only. The shapes stay
+                // hit-testable (`hitLive`) in Measure with no draft open so a RIGHT-click still reaches the
+                // object's menu (`onMeasureContext`); a LEFT press on them has no handler, so it bubbles to
+                // `onBgDown` and places a point.
+                const canGrab = tool === "select";
+                const hitLive = canGrab || (tool === "measure" && !measDraft.length);
                 // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
                 // every mode. The uncalibrated amber still overrides the user's colour there,
                 // because that is a correctness signal rather than decoration.
@@ -24394,7 +24389,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
@@ -24457,9 +24452,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                          pointerEvents={hitLive ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
                         it was unreachable: every press over the chip landed on the grab layer and
@@ -25974,6 +25969,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     // NEW-1 — a HALF-DRAWN measurement is never document content, and every mark in
                     // here is constant screen px. Stripped from the sheet.
+                    <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                     <g data-export="skip" pointerEvents="none">
                       {measDraft.map((p, k) => { const c = f2p(p); return (
                         <g key={k}>
@@ -25986,11 +25982,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           quiet bottom-center live-draft strip below the <svg> (liveDraftReadout),
                           so it never sits over the point the user is about to click next. */}
                     </g>
+                    </g>
                   );
                 }
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 const isArea = measureMode === "area";
                 return (
+                  <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                   <g data-export="skip" pointerEvents="none">
                     {isArea && all.length >= 3
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
@@ -25999,6 +25997,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* NEW-1 (B850240) — the live SF/feet readout moved to the quiet bottom-center
                         live-draft strip below the <svg> (liveDraftReadout), so it never sits over
                         the user's next click. */}
+                  </g>
                   </g>
                 );
               })()}
