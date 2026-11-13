@@ -5,7 +5,7 @@
  * test/scheduleTaskIcons.test.js, which evaluates this very file — there is no second copy to drift.
  *
  * DATA MODEL: a task carries `icons: string[]` (0–2 entries), NEVER inside the task name. An entry is either an emoji
- * character (drawn as a bundled Twemoji SVG), a custom id "c:<name>" (a coloured 36x36 drawing, below), or a built-in
+ * character (drawn as a bundled Twemoji SVG), a custom id "c:<name>" (a coloured drawing with FIXED colours, 36x36 unless CUSTOM_VIEWBOX says otherwise, below), or a built-in
  * line-art id "svg:<name>" (BUILTIN_SVG, below: drawn in currentColor so it follows the row's text colour). The stored
  * value is only ever the KEY — never markup. Absent = none.
  *
@@ -130,8 +130,20 @@
 
   // Inner markup of <svg viewBox="0 0 36 36">. First drafts, reproduced exactly as the owner supplied them.
   var CUSTOM_SVG = {
-    permit: '<rect x="6" y="3" width="20" height="28" rx="2" fill="#E1E8ED" stroke="#99AAB5"/><path d="M10 9h12M10 13h12M10 17h7" stroke="#99AAB5" stroke-width="2"/><circle cx="25" cy="25" r="8" fill="#77B255"/><path d="M21 25l3 3 5-6" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
-    tilt: '<rect x="0" y="31" width="36" height="5" fill="#A0785A"/><rect x="3" y="29" width="30" height="2" fill="#99AAB5"/><g transform="rotate(35 4 31)"><rect x="4" y="9" width="10" height="22" fill="#B4B2A9" stroke="#66757F"/><circle cx="9" cy="14" r="1.2" fill="#66757F"/></g><path d="M21 16V3" stroke="#31373D" stroke-width="1.5"/><path d="M15 2.5h16" stroke="#FFAC33" stroke-width="3"/>',
+    // PERMIT / APPROVAL (owner-approved artwork, 2026-11-13, picked IN COLOUR from several drawings at row size — do not redesign): a clipboard
+    // (pale board, blue clip, two text lines) with a blue approved-seal + white check, and a red rubber stamp at its lower right.
+    // 24x24 (see CUSTOM_VIEWBOX), FIXED colours like an emoji — they hold in light/dark and on hovered / selected rows. The gap around
+    // the stamp is a TRUE cut-out: a <mask> (white everywhere, the stamp's silhouette grown by 1.1 each side in black) over the whole
+    // clipboard, so the row behind shows through — never a white or background-coloured stroke. The mask id carries the "__UID__"
+    // token, which customMarkup() swaps for a per-rendered-instance id so many permit icons on one page never share a mask id.
+    permit: '<defs><mask id="pm-__UID__" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24"><rect x="0" y="0" width="24" height="24" fill="#fff"/>' +
+      '<g transform="translate(18.6 14.2)" fill="#000" stroke="#000" stroke-width="2.2" stroke-linejoin="round"><ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/></g></mask></defs>' +
+      '<g mask="url(#pm-__UID__)"><rect x="3" y="3.5" width="13.5" height="18" rx="1.6" fill="#e3f3fb" stroke="#2f3a6b" stroke-width="1.5"/>' +
+      '<rect x="6.75" y="2" width="6" height="3.2" rx="1" fill="#3f7fe0" stroke="#2f3a6b" stroke-width="0.8"/>' +
+      '<path d="M6 7.5h7.5M6 10.5h7.5" stroke="#2f3a6b" stroke-width="1.3" stroke-linecap="round" fill="none"/>' +
+      '<circle cx="9.75" cy="16" r="3" fill="#3f7fe0"/>' +
+      '<path d="M8.4 16l1 1 1.8-2" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></g>' +
+      '<g transform="translate(18.6 14.2)" fill="#d4506c"><ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/></g>',    tilt: '<rect x="0" y="31" width="36" height="5" fill="#A0785A"/><rect x="3" y="29" width="30" height="2" fill="#99AAB5"/><g transform="rotate(35 4 31)"><rect x="4" y="9" width="10" height="22" fill="#B4B2A9" stroke="#66757F"/><circle cx="9" cy="14" r="1.2" fill="#66757F"/></g><path d="M21 16V3" stroke="#31373D" stroke-width="1.5"/><path d="M15 2.5h16" stroke="#FFAC33" stroke-width="3"/>',
     roof: '<rect x="4" y="16" width="28" height="17" fill="#CCD6DD"/><rect x="1" y="12" width="34" height="5" fill="#F5F8FA" stroke="#8899A6"/><path d="M9 12v5M16 12v5M23 12v5" stroke="#CCD6DD"/><rect x="21" y="6" width="9" height="6" fill="#8899A6"/><path d="M23 8h5M23 10h5" stroke="#66757F"/><rect x="30" y="17" width="2" height="16" fill="#8899A6"/>',
     dock: '<rect x="2" y="7" width="32" height="26" fill="#CCD6DD"/><rect x="2" y="5" width="32" height="3" fill="#8899A6"/><g fill="#66757F"><rect x="5" y="17" width="7" height="13"/><rect x="14.5" y="17" width="7" height="13"/><rect x="24" y="17" width="7" height="13"/></g><path d="M5 20h7M5 23h7M5 26h7M14.5 20h7M14.5 23h7M14.5 26h7M24 20h7M24 23h7M24 26h7" stroke="#8899A6"/><rect x="0" y="33" width="36" height="3" fill="#99AAB5"/>',
     dump: '<path d="M3 9c2-5 9-5 12 1z" fill="#A0785A"/><path d="M2 9l15 4v11H3z" fill="#FFAC33"/><path d="M19 14h7l6 7v5H19z" fill="#FFCC4D"/><path d="M21 16h4.5l4 5H21z" fill="#88C9F9"/><rect x="2" y="24" width="31" height="3" fill="#66757F"/><circle cx="9" cy="29" r="4" fill="#31373D"/><circle cx="27" cy="29" r="4" fill="#31373D"/><circle cx="9" cy="29" r="1.5" fill="#99AAB5"/><circle cx="27" cy="29" r="1.5" fill="#99AAB5"/>',
@@ -146,6 +158,16 @@
     joist: '<path d="M1 11h34M1 25h34" stroke="#66757F" stroke-width="3"/><path d="M3 25l4.5-14 4.5 14 4.5-14 4.5 14 4.5-14 4.5 14 4.5-14" stroke="#8899A6" stroke-width="2" fill="none"/>',
     plat: '<rect x="2" y="2" width="32" height="32" fill="#EAF3DE" stroke="#3B6D11" stroke-width="1.5"/><rect x="2" y="15" width="32" height="6" fill="#B4B2A9"/><path d="M2 18h32" stroke="#fff" stroke-dasharray="2 2"/><path d="M13 2v13M24 2v13M18 21v13" stroke="#3B6D11" stroke-width="1.5"/>',
     hydrant: '<rect x="9" y="31" width="18" height="3" fill="#99AAB5"/><rect x="12" y="13" width="12" height="18" rx="2" fill="#DD2E44"/><path d="M12 13a6 6 0 0 1 12 0z" fill="#BE1931"/><rect x="16" y="3" width="4" height="5" rx="1" fill="#BE1931"/><rect x="6.5" y="17" width="6" height="5" rx="1" fill="#BE1931"/><rect x="23.5" y="17" width="6" height="5" rx="1" fill="#BE1931"/><rect x="11" y="12" width="14" height="2" fill="#A0041E"/>'
+  };
+
+  // A "c:" drawing is 36x36 unless it says otherwise here (the Permit is drawn on a 24x24 board). A drawing whose markup carries
+  // the token "__UID__" (a <mask>/<clipPath> id) is given a fresh id by customMarkup() for EACH rendered instance: SVG ids are
+  // document-global, so two icons sharing a mask id would clip/mask each other (and one removed from the page can take the id with it).
+  var CUSTOM_VIEWBOX = { permit: "0 0 24 24" };
+  var customViewBox = function (name) { return CUSTOM_VIEWBOX[name] || "0 0 36 36"; };
+  var customMarkup = function (name, uid) {
+    var m = CUSTOM_SVG[name];
+    return m ? m.split("__UID__").join(String(uid == null ? "0" : uid)) : "";
   };
 
   // Built-in line-art icons, "svg:<name>". Inner markup of <svg viewBox=... fill="none" stroke="currentColor"
@@ -304,7 +326,7 @@
 
   var api = {
     MAX_ICONS: MAX_ICONS,
-    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, BUILTIN_SVG: BUILTIN_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS, LEGACY_EMOJI: LEGACY_EMOJI,
+    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, CUSTOM_VIEWBOX: CUSTOM_VIEWBOX, customViewBox: customViewBox, customMarkup: customMarkup, BUILTIN_SVG: BUILTIN_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS, LEGACY_EMOJI: LEGACY_EMOJI,
     isCustom: isCustom, customName: customName, isBuiltinSvg: isBuiltinSvg, svgName: svgName, isDrawn: isDrawn, isKnown: function (id) { return !!knownId[id]; },
     twemojiFile: twemojiFile,
     searchTaskIcons: searchTaskIcons, iconLabel: iconLabel,

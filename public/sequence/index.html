@@ -15743,14 +15743,17 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 // taskIconsW is the one place that width is computed, so the name EDITOR's text starts where the displayed name starts.
 const TASK_ICON_PX = 16, TASK_ICON_GAP = 2, TASK_ICON_PAD = 2, TASK_ICON_AFTER = 2;
 const taskIconsW = n => n > 0 ? n * TASK_ICON_PX + (n - 1) * TASK_ICON_GAP + 2 * TASK_ICON_PAD + TASK_ICON_AFTER : 0;
+let TASK_ICON_UID = 0;   // per-rendered-instance counter: a drawing with a <mask> (the Permit) needs an id no other icon on the page shares
 function TaskIconGlyph({id, size = 16, faded = false}) {
   const [failed, setFailed] = React.useState(false);
+  const uidRef = React.useRef(null);
+  if (uidRef.current === null) uidRef.current = "ti" + (++TASK_ICON_UID);
   const TI = window.PlanyrTaskIcons;
   const st = {display:"block", flexShrink:0, opacity: faded ? 0.55 : 1};
   if (TI.isCustom(id)) {
-    const m = TI.CUSTOM_SVG[TI.customName(id)];
-    if (!m) return null;   // an id from a newer client: keep it stored, draw nothing
-    return <svg viewBox="0 0 36 36" width={size} height={size} aria-hidden="true" style={st} dangerouslySetInnerHTML={{__html: m}} />;
+    const nm = TI.customName(id);
+    if (!TI.CUSTOM_SVG[nm]) return null;   // an id from a newer client: keep it stored, draw nothing
+    return <svg viewBox={TI.customViewBox(nm)} width={size} height={size} aria-hidden="true" style={st} dangerouslySetInnerHTML={{__html: TI.customMarkup(nm, uidRef.current)}} />;
   }
   if (TI.isBuiltinSvg(id)) {   // built-in line art ("svg:<name>"): currentColor, so it follows the text colour of the row / picker it sits in
     const b = TI.BUILTIN_SVG[TI.svgName(id)];
