@@ -2792,6 +2792,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * the person did, never the app's tidy-up. ⛔ AND IT ONLY EVER SHRINKS ON CLICK-OUT — content wider than
    * the box (a long unbroken line, a wide table) leaves the box exactly as it is. */
   const settleBox = useCallback((aid) => {
+    if (previewRef.current) return;                  // NEW-2: a hovered paste option is on screen — never fit the box around a preview
     if (!aid || !editor || editor.isDestroyed) return;
     const hit = findFitBox(editor, aid);
     if (!hit || !boxHasContent(hit.node)) return;
@@ -2829,7 +2830,10 @@ const NoteEditor = forwardRef(function NoteEditor({
    * already at least start-wide never measures. */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const onEditorUpdate = () => {
+    const onEditorUpdate = ({ transaction } = {}) => {
+      /* ⛔ NEW-2 (found live 2026-11-13): a paste-option PREVIEW changes the words' natural width, and this grew the self-fitting box with it — a width the
+       * restore then could not take back, because it landed AFTER the restore. A preview (and its take-back) never resizes a box. */
+      if (transaction?.getMeta?.("pastePreview")) return;
       const id = editingRef.current;
       if (!id || editor.isDestroyed) return;
       const hit = findFitBox(editor, id);
