@@ -534,6 +534,7 @@ import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printS
 import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
 import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+import { carryKeyOf, graftOverlaySrc, stashMemory, takeMemory, persistDisk, loadDisk } from "./lib/historyCarry.js"; // NEW-1 (2026-11-13) — undo history survives leaving a plan
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
@@ -5224,6 +5225,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [histTick, bumpHist] = useState(0);
   const [dockRemoved, setDockRemoved] = useState(null); // NEW-1 — { hostId, text, tick }: the "Removed. W wall has no dock layers." note + Undo; valid only at the history tick the removal produced
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
+  /* ⛔ NEW-1 (2026-11-13, owner: "do I lose the ability to do the control Z whenever I get out of the page?") —
+   * UNDO HISTORY SURVIVES LEAVING THE PLAN. Everything is in lib/historyCarry.js (read its header for the
+   * rules and caps); this block is only the wiring. The planner remounts per plan (`key=siteId:loadEpoch`),
+   * which used to throw `histRef` away: on unmount the stacks are STASHED per plan (memory, plus a short
+   * IndexedDB tail for a reload) and on mount the same plan's stack is ADOPTED. The STALE-HISTORY GUARD is
+   * `checkCarried`: carried frames are trusted only while the plan still hashes to what it was when they
+   * were saved, checked at the first undo / first new edit / any content change before then — never at boot —
+   * and DROPPED, never replayed, when it does not match (another tab, computer, teammate, a cloud pull). */
+  const carryRef = useRef(null);                       // { baseKey, pending } while carried frames are unverified
+  const carrySavedRef = useRef(null);                  // the stack the disk tail last saw (skip a no-change save)
+  const carryScope = openedUidRef.current || "local";  // frames are per ACCOUNT as well as per plan
+  const carryIo = { get: idbGet, put: idbPut, del: idbDelete };
+  const planKeyNow = () => carryKeyOf(stateRef.current, histKey);
+  const checkCarried = (commit) => {
+    const c = carryRef.current;
+    if (!c || !c.pending) return true;
+    if (planKeyNow() === c.baseKey) { if (commit) c.pending = false; return true; }
+    histRef.current.reset(); carryRef.current = null;  // the plan changed since: the steps are not ours to replay
+    return false;
+  };
+  const saveCarryToDisk = () => {
+    if (!histRef.current) return;
+    checkCarried(false);
+    const st = histRef.current.snapshotStacks();
+    const last = carrySavedRef.current, top = st.past[st.past.length - 1];
+    if (last && last.top === top && last.n === st.past.length) return;
+    carrySavedRef.current = { top, n: st.past.length };
+    persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey: planKeyNow() });
+  };
+  useEffect(() => {
+    let live = true;
+    const adopt = (e) => {
+      if (!live || !e || !histRef.current.isEmpty()) return;                // a person who already edited owns the stack
+      if (histRef.current.adopt(e.past, e.future)) { carryRef.current = { baseKey: e.baseKey, pending: true }; touchHist(); }
+    };
+    const mem = takeMemory(carryScope, siteId);
+    if (mem) adopt(mem); else loadDisk(carryIo, carryScope, siteId).then(adopt);
+    const onHide = () => { if (document.visibilityState === "hidden") saveCarryToDisk(); };
+    window.addEventListener("pagehide", saveCarryToDisk);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      live = false;
+      window.removeEventListener("pagehide", saveCarryToDisk);
+      document.removeEventListener("visibilitychange", onHide);
+      try {
+        checkCarried(false);
+        const st = histRef.current.snapshotStacks(), baseKey = planKeyNow();
+        stashMemory(carryScope, siteId, { past: st.past, future: st.future, baseKey });
+        setTimeout(() => { persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey }); }, 0);
+      } catch (_) { /* history carry-over is best effort — never an error */ }
+    };
+  }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* Quiet-time save of the disk tail; nothing runs per edit. MEASURED (Chromium, a real reload): an IndexedDB write
+   * started from `pagehide` does NOT reliably commit before the page is torn down, so the pagehide / hidden
+   * saves above are only the best-effort last word — this settled-edit save is what a reload actually relies on. */
+  useEffect(() => {
+    const t = setTimeout(saveCarryToDisk, 1500);
+    return () => clearTimeout(t);
+  }, [histTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop unverified carried steps the moment the plan stops matching what they were saved against.
+  useEffect(() => {
+    if (carryRef.current && carryRef.current.pending && !checkCarried(false)) touchHist();
+  }, [histTick, parcels, els, measures, callouts, markups, sheetOverlays, layerOverrides, layerAbove, origin]); // eslint-disable-line react-hooks/exhaustive-deps
   /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
    * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
    * "the same seam pushHistory() uses, which is already exactly one call per undoable action"
@@ -5256,7 +5320,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
-  const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  const pushHistory = (kind = "edit") => { if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -5544,6 +5608,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // before the snapshot reaches the canvas, so an undo can never REINSTATE a tear — and so the
     // flush at the bottom of this function, which commits against this exact snapshot, ships the
     // repaired geometry rather than the recorded wreckage.
+    s = graftOverlaySrc(s, stateRef.current.sheetOverlays); // NEW-1 (2026-11-13) — a frame carried over from disk holds no raster `src`; keep the live one
     {
       const guardedEls = assemblyGuard(s.els, "undo/redo");
       if (guardedEls !== s.els) s = { ...s, els: guardedEls };
@@ -5714,8 +5779,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
     return name; // set only when undoOwnership actually called nameOf, i.e. verdict === "foreign"
   };
-  const applyUndo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
-  const applyRedo = () => { const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
+  const applyUndo = () => { if (!checkCarried(true)) { touchHist(); return; } const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
+  const applyRedo = () => { if (!checkCarried(true)) { touchHist(); return; } const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
   const undo = () => {
     const name = riskName();
     if (name) { pushToast({ text: `The next undo would reverse ${name}'s change, not yours. Undo it anyway?`, action: { label: "Undo anyway", onClick: applyUndo } }); return; }
@@ -5757,8 +5822,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRedoHover(0);
     setRedoMenuOpen(true);
   };
-  const applyUndoN = (n) => { const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
-  const applyRedoN = (n) => { const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyUndoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyRedoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
   // NEW-7/NEW-4 — the multi-step dropdown gets the SAME ownership guard as a plain Undo/Redo press;
   // a run of several steps reverts further back, so if even the top frame is at risk every deeper
   // step in the run is too (riskName()'s single-timestamp sufficiency, see its own header above).
@@ -7701,25 +7766,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
     setMulti(refs); setSel(refs[0] || null); setDrillId(null);
   };
-  // B910 / NEW-1 — clicking a measurement used to be inert unless you'd first switched to the
-  // Select tool: the Measure tool STAYS active after you draw (so you can measure many things in a
-  // row), but the hit target + this handler both gated on tool==="select", so the measurement you
-  // just drew swallowed clicks silently. Now a click grabs a finished measurement from the Measure
-  // tool too and drops back to Select (the handles / × / highlight are all gated on Select), so the
-  // selection is immediately visible and editable — mirroring how every other drawn item becomes
-  // grabbable the instant its tool hands back to Select. A repeated click cycles the selection down
-  // through anything stacked under the cursor (smaller-area-wins so a tiny measurement on top of a
-  // big one is reachable first). Mid-draw (a new measurement in progress) we do NOT steal the click:
-  // it falls through to place the next vertex, even when that vertex lands on an existing measurement.
-  // NEW — one press both SELECTS the measurement (repeat-click cycles the stack) AND arms a
+  // B910 / NEW-1 — a click on a finished measurement SELECTS it (repeat-click cycles the stack,
+  // smaller-area-wins so a tiny measurement on top of a big one is reachable first) AND arms a
   // whole-measurement MOVE, so a drag repositions it and a plain click (no travel) just selects.
-  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail. This is what makes
-  // "click and drag a measurement" work — previously the body press only ever selected.
+  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail.
+  // ⛔ B2671280 (owner constraint #56) — SELECT TOOL ONLY. B910 also let this grab a finished measurement
+  // from the Measure tool and silently drop to Select; that EAT the first click of the next measurement
+  // whenever it landed on (or, for an Area, anywhere inside) an existing one — "the first click after
+  // switching measure tools doesn't register". While a Measure tool is armed a press is ALWAYS a point
+  // (onBgDown); a measurement is picked in Select, or by right-click (`onMeasureContext`, which still
+  // selects from any tool). The render's `canGrab` and this guard say the same thing.
   const startMoveMeasure = (e, i) => {
     if (e.button !== 0) return;
-    if (tool === "measure" && measDraft.length > 0) return; // mid-draw: let onBgDown place the next vertex
+    if (tool !== "select") return;
     e.stopPropagation();
-    if (tool !== "select") setTool("select"); // drop to Select so the grips / × / highlight render
     const fp = p2f(e.clientX, e.clientY);
     const order = measuresUnderPoint(measures, fp, 12 / view.ppf); // 12px hit buffer → feet
     const next = nextMeasureSelection(order, sel?.kind === "measure" ? sel.i : -1);
@@ -24323,16 +24383,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
-                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
-                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
-                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
-                // arms a whole-measurement drag on the same press).
-                // NEW-1 (B1253248) — but NOT mid-draft: startMoveMeasure already lets a click through
-                // to place the new measurement's next vertex while `measDraft.length > 0` (see the
-                // guard at its top), so the "move" cursor this drove was pure misdirection — it
-                // promised a grab that would not happen, over the exact vertex the user was aiming
-                // past to place their next point.
-                const canGrab = tool === "select" || (tool === "measure" && !measDraft.length);
+                // A finished measurement is grabbable from the SELECT tool only (B2671280, owner constraint
+                // #56). B910 also offered it from the Measure tool, which ate the first click of the next
+                // measurement whenever it landed on (or inside, for an Area) an existing one — the band, the
+                // "move" cursor and the press handler all stay out of the way while a Measure tool is armed,
+                // draft or no draft. `canGrab` is the PRESS (and the "move" cursor): Select only. The shapes stay
+                // hit-testable (`hitLive`) in Measure with no draft open so a RIGHT-click still reaches the
+                // object's menu (`onMeasureContext`); a LEFT press on them has no handler, so it bubbles to
+                // `onBgDown` and places a point.
+                const canGrab = tool === "select";
+                const hitLive = canGrab || (tool === "measure" && !measDraft.length);
                 // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
                 // every mode. The uncalibrated amber still overrides the user's colour there,
                 // because that is a correctness signal rather than decoration.
@@ -24394,7 +24454,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
@@ -24457,9 +24517,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                          pointerEvents={hitLive ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
                         it was unreachable: every press over the chip landed on the grab layer and
@@ -25974,6 +26034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     // NEW-1 — a HALF-DRAWN measurement is never document content, and every mark in
                     // here is constant screen px. Stripped from the sheet.
+                    <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                     <g data-export="skip" pointerEvents="none">
                       {measDraft.map((p, k) => { const c = f2p(p); return (
                         <g key={k}>
@@ -25986,11 +26047,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           quiet bottom-center live-draft strip below the <svg> (liveDraftReadout),
                           so it never sits over the point the user is about to click next. */}
                     </g>
+                    </g>
                   );
                 }
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 const isArea = measureMode === "area";
                 return (
+                  <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                   <g data-export="skip" pointerEvents="none">
                     {isArea && all.length >= 3
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
@@ -25999,6 +26062,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* NEW-1 (B850240) — the live SF/feet readout moved to the quiet bottom-center
                         live-draft strip below the <svg> (liveDraftReadout), so it never sits over
                         the user's next click. */}
+                  </g>
                   </g>
                 );
               })()}
