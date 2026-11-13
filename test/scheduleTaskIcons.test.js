@@ -39,8 +39,7 @@ describe("the icon library", () => {
     for (const n of used) expect(TI.CUSTOM_SVG[n], "c:" + n).toBeTruthy();
     expect([...Object.keys(TI.CUSTOM_SVG)].sort()).toEqual([...used].sort());
   });
-  it("reproduces the owner's markup as given (spot-checked verbatim)", () => {
-    expect(TI.CUSTOM_SVG.permit).toBe('<rect x="6" y="3" width="20" height="28" rx="2" fill="#E1E8ED" stroke="#99AAB5"/><path d="M10 9h12M10 13h12M10 17h7" stroke="#99AAB5" stroke-width="2"/><circle cx="25" cy="25" r="8" fill="#77B255"/><path d="M21 25l3 3 5-6" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>');
+  it("reproduces the owner's markup as given (spot-checked verbatim; the Permit has its own block below)", () => {
     expect(TI.CUSTOM_SVG.manhole).toBe('<circle cx="18" cy="18" r="16" fill="#66757F"/><circle cx="18" cy="18" r="13" fill="#8899A6"/><path d="M8 13h20M6 18h24M8 23h20M13 7v22M18 5v26M23 7v22" stroke="#66757F" stroke-width="1.5"/>');
     expect(TI.CUSTOM_SVG.joist).toBe('<path d="M1 11h34M1 25h34" stroke="#66757F" stroke-width="3"/><path d="M3 25l4.5-14 4.5 14 4.5-14 4.5 14 4.5-14 4.5 14 4.5-14" stroke="#8899A6" stroke-width="2" fill="none"/>');
     for (const [n, m] of Object.entries(TI.CUSTOM_SVG)) {
@@ -162,6 +161,82 @@ describe("the built-in TIA icon (svg:tia — cars on a road, replaces the traffi
     expect(tia.markup).toMatch(/currentColor/);
     for (const p of carPaths) expect((p.match(/M/g) || []).length).toBe(2);   // the body + its windshield, nothing painted over it
     expect(tia.markup).not.toMatch(/<rect/);
+  });
+});
+
+describe("the Permit / approval icon (c:permit — colour clipboard + approved seal + rubber stamp)", () => {
+  const m = TI.CUSTOM_SVG.permit;
+  const g = (uid) => TI.customMarkup("permit", uid);
+  it("keeps its stored id, so a task that already uses the permit icon picks the new drawing up; still offered once, in Entitlements and permits", () => {
+    expect(TI.ALL_IDS.filter(id => id === "c:permit").length).toBe(1);
+    const cat = TI.CATEGORIES.find(c => c.key === "ent");
+    expect(cat.items[0][0]).toBe("c:permit");
+    expect(cat.items[0][1]).toBe("Permit / approval");
+    expect(TI.normalizeTaskIcons(["c:permit"])).toEqual(["c:permit"]);
+    expect(TI.isCustom("c:permit")).toBe(true);
+    expect(TI.iconLabel("c:permit")).toBe("Permit / approval · drawn for Planyr");
+  });
+  it("is drawn on a 24x24 board (the other c: drawings stay 36x36)", () => {
+    expect(TI.customViewBox("permit")).toBe("0 0 24 24");
+    expect(TI.customViewBox("plat")).toBe("0 0 36 36");
+    expect(TI.customViewBox("hydrant")).toBe("0 0 36 36");
+  });
+  it("carries the approved artwork exactly: board, clip, two text lines, seal + check, and the four-piece stamp at (18.6, 14.2)", () => {
+    expect(m).toContain('<rect x="3" y="3.5" width="13.5" height="18" rx="1.6" fill="#e3f3fb" stroke="#2f3a6b" stroke-width="1.5"/>');
+    expect(m).toContain('<rect x="6.75" y="2" width="6" height="3.2" rx="1" fill="#3f7fe0" stroke="#2f3a6b" stroke-width="0.8"/>');
+    expect(m).toContain('<path d="M6 7.5h7.5M6 10.5h7.5" stroke="#2f3a6b" stroke-width="1.3" stroke-linecap="round" fill="none"/>');
+    expect(m).toContain('<circle cx="9.75" cy="16" r="3" fill="#3f7fe0"/>');
+    expect(m).toContain('<path d="M8.4 16l1 1 1.8-2" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>');
+    const stamp = m.match(/<g transform="translate\(18\.6 14\.2\)" fill="#d4506c">(.*?)<\/g>/);
+    expect(stamp, "stamp group").toBeTruthy();
+    expect(stamp[1]).toBe('<ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/>');
+  });
+  it("the gap round the stamp is a TRUE cut-out: a <mask> (white field, the stamp's silhouette in black grown by 1.1) over the clipboard", () => {
+    const mask = m.match(/<mask id="pm-__UID__"[^>]*>(.*?)<\/mask>/);
+    expect(mask, "mask").toBeTruthy();
+    expect(mask[1]).toContain('<rect x="0" y="0" width="24" height="24" fill="#fff"/>');
+    // the black silhouette = the SAME four stamp shapes, same transform, stroked 2.2 (1.1 each side)
+    expect(mask[1]).toContain('<g transform="translate(18.6 14.2)" fill="#000" stroke="#000" stroke-width="2.2" stroke-linejoin="round">');
+    expect(mask[1]).toContain('<ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/>');
+    expect(m).toContain('<g mask="url(#pm-__UID__)"><rect x="3" y="3.5"');   // the mask wraps the clipboard (board, clip, lines, seal)
+    expect(m.indexOf('<g mask=')).toBeLessThan(m.indexOf('fill="#d4506c"'));    // …and the stamp itself is NOT inside it
+  });
+  it("NO white / background-coloured gap stroke: the only white in the drawing is the mask's field and the seal's check mark", () => {
+    const whites = m.match(/#fff\b|#ffffff|white/gi) || [];
+    expect(whites.length).toBe(2);
+    expect(m).not.toMatch(/currentColor/);   // fixed colours, like an emoji
+    expect(m).not.toMatch(/var\(--/);
+  });
+  it("the mask / clip id is unique per rendered instance: customMarkup swaps the token, leaves none behind, never reuses an id", () => {
+    expect(m.split("__UID__").length - 1).toBe(2);   // the id and the one reference
+    const a = g("ti1"), b = g("ti2");
+    expect(a).not.toContain("__UID__");
+    expect(a).toContain('id="pm-ti1"');
+    expect(a).toContain('url(#pm-ti1)');
+    expect(b).toContain('id="pm-ti2"');
+    expect(a).not.toBe(b);
+    const ids = new Set(); for (let i = 0; i < 50; i++) { const id = (g("ti" + i).match(/id="([^"]+)"/) || [])[1]; ids.add(id); }
+    expect(ids.size).toBe(50);
+  });
+  it("the other c: drawings are untouched by the id seam (no token, markup returned verbatim)", () => {
+    for (const [n, mk] of Object.entries(TI.CUSTOM_SVG)) {
+      if (n === "permit") continue;
+      expect(mk, n).not.toContain("__UID__");
+      expect(TI.customMarkup(n, "ti9"), n).toBe(mk);
+    }
+    expect(TI.customMarkup("nope", "ti1")).toBe("");
+  });
+  it("TaskIconGlyph gives EACH rendered c: icon its own id and its own viewBox (module counter + per-instance ref)", () => {
+    const i = page.indexOf("function TaskIconGlyph(");
+    const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
+    expect(page).toMatch(/let TASK_ICON_UID = 0;/);
+    expect(body).toContain('uidRef.current = "ti" + (++TASK_ICON_UID)');
+    expect(body).toContain("viewBox={TI.customViewBox(nm)}");
+    expect(body).toContain("TI.customMarkup(nm, uidRef.current)");
+    expect(body).toMatch(/if \(!TI\.CUSTOM_SVG\[nm\]\) return null;/);
+  });
+  it("is found by permit, approval and approved", () => {
+    for (const q of ["permit", "approval", "approved"]) expect(ids(TI.searchTaskIcons(q))).toContain("c:permit");
   });
 });
 
