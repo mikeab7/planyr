@@ -17906,8 +17906,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true, includeScaleBar = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups, includeScaleBar));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -18154,7 +18154,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const composeKey = composeMode && printFrame
     ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
       settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false,
-      settings.printBuildingsTable !== false,
+      settings.printBuildingsTable !== false, settings.printScaleBar !== false,
       composePageOverride ? `${composePageOverride.w}x${composePageOverride.h}` : ""].join("|")
     : null;
   useEffect(() => {
@@ -18165,7 +18165,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const scaleText = printScale ? scaleLabel(printScale) : "";
         const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false));
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, false, settings.printScaleBar !== false));
         if (cancelled) return;
         if (!composed) { setComposePreviewUrl(null); return; }
         const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
@@ -18225,7 +18225,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
       // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref(), settings.printScaleBar !== false);
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -24336,8 +24336,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        page picture. Read-only; same gate. */
     const composedHook = async (o = {}) => {
       const { createExportSheet } = await loadExportSheet();
-      // `o` (E2E only): { paper, orient, buildingsTable, annotate } — the sheet shape under test; defaults are the editable-PDF Letter sheet
-      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false);
+      // `o` (E2E only): { paper, orient, buildingsTable, annotate, scaleBar, scaleText } — the sheet shape under test; defaults are the editable-PDF Letter sheet
+      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, o.scaleText || "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false, o.scaleBar !== false);
       if (!c) return null;
       return {
         sheetSvg: c.sheetSvg,
@@ -24347,6 +24347,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pins: c.annotationPins || [],
         annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
         degraded: c.annotationSet?.degraded || [],
+        hasViewport: !!c.annotationSet?.viewport, // the PDF's embedded measurement scale (/VP + /Measure) — independent of the drawn scale bar
       };
     };
     window.__plannerExportComposed = composedHook;
@@ -26910,6 +26911,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                showScaleBar={settings.printScaleBar !== false} onToggleScaleBar={(v) => setSettings((s) => ({ ...s, printScaleBar: v }))}
                 flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
