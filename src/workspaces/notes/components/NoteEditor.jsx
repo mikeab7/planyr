@@ -82,8 +82,9 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage,
+  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage, notesScope,
 } from "../lib/notesStore.js";
+import { captureHistory, planRestore, forgetOutside } from "../lib/notesUndoCarry.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "../lib/notesMarkdown.js";
@@ -104,6 +105,8 @@ import NoteHistory from "./NoteHistory.jsx";
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
+/* Outcomes of the undo-history carry that are ordinary, not worth a telemetry row. */
+const QUIET_CARRY_REASONS = new Set(["none-parked", "page-changed", "nothing-to-keep"]);
 /* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
@@ -2012,6 +2015,31 @@ const NoteEditor = forwardRef(function NoteEditor({
       ed.commands.dropEmptyAnchors();
     },
   });
+
+  /* ⛔ EACH PAGE KEEPS ITS OWN UNDO HISTORY ACROSS A PAGE SWITCH (NEW-1, 2026-11-13). The parent keys this component by page id, so leaving a
+   * page unmounts the editor and a new one starts with an empty history — Ctrl+Z after "A → B → A" found nothing. The remount, the autosave flush
+   * and the keyed instance are all UNCHANGED; only the history is carried: parked when this editor goes away, handed back to the NEW editor when
+   * the page is opened again (lib/notesUndoCarry.js — read its header: why steps travel as JSON, the stale guard that discards a history whose
+   * page changed meanwhile, the caps). In memory only: not saved, not synced, gone on reload. A read-only peek neither parks nor restores.
+   * Restoring is a meta-only transaction (no step), so no plugin treats it as an edit, nothing is saved and `undoDepth` is the only thing that moves. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return undefined;
+    const scopePrefix = `${notesScope()}|`;
+    const key = `${scopePrefix}${pageId}`;
+    const report = (reason) => { if (reason && !QUIET_CARRY_REASONS.has(reason)) reportClientEvent("notes-undo-carry", `a page's undo history was not carried (${reason})`); };
+    /* A read-only trail of what the carry decided, for the live harness (E2E-gated, like every self-audit hook in this file). */
+    const trail = (phase, r) => { if (typeof window !== "undefined" && window.__PLANYR_E2E) (window.__undoCarryLog = window.__undoCarryLog || []).push({ phase, key, ...r }); };
+    forgetOutside(scopePrefix);
+    try {
+      const plan = planRestore(key, editor.state);
+      trail("restore", { restored: !!plan.tr, reason: plan.reason, done: plan.done, undone: plan.undone });
+      if (plan.tr) editor.view.dispatch(plan.tr); else report(plan.reason);
+    } catch (e) { report(`restore-threw:${e?.name || "error"}`); }
+    return () => {
+      if (editor.isDestroyed) return;
+      try { const r = captureHistory(key, editor.state); trail("park", r); report(r.reason); } catch (e) { report(`capture-threw:${e?.name || "error"}`); }
+    };
+  }, [editor, pageId, readOnly]);
 
   /* ⛔ THE INSTRUMENT NEW-2 NEEDED, and the reason it is committed rather than improvised.
    * "Backspace at the start of a block" is a rule about the DOCUMENT TREE, and a harness that

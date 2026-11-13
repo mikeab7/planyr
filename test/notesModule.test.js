@@ -147,6 +147,8 @@ const ALL_NOTES_FILES = [
   // survivor, isBlankDoublePress, reconstructs a double-click pair without depending on a
   // native dblclick alone.
   "lib/notesBlankPaper.js", "lib/notesCaretSnapback.js",
+  // NEW-1 (B2671278, 2026-11-13) — each page's undo history parked across a page switch and rebuilt against the new editor.
+  "lib/notesUndoCarry.js",
   // NEW-1 (2026-09-22) — the one-way migration of an old page's top-level flow content into a
   // single rich-text box, run on read, never on write.
   "lib/notesFlowMigration.js",

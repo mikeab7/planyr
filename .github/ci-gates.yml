@@ -241,6 +241,15 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-paste-preview.mjs
+      # Notes UNDO SURVIVES A PAGE SWITCH (NEW-1, owner ask 2026-11-13: Ctrl+Z "even if I go to an old page or a page I wasn't on in a minute").
+      # Real keys and a real mouse on a seeded two-page notebook: typing, a box drag, a box delete and a paste are all still undoable (and redo-able)
+      # after A -> B -> A; each page undoes only its own steps; a page changed while away drops its saved history instead of replaying it; a reload
+      # empties it (in memory only). Known-good arms (undo + a box drag register on ONE page, no switch) VOID the run. 15 of 33 checks red on main;
+      # a second mutation (the stale guard off) turns the "changed elsewhere" rows red.
+      - name: Notes undo history survives a page switch (type / move / delete / paste, per page, stale guard - NEW-1, 2026-11-13)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-undo-carry.mjs
       # Notes CARET SNAP-BACK RECORDER (NEW-3, 2026-11-12). The owner's "I click a line above the caret and it jumps back" was not reproduced, so the
       # editor reports it when it happens (structure only). A forced snap-back MUST be recorded or the run is VOID.
       - name: Notes caret snap-back recorder (a normal click sends nothing, a snap-back sends one structure-only event - NEW-3, 2026-11-12)
