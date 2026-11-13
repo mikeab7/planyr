@@ -66,7 +66,7 @@ try {
   await pacedWait(page, 600);
   await page.getByRole("button", { name: "Continue ➜" }).click();
   await pacedWait(page, 1500);
-  await page.locator('select[aria-label="Scale"]').selectOption("100");
+  await page.locator('select[aria-label="Scale"]').selectOption("1000");
 
   const section = page.getByRole("button", { name: "On the plan" }).locator("xpath=ancestor::div[1]");
   const row = page.getByLabel("Scale bar", { exact: true });
@@ -78,7 +78,8 @@ try {
     for (let i = 0; i < 80; i++) {
       const svg = await page.evaluate(async () => { const im = document.querySelector('img[alt="Sheet preview"]'); return im ? await (await fetch(im.src)).text() : ""; });
       const has = svg.includes('data-furniture-kind="scale-bar"');
-      if (svg && has === wantBar) return svg;
+      // a ticked read waits for the stated scale too: choosing the scale re-builds the sheet a beat after the bar is already there
+      if (svg && has === wantBar && (!wantBar || STATED.test(svg))) return svg;
       await page.waitForTimeout(250);
     }
     return await page.evaluate(async () => { const im = document.querySelector('img[alt="Sheet preview"]'); return im ? await (await fetch(im.src)).text() : ""; });
@@ -98,12 +99,12 @@ try {
     await pacedWait(page, 600);
     await page.getByRole("button", { name: "Continue ➜" }).click();
     await pacedWait(page, 1500);
-    await page.locator('select[aria-label="Scale"]').selectOption("100");
+    await page.locator('select[aria-label="Scale"]').selectOption("1000");
     return Buffer.from(pdfs[pdfs.length - 1], "base64").toString("latin1");
   };
   const stamps = (pdf) => [...pdf.matchAll(/\/Subj \(([^)]*)\)/g)].map((m) => m[1]);
   const viewport = (pdf) => /\/Type \/Viewport/.test(pdf) && /\/Measure/.test(pdf);
-  const STATED = /1&quot; = 100'/;
+  const STATED = /1&quot; = 1000'/; // the framed area is ~7,100 ft wide: 1" = 100' does not fit a Letter sheet (Download is disabled and nothing prints) — 1" = 1000' does
 
   // ---- TICKED: today's sheet --------------------------------------------------
   const on = await previewSvg(true);
