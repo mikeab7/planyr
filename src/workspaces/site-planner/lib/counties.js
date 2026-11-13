@@ -39,6 +39,7 @@ import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster, c
  * spelled "Harris", silently). */
 import { byCountyKey, countyKeySet, normCountyKey, countyNameSlug } from "../../../shared/gis/countyKeys.js";
 import { parcelGapNotice } from "./parcelGaps.js";
+import { METRO_POINT_WHERE } from "./davidsonParcel.js"; // NEW-2 (Metro Nashville out-of-county placeholder lots)
 /* CITY-SCOPED SOURCES (B1583296) — a point-in-city-polygon check that runs BEFORE the nationwide
  * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
  * config line: a county whose only real parcel source covers just one city inside it cannot be
@@ -3385,6 +3386,9 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [36.17, -86.78], zoom: 11,
     bbox: [35.94, -87.08, 36.43, -86.49], displayMinZoom: 17,
     mapServer: null, layerUrl: COUNTIES.tn_davidson.layerUrl,
+    /* NEW-2 (2026-11-12) — the layer also holds placeholder polygons for lots across the county line (Cheatham 45, Robertson 46, Rutherford 4, Williamson 103, Wilson 58 — "ASSESSED IN WILSON COUNTY"):
+     * Metro draws them but keeps no Metro record, so a CLICK is never answered by one (`pointWhere`, keyed by URL like pointOrderBy, honoured by queryAtPoint) and a search that does find one gets no Metro rows (davidsonParcel.js). */
+    pointWhere: METRO_POINT_WHERE,
   },
   tn_rutherford: {
     state: "TN", center: [35.84, -86.42], zoom: 10,
@@ -4144,6 +4148,13 @@ export const POINT_ORDER_BY_LAYERS = Object.freeze(
   Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
 );
 export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
+
+/* NEW-2 (Metro Nashville, 2026-11-12) — a layer that mixes real lots with PLACEHOLDER polygons it keeps no record of declares `pointWhere` (an ArcGIS SQL `where`) on its config entry; a click's /query carries it, so a placeholder
+ * can never answer a click (the lot behind it, or the neighbouring county's own source, does). Keyed by URL exactly like pointOrderBy. */
+export const POINT_WHERE_LAYERS = Object.freeze(
+  Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointWhere).map((c) => [trimLayerUrl(c.layerUrl), c.pointWhere])),
+);
+export const pointWhereForUrl = (url) => POINT_WHERE_LAYERS[trimLayerUrl(url)] || null;
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a

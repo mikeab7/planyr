@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  lengthIn, parseMsoList, classifyMarker, listFormatMap, planOutline, splitTabRow, tabRuns, isBlankText,
+  lengthIn, marginLeftIn, parseMsoList, classifyMarker, listFormatMap, planOutline, splitTabRow, tabRuns, isBlankText,
 } from "../src/workspaces/notes/lib/notesOfficeLists.js";
 import { isMarkerColumn, tabularFromClipboard, parseTabular } from "../src/workspaces/notes/lib/notesTablePaste.js";
 
@@ -189,5 +189,37 @@ describe("the wiring stays in place", () => {
   it("the table safety net reports a structure-only skeleton (tag/class/property NAMES), not the person's text", () => {
     expect(src).toMatch(/notes-paste-table-rescued/);
     expect(src).not.toMatch(/skeleton:\s*[a-z.]*textContent/);
+  });
+});
+
+
+/* NEW-1 (2026-11-12) — an Outlook outline pasted flat, with blank numbered items and the levels lost. The DOM half (a Chromium-copied Word list whose
+ * mso-list is gone) is judged in a browser by the paste bank's `owa-recopy-*` and `outlook-nested-*` fixtures; these are its pure parts. */
+describe("a legal / outline number (1.1. / 1.1.1) is a NUMBER, and its depth is the level", () => {
+  it("reads 1.1. and 1.1.1. as ordered with the depth, never as a bullet (red on main: both were 'bullet')", () => {
+    expect(classifyMarker("1.1.")).toEqual({ kind: "ordered", start: 1, depth: 2 });
+    expect(classifyMarker("1.2.3")).toEqual({ kind: "ordered", start: 3, depth: 3 });
+    expect(classifyMarker("2.1.")).toEqual({ kind: "ordered", start: 1, depth: 2 });
+    expect(classifyMarker("(1.1)").kind).toBe("ordered");
+  });
+  it("leaves a plain number, a letter and a bullet glyph exactly as they were", () => {
+    expect(classifyMarker("3.")).toEqual({ kind: "ordered", start: 3 });
+    expect(classifyMarker("b.").kind).toBe("ordered");
+    expect(classifyMarker("·").kind).toBe("bullet");
+    expect(classifyMarker("o").kind).toBe("bullet");
+  });
+});
+
+describe("a margin read back from a browser's shorthand", () => {
+  it("takes the left value of `margin: a b c d` in every arity (a browser rewrites Word's margin-left this way)", () => {
+    expect(marginLeftIn("margin: 0in 0in 0in 1in; font-size: 11pt")).toBeCloseTo(1);
+    expect(marginLeftIn("margin: 0in 0.5in")).toBeCloseTo(0.5);          // vertical horizontal → horizontal
+    expect(marginLeftIn("margin: 0in 1.5in 0in")).toBeCloseTo(1.5);       // top horizontal bottom
+    expect(marginLeftIn("margin: 0.25in")).toBeCloseTo(0.25);
+  });
+  it("prefers the longhand, and says null when there is no margin at all", () => {
+    expect(marginLeftIn("margin: 0 0 0 1in; margin-left: 2in")).toBeCloseTo(2);
+    expect(marginLeftIn("font-size: 11pt")).toBe(null);
+    expect(marginLeftIn("")).toBe(null);
   });
 });

@@ -28,11 +28,11 @@ describe("the icon library", () => {
   it("has the eight categories in the owner's order", () => {
     expect(TI.CATEGORIES.map(c => c.title)).toEqual(["Acquisition and diligence", "Entitlements and permits", "Design", "Utilities", "Sitework", "Building", "Leasing and finance", "Status and milestones"]);
   });
-  it("offers 78 distinct icons: 61 emoji + the 16 coloured c: drawings + 1 built-in line-art svg:", () => {
+  it("offers 78 distinct icons: 60 emoji + the 16 coloured c: drawings + 2 built-in line-art svg: (Plat, TIA)", () => {
     expect(TI.ALL_IDS.length).toBe(78);
-    expect(TI.EMOJI_IDS.length).toBe(61);
+    expect(TI.EMOJI_IDS.length).toBe(60);
     expect(TI.ALL_IDS.filter(TI.isCustom).length).toBe(16);
-    expect(TI.ALL_IDS.filter(TI.isBuiltinSvg)).toEqual(["svg:plat"]);
+    expect(TI.ALL_IDS.filter(TI.isBuiltinSvg)).toEqual(["svg:tia", "svg:plat"]);
   });
   it("every custom id has inline SVG markup, and nothing in CUSTOM_SVG is unused", () => {
     const used = new Set(TI.ALL_IDS.filter(TI.isCustom).map(TI.customName));
@@ -56,12 +56,12 @@ describe("the icon library", () => {
       for (const c of cats) expect(c.items.filter(i => i[0] === dupe).length).toBe(1);
     }
   });
-  it("the owner's icon decisions hold: permit ≠ contract scroll, TIA is the traffic light, sewer is the manhole, roof is the flat roof, civil ≠ design", () => {
+  it("the owner's icon decisions hold: permit ≠ contract scroll, TIA is the cars-on-a-road drawing, sewer is the manhole, roof is the flat roof, civil ≠ design", () => {
     const where = (id) => TI.CATEGORIES.find(c => c.items.some(i => i[0] === id)).items.find(i => i[0] === id);
     expect(where("c:permit")[2]).toMatch(/permit/);
     expect(where("📜")[2]).toMatch(/contract/);
     expect(where("📜")[2]).not.toMatch(/permit/);
-    expect(where("🚦")[2]).toMatch(/TIA/);
+    expect(where("svg:tia")[2]).toMatch(/TIA/);
     expect(where("c:manhole")[2]).toMatch(/sewer/);
     expect(where("c:dump")[2]).toMatch(/grading/);
     expect(where("c:roof")[2]).toMatch(/roof/);
@@ -110,6 +110,61 @@ describe("the built-in Plat icon (svg:plat, B2671217)", () => {
   });
 });
 
+describe("the built-in TIA icon (svg:tia — cars on a road, replaces the traffic light)", () => {
+  const tia = TI.BUILTIN_SVG.tia;
+  const carPaths = tia.markup.match(/<path fill="currentColor" stroke="none" fill-rule="evenodd" d="[^"]+"\/>/g) || [];
+  it("is a stored KEY, drawn (not an emoji), offered once in Entitlements and permits with the old label and keywords", () => {
+    expect(TI.isBuiltinSvg("svg:tia")).toBe(true);
+    expect(TI.isKnown("svg:tia")).toBe(true);
+    expect(TI.EMOJI_IDS).not.toContain("svg:tia");
+    const cats = TI.CATEGORIES.filter(c => c.items.some(i => i[0] === "svg:tia"));
+    expect(cats.map(c => c.key)).toEqual(["ent"]);
+    expect(cats[0].items.find(i => i[0] === "svg:tia")).toEqual(["svg:tia", "Traffic impact analysis (TIA)", "traffic TIA impact analysis"]);
+    expect(TI.iconLabel("svg:tia")).toBe("Traffic impact analysis (TIA) · drawn for Planyr");
+    expect(TI.normalizeTaskIcons(["svg:tia", "svg:plat"])).toEqual(["svg:tia", "svg:plat"]);
+  });
+  it("is found by tia and traffic (and not by unrelated words)", () => {
+    for (const q of ["tia", "traffic", "impact", "analysis", "traffic impact"]) expect(ids(TI.searchTaskIcons(q)), q).toContain("svg:tia");
+    expect(ids(TI.searchTaskIcons("zoning"))).not.toContain("svg:tia");
+  });
+  it("🚦 left the picker but is not erased: a task that saved it keeps it (kept by normalize, still labelled, file still bundled)", () => {
+    expect(TI.ALL_IDS).not.toContain("🚦");
+    expect(ids(TI.searchTaskIcons("traffic"))).not.toContain("🚦");
+    expect(TI.LEGACY_EMOJI).toEqual(["🚦"]);
+    expect(TI.normalizeTaskIcons(["🚦", "svg:plat"])).toEqual(["🚦", "svg:plat"]);
+    expect(TI.iconLabel("🚦")).toBe("Traffic impact analysis (TIA)");
+    expect(existsSync(root("public/sequence/vendor/twemoji/" + TI.twemojiFile("🚦") + ".svg"))).toBe(true);
+  });
+  it("carries the approved artwork exactly (24x24, road edges, dashed centre line)", () => {
+    expect(tia.viewBox).toBe("0 0 24 24");
+    expect(tia.markup).toContain('<path d="M2 3.5h20M2 20.5h20" stroke-width="1.4"/>');
+    expect(tia.markup).toContain('<path d="M2 12h20" stroke-width="1" stroke-dasharray="2.5 3"/>');
+  });
+  it("draws three cars, each 7.5 x 4.2 (rx 1.4) in the approved places, each with a 1.4 x 2.6 (rx 0.4) windshield inset 0.8 from the car's top", () => {
+    expect(carPaths.length).toBe(3);
+    // [x, y, windshield x] — straight from the brief
+    const spec = [[1.8, 5.6, 6.7], [10.5, 5.6, 15.4], [13.5, 14.2, 14.7]];
+    const f = (n) => String(+n.toFixed(2));
+    const rr = (x, y, w, h, r) => `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w - r)} ${f(y + h)}H${f(x + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x)} ${f(y + h - r)}V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}Z`;
+    spec.forEach(([x, y, wx], i) => {
+      const d = carPaths[i].match(/ d="([^"]+)"/)[1];
+      expect(d, "car " + (i + 1)).toBe(rr(x, y, 7.5, 4.2, 1.4) + rr(wx, y + 0.8, 1.4, 2.6, 0.4));
+    });
+  });
+  it("front directions: cars 1 and 2 face right (windshield right of centre), car 3 faces left (windshield left of centre)", () => {
+    const centre = [1.8 + 3.75, 10.5 + 3.75, 13.5 + 3.75], ws = [6.7, 15.4, 14.7];
+    expect(ws[0] + 0.7 > centre[0]).toBe(true);
+    expect(ws[1] + 0.7 > centre[1]).toBe(true);
+    expect(ws[2] + 0.7 < centre[2]).toBe(true);
+  });
+  it("the windshields are TRUE cut-outs: one evenodd path per car, no mask, no id, no fixed colour — only currentColor", () => {
+    expect(tia.markup).not.toMatch(/<mask|\sid=|url\(|#[0-9a-fA-F]{3,8}\b|rgb|white|black/);
+    expect(tia.markup).toMatch(/currentColor/);
+    for (const p of carPaths) expect((p.match(/M/g) || []).length).toBe(2);   // the body + its windshield, nothing painted over it
+    expect(tia.markup).not.toMatch(/<rect/);
+  });
+});
+
 describe("Twemoji files", () => {
   it("names follow the codepoint rule: hex codepoints joined by '-', fe0f dropped", () => {
     expect(TI.twemojiFile("🧭")).toBe("1f9ed");
@@ -125,7 +180,7 @@ describe("Twemoji files", () => {
     expect(missing).toEqual([]);
   });
   it("only the SVGs the library uses are bundled (+ the credits note) — nothing hot-linked, nothing extra", () => {
-    const want = new Set(TI.EMOJI_IDS.map(e => TI.twemojiFile(e) + ".svg"));
+    const want = new Set(TI.EMOJI_IDS.concat(TI.LEGACY_EMOJI).map(e => TI.twemojiFile(e) + ".svg"));   // + the emoji the picker no longer offers but saved tasks may still hold
     want.add("CREDITS.txt");
     const have = readdirSync(root("public/sequence/vendor/twemoji/"));
     expect(have.sort()).toEqual([...want].sort());
@@ -144,8 +199,8 @@ describe("Twemoji files", () => {
 });
 
 describe("search", () => {
-  it('"tia" finds the traffic light — and nothing else ("substantial" must not match)', () => {
-    expect(ids(TI.searchTaskIcons("tia"))).toEqual(["🚦"]);
+  it('"tia" finds the TIA drawing — and nothing else ("substantial" must not match)', () => {
+    expect(ids(TI.searchTaskIcons("tia"))).toEqual(["svg:tia"]);
   });
   it('"sewer" finds the manhole, "roof" the roof, "tilt" the tilt-wall icon', () => {
     expect(ids(TI.searchTaskIcons("sewer"))).toEqual(["c:manhole"]);

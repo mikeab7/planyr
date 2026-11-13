@@ -146,7 +146,7 @@ const ALL_NOTES_FILES = [
   // rounds built) are gone with the flow body they existed to test against; this file's one
   // survivor, isBlankDoublePress, reconstructs a double-click pair without depending on a
   // native dblclick alone.
-  "lib/notesBlankPaper.js",
+  "lib/notesBlankPaper.js", "lib/notesCaretSnapback.js",
   // NEW-1 (2026-09-22) — the one-way migration of an old page's top-level flow content into a
   // single rich-text box, run on read, never on write.
   "lib/notesFlowMigration.js",
@@ -369,7 +369,7 @@ describe("the editor is split off the route's static path", () => {
 
   it("the pending snapshot is plain JSON captured at edit time, not queried at flush time", () => {
     const editor = src("components/NoteEditor.jsx");
-    expect(editor, "onUpdate must read getJSON() at EDIT time").toMatch(/onUpdate: \(\{ editor: ed \}\) => \{\s*\n\s*const doc = ed\.getJSON\(\);/);
+    expect(editor, "onUpdate must read getJSON() at EDIT time").toMatch(/onUpdate: \(\{ editor: ed(?:, transaction)? \}\) => \{\s*\n\s*const doc = ed\.getJSON\(\);/);
     expect(editor, "…and put that plain object in pendingRef").toMatch(/pendingRef\.current = \{ id: pageId, doc \}/);
     expect(editor, "the flush writes the captured object").toMatch(/writePage\(pending\.id, pending\.doc\)/);
     /* NEW-3 added a SECOND ref holding the same document for the version snapshot, and the

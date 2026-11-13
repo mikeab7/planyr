@@ -41,7 +41,7 @@
     { key: "ent", title: "Entitlements and permits", items: [
       ["c:permit", "Permit / approval", "permit approval approved"],
       ["🏛️", "City council / jurisdiction", "city council jurisdiction county"],
-      ["🚦", "Traffic impact analysis (TIA)", "traffic TIA impact analysis"],
+      ["svg:tia", "Traffic impact analysis (TIA)", "traffic TIA impact analysis"],
       ["🛣️", "TxDOT / driveway / ROW", "TxDOT driveway ROW highway"],
       ["c:pond", "Detention / drainage review", "detention drainage HCFCD review"],
       ["🌊", "Floodplain / FEMA", "floodplain FEMA LOMR"],
@@ -120,8 +120,13 @@
   ];
 
   // The three ids that sit in two categories get ONE label for the grid slot's tooltip (the picker still shows each
-  // category's own label).
-  var SLOT_LABEL_OVERRIDE = { "c:pond": "Detention pond", "c:joist": "Steel joists", "🏦": "Bank / district / loan" };
+  // category's own label). 🚦 is no longer offered (the TIA's own drawing, svg:tia, replaced it) but a task that saved it
+  // keeps drawing it and keeps its hover label.
+  var SLOT_LABEL_OVERRIDE = { "c:pond": "Detention pond", "c:joist": "Steel joists", "🏦": "Bank / district / loan", "🚦": "Traffic impact analysis (TIA)" };
+
+  // Emoji that the picker NO LONGER OFFERS but that tasks may have saved: still stored, still drawn (their bundled Twemoji
+  // file stays), never rewritten. Add an id here (and keep its file) whenever a library emoji is replaced by a drawing.
+  var LEGACY_EMOJI = ["🚦"];
 
   // Inner markup of <svg viewBox="0 0 36 36">. First drafts, reproduced exactly as the owner supplied them.
   var CUSTOM_SVG = {
@@ -158,6 +163,17 @@
         '<path d="M2.5 10.7H10.75A3.5 3.5 0 1 1 10.75 13.3H2.5" stroke-width="1.3"/>' +
         '<path d="M7 2.5V10.7M12 2.5V9.13M7 13.3V21.5M12 14.87V21.5M16.47 9.53L21.5 4.5M17.5 12H21.5M16.47 14.47L21.5 19.5" stroke-width="1"/>' +
         '<rect x="2.5" y="2.5" width="19" height="19" rx="1.5" stroke-width="1.4"/>'
+    },
+    // TIA (owner-approved artwork, 2026-11-12, picked from about a dozen variants — do not redesign): a two-lane road with three
+    // cars, two in the upper lane facing right and one in the lower lane facing left. Each car is ONE evenodd path (the body with
+    // its windshield as a second, inner outline), so the windshield is a TRUE cut-out: no mask, no id, no fixed background colour.
+    tia: {
+      viewBox: "0 0 24 24",
+      markup: '<path d="M2 3.5h20M2 20.5h20" stroke-width="1.4"/>' +
+        '<path d="M2 12h20" stroke-width="1" stroke-dasharray="2.5 3"/>' +
+        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M3.2 5.6H7.9A1.4 1.4 0 0 1 9.3 7V8.4A1.4 1.4 0 0 1 7.9 9.8H3.2A1.4 1.4 0 0 1 1.8 8.4V7A1.4 1.4 0 0 1 3.2 5.6ZM7.1 6.4H7.7A0.4 0.4 0 0 1 8.1 6.8V8.6A0.4 0.4 0 0 1 7.7 9H7.1A0.4 0.4 0 0 1 6.7 8.6V6.8A0.4 0.4 0 0 1 7.1 6.4Z"/>' +
+        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M11.9 5.6H16.6A1.4 1.4 0 0 1 18 7V8.4A1.4 1.4 0 0 1 16.6 9.8H11.9A1.4 1.4 0 0 1 10.5 8.4V7A1.4 1.4 0 0 1 11.9 5.6ZM15.8 6.4H16.4A0.4 0.4 0 0 1 16.8 6.8V8.6A0.4 0.4 0 0 1 16.4 9H15.8A0.4 0.4 0 0 1 15.4 8.6V6.8A0.4 0.4 0 0 1 15.8 6.4Z"/>' +
+        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M14.9 14.2H19.6A1.4 1.4 0 0 1 21 15.6V17A1.4 1.4 0 0 1 19.6 18.4H14.9A1.4 1.4 0 0 1 13.5 17V15.6A1.4 1.4 0 0 1 14.9 14.2ZM15.1 15H15.7A0.4 0.4 0 0 1 16.1 15.4V17.2A0.4 0.4 0 0 1 15.7 17.6H15.1A0.4 0.4 0 0 1 14.7 17.2V15.4A0.4 0.4 0 0 1 15.1 15Z"/>'
     }
   };
 
@@ -288,7 +304,7 @@
 
   var api = {
     MAX_ICONS: MAX_ICONS,
-    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, BUILTIN_SVG: BUILTIN_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS,
+    CATEGORIES: CATEGORIES, CUSTOM_SVG: CUSTOM_SVG, BUILTIN_SVG: BUILTIN_SVG, ALL_IDS: ALL_IDS, EMOJI_IDS: EMOJI_IDS, LEGACY_EMOJI: LEGACY_EMOJI,
     isCustom: isCustom, customName: customName, isBuiltinSvg: isBuiltinSvg, svgName: svgName, isDrawn: isDrawn, isKnown: function (id) { return !!knownId[id]; },
     twemojiFile: twemojiFile,
     searchTaskIcons: searchTaskIcons, iconLabel: iconLabel,

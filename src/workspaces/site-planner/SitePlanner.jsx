@@ -16881,6 +16881,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
     // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
     etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
+    // NEW-1 — a city's own detention policy (Baytown, Mont Belvieu): additive, no rate behind it.
+    cityNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "city-note"),
     // B861 (chat NEW-2) — drainage-district membership (additive to the county). BKDD is the
     // first; districtFailed distinguishes a boundary-source outage ("membership unverified")
     // from a clean "not in a district".
@@ -22836,7 +22838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} countyState={(COUNTIES[restored?.county] || {}).state || null} />
     );
   };
   /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is

@@ -134,6 +134,8 @@ export function attachAdminBoundaries(map) {
   const draw = (ts) => {
     raf = 0;
     if (destroyed) return;
+    // NEW-2: the map was torn down under a queued frame — Leaflet has dropped its panes, so projecting would throw. Detach.
+    if (!tracker.alive) { controller.destroy(); return; }
     const size = map.getSize();
     const dpr = window.devicePixelRatio || 1;
     const f = tracker.frame(typeof ts === "number" ? ts : performance.now());

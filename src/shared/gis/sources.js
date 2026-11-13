@@ -30,6 +30,7 @@
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -2080,6 +2081,109 @@ export const GIS_SOURCES = {
     browserVerified: { date: "2026-09-30", by: "owner's browser, planyr.io tab", features: null },
   },
 
+  /* ⛔ NEW-1 (Fort Bend, 2026-11-12) — FORT BEND COUNTY'S OWN BOUNDARY LAYERS. H-GAC's regional ETJ mosaic was last edited
+   * 2024-02-23 and cannot carry what has happened since; the county GIS office publishes three layers on one MapServer that can.
+   * Measured live 2026-11-12 (planyr.io Origin answers `Access-Control-Allow-Origin: https://planyr.io` — CORS-clean, so no relay):
+   *   /5  City ETJs        — 20 polygons (`City`, `Date_Modified`, `Notes`); newest Rosenberg 2026-04-23 "ORDINANCE 2026-16 REMOVAL OF 180.73 AC FROM ETJ".
+   *   /16 Land Ordinances  — annexations AND de-annexations (`Type`, `City`, `Ordinance_Reference`, `Acreages`, `Filing_Date`). Fulshear's four
+   *                          "Petition of Release from ETJ" polygons (183.9 + 583.8 + 444.3 + 4,663.8 ac) are here; H-GAC still draws the 4,663.8-ac one as
+   *                          FULSHEAR ETJ at (-95.8537, 29.6276) while /5 no longer holds it — the repro.
+   *   /4  City Limits      — 20 polygons (`CityName`, `City_Type`).
+   * Hostname note: the sibling host `arcgisweb.fortbendcountytx.gov` (parcels, contours) sends NO CORS headers and rides the relay; THIS host
+   * (`gisportal`) does not need it. `dataLastEdited` is the newest `Date_Modified` the layer carries. */
+  etj_fortbend: {
+    key: "etj_fortbend",
+    label: "ETJ — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/5",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "City" },
+    coverage: "metro",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    dataLastEdited: "2026-04-23",
+    /* The cities this table names (distinct `City`, read live 2026-11-12) — the honest bound on what it can answer inside the county. */
+    roster: [
+      "ARCOLA", "BEASLEY", "EAST BERNARD", "FAIRCHILDS", "FULSHEAR", "HOUSTON", "KATY", "KENDLETON", "MISSOURI CITY", "NEEDVILLE",
+      "ORCHARD", "PEARLAND", "PLEAK", "RICHMOND", "ROSENBERG", "SIMONTON", "STAFFORD", "SUGAR LAND", "THOMPSONS", "WESTON LAKES",
+    ],
+    rosterCheckedAt: "2026-11-12",
+  },
+  /* The SB 2038 evidence. `where` keeps ONLY what is an ETJ release or removal: a de-annexation of "<City> ETJ" (not of the city's limits —
+   * `Type='De-annexation'` with `City='Rosenberg'` is land leaving the CITY and says nothing about an ETJ), filed 2020 or later (the 2016
+   * Sugar Land and 2000 Missouri City rows are old city-ordinance changes the ETJ layer absorbed long ago, not releases), and not Alvin's
+   * "Resolution to Expand ETJ" (mis-typed De-annexation: it grows an ETJ). 36 polygons on 2026-11-12. */
+  etj_release_fortbend: {
+    key: "etj_release_fortbend",
+    label: "ETJ releases & removals — Fort Bend County (SB 2038)",
+    provider: "Fort Bend County GIS (Land Ordinances, gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/16",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "City" },
+    where: "Type = 'De-annexation' AND City LIKE '% ETJ' AND Filing_Date >= DATE '2020-01-01' AND (Ordinance_Reference IS NULL OR Ordinance_Reference NOT LIKE '%xpand%')",
+    nameStrip: ["\\s+ETJ$"],
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    dataLastEdited: "2026-06-01",
+  },
+  /* The county line itself — used ONLY to cut H-GAC's stale polygons out of the drawn ETJ layer inside Fort Bend County (the drawn half of
+   * `etj_fortbend`'s `supersedes`). One polygon, 6,454 vertices; the cut reads it simplified (maxAllowableOffset). Read live 2026-11-12. */
+  county_fortbend: {
+    key: "county_fortbend",
+    label: "County line — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/3",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  city_fortbend: {
+    key: "city_fortbend",
+    label: "City limits — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/4",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CityName" },
+    /* `City_Type` is CITY / TOWN / VILL — the form of government, NOT a limits class. The layer is full-purpose limits only: the county
+     * publishes limited-purpose annexation separately (MapServer/17 "City Limited Annexation", not wired). Agreement with TxGIO measured
+     * 2026-11-12 at 150 random points across the county's extent: every point inside the county matched (the 19 that did not were in
+     * Harris, Brazoria or Wharton county, where this layer is empty by design). */
+    fullPurposeOnly: true,
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  /* ⛔ NEW-2 (Harris, 2026-11-12) — HARRIS COUNTY'S OWN ETJ TABLE, the fallback when H-GAC answers nothing. The county GIS office
+   * (`gis.hctx.net`, layer description: "obtained from ITC Repository database, H-GAC, City of Katy GIS Hub, and FOIA requests through Deer Park and
+   * Laporte") publishes eight cities' ETJ across Harris County: BAYTOWN, DEER PARK, HOUSTON, KATY, LA PORTE, PASADENA, PEARLAND, WALLER. CORS-clean
+   * from a planyr.io Origin. Native SR is Texas South Central ftUS; the app's queries pass inSR/outSR 4326. Live: (-95.75, 30.05) → HOUSTON. */
+  etj_harris: {
+    key: "etj_harris",
+    label: "ETJ — Harris County (county GIS)",
+    provider: "Harris County GIS (gis.hctx.net)",
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/Boundaries/HC_Cities_ETJ/MapServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Name" },
+    coverage: "metro",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    roster: ["BAYTOWN", "DEER PARK", "HOUSTON", "KATY", "LA PORTE", "PASADENA", "PEARLAND", "WALLER"],
+    rosterCheckedAt: "2026-11-12",
+  },
+
   /* ⛔ NEW-1 (DFW, 2026-09-30) — "WIRE ALL THE CITY LIMITS AND ETJs WITHIN 50 MILES OF DALLAS."
    *
    * THE FINDING THAT SHAPES THE REST: NCTCOG DOES NOT PUBLISH AN ETJ LAYER. Its open-data hub
@@ -3621,6 +3725,7 @@ export const GIS_SOURCES = {
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...NASHVILLE_SOURCES, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 
 /* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
@@ -3645,7 +3750,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], etj_fortbend: ["TX"], etj_release_fortbend: ["TX"], city_fortbend: ["TX"], county_fortbend: ["TX"], etj_harris: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -3868,6 +3973,12 @@ export const SOURCE_FIXTURE_REACH = {
   // NEW-1a — Baytown's own ETJ ring, added because H-GAC's regional mosaic omits Baytown. It is one
   // city's ETJ, a few km across; two points inside it (one also inside the city limits, one not) is
   // the most separation this layer HAS, exactly as with the Austin and Fort Worth rows.
+  // NEW-1 / NEW-2 (Fort Bend, Harris — 2026-11-12) — county-published boundary tables. One county each by definition.
+  etj_fortbend: ["regional", "Fort Bend County's City ETJs table — one county (about 50 km across); probing it in Dallas would assert a guaranteed zero."],
+  etj_release_fortbend: ["regional", "Fort Bend County's recorded ETJ releases and removals — one county."],
+  county_fortbend: ["regional", "The Fort Bend County line — one polygon."],
+  city_fortbend: ["regional", "Fort Bend County's city-limits table — one county."],
+  etj_harris: ["regional", "Harris County's City ETJ table — one county; eight cities."],
   etj_baytown: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
   city_baytown: ["local", "One city's incorporated limits — a few km across, with no wider extent to probe."],
   // The BKDD tier — ONE drainage district, roughly 20 km across. `local` is the honest class:
@@ -3918,6 +4029,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...NASHVILLE_FIXTURE_REACH, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.
@@ -3938,6 +4050,7 @@ export const SOURCE_FIXTURE_REACH = {
  * this list may only SHRINK: when a host becomes reachable, widen that row's fixtures and delete
  * its row here in the same commit. */
 export const SOURCE_FIXTURE_REACH_PENDING = {
+  nashCcm: "maps.nashville.gov is refused by this build environment's egress (measured 2026-11-12: CONNECT 403) and its relay allow-list entry only exists once this commit deploys, so both fixtures are the sweep's facts, not this build's. → V2115889.",
   femaEbfe: "txgeo.usgs.gov is blocked by this build environment's egress policy (verified 2026-08-06: every request returns 'Host not in allowlist'). Its four sampleFixtures were measured live on 2026-08-05 from an unblocked network and are kept. → V17706.",
   hcfcdMaapnext: "fximgservices.hcfcd.org unreachable (this row is already `availability: down` with an outage record, so its fixtures deliberately assert the OUTAGE). → V17706.",
   bkddStreams: "gisclient.quiddity.com blocked by egress policy. → V17706.",
