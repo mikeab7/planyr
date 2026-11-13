@@ -15,6 +15,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const FX = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../test/fixtures/clipboard-bank");
 const name = process.env.FIXTURE || "owa-recopy-restart-blanks";
+/* the sign-in route can answer 5xx for a while after a deploy; openSignedIn is retried below */
 const fx = { html: fs.readFileSync(path.join(FX, `${name}.html`), "utf8"), text: fs.readFileSync(path.join(FX, `${name}.txt`), "utf8") };
 const BASE = process.env.BASE_URL || "https://planyr.io";
 let s = null;
@@ -108,6 +109,47 @@ try {
     await check(label, "Final Plat");
     await check(label, "Updates in red");
   }
+  console.log("\n[signed in: the pasted outline's structure, the hover preview, the snap-back recorder (B2671242 / B2671243 / B2671244)]");
+  await page.evaluate(() => { window.__PLANYR_E2E = true; });          // read when an editor mounts: the NEXT page created below
+  await newPage();
+  ok("armed", await arm());
+  await realPaste();
+  const outline = await page.evaluate(() => {
+    const out = [];
+    const walk = (el, d) => { for (const c of el.children) { if (c.tagName === "OL" || c.tagName === "UL") { [...c.children].forEach((li, i) => { const p = li.querySelector(":scope > p"); out.push(`${"  ".repeat(d)}${c.tagName === "OL" ? i + 1 + "." : "•"} ${(p ? p.textContent : "").trim()}`); walk(li, d + 1); }); } else if (!["P", "LI"].includes(c.tagName)) walk(c, d); } };
+    walk(document.querySelector(".ProseMirror"), 0);
+    return out;
+  });
+  console.log("   rendered:", JSON.stringify(outline.map((l) => l.slice(0, 34))));
+  ok("B2671242: three real nested levels, 8 list items, none empty", outline.length === 8 && outline.every((l) => l.replace(/^\s*\d+\.\s*/, "").length > 0) && outline.some((l) => /^ {4}\d+\. Let me know/.test(l)) && /^1\. Final Plat/.test(outline[0]) && /^ {2}2\. Easements/.test(outline[3]), JSON.stringify(outline.map((l) => l.slice(0, 30))));
+  ok("B2671242: no marker text left in a line, the first letter of 'Final Plat' present", !outline.some((l) => /^\s*\d+\.\s+\d+\./.test(l)) && outline[0].includes("Final Plat"));
+  const red = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror span")].filter((s) => /rgb\(255, 0, 0\)|#ff0000|red/i.test(s.getAttribute("style") || "") && /Let me know|I have our counsel|Also from our meeting/.test(s.textContent)).length);
+  ok("B2671242: the red runs are still red", red >= 3, String(red));
+  const hookOk = await page.evaluate(() => !!(window.__noteEditor && window.__noteEditor.doc));
+  ok("the E2E editor hook is armed (needed for the preview checks)", hookOk);
+  if (hookOk) {
+    const live = () => page.evaluate(() => JSON.stringify(window.__noteEditor.doc()));
+    const depth = () => page.evaluate(() => window.__noteEditor.undoDepth());
+    const reds = (j) => (j.match(/"color":"(?:#ff0000|red|rgb\(255, ?0, ?0\))"/gi) || []).length;
+    await page.keyboard.down("Control"); await page.keyboard.up("Control"); await page.waitForTimeout(400);
+    const before = await live(); const d0 = await depth();
+    await page.hover('[data-testid="note-paste-merge"]'); await page.waitForTimeout(300);
+    const pv = await live();
+    ok("B2671243: hovering Merge Formatting shows it in place (red gone, still the same list)", reds(before) >= 3 && reds(pv) === 0 && pv.includes("orderedList"), `red ${reds(before)} → ${reds(pv)}`);
+    await page.mouse.move(1000, 700); await page.waitForTimeout(300);
+    ok("B2671243: moving off the menu restores the document exactly, with no undo step", (await live()) === before && (await depth()) === d0);
+    await page.hover('[data-testid="note-paste-text"]'); await page.waitForTimeout(250);
+    ok("B2671243: hovering Keep Text Only shows plain lines", !(await live()).includes("orderedList"));
+    await page.keyboard.press("Escape"); await page.waitForTimeout(350);
+    ok("B2671243: Escape restores the paste and closes the menu", (await live()) === before);
+    /* the recorder: a forced snap-back is reported once, structure only */
+    const ev0 = await page.evaluate(() => (window.pfTelemetry?.recent?.() || []).filter((r) => /notes-snapback/.test(JSON.stringify(r))).length);
+    await page.evaluate(() => { const once = () => { document.removeEventListener("mouseup", once, false); setTimeout(() => window.__noteEditor.caretAt(3), 40); }; document.addEventListener("mouseup", once, false); });
+    await clickLine("Baytown Submittal"); await page.waitForTimeout(1200);
+    const evs = await page.evaluate(() => (window.pfTelemetry?.recent?.() || []).filter((r) => /notes-snapback/.test(JSON.stringify(r))).map((r) => JSON.stringify(r)));
+    ok("B2671244: a forced snap-back is recorded once, with structure and no note text", evs.length === ev0 + 1 && !/Baytown|Final Plat|Updates in red/.test(evs[evs.length - 1] || ""), `${ev0} → ${evs.length}`);
+  }
+
   console.log("\n[a plain TYPED list, nothing pasted]");
   await newPage();
   ok("armed", await arm());

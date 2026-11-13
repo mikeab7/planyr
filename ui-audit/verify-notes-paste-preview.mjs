@@ -190,6 +190,29 @@ console.log("\n=== F · Excel's table set previews too (Transpose) ===");
     ok("…and restores", same(await live(), base));
   }
 }
+console.log("\n=== G · on ARMED BLANK PAPER (a self-fitting box): the preview must not resize the box and leave it resized (found live, 2026-11-13) ===");
+{
+  await page.goto("about:blank");
+  await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(([tk, pk, d]) => {
+    localStorage.clear(); localStorage.setItem("planyr.theme", "light");
+    localStorage.setItem(tk, JSON.stringify({ v: 3, tombs: [], trash: [], pages: [{ id: "p1", title: "Throwaway", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }] }));
+    localStorage.setItem(pk, JSON.stringify(d));
+  }, [TREE_KEY, PAGE_KEY, { type: "doc", content: [para("")] }]);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 }); await wait(700);
+  const at = await page.evaluate(() => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.08), y: Math.round(r.top + r.height * 0.12) }; });
+  await page.mouse.dblclick(at.x, at.y); await wait(450);
+  await paste(OUTLOOK);
+  await ctrlTap();
+  const base = await live(); const d0 = await depth();
+  for (const mode of ["merge", "text", "merge"]) { await hover(mode); await wait(250); }
+  await offMenu(); await wait(500);
+  ok("after hovering Merge / Text / Merge and moving off, the document (box width included) is exactly as pasted", same(await live(), base), "the box width or an attribute differs — a preview left a resize behind");
+  ok("…with no undo step", (await depth()) === d0);
+  await hover("text"); await page.keyboard.press("Escape"); await wait(500);
+  ok("Escape after a Keep Text Only hover restores the document exactly too", same(await live(), base));
+}
 ok("no page error", errs.length === 0, errs.slice(0, 3).join(" | "));
 console.log(`\n${passN} passed, ${failN} failed`);
 await browser.close();
