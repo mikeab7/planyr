@@ -534,6 +534,7 @@ import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printS
 import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
 import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+import { carryKeyOf, graftOverlaySrc, stashMemory, takeMemory, persistDisk, loadDisk } from "./lib/historyCarry.js"; // NEW-1 (2026-11-13) — undo history survives leaving a plan
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
@@ -5224,6 +5225,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [histTick, bumpHist] = useState(0);
   const [dockRemoved, setDockRemoved] = useState(null); // NEW-1 — { hostId, text, tick }: the "Removed. W wall has no dock layers." note + Undo; valid only at the history tick the removal produced
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
+  /* ⛔ NEW-1 (2026-11-13, owner: "do I lose the ability to do the control Z whenever I get out of the page?") —
+   * UNDO HISTORY SURVIVES LEAVING THE PLAN. Everything is in lib/historyCarry.js (read its header for the
+   * rules and caps); this block is only the wiring. The planner remounts per plan (`key=siteId:loadEpoch`),
+   * which used to throw `histRef` away: on unmount the stacks are STASHED per plan (memory, plus a short
+   * IndexedDB tail for a reload) and on mount the same plan's stack is ADOPTED. The STALE-HISTORY GUARD is
+   * `checkCarried`: carried frames are trusted only while the plan still hashes to what it was when they
+   * were saved, checked at the first undo / first new edit / any content change before then — never at boot —
+   * and DROPPED, never replayed, when it does not match (another tab, computer, teammate, a cloud pull). */
+  const carryRef = useRef(null);                       // { baseKey, pending } while carried frames are unverified
+  const carrySavedRef = useRef(null);                  // the stack the disk tail last saw (skip a no-change save)
+  const carryScope = openedUidRef.current || "local";  // frames are per ACCOUNT as well as per plan
+  const carryIo = { get: idbGet, put: idbPut, del: idbDelete };
+  const planKeyNow = () => carryKeyOf(stateRef.current, histKey);
+  const checkCarried = (commit) => {
+    const c = carryRef.current;
+    if (!c || !c.pending) return true;
+    if (planKeyNow() === c.baseKey) { if (commit) c.pending = false; return true; }
+    histRef.current.reset(); carryRef.current = null;  // the plan changed since: the steps are not ours to replay
+    return false;
+  };
+  const saveCarryToDisk = () => {
+    if (!histRef.current) return;
+    checkCarried(false);
+    const st = histRef.current.snapshotStacks();
+    const last = carrySavedRef.current, top = st.past[st.past.length - 1];
+    if (last && last.top === top && last.n === st.past.length) return;
+    carrySavedRef.current = { top, n: st.past.length };
+    persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey: planKeyNow() });
+  };
+  useEffect(() => {
+    let live = true;
+    const adopt = (e) => {
+      if (!live || !e || !histRef.current.isEmpty()) return;                // a person who already edited owns the stack
+      if (histRef.current.adopt(e.past, e.future)) { carryRef.current = { baseKey: e.baseKey, pending: true }; touchHist(); }
+    };
+    const mem = takeMemory(carryScope, siteId);
+    if (mem) adopt(mem); else loadDisk(carryIo, carryScope, siteId).then(adopt);
+    const onHide = () => { if (document.visibilityState === "hidden") saveCarryToDisk(); };
+    window.addEventListener("pagehide", saveCarryToDisk);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      live = false;
+      window.removeEventListener("pagehide", saveCarryToDisk);
+      document.removeEventListener("visibilitychange", onHide);
+      try {
+        checkCarried(false);
+        const st = histRef.current.snapshotStacks(), baseKey = planKeyNow();
+        stashMemory(carryScope, siteId, { past: st.past, future: st.future, baseKey });
+        setTimeout(() => { persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey }); }, 0);
+      } catch (_) { /* history carry-over is best effort — never an error */ }
+    };
+  }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* Quiet-time save of the disk tail; nothing runs per edit. MEASURED (Chromium, a real reload): an IndexedDB write
+   * started from `pagehide` does NOT reliably commit before the page is torn down, so the pagehide / hidden
+   * saves above are only the best-effort last word — this settled-edit save is what a reload actually relies on. */
+  useEffect(() => {
+    const t = setTimeout(saveCarryToDisk, 1500);
+    return () => clearTimeout(t);
+  }, [histTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop unverified carried steps the moment the plan stops matching what they were saved against.
+  useEffect(() => {
+    if (carryRef.current && carryRef.current.pending && !checkCarried(false)) touchHist();
+  }, [histTick, parcels, els, measures, callouts, markups, sheetOverlays, layerOverrides, layerAbove, origin]); // eslint-disable-line react-hooks/exhaustive-deps
   /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
    * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
    * "the same seam pushHistory() uses, which is already exactly one call per undoable action"
@@ -5256,7 +5320,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
-  const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  const pushHistory = (kind = "edit") => { if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -5544,6 +5608,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // before the snapshot reaches the canvas, so an undo can never REINSTATE a tear — and so the
     // flush at the bottom of this function, which commits against this exact snapshot, ships the
     // repaired geometry rather than the recorded wreckage.
+    s = graftOverlaySrc(s, stateRef.current.sheetOverlays); // NEW-1 (2026-11-13) — a frame carried over from disk holds no raster `src`; keep the live one
     {
       const guardedEls = assemblyGuard(s.els, "undo/redo");
       if (guardedEls !== s.els) s = { ...s, els: guardedEls };
@@ -5714,8 +5779,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
     return name; // set only when undoOwnership actually called nameOf, i.e. verdict === "foreign"
   };
-  const applyUndo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
-  const applyRedo = () => { const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
+  const applyUndo = () => { if (!checkCarried(true)) { touchHist(); return; } const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
+  const applyRedo = () => { if (!checkCarried(true)) { touchHist(); return; } const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
   const undo = () => {
     const name = riskName();
     if (name) { pushToast({ text: `The next undo would reverse ${name}'s change, not yours. Undo it anyway?`, action: { label: "Undo anyway", onClick: applyUndo } }); return; }
@@ -5757,8 +5822,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRedoHover(0);
     setRedoMenuOpen(true);
   };
-  const applyUndoN = (n) => { const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
-  const applyRedoN = (n) => { const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyUndoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyRedoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
   // NEW-7/NEW-4 — the multi-step dropdown gets the SAME ownership guard as a plain Undo/Redo press;
   // a run of several steps reverts further back, so if even the top frame is at risk every deeper
   // step in the run is too (riskName()'s single-timestamp sufficiency, see its own header above).
