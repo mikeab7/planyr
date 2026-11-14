@@ -110,7 +110,7 @@ back-compatible (no field renames), additive buckets:
 ```
 `els`/`markups` stay flat; **selectors classify by meaning:** `constraintsOf`
 (easements = markup kind `encumbrance`; setbacks derived from parcels; liveLayers),
-`utilitiesOf` (`utilRoute|traced|infwater`), `annotationsOf`
+`annotationsOf`
 (line/rect/ellipse/polygon/polyline + measures + callouts), `crossSectionsOf`,
 `setbacksOf`, `parcelsOf`, `elementsOf`, `developableArea` (**stub** for the future
 synthesis). **Conformance:** add data as new model fields (additive), bump
@@ -140,12 +140,11 @@ One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
   `TDO/UN_Stormwater`) — the only CORS-clean host. Sublayers pinned via `layers:`
   (water `0,1`; wastewater `2,6`; storm `22,23,24,904`) or defaults render meters,
   not mains. Trunk lines scale-gated to ~≥1:40k; coverage is City-of-Houston-only.
-- **Site-engineering tools** (planner Layers control → Evidence tools): electric &
-  water service routing (`buildUtilRoute`), pond detention calculator
-  (`detentionStorage`, 3:1 taper, prismoidal volume), editable easement-rule table
-  (`lib/easementRules.js`, VERIFY placeholders), ditch cross-section
-  (`lib/elevation.js`, 3DEP `getSamples`) feeding `el.det.availDepth`. All elevation
-  output labeled "screening only — verify with survey."
+- **Site-engineering tools**: pond detention calculator
+  (`detentionStorage`, 3:1 taper, prismoidal volume) and the editable easement-rule table
+  (`lib/easementRules.js`, VERIFY placeholders; opened from the Easement ▾). All elevation
+  output labeled "screening only — verify with survey." (The electric / water service routing,
+  trace, inferred-main and ditch cross-section tools were removed 2026-11-14 by owner decision.)
 - **Terrain pipeline (B703–B706):** the `TERRAIN` registry rows in `lib/layers.js` — ground
   relief (an `esriImage` layer whose `rendering` is a custom Colormap-over-Stretch **DRA**
   rendering-rule OBJECT: the server re-stretches blue→cream→red to each exported extent, so
@@ -161,7 +160,7 @@ One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
   in an in-memory LRU — never JSON.stringify a Float32Array through gisCache), proxy→direct
   fallback with LERC magic-byte sniff, canvas-renderer polylines, zoom gate 16. The hover
   elevation readout (`components/useGroundElevation.js`) bilinear-samples the UNSMOOTHED
-  cached grid (agrees with the cross-section tool) with a debounced `samplePoint` fallback.
+  cached grid with a debounced `samplePoint` fallback.
   The one pixel convention (cell value at cell CENTER) is pinned by the ramp calibration test
   in `test/contours.test.js` — contours, readout, and cross-section can't drift by half a cell.
 - **Mapillary token is a secret** — `import.meta.env.VITE_MAPILLARY_TOKEN` (CI secret)

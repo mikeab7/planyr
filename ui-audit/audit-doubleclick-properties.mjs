@@ -52,9 +52,7 @@
  *     PLUS the `roadStripBBox(pts, vtx, travelW, curb, { defaultRadius })` spread (cx/cy/w/h/rot).
  *     This harness derives that spread itself (`roadBBox` below) rather than hand-writing numbers.
  *
- *  2. A `utilRoute` WITHOUT `pad` CRASHES THE WHOLE WORKSPACE RENDER — "Cannot read properties of
- *     undefined (reading 'map')" — because the render maps `m.pad` unconditionally. Not a blank
- *     markup: a blank app. Seed `pts` + `corridor` + `pad` together, always.
+ *  2. (RETIRED 2026-11-14 — the `utilRoute` markup this trap was about went with the Utility Evidence tools.)
  *
  *  3. `[title="Zoom to fit"]` MATCHES THE HEADER'S FULLSCREEN GLYPH FIRST. There are two controls
  *     with that title and the header one wins the query, so "fit the view" silently did nothing.
@@ -76,7 +74,7 @@
  *     x/y leaves the centre undefined, every derived corner is NaN, and the whole plan lands off
  *     the canvas — TRAP 1's symptom again, from a different cause. Both are silent.
  *
- *  7. AN OPEN-PATH MARKUP (line, polyline, traced, infwater) DRAWN AXIS-ALIGNED HAS A ZERO-HEIGHT
+ *  7. AN OPEN-PATH MARKUP (line, polyline) DRAWN AXIS-ALIGNED HAS A ZERO-HEIGHT
  *     BOUNDING BOX. A probe that requires both width AND height skips it and reports "did not
  *     render", which reads as a missing feature rather than a flat one.
  *
@@ -232,14 +230,7 @@ const MARKUPS = [
   (() => { const p = mkAt(); return { id: mid(), kind: "polygon", stroke: "#ff0006", weight: 3, fill: "#ff0006", fillOpacity: 0.25, pts: ring(p.x, p.y, 280, 180) }; })(),
   (() => { const p = mkAt(); return { id: mid(), kind: "rect", stroke: "#ff0007", weight: 3, fill: "#ff0007", fillOpacity: 0.25, cx: p.x, cy: p.y, w: 280, h: 180, rot: 0 }; })(),
   (() => { const p = mkAt(); return { id: mid(), kind: "ellipse", stroke: "#ff0008", weight: 3, fill: "#ff0008", fillOpacity: 0.25, cx: p.x, cy: p.y, w: 280, h: 180, rot: 0 }; })(),
-  // TRAP 2 — `pad` is not optional: without it the WORKSPACE render throws and the app is blank.
-  (() => { const p = mkAt(); const c = { x: p.x + 150, y: p.y };
-    return { id: mid(), kind: "utilRoute", util: "water", stroke: "#ff0009", width: 40, label: "Water service",
-      pts: [{ x: p.x - 150, y: p.y }, { x: p.x + 150, y: p.y }],
-      corridor: [{ x: p.x - 150, y: p.y - 20 }, { x: p.x + 150, y: p.y - 20 }, { x: p.x + 150, y: p.y + 20 }, { x: p.x - 150, y: p.y + 20 }],
-      pad: ring(c.x, c.y, 40, 40) }; })(),
-  (() => { const p = mkAt(); return { id: mid(), kind: "traced", stroke: "#ff000a", weight: 3, label: "Overhead electric (traced)", pts: [{ x: p.x - 150, y: p.y }, { x: p.x + 150, y: p.y }] }; })(),
-  (() => { const p = mkAt(); return { id: mid(), kind: "infwater", stroke: "#ff000b", weight: 3, dash: "dashed", label: "Inferred water main", pts: [{ x: p.x - 150, y: p.y }, { x: p.x + 150, y: p.y }] }; })(),
+  // (The utilRoute / traced / infwater kinds were removed with the Utility Evidence tools, owner decision 2026-11-14.)
   (() => { const p = mkAt(); return { id: mid(), kind: "encumbrance", stroke: "#ff000c", weight: 3, label: "Encumbrance", pts: ring(p.x, p.y, 280, 180), centerline: [] }; })(),
 ];
 

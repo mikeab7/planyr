@@ -77,7 +77,6 @@ const MARKUP_LABEL = {
   line: "a line markup", polyline: "a polyline markup", rect: "a rectangle markup",
   ellipse: "an ellipse markup", polygon: "a polygon markup",
   encumbrance: "an easement", easement: "an easement",
-  utilRoute: "a utility route", traced: "a traced line", infwater: "an inferred water main",
 };
 
 // Short human label for a (kind, element) pair. `els` (the full collection) lets a building get

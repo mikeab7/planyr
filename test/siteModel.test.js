@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
-  statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
+  statusOf, parcelsOf, activeParcelsOf, annotationsOf, dropRetiredMarkups, RETIRED_MARKUP_KINDS, READ_NORMALIZE,
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
   buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth,
   parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
@@ -177,7 +177,6 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
       parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], setbacks: { front: 25 } }],
       markups: [
         { kind: "encumbrance", id: "e1" }, // title easement => constraint
-        { kind: "utilRoute", id: "u1" },   // service route => utility
         { kind: "rect", id: "a1" },        // neutral annotation
       ],
       measures: [{ id: "m1" }],
@@ -185,12 +184,38 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     });
     expect(statusOf(m)).toBe("pursuit");
     expect(parcelsOf(m)).toHaveLength(1);
-    expect(utilitiesOf(m).map((x) => x.id)).toEqual(["u1"]);
     expect(constraintsOf(m).easements.map((x) => x.id)).toEqual(["e1"]);
     expect(annotationsOf(m).markups.map((x) => x.id)).toEqual(["a1"]);
     expect(annotationsOf(m).measures).toHaveLength(1);
     expect(annotationsOf(m).callouts).toHaveLength(1);
     expect(setbacksOf(m)).toEqual([{ id: "p1", setbacks: { front: 25 } }]);
+  });
+
+  // Owner decision 2026-11-14 — the Utility Evidence tools (trace overhead electric, route electric / water service,
+  // infer water main, ditch cross-section) were removed. Production holds none of these records, but an old draft /
+  // device copy that carries one must open cleanly, with the record dropped, never crash or draw something uneditable.
+  it("a retired Utility Evidence markup (utilRoute / traced / infwater) is dropped silently on load; everything else is kept", () => {
+    expect(RETIRED_MARKUP_KINDS).toEqual(["utilRoute", "traced", "infwater"]);
+    const m = createSiteModel({
+      markups: [
+        { kind: "utilRoute", id: "u1", pts: [{ x: 0, y: 0 }, { x: 5, y: 5 }], corridor: [], pad: [] },
+        { kind: "traced", id: "t1", pts: [{ x: 0, y: 0 }, { x: 9, y: 9 }] },
+        { kind: "infwater", id: "w1", pts: [{ x: 0, y: 0 }, { x: 4, y: 4 }] },
+        { kind: "easement", id: "e1", pts: [{ x: 0, y: 0 }, { x: 9, y: 0 }, { x: 9, y: 9 }] },
+        { kind: "polyline", id: "pl1", pts: [{ x: 0, y: 0 }, { x: 3, y: 3 }] },
+      ],
+    });
+    expect(m.markups.map((x) => x.id).sort()).toEqual(["e1", "pl1"]);
+    // the rows read path runs the same table
+    expect(READ_NORMALIZE.markups([{ kind: "traced", id: "t1" }, { kind: "rect", id: "r1" }]).map((x) => x.id)).toEqual(["r1"]);
+  });
+
+  it("dropRetiredMarkups is identity-preserving when nothing is retired (no churn on already-normal plans), and tolerates junk", () => {
+    const clean = [{ kind: "easement", id: "e1" }, { kind: "line", id: "l1" }];
+    expect(dropRetiredMarkups(clean)).toBe(clean);
+    expect(dropRetiredMarkups(undefined)).toBeUndefined();
+    expect(dropRetiredMarkups(null)).toBeNull();
+    expect(dropRetiredMarkups([null, { kind: "traced", id: "t" }, { kind: "easement", id: "e" }])).toEqual([null, { kind: "easement", id: "e" }]);
   });
 
   it("developableArea is still the reserved stub (returns null, not a fabricated number)", () => {

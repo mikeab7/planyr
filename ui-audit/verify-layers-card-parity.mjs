@@ -151,22 +151,13 @@ try {
   await page.waitForTimeout(1800);
   {
     // The things that left the card still WORK, from their new homes (V1829776 steps 3–4).
-    check("rail: a Utility Evidence heading", (await page.locator(".rail-hdr", { hasText: "Utility Evidence" }).count()) === 1);
-    for (const id of ["rail-ev-trace", "rail-ev-route-elec", "rail-ev-route-water", "rail-ev-infer-main", "rail-ev-xsec"]) check(`rail: ${id} is there`, (await page.getByTestId(id).count()) === 1);
-    const trace = page.getByTestId("rail-ev-trace");
-    await trace.click();
-    check("rail: Trace overhead electric arms", (await trace.getAttribute("aria-pressed")) === "true");
-    await trace.click();
-    check("rail: …and disarms", (await trace.getAttribute("aria-pressed")) === "false");
+    // The five Utility Evidence tools were removed 2026-11-14 (owner decision): the rail must carry none of them.
+    check("rail: no Utility Evidence heading", (await page.locator(".rail-hdr", { hasText: "Utility Evidence" }).count()) === 0);
+    check("rail: no rail-ev-* control", (await page.locator('[data-testid^="rail-ev-"]').count()) === 0);
     await page.getByRole("button", { name: "Easement options" }).click();
     await page.getByTestId("easement-rules-toggle").click();
     check("Easement ▾ → Easement rules opens the jurisdiction editor", (await page.getByTestId("easement-rules").count()) === 1);
     await page.keyboard.press("Escape");
-    await page.getByTestId("rail-ev-route-water").click();
-    await page.waitForTimeout(600);
-    const flashed = await page.getByText(/pick one in the Easement ▾ menu/).count();
-    const armed = (await page.getByTestId("rail-ev-route-water").getAttribute("aria-pressed")) === "true";
-    check("Route water service: with no criteria it names the Easement ▾ menu and opens the rules there; with criteria it arms", (flashed === 1 && (await page.getByTestId("easement-rules").count()) === 1) || armed, `flash=${flashed} armed=${armed}`);
     await page.keyboard.press("Escape");
     await page.mouse.click(5, 300);
   }
