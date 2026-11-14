@@ -51,7 +51,9 @@ test("the Easement tool still draws, and its rules editor still opens from the E
   await open(page, site());
   const canvas = page.getByTestId("planner-canvas");
   const box = await canvas.boundingBox();
-  expect(await page.locator("[data-markup]").count(), "no markup yet").toBe(0);
+  // one markup can stamp `data-markup` on more than one node (body + grab layer), so count DISTINCT ids
+  const markupIds = () => page.evaluate(() => [...new Set([...document.querySelectorAll("[data-markup]")].map((n) => n.getAttribute("data-markup")))]);
+  expect(await markupIds(), "no markup yet").toEqual([]);
 
   await page.getByRole("button", { name: /^Easement$/ }).first().click();
   await expect(page.getByRole("button", { name: /^Easement$/ }).first()).toHaveAttribute("aria-pressed", "true");
@@ -59,7 +61,7 @@ test("the Easement tool still draws, and its rules editor still opens from the E
   await page.mouse.click(x0, y0);
   await page.mouse.click(x0 + 220, y0 + 10);
   await page.keyboard.press("Enter");
-  await expect(page.locator("[data-markup]"), "the easement was drawn").toHaveCount(1);
+  await expect.poll(async () => (await markupIds()).length, { message: "the easement was drawn" }).toBe(1);
 
   // the rules editor: Easement ▾ → "Easement rules" disclosure
   await page.getByRole("button", { name: "Easement options" }).click();
@@ -82,6 +84,6 @@ test("a plan that still carries retired utilRoute / traced / infwater markups op
     ],
   }));
   await expect(page.locator('[data-markup="u1"], [data-markup="t1"], [data-markup="w1"]'), "the retired kinds are not drawn").toHaveCount(0);
-  await expect(page.locator('[data-markup="pl1"]'), "an ordinary markup beside them survives").toHaveCount(1);
+  expect(await page.locator('[data-markup="pl1"]').count(), "an ordinary markup beside them survives").toBeGreaterThan(0);
   expect(errors, "no page error while loading").toEqual([]);
 });
