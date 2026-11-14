@@ -147,7 +147,8 @@ describe("source guards (all red on 2500b00)", () => {
     expect(sp).toContain("canvasRootCursor({");
     expect(sp).not.toMatch(/cursor: spacePan \? \(panning/);
     const m = sp.match(/const cursorMode = [\s\S]*?: null;/)[0];
-    for (const v of ["addLeaderFor", "ovAlignBase", "mergePick", "attachFor", "alignFor", "traceMode", "pobMode", "routeMode", "xsecMode", "ovCalib"]) expect(m).toContain(v);
+    for (const v of ["addLeaderFor", "ovAlignBase", "mergePick", "attachFor", "alignFor", "pobMode", "ovCalib"]) expect(m).toContain(v);
+    for (const v of ["traceMode", "routeMode", "xsecMode"]) expect(m).not.toContain(v); // the Utility Evidence tools are gone (2026-11-14)
     expect(sp).toContain("data-cursor-mode={cursorMode || undefined}");
   });
   it("corner/scale grips take their cursor from the grip's own axes; none reads grab; no fixed overlay/callout resize cursor", () => {

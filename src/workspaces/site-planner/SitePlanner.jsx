@@ -106,10 +106,8 @@ import { elHidden, isHidden, refHidden, parcelAcreageHidden, normalizeRetiredTog
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
-import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, patchEasementRule, subscribeEasementRules, resolveEasementJur } from "./lib/easementRules.js";
 import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
-import { sampleProfile, ditchStats } from "./lib/elevation.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
  * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
  * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
@@ -360,7 +358,7 @@ import { ParcelToolsMenu, MeasureMenu, MenuIcon } from "./components/RailMenus.j
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
 // helpers stay on the critical path.
 import { getKey, setKey } from "./lib/titleKey.js";
-import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
+import { identifyJurisdiction, identifyRoadAuthority, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 /* NEW-2 — the STRUCTURED accessor for "which city governs here". Never recover this by parsing the
  * badge label: that coupling silently downgraded the floodplain rule on 16 of the owner's 28 sites
  * the moment the wording changed. See jurisdictionLabel.js's header. */
@@ -708,12 +706,6 @@ const ICON_PATHS = {
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
   deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
-  // B2391216 ×2 — the Utility Evidence rail section (same 16-box stroke style as every glyph above).
-  evTrace: <><path d="M3 2.5v11M13 2.5v11M1.6 5h2.8M11.6 5h2.8" /><path d="M3 6.6Q8 11 13 6.6" /></>,
-  evElec: <path d="M9.2 1.8 4.4 8.8h3.4L6.8 14.2l4.8-7H8.2z" />,
-  evWater: <path d="M8 2c2.7 3.1 4.1 5.1 4.1 7.1a4.1 4.1 0 0 1-8.2 0C3.9 7.1 5.3 5.1 8 2Z" />,
-  evMain: <><circle cx="3.4" cy="11.4" r="1.6" /><circle cx="8" cy="4.8" r="1.6" /><circle cx="12.6" cy="11.4" r="1.6" /><path d="M4.4 10 7.1 6.2M8.9 6.2 11.6 10" /></>,
-  evXsec: <><path d="M1.5 3.8h3.6l1.5 7h2.8l1.5-7h3.6" /><path d="M1.5 13.4h13" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg className="rbtn-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -920,7 +912,7 @@ const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
 // Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
 // (line/polyline/polygon/cloud) expose draggable control points; box shapes (rect/ellipse)
-// resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
+// resize + rotate via grips. Semantic markups (encumbrance/easement) stay
 // move-only — they carry derived geometry that hand-editing would desync.
 // A cloud is ALWAYS stored as a vertex ring (`pts`), whichever of its three draw modes made it
 // (polygon click-path, rectangle drag, or freehand) — never a centre-box — so it reshapes via the
@@ -969,7 +961,6 @@ const INK_HALO = { paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 };
  * gate and the render cannot drift, and so a new one cannot be added without choosing a base. */
 const EASE_LABEL_BASE_PX = 10.5;      // easement — the reported case (B435536)
 const ENCUMBER_LABEL_BASE_PX = 11;    // deed encumbrance boundary
-const TRACED_LABEL_BASE_PX = 9.5;     // traced overlay line
 /* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
  * Standards default and as a per-object override, plus the markup/easement pickers). */
 const PARCEL_FILL_DEFAULT = "#5b6650"; // the fill colour a parcel takes when its Fill opacity is first raised above 0
@@ -1052,19 +1043,12 @@ function expandPolygon(pts, d) {
  * solver can share it. Same signature/return; imported above. */
 
 /* ------------------- utility service routing (elec/water) ------------------ */
-const _hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function nearestOnSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
 }
-function nearestOnPolylines(p, polys) {
-  let best = null, bd = Infinity;
-  polys.forEach((pl) => { for (let i = 0; i < pl.length - 1; i++) { const q = nearestOnSeg(p, pl[i], pl[i + 1]); const d = _hyp(p, q); if (d < bd) { bd = d; best = q; } } });
-  return best ? { pt: best, d: bd } : null;
-}
-const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
 
 /* B707/B712 — which drawn elements count as FILL for the mitigation screen: the
  * same set the yield math treats as impervious (buildings incl. bump-outs, paving,
@@ -1139,28 +1123,6 @@ function pondFloodFacts(ring, zones, rule, { bfeFt, bfeSrc, existGradeFt, derive
   if (_pondFactsMemo.size > MIT_MEMO_MAX) _pondFactsMemo.delete(_pondFactsMemo.keys().next().value);
   return val;
 }
-// A building's walls (with midpoints + lengths), its centre and area.
-function buildingWalls(b) {
-  const corners = ringOf(b), ctr = centroid(corners), n = corners.length, walls = [];
-  for (let i = 0; i < n; i++) { const a = corners[i], d = corners[(i + 1) % n]; walls.push({ a, b: d, mid: { x: (a.x + d.x) / 2, y: (a.y + d.y) / 2 }, len: Math.hypot(d.x - a.x, d.y - a.y) }); }
-  return { walls, ctr, area: polyArea(corners) };
-}
-const LARGE_BLDG_SF = 100000; // ≥ this → snap service to the (long) dock wall
-// Build a service route from `source` (a point) to a building: pick the entry
-// wall (nearest; for big buildings restrict to the long/dock walls), a fitting
-// pad just outside it, and a buffered easement corridor along the route.
-function buildUtilRoute(source, b, opts, uid) {
-  const { walls, ctr, area } = buildingWalls(b);
-  let cands = walls;
-  if (area >= LARGE_BLDG_SF) { const mx = Math.max(...walls.map((w) => w.len)); cands = walls.filter((w) => w.len >= mx - 1); }
-  let ew = cands[0]; cands.forEach((w) => { if (_hyp(source, w.mid) < _hyp(source, ew.mid)) ew = w; });
-  const entry = ew.mid;
-  let nx = entry.x - ctr.x, ny = entry.y - ctr.y; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
-  const padC = { x: entry.x + nx * (opts.padSize / 2 + 3), y: entry.y + ny * (opts.padSize / 2 + 3) };
-  const pts = [source, entry, padC]; // reach the fitting pad just outside the wall, not just the wall midpoint (B62)
-  return { id: uid(), kind: "utilRoute", util: opts.util, pts, corridor: bufferPolyline(pts, opts.width), pad: rectRing(padC, opts.padSize, opts.padSize), width: opts.width, fitting: opts.fitting, label: opts.label, stroke: opts.color };
-}
-
 /* --------------------------- parking math -------------------------- */
 // carStalls / trailerStalls / estStalls / estTrailers moved to ./lib/siteGeometry.js
 // (site-metrics-extraction) — pure, shared with lib/siteMetrics.js.
@@ -2474,7 +2436,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       window.removeEventListener("drop", onDrop);
     };
   }, []);
-  const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
 
   /* Geographic basemap + shared overlay layers under the canvas (Phase 1). Only meaningful for a
@@ -2685,11 +2646,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the generic clientErrors dedup can't help here because dx/dy/ppf float noise makes every
   // message text unique.
   const geoRegOutOfRangeRef = useRef({ bucket: null, at: 0 });
-  // Utility-evidence drawing: manual power-line trace + inferred water main.
-  const [traceMode, setTraceMode] = useState(false);
-  const [tracePts, setTracePts] = useState([]);
-  const [evidenceBusy, setEvidenceBusy] = useState(false);
-  const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
   const [easeRules, setEaseRules] = useState(loadEasementRules); // stale-ok: re-synced by subscribeEasementRules on the next line (B1953793)
   useEffect(() => subscribeEasementRules(() => setEaseRules(loadEasementRules())), []);
   // B707/B709/B710 — the floodplain-suite rule files (editable, verified-flagged,
@@ -2729,9 +2685,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
   };
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [xsecMode, setXsecMode] = useState(false);   // ditch cross-section: click two points
-  const [xsecPts, setXsecPts] = useState([]);
-  const [xsec, setXsec] = useState(null);            // { p0, p1, lenFt, busy, stats } result
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -5710,7 +5663,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // undo while an uncovered draft — callout/rect/ellipse — is pending) would otherwise leave stale
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
-    setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    setEaseDraft(null); setEaseEdges(null); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
     // ⛔ B712224 (round 3) — an undo/redo that brings a DELETED element back is a deliberate,
     // whole-snapshot restore, not a stale canvas the tombstone-floor guard is built to catch (see
     // elementSync.js's `pendingResurrect`). `applySnapshot` has no notion of "which of these ids
@@ -7422,7 +7375,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -7436,7 +7389,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -8191,31 +8144,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (identifyMode) { beginIdentifyPress(e); return; } // B383 identify→add: click adds the lot, drag pans (resolved in onUp)
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
-    if (xsecMode) { // ditch cross-section: two clicks → sample elevations
-      const sp = snapPt(fp);
-      if (xsecPts.length === 0) { setXsecPts([sp]); flashWarn("Click the far side of the ditch.", 0); }
-      else { runXSection(xsecPts[0], sp); }
-      return;
-    }
-    if (traceMode) { setTracePts((a) => [...a, snapPt(fp)]); return; } // power-line quick-trace point
-    if (routeMode) { // utility service routing: pick source, then a building
-      if (routeMode.stage === "source") {
-        let src = snapPt(fp);
-        if (routeMode.snapTo === "traced") {
-          const near = nearestOnPolylines(fp, markups.filter((m) => m.kind === "traced").map((m) => m.pts));
-          if (!near || near.d > 90) { flashWarn("Click closer to a traced power line.", 0); return; }
-          src = near.pt;
-        }
-        setRouteMode({ ...routeMode, stage: "building", source: src });
-        flashWarn("Now click the building to serve.", 0);
-        return;
-      }
-      let b = els.find((e) => e.type === "building" && pointInRing(fp, ringOf(e)));
-      if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
-      if (!b) { flashWarn("⚠ No building to serve — draw a building first.", 0); return; }
-      commitUtilRoute(routeMode, b);
-      return;
-    }
     if (tool === "marquee") { // dedicated box-select tool (B570): drag a rubber-band, no Shift needed
       drag.current = { mode: "marquee", a: fp };
       setMarquee({ a: fp, b: fp });
@@ -8735,7 +8663,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const translateMarkup = (m, dx, dy) => {
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
-    if (m.kind === "utilRoute") return { ...m, pts: shift(m.pts), corridor: shift(m.corridor), pad: shift(m.pad) };
     if (m.kind === "encumbrance") return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), centerline: (m.centerline || []).map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.kind === "easement") return { ...m, pts: shift(m.pts), centerline: m.centerline ? shift(m.centerline) : m.centerline };
     if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
@@ -10469,7 +10396,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // so "finish / auto-close" behaves identically everywhere. Each finisher guards its own minimum
   // point count, so this no-ops (rather than cancelling the draft) when there aren't enough yet.
   const finishActiveDrawing = () => {
-    if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
     if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) {
       /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second has already
@@ -10499,9 +10425,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // point is gone. Pure decision lives in lib/drafts.js (resolveDraftStepBack) so every draft
   // type's trim + the "no draft → false" fall-through contract is unit-tested; returns true iff
   // it consumed a vertex, so Ctrl-Z falls through to a global undo only when no draft is active.
-  const draftSetters = { tracePts: setTracePts, splitPath: setSplitPath, measDraft: setMeasDraft, mkPoly: setMkPoly, draftPoly: setDraftPoly, draftElPoly: setDraftElPoly, draftRoadPts: setDraftRoadPts, easeDraft: setEaseDraft, easeEdges: setEaseEdges, xsecPts: setXsecPts };
+  const draftSetters = { splitPath: setSplitPath, measDraft: setMeasDraft, mkPoly: setMkPoly, draftPoly: setDraftPoly, draftElPoly: setDraftElPoly, draftRoadPts: setDraftRoadPts, easeDraft: setEaseDraft, easeEdges: setEaseEdges };
   const removeLastVertex = () => {
-    const r = resolveDraftStepBack({ traceMode, tracePts, tool, splitPath, measDraft, mkPoly, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, xsecMode, xsecPts });
+    const r = resolveDraftStepBack({ tool, splitPath, measDraft, mkPoly, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges });
     if (!r) return false;
     draftSetters[r.target](r.next);
     return true;
@@ -14172,17 +14098,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detRegime = drainCtxData && siteSqft > 0 && drainFloodOk
     ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8, resolvedWseFt: detRegimeResolvedWseFt, resolvedWseSrc: detRegimeResolvedWseSrc })
     : null;
-  // B634 tier-2 slice: in Regime A, the outfall value-of-information line. The user's
-  // cross-section only feeds in when it actually CROSSES the named receiving channel
-  // (within ~250 ft) — otherwise a random ditch section would be misattributed to it.
-  const xsecOnChannel = (() => {
-    if (!xsec?.stats || !drainCtxData?.channel?.geometry || !origin) return false;
-    const toLL = (p) => { const [la, ln] = feetToLatLng(p, origin.lat, origin.lon); return [ln, la]; };
-    const pts = [xsec.p0, xsec.p1, { x: (xsec.p0.x + xsec.p1.x) / 2, y: (xsec.p0.y + xsec.p1.y) / 2 }].filter(Boolean).map(toLL);
-    return pts.some((ll) => polylineDistMeters(drainCtxData.channel.geometry, ll[0], ll[1]) < 76); // ~250 ft
-  })();
   const outfallNote = detRegime && detRegime.regime === "A"
-    ? screenOutfall({ channel: drainCtxData.channel, ditch: xsecOnChannel ? xsec.stats : null, siteGradeFt: drainCtxData.groundElevFt })
+    ? screenOutfall({ channel: drainCtxData.channel, ditch: null, siteGradeFt: drainCtxData.groundElevFt })
     : null;
   // Per-pond usable split (B708). usablePondVolume is the ONE shared helper for
   // this metrics loop, the pond auto-size solver, and the per-pond card — so a
@@ -17099,7 +17016,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * be clicked on, existing objects included: the canvas root carries `data-cursor-mode` and ONE stylesheet rule (lib/plannerCursors.js)
    * turns every descendant's cursor into that mode's, so a new object type can never forget to ask. Space-held = pan. */
   const cursorMode = spacePan ? "pan" : identifyMode ? "identify"
-    : (tool !== "select" || attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
+    : (tool !== "select" || attachFor || alignFor || pobMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
     : null;
   /* NEW-1 — PARCELS IN FRONT. While the Parcels tool is the thing being worked (the Land panel open — docked or floating —
    * Pick county lots, Draw / Split / Combine / Edit corners) the parcel geometry is the TOP of the drawing. One boolean, one
@@ -19608,7 +19525,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //  • rect / ellipse → 4 corner + 4 edge resize grips + a rotate handle above the top edge
   //  • line / polyline / polygon → draggable vertex dots; ＋ on edges (poly) to add a point,
   //    Shift-click a dot to delete one
-  // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
+  // Semantic markups (encumbrance/easement) get no grips (move-only, as before).
   const markupHandles = (() => {
     if (selHiddenNow || sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
@@ -20882,108 +20799,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : x));
   };
 
-  // Manual quick-trace of an overhead power line on the aerial: click points,
-  // double-click / Enter to finish. Commits a labeled polyline markup.
-  const commitTrace = () => {
-    if (tracePts.length >= 2) {
-      pushHistory();
-      const mk = { id: uid(), kind: "traced", pts: tracePts, label: "Overhead electric (traced)", stroke: "#b45309", weight: 2.6, dash: "solid" };
-      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-    }
-    setTracePts([]); setTraceMode(false);
-  };
-
-  // Inferred water main: connect the fire hydrants currently in view (OSM) into a
-  // nearest-neighbour path, drawn dashed and labeled screening-only.
-  const inferWaterMain = async () => {
-    if (!origin || evidenceBusy) return;
-    setEvidenceBusy(true); flashWarn("Fetching hydrants in view…", 0);
-    try {
-      const corners = [[0, 0], [size.w, 0], [0, size.h], [size.w, size.h]].map(([px, py]) =>
-        feetToLatLng({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf }, origin.lat, origin.lon));
-      const lats = corners.map((c) => c[0]), lngs = corners.map((c) => c[1]);
-      const bb = { s: Math.min(...lats), n: Math.max(...lats), w: Math.min(...lngs), e: Math.max(...lngs) };
-      const els = await fetchOverpass(bb, { hydrants: true });
-      const feet = els.filter((e) => e.type === "node" && e.lat != null)
-        .map((e) => lngLatRingToFeet([[e.lon, e.lat]], origin.lon, origin.lat)[0]);
-      if (feet.length < 2) { flashWarn(`Only ${feet.length} hydrant${feet.length === 1 ? "" : "s"} in view — need ≥ 2 to infer a main. Zoom/pan to include a run of hydrants.`, 7000); return; }
-      // nearest-neighbour order starting from the westmost hydrant
-      const remaining = feet.slice();
-      let cur = remaining.reduce((a, b) => (b.x < a.x ? b : a), remaining[0]);
-      remaining.splice(remaining.indexOf(cur), 1);
-      const ordered = [cur];
-      while (remaining.length) {
-        let bi = 0, bd = Infinity;
-        remaining.forEach((p, i) => { const d = Math.hypot(p.x - cur.x, p.y - cur.y); if (d < bd) { bd = d; bi = i; } });
-        cur = remaining.splice(bi, 1)[0]; ordered.push(cur);
-      }
-      pushHistory();
-      const mk = { id: uid(), kind: "infwater", pts: ordered, label: "Inferred water main (screening only)", stroke: "#0891b2", weight: 2, dash: "dashed" };
-      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-      flashWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`, 8000);
-    } catch (_) {
-      flashWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.", 6000);
-    } finally { setEvidenceBusy(false); }
-  };
-
-  // --- utility service routing (electric / water) ---
-  const startRoute = (util, extra = {}) => {
-    if (util === "elec" && !markups.some((m) => m.kind === "traced")) {
-      flashWarn("⚠ Trace an overhead pole line first (✏ Trace overhead electric), then route from it.", 6000); return;
-    }
-    setSel(null); setTool("select"); setTraceMode(false);
-    setRouteMode({ util, snapTo: util === "elec" ? "traced" : "free", stage: "source", ...extra });
-    flashWarn(util === "elec" ? "Click the connection point on a traced power line." : "Click the tap point on the water main (turn on the water layer to see it).", 0);
-  };
-  const commitUtilRoute = (mode, b) => {
-    const opts = mode.util === "elec"
-      ? { util: "elec", width: 10, color: "#b45309", padSize: 10, fitting: "XFMR", label: "Electric service · 10′ easement" }
-      : { util: "water", width: mode.width || 15, color: "#0891b2", padSize: 6, fitting: "TAP", label: `Water service · ${mode.width || 15}′ easement${mode.ruleNote ? ` — ${mode.ruleNote}` : ""}` };
-    const mk = buildUtilRoute(mode.source, b, opts, uid);
-    pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-    setRouteMode(null);
-    const hits = els.filter((e) => e.id !== b.id && ["building", "paving", "parking", "trailer", "pond"].includes(e.type) && ringsOverlap(mk.corridor, ringOf(e)));
-    const what = mode.util === "elec" ? "Electric" : "Water";
-    flashWarn(hits.length ? `⚠ ${what} easement overlaps ${hits.length} element${hits.length > 1 ? "s" : ""} — reroute or relocate.` : `${what} service routed to the ${(b.w * b.h >= LARGE_BLDG_SF) ? "dock/long wall" : "nearest wall"} — no conflicts.`, 8000);
-  };
-
-  // Ditch cross-section: sample the 3DEP DEM along the drawn line (screening only).
-  const runXSection = async (p0, p1) => {
-    if (xsecBusyRef.current) return; // in-flight guard: ignore a second run while one samples (B56b)
-    if (!origin) { flashWarn("Cross-section needs a located site (a real-world origin).", 6000); return; }
-    const lenFt = _hyp(p0, p1);
-    if (!(lenFt > 1)) { flashWarn("Cross-section line is too short — draw a longer line.", 5000); setXsecMode(false); setXsecPts([]); return; }
-    xsecBusyRef.current = true;
-    setXsec({ p0, p1, lenFt, busy: true, stats: null });
-    setXsecMode(false); setXsecPts([]);
-    try {
-      const a = feetToLatLng(p0, origin.lat, origin.lon), b = feetToLatLng(p1, origin.lat, origin.lon);
-      const elev = await sampleProfile([[a[1], a[0]], [b[1], b[0]]], 48); // [lng,lat]
-      const stats = ditchStats(elev, lenFt);
-      if (!stats) throw new Error("no samples");
-      setXsec({ p0, p1, lenFt, busy: false, stats });
-    } catch (_) {
-      setXsec(null);
-      flashWarn("Couldn't sample USGS 3DEP elevation there (service/coverage). Try again or a different line.", 7000);
-    } finally {
-      xsecBusyRef.current = false;
-    }
-  };
-
   const setRule = (key, patch) => setEaseRules(patchEasementRule(key, patch));
-  // B2391216 ×2 — the per-jurisdiction rules editor lives in the Easement tool's ▾ menu (it left the layers card).
-  // Every path that wants the rules opens THIS: the menu AND its Easement rules disclosure.
-  const openEaseRules = () => { setRulesOpen(true); setEaseMenu(true); };
-  const startWaterRoute = () => {
-    // ⛔ B877440 — `jurKey` is null when no easement criteria are on file (no auto-detect match,
-    // no manual pick). Never fabricate a width off `easeRules.generic`'s Houston-style placeholder
-    // — the tool declines and points at the Easement rules panel, where the user can either pick a
-    // jurisdiction by hand (still fully functional) or file a request.
-    const rule = easeRules[jurKey];
-    if (!rule) { openEaseRules(); flashWarn("No easement width on file for this jurisdiction — pick one in the Easement ▾ menu (Easement rules), or request criteria.", 6000); return; }
-    startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
-  };
-
+  // B2391216 ×2 — the per-jurisdiction rules editor lives in the Easement tool's ▾ menu (it left the layers card);
+  // its "Easement rules" disclosure (`easement-rules-toggle`) is the one way in. (The route tools' path in was removed 2026-11-14.)
   // Upload + extract a title-commitment PDF via the Claude API.
   const runTitleExtract = async (file) => {
     if (!file) return;
@@ -24549,7 +24367,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
                 // (so a live color-picker change shows instantly instead of hiding under an accent tint);
                 // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
-                // B567 neutral-markup choice to the semantic markups too — utilRoute/traced/encumbrance.)
+                // B567 neutral-markup choice to the semantic markups too — encumbrance/easement.)
                 const stroke = m.stroke;
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
@@ -24582,7 +24400,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const mkLockAnchor = () => {
                   const pts = m.kind === "line" ? [m.a, m.b]
                     : MK_BOX_KINDS.includes(m.kind) ? boxCorners(m)
-                    : m.kind === "utilRoute" ? (m.corridor || m.pts)
                     : (mkPts(m).length ? mkPts(m) : (m.pts || []));
                   if (!pts || !pts.length) return null;
                   let minX = Infinity, maxX = -Infinity, minY = Infinity;
@@ -24595,49 +24412,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // that decide a click), the pre-click hover glow always matches what a click grabs;
                 // there is no second, separate hit-test that could disagree with the selection.
                 const node = (() => {
-                if (m.kind === "utilRoute") {
-                  const col = m.stroke; // B619: keep the route's own color when selected
-                  const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const cl = m.pts.map((p) => f2p(p));
-                  const clStr = cl.map((q) => `${q.x},${q.y}`).join(" ");
-                  const clW = strokeZoom(2.2, zk); // B617
-                  const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
-                  return (
-                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
-                      {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
-                      <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
-                      <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
-                      {/* NEW-1 (the constant-screen-px audit): these ride `labelK` like every other
-                          on-canvas label, so a sheet exported from a wide zoom doesn't print them at
-                          several times their intended size. `labelK` is exactly 1 on screen. */}
-                      <text x={padC.x} y={padC.y + 3 * labelK} textAnchor="middle" fontSize={8 * labelK} fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5 * labelK} textAnchor="middle" fontSize={9.5 * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
-                    </g>
-                  );
-                }
-                if (m.kind === "traced" || m.kind === "infwater") {
-                  const pp = m.pts.map((p) => f2p(p));
-                  const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
-                  const mid = pp[Math.floor((pp.length - 1) / 2)];
-                  const col = m.stroke; // B619: keep the traced line's own color when selected
-                  const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
-                  return (
-                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
-                      {/* NEW-1 (the constant-screen-px audit): vertex marks and the label ride `labelK`
-                          so they hold their intended size on a sheet instead of scaling with the zoom. */}
-                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3 * labelK} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
-                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2 * labelK} y={q.y - 2 * labelK} width={4 * labelK} height={4 * labelK} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {/* NEW-6 — same rule as the easement label below: this was the identical
-                          constant-screen-px shape, found by the same audit and fixed in the same pass. */}
-                      {mid && featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, TRACED_LABEL_BASE_PX) && <text x={mid.x} y={mid.y - 6 * labelK} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, TRACED_LABEL_BASE_PX) * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
-                    </g>
-                  );
-                }
                 if (m.kind === "encumbrance") {
                   // As written (deedGap.js): the ring keeps the last course's true endpoint and any misclosure
                   // draws as its own red dashed segment instead of being absorbed into the closing edge.
@@ -25273,7 +25047,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
               if (draftRoadPts) { setDraftRoadPts(null); branchSeedRef.current = null; return; } // cancel an in-progress road draw
               // during a placement/draw mode a right-click just eats the native menu (each mode has its own Esc/exit)
-              if (tool !== "select" || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
+              if (tool !== "select" || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
               setParcelMenu(null); setOvMenu(null);
               setMapMenu({ x: e.clientX, y: e.clientY, kind: "empty" });
             }}>
@@ -25635,26 +25409,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </foreignObject>
                 </g>
               )}
-              {/* ditch cross-section line (in-progress + last result) */}
-              {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
-              {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
-              {/* in-progress utility route (source → cursor) */}
-              {routeMode?.stage === "building" && routeMode.source && cursor && (() => {
-                const a = f2p(routeMode.source), b = f2p(cursor);
-                return <g data-export="skip" pointerEvents="none">
-                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={routeMode.util === "elec" ? "#b45309" : "#0891b2"} strokeWidth={2} strokeDasharray="6 4" />
-                  <circle cx={a.x} cy={a.y} r={4} fill={routeMode.util === "elec" ? "#b45309" : "#0891b2"} stroke="#fff" strokeWidth={1.2} />
-                </g>;
-              })()}
-              {/* in-progress power-line trace */}
-              {traceMode && tracePts.length > 0 && (() => {
-                const pp = tracePts.map((p) => f2p(p));
-                const s = [...pp, cursor ? f2p(cursor) : pp[pp.length - 1]].map((q) => `${q.x},${q.y}`).join(" ");
-                return <g data-export="skip" pointerEvents="none">
-                  <polyline points={s} fill="none" stroke="#b45309" strokeWidth={2.4} strokeDasharray="6 4" />
-                  {pp.map((q, i) => <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} fill="#b45309" stroke="#fff" strokeWidth={1} />)}
-                </g>;
-              })()}
               {/* multi-select outlines — neutral hue-free chrome (B569): a light casing under a dark
                   line, legible on aerial imagery, never colliding with a status/accent hue. B740: a
                   per-member outline that HUGS each element's real footprint (rotation-aware — an
@@ -27398,35 +27152,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })}
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span className="rbtn-hint" style={railHint(tool === "callout")}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span className="rbtn-hint" style={railHint(tool === "text")}>T</span></button>
-
-          {/* B2391216 ×2 — Utility Evidence: the five street-imagery / utility drawing tools that used to ride under the
-              layers card (they are DRAWING tools, not layers). Same handlers, same active states, same row style as every
-              other tool here; located plans only (they read the aerial and the GIS around the site). */}
-          {origin && (<>
-            {railHdr("Utility Evidence")}
-            <button className={`rbtn${traceMode ? " on" : ""}`} style={rbtn(traceMode)} data-testid="rail-ev-trace" aria-pressed={traceMode}
-              onClick={() => { setTracePts([]); setTraceMode((m) => !m); }}
-              title="Click along a visible pole line on the aerial; double-click or Enter to finish (Esc to cancel)">
-              <ToolIcon id="evTrace" /> {traceMode ? "Tracing…" : "Trace overhead electric"}
-            </button>
-            <button className={`rbtn${routeMode?.util === "elec" ? " on" : ""}`} style={rbtn(routeMode?.util === "elec")} data-testid="rail-ev-route-elec" aria-pressed={routeMode?.util === "elec"}
-              onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)">
-              <ToolIcon id="evElec" /> Route electric service
-            </button>
-            <button className={`rbtn${routeMode?.util === "water" ? " on" : ""}`} style={rbtn(routeMode?.util === "water")} data-testid="rail-ev-route-water" aria-pressed={routeMode?.util === "water"}
-              onClick={startWaterRoute} title="Route water service from a main to a building; the easement width comes from the jurisdiction rule in the Easement ▾ menu">
-              <ToolIcon id="evWater" /> Route water service
-            </button>
-            <button className="rbtn" style={{ ...rbtn(false), opacity: evidenceBusy ? 0.6 : 1 }} data-testid="rail-ev-infer-main" disabled={evidenceBusy}
-              onClick={inferWaterMain} title="Connect the fire hydrants in view into a screening-only water main">
-              <ToolIcon id="evMain" /> {evidenceBusy ? "Inferring…" : "Infer water main"}
-            </button>
-            <button className={`rbtn${xsecMode ? " on" : ""}`} style={rbtn(xsecMode)} data-testid="rail-ev-xsec" aria-pressed={xsecMode}
-              onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
-              title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert (Esc to cancel)">
-              <ToolIcon id="evXsec" /> Cross-section (ditch)
-            </button>
-          </>)}
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
@@ -31171,39 +30896,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       })()}
 
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
-      {/* ditch cross-section result */}
-      {xsec && (
-        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
-            <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
-          </div>
-          {xsec.busy ? (
-            <div style={{ fontSize: 12, color: PAL.muted, padding: "10px 0" }}>Sampling USGS 3DEP elevation…</div>
-          ) : xsec.stats && (() => {
-            const s = xsec.stats, W = 258, H = 64, span = Math.max(0.5, s.maxFt - s.minFt);
-            const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
-            return (
-              <div>
-                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: RADIUS.sm }}>
-                  <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
-                </svg>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: MONO_FONT }}>
-                  <span>Depth ≈ <b>{f1(s.depthFt)}′</b></span>
-                  <span>Invert {f1(s.invertFt)}′</span>
-                  <span>Bank {f1(s.bankFt)}′</span>
-                </div>
-                <div style={{ fontSize: 9.5, color: PAL.warn, lineHeight: 1.4, margin: "6px 0 8px" }}>Screening only — LiDAR bare-earth, verify with survey.</div>
-                <button onClick={() => {
-                  if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); flashWarn("Available depth applied to the selected pond.", 4000); }
-                  else { flashWarn("⚠ Select a pond first, then apply the available depth.", 5000); }
-                }} style={{ ...chip, width: "100%", fontWeight: 600 }}>→ Use as detention available depth{selEl?.type === "pond" ? "" : " (select a pond)"}</button>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
       {(() => {
         /* ⛔ NEW-1/B754752 — `toastPill` is built HERE, inside this IIFE, not as a top-level
          * `const` above. `hiddenContentReads.js`'s sweep treats "the last top-level `const`
@@ -31226,14 +30918,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
         const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
         return (<>
-          {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
+          {(pobMode || overlapWarn || deedAlignHint) && (
             /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
                3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
                success-green with its own warning invisible to the color. `.includes` catches both. */
-            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode ? PAL.accent : "#15803d") }}>
               <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-              {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
-              {deedAlignHint && !pobMode && !routeMode && <>
+              {pobMode && <button onClick={() => { setPobMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
+              {deedAlignHint && !pobMode && <>
                 <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
                 <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
               </>}

@@ -54,15 +54,13 @@ describe("resolveDraftStepBack — Bluebeam mid-draw vertex step-back", () => {
     expect(resolveDraftStepBack({ easeEdges: { parcelId: "pc1", idx: [3] } })).toEqual({ target: "easeEdges", next: null });
   });
 
-  it("NEW: trims the ditch cross-section pending point (xsecPts) only while xsecMode is on", () => {
-    expect(resolveDraftStepBack({ xsecMode: true, xsecPts: P(1) })).toEqual({ target: "xsecPts", next: [] });
-    // xsecPts present but the tool is off → not this branch's business
-    expect(resolveDraftStepBack({ xsecMode: false, xsecPts: P(1) })).toBeNull();
+  it("the retired Utility Evidence tools (trace, ditch cross-section — owner decision 2026-11-14) no longer own a draft", () => {
+    // A stale caller that still hands these over must fall through to a global undo, never trim a point.
+    expect(resolveDraftStepBack({ xsecMode: true, xsecPts: P(1) })).toBeNull();
+    expect(resolveDraftStepBack({ traceMode: true, tracePts: P(2) })).toBeNull();
   });
 
-  it("trace / split / measure branches are tool-gated (no accidental trim when the tool is off)", () => {
-    expect(resolveDraftStepBack({ traceMode: true, tracePts: P(2) })).toEqual({ target: "tracePts", next: P(1) });
-    expect(resolveDraftStepBack({ traceMode: false, tracePts: P(2) })).toBeNull();
+  it("split / measure branches are tool-gated (no accidental trim when the tool is off)", () => {
     expect(resolveDraftStepBack({ tool: "split", splitPath: P(3) })).toEqual({ target: "splitPath", next: P(2) });
     expect(resolveDraftStepBack({ tool: "select", splitPath: P(3) })).toBeNull();
     expect(resolveDraftStepBack({ tool: "measure", measDraft: P(2) })).toEqual({ target: "measDraft", next: P(1) });
