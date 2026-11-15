@@ -34,7 +34,8 @@ const SERVICES = {
   smyrna: { url: `${ORG}/Smyrna_Zoning/FeatureServer/0`, field: "ZONING_DIST", where: "1=1" },
   lavergne: { url: `${ORG}/LaVergne_Zoning/FeatureServer/0`, field: "Zoning_Typ", where: "1=1" },
 };
-/* Smyrna's integer → code, for the known-good comparison only (the page's own table is what is on trial, so the expected text below is written out by hand). */
+/* Smyrna's integer → the text the card must show, written out BY HAND from the town's own coded-value domain (the page's own table is what is on trial, so it is not imported). */
+const SMYRNA_TEXT = { 1: "F-1 · Floodway", 2: "A-1 · Airport District", 3: "C-1 · Central Business", 4: "C-2 · Highway Service", 5: "C-3 · Restrictive Highway Service", 6: "C-4 · Neighborhood Service", 7: "I-1 · Light Industrial", 8: "I-2 · Light Industrial", 9: "I-3 · Heavy Industrial", 10: "P&O · Professional and Office", 11: "R-1 · Low Density Residential", 12: "R-2 · Low Density Residential", 13: "R-3 · Medium Density Residential", 14: "R-4 · Medium Density Residential", 15: "R-5 · High Density Residential", 16: "R-6 · High Density Residential", 17: "PRD · Planned Residential District", 18: "PUD · Planned Unit Development", 19: "Proposed", 20: "Historic Overlay District", 21: "PCD · Planned Commercial District", 22: "P&O-2 · Professional and Office", 23: "Height", 24: "PID · Planned Industrial District" };
 const CLUSTERS = [
   { key: "capital", label: "Capital Way, Christiana", at: { lat: 35.7208, lng: -86.3254 }, svc: "county", title: /^Zoning · Unincorporated Rutherford County$/, zone: /EAC · Employment & Activity Center/ },
   { key: "joe", label: "1975 Joe B Jackson Pkwy, Murfreesboro", at: { lat: 35.78075, lng: -86.36112 }, svc: "murfreesboro", title: /^Zoning · Murfreesboro$/, zone: /L-I · Light Industrial/ },
@@ -96,18 +97,26 @@ const truthAt = (key, at) => page.evaluate(async ([svc, p]) => {
   const u = `${svc.url}/query?where=${encodeURIComponent(svc.where)}&geometry=${p.lng},${p.lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=${svc.field}&returnGeometry=false&f=json`;
   try { const j = await (await fetch(u)).json(); return (j.features || []).map((f) => f.attributes[svc.field]); } catch (e) { return null; }
 }, [SERVICES[key], at]);
-const clickForCard = async (titleRe) => {
+/* A tap's lat/lng: the backdrop map's own container → lat/lng (the page's `__geoMap`, armed by the E2E flag). */
+const latLngOfTap = (x, y) => page.evaluate(([cx, cy]) => { const m = window.__geoMap; if (!m) return null; const r = m.getContainer().getBoundingClientRect(); const ll = m.containerPointToLatLng([cx - r.left, cy - r.top]); return { lat: ll.lat, lng: ll.lng }; }, [x, y]);
+/* Tap empty points until the card is a Zoning card AND (when `svcKey` is given) that member's own service has a polygon under THE TAP — so the expected answer is asked at the point that was clicked. */
+const clickForCard = async (titleRe, svcKey = null) => {
   const box = await page.getByTestId("planner-canvas").boundingBox();
-  let card = "", tried = 0;
+  let card = "", tried = 0, tap = null, truth = null;
   // a tap on a parcel selects it, it does not identify: try several EMPTY points so one gap in the data cannot decide it
-  for (const [dx, dy] of [[260, 40], [-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150], [150, -200]]) {
-    await page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+  for (const [dx, dy] of [[260, 40], [-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150], [150, -200], [380, 120], [-380, -120]]) {
+    const x = box.x + box.width / 2 + dx, y = box.y + box.height / 2 + dy;
+    await page.mouse.click(x, y);
     await sleep(2500);
     card = await page.getByTestId("gis-identify").first().innerText().catch(() => "");
     tried++;
-    if (titleRe.test(card.split("\n")[0] || "") || /Zoning · /.test(card)) break;
+    if (!/Zoning · /.test(card)) continue;
+    tap = await latLngOfTap(x, y);
+    if (svcKey) { truth = tap ? await truthAt(svcKey, tap) : null; if (!truth || !truth.length) continue; }
+    break;
   }
-  return { card, tried };
+  const title = (card.split("\n").map((l) => l.trim()).find((l) => /^Zoning · /.test(l))) || "";
+  return { card, tried, tap, truth, title };
 };
 
 try {
@@ -130,20 +139,24 @@ try {
     if (!truth || !truth.length) voidRun(`${c.svc}'s own service could not be asked (or holds nothing) at ${c.at.lat},${c.at.lng} — the known-good arm has no ground truth`);
     else console.log(`B · the service itself says the code under the plan origin is ${JSON.stringify(truth)}`);
 
-    check("C · the county service answered with zoning polygons", featsFor(/Zoning_Hub_Data/) > 0, `${featsFor(/Zoning_Hub_Data/)} features`);
-    check("C · Murfreesboro's service answered", featsFor(/City_Zoning_inc_Historic/) > 0 || c.svc !== "murfreesboro", `${featsFor(/City_Zoning_inc_Historic/)} features`);
-    check("C · Smyrna's service answered", featsFor(/Smyrna_Zoning/) > 0 || c.svc !== "smyrna", `${featsFor(/Smyrna_Zoning/)} features`);
-    check("C · La Vergne's service answered", featsFor(/LaVergne_Zoning/) > 0 || c.svc !== "lavergne", `${featsFor(/LaVergne_Zoning/)} features`);
+    if (c.svc === "county" || c.svc === "murfreesboro") check("C · the county service answered with zoning polygons (where the county zones)", featsFor(/Zoning_Hub_Data/) > 0, `${featsFor(/Zoning_Hub_Data/)} features`);
+    check(`C · ${c.svc}'s own service answered with zoning polygons`, featsFor({ county: /Zoning_Hub_Data/, murfreesboro: /City_Zoning_inc_Historic/, smyrna: /Smyrna_Zoning/, lavergne: /LaVergne_Zoning/ }[c.svc]) > 0, "");
     check("C · the State's city limits (the government lookup) answered", featsFor(/TN_Cities_view/) > 0, `${featsFor(/TN_Cities_view/)} features`);
     const bad = net.filter((e) => e.status >= 400);
     check("C · no zoning request failed", bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-70)}`).join(" | "));
 
-    // D — the click card
-    const { card, tried } = await clickForCard(c.title);
-    console.log(`(card found after ${tried} tap(s))\n` + card.split("\n").map((l) => "     " + l).join("\n"));
-    const title = (card.split("\n")[0] || "").trim();
+    // D — the click card, judged against the service asked AT THE CLICKED POINT
+    const { card, tried, tap, truth: tapTruth, title } = await clickForCard(c.title, c.svc);
+    console.log(`(card found after ${tried} tap(s); tap at ${tap ? tap.lat.toFixed(5) + "," + tap.lng.toFixed(5) : "?"}; the service itself says ${JSON.stringify(tapTruth)})\n` + card.split("\n").map((l) => "     " + l).join("\n"));
     check("D · the card names the government the site falls in", c.title.test(title), title);
-    check("D · …and the zone is the code the service itself reported, with its district name", c.zone.test(card), "");
+    if (!tapTruth || !tapTruth.length) voidRun(`no tap produced a Zoning card with a ${c.svc} polygon under it — the zone arm has no ground truth`);
+    else {
+      // every district the service reports AT THE TAP must be on the card (Smyrna's overlay districts stack over a base district; the other three never stack)
+      const textOf = (v) => (c.svc === "smyrna" ? (SMYRNA_TEXT[v] || `Unlisted district (code ${v})`) : String(v).toUpperCase());
+      const wants = [...new Set(tapTruth.map(textOf))];
+      const missing = wants.filter((w) => !card.includes(w));
+      check("D · every district the service itself reports AT THE TAP is on the card, with its name", missing.length === 0, `service says ${JSON.stringify(tapTruth)} → expects ${JSON.stringify(wants)}${missing.length ? "; missing " + JSON.stringify(missing) : ""}`);
+    }
     check("D · ONE zoning card for the click", (card.match(/Zoning · /g) || []).length === 1);
     check("D · no raw field name on the card", !/ZONEABBRV|ZONE_DIST|ZONING_DIST|SubZoning|Zoning_Typ|OBJECTID|ParcelType/.test(card));
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/D-${c.key}.png` });

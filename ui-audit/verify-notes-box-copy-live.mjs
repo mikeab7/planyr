@@ -154,10 +154,10 @@ async function cleanup() {
 
 
 /* ───────────── the run ───────────── */
-const fresh = (name) => makePage(name, [[W1, 60, 70], [W2, 60, 118]]);
+const fresh = (name) => makePage(name, [[W1, 60, 170], [W2, 60, 218]]);
 const W1 = "Alpha tax rate cap and the revenue it touches";
 const W2 = "Bravo permit for a second water well";
-const blank = async () => { const at = await page.evaluate(() => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: r.left + 330, y: r.top + 330 }; }); return at; };
+const blank = async () => { const at = await page.evaluate(() => { const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect(); return { x: r.left + 330, y: r.top + 400 }; }); return at; };
 const rects = () => page.evaluate(() => [...document.querySelectorAll(".planyr-anchor")].map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, t: e.textContent.slice(0, 10) }; }));
 const overlap = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
 
@@ -177,7 +177,7 @@ try {
   listBefore = await page.locator('[data-testid^="notes-row-"]').count();
   console.log(`the account's list holds ${listBefore} pages before the run`);
 
-  const idOther = await makePage("other-page", [["Gamma on the other page", 60, 70]]);
+  const idOther = await makePage("other-page", [["Gamma on the other page", 60, 170]]);
 
   /* ───────── K + 1 · box copy, paste on armed paper ───────── */
   console.log("\n=== K / 1 · a click on a box's outline then Ctrl+C = moving outline + a BOX on the clipboard; Ctrl+V on armed paper = a new box ===");

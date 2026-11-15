@@ -143,6 +143,19 @@ sc("box-paste-into-box", "box copy → Ctrl+V with the caret inside ANOTHER box'
   const d3 = boxesOf(await doc());
   ok("ONE Ctrl+Z undoes the pick (back to the pasted box)", d3.length === 3 && textOf(d3.find((b) => b.attrs.aid === "b")) === textOf(bBefore), String(d3.length));
 });
+sc("box-paste-into-fit-box", "…and the same with SELF-FITTING boxes (what typing on blank paper makes): leaving the box must not retire the paste-options tab", async () => {
+  /* ⛔ The first live run found it: a box he typed into on blank paper is `fit:true`, so pasting a box blurs it, `settleBox` writes its width, and that write used to retire the tab. Seeded fit:false boxes can't show it. */
+  const d1 = DOC1(); d1.content.forEach((n) => { if (n.type === "noteAnchor") n.attrs.fit = true; });
+  await seed(d1);
+  await selectByOutline("a"); await key("Control+c"); await settle(300);
+  await key("Escape"); await key("Escape");
+  await enter(B_TEXT); await key("End"); await key("Control+v"); await settle(1500);
+  ok("a new box appeared (3 boxes)", boxesOf(await doc()).length === 3);
+  ok("the paste-options tab is still offered after the box he was in settled", await chipVisible());
+  await key("Control"); await settle(400); await key("t"); await settle(900);
+  const d2 = boxesOf(await doc());
+  ok("Keep Text Only works: 2 boxes and the words in the box he was in", d2.length === 2 && JSON.stringify(d2.find((b) => b.attrs.aid === "b").content).includes(A_TEXT), String(d2.length));
+});
 sc("box-ants-end", "the outline ends with Esc, with a new copy, or with an edit — and with nothing else", async () => {
   await selectByOutline("a"); await key("Control+c"); await settle(250);
   ok("starts on A", JSON.stringify(await ants()) === '["a"]');
