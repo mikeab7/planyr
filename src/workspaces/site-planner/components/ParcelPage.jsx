@@ -66,7 +66,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, countyState }) {
+export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, addrParts, countyState }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -81,7 +81,7 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
   const kind = origin.kind;
   const stated = parcel.statedAcres != null && parcel.statedAcres !== "" ? Number(parcel.statedAcres) : null;
   const hasTypedFacts = !!(parcel.owner || parcel.acct || stated != null);
-  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField, state: countyState || null, ringAcres: acres }) : null;
+  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField, addrParts, state: countyState || null, ringAcres: acres }) : null;
   const deedAc = rec && rec.deedAcres != null ? rec.deedAcres : stated;
 
   return (
