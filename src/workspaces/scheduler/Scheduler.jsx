@@ -294,6 +294,8 @@ export default function Scheduler({
       // the same ordering selectSchedule() relies on for its own explicit picks.
       const navAction = resolveReportRowNavigation({
         cameFromReports,
+        section: nav.section,
+        rowLink: nav.rowLink,
         projectId: projectIdRef.current,
         activeId: nav.activeId,
         linkedSiteId: (nav.projects.find((p) => p && p.id === nav.activeId) || {}).linkedSiteId ?? null,

@@ -826,6 +826,10 @@ export default function App({
   const [comps, setComps] = useState([]);
   const [pendingCompAnchor, setPendingCompAnchor] = useState(null);
   const [focusCompId, setFocusCompId] = useState(null);
+  // NEW-1 (2026-11-15) — true when the focus request came from OUTSIDE the map (the Dashboard
+  // Comps card), where the map is wherever it was last left: pan to the comp as well as open it.
+  // A pin click leaves it false (the pin is already on screen; no unasked zoom).
+  const [focusCompReveal, setFocusCompReveal] = useState(false);
   // COMPS-DASHBOARD-CARD — apply a pending "focus this comp" request from the Dashboard once this
   // workspace mounts. `compIntent.token` makes a repeat click on the SAME comp re-fire (Shell
   // stamps a fresh token every call, same convention as `scheduleTaskIntent`); the ref is what
@@ -835,10 +839,11 @@ export default function App({
   useEffect(() => {
     if (!compIntent || compIntent.token === appliedCompIntentRef.current) return;
     appliedCompIntentRef.current = compIntent.token;
+    setFocusCompReveal(true);
     setFocusCompId(compIntent.compId);
   }, [compIntent]);
   const onPlaceComp = (anchor) => setPendingCompAnchor(anchor);
-  const onCompClick = (id) => setFocusCompId(id);
+  const onCompClick = (id) => { setFocusCompReveal(false); setFocusCompId(id); };
 
   // LOCATIONS-MAP-CARD FIX — same shape as the compIntent pair above: `focusMissingLocations` is
   // a token MapFinder's own effect reacts to (open the Sites tab, filter to what's missing a
@@ -1425,6 +1430,7 @@ export default function App({
             pendingCompAnchor={pendingCompAnchor}
             onCompAnchorConsumed={() => setPendingCompAnchor(null)}
             focusCompId={focusCompId}
+            focusCompReveal={focusCompReveal}
             onCompFocusHandled={() => setFocusCompId(null)}
             onCompsChange={setComps}
             focusMissingLocations={focusMissingLocations}
