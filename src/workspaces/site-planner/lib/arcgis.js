@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl, stackRuleForUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl, pointWhereForUrl, stackRuleForUrl } from "./counties.js";
 import { pickAtPoint } from "./parcelStack.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
@@ -304,6 +304,7 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       returnGeometry: "true",
       outSR: 4326,
       ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
+      ...(pointWhereForUrl(layerUrl) ? { where: pointWhereForUrl(layerUrl) } : {}), // NEW-2 — a layer's placeholder polygons never answer a click
     }, { timeoutMs });
     const feats = j.features || [];
     const rule = stackRuleForUrl(layerUrl);
@@ -320,7 +321,8 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
-      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}), // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
+      ...(pointWhereForUrl(layerUrl) ? { where: pointWhereForUrl(layerUrl) } : {}), // NEW-2 — a layer's placeholder polygons never answer a click // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
     }, { timeoutMs });
     const rule = stackRuleForUrl(layerUrl);
     if (rule) return pickAtPoint(j.features || [], rule, lng, lat, featureContainsLngLat) || null; // NEW-1/2/3 (parcelStack.js) — rows of one lot collapse to one; a second lot at the spot is remembered, not dropped

@@ -23,7 +23,7 @@ describe("county record — the owner's SCHIEL lot (Harris)", () => {
   it("deed acres come from the county's acreage column", () => expect(rec.deedAcres).toBeCloseTo(63.8457, 4));
   it("tax year rides along", () => expect(rec.taxYear).toBe("2025"));
   it("a record with no attribute bag falls back to what the parcel carries, and says nothing else", () => {
-    expect(countyRecord(null, { acct: "A1", addr: "1 MAIN ST" })).toEqual({ owner: null, account: "A1", address: "1 MAIN ST", deedAcres: null, taxYear: null });
+    expect(countyRecord(null, { acct: "A1", addr: "1 MAIN ST" })).toEqual({ owner: null, account: "A1", address: "1 MAIN ST", deedAcres: null, taxYear: null, agUse: null });
   });
   it("placeholder text is absent, never a value", () => {
     expect(countyRecord({ OWNERNAME: "Null", ACCOUNT: "None" }).owner).toBeNull();

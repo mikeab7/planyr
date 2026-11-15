@@ -1,3 +1,70 @@
+/* NEW-1 (2026-11-12, cross-user `client_errors`: "Cannot read properties of null (reading 'removeLayer')",
+ * stack `_overlayOnError → fire → i.P` in `map-vendor`) — THE RASTER ERROR PATH, closed at the SAME seam.
+ * esri-leaflet 3.0.19 `RasterLayer._renderImage` registers `onOverlayError = function () { this._map.removeLayer(image); … }`
+ * with NO `this._map` guard (its sibling `onOverlayLoad` has `if (this._map)`). The image is created and added
+ * synchronously inside `_renderImage`, but the request that fails comes back LATER — so a row switched off, or a plan
+ * switched, while an /export image is in flight leaves an error landing on a layer whose `_map` is already null, and
+ * the throw happens inside Leaflet's event loop. We cannot edit the closure, so right after `_renderImage` returns we
+ * find the Overlay it just added (a `layeradd` listener held for exactly that call — O(1), no scan of the map's
+ * layers), drop esri's unguarded "error" listener and register an equivalent that never dereferences a null map:
+ * remove the image if it is still on a map, fire the layer's "error" (status wiring still hears it), and drop the
+ * pending load listener. Same behaviour otherwise.
+ *
+ * ONE wrapper per layer: the orphan-image handling below (guardRasterOpacity) and this error guard share the single
+ * `_renderImage` wrapper via `install`; `guardRasterErrors` is the error-only entry for layers.js's raster layers. */
+const GUARD = "__planyrRasterGuard";
+
+function guardOverlayError(layer, overlay) {
+  if (!overlay || typeof overlay.on !== "function" || typeof overlay.off !== "function") return;
+  overlay.off("error"); // esri-leaflet's own listener (the overlay has no other "error" listener)
+  const onLoad = () => { overlay.off("error", onError); overlay.off("load", onLoad); };
+  function onError() {
+    overlay.off("error", onError);
+    overlay.off("load"); // esri's pending load listener, and ours
+    const m = overlay._map; // the map the IMAGE is still on — null once the layer's teardown already removed it
+    if (m) m.removeLayer(overlay);
+    layer.fire("error");
+  }
+  overlay.on("error", onError);
+  overlay.on("load", onLoad);
+}
+
+function install(layer) {
+  if (layer[GUARD]) return layer[GUARD];
+  const state = { opacity: false, pending: new Set() }; // pending: DOM <img> nodes whose load hasn't resolved yet
+  layer[GUARD] = state;
+  const origRenderImage = layer._renderImage;
+  layer._renderImage = function (url, bounds, contentType) {
+    const map = this._map;
+    let overlay = null;
+    const onAdd = (e) => { if (!overlay && e && e.layer && e.layer._image) overlay = e.layer; };
+    const listen = !!map && typeof map.on === "function" && typeof map.off === "function";
+    if (listen) map.on("layeradd", onAdd);
+    try {
+      origRenderImage.call(this, url, bounds, contentType);
+    } finally {
+      if (listen) map.off("layeradd", onAdd);
+    }
+    guardOverlayError(this, overlay);
+    if (state.opacity) {
+      // The Overlay is created and .addTo()'d SYNCHRONOUSLY inside _renderImage, so by the time
+      // the call above returns, its <img> already exists as the pane's newest matching child.
+      const pane = typeof this.getPane === "function" ? this.getPane() : null;
+      const imgs = pane ? pane.querySelectorAll("img.leaflet-image-layer") : null;
+      const img = imgs && imgs.length ? imgs[imgs.length - 1] : null;
+      if (img) state.pending.add(img);
+    }
+  };
+  return state;
+}
+
+/* Error-only entry: every esri raster layer (dynamicMapLayer / imageMapLayer) built by layers.js. */
+export function guardRasterErrors(layer) {
+  install(layer);
+  return layer;
+}
+
+
 /* NEW-1 (parcel outline opacity race) — split out of parcelDisplay.js for the same reason
  * `terrainGate.js`/`adminBoundaryData.js`/`floodTileDecode.js` were split from their Leaflet-glue
  * siblings: this module touches only the LAYER OBJECT it's handed (duck-typed — `_renderImage`,
@@ -28,17 +95,9 @@
  * is closed here too, at the one place every parcel image layer is built, rather than chased at
  * each call site. Keep what you SEE == what you can SELECT (B137). */
 export function guardRasterOpacity(layer) {
-  const pending = new Set(); // DOM <img> nodes whose load hasn't resolved yet
-  const origRenderImage = layer._renderImage;
-  layer._renderImage = function (url, bounds, contentType) {
-    origRenderImage.call(this, url, bounds, contentType);
-    // The Overlay is created and .addTo()'d SYNCHRONOUSLY inside _renderImage, so by the time
-    // the call above returns, its <img> already exists as the pane's newest matching child.
-    const pane = typeof this.getPane === "function" ? this.getPane() : null;
-    const imgs = pane ? pane.querySelectorAll("img.leaflet-image-layer") : null;
-    const img = imgs && imgs.length ? imgs[imgs.length - 1] : null;
-    if (img) pending.add(img);
-  };
+  const state = install(layer);
+  state.opacity = true;
+  const pending = state.pending;
   const origOnRemove = layer.onRemove;
   layer.onRemove = function (map) {
     pending.forEach((img) => {

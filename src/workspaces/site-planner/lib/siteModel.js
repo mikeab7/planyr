@@ -68,7 +68,15 @@ export { SITE_MODEL_VERSION, STATUSES, STATUS_META, statusOf, ROLES, ROLE_META, 
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
-export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
+// RETIRED (owner decision 2026-11-14): the five Utility Evidence tools (trace overhead electric, route electric /
+// water service, infer water main, ditch cross-section) were removed. Production held zero markups of these kinds, but a
+// stale device copy / old draft / paste could still carry one, so every READ drops them silently instead of crashing
+// or drawing a record nothing can edit. (`READ_NORMALIZE.markups` → `dropRetiredMarkups`; identity-preserving.)
+export const RETIRED_MARKUP_KINDS = ["utilRoute", "traced", "infwater"];
+export const dropRetiredMarkups = (list) =>
+  Array.isArray(list) && list.some((m) => m && RETIRED_MARKUP_KINDS.includes(m.kind))
+    ? list.filter((m) => !(m && RETIRED_MARKUP_KINDS.includes(m.kind)))
+    : list;
 export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon", "cloud"]; // neutral drawing markups
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
@@ -217,7 +225,7 @@ export function stampParcelNumbers(parcels) {
 export const READ_NORMALIZE = Object.freeze({
   els: (list) => ensureZ(migrateBandForce(list)),
   parcels: (list) => ensureZ(stampParcelNumbers(withLockSemantics(withStableParcelIds(list)))),
-  markups: (list) => ensureZ(list),
+  markups: (list) => ensureZ(dropRetiredMarkups(list)),
   measures: (list) => ensureZ(list),
   callouts: (list) => ensureZ(list),
 });
@@ -2097,9 +2105,6 @@ export function constraintsOf(m) {
     liveLayers: (m.constraints && m.constraints.liveLayers) || [],
   };
 }
-
-// Utility runs: electric/water service routes, traced overhead lines, inferred mains.
-export const utilitiesOf = (m) => byKind(m.markups, UTILITY_KINDS);
 
 // First-class easement objects (NEW-1) — the kind:"easement" markups specifically
 // (a subset of constraintsOf().easements, which also includes legacy encumbrances).

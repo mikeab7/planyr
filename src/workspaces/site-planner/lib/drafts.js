@@ -11,7 +11,6 @@ export function resolveDraftStepBack(s = {}) {
   const arr = (a) => (Array.isArray(a) ? a : []);
   const s2 = s || {};
 
-  if (s2.traceMode && arr(s2.tracePts).length) return { target: "tracePts", next: s2.tracePts.slice(0, -1) };
   if (s2.tool === "split" && arr(s2.splitPath).length) return { target: "splitPath", next: s2.splitPath.slice(0, -1) };
   if (s2.tool === "measure" && arr(s2.measDraft).length) return { target: "measDraft", next: s2.measDraft.slice(0, -1) };
   if (s2.mkPoly && arr(s2.mkPoly.pts).length) { const pts = s2.mkPoly.pts.slice(0, -1); return { target: "mkPoly", next: pts.length ? { ...s2.mkPoly, pts } : null }; }
@@ -21,8 +20,6 @@ export function resolveDraftStepBack(s = {}) {
   if (s2.easeDraft && arr(s2.easeDraft.pts).length) { const pts = s2.easeDraft.pts.slice(0, -1); return { target: "easeDraft", next: pts.length ? { pts } : null }; }
   // A parcel-edge easement run accumulates picked edge indices (not free points) — step back the last edge.
   if (s2.easeEdges && arr(s2.easeEdges.idx).length) { const idx = s2.easeEdges.idx.slice(0, -1); return { target: "easeEdges", next: idx.length ? { ...s2.easeEdges, idx } : null }; }
-  // The ditch cross-section holds at most one pending point (the near bank) before the far click samples.
-  if (s2.xsecMode && arr(s2.xsecPts).length) return { target: "xsecPts", next: s2.xsecPts.slice(0, -1) };
 
   return null;
 }

@@ -101,6 +101,13 @@ export const IDB_CLASSES = [
     match: (k) => has(k, "planarfit:sites:history"),
   },
   {
+    /* NEW-1 (2026-11-13): the Site Planner's undo steps carried across a reload (site-planner/lib/historyCarry.js) — a short
+     * tail per plan, 8 plans at most, each capped (~1.5 MB), kept 3 days, never synced. Disposable by design (losing it costs
+     * "no undo after a reload") but NOT rebuildable, and its writer already bounds it, so it is classified, never bulk-reclaimed. */
+    id: "undohistory", label: "Undo steps", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => has(k, "undo:v1:"),
+  },
+  {
     /* The Spreadsheet's calculation cache (NEW-1, B2604xxx): formula results remembered per workbook so a reload paints complete (lib/univerCalcCache.js).
      * Entirely derived — an entry is used only when its hash equals the workbook about to load, and losing it costs one recalculation.
      * NOT in the bulk-reclaim set on purpose: the shared reclaim path (storageReclaim.js) only knows the GIS namespaces, and this class is
