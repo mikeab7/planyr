@@ -557,7 +557,7 @@ function RailTab({ label, count, active, onClick, title }) {
   );
 }
 
-function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
+function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, focusCompReveal = false, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
   // B1310209 (NEW-2) — the map's own relatively-positioned host box (below), the same one every
   // other floating map panel (the Comps rail, the Layers panel) is already a position:absolute
@@ -5313,6 +5313,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   pendingAnchor={pendingCompAnchor}
                   onAnchorConsumed={onCompAnchorConsumed}
                   focusCompId={focusCompId}
+                  focusReveal={focusCompReveal}
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}
