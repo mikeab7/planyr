@@ -19,8 +19,10 @@ import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js"
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { fetchTaxUnits, tableFromUnits, accountOf, TAX_UNIT_COUNTIES } from "../lib/taxUnitsClient.js";
 import { taxTableForCombined } from "../lib/taxRates.js";
+import { noteStaleRoll } from "../lib/taxRollStale.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
 import { countyRecord, apprAll } from "../lib/appraisal.js";
+import { agUseLine, AG_USE_RULES } from "../lib/agUseRules.js";
 import { accountOf as recordAccountOf } from "../lib/parcelOrigin.js";
 
 const eyebrow = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
@@ -64,7 +66,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField }) {
+export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, countyState }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -79,7 +81,7 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
   const kind = origin.kind;
   const stated = parcel.statedAcres != null && parcel.statedAcres !== "" ? Number(parcel.statedAcres) : null;
   const hasTypedFacts = !!(parcel.owner || parcel.acct || stated != null);
-  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField }) : null;
+  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField, state: countyState || null }) : null;
   const deedAc = rec && rec.deedAcres != null ? rec.deedAcres : stated;
 
   return (
@@ -138,6 +140,9 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
             <Fact label="Address">{rec.address}</Fact>
             <Fact label="Deed acres">{deedAc != null ? <>{fmt(deedAc)} <span style={{ color: "var(--text-secondary)" }}>· drawn {fmt(drawnAcresOf(parcel))}</span></> : null}</Fact>
             <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{[cadName ? `Source: ${cadName}` : "Source: county appraisal district", rec.taxYear ? `tax year ${rec.taxYear}` : null].filter(Boolean).join(" · ")}</div>
+            {(() => { const line = agUseLine(rec.agUse); return line ? (
+              <div data-testid="parcel-ag-use" title={AG_USE_RULES[rec.agUse.ruleId].note} style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm, overflowWrap: "anywhere" }}>{line}</div>
+            ) : null; })()}
             {parcel.attrs && (
               <details data-testid="parcel-more-fields" style={{ marginTop: SPACE.sm }}>
                 <summary style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--accent-site-text, var(--text-primary))", cursor: "pointer" }}>More county fields</summary>
@@ -202,11 +207,11 @@ function TaxTable({ data }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
         <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? "Rate per $100" : "Total"}</th></tr></thead>
         <tbody>
-          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(6)}</td></tr>)}
+          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}{r.note ? <span style={{ color: "var(--text-secondary)" }}>{` · ${r.note}`}</span> : null}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(6)}</td></tr>)}
           <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(6) : "—"}</td></tr>
         </tbody>
       </table>
-      {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.year ? ` · ${data.year}` : ""}</div>}
+      {data.source && <div data-testid="parcel-tax-caption" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.caption ? ` · ${data.caption}` : data.year ? ` · ${data.year}` : ""}</div>}
     </PageSection>
   );
 }
@@ -214,7 +219,7 @@ function TaxTable({ data }) {
 /* B2158065 — the table from /api/taxunits (the CAD's own per-account unit list + adopted rates).
  * Renders nothing until every lot's answer is complete: a partial list would understate the total. */
 function ServerTaxTable({ county, lots, combined, idField }) {
-  const accts = lots.map((l) => accountOf(l, idField));
+  const accts = lots.map((l) => accountOf(l, idField, county));
   const key = `${county}|${accts.join(",")}`;
   const [res, setRes] = useState({ key: "", tables: null });
   useEffect(() => {
@@ -223,6 +228,10 @@ function ServerTaxTable({ county, lots, combined, idField }) {
     Promise.all(accts.map((a) => fetchTaxUnits(county, a))).then((rs) => { if (live) setRes({ key, tables: rs.map(tableFromUnits) }); });
     return () => { live = false; };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { // NEW-3: a newer HCAD roll is out and the index has not been rebuilt — one telemetry row per page load, so ops sees it
+    const t = res.tables && res.tables.find((x) => x && x.staleState === "refresh-pending");
+    if (t) noteStaleRoll(county, t.rollYear);
+  }, [res]); // eslint-disable-line react-hooks/exhaustive-deps
   if (res.key !== key || !res.tables || res.tables.some((t) => !t)) return null;
   const data = combined ? taxTableForCombined(lots, { tableOf: (p) => res.tables[lots.indexOf(p)] }) : res.tables[0];
   return data ? <TaxTable data={data} /> : null;
