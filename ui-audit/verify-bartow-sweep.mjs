@@ -189,8 +189,7 @@ try {
     let card = null;
     for (const [dx, dy] of [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [4, 4], [-4, -4]]) {
       await page.mouse.click(xy.x + dx, xy.y + dy);
-      await page.waitForTimeout(2500);
-      card = await readCard();
+      for (let w = 0; w < 10 && !(card = await readCard()); w++) await page.waitForTimeout(500); // the identify answers a little after the press on a dense network: wait for the card, not a fixed beat
       if (card && C.expect.every((re) => re.test(card.text))) break;
     }
     if (!card) { check(`${C.name}: a click opens a card`, false, "no popup"); }
