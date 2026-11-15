@@ -4,7 +4,9 @@
  * units + each unit's ADOPTED rate for a stated tax year). Partial unit lists understate the
  * total (a false number), so: complete per the source, or HIDDEN. Never a guess/average.
  *
- * FINDING (researched 2026-10-06 from the Claude Code sandbox) — NO COUNTY IS COVERED YET.
+ * FINDING (researched 2026-10-06 from the Claude Code sandbox) — written BEFORE the per-account API: Harris (B2158065) and
+ *   Fort Bend (NEW-1, 2026-11-12) now render from /api/taxunits (see TAX_COVERAGE); the notes below are history for the rest.
+ *   NO COUNTY WAS COVERED YET.
  *   Reachable: comptroller.texas.gov/taxes/property-tax/docs/<year>-{county,city,school-district,
  *   special-district}-rates-levies.xlsx (200; adopted rates BY UNIT NAME, not per account — already
  *   used by harrisTaxRates.js via /api/taxrates), and the ArcGIS Online parcel layers in counties.js.
@@ -37,9 +39,10 @@
 export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
-  harris: { covered: false, reason: "HCAD GIS has no taxing-unit fields; hcad.org / hctax.net blocked from sandbox. Existing Comptroller+polygon panel is an incomplete estimate." },
-  fortbend: { covered: false, reason: "Parcels carry TAXUNITS codes (complete) but no reachable code->name->rate legend (fbcad.org blocked); mapping codes would be a guess." },
-  chambers: { covered: false, reason: "No taxing-unit field known/readable; service returned no field list from sandbox." },
+  // `server: true` = rendered from /api/taxunits (taxUnitsClient.TAX_UNIT_COUNTIES), not from a static data file; `covered` stays the static-file flag.
+  harris: { covered: false, server: true, reason: "Rendered from /api/taxunits: HCAD's own per-account unit list + adopted rates, from the precomputed Supabase index (B2158065). The static-file path here is unused for Harris." },
+  fortbend: { covered: false, server: true, reason: "Rendered from /api/taxunits (NEW-1): membership = the FBCAD parcel layer's TAXUNITS codes; names + adopted rates = the Fort Bend County Tax Office rate portal, keyed by the same codes; the newest year in which every unit has a reported rate. An account with a unit the portal does not publish (e.g. M256, SM106) is incomplete and the table is hidden with the reason." },
+  chambers: { covered: false, reason: "CCAD layer readable but carries no taxing-unit field; Location_Code (83 codes) has no published legend — hidden." },
   waller: { covered: false, reason: "No taxing-unit field in the wired source." },
   montgomery: { covered: false, reason: "Parcels carry taxingUnits codes but no reachable code legend/rates (mcad-tx.org blocked); layer's pYear reads 2027, so it needs a currency check." },
   brazoria: { covered: false, reason: "Only school/city/county fields (null in sampled rows); no ESD/MUD/college membership, so the list would be incomplete." },

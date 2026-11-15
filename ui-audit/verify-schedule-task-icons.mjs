@@ -92,7 +92,7 @@ async function makeServer() {
 
 const task = (over) => ({ start: "2026-01-05", end: "2026-01-05", duration: 1, predecessors: [], health: "gray", percentComplete: 0,
   parentId: null, responsibleParty: "", notes: [], isExpanded: true, durUnit: "d", durValue: 1, ...over });
-// 1 Entitlements (phase) → 2 Submit TIA (no icons) · 3 Will-serve letters (1) · 4 Plat (2) ; 5 Sitework (phase) → 6 Mass grading (🚦-free, dump) · 7 Pond (pond) ;
+// 1 Entitlements (phase) → 2 Submit TIA (no icons) · 3 Will-serve letters (1) · 4 Plat (2) ; 5 Sitework (phase) → 6 Mass grading (dump) · 7 Pond (pond) ;
 // 8 Lone task (no parent, no icons) ; 9 Closeout (phase, no icons anywhere inside) → 10 Punch list (no icons)
 const FIXTURE = {
   aPid: 1, nPid: 2, nTid: 1000, view: "grid", section: "projects",
@@ -216,12 +216,12 @@ try {
   ok("4 no icon id appears twice inside one category", await picker.locator("[data-icon-group]").evaluateAll(gs => gs.every(g => { const ids = [...g.querySelectorAll("[data-icon-id]")].map(b => b.getAttribute("data-icon-id")); return new Set(ids).size === ids.length; })));
   const ac = await picker.locator("input").evaluate(i => ({ ac: i.getAttribute("autocomplete"), lp: i.getAttribute("data-lpignore"), p1: i.getAttribute("data-1p-ignore") }));
   ok("5 the search box carries the no-autofill attributes", ac.ac === "off" && ac.lp === "true" && ac.p1 !== null, JSON.stringify(ac));
-  ok("4 custom icons carry the green dot, emoji do not", await picker.evaluate(p => { const dot = b => !![...b.querySelectorAll("span")].find(s => s.style.background === "rgb(22, 163, 74)"); return dot(p.querySelector('[data-icon-id="c:manhole"]')) && !dot(p.querySelector('[data-icon-id="🚦"]')); }));
-  ok("4 hover label: emoji plain, custom adds ' · drawn for Planyr'", await picker.evaluate(p => p.querySelector('[data-icon-id="🚦"]').title === "Traffic impact analysis (TIA)" && p.querySelector('[data-icon-id="c:manhole"]').title === "Sanitary sewer · drawn for Planyr"));
+  ok("4 custom icons carry the green dot, emoji do not", await picker.evaluate(p => { const dot = b => !![...b.querySelectorAll("span")].find(s => s.style.background === "rgb(22, 163, 74)"); return dot(p.querySelector('[data-icon-id="c:manhole"]')) && !dot(p.querySelector('[data-icon-id="📮"]')); }));
+  ok("4 hover label: emoji plain, custom adds ' · drawn for Planyr'", await picker.evaluate(p => p.querySelector('[data-icon-id="📮"]').title === "Will-serve letter" && p.querySelector('[data-icon-id="c:manhole"]').title === "Sanitary sewer · drawn for Planyr"));
   if (SHOTS) await page.screenshot({ path: SHOT_DIR + "picker-open.png" });
   const ids = async () => picker.locator("[data-icon-id]").evaluateAll(bs => bs.map(b => b.getAttribute("data-icon-id")));
   await picker.locator("input").fill("tia"); await pacedWait(page, 150);
-  ok('4 search "tia" → exactly the traffic light', JSON.stringify(await ids()) === JSON.stringify(["🚦"]), JSON.stringify(await ids()));
+  ok('4 search "tia" → exactly the cars-on-a-road TIA drawing', JSON.stringify(await ids()) === JSON.stringify(["svg:tia"]), JSON.stringify(await ids()));
   await picker.locator("input").fill("sewer"); await pacedWait(page, 150);
   ok('4 search "sewer" → exactly the manhole', JSON.stringify(await ids()) === JSON.stringify(["c:manhole"]), JSON.stringify(await ids()));
   await picker.locator("input").fill("roof"); await pacedWait(page, 100);
@@ -231,10 +231,10 @@ try {
   await picker.locator("input").fill("zzqx"); await pacedWait(page, 150);
   ok("4 empty search says Nothing matches “zzqx”. Try another word.", (await picker.innerText()).includes("Nothing matches “zzqx”. Try another word."));
   await picker.locator("input").fill("tia"); await pacedWait(page, 100);
-  await picker.locator('[data-icon-id="🚦"]').click(); await pacedWait(page, 200);
-  ok("4 first pick lands in the row's slot", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["🚦"]));
+  await picker.locator('[data-icon-id="svg:tia"]').click(); await pacedWait(page, 200);
+  ok("4 first pick lands in the row's slot", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["svg:tia"]));
   await picker.locator("input").fill("sewer"); await picker.locator('[data-icon-id="c:manhole"]').click(); await pacedWait(page, 150);
-  ok("4 second pick adds beside it", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["🚦", "c:manhole"]));
+  ok("4 second pick adds beside it", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["svg:tia", "c:manhole"]));
   await picker.locator("input").fill("roof"); await picker.locator('[data-icon-id="c:roof"]').click(); await pacedWait(page, 150);
   ok("4 a THIRD pick replaces the OLDEST", JSON.stringify((await state(page, 2)).glyphs) === JSON.stringify(["c:manhole", "c:roof"]), JSON.stringify((await state(page, 2)).glyphs));
   const s2b = await state(page, 2);

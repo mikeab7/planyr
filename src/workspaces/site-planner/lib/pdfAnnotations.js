@@ -551,7 +551,7 @@ export function measureDictString(m) {
   return `<< /Type /Measure /Subtype /RL /R (${m.R}) /X [${numberFormat(m.X)}] /Y [${numberFormat(m.X)}] /D [${numberFormat(m.D)}] /A [${numberFormat(m.A)}] /O [0 0] /CYX 1 >>`;
 }
 
-const SITE_MARKUP_KINDS = new Set(["easement", "encumbrance", "utilRoute", "traced", "infwater"]);
+const SITE_MARKUP_KINDS = new Set(["easement", "encumbrance"]);
 /** The largest closed (or filled) subpath among `ink`, on-curve vertices, PDF space — or null. */
 function largestRing(ink) {
   let best = null, bestA = 0;
@@ -648,7 +648,7 @@ export function buildAnnotations(descriptors, opts) {
           annots.push({ ...base, subtype: "Polygon", vertices: poly, subj: base.subj + " (rotated)" });
         }
       } else if (SITE_MARKUP_KINDS.has(d.kind) && main) {
-        // easements / encumbrances / utility routes: drawn site data, editable like any other shape (NEW-1, 2026-10-20)
+        // easements / encumbrances: drawn site data, editable like any other shape (NEW-1, 2026-10-20)
         const sp = largestRing(ink);
         if (sp) annots.push({ ...base, subtype: "Polygon", vertices: sp.flat() });
         else annots.push({ ...base, subtype: "PolyLine", vertices: pathVertices(main).flat(), LE: ["None", "None"] });

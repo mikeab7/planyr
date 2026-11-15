@@ -87,7 +87,7 @@ draw" into "empty / no features here" (`test/layerDrawBudget.test.js`).
 
 ## Metro Nashville (Davidson County) — water-quality buffers + pending flood maps (B2671266, B2671267, 2026-11-12)
 
-Rows (`lib/nashvilleLayers.js`, cards `lib/nashvilleCards.js`, registry `shared/gis/sourcesNashville.js`), all `states: ["TN"]`, `regions: ["davidson_tn"]`, read straight from Metro's ArcGIS Online org (`services2.arcgis.com/HdTo6HJqh92wn4D8`, CORS-open):
+Rows (`lib/nashvilleBufferLayers.js`, cards `lib/nashvilleBufferCards.js`, registry `shared/gis/sourcesNashvilleBuffers.js`), all `states: ["TN"]`, `regions: ["davidson"]`, read straight from Metro's ArcGIS Online org (`services2.arcgis.com/HdTo6HJqh92wn4D8`, CORS-open):
 
 | Panel row (Flood & Drainage) | Layers | Measured 2026-11-12 |
 |---|---|---|
@@ -95,7 +95,7 @@ Rows (`lib/nashvilleLayers.js`, cards `lib/nashvilleCards.js`, registry `shared/
 | **Metro floodplain — pending / preliminary maps** (`metro_pending_flood`, tier advisory) | `FEMA_Floodplains_and_Floodways_view` 2 Pending · 3 Preliminary | **both EMPTY (0 features)**; Approved (layer 1, 17,784, all adopted 2024-06-20) is deliberately not duplicated — FEMA's NFHL row is the effective map |
 
 * **No width is printed per stream** (constraint #4): the polygons carry none. The (i) carries the Metro Stormwater Manual Vol. 1 ch. 6 §6.10 tier table (30 ft <100 ac · 50 ft 100 ac–1 sq mi · 75 ft from the floodway for FEMA-studied / local-flood-study / ≥ 1 sq mi; pond and wetland 25 ft; inner no-disturb zone, outer no-structures-or-impervious zone). **That table was the sweep's reading and was not re-read from the PDF (nashville.gov is outside the build sandbox's network).** The state's 30 ft computed buffer (`tn_stream_buffers`) stays.
-* **The region is Metro's own county boundary, not the bundled county polygon.** The bundled outline (38 vertices) leaves out the county's north tip, where 1.6% of Metro's polygons sit; Metro's `DavidsonCountyBoundaryBuffer` layer is a MASK whose inner ring is the county, so `scripts/build-service-areas.mjs --only=davidson_tn` takes the largest inner ring.
+* **The region is Metro's own county boundary, not the bundled county polygon.** The bundled outline (38 vertices) leaves out the county's north tip, where 1.6% of Metro's polygons sit; Metro's `DavidsonCountyBoundaryBuffer` layer is a MASK whose inner ring is the county, so `scripts/build-service-areas.mjs --only=davidson` takes the largest inner ring.
 * **Pending / Preliminary are empty today and the rows say so, dated.** Their coverage fixtures probe the sibling Approved layer (`layerId: [2, 1]`, fixtures `layer: 1`) to prove the service answers — never a count on an empty layer. Their card was built against the layers' schema (no real record exists); when Metro posts its first revision, re-read the card against it and add a fixture on the layer itself.
 * **Follow-up, not built:** the same org's `Drainage_Area_Estimates_for_Stormwater_Regulations` could say which tier a given stream is in, letting the stream card print a width with its record.
-* Guards: `test/nashvilleLayers.test.js`; live `ui-audit/verify-nashville-layers-live.mjs`.
+* Guards: `test/nashvilleBufferLayers.test.js`; live `ui-audit/verify-nashville-buffers-live.mjs`.
