@@ -1,8 +1,8 @@
 /* Metro Nashville & Davidson County — water-quality buffers + pending / preliminary flood maps (NEW-1 / NEW-2, 2026-11-12).
  *
- * Every row is a REGIONAL source: it declares `states: ["TN"]` and `regions: ["davidson_tn"]` (serviceAreas.js: Davidson County, from the bundled county polygons — built by
+ * Every row is a REGIONAL source: it declares `states: ["TN"]` and `regions: ["davidson"]` (serviceAreas.js: Davidson County, from the bundled county polygons — built by
  * scripts/build-service-areas.mjs), so `layerAvailableHere` hides the row — and the map's draw filter turns it off before any request — on a Memphis, Knoxville, Murfreesboro, Houston or Georgia site.
- * The registry spreads NASHVILLE_LAYERS into ALL_LAYERS, exactly as Sugar Land's rows are.
+ * The registry spreads NASHVILLE_BUFFER_LAYERS into ALL_LAYERS, exactly as Sugar Land's rows are.
  *
  * NEW-1 — "Metro water-quality buffers": ONE panel row (merge group `metro_wq_buffers`) of four members read from Metro Water Services' Stormwater_Regulation_Buffers_view. The existing `tn_stream_buffers`
  * row (30 ft from the USGS NHD centreline, the state Construction General Permit rule) STAYS: Metro's polygons are the LOCAL rule on top of it.
@@ -14,11 +14,11 @@
  *   ⛔ Both layers hold ZERO features on 2026-11-12, so today the row draws nothing; its note says so, with the date, and that an empty map is Metro's copy being empty — never proof FEMA has no revision in progress.
  *
  * City/county GIS is shown as LAYERS ONLY — nothing here is wired into Site Analysis verdicts (constraint: Site Analysis stays TRUSTED-ONLY).
- * PURE: no network, no React — unit-tested in test/nashvilleLayers.test.js. */
+ * PURE: no network, no React — unit-tested in test/nashvilleBufferLayers.test.js. */
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { floodwayBufferCard, streamBufferCard, pondBufferCard, wetlandBufferCard, pendingFloodCard, SWMM_CITATION } from "./nashvilleCards.js";
+import { floodwayBufferCard, streamBufferCard, pondBufferCard, wetlandBufferCard, pendingFloodCard, SWMM_CITATION } from "./nashvilleBufferCards.js";
 
-const METRO = { states: ["TN"], regions: ["davidson_tn"] };
+const METRO = { states: ["TN"], regions: ["davidson"] };
 const METRO_WS = "Metro Nashville & Davidson County — Metro Water Services";
 const BUFFER_VINTAGE = "Metro Water Services stormwater regulation buffers — layer edited 2025-06-06";
 const PENDING_VINTAGE = "Metro Nashville FEMA pending / preliminary flood hazard areas — layer edited 2026-08-18; both held 0 features on 2026-11-12";
@@ -35,7 +35,7 @@ const fema = (color) => (_p, opacity) => ({ color, weight: 1.4, opacity, fill: t
 const buffer = (key, o) => ({ kind: "esriFeature", ...METRO, url: urlOf(key), source: `${METRO_WS} — stormwater regulation buffers`, vintage: BUFFER_VINTAGE, minZoom: 13, simplifyFactor: 1, weight: 1, opacity: 0.55,
   role: "area", group: "flood", floodTier: "local", agency: "Metro Water Services", hoverIdentify: true, canvasIdentify: true, mergeGroup: "metro_wq_buffers", ...o });
 
-export const NASHVILLE_MERGE_GROUPS = {
+export const NASHVILLE_BUFFER_MERGE_GROUPS = {
   metro_wq_buffers: {
     label: "Metro water-quality buffers",
     note: `Metro Water Services' stormwater buffers — streams, ponds, wetlands and the FEMA floodway — one switch for all four. Metro's stormwater rules limit what can be built inside them (${SWMM_CITATION}); they sit on top of the state's 30 ft construction buffer. Loads at zoom 13 and closer. Click a buffer for what applies.`,
@@ -46,7 +46,7 @@ export const NASHVILLE_MERGE_GROUPS = {
   },
 };
 
-export const NASHVILLE_LAYERS = {
+export const NASHVILLE_BUFFER_LAYERS = {
   nash_stream_buffer: buffer("metroStreamBuffer", {
     label: "Stream buffer", color: WQ_COLORS.stream, order: 6, fetchAll: true, styleFn: ribbon(WQ_COLORS.stream), legend: [{ label: "Stream buffer", color: WQ_COLORS.stream }],
     identifyCard: (props) => streamBufferCard(props), hoverTitle: "Stream buffer", hoverSource: "Metro Water Services", hoverFields: [],
@@ -92,4 +92,4 @@ export const NASHVILLE_LAYERS = {
   },
 };
 
-export const NASHVILLE_LAYER_IDS = Object.freeze(Object.keys(NASHVILLE_LAYERS));
+export const NASHVILLE_BUFFER_LAYER_IDS = Object.freeze(Object.keys(NASHVILLE_BUFFER_LAYERS));

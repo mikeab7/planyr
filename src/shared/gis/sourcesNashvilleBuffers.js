@@ -10,15 +10,15 @@
  *       their coverage fixtures prove the SERVICE answers by probing the sibling Approved layer, never by asserting a count on an empty layer.
  *
  * Every row is `states: ["TN"]`, production tier. Spread into `GIS_SOURCES` (sources.js) — one line there — so this block does not share a patch hunk with any other state's rows.
- * Fixtures and notes live in `sourceFixturesNashville.js` (off the app bundle, like every other row). */
+ * Fixtures and notes live in `sourceFixturesNashvilleBuffers.js` (off the app bundle, like every other row). */
 
 const METRO = "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services";
-const base = { states: ["TN"], coverage: "nashville", tier: "production", lastVerified: "2026-11-12", layerId: null, geometryType: "polygon" };
+const base = { states: ["TN"], coverage: "davidson", tier: "production", lastVerified: "2026-11-12", layerId: null, geometryType: "polygon" };
 /* a buffer row's serviceUrl IS its layer (layerId null); the two FEMA rows name the service root and a layerId list */
 const BUF = `${METRO}/Stormwater_Regulation_Buffers_view/FeatureServer`;
 const FEMA = `${METRO}/FEMA_Floodplains_and_Floodways_view/FeatureServer`;
 
-export const NASHVILLE_SOURCES = {
+export const NASHVILLE_BUFFER_SOURCES = {
   metroFloodwayBuffer: {
     key: "metroFloodwayBuffer", label: "Floodway buffer (Metro Water Services, Nashville)", provider: "Metro Nashville & Davidson County — Metro Water Services stormwater regulation buffers (FEMA floodway buffer)",
     serviceUrl: `${BUF}/0`, fields: { distance: "BufferDistance" }, dataLastEdited: "2025-06-06", ...base,
@@ -55,4 +55,4 @@ export const NASHVILLE_SOURCES = {
 
 /* Every row's real coverage is ONE county — a "regional" fixture class (≥2 points, ≥15 km apart), not the state class a Tennessee scope implies. */
 const COUNTY_ONLY = (what) => ["regional", `${what} — Davidson County (Nashville) only; probing it in Memphis or Knoxville would assert a guaranteed zero.`];
-export const NASHVILLE_FIXTURE_REACH = Object.fromEntries(Object.keys(NASHVILLE_SOURCES).map((k) => [k, COUNTY_ONLY(NASHVILLE_SOURCES[k].label)]));
+export const NASHVILLE_BUFFER_FIXTURE_REACH = Object.fromEntries(Object.keys(NASHVILLE_BUFFER_SOURCES).map((k) => [k, COUNTY_ONLY(NASHVILLE_BUFFER_SOURCES[k].label)]));

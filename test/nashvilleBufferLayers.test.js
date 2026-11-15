@@ -29,8 +29,8 @@ import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/li
 import { FLOOD_TIERS } from "../src/workspaces/site-planner/lib/floodGroup.js";
 import { GIS_SOURCES, auditRegistry, fixturePoints, haversineKm } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
-import { NASHVILLE_LAYERS, NASHVILLE_LAYER_IDS, NASHVILLE_MERGE_GROUPS } from "../src/workspaces/site-planner/lib/nashvilleLayers.js";
-import * as cards from "../src/workspaces/site-planner/lib/nashvilleCards.js";
+import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_LAYER_IDS, NASHVILLE_BUFFER_MERGE_GROUPS } from "../src/workspaces/site-planner/lib/nashvilleBufferLayers.js";
+import * as cards from "../src/workspaces/site-planner/lib/nashvilleBufferCards.js";
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
@@ -49,23 +49,23 @@ const MERGE = (id) => ALL_LAYERS[id].mergeGroup;
 
 describe("the Davidson County service area is a real boundary", () => {
   it("holds Nashville and its suburbs, not the neighbouring counties or Davidson County NC", () => {
-    for (const [k, p] of Object.entries(IN)) expect(areaContains("davidson_tn", p), k).toBe(true);
-    for (const [k, p] of Object.entries(OUT)) expect(areaContains("davidson_tn", p), k).toBe(false);
+    for (const [k, p] of Object.entries(IN)) expect(areaContains("davidson", p), k).toBe(true);
+    for (const [k, p] of Object.entries(OUT)) expect(areaContains("davidson", p), k).toBe(false);
   });
 });
 
 describe("every Metro row is registered whole, scoped to Davidson County", () => {
-  it("has the six rows, each Tennessee-only AND davidson_tn-only", () => {
-    expect(NASHVILLE_LAYER_IDS).toEqual([...BUFFERS.slice(0, 4), ...FEMA_ROWS].sort((a, b) => NASHVILLE_LAYER_IDS.indexOf(a) - NASHVILLE_LAYER_IDS.indexOf(b)));
-    expect(NASHVILLE_LAYER_IDS.length).toBe(6);
-    for (const id of NASHVILLE_LAYER_IDS) {
-      expect(ALL_LAYERS[id], id).toBe(NASHVILLE_LAYERS[id]);
+  it("has the six rows, each Tennessee-only AND davidson-only", () => {
+    expect(NASHVILLE_BUFFER_LAYER_IDS).toEqual([...BUFFERS.slice(0, 4), ...FEMA_ROWS].sort((a, b) => NASHVILLE_BUFFER_LAYER_IDS.indexOf(a) - NASHVILLE_BUFFER_LAYER_IDS.indexOf(b)));
+    expect(NASHVILLE_BUFFER_LAYER_IDS.length).toBe(6);
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) {
+      expect(ALL_LAYERS[id], id).toBe(NASHVILLE_BUFFER_LAYERS[id]);
       expect(ALL_LAYERS[id].states, id).toEqual(["TN"]);
-      expect(ALL_LAYERS[id].regions, id).toEqual(["davidson_tn"]);
+      expect(ALL_LAYERS[id].regions, id).toEqual(["davidson"]);
     }
   });
   it("carries the full row the panel and the stacking model read", () => {
-    for (const id of NASHVILLE_LAYER_IDS) {
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) {
       const c = ALL_LAYERS[id];
       expect(c.label, id).toMatch(/^[A-Z]/);
       for (const f of ["source", "note", "infoCaveat", "vintage"]) expect(c[f], `${id}.${f}`).toBeTruthy();
@@ -81,14 +81,14 @@ describe("every Metro row is registered whole, scoped to Davidson County", () =>
     }
   });
   it("sits in a weight tier, and the hierarchy audit stays clean", () => {
-    for (const id of NASHVILLE_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(LAYER_TIER[id], id).toBeTruthy();
     for (const id of BUFFERS) expect(LAYER_TIER[id], id).toBe("constraint");
     expect(hierarchyProblems(ALL_LAYERS)).toEqual([]);
   });
   it("every url IS a registry endpoint — the Metro service, read directly (it is CORS-open, no relay)", () => {
     const endpoint = (s) => (Array.isArray(s.layerId) ? `${s.serviceUrl}/${s.layerId[0]}` : s.serviceUrl);
     const urls = new Set(Object.values(GIS_SOURCES).map(endpoint));
-    for (const id of NASHVILLE_LAYER_IDS) {
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) {
       expect(urls.has(ALL_LAYERS[id].url), `${id}: ${ALL_LAYERS[id].url}`).toBe(true);
       expect(ALL_LAYERS[id].url, id).toMatch(/^https:\/\/services2\.arcgis\.com\/HdTo6HJqh92wn4D8\/arcgis\/rest\/services\//);
     }
@@ -100,7 +100,7 @@ describe("every Metro row is registered whole, scoped to Davidson County", () =>
     expect(ALL_LAYERS.nash_flood_preliminary.url).toMatch(/FeatureServer\/3$/);
   });
   it("NEVER reads the Approved layer (FEMA's NFHL row is the effective map) — no duplicate", () => {
-    for (const id of NASHVILLE_LAYER_IDS) expect(ALL_LAYERS[id].url, id).not.toMatch(/FEMA_Floodplains_and_Floodways_view\/FeatureServer\/1$/);
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(ALL_LAYERS[id].url, id).not.toMatch(/FEMA_Floodplains_and_Floodways_view\/FeatureServer\/1$/);
   });
   it("the buffer ribbons are fetched whole and simplified: none draws before z13, stream + wetland follow the paging, every row asks the server for ~1 px", () => {
     for (const id of BUFFERS) { expect(ALL_LAYERS[id].minZoom, id).toBeGreaterThanOrEqual(13); expect(ALL_LAYERS[id].simplifyFactor, id).toBe(1); expect(ALL_LAYERS[id].fields, `${id}: no fields list`).toBeUndefined(); }
@@ -111,9 +111,9 @@ describe("every Metro row is registered whole, scoped to Davidson County", () =>
   it("one panel row per merge group, each with a label and a note, and the registry's merge map carries them", () => {
     expect(new Set(BUFFERS.map(MERGE))).toEqual(new Set(["metro_wq_buffers"]));
     expect(new Set(FEMA_ROWS.map(MERGE))).toEqual(new Set(["metro_pending_flood"]));
-    expect(NASHVILLE_MERGE_GROUPS.metro_wq_buffers.label).toBe("Metro water-quality buffers");
-    expect(NASHVILLE_MERGE_GROUPS.metro_pending_flood.label).toBe("Metro floodplain — pending / preliminary maps");
-    for (const k of Object.keys(NASHVILLE_MERGE_GROUPS)) { expect(MERGE_GROUPS[k], k).toBe(NASHVILLE_MERGE_GROUPS[k]); expect(NASHVILLE_MERGE_GROUPS[k].note, k).toBeTruthy(); }
+    expect(NASHVILLE_BUFFER_MERGE_GROUPS.metro_wq_buffers.label).toBe("Metro water-quality buffers");
+    expect(NASHVILLE_BUFFER_MERGE_GROUPS.metro_pending_flood.label).toBe("Metro floodplain — pending / preliminary maps");
+    for (const k of Object.keys(NASHVILLE_BUFFER_MERGE_GROUPS)) { expect(MERGE_GROUPS[k], k).toBe(NASHVILLE_BUFFER_MERGE_GROUPS[k]); expect(NASHVILLE_BUFFER_MERGE_GROUPS[k].note, k).toBeTruthy(); }
   });
   it("the (i) cites §6.10 with the three tiers and says what is NOT printed per stream (constraint #4)", () => {
     const s = ALL_LAYERS.nash_stream_buffer.infoCaveat;
@@ -135,7 +135,7 @@ describe("every Metro row is registered whole, scoped to Davidson County", () =>
       expect(layerVintage(ALL_LAYERS[id]) || ALL_LAYERS[id].vintage, id).toMatch(/0 features/);
       expect(ALL_LAYERS[id].floodTier, id).toBe("advisory"); // never listed with the adopted regulatory layers
     }
-    expect(NASHVILLE_MERGE_GROUPS.metro_pending_flood.note).toMatch(/As of 2026-11-12/);
+    expect(NASHVILLE_BUFFER_MERGE_GROUPS.metro_pending_flood.note).toMatch(/As of 2026-11-12/);
   });
 });
 
@@ -158,7 +158,7 @@ describe("the registry rows (GIS_SOURCES) the weekly health check covers", () =>
   it("every fixture sits in Davidson County and the two ends are at least 15 km apart", () => {
     for (const k of KEYS) {
       const pts = fixturePoints(SOURCE_FIXTURES[k]);
-      for (const [lng, lat] of pts) expect(areaContains("davidson_tn", { lat, lng }), `${k} ${lng},${lat}`).toBe(true);
+      for (const [lng, lat] of pts) expect(areaContains("davidson", { lat, lng }), `${k} ${lng},${lat}`).toBe(true);
     }
     for (const k of ["metroFloodwayBuffer", "metroPondBuffer", "metroStreamBuffer", "metroWetlandBuffer"]) {
       const pts = fixturePoints(SOURCE_FIXTURES[k]);
@@ -189,13 +189,13 @@ describe("where each row is offered — the pure gate at real points", () => {
   for (const [name, p] of Object.entries(IN)) {
     it(`${name} (Davidson County) is offered every Metro row`, () => {
       const offered = offeredAt(p);
-      for (const id of NASHVILLE_LAYER_IDS) expect(offered.has(id), id).toBe(true);
+      for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(offered.has(id), id).toBe(true);
     });
   }
   for (const [name, p] of Object.entries(OUT)) {
     it(`${name} is offered NO Metro row`, () => {
       const offered = offeredAt(p);
-      for (const id of NASHVILLE_LAYER_IDS) expect(offered.has(id), id).toBe(false);
+      for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(offered.has(id), id).toBe(false);
     });
   }
   it("other Tennessee counties still get the state's own rows (the Metro rows are additive, not a replacement)", () => {
@@ -204,11 +204,11 @@ describe("where each row is offered — the pure gate at real points", () => {
     expect(offered.has("tn_wqa")).toBe(true);
   });
   it("the map's draw filter turns every Metro row off outside Davidson County (so no request fires) and leaves them on inside it", () => {
-    const on = Object.fromEntries(NASHVILLE_LAYER_IDS.map((id) => [id, { on: true, opacity: 1 }]));
+    const on = Object.fromEntries(NASHVILLE_BUFFER_LAYER_IDS.map((id) => [id, { on: true, opacity: 1 }]));
     const out = drawnOverlaysOf(on, { scope: scopeOf(OUT.murfreesboro), layers: ALL_LAYERS });
-    for (const id of NASHVILLE_LAYER_IDS) expect(out[id].on, id).toBe(false);
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(out[id].on, id).toBe(false);
     const inside = drawnOverlaysOf(on, { scope: scopeOf(IN.downtown), layers: ALL_LAYERS });
-    for (const id of NASHVILLE_LAYER_IDS) expect(inside[id].on, id).toBe(true);
+    for (const id of NASHVILLE_BUFFER_LAYER_IDS) expect(inside[id].on, id).toBe(true);
     expect(layerAvailableHere(ALL_LAYERS.nash_stream_buffer, scopeOf(IN.antioch))).toBe(true);
   });
 });
@@ -225,7 +225,7 @@ describe("requests actually issued — the Metro service is asked inside Davidso
     globalThis.fetch = vi.fn(async (u) => { fetched.push(String(u)); return { ok: true, status: 200, json: async () => ({ fullExtent: null }), text: async () => "{}" }; });
     try {
       const all = Object.fromEntries(Object.keys(ALL_LAYERS).map((id) => [id, { on: false, opacity: 1 }]));
-      for (const id of NASHVILLE_LAYER_IDS) all[id] = { on: true, opacity: 1 };
+      for (const id of NASHVILLE_BUFFER_LAYER_IDS) all[id] = { on: true, opacity: 1 };
       const drawn = drawnOverlaysOf(all, { scope: scopeOf(point), layers: ALL_LAYERS });
       syncOverlayLayers(fakeMap(), drawn, {}, { onStatus() {}, onError() {} });
       await new Promise((r) => setTimeout(r, 200));
@@ -234,7 +234,7 @@ describe("requests actually issued — the Metro service is asked inside Davidso
   }
   it("at Nashville every row is built, with the server simplifying, the paged rows following the paging, and no fields list on the buffers", async () => {
     const r = await run(IN.downtown);
-    expect(r.calls.length).toBe(NASHVILLE_LAYER_IDS.length);
+    expect(r.calls.length).toBe(NASHVILLE_BUFFER_LAYER_IDS.length);
     const byUrl = (re) => r.calls.find((o) => re.test(o.url));
     expect(byUrl(/Buffers_view\/FeatureServer\/2$/).fetchAllFeatures).toBe(true);
     expect(byUrl(/Buffers_view\/FeatureServer\/3$/).fetchAllFeatures).toBe(true);

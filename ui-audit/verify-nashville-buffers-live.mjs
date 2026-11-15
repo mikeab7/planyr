@@ -1,6 +1,6 @@
-/* verify-nashville-layers-live — Metro Nashville water-quality buffers + pending / preliminary flood maps (B2671266, B2671267), LIVE on planyr.io, signed in as the test account.
+/* verify-nashville-buffers-live — Metro Nashville water-quality buffers + pending / preliminary flood maps (B2671266, B2671267), LIVE on planyr.io, signed in as the test account.
  *
- *   E2E_LOGIN_KEY=… node ui-audit/verify-nashville-layers-live.mjs [https://planyr.io] [--expect-sha <sha>] [--shots <dir>]
+ *   E2E_LOGIN_KEY=… node ui-audit/verify-nashville-buffers-live.mjs [https://planyr.io] [--expect-sha <sha>] [--shots <dir>]
  *
  * Proves, against the DEPLOYED build (read from /version.json in the same call as the assertions):
  *   A. A LOCATED PLAN at Antioch (inside Davidson County, where the sweep measured 72 stream-buffer polygons in one small box) lists BOTH merged Flood & Drainage rows; turning
@@ -36,7 +36,7 @@ for (let attempt = 1; attempt <= 6 && !s; attempt++) {
   catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 6) throw e; await new Promise((r) => setTimeout(r, 20000)); }
 }
 const page = s.page;
-await assertMeasurable(page, "verify-nashville-layers-live");
+await assertMeasurable(page, "verify-nashville-buffers-live");
 await page.setViewportSize({ width: 1400, height: 900 });
 const served = await page.evaluate(async () => (await fetch("/version.json", { cache: "no-store" }).then((r) => r.json())).build);
 console.log(`signed in as ${s.proof.email} · served build ${served}`);

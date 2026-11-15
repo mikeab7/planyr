@@ -1,4 +1,4 @@
-/* NEW-1 / NEW-2 (Nashville buffers + Metro pending flood maps, 2026-11-12) — the VERIFICATION payload of the Metro Nashville registry rows (`sourcesNashville.js`), off the app bundle exactly like
+/* NEW-1 / NEW-2 (Nashville buffers + Metro pending flood maps, 2026-11-12) — the VERIFICATION payload of the Metro Nashville registry rows (`sourcesNashvilleBuffers.js`), off the app bundle exactly like
  * every other row's fixtures (see sourceFixtures.js). Spread into SOURCE_FIXTURES / SOURCE_DOCS there with one line each.
  *
  * Every point is a vertex of a real feature (found by the sweep's own query), and every count is what the verifier's ±0.01° box returned on 2026-11-12. The two ends are ≥ 15 km apart (Davidson County is
@@ -10,7 +10,7 @@
 const ANTIOCH = [-86.65461, 36.02578], NORTH = [-86.81005, 36.29407];
 const APPROVED_ALIVE = (label) => ({ label, point: [-86.8199, 36.1029], layer: 1, expectMinCount: 1 }); // live 2026-11-12: 66 approved polygons in the box
 
-export const NASHVILLE_FIXTURES = {
+export const NASHVILLE_BUFFER_FIXTURES = {
   metroFloodwayBuffer: { fixtures: [
     { label: "South-west Davidson (Bell Road / Mill Creek side)", point: [-87.0411, 36.0502], expectMinCount: 1 }, // live 2026-11-12: 4
     { label: "North Davidson", point: [-86.7505, 36.4046], expectMinCount: 1 }, // live: 5
@@ -39,7 +39,7 @@ export const NASHVILLE_FIXTURES = {
   ] },
 };
 
-export const NASHVILLE_DOCS = {
+export const NASHVILLE_BUFFER_DOCS = {
   metroFloodwayBuffer: { notes: "Metro Water Services' FEMA floodway buffer (174; BufferDistance 50 on 91, 75 on 83; edited 2025-06-06). Metro Stormwater Manual Vol. 1 ch. 6 §6.10." },
   metroPondBuffer: { notes: "Metro pond buffer (993; BufferDistance 25 on all; edited 2025-06-06): 25 ft from normal pool per §6.10." },
   metroStreamBuffer: { notes: "Metro stream buffer (25,287; no width attribute, edited 2025-06-06). The width is 30 / 50 / 75 ft by drainage area and flood study (§6.10); the polygon does not say which. Page size 2,000 — read with fetchAll." },
