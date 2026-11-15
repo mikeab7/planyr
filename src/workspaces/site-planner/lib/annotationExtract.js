@@ -218,8 +218,8 @@ export function elementSubject(el) {
   const W = { pond: "Detention pond", road: "Road", parking: "Car parking", trailer: "Trailer parking", sidewalk: "Sidewalk", landscape: "Landscape", driveInRamp: "Drive-in ramp" };
   return W[el.type] || String(el.type || "Site element").replace(/^./, (c) => c.toUpperCase());
 }
-/** Plain words for a site-data markup kind (easements, utility routes — they live in `markups` but are drawn site data). */
-export const MARKUP_SITE_SUBJECT = { easement: "Easement", encumbrance: "Encumbrance", utilRoute: "Utility route", traced: "Traced line", infwater: "Water main (inferred)" };
+/** Plain words for a site-data markup kind (easements — they live in `markups` but are drawn site data). */
+export const MARKUP_SITE_SUBJECT = { easement: "Easement", encumbrance: "Encumbrance" };
 
 /**
  * Lift every drawn object out of `clone` (mutates it) and describe each as a native annotation.

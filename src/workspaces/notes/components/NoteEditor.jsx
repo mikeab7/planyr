@@ -34,7 +34,10 @@
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { TextSelection } from "@tiptap/pm/state";
+import { Selection, TextSelection } from "@tiptap/pm/state";
+import { undoDepth } from "@tiptap/pm/history";
+import { blockAt, snapbackVerdict, snapbackReport } from "../lib/notesCaretSnapback.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { contentOfBoxes } from "../lib/notesTableClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
@@ -47,6 +50,8 @@ import {
 } from "../lib/notesBlankPaper.js";
 import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import { normalizeFakeBullets } from "../lib/notesFakeBullets.js";
+import { unnestDoc } from "../lib/notesAnchorNest.js";
+import { placeChip } from "../lib/notesChipPlace.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -77,8 +82,9 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage,
+  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage, notesScope,
 } from "../lib/notesStore.js";
+import { captureHistory, planRestore, forgetOutside } from "../lib/notesUndoCarry.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "../lib/notesMarkdown.js";
@@ -99,6 +105,8 @@ import NoteHistory from "./NoteHistory.jsx";
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
+/* Outcomes of the undo-history carry that are ordinary, not worth a telemetry row. */
+const QUIET_CARRY_REASONS = new Set(["none-parked", "page-changed", "nothing-to-keep"]);
 /* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
@@ -1045,7 +1053,7 @@ function pasteMenuHasFocus() {
  *  React would remount it out from under its own click. The flyout is clamped into the visible mat in a LAYOUT effect
  *  (measured before paint, so it never shows at an unclamped spot) and flips above the line when it would run off the
  *  bottom — it has to fit a phone, where the buttons also grow to a thumb-sized target. */
-function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
+function PasteOptions({ offer, expanded, focusIn, onExpand, onPick, onPreview }) {
   const rootRef = useRef(null);
   const [tip, setTip] = useState(null);
   const [place, setPlace] = useState(null);
@@ -1064,9 +1072,26 @@ function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
     if (!el || !host) { setPlace(null); return; }
     const w = el.offsetWidth; const h = el.offsetHeight;
     const hw = host.clientWidth; const hh = host.clientHeight;
-    const left = Math.max(6, Math.min(x, hw - w - 6));
-    let top = y + 4;
-    if (top + h > hh - 6) top = Math.max(6, (yTop ?? y) - h - 4);
+    /* ⛔ IT COVERS NO TEXT (B2671237, owner screenshot: "(Ctrl) v" printed over the next box's words). Every line of text on the
+     * page is an obstacle; `placeChip` takes the historic spot when it is clear and otherwise the nearest clear one. */
+    let obstacles = [];
+    try {
+      const pm = host.querySelector(".ProseMirror");
+      const hr = host.getBoundingClientRect();
+      if (pm) {
+        const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        const range = document.createRange();
+        let node;
+        while ((node = walker.nextNode())) {
+          if (!node.nodeValue || !node.nodeValue.trim()) continue;
+          range.selectNodeContents(node);
+          for (const r of range.getClientRects()) obstacles.push({ left: r.left - hr.left, top: r.top - hr.top, right: r.right - hr.left, bottom: r.bottom - hr.top });
+        }
+      }
+    } catch (_) { obstacles = []; }
+    const spot = placeChip({ chip: { w, h }, at: { x, y, yTop }, obstacles, host: { w: hw, h: hh } });
+    const left = spot.left;
+    const top = spot.top;
     const tipRight = left + 250 > hw;
     setPlace((prev) => (prev && prev.left === left && prev.top === top && prev.tipRight === tipRight ? prev : { left, top, tipRight }));
   }, [x, y, yTop, expanded, kind]);
@@ -1122,6 +1147,7 @@ function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
   return (
     <div ref={rootRef} data-testid="note-paste-options" data-paste-kind={offer.kind} role="group" aria-label="Paste Options"
       onClick={(e) => e.stopPropagation()}
+      onMouseLeave={() => onPreview?.(null)}
       onKeyDown={(e) => {
         /* Arrows, Tab and Home / End move the highlight; Enter / Space press the focused button natively; the option's own
          * letter and Escape are NoteEditor's (they must work from outside the menu's focus too). */
@@ -1159,12 +1185,13 @@ function PasteOptions({ offer, expanded, focusIn, onExpand, onPick }) {
                   tabIndex={mode === cur ? 0 : -1}
                   onClick={() => onPick(mode)}
                   onMouseEnter={(e) => {
+                    onPreview?.(mode);
                     setActive(mode);
                     if (rootRef.current?.contains(document.activeElement)) e.currentTarget.focus({ preventScroll: true });
                     setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight });
                   }}
                   onMouseLeave={() => setTip((t) => (t && t.mode === mode ? null : t))}
-                  onFocus={(e) => { setActive(mode); setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight }); }}
+                  onFocus={(e) => { onPreview?.(mode); setActive(mode); setTip({ mode, left: e.currentTarget.offsetLeft, top: e.currentTarget.offsetTop + e.currentTarget.offsetHeight }); }}
                   onBlur={() => setTip((t) => (t && t.mode === mode ? null : t))}
                   className="planyr-paste-btn"
                 >
@@ -1711,9 +1738,11 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* ⛔ AND "BULLETS" THAT ARE JUST TEXT BECOME REAL LISTS HERE TOO (lib/notesFakeBullets.js): a Word / OneNote outline pasted
    * before the Office-list fix is paragraphs that begin with the glyph, so Enter has no list to continue. Same rule as the two
    * migrations: on the way in, never a transaction, saved only once the person edits (pressing Enter is that edit). */
-  const [initialDoc] = useState(() => normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
+  /* ⛔ AND A BOX INSIDE A BOX IS UNWRAPPED HERE TOO (B2671237, lib/notesAnchorNest.js): a page that already stored one (a paste
+   * of text copied from a box used to nest it) opens flat; same on-read, never-a-transaction rule as the two above. */
+  const [initialDoc] = useState(() => unnestDoc(normalizeFakeBullets(migrateFlowBody(migrateSketchesToBoxes(
     (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
-  ))));
+  )))));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
   /* ⛔ NEW-5 — whether DOM focus is currently in the title `<input>`, so the toolbar knows to
    * read/write `titleStyle` instead of the document selection. A plain boolean, not derived
@@ -1791,6 +1820,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * rest of the time, which is most of the time — an affordance that shows up on every paste
    * would be its own noise. The default Ctrl+V is untouched; this only watches. */
   const [pasteOffer, setPasteOffer] = useState(null);
+  /* NEW-2: the paste option being PREVIEWED (Word's Live Preview): `{ snapshot, selJSON, mode }`. `snapshot` is the document exactly as it stood before the
+   * first preview — the applied option — so taking the preview back is one exact replace and never an undo.
+   * ⛔ THE MENU DOES NOT FOLLOW THE PREVIEW. It is anchored to where the APPLIED paste ends; a preview changes the paste's height, and a menu that chased
+   * that end slid out from under the pointer, which fired mouseleave, which restored the paste, which slid the menu back under the pointer — a flicker loop
+   * (measured, first build). Frozen while previewing; a pick moves it as it always did. */
+  const previewRef = useRef(null);
   const pasteRef = useRef(null);
   pasteRef.current = pasteOffer;
   /* The extension list must stay stable (rebuilding it rebuilds the editor), so the paste announcement reaches this
@@ -1940,8 +1975,11 @@ const NoteEditor = forwardRef(function NoteEditor({
         "data-testid": "note-body",
       },
     },
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
       const doc = ed.getJSON();
+      /* ⛔ A PASTE-OPTION PREVIEW IS NOT AN EDIT (NEW-2, 2026-11-12). Hovering Merge Formatting shows it in place and takes it back; neither the show
+       * nor the take-back may queue a save, mark the page "unsaved", touch the version snapshot's `lastDocRef`, or reach the cloud. Only the pick does. */
+      if (transaction?.getMeta("pastePreview")) return;
       // Two refs, deliberately: `pendingRef` is the SAVE's queue and is emptied by the
       // flush; `lastDocRef` is the version snapshot's and is never emptied. See the unmount
       // effect below for the cleanup-order bug that separating them fixes.
@@ -1977,6 +2015,31 @@ const NoteEditor = forwardRef(function NoteEditor({
       ed.commands.dropEmptyAnchors();
     },
   });
+
+  /* ⛔ EACH PAGE KEEPS ITS OWN UNDO HISTORY ACROSS A PAGE SWITCH (NEW-1, 2026-11-13). The parent keys this component by page id, so leaving a
+   * page unmounts the editor and a new one starts with an empty history — Ctrl+Z after "A → B → A" found nothing. The remount, the autosave flush
+   * and the keyed instance are all UNCHANGED; only the history is carried: parked when this editor goes away, handed back to the NEW editor when
+   * the page is opened again (lib/notesUndoCarry.js — read its header: why steps travel as JSON, the stale guard that discards a history whose
+   * page changed meanwhile, the caps). In memory only: not saved, not synced, gone on reload. A read-only peek neither parks nor restores.
+   * Restoring is a meta-only transaction (no step), so no plugin treats it as an edit, nothing is saved and `undoDepth` is the only thing that moves. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return undefined;
+    const scopePrefix = `${notesScope()}|`;
+    const key = `${scopePrefix}${pageId}`;
+    const report = (reason) => { if (reason && !QUIET_CARRY_REASONS.has(reason)) reportClientEvent("notes-undo-carry", `a page's undo history was not carried (${reason})`); };
+    /* A read-only trail of what the carry decided, for the live harness (E2E-gated, like every self-audit hook in this file). */
+    const trail = (phase, r) => { if (typeof window !== "undefined" && window.__PLANYR_E2E) (window.__undoCarryLog = window.__undoCarryLog || []).push({ phase, key, ...r }); };
+    forgetOutside(scopePrefix);
+    try {
+      const plan = planRestore(key, editor.state);
+      trail("restore", { restored: !!plan.tr, reason: plan.reason, done: plan.done, undone: plan.undone });
+      if (plan.tr) editor.view.dispatch(plan.tr); else report(plan.reason);
+    } catch (e) { report(`restore-threw:${e?.name || "error"}`); }
+    return () => {
+      if (editor.isDestroyed) return;
+      try { const r = captureHistory(key, editor.state); trail("park", r); report(r.reason); } catch (e) { report(`capture-threw:${e?.name || "error"}`); }
+    };
+  }, [editor, pageId, readOnly]);
 
   /* ⛔ THE INSTRUMENT NEW-2 NEEDED, and the reason it is committed rather than improvised.
    * "Backspace at the start of a block" is a rule about the DOCUMENT TREE, and a harness that
@@ -2033,6 +2096,9 @@ const NoteEditor = forwardRef(function NoteEditor({
           return true;
         });
       },
+      /** NEW-2: the live document and how many undo steps exist — the two facts a "the preview left no trace" check needs. E2E-gated like the rest. */
+      doc: () => (editor.isDestroyed ? null : editor.getJSON()),
+      undoDepth: () => (editor.isDestroyed ? null : undoDepth(editor.state)),
       selection: () => (editor.isDestroyed ? null : { from: editor.state.selection.from, to: editor.state.selection.to, empty: editor.state.selection.empty }),
       /** Run a named editor command through the ordinary command system (so it obeys every
        *  schema rule a click would) — for a harness that needs to state "run X" precisely
@@ -2208,6 +2274,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       // the mount-time schema settle `onUpdate` no longer treats as an edit. Neither is
       // "typing", so neither may mint a row labelled that way.
       if (editor.isDestroyed || !hasUserInputRef.current) return;
+      if (previewRef.current) return;              // NEW-2: a hovered paste option is on screen — that document is not a version
       snapshotPage(pageId, editor.getJSON()).then((r) => { if (r.taken && historyOpen) refreshVersions(); });
     }, 1500);
     return () => clearTimeout(t);
@@ -2774,6 +2841,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * the person did, never the app's tidy-up. ⛔ AND IT ONLY EVER SHRINKS ON CLICK-OUT — content wider than
    * the box (a long unbroken line, a wide table) leaves the box exactly as it is. */
   const settleBox = useCallback((aid) => {
+    if (previewRef.current) return;                  // NEW-2: a hovered paste option is on screen — never fit the box around a preview
     if (!aid || !editor || editor.isDestroyed) return;
     const hit = findFitBox(editor, aid);
     if (!hit || !boxHasContent(hit.node)) return;
@@ -2811,7 +2879,10 @@ const NoteEditor = forwardRef(function NoteEditor({
    * already at least start-wide never measures. */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const onEditorUpdate = () => {
+    const onEditorUpdate = ({ transaction } = {}) => {
+      /* ⛔ NEW-2 (found live 2026-11-13): a paste-option PREVIEW changes the words' natural width, and this grew the self-fitting box with it — a width the
+       * restore then could not take back, because it landed AFTER the restore. A preview (and its take-back) never resizes a box. */
+      if (transaction?.getMeta?.("pastePreview")) return;
       const id = editingRef.current;
       if (!id || editor.isDestroyed) return;
       const hit = findFitBox(editor, id);
@@ -5395,6 +5466,104 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [pasteExpanded, setPasteExpanded] = useState(false);
   /* Does the open flyout hold keyboard focus? Yes for a pointer / keyboard person; no on a touch screen (see PasteOptions). */
   const [pasteFocusIn, setPasteFocusIn] = useState(false);
+  const pasteExpandedRef = useRef(false);
+  pasteExpandedRef.current = pasteExpanded;
+  /* ⛔ THE CARET SNAP-BACK RECORDER (NEW-3, owner report 2026-11-12 — see lib/notesCaretSnapback.js for why this is instrumentation and not a fix).
+   * A plain left click in the page's text that ends, 150 ms or 700 ms later, with the caret in a DIFFERENT textblock than the one clicked sends ONE structure-only
+   * `notes-snapback` event (at most one per five minutes). Skipped when the press was not a plain click (a drag, a modifier, a double-click), when it began
+   * outside the text, or when the editor is no longer focused (a select-then-enter press blurs it on purpose). Reads only; changes nothing. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    let down = null;
+    let lastSent = 0;
+    const onDown = (e) => {
+      down = null;
+      if (e.button !== 0 || e.detail !== 1 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror") || e.target.closest("[data-chrome],[data-handle-layer],.planyr-anchor-edge")) return;
+      down = { x: e.clientX, y: e.clientY, focused: editor.view.hasFocus() };
+    };
+    const onUp = (e) => {
+      const d = down; down = null;
+      if (!d || !d.focused || editor.isDestroyed) return;
+      if (Math.abs(e.clientX - d.x) > 3 || Math.abs(e.clientY - d.y) > 3) return;
+      const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+      if (!hit) return;
+      const doc = editor.state.doc;
+      const clicked = blockAt(doc, hit.pos);
+      if (!clicked) return;
+      const clickPos = hit.pos;
+      const t0 = Date.now();
+      const look = () => {
+        if (editor.isDestroyed || !editor.view.hasFocus()) return;
+        if (editor.state.doc !== doc) return;                       // the page changed under the check: not a snap-back
+        const head = editor.state.selection.head;
+        if (!snapbackVerdict(clicked, head) || Date.now() - lastSent < 300000) return;
+        lastSent = Date.now();
+        const offer = pasteRef.current;
+        reportClientEvent("notes-snapback", "a click in the text left the caret in another block", snapbackReport({
+          doc, clicked, clickPos, head,
+          ctx: { pasteOffer: !!offer, pasteExpanded: !!offer && pasteExpandedRef.current, msSincePaste: offer ? Date.now() - offer.at : null, applied: offer ? offer.applied : null, menuFocus: pasteMenuHasFocus(), msSinceClick: Date.now() - t0 },
+        }));
+      };
+      setTimeout(look, 150); setTimeout(look, 700);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("mouseup", onUp, true);
+    return () => { document.removeEventListener("mousedown", onDown, true); document.removeEventListener("mouseup", onUp, true); };
+  }, [editor]);
+
+  /* ⛔ LIVE PREVIEW OF A PASTE OPTION (NEW-2, owner ask 2026-11-12: "in Word, if you hover over Keep Source Formatting or Merge Formatting or Keep Text
+   * Only, it shows you how they all look as you hover"). Hovering an option — or moving the keyboard highlight to it — SHOWS the paste in that option's
+   * form, in place; leaving the menu takes it back. The preview is the SAME transform a pick runs (`applyPasteModeToTr` / the text insert), applied as a
+   * transaction that is kept out of the undo history (`addToHistory:false`) and out of every save path (`pastePreview` — see `onUpdate`). Because it is not in
+   * the history, the only undo steps are the paste and, if one is made, the pick: `applyPasteMode` takes the preview back FIRST, so the pick's own undo frame
+   * reverses from the applied state, never from a preview. It never sets `uiEvent:"paste"` (that hook widens the box for a table — a real edit), never moves
+   * the scroll, and restores the caret exactly. Picture is not previewed (it is async and stores an image). Not on a touch screen: there is no hover. */
+  const restorePreview = useCallback(() => {
+    const pv = previewRef.current;
+    if (!pv) return;
+    previewRef.current = null;
+    if (!editor || editor.isDestroyed) return;
+    applyingPasteModeRef.current = true;
+    try {
+      editor.chain().command(({ tr }) => {
+        tr.setMeta("addToHistory", false); tr.setMeta("pastePreview", true);
+        revertToBase(tr, pv.snapshot);
+        try { tr.setSelection(Selection.fromJSON(tr.doc, pv.selJSON)); } catch (_) { /* a selection is a nicety */ }
+        return true;
+      }).run();
+    } finally { releasePasteApply(); }
+  }, [editor]);
+  const previewPasteMode = useCallback((mode) => {
+    const offer = pasteRef.current;
+    if (!editor || editor.isDestroyed || !offer) return;
+    const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches;
+    if (touch) return;
+    if (mode == null || mode === offer.applied || mode === "picture") { restorePreview(); return; }
+    if (previewRef.current?.mode === mode) return;
+    const pv = previewRef.current || { snapshot: editor.state.doc, selJSON: editor.state.selection.toJSON() };
+    applyingPasteModeRef.current = true;
+    let ok = false;
+    try {
+      if (mode === "text") {
+        const text = textOfNode(offer.baseDoc.slice(offer.from, Math.min(offer.to, offer.baseDoc.content.size)).content);
+        ok = editor.chain()
+          .command(({ tr }) => { tr.setMeta("addToHistory", false); tr.setMeta("pastePreview", true); revertToBase(tr, offer.baseDoc); return true; })
+          .insertContentAt({ from: offer.from, to: Math.min(offer.to, offer.baseDoc.content.size) }, plainTextToContent(text))
+          .run();
+      } else {
+        ok = editor.chain().command(({ tr }) => {
+          tr.setMeta("addToHistory", false); tr.setMeta("pastePreview", true);
+          const r = applyPasteModeToTr(tr, mode, offer);
+          return !!(r && r.ok);
+        }).run();
+      }
+    } finally { releasePasteApply(); }
+    if (!ok) { previewRef.current = pv; restorePreview(); return; }
+    previewRef.current = { ...pv, mode };
+  }, [editor, restorePreview]);
+  /* the preview never outlives the open menu or the offer: closing the menu, a retired offer, Escape, an outside press all take it back */
+  useEffect(() => { if (!pasteOffer || !pasteExpanded) restorePreview(); }, [pasteOffer, pasteExpanded, restorePreview]);
   const openPasteMenu = useCallback((focusIn = true) => {
     const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches;
     setPasteFocusIn(!!focusIn && !touch);
@@ -5403,12 +5572,13 @@ const NoteEditor = forwardRef(function NoteEditor({
   /** Close the flyout. `giveBack`: focus was in the menu, so the caret gets it back (Escape, a second Ctrl tap) — never leave focus on
    *  a button that is about to unmount, where it would fall to <body> and the next key would go nowhere. */
   const closePasteMenu = useCallback((giveBack = true) => {
+    restorePreview();
     setPasteExpanded(false);
     setPasteFocusIn(false);
     if (giveBack && editor && !editor.isDestroyed && pasteMenuHasFocus()) {
       try { editor.view.focus(); } catch (_) { /* the view can be gone */ }
     }
-  }, [editor]);
+  }, [editor, restorePreview]);
   const ctrlArmedRef = useRef(false);
   useEffect(() => {
     if (!pasteOffer || pasteExpanded) return undefined;
@@ -5420,7 +5590,8 @@ const NoteEditor = forwardRef(function NoteEditor({
    * would silently act on the wrong text is worse than no option. (Not the edit a pick makes itself.) */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    const retire = () => { if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
+    /* The box-clearing push (lib/notesBoxClearPlugin.js) is layout housekeeping after the paste, not further editing: it must not retire the offer. */
+    const retire = (e) => { if (e?.transaction?.getMeta?.("planyrBoxClear")) return; if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);
@@ -5431,6 +5602,8 @@ const NoteEditor = forwardRef(function NoteEditor({
    * back to Keep Source Formatting) never compounds a loss. Picture is the one async option: it draws the table first. */
   const applyPasteMode = useCallback(async (mode) => {
     const offer = pasteRef.current;
+    /* NEW-2: a hovered preview comes off BEFORE the pick, so the pick starts from (and its undo returns to) the applied state. */
+    restorePreview();
     /* The pick works on the EDITOR's selection, so a pick made from inside the menu gives the caret back first. */
     closePasteMenu(true);
     if (!offer || !editor || editor.isDestroyed) return;
@@ -5527,7 +5700,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const { ok, end } = run((tr) => applyPasteModeToTr(tr, mode, offer));
     if (!ok) { sizeUp(`Planyr couldn't apply ${PASTE_MODE_META[mode].label} to that paste.`); return; }
     setPasteOffer((cur) => (cur === offer ? { ...offer, applied: mode, curTo: end, dom: null } : cur));
-  }, [editor, onPrintNotice, closePasteMenu]);
+  }, [editor, onPrintNotice, closePasteMenu, restorePreview]);
 
   /* ⛔ A LONE CTRL TAP OPENS THE FLYOUT AND HANDS IT THE KEYBOARD — Word's shortcut (NEW-1, 2026-11-10; it used to open on the
    * Ctrl KEYDOWN, so Ctrl+V / Ctrl+Z / Ctrl+C all popped it, and left focus in the editor so the arrows moved the page).
@@ -5958,6 +6131,7 @@ const NoteEditor = forwardRef(function NoteEditor({
           focusIn={pasteFocusIn}
           onExpand={() => openPasteMenu(true)}
           onPick={applyPasteMode}
+          onPreview={previewPasteMode}
         />
         {/* THE SLASH MENU (NEW-1). Drawn over the mat at the `/` itself; every decision
             about it is the plugin's — see lib/notesSlashMenu.js. */}

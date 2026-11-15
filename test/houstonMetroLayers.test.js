@@ -26,7 +26,7 @@ beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 const IDS = ["harris_mtfp", "has_airport_tiers", "tx_evac_zones"];
 const P = {
   aldine: { lat: 29.88597, lng: -95.36890 }, iah: { lat: 29.99, lng: -95.34 }, hobby: { lat: 29.645, lng: -95.277 }, katy: { lat: 29.79, lng: -95.82 },
-  anahuac: { lat: 29.5857, lng: -94.4188 }, grandPort: { lat: 29.807276, lng: -94.877079 }, galveston: { lat: 29.3, lng: -94.8 },
+  anahuac: { lat: 29.5857, lng: -94.4188 }, grandPort: { lat: 29.807276, lng: -94.877079 }, galveston: { lat: 29.3, lng: -94.8 }, ellington: { lat: 29.607, lng: -95.159 },
   dallas: { lat: 32.78, lng: -96.8 }, austin: { lat: 30.27, lng: -97.74 }, atlanta: { lat: 33.75, lng: -84.39 },
 };
 const shows = (id, st, pt) => layerAvailableHere(ALL_LAYERS[id], { state: st, loc: pt });
@@ -75,8 +75,9 @@ describe("where each layer is offered (constraint #3 — no Texas row on a non-T
     expect(shows("harris_mtfp", "TX", P.dallas)).toBe(false);
     expect(shows("harris_mtfp", "GA", P.atlanta)).toBe(false);
   });
-  it("airport tiers: the Houston metro yes (IAH, Hobby, Katy); Dallas and Atlanta no", () => {
-    for (const pt of [P.iah, P.hobby, P.katy]) expect(shows("has_airport_tiers", "TX", pt)).toBe(true);
+  it("airport tiers: Bush Intercontinental, Hobby and Ellington yes; Katy (west of the tiers' extent), Dallas and Atlanta no", () => {
+    for (const pt of [P.iah, P.hobby, P.ellington]) expect(shows("has_airport_tiers", "TX", pt)).toBe(true);
+    expect(shows("has_airport_tiers", "TX", P.katy)).toBe(false); // the tiers' own extent ends at -95.44°; a Katy site is correctly offered no airport row
     expect(shows("has_airport_tiers", "TX", P.dallas)).toBe(false);
     expect(shows("has_airport_tiers", "GA", P.atlanta)).toBe(false);
   });
@@ -87,7 +88,9 @@ describe("where each layer is offered (constraint #3 — no Texas row on a non-T
     expect(shows("tx_evac_zones", "GA", P.atlanta)).toBe(false);
   });
   it("the Zip-Zone region is a box over the layer's extent, and inRegion answers a box like any other region", () => {
-    expect(REGION_ZONES.tx_gulf_evac.bbox).toHaveLength(4);
+    expect(REGION_ZONES.tx_gulf_evac.box).toHaveLength(4);
+    expect(REGION_ZONES.houston_airports.box).toHaveLength(4);
+    expect(ALL_LAYERS.has_airport_tiers.regions).toEqual(["houston_airports"]); // its OWN extent — never the growth-fault layer's houston_metro
     expect(inRegion("tx_gulf_evac", P.anahuac)).toBe(true);
     expect(inRegion("tx_gulf_evac", P.dallas)).toBe(false);
     expect(inRegion("tx_gulf_evac", null)).toBeNull(); // no location: cannot tell, so it never hides a row

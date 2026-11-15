@@ -47,6 +47,18 @@ export function lengthIn(style, prop) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** A paragraph's LEFT margin in inches — `margin-left:1in`, or the left value of the shorthand `margin:0in 0in 0in 1in` (what a browser
+ *  re-serialises Word's styles as: the longhand is gone). null when neither is there. */
+export function marginLeftIn(style) {
+  const long = lengthIn(style, "margin-left");
+  if (long != null) return long;
+  const m = /(?:^|;)\s*margin\s*:\s*([^;]+)/i.exec(String(style || ""));
+  if (!m) return null;
+  const v = m[1].trim().split(/\s+/);
+  const left = v.length === 1 ? v[0] : v.length === 2 || v.length === 3 ? v[1] : v[3];
+  return lengthIn(`margin-left:${left}`, "margin-left");
+}
+
 /** The `mso-list` declaration of a style attribute: `{ id, level }` for `l0 level2 lfo1`, `"ignore"` for the
  *  marker span, `null` for none / `mso-list:none`. */
 export function parseMsoList(style) {
@@ -67,6 +79,10 @@ const ROMAN = /^[ivxlcdm]+$/i;
  *  Courier-New bullet and never the letter. */
 export function classifyMarker(text) {
   const t = String(text ?? "").replace(/[\s ​]+/g, "");
+  /* ⛔ A LEGAL / OUTLINE NUMBER — `1.1.` `1.1.1` — is a number, and its DEPTH is the nesting level (NEW-1, 2026-11-12: it fell through to
+   * "bullet" because only a single number matched, so Outlook's 1 / 1.1 / 1.1.1 outline came in as a numbered item with bullets under it). */
+  const legal = /^\(?(\d{1,4}(?:\.\d{1,4})+)[.)]?$/.exec(t);
+  if (legal) { const parts = legal[1].split(".").map((n) => parseInt(n, 10)); return { kind: "ordered", start: parts[parts.length - 1], depth: parts.length }; }
   const dec = /^\(?(\d{1,4})[.)]?$/.exec(t);
   if (dec) return { kind: "ordered", start: parseInt(dec[1], 10) };
   if (/^\(?[a-z][.)]$/i.test(t) || (/^\(?[ivxlcdm]+[.)]$/i.test(t) && ROMAN.test(t.replace(/[().]/g, "")))) return { kind: "ordered", start: null };
@@ -190,7 +206,10 @@ const elementsWith = (root, re) => Array.from(root.querySelectorAll("[style]")).
 function cleanStyle(el) {
   const kept = String(el.getAttribute("style") || "").split(";").filter((d) => d.trim() && !/^\s*(mso-list|mso-add-space|margin|text-indent|tab-stops)/i.test(d));
   if (kept.length) el.setAttribute("style", kept.join(";")); else el.removeAttribute("style");
-  el.removeAttribute("class");
+  /* ⛔ THE CLASS STAYS (NEW-1, 2026-11-12). Word's document font lives in `p.MsoListParagraph { font-family: Calibri }` in the clipboard's <style>,
+   * and `normalizeOfficeStyle` (notesOfficeStyle.js) resolves it LATER in the same paste. Removing the class here took the font away from
+   * every list item while the same text outside a list kept it — measured on the Outlook outline fixtures, "font is none, wanted Calibri".
+   * The class carries a margin too, but nothing reads a margin off a class, so keeping it indents nothing. */
 }
 
 const hasContent = (el) => !isBlankText(el.textContent) || !!el.querySelector("img,table,hr");
@@ -248,6 +267,43 @@ function takeHangingMarker(p) {
   return mark;
 }
 
+/* ⛔ A WORD LIST THAT CAME THROUGH A BROWSER (NEW-1, owner report 2026-11-12: an Outlook outline pasted flat, with the numbers as text).
+ * Outlook on the web, the new Outlook and anything else running in Chromium re-serialise Word's markup when you copy: the style attribute
+ * is rebuilt from the browser's own property table, which has no `mso-list`, so the list information is GONE. What is left is the shape
+ * Word drew for the eye — a paragraph with a hanging indent (negative text-indent, margin-left per level) that begins with the number as
+ * TEXT, then a run of non-breaking spaces (Word's tab). Measured by copying the committed Word fixtures out of a Chromium page
+ * (test/fixtures/clipboard-bank/owa-*). `takeTextMarker` recognises exactly that: a negative text-indent AND a numbered/lettered marker
+ * AND a wide gap. It cuts the marker and the gap and nothing else — not one character of the words after it. */
+const TEXT_MARKER = /^[\s\u00a0]*(\(?(?:\d{1,3}(?:\.\d{1,3})+[.)]?|\d{1,3}[.)]|[A-Za-z]{1,4}[.)]))(?:[\s\u00a0\u2007\u202f]{3,}|\t[\s\u00a0]*)/;
+
+function takeTextMarker(p) {
+  if ((lengthIn(p.getAttribute("style"), "text-indent") ?? 0) >= 0) return null;
+  const texts = [];
+  const walker = p.ownerDocument.createTreeWalker(p, 4);              // SHOW_TEXT: comments (`<![if !supportLists]>`) are skipped
+  let head = "";
+  for (let n = walker.nextNode(); n && head.length < 60; n = walker.nextNode()) { texts.push(n); head += n.nodeValue; }
+  const m = TEXT_MARKER.exec(head);
+  if (!m) return null;
+  const mark = m[1];
+  const letters = /^\(?([A-Za-z]+)[.)]$/.exec(mark);
+  if (letters && letters[1].length > 1 && !ROMAN.test(letters[1])) return null;       // "Mr." "No." "Re." are words, not a list marker
+  let left = m[0].length;
+  const emptied = [];
+  for (const t of texts) {
+    if (left <= 0) break;
+    const take = Math.min(left, t.nodeValue.length);
+    t.nodeValue = t.nodeValue.slice(take);
+    left -= take;
+    if (!t.nodeValue) emptied.push(t);
+  }
+  for (const t of emptied) {
+    let el = t.parentNode;
+    t.remove();
+    while (el && el !== p && !Array.from(el.childNodes).some((c) => c.nodeType !== 8)) { const up = el.parentNode; el.remove(); el = up; }
+  }
+  return mark;
+}
+
 /** Rewrite the Office list / tab-row markup of a pasted clipboard document in place. `root` is the document body.
  *  Never throws into the paste: the caller keeps the unconverted markup on any error. Returns `{ lists, tables }`
  *  (counts, for tests and telemetry). */
@@ -280,13 +336,32 @@ export function convertOfficeLists(root) {
     const left = lengthIn(el.getAttribute("style"), "margin-left");
     info.set(el, { id: m.id, level: m.level, kind, start: mark ? mark.start : null, left: left ?? 0.5 * m.level });
   }
+  const textItems = [];
   for (const p of Array.from(root.querySelectorAll("p"))) {
     if (info.has(p) || p.closest("li,td,th")) continue;
     const mark = takeHangingMarker(p);
-    if (mark == null) continue;
-    const c = classifyMarker(mark);
-    const left = lengthIn(p.getAttribute("style"), "margin-left") ?? 0.5;
-    info.set(p, { id: "hang", level: Math.max(1, Math.round(left / 0.5)), kind: c.kind, start: c.start, left });
+    if (mark != null) {
+      const c = classifyMarker(mark);
+      const left = lengthIn(p.getAttribute("style"), "margin-left") ?? 0.5;
+      info.set(p, { id: "hang", level: Math.max(1, Math.round(left / 0.5)), kind: c.kind, start: c.start, left });
+      continue;
+    }
+    const text = takeTextMarker(p);
+    if (text != null) textItems.push({ p, c: classifyMarker(text), left: marginLeftIn(p.getAttribute("style")) ?? 0.5 });
+  }
+  /* the text-marker items' LEVELS: a legal number says its own depth (`1.1.1` is level 3); otherwise the level is the rank of the item's
+   * left margin among the distinct margins of its own run (Word's steps are .5 in by default but .25 in is common — never assume the step) */
+  {
+    const byParent = new Map();
+    for (const it of textItems) { const k = it.p.parentNode; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(it); }
+    for (const group of byParent.values()) {
+      const legal = group.some((it) => it.c.depth > 1);
+      const lefts = Array.from(new Set(group.map((it) => Math.round(it.left * 20)))).sort((a, b) => a - b);
+      for (const it of group) {
+        const level = legal ? (it.c.depth || 1) : lefts.indexOf(Math.round(it.left * 20)) + 1;
+        info.set(it.p, { id: "text", level, kind: it.c.kind, start: it.c.start, left: it.left });
+      }
+    }
   }
 
   /* 3 — group by parent and rebuild */
@@ -357,6 +432,7 @@ export function convertOfficeLists(root) {
         const p = doc.createElement("p");
         cleanStyle(src);
         if (src.getAttribute("style")) p.setAttribute("style", src.getAttribute("style"));
+        if (src.getAttribute("class")) p.setAttribute("class", src.getAttribute("class"));      // the font lives in the class (see cleanStyle)
         while (src.firstChild) p.appendChild(src.firstChild);
         li.appendChild(p);
         for (const kid of item.kids) li.appendChild(kid.t === "table" ? flatNodes[kid.src] : build(kid));

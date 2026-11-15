@@ -187,9 +187,9 @@ const leaked = [];
 for (const id of ["harris_mtfp", "has_airport_tiers", "tx_evac_zones"]) if (await rowOffered(id)) leaked.push(id);
 check("scope · a Dallas view offers none of the Houston-metro rows", leaked.length === 0, leaked.join(", "));
 check("scope · a Dallas view sent ZERO requests to their hosts", log.filter((e) => e.sent && HOSTS.test(e.url)).length === 0, `${log.filter((e) => e.sent && HOSTS.test(e.url)).length} sent`);
-/* Katy: inside the metro circle and Harris County (MTFP, tiers yes) but outside the airport tiers' footprint — the tiers' service answers EMPTY there (known-good arm: it was asked and answered 0). */
+/* Katy: Harris County (the thoroughfare plan IS offered) but west of the airport tiers' own extent, so the tiers are NOT offered; the evacuation zones' box reaches it (known-good arm for the scope rule). */
 await freshMap(-95.82, 29.79, 11);
-check("scope · a Katy view IS offered the thoroughfare plan and the airport tiers (the metro rows)", (await rowOffered("harris_mtfp")) && (await rowOffered("has_airport_tiers")));
+check("scope · a Katy view is offered the thoroughfare plan and the evacuation zones, and NOT the airport tiers", (await rowOffered("harris_mtfp")) && (await rowOffered("tx_evac_zones")) && !(await rowOffered("has_airport_tiers")));
 
 if (!goodRows) { console.log("VOID: no row returned a feature — the flow itself may be broken"); voided++; }
 if (!reached) { console.log("VOID: no row was reached"); voided++; }

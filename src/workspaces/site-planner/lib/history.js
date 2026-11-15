@@ -188,6 +188,19 @@ export function createHistoryStack({ keyOf, limit = 80 } = {}) {
 
     reset() { past = []; future = []; },
 
+    /* NEW-1 (2026-11-13, "undo survives leaving a plan") — seed an EMPTY stack with frames carried over
+     * from a previous mount of the same plan (lib/historyCarry.js). Refuses (returns false) when the stack
+     * already holds anything: a person who has edited before the carried frames arrived owns the stack,
+     * and splicing older frames UNDER newer ones could undo across a gap nobody recorded. Capped at the
+     * stack's own `limit`, oldest dropped first. */
+    adopt(carriedPast, carriedFuture = []) {
+      if (past.length || future.length) return false;
+      past = (carriedPast || []).slice(-limit);
+      future = (carriedFuture || []).slice(-limit);
+      return past.length > 0 || future.length > 0;
+    },
+    isEmpty() { return !past.length && !future.length; },
+
     /* Introspection for tests / debugging — returns shallow copies, never the live arrays. */
     snapshotStacks() { return { past: [...past], future: [...future] }; },
   };

@@ -44,9 +44,20 @@ describe("the declared service areas", () => {
     for (const cfg of Object.values(ALL_LAYERS)) for (const r of cfg.regions || []) names.add(r);
     for (const r of names) expect(REGION_ZONES[r] || SERVICE_AREAS[r], `region "${r}" is declared nowhere`).toBeTruthy();
   });
-  it("the 65-mile 'houston' circle is gone; only the growth-fault STUDY extent keeps a circle", () => {
+  it("the 65-mile 'houston' circle is gone; the growth-fault row is a BOX of the layer's real data extent", () => {
     expect(REGION_ZONES.houston).toBeUndefined();
     expect(ALL_LAYERS.faults.regions).toEqual(["houston_metro"]);
+    expect(REGION_ZONES.houston_metro.box).toHaveLength(4);
+    expect(REGION_ZONES.houston_metro.radiusMiles).toBeUndefined();
+  });
+  it("growth faults: Mont Belvieu / Cove / Houston are covered; Anahuac / Winnie / Beaumont are NOT (NEW-1, data ends at -94.838°)", () => {
+    const at = (lat, lng) => layerAvailableHere(ALL_LAYERS.faults, { state: "TX", loc: { lat, lng } });
+    expect(at(29.8405, -94.9019)).toBe(true);   // Mont Belvieu (Targa)
+    expect(at(29.7604, -95.3698)).toBe(true);   // downtown Houston
+    expect(at(29.7685, -94.6785)).toBe(false);  // Anahuac, Chambers County
+    expect(at(29.8221, -94.3794)).toBe(false);  // Winnie
+    expect(at(30.0802, -94.1266)).toBe(false);  // Beaumont
+    expect(at(32.7767, -96.797)).toBe(false);   // Dallas
   });
   it("each Houston-area source declares the area it actually serves", () => {
     expect(ALL_LAYERS[HCFCD].regions).toEqual(["harris"]);

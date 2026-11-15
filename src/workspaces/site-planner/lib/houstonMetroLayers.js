@@ -229,7 +229,7 @@ export const HOUSTON_METRO_LAYERS = {
   },
   has_airport_tiers: {
     kind: "esriFeature", label: "Airport Height Tiers", source: "City of Houston — Houston Airport System",
-    url: tiers.serviceUrl, states: ["TX"], regions: ["houston_metro"],
+    url: tiers.serviceUrl, states: ["TX"], regions: ["houston_airports"],
     fields: ["OBJECTID", "Tier"],
     minZoom: 9, color: "#485f94", weight: 1.2, opacity: 0.55, styleFn: tierStyle, legend: tierLegend(),
     ...hoverCommon, identifyCard: tierCard,
