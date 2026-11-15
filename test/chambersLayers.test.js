@@ -42,7 +42,7 @@ const MB_CITY_IDS = MB_IDS.filter((id) => !PLAN_IDS.includes(id));
 const BT_IDS = IDS.filter((id) => id.startsWith("tx_baytown_"));
 const TARGA = { lat: 29.8405, lng: -94.9019 };                // the Targa plant — Mont Belvieu's limits, "Hill Mixed Use"
 const MAIN_ST = { lat: 29.8528, lng: -94.8863 };              // 1129 Main St, Mont Belvieu
-const BAYTOWN_HI = { lat: 29.80, lng: -94.873 };              // Baytown's heavy-industrial ground on the Chambers side (HI, 152 ac, measured)
+const BAYTOWN_HI = { lat: 29.80688, lng: -94.87638 };       // Baytown's 152-acre heavy-industrial tract on the Chambers side (HI, verified by point query 2026-11-15)
 const COTTON_BAYOU = { lat: 29.79, lng: -94.84 };             // south of Mont Belvieu's ETJ, inside the Master Drainage Plan's Cotton Bayou watershed
 const ELSEWHERE = {
   houston: { lat: 29.7604, lng: -95.3698 }, katy: { lat: 29.79, lng: -95.82 }, dallas: { lat: 32.7767, lng: -96.797 }, anahuac: { lat: 29.77, lng: -94.68 }, atlanta: { lat: 33.749, lng: -84.388 },

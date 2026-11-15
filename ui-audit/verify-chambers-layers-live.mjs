@@ -31,7 +31,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${
 
 const HOSTS = /cmbgis\.com|2iaYWEMdQLPv0ZUw/;
 const TARGA = { lat: 29.8405, lng: -94.9019 };
-const BAYTOWN_HI = { lat: 29.80, lng: -94.873 };
+const BAYTOWN_HI = { lat: 29.80688, lng: -94.87638 };   // inside the 152-acre HI tract (verified by point query 2026-11-15; the brief's (29.80, −94.873) is LI)
 const OTHER = { houston: { lat: 29.7604, lng: -95.3698 }, katy: { lat: 29.79, lng: -95.82 }, anahuac: { lat: 29.77, lng: -94.68 }, dallas: { lat: 32.7767, lng: -96.797 } };
 /* Points ON real features (a vertex / interior point of a live feature, measured 2026-11-12 through the relay). */
 const AT = {
@@ -84,7 +84,7 @@ page.on("response", async (res) => {
 page.on("request", (r) => { if (HOSTS.test(r.url())) log.push({ url: r.url(), status: "sent", features: null, req: true }); });
 const answered = (re) => log.filter((e) => !e.req && re.test(e.url) && /\/query/.test(e.url));
 const sent = () => log.filter((e) => e.req);
-const layerSent = () => sent().filter((e) => !/AdministrativeArea_v2/.test(e.url));   // the header pill's ETJ lookup (NEW-1, B2671239) reads the same server by design
+const layerSent = () => sent().filter((e) => !/AdministrativeArea_v2/.test(e.url) && !/City_of_Baytown_Citizen_Map_WFL1\/FeatureServer\/1[12]\//.test(e.url));   // the header pill's ETJ / city lookups (Mont Belvieu's server, and Baytown's layers 11 / 12) read the same hosts by design
 const ans = (re) => answered(re).filter((e) => e.status === 200).reduce((n, e) => n + (e.features || 0), 0);
 
 const cleanupIds = [];
@@ -100,7 +100,7 @@ const insert = async (plan) => {
 };
 const openPanel = async (id) => {
   await page.goto(`${BASE}/?planyrDiag=1#/project/${id}/site`, { waitUntil: "domcontentloaded" });
-  if (!LOCAL) await page.reload({ waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });   // a hash-only change leaves the previous plan's map framing in place — always reload (local plans live in localStorage and survive it)
   await page.getByTestId("planner-canvas").waitFor({ timeout: 60000 });
   await sleep(2500);
   const chip = page.getByTestId("layers-expand").filter({ visible: true });
@@ -219,7 +219,7 @@ try {
   check("C · switching Water & Sewer on at Baytown issues ZERO requests to Mont Belvieu's water or sewer services", sent().filter((e) => /WaterDistribution_v2|SewerStormwater_v2|Stormwater_v2/.test(e.url)).length === 0, "");
   const L2 = await layers(), F2 = (L2 && L2.features) || {};
   check("C · Baytown's zoning answered with parcels (first page of the 24,849-polygon table)", ans(/FeatureServer\/10\/query/) > 0, String(ans(/FeatureServer\/10\/query/)));
-  check("C · Baytown's zoning PAINTED ≥ 2 features at the Baytown view", (F2.tx_baytown_zoning || 0) >= 2, String(F2.tx_baytown_zoning));
+  check("C · Baytown's zoning PAINTED ≥ 1 feature at the Baytown view (the view sits on one 152-acre tract)", (F2.tx_baytown_zoning || 0) >= 1, String(F2.tx_baytown_zoning));
   const bt = await identify("tx_baytown_zoning", AT.tx_baytown_zoning);
   console.log("card tx_baytown_zoning:", JSON.stringify(bt));
   check('C · card at the industrial ground: "HI · Heavy Industrial"', /HI · Heavy Industrial/.test(txtOf(bt)), "");
@@ -239,7 +239,7 @@ try {
     if (k === "houston") check("D · Houston (known-good arm) lists Texas rows", all.length > 0 && all.some((id) => /jur_|coh_|fema|hcfcd/.test(id)), all.slice(0, 6).join(", "));
     check(`D · ${k}: none of the Chambers rows is offered`, !all.some((id) => /^tx_mb_|^tx_baytown_/.test(id)), all.filter((id) => /^tx_/.test(id)).join(", "));
     await sleep(3000);
-    check(`D · ${k}: ZERO requests to the Mont Belvieu server or Baytown's org (header ETJ lookups included — their boxes are tight)`, sent().length === 0, `${sent().length} sent: ${sent().slice(0, 2).map((e) => e.url.slice(-70)).join(" | ")}`);
+    check(`D · ${k}: ZERO requests to the Mont Belvieu server or Baytown's org (header ETJ lookups included — their boxes are tight)`, sent().length === 0, `${sent().length} sent: ${sent().slice(0, 3).map((e) => e.url.replace(/\?.*/, "").slice(-80)).join(" | ")}`);
   }
 } finally {
   if (LOCAL) check("(local run) nothing was written to the cloud — plans lived only in this browser", true, "");

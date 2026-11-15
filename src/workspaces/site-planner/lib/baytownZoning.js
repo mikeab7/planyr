@@ -2,7 +2,7 @@
  *
  * SOURCE: the city's own ArcGIS Online org, City_of_Baytown_Citizen_Map_WFL1/FeatureServer/10 ("BaytownGIS.SDE.BT_Zoning_Master"), read directly (AGOL is CORS-open). MEASURED 2026-11-12: 24,849 polygons,
  * layer last edited 2023-02-16 — PARCEL-LEVEL (HCAD account, address, acres), so a zoomed-out view is a very large answer: the layer row asks it simplified and with every page followed (the DeSoto shape).
- * It covers the Harris AND the Chambers County sides of the city (HI 152 ac at ≈ (−94.873, 29.80), measured).
+ * It covers the Harris AND the Chambers County sides of the city (a 152-acre HI tract at (−94.8764, 29.8069), verified by point query 2026-11-15).
  *
  * WHAT THE DATA DOES TO YOU, and what is done about it:
  *   · `ULDCZON_20` is the district code. 17 codes plus `SL` (372 slivers of ≈ 0.007 ac — street-side lots; the layer's own legend does not list it), blank (1) and null (13). A code the city's legend
