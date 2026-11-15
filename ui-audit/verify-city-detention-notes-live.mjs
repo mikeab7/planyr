@@ -1,8 +1,8 @@
 /* B2671236 — Baytown Ch. 109 + Mont Belvieu "adopts the Chambers DCM" detention notes — signed in as the throwaway test account on a real deploy.
  *   E2E_LOGIN_KEY=… node ui-audit/verify-city-detention-notes-live.mjs [https://planyr.io] [--expect-sha <sha>]
  *
- * Writes THROWAWAY one-parcel sites (Mont Belvieu, Baytown, Katy control) to the test account, opens each in the real planner, opens
- * Drainage and reads the Stormwater readout. Known-good arm: Katy (an unmodeled city with NO city note) must still carry the generic
+ * Writes THROWAWAY one-parcel sites (Mont Belvieu, Baytown, Pasadena control) to the test account, opens each in the real planner, opens
+ * Drainage and reads the Stormwater readout. Known-good arm: Pasadena (an unmodeled city with NO city note) must still carry the generic
  * "This city's detention criteria aren't modeled" line — if the instrument cannot read the readout at all the run is VOID.
  * Deletes every site it wrote (local + cloud) and verifies they are gone. Never touches a real plan. */
 import { openSignedIn } from "./lib/signedInSession.mjs";
@@ -28,7 +28,7 @@ const mk = (tag, lat, lon, county) => {
 const CASES = {
   montBelvieu: mk("mb", 29.8472, -94.8885, "chambers"),
   baytown: mk("bt", 29.7355, -94.9774, "harris"),
-  katy: mk("katy", 29.78, -95.79, "fortbend"),
+  katy: mk("katy", 29.6911, -95.2091, "harris"), // control: downtown Pasadena — an unmodeled city inside its limits (key kept as "katy" for the arm name)
 };
 
 const s = await openSignedIn({ base, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
@@ -60,20 +60,24 @@ try {
     await page.getByTestId("planner-canvas").waitFor({ timeout: 45000 });
     await page.waitForTimeout(4000);
     try { await page.locator("button:visible", { hasText: /^Drainage$/ }).first().click({ timeout: 6000 }); } catch (_) {}
-    let txt = "";
-    for (let i = 0; i < 12; i++) { await page.waitForTimeout(3000); txt = await bodyText(); if (/Stormwater|Detention required|detention criteria/i.test(txt) && /Mont Belvieu|Baytown|aren't modeled|County/.test(txt)) break; }
-    const chk = page.locator("button:visible", { hasText: /Check drainage|Run check|Re-check|Check flood/i }).first();
-    if (await chk.count()) { try { await chk.click({ timeout: 3000 }); await page.waitForTimeout(12000); txt = await bodyText(); } catch (_) {} }
+    await page.waitForTimeout(8000);
+    // the drainage check is not run on open — the panel says "not checked yet" until the ↻ is pressed
+    try { await page.locator("button:visible", { hasText: "↻" }).first().click({ timeout: 6000 }); } catch (_) {}
+    await page.waitForTimeout(25000);
+    // the city line lives inside the collapsed "Assumptions & method" group of the Detention detail
+    try { await page.getByText("Assumptions & method", { exact: false }).first().click({ timeout: 6000 }); } catch (_) {}
+    await page.waitForTimeout(2500);
+    let txt = await bodyText();
     return txt;
   }
   const line = (txt, re) => (txt.match(new RegExp("[^\\n]*(?:" + re + ")[^\\n]*", "i")) || ["(no such line)"])[0];
 
-  console.log("\n— Known-good arm: Katy (unmodeled city, no city note) —");
+  console.log("\n— Known-good arm: Pasadena (unmodeled city, no city note) —");
   const katy = await readout(CASES.katy);
-  if (!/aren't modeled/.test(katy)) { console.log("VOID — the generic unmodeled-city line is not visible on the Katy control; the instrument cannot read the readout."); voided++; }
+  if (!/aren't modeled/.test(katy)) { console.log("VOID — the generic unmodeled-city line is not visible on the Pasadena control; the instrument cannot read the readout."); voided++; }
   else {
-    check("Katy: generic \"city's detention criteria aren't modeled\" line still shows", true, line(katy, "aren't modeled"));
-    check("Katy: no Baytown / Mont Belvieu note", !/Mont Belvieu adopts|Baytown: detention/.test(katy));
+    check("Pasadena: generic \"city's detention criteria aren't modeled\" line still shows", true, line(katy, "aren't modeled"));
+    check("Pasadena: no Baytown / Mont Belvieu note", !/Mont Belvieu adopts|Baytown: detention/.test(katy));
   }
 
   console.log("\n— Mont Belvieu —");
@@ -81,7 +85,7 @@ try {
   note(line(mb, "Mont Belvieu adopts"));
   check("Mont Belvieu: says it adopts the Chambers County manual (strictest applies)", /Mont Belvieu adopts the Chambers County manual/.test(mb), line(mb, "Mont Belvieu"));
   check("Mont Belvieu: the generic unmodeled-city sentence is replaced, not stacked", !/This city's detention criteria aren't modeled/.test(mb));
-  check("Mont Belvieu: Chambers band unchanged (0.5–1.2 screening band, no point number)", /0\.5\s*[–-]\s*1\.2/.test(mb) || /Chambers/.test(mb), line(mb, "0\\.5.{0,4}1\\.2|Chambers"));
+  check("Mont Belvieu: Chambers band unchanged (0.5–1.2 screening band, no point number)", /0\.5\s*[–-]\s*1\.2\s*ac-ft\/ac/.test(mb), line(mb, "0\\.5.{0,4}1\\.2|Chambers"));
 
   console.log("\n— Baytown —");
   const bt = await readout(CASES.baytown);
