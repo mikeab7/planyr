@@ -1654,6 +1654,40 @@ export const COUNTY_AUTHORITY = {
 /* City (TxGIO city_name, lowercased) → municipal overlay id. */
 const CITY_OVERLAYS = { "missouri city": "missouricity", magnolia: "magnolia" };
 
+/* NEW-1 (Baytown + Mont Belvieu) — CITY NOTES: a city's own detention POLICY, said plainly, with NO rate behind it.
+ *
+ * Why this is not a CITY_OVERLAYS row: a `CITY_OVERLAYS` / `MUNICIPAL_OVERLAYS` entry becomes the site's PRIMARY reviewer
+ * and dispatches to ONE parent authority. Baytown straddles Harris and Chambers (HCFCD on one side, the Chambers band on the
+ * other) and Mont Belvieu adopts the Chambers manual outright — neither may change the number the county already prices, and
+ * neither has a transcribed rate of its own (RULES-AS-DATA, owner constraint #4: no number without its rule record). So a note
+ * is ADDITIVE: `authorityForJurisdiction` pushes `{kind:"city-note"}` and touches neither `primary` nor any flag; the
+ * Stormwater readout draws it with the other warn notes and, for these cities, in place of the generic "city's criteria
+ * aren't modeled" line. `name` (not `city`) on purpose: SitePlanner's flood-administrator `edgeLabels` reads `.city`.
+ *
+ * Both texts are read from the city's own published documents (cited in `source`); Baytown Chapter 109 itself was NOT read
+ * (Municode is JS-rendered and Baytown's host was unreachable from the build sandbox), so no Baytown rate is stated. */
+export const CITY_NOTES = {
+  "mont belvieu": {
+    name: "Mont Belvieu",
+    short: "Mont Belvieu adopts the Chambers County manual — the stricter of the two applies",
+    detail:
+      "The City of Mont Belvieu Infrastructure Design and Construction Manual (Ord. 2022-020, updated 2022-12-09), Drainage Design 1, adopts the most recently adopted Chambers County Drainage Criteria Manual by reference — where the two differ, the strictest applies — " +
+      "so the Chambers screening band shown here is the right starting point. Two city changes sit on top of it: the city's own runoff-coefficient table overrides the county manual's Table 4-1 (Design 15), and detention must be built before any impervious cover is placed (Construction 1). " +
+      "The Chambers manual publishes no flat ac-ft/ac rate, so the band stays a Planyr screening band. Verify with the City Engineer.",
+    source: { name: "City of Mont Belvieu Infrastructure Design and Construction Manual (Ord. 2022-020)", section: "Drainage Design 1 and 15; Construction 1", url: "https://www.montbelvieu.net/DocumentCenter/View/1801" },
+    verifiedOn: "2026-11-12",
+  },
+  baytown: {
+    name: "Baytown",
+    short: "Baytown: detention follows City Ch. 109 — county number shown; verify with the City",
+    detail:
+      "The City of Baytown Engineering and Development Division Plan Set Requirements (rev. 2026-04-09) put detention under Chapter 109 of the Baytown Code of Ordinances, with design-storm intensities per §109-102 and an outfall restrictor checked against the 5-yr storm. " +
+      "Planyr has not transcribed Chapter 109, so NO Baytown rate is applied: the number shown is the county's (HCFCD on the Harris side, the Chambers screening band on the Chambers side) and is a floor, not the City's own requirement. Confirm the Chapter 109 rate and design storms with the City before design.",
+    source: { name: "City of Baytown Engineering and Development Division — Plan Set Requirements (rev. 2026-04-09); Code of Ordinances Ch. 109", section: "Detention per Chapter 109; §109-102 design storms", url: "https://www.baytown.org/DocumentCenter/View/12113/" },
+    verifiedOn: "2026-11-12",
+  },
+};
+
 /* B823 — short authority labels for one-line badge copy (the ETJ overlay's `short`).
  * Keyed by authority id; keep in sync with COUNTY_AUTHORITY / DETENTION_RULES ids. */
 export const AUTHORITY_SHORT = {
@@ -1735,6 +1769,16 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
       detail: etjNote + " Houston's plat review can still impose access/ROW conditions — separate from detention criteria.",
     });
     out.flags.push("houston-etj");
+  }
+
+  /* NEW-1 — a city's own detention policy, as an ADDITIVE note (see CITY_NOTES). Same materially-inside gate as the
+   * unverified-city flag below: an ARRAY cityCentroid that does not name the city is a frontage sliver and says nothing; an
+   * outage / legacy check (null / undefined) fails open. It never changes `primary`, `flags` or any number. */
+  for (const c of cities) {
+    const note = CITY_NOTES[c];
+    if (!note) continue;
+    const inside = !Array.isArray(cityCentroid) || cityCentroid.some((x) => String(x).toLowerCase() === c);
+    if (inside) out.overlays.push({ kind: "city-note", id: c, name: note.name, short: note.short, detail: note.detail, source: note.source });
   }
 
   if (counties.length > 1) {
@@ -2159,7 +2203,7 @@ export function slimDrainageContext(ctx) {
  * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
  * check-time fetches and can't be re-derived from the raw jurisdiction names. */
 const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired", TN_NOT_WIRED_FLAG, ...NJNY_NOT_WIRED_FLAGS]);
-const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
+const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal", "city-note"]);
 
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
  * (ruleFor) and the watershed overlays (from the module constant) so a reloaded readout

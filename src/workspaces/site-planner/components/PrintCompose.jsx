@@ -103,6 +103,7 @@ export default function PrintCompose({
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
   showMetricsBand, onToggleMetricsBand,
   buildingsTablePrintable, showBuildingsTable, onToggleBuildingsTable,
+  showScaleBar = true, onToggleScaleBar,
   flattenMarkups, onToggleFlattenMarkups,
   onReposition, onCancel, onDownload,
   downloading,
@@ -181,7 +182,7 @@ export default function PrintCompose({
               <option value={0}>Scale to fit (NTS)</option>
               {STANDARD_SCALES.map((s) => <option key={s} value={s}>{scaleLabel(s)}</option>)}
             </select>
-            {!fitWarning && scaleFtPerIn > 0 && (
+            {!fitWarning && scaleFtPerIn > 0 && showScaleBar && (
               <div style={{ marginTop: 6, ...secondary }}>The printed scale bar will agree with this ratio.</div>
             )}
           </Section>
@@ -199,6 +200,7 @@ export default function PrintCompose({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12 }}>
               <ContentToggle label="Dimensions" checked={showDims} onChange={onToggleDims} />
               <ContentToggle label="Square feet labels" checked={showAreas} onChange={onToggleAreas} />
+              <ContentToggle label="Scale bar" checked={showScaleBar} onChange={onToggleScaleBar} />
               {mapLayersPrintable && <ContentToggle label="Map layers" checked={printMapLayers} onChange={onToggleMapLayers} />}
               {overlayPrintable && <ContentToggle label="Overlay" checked={printOverlay} onChange={onTogglePrintOverlay} />}
             </div>

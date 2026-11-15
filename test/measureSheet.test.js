@@ -230,11 +230,9 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
   });
 
   it("the semantic markup labels ride labelK, so they hold their size at sheet scale", () => {
-    // utilRoute fitting + label, encumbrance per-call bearing, and the two vertex marks.
-    expect(SP).toMatch(/fontSize=\{8 \* labelK\} fontWeight="800"/);
+    // encumbrance per-call bearing (the utility-route fitting and the traced / inferred-main vertex marks went with the
+    // Utility Evidence tools, 2026-11-14).
     expect(SP).toMatch(/fontSize=\{9 \* labelK\} fontFamily=\{NUM_FONT\}/);
-    expect(SP).toMatch(/r=\{3 \* labelK\} fill="#dc2626"/);
-    expect(SP).toMatch(/width=\{4 \* labelK\} height=\{4 \* labelK\}/);
   });
 
   /* ⛔ NEW-6 (B435536) — THE THREE CENTROID *NAME* LABELS NOW RIDE A ZOOM RAMP AS WELL AS `labelK`,
@@ -251,11 +249,11 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
    * scale. Only the base moved from a literal to a named constant. Asserting the invariant instead
    * of the literal is what keeps this guard alive across a legitimate change. */
   it("NEW-6 — the centroid NAME labels still ride labelK, on top of the zoom ramp", () => {
-    for (const base of ["EASE_LABEL_BASE_PX", "ENCUMBER_LABEL_BASE_PX", "TRACED_LABEL_BASE_PX"]) {
+    for (const base of ["EASE_LABEL_BASE_PX", "ENCUMBER_LABEL_BASE_PX"]) {
       expect(SP, `${base} must be declared`).toMatch(new RegExp(`const ${base} = [\\d.]+;`));
     }
-    // encumbrance + traced render through the ramp TIMES labelK — never one without the other.
-    for (const base of ["ENCUMBER_LABEL_BASE_PX", "TRACED_LABEL_BASE_PX"]) {
+    // encumbrance renders through the ramp TIMES labelK — never one without the other (the traced line went 2026-11-14).
+    for (const base of ["ENCUMBER_LABEL_BASE_PX"]) {
       expect(SP, `${base} must render through featureNameFontPx(...) * labelK`)
         .toMatch(new RegExp(`fontSize=\\{featureNameFontPx\\(labelPpf, ${base}\\) \\* labelK\\}`));
     }
@@ -266,8 +264,9 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
     const PL = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/easementLabelPlacement.js", import.meta.url), "utf8");
     expect(PL).toMatch(/featureNameFontPx\(labelPpf, basePx\)/);
     expect(PL).toMatch(/featureNameLabelVisible\(/);
-    // and every name label is gated by the fit rule, not merely resized
-    expect((SP.match(/featureNameLabelVisible\(/g) || []).length).toBeGreaterThanOrEqual(2);
+    // and every name label is gated by the fit rule, not merely resized (the traced line's was the second one here; it went
+    // with the Utility Evidence tools, 2026-11-14 — the easement's is gated inside the placement module asserted above)
+    expect((SP.match(/featureNameLabelVisible\(/g) || []).length).toBeGreaterThanOrEqual(1);
   });
 
   it("in-progress tool drafts never reach a sheet (constant px, and not document content)", () => {

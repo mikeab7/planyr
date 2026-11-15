@@ -79,23 +79,20 @@ export function ellipseRing(m, seg = 48) {
 // A markup's clickable geometry + whether its BODY captures (the B920 rule in ONE place, so the
 // DOM render and this picker never diverge): { ring, path, closed, filled, area } | null.
 //   - polygon/rect/ellipse — closed; `filled` follows the shared visible-fill rule (B920).
-//   - line/polyline/traced/infwater — open paths (stroke hit only), area 0.
-//   - encumbrance/easement/utilRoute — semantic markups whose bodies already grab in the DOM
-//     (pattern fill / corridor fill / pointerEvents "all"), so they are always `filled`.
+//   - line/polyline — open paths (stroke hit only), area 0.
+//   - encumbrance/easement — semantic markups whose bodies already grab in the DOM
+//     (pattern fill / pointerEvents "all"), so they are always `filled`.
 export function markupHitModel(m) {
   if (!m) return null;
   switch (m.kind) {
     case "line": return { path: [m.a, m.b], closed: false, filled: false, area: 0 };
-    case "polyline":
-    case "traced":
-    case "infwater": return { path: m.pts || [], closed: false, filled: false, area: 0 };
+    case "polyline": return { path: m.pts || [], closed: false, filled: false, area: 0 };
     case "polygon":
     case "cloud": return { ring: m.pts || [], closed: true, filled: grabsWholeBody(m), area: ringArea(m.pts || []) };
     case "rect": return { ring: boxCorners(m), closed: true, filled: grabsWholeBody(m), area: Math.abs((m.w || 0) * (m.h || 0)) };
     case "ellipse": return { ring: ellipseRing(m), closed: true, filled: grabsWholeBody(m), area: Math.abs(Math.PI * (m.w || 0) * (m.h || 0) / 4) };
     case "encumbrance":
     case "easement": return { ring: m.pts || [], closed: true, filled: true, area: ringArea(m.pts || []) };
-    case "utilRoute": return { ring: m.corridor || [], closed: true, filled: true, area: ringArea(m.corridor || []) };
     default: return null;
   }
 }

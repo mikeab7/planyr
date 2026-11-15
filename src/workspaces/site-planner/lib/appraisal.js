@@ -6,6 +6,8 @@
  */
 import { findColumn, hasAddrParts } from "./addrParts.js"; // leaf module (no imports) — the declared split-situs shape
 
+import { isDavidsonRecord, davidsonRows } from "./davidsonParcel.js"; // NEW-2 (Metro Nashville parcel card rows, 2026-11-12)
+
 /* ---- SITUS vs. the OWNER'S MAILING address (NEW-2) ---------------------------------------------
  *
  * A parcel record carries at least two addresses: where the LAND is (the situs) and where the tax
@@ -39,6 +41,7 @@ import { findColumn, hasAddrParts } from "./addrParts.js"; // leaf module (no im
  * without a situs, and the "Account / ID" row matched the prefix word `Accounts` in
  * `…Accounts.OBJECTID` and showed the row id. Resolvers therefore match the LEAF — the text after the
  * last "." — while still reading the value off the full key. An un-prefixed key is its own leaf. */
+import { agUseOf } from "./agUseRules.js";
 export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
@@ -491,6 +494,14 @@ export const apprRows = (attrs) => {
           : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]) && !(label === "Year built" && Number(attrs[key]) === 0)); // a year built of 0 is a column filler (Bartow GA), never a year
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : label === "Owner" ? ownerWithFirstName(attrs, k) : attrs[k] }); }
   }
+  /* NEW-2 (2026-11-12) — a Metro Nashville lot swaps the generic Zoning / Land use rows for the assessor's own, labelled as such, and adds Tax district, Council district and the assessor's portal (davidsonParcel.js).
+   * A placeholder polygon for a lot across the county line gets none of them — and no zoning at all. */
+  if (isDavidsonRecord(attrs)) {
+    const kept = rows.filter((r) => r.label !== "Zoning" && r.label !== "Land use");
+    const at = kept.findIndex((r) => r.label === "Legal");
+    kept.splice(at < 0 ? kept.length : at, 0, ...davidsonRows(attrs));
+    return kept;
+  }
   return rows;
 };
 
@@ -612,7 +623,7 @@ export function parcelFallbackName(attrs) {
  * was the internal OBJECTID (634440) rather than the HCAD account (0421030000123), and `pc.addr` was the
  * bare street name. The stamped values are only the FALLBACK for a record that has no attribute bag.
  *
- * @returns { owner, account, address, deedAcres, taxYear } — each null when the record does not say. */
+ * @returns { owner, account, address, deedAcres, taxYear, agUse } — each null when the record does not say. */
 const STREET_PART = {
   num: /^(site|situs|prop(erty)?)_?(str(eet)?_?)?(num(ber)?|no)$/i,
   pfx: /^(site|situs|prop(erty)?)_?str(eet)?_?(pfx|prefix|dir)$/i,
@@ -658,7 +669,7 @@ export function composeSitus(attrs, parts) {
   return tail ? `${street}, ${tail}` : street;
 }
 
-export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null, addrParts = null } = {}) {
+export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null, addrParts = null, state = null } = {}) {
   /* The county's DECLARED id / address column (lib/counties.js) is the fallback when the generic resolvers
    * miss it: the registry already names the column each service publishes its account and situs in. */
   const declared = (name) => {
@@ -687,5 +698,7 @@ export function countyRecord(attrs, { acct = null, addr = null, idField = null, 
     address: cleanAddr(composeSitus(attrs, addrParts)) || cleanAddr(situsAddress(attrs)) || streetFromParts(attrs) || cleanAddr(declared(addrField)) || cleanAddr(addr),
     deedAcres: deed,
     taxYear,
+    /* Texas ag-use (1-d-1) valuation — the rollback-tax facts (lib/agUseRules.js); null for anything but a Texas county's ag-use lot. */
+    agUse: agUseOf(attrs, { state }),
   };
 }
