@@ -170,7 +170,7 @@ New UI items genuinely surfaced by this pass are filed in `BACKLOG.md` as **B93�
   colour-coded, actionable.
 - **F5** Status bar (cursor ft, px/ft, contextual hint, site acreage, `?` help).
   `✓ OK`.
-- **F6** Layers control (top-right) + Evidence tools. `✓ OK` — shared with the map;
+- **F6** Layers control (top-right) (+ the Evidence tools, since removed 2026-11-14). `✓ OK` — shared with the map;
   per-layer status; roadmap items disabled with a tooltip.
 - **F7** Empty-state card ("Start your site" 1/2/3). `✓ OK` (post-fix) — step 3 now
   references the **Boundary** tool.
