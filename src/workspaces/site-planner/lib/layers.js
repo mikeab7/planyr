@@ -19,8 +19,8 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
-import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
 import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
+import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
@@ -1424,11 +1424,11 @@ export const LAYER_VINTAGE = {
   fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
   ...SUGARLAND_VINTAGE,
-  ...HOUSTON_METRO_VINTAGE,
   ...NASHVILLE_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...HOUSTON_METRO_VINTAGE,
   ...FLORIDA_VINTAGE,
   ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };

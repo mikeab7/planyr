@@ -452,7 +452,12 @@ export function buildWellsRow(m, t = CHECK_THRESHOLDS) {
   const cats = {};
   for (const f of m.inRadius) { const c = classifyWell(f.attrs); cats[c] = (cats[c] || 0) + 1; }
   const words = { plugged: "plugged", abandoned: "abandoned", dry: "dry hole", shutin: "shut-in", injection: "injection", producing: "producing", storage: "storage (cavern)", other: "other" };
-  const mix = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${n} ${words[k] || k}`).join(", ");
+  // Three entries, biggest first — EXCEPT a salt-dome storage well always keeps a slot: it is an active wellhead with operator
+  // setbacks, and on Mont Belvieu ground dry holes / producers / plugs outnumber it, so a plain top-3 hid it (live Targa check).
+  const ranked3 = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+  const top3 = ranked3.slice(0, 3);
+  if (cats.storage && !top3.some(([k]) => k === "storage")) top3[2] = ["storage", cats.storage];
+  const mix = top3.map(([k, n]) => `${n} ${words[k] || k}`).join(", ");
   const storageNear = (cats.storage || 0) > 0;
   const onSiteStorage = m.onSite > 0 && m.inRadius.some((f) => f.distFt <= t.onSiteFt && classifyWell(f.attrs) === "storage");
   if (storageNear) base.caveat = `${base.caveat} ${STORAGE_WELL_CAVEAT}`;
