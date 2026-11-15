@@ -22,11 +22,12 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${
 const squareAt = (lon, lat, half = 150) => ({ lat, lon, pts: [[-half, -half], [half, -half], [half, half], [-half, half]] });
 const CASES = [
   { key: "targa", why: "the Targa plant — inside Mont Belvieu's limits AND its published ETJ polygon: the city governs, no ETJ beside it", plan: squareAt(-94.9019, 29.8405), want: "City of Mont Belvieu · Chambers County", no: /ETJ/ },
-  { key: "mb-etj", why: "(−94.86, 29.89) — Mont Belvieu's ETJ, the site the sweep reported as 'Unincorporated'", plan: squareAt(-94.86, 29.89), want: "City of Mont Belvieu ETJ · Chambers County" },
-  { key: "mb-etj-west", why: "Mont Belvieu's ETJ, far west edge", plan: squareAt(-94.96078, 29.89792), want: "City of Mont Belvieu ETJ · Chambers County" },
-  { key: "beach-city", why: "Beach City's ETJ (Mont Belvieu's copy of the neighbours' lines)", plan: squareAt(-94.90825, 29.66029), want: "City of Beach City ETJ · Chambers County" },
+  { key: "mb-etj", why: "(−94.86, 29.89) — Mont Belvieu's ETJ, the site the sweep reported as 'Unincorporated' (the ETJ straddles the Chambers / Liberty county line; this ground is Liberty County)", plan: squareAt(-94.86, 29.89), want: "City of Mont Belvieu ETJ · Liberty County" },
+  { key: "mb-etj-overlap", why: "Mont Belvieu's ETJ, far west edge — Baytown's own ETJ polygon overlaps it here: BOTH claims are disclosed, never one picked (Local Gov't Code ch. 42 apportions an overlap; the app does not decide it)", plan: squareAt(-94.96078, 29.89792), want: "ETJ crosses City of Baytown + City of Mont Belvieu · Liberty County" },
+  { key: "beach-city-limits", why: "inside Beach City's own LIMITS (and under its copied ETJ polygon): the limits govern, no ETJ beside the city (constraint #38)", plan: squareAt(-94.90825, 29.66029), want: "City of Beach City · Chambers County", no: /ETJ/ },
+  { key: "beach-city-etj", why: "Beach City's ETJ outside its limits (Mont Belvieu's copy of the neighbours' lines)", plan: squareAt(-94.84994, 29.76705), want: "City of Beach City ETJ · Chambers County" },
   { key: "cove", why: "Cove's ETJ", plan: squareAt(-94.82899, 29.80138), want: "City of Cove ETJ · Chambers County" },
-  { key: "old-river", why: "Old River-Winfree's ETJ, named by its legal name", plan: squareAt(-94.83045, 29.89004), want: "City of Old River-Winfree ETJ · Chambers County" },
+  { key: "old-river", why: "Old River-Winfree's ETJ, named by its legal name", plan: squareAt(-94.83045, 29.89004), want: "City of Old River-Winfree ETJ · Liberty County" },
   { key: "baytown-ameriport", why: "Ameriport — Baytown's ETJ, from Baytown's own publisher, unchanged", plan: squareAt(-94.867, 29.793), want: "City of Baytown ETJ · Chambers County" },
   { key: "nrg-cove", why: "NRG Cove — in no city and no ETJ: unincorporated", plan: squareAt(-94.829, 29.764), want: "Unincorporated · Chambers County" },
   { key: "houston", why: "CONTROL — downtown Houston, untouched by this item", plan: squareAt(-95.3698, 29.7604), want: "City of Houston · Harris County" },

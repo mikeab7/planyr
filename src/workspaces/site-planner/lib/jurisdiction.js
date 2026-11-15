@@ -411,7 +411,7 @@ export const ETJ_SOURCES = [
    * copy row has no publish date and says so (`copy`, constraint #40), and its roster is the honest bound: Baytown stays on its own publisher's row, Dayton / Liberty are not claimed. */
   {
     id: "etj_montbelvieu", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    region: "Mont Belvieu", bbox: [29.70, -95.00, 30.08, -94.62],
+    region: "Mont Belvieu", bbox: [29.79, -94.99, 29.94, -94.76],   // the ETJ polygon is lat 29.82–29.91, lng −94.97 – −94.79 (measured 2026-11-12), padded ~0.03°
     url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/1",
     fields: { name: null }, nameConst: "Mont Belvieu",
     ttl: 7 * 24 * 3600 * 1000,
@@ -420,7 +420,7 @@ export const ETJ_SOURCES = [
   },
   {
     id: "etj_chambers_neighbors", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    region: "Chambers County (Beach City · Cove · Old River-Winfree)", bbox: [29.62, -95.00, 30.08, -94.55],
+    region: "Chambers County (Beach City · Cove · Old River-Winfree)", bbox: [29.62, -94.95, 29.93, -94.75],   // the three rings span lat 29.66–29.89, lng −94.91 – −94.78 (measured 2026-11-12), padded ~0.03°
     url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/5",
     fields: GIS_SOURCES.etj_chambers_neighbors.fields, nameStrip: GIS_SOURCES.etj_chambers_neighbors.nameStrip,
     nameDisplay: { "Old River": "Old River-Winfree" }, titleCaseName: true,

@@ -146,15 +146,14 @@ describe("both rows are relayed, routed by bbox, and cost a Houston click nothin
       expect(SOURCE_FIXTURES[id].fixtures.length, id).toBeGreaterThanOrEqual(2);
     }
   });
-  it("every named point is routed to the new rows; Houston, Katy and Dallas are not", () => {
-    for (const [lng, lat] of [MB_ETJ, TARGA, NRG_COVE, AMERIPORT]) {
-      const ids = etjSourcesForPoint(lat, lng).map((s) => s.id);
-      expect(ids, `${lng},${lat}`).toContain("etj_montbelvieu");
-      expect(ids, `${lng},${lat}`).toContain("etj_chambers_neighbors");
+  it("each row is routed over its own ground (measured polygon extents, padded); Houston, Katy, Dallas and Anahuac get neither", () => {
+    const ids = ([lng, lat]) => etjSourcesForPoint(lat, lng).map((s) => s.id);
+    for (const p of [MB_ETJ, TARGA]) expect(ids(p), `${p}`).toContain("etj_montbelvieu");
+    for (const p of [MB_ETJ, TARGA, NRG_COVE, AMERIPORT]) expect(ids(p), `${p}`).toContain("etj_chambers_neighbors");
+    expect(ids(NRG_COVE)).not.toContain("etj_montbelvieu");                                // south of Mont Belvieu's ETJ
+    for (const p of [[-95.37, 29.76], [-95.82, 29.79], [-96.8, 32.78], [-94.68, 29.77]]) {   // Houston · Katy · Dallas · Anahuac
+      expect(ids(p).filter((id) => /montbelvieu|chambers_neighbors/.test(id)), `${p}`).toEqual([]);
     }
-    expect(etjSourcesForPoint(29.76, -95.37).map((s) => s.id)).toEqual(["etj_hgac"]);          // downtown Houston — still one query
-    expect(etjSourcesForPoint(29.79, -95.82).map((s) => s.id)).toEqual(["etj_hgac"]);          // Katy
-    expect(etjSourcesForPoint(32.78, -96.8).map((s) => s.id)).not.toContain("etj_montbelvieu"); // Dallas
   });
   it("the registry audit (with its fixtures and reach rule) has no complaint about either new row", () => {
     const { problems } = auditRegistry({ etj_montbelvieu: GIS_SOURCES.etj_montbelvieu, etj_chambers_neighbors: GIS_SOURCES.etj_chambers_neighbors }, SOURCE_FIXTURES);
