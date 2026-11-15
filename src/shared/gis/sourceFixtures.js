@@ -24,6 +24,7 @@
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
+import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
@@ -36,6 +37,7 @@ export const SOURCE_FIXTURES = {
   ...OK_FIXTURES,
   ...SUGARLAND_FIXTURES,
   ...NASHVILLE_BUFFER_FIXTURES,
+  ...RUTHERFORD_FIXTURES,
   ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   fixtures: [
@@ -1512,6 +1514,7 @@ export const SOURCE_DOCS = {
   ...OK_DOCS,
   ...SUGARLAND_DOCS,
   ...NASHVILLE_BUFFER_DOCS,
+  ...RUTHERFORD_DOCS,
   ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",

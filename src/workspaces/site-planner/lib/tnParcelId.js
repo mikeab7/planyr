@@ -16,6 +16,9 @@ const PREFIX_RE = /^(?:tn\s*)?(?:tax\s*)?(?:parcel\s*(?:id|number|no|#)?|pid|apn
 const ID_CHARS_RE = /^[A-Z0-9 .\-_/]+$/;
 
 /** The text with a leading "Parcel ID:" / "APN" / "#" label removed, upper-cased and trimmed. */
+import { featureRingArea } from "./parcelStack.js";
+const largestRingFeature = (list) => list.reduce((best, f) => (featureRingArea(f) > featureRingArea(best) ? f : best), list[0]);
+
 export function stripIdLabel(text) {
   return String(text == null ? "" : text).trim().replace(PREFIX_RE, "").trim().toUpperCase();
 }
@@ -264,7 +267,7 @@ export function pickIdMatch(feats, canonical, attrOf) {
   const want = norm(canonical);
   const exact = list.filter((f) => norm(attrOf(f)) === want);
   if (exact.length === 1) return exact[0];
-  if (exact.length > 1) return exact[0]; // the same id twice (a split record) — the first is as good as any, both are the same lot
+  if (exact.length > 1) return largestRingFeature(exact); // NEW-2 — the same id twice (Rutherford: a 0.12-ac sliver beside the 74.6-ac lot): the LARGEST ring is the lot, never whichever the server listed first
   /* No exact: an id typed without its special-interest part ("156-027.00") matches "156-027.00-000" by prefix. One lot → that lot. */
   const pre = list.filter((f) => norm(attrOf(f)).startsWith(want));
   if (pre.length === 1) return pre[0];

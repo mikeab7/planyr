@@ -16,6 +16,12 @@ import {
   drycleanerCard, ms4Card, wqaCard, pwsCard, snaCard, scenicCard, critHabitatCard, landfillCard, thcSiteCard, nrhpBoundaryCard, dorSiteCard, nrhpPointCard, isImpairedAttainment, isThreatenedAttainment,
 } from "./tennesseeCards.js";
 
+import {
+  COUNTY, MURFREESBORO, SMYRNA, LAVERGNE, JURISDICTION, NAME_SOURCE, COUNTY_WHERE, MURFREESBORO_WHERE,
+  zoningCard as rutherfordCard, zoningStyleFor, memberLegend, labelFormat, LABEL_FIELD,
+} from "./rutherfordZoning.js";
+import { jurisdictionAt as rutherfordSiteAt, ensureLimits as ensureRutherfordLimits } from "./rutherfordJurisdiction.js";
+
 const TN = { states: ["TN"] };
 /* a state server the browser cannot read directly rides the same-origin relay (functions/gis-proxy); the registry records the server's own address */
 export const viaRelay = (u) => "/gis-proxy/" + String(u).replace(/^https:\/\//, "");
@@ -28,6 +34,29 @@ export const wqaStyle = (props, opacity) => {
   const c = impaired ? "#c2410c" : threatened ? "#d97706" : /^fully/i.test(String(a || "")) ? "#2563eb" : "#9ca3af"; // design-exempt: map ink for a drawn assessment class (cartography, not UI chrome)
   return { color: c, weight: impaired ? 2 : threatened ? 2 : 1.4, opacity, fill: false };
 };
+
+
+/* The consolidated panel row the four Rutherford zoning members fold into (layers.js spreads this into MERGE_GROUPS). */
+export const TN_MERGE_GROUPS = {
+  tn_rutherford_zoning: {
+    label: "Zoning",
+    note: "Zoning for Rutherford County, Murfreesboro, Smyrna and La Vergne — each government's own layer, one switch for all four. Colour = family; the code prints at close zoom; the legend lists the districts in view under each government. Click for the district.",
+  },
+};
+
+/* ---- Rutherford County TN zoning (NEW-1, 2026-11-12) — four governments' own layers, ONE panel row. Rules and wording: lib/rutherfordZoning.js; the service rows: shared/gis/sourcesRutherford.js. ----
+ * Order matters: the cities come first and the county LAST, because the four cards share one `dedupeKey` and a click keeps the first answer — so a city's own layer beats the county's older one. */
+const rzMember = (member, srcKey, o) => ({
+  kind: "esriFeature", ...TN, regions: ["rutherford"], mergeGroup: "tn_rutherford_zoning", role: "area", group: "jurisdiction", order: 31, minZoom: 12, opacity: 0.4,
+  label: `Zoning (${JURISDICTION[member]})`, url: GIS_SOURCES[srcKey].serviceUrl, ...(GIS_SOURCES[srcKey].where ? { where: GIS_SOURCES[srcKey].where } : {}),
+  simplifyFactor: 1.5, fetchAll: true, // asked simplified (server-side, ~1.5 px) with every page followed: the whole county fits the draw budget at any zoom
+  styleFn: zoningStyleFor(member), lineLabel: { field: LABEL_FIELD[member], minZoom: 14, format: labelFormat(member), declutter: true },
+  hoverIdentify: true, canvasIdentify: true, hoverTitle: "Zoning", hoverSource: JURISDICTION[member],
+  warm: () => { ensureRutherfordLimits(); }, // the State's city limits name the government a click falls in
+  identifyCard: (props, at) => rutherfordCard(member, props, at && Number.isFinite(at.lat) ? rutherfordSiteAt(at.lat, at.lng) : null),
+  viewLegend: (features) => memberLegend(member, features.map((f) => f.properties)),
+  ...o,
+});
 
 export const TN_LAYERS = {
   /* ---- Jurisdictions: City limits (State of Tennessee STS; no ETJ in Tennessee — the county governs outside city limits). The county-line row `tn_county` is main's own (B2507065), offered in TN and, at DeSoto's feet, MS. ---- */
@@ -52,6 +81,33 @@ export const TN_LAYERS = {
     infoCaveat: "A permit area says WHOSE stormwater rules apply, not what they are — buffer widths and detention criteria differ by city (Nashville, Murfreesboro and Franklin each publish their own). Get the design manual from the permittee.",
     role: "area", group: "jurisdiction", order: 6,
   },
+
+
+  /* ---- Zoning: Rutherford County, Murfreesboro, Smyrna, La Vergne (each government's own layer; one panel row) ---- */
+  tn_rz_murfreesboro: rzMember(MURFREESBORO, "murfreesboroZoning", {
+    source: "City of Murfreesboro — GIS (zoning)",
+    vintage: `City of Murfreesboro zoning — layer last edited 2024-04-09; a rezoning since then is not on it. Street right-of-way is not drawn. ${NAME_SOURCE[MURFREESBORO]}`,
+    note: "The City of Murfreesboro's zoning districts (layer last edited April 2024). Colour = family; the code prints at close zoom. Click for the district and the city's zoning ordinance.",
+    infoCaveat: "The layer was last edited April 2024 — a rezoning since then is not on it. Street right-of-way carries no district here. Confirm with Murfreesboro Planning before relying on a district.",
+  }),
+  tn_rz_smyrna: rzMember(SMYRNA, "smyrnaZoning", {
+    source: "Town of Smyrna — GIS (zoning)",
+    vintage: `Town of Smyrna zoning — layer last edited 2024-03-06; a rezoning since then is not on it. ${NAME_SOURCE[SMYRNA]}`,
+    note: "The Town of Smyrna's zoning districts (layer last edited March 2024). Colour = family; the code prints at close zoom. Click for the district and the town's zoning ordinance.",
+    infoCaveat: "The layer was last edited March 2024 — a rezoning since then is not on it. A few polygons carry a district code the town's own list does not define; they show as Unlisted. Confirm with Smyrna Planning before relying on a district.",
+  }),
+  tn_rz_lavergne: rzMember(LAVERGNE, "lavergneZoning", {
+    source: "City of La Vergne — GIS (zoning)",
+    vintage: `City of La Vergne zoning — layer last edited 2024-03-06; a rezoning since then is not on it. ${NAME_SOURCE[LAVERGNE]}`,
+    note: "The City of La Vergne's zoning districts (layer last edited March 2024). Colour = family; the code prints at close zoom. Click for the district and the city's zoning ordinance.",
+    infoCaveat: "The layer was last edited March 2024 — a rezoning since then is not on it. Confirm with La Vergne Planning before relying on a district.",
+  }),
+  tn_rz_county: rzMember(COUNTY, "rutherfordCountyZoning", {
+    source: "Rutherford County Planning — zoning",
+    vintage: `Rutherford County zoning — layer edited 2026-10-28. City and annexed ground is left out (the county does not zone it). ${NAME_SOURCE[COUNTY]}`,
+    note: "Zoning districts in unincorporated Rutherford County (layer edited October 2026). Ground inside a city is not drawn from this layer — the city's own layer is. Colour = family; the code prints at close zoom. Click for the district, effective date and case.",
+    infoCaveat: "The county table lags annexations: where a city has annexed ground since the county last updated it, the city's layer governs and the county's older shape may still show under it. A click inside a city names the city, never the county. Confirm with Rutherford County Planning before relying on a district.",
+  }),
 
   /* ---- Flood & Drainage: the state's water-quality assessment ---- */
   tn_wqa: {
