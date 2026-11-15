@@ -14,7 +14,7 @@ import { answerFromIndex, PREFIX_LEN } from "./lib/hcadIndex.js";
 import { remoteZipEntries } from "./lib/zipRange.js";
 import { normalizeCounty } from "./taxrates.js";
 import { lookupFortBend } from "./lib/fortBendUnits.js";
-import { decideStaleness, staleCaption } from "./lib/rollStale.js";
+import { decideStaleness, staleCaption, summariseRates } from "./lib/rollStale.js";
 import { parseRateTable } from "./lib/hcadUnits.js";
 import { readZipEntryText } from "./lib/zipRange.js";
 
@@ -59,24 +59,28 @@ const COUNTIES = {
 const json = (obj, status = 200, extra = {}) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
 
-/** NEW-3: is the indexed Harris answer behind a newer roll? Reads only the small rate file of each newer year (HCAD
- * publishes the zip tail + that entry), cached per roll year for six hours. Never throws — a failed check says nothing. */
-async function harrisStaleness(rollYear, cache, origin, fetchImpl = fetch) {
+/** NEW-3: is the indexed Harris answer behind a newer roll — FOR THIS ACCOUNT's units? Reads only the small rate file of each
+ * newer year (HCAD publishes the zip tail + that entry) and caches a compact per-year summary (adopted / never-levied codes) for
+ * six hours; the verdict itself is computed per account from it. Never throws into the answer — a failed check adds nothing. */
+async function harrisStaleness(rollYear, codes, cache, origin, fetchImpl = fetch) {
   const nowYear = new Date().getUTCFullYear();
   if (!(rollYear < nowYear)) return decideStaleness({ rollYear, nowYear });
-  const key = new Request(`${origin}/api/taxunits?stale=harris&y=${rollYear}&now=${nowYear}`, { method: "GET" });
-  const hit = await cache.match(key);
-  if (hit) return hit.json();
   const newer = [];
   for (let y = rollYear + 1; y <= nowYear; y++) {
-    const u = hcadZipUrl(y);
-    const entries = await remoteZipEntries(u, fetchImpl);
-    const e = entries && entries["jur_tax_dist_exempt_value_rate.txt"];
-    newer.push({ year: y, rates: e ? parseRateTable(await readZipEntryText(u, e, fetchImpl)) : null });
+    const key = new Request(`${origin}/api/taxunits?stale=harris&year=${y}&v=2`, { method: "GET" });
+    const hit = await cache.match(key);
+    let summary;
+    if (hit) summary = (await hit.json()).summary;
+    else {
+      const u = hcadZipUrl(y);
+      const entries = await remoteZipEntries(u, fetchImpl);
+      const e = entries && entries["jur_tax_dist_exempt_value_rate.txt"];
+      summary = e ? summariseRates(parseRateTable(await readZipEntryText(u, e, fetchImpl))) : null;
+      await cache.put(key, json({ summary }, 200, { "cache-control": "public, max-age=21600" }));
+    }
+    newer.push({ year: y, summary });
   }
-  const v = decideStaleness({ rollYear, nowYear, newer });
-  await cache.put(key, json(v, 200, { "cache-control": "public, max-age=21600" }));
-  return v;
+  return decideStaleness({ rollYear, nowYear, codes, newer });
 }
 
 export { indexedLookup, harrisStaleness };
@@ -117,7 +121,7 @@ export async function onRequestGet(context) {
     const body = { county, acct, ...r };
     if (county === "harris" && r.indexed && r.complete && r.year) {
       body.rollYear = r.year;
-      try { const v = await harrisStaleness(r.year, cache, url.origin); body.stale = v.stale; body.staleState = v.state; if (v.newerYear) body.newerYear = v.newerYear; const cap = staleCaption(v); if (cap) body.caption = cap; } catch (_) { /* a failed staleness check adds nothing */ }
+      try { const v = await harrisStaleness(r.year, (r.units || []).map((u) => u.code), cache, url.origin); body.stale = v.stale; body.staleState = v.state; if (v.newerYear) body.newerYear = v.newerYear; const cap = staleCaption(v); if (cap) body.caption = cap; } catch (_) { /* a failed staleness check adds nothing */ }
     }
     if (r.transient) return json(body, 200, { "cache-control": "no-store" });
     const res = json(body, 200, { "cache-control": `public, max-age=${r.complete ? (county === "fortbend" || (body.staleState && body.staleState !== "current") ? 6 * 3600 : 7 * 24 * 3600) : 3600}` });
