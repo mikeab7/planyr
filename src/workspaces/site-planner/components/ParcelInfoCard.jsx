@@ -164,6 +164,9 @@ export default function ParcelInfoCard({
               request; an official county / statewide row renders nothing here. */}
           <ParcelCopyNote county={info.county} testId="parcel-card-copy" />
 
+          {/* NEW-1/2/3 (2026-11-12) — a layer that stacked several rows on this spot (co-owners, a second overlapping lot, two records of one id) says so in one plain line (lib/parcelStack.js). */}
+          {info.stackNote && <div data-testid="parcel-card-stack" style={{ marginTop: 8, fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>{info.stackNote}</div>}
+
           {/* ⛔ NEW-1 (2026-09-08) — THIS CARD NO LONGER CARRIES A PRIMARY ACTION, and the removal
               is the point, not a trim. It used to end in one button chosen by the map toolbar's
               Site/Comp mode ("Plan this site →" / "Add as comp →"). That mode is gone: an address

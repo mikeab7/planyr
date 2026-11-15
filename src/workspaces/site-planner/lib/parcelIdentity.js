@@ -14,6 +14,8 @@
  * stored `gisKey` string, so plans saved under the old `geo:` key are still recognised.
  * Pure — no DOM, no React. */
 
+import { stackKeyOf } from "./parcelStack.js";
+
 const EXACT_ID_KEYS = ["OBJECTID", "objectid", "OID"];
 
 /** The lot's stable id from a feature's attributes, or null. */
@@ -72,10 +74,13 @@ export function ringsHash(rings) {
 
 /** The lot key. `namespace` (e.g. the county) is prefixed as MapFinder does; the planner passes none
  *  so stored `oid:<id>` keys keep their existing shape. `fallback` supplies a last-resort unique key. */
-export function parcelKey(attrs, rings, { namespace, fallback } = {}) {
-  const id = parcelIdOf(attrs);
-  const h = id == null ? ringsHash(rings) : null;
-  const core = id != null ? `oid:${id}` : h != null ? `geo:${h}` : (fallback ? fallback() : null);
+export function parcelKey(attrs, rings, { namespace, fallback, stack } = {}) {
+  /* NEW-1 (stacked rows) — a layer that returns one lot as SEVERAL rows (Bartow: up to 170 identical-geometry rows, each its own OBJECTID) declares the field one lot shares (counties.js `dedupeBy`);
+   * that value IS the lot, so two picks of the same lot are one key and never two overlapping copies. Callers pass the county's rule (`stackRuleForCounty`); absent = today's rule exactly. */
+  const sk = stack ? stackKeyOf(attrs, stack) : null;
+  const id = sk == null ? parcelIdOf(attrs) : null;
+  const h = sk == null && id == null ? ringsHash(rings) : null;
+  const core = sk != null ? `pid:${sk}` : id != null ? `oid:${id}` : h != null ? `geo:${h}` : (fallback ? fallback() : null);
   if (core == null) return null;
   return namespace ? `${namespace}:${core}` : core;
 }
