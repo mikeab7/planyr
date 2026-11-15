@@ -95,13 +95,45 @@ describe("B691 — probeService noCors path", () => {
   });
 });
 
-describe("B691 — registry carries the flag (source-text guard)", () => {
-  const countiesSrc = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/counties.js", import.meta.url)), "utf8");
-  it("fb_contours sets noCors: true", () => {
-    const block = countiesSrc.slice(countiesSrc.indexOf("fb_contours:"), countiesSrc.indexOf("fb_contours:") + 2200);
-    expect(block).toMatch(/noCors:\s*true/);
+describe("NEW-2 (2026-11-12) — a DEAD ArcGIS site answers 200 + {status:'error'}, and that is a failure, never a loaded layer", () => {
+  // Fort Bend's whole arcgisweb host answered exactly this for every path (measured 2026-10-30 and 2026-11-12); the probe used to read it as a live service.
+  const DEAD = { status: "error", messages: ["Could not access any server machines. Please contact your system administrator."] };
+
+  it("noCors path: the dead-site body is an honest failure with the server's own words — not ok, not 'unreachable' (it answered)", async () => {
+    const url = uniqueUrl();
+    record(() => jsonRes(DEAD));
+    const r = await probeService(url, { noCors: true });
+    expect(r.ok).toBe(false);
+    expect(r.unreachable).toBeUndefined();
+    expect(r.error).toMatch(/Could not access any server machines/);
+    expect(r.fullExtent).toBeUndefined();
+    expect(calls.some((u) => u.startsWith(HOST))).toBe(false);
   });
-  it("the ⓘ note names the proxy-health behavior", () => {
-    expect(countiesSrc).toMatch(/Health checked via the same-origin proxy/);
+
+  it("the ordinary (CORS-open) path reads the same body as a failure too", async () => {
+    const url = uniqueUrl();
+    record(() => jsonRes(DEAD));
+    const r = await probeService(url, {});
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/server machines/);
+  });
+
+  it("a status:'error' body with no messages still fails (generic words), and a live service is untouched", async () => {
+    const dead = uniqueUrl();
+    record(() => jsonRes({ status: "error" }));
+    expect((await probeService(dead, {})).error).toBe("service error");
+    const live = uniqueUrl();
+    record(() => jsonRes({ currentVersion: 11.3, status: "started", fullExtent: null }));
+    expect((await probeService(live, {})).ok).toBe(true);
+  });
+});
+
+describe("B691 — the noCors flag stays supported, and the Fort Bend contour row that used it is gone", () => {
+  const countiesSrc = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/counties.js", import.meta.url)), "utf8");
+  it("no registry row sets noCors any more, and the removal is explained where the row used to be", () => {
+    const code = countiesSrc.replace(/\/\/[^\n]*/g, "");
+    expect(code).not.toMatch(/noCors:\s*true/);
+    expect(code).not.toMatch(/fb_contours/);
+    expect(countiesSrc).toMatch(/fb_contours[\s\S]{0,200}IS REMOVED/);
   });
 });

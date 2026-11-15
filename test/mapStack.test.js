@@ -118,7 +118,6 @@ describe("NEW-1 — every registered GIS source declares its role", () => {
   it("the owner's own case is classified the way he asked for it", () => {
     // Contours over his buildings; the floodplain fill under them.
     expect(rolesOf(ALL_LAYERS.contours)[0].role).toBe("line");
-    expect(rolesOf(ALL_LAYERS.fb_contours)[0].role).toBe("line");
     expect(rolesOf(ALL_LAYERS.nhd_flowlines)[0].role).toBe("line");
     expect(rolesOf(ALL_LAYERS.wetlands)[0].role).toBe("area");
     expect(rolesOf(ALL_LAYERS.elevation)[0].role).toBe("area");

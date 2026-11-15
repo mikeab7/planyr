@@ -20,6 +20,7 @@ import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; //
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { TX_CITY_ZONING_LAYERS, TX_CITY_ZONING_VINTAGE } from "./txCityZoningLayers.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster, 2026-11-12)
 import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
+import { FORTBEND_LAYERS, FORTBEND_VINTAGE, FORTBEND_MERGE_GROUPS } from "./fortBendLayers.js"; // NEW-1 (Fort Bend County layers, 2026-11-12)
 import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_MERGE_GROUPS } from "./nashvilleBufferLayers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps, 2026-11-12)
 import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
 import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
@@ -136,6 +137,7 @@ export const MERGE_GROUPS = {
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
   ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
+  ...FORTBEND_MERGE_GROUPS, // NEW-1 (Fort Bend County): the Brazos River Studies row of two
   ...NASHVILLE_BUFFER_MERGE_GROUPS, // B2671266 / B2671267 (Metro Nashville): the water-quality buffers row of four, the pending / preliminary flood maps row of two
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
   ...TN_MERGE_GROUPS, // NEW-1 (Rutherford County TN): the Zoning row of four governments
@@ -1331,7 +1333,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...FORTBEND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
 /* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
  * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
@@ -1431,10 +1433,10 @@ export const LAYER_VINTAGE = {
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
-  fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
   ...TX_CITY_ZONING_VINTAGE,
   ...SUGARLAND_VINTAGE,
+  ...FORTBEND_VINTAGE,
   ...NASHVILLE_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
@@ -1526,6 +1528,13 @@ async function probeOnce(probeUrl) {
     const r = await fetchWithRetry(probeUrl, {}, 3);
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}`, httpStatus: r.status };
     const j = await r.json().catch(() => ({}));
+    /* NEW-2 (2026-11-12) — ArcGIS Server answers a DEAD site (the web adaptor up, no server machines behind it) with HTTP 200 and the ADMIN-style body
+     * {"status":"error","messages":["Could not access any server machines…"]} — no `error` key. Fort Bend's whole arcgisweb host did exactly that for weeks, and this
+     * probe read the body as a live service, so the contour row sat at a green "loaded" dot over nothing. `status:"error"` is a failure, with the server's own words. */
+    if (j && !j.error && String(j.status || "").toLowerCase() === "error") {
+      const msg = Array.isArray(j.messages) ? j.messages.map((m) => String(m)).filter(Boolean).join(" ") : "";
+      return { ok: false, error: msg || "service error" };
+    }
     return j && j.error
       ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
       // Capture the service's own data extent (fullExtent, or `extent` on a FeatureServer/layer)

@@ -36,8 +36,9 @@ export const PARCEL_COPIES = {
   // AZ
   az_pinal: ["City of Maricopa GIS", "2026-08"],
 
-  // TX (Fort Bend)
-  fortbend: [null, "2026-10"],
+  // TX (Fort Bend) — NO static date: the hosted FBCAD layer's own lastEditDate is read at runtime (PARCEL_COPY_LIVE_DATE, `readLiveCopyAsOf`); "2026-10" was a guess that
+  // overstated it (NEW-2, 2026-11-12 — the sweep read 2026-08-14 on 2026-10-30). Until the date is read, or when it cannot be, the line says "date not published".
+  fortbend: [null, null],
 
   // GA
   ga_appling: ["Heart of Georgia Altamaha Regional Commission", "2026-07"],
@@ -335,6 +336,42 @@ export const PARCEL_COPIES = {
   wa_klickitat: ["Mt. Adams Resource Stewards", "2026-09"],
 };
 
+/* Copy rows whose date is a RUNTIME fact, not a typed one: the county's layer URL (COUNTIES[key].layerUrl) is asked for its own `editingInfo.lastEditDate`. Their static
+ * PARCEL_COPIES date must stay null (test/parcelCopies.test.js), so a typed month can never stand in for the read. */
+export const PARCEL_COPY_LIVE_DATE = Object.freeze(["fortbend"]);
+export const hasLiveCopyDate = (countyKey) => PARCEL_COPY_LIVE_DATE.includes(countyKey);
+
+/* A service's lastEditDate (epoch ms) → "YYYY-MM" (UTC), or null for anything that is not a plausible past date — a missing, zero, non-numeric or future value is never turned into a month. */
+export function asOfFromEditDate(ms, now = Date.now()) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0 || n > now + 86400000) return null;
+  const d = new Date(n);
+  const y = d.getUTCFullYear();
+  if (y < 2000) return null;
+  return `${y}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+const _liveAsOf = new Map(); // countyKey → Promise<"YYYY-MM"|null> (successes only; a failure is dropped so the next card retries)
+/* The live data month for a live-date copy county, or null (not a live-date county, the service did not answer, or its answer carries no edit date). One small
+ * `?f=json` read of the layer the parcels already come from, deduped per session. NEVER throws — a failed read means "date not published", which is true. */
+export function readLiveCopyAsOf(countyKey, { fetchImpl, now } = {}) {
+  if (!hasLiveCopyDate(countyKey)) return Promise.resolve(null);
+  const url = COUNTIES[countyKey] && COUNTIES[countyKey].layerUrl;
+  if (!url) return Promise.resolve(null);
+  if (_liveAsOf.has(countyKey)) return _liveAsOf.get(countyKey);
+  const f = fetchImpl || (typeof fetch === "function" ? fetch : null);
+  if (!f) return Promise.resolve(null);
+  const p = Promise.resolve()
+    .then(() => f(`${url}?f=json`))
+    .then((r) => (r && r.ok ? r.json() : null))
+    .then((j) => (j && !j.error && j.editingInfo ? asOfFromEditDate(j.editingInfo.lastEditDate, now) : null))
+    .catch(() => null)
+    .then((v) => { if (v == null) _liveAsOf.delete(countyKey); return v; });
+  _liveAsOf.set(countyKey, p);
+  return p;
+}
+export const _resetLiveCopyAsOf = () => _liveAsOf.clear(); // tests
+
 /* Rows the provenance record calls "third-party" that a STATE AGENCY publishes — official under the owner's rule
  * ("copy = not the county's and not the state's"), so no line. Each carries the reason, so the exemption is a decision
  * on the record and not a gap. (NYS Dept. of State's Fulton layer is NOT here: the owner named Fulton as a copy.) */
@@ -390,12 +427,14 @@ export function parcelCopyLine({ name, publisher, asOf }) {
 export const PARCEL_COPY_ASK = "Need the county’s official or newer data?";
 
 /* → { line, ask, href, publisher, asOf, county, state } for a copy county, or null (official rows render nothing).
- * `point` ({lat, lng}) is the clicked point, carried into the email like the no-data message does. */
-export function parcelCopyNotice(countyKey, point) {
+ * `point` ({lat, lng}) is the clicked point, carried into the email like the no-data message does. `liveAsOf` ("YYYY-MM") is the runtime-read date for a
+ * PARCEL_COPY_LIVE_DATE county (see `readLiveCopyAsOf`); null/absent → "date not published". */
+export function parcelCopyNotice(countyKey, point, liveAsOf = null) {
   const copy = parcelCopyOf(countyKey);
   if (!copy) return null;
   const { name, state } = countyNameOf(countyKey);
-  const line = parcelCopyLine({ name, publisher: copy.publisher, asOf: copy.asOf });
+  const asOf = hasLiveCopyDate(countyKey) ? liveAsOf : copy.asOf; // a live-date county never shows a typed month, only the read one
+  const line = parcelCopyLine({ name, publisher: copy.publisher, asOf });
   const href = parcelRequestHref({ name, state, sentence: line, lat: point && point.lat, lng: point && point.lng, sentenceLabel: "Data shown" });
-  return { line, ask: PARCEL_COPY_ASK, href, publisher: copy.publisher, asOf: copy.asOf, county: name, state };
+  return { line, ask: PARCEL_COPY_ASK, href, publisher: copy.publisher, asOf, county: name, state };
 }

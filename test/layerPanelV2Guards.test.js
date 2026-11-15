@@ -31,10 +31,12 @@ describe("B761 — merged City-limits-&-ETJ config (solid limits / dashed same-h
   });
 });
 
-describe("B762 — Fort Bend single-layer county folds into Basemap", () => {
-  it("fb_contours is relabeled for its new home under the USGS contour row", () => {
+describe("B762 — a single-layer county folds into Basemap (Fort Bend's contour row was removed, NEW-2 2026-11-12: its host is dead)", () => {
+  it("the dead Fort Bend contour row is gone, and the registry says why and names the USGS row that covers the county", () => {
     const counties = read("../src/workspaces/site-planner/lib/counties.js");
-    expect(counties).toMatch(/label: "1-Ft Contours \(Fort Bend DD\)"/);
+    expect(counties).not.toMatch(/label: "1-Ft Contours \(Fort Bend DD\)"/);
+    expect(counties).toMatch(/Contours_1Foot[\s\S]{0,400}IS REMOVED/);
+    expect(counties).toMatch(/Contour Lines.{0,40}\(USGS 3DEP/);
   });
   it("the panel folds a single-layer county and gates its own group on ≥2 layers", () => {
     const panel = read("../src/workspaces/site-planner/components/LayerPanel.jsx");

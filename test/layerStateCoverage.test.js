@@ -31,7 +31,7 @@ const NATIONAL = [
 const TEXAS_ONLY = [
   "txrrc_pipe", "txrrc_pipe_easement", "txrrc_wells", "ccn_service", "env_lpst", "faults", "txdot_aadt",
   "jur_county", "jur_city", "jur_etj", "jur_isd", "jur_mud", "jur_road_authority", "coh_hydrants", "hcfcd_row",
-  "coh_ww", "coh_storm", "coh_water", "bkdd_drainage", "bkdd_easements", "bkdd_dmp", "fb_contours",
+  "coh_ww", "coh_storm", "coh_water", "bkdd_drainage", "bkdd_easements", "bkdd_dmp",
 ];
 
 /* The EIA approximate pipeline layers (PR #1902, widened NEW-1 2026-10-29): offered in EVERY state except Texas — `statesNot: ["TX"]`,
@@ -53,8 +53,14 @@ describe("the layer registry's state coverage", () => {
     for (const id of TEXAS_ONLY) expect(ALL_LAYERS[id].states, id).toEqual(["TX"]);
   });
   it("every per-county group in counties.js (Harris, Fort Bend, Chambers, Waller…) is Texas-only", () => {
-    expect(Object.keys(JLAYERS).length).toBeGreaterThan(0);
+    // The per-county group is EMPTY since the dead Fort Bend contour row was removed (NEW-2, 2026-11-12) — every Fort Bend layer now lives in fortBendLayers.js with
+    // `states: ["TX"]` + `regions: ["fortbend"]`. The loop still pins any county-scoped layer someone adds back to Texas.
     for (const [id, cfg] of Object.entries(JLAYERS)) expect(cfg.states, id).toEqual(["TX"]);
+  });
+  it("every Fort Bend County layer is Texas-only AND region-scoped to Fort Bend (hidden on a Harris, Dallas or Georgia site)", () => {
+    const fb = Object.entries(ALL_LAYERS).filter(([id]) => id.startsWith("fb_"));
+    expect(fb.length).toBe(8);
+    for (const [id, cfg] of fb) { expect(cfg.states, id).toEqual(["TX"]); expect(cfg.regions, id).toEqual(["fortbend"]); }
   });
   it("every state code used is one siteState() can actually return", () => {
     // siteState names all 50 states + DC since B2479568; the original eight (envelopes / outlines) are a subset of that list.
