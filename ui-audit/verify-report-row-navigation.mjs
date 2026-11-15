@@ -70,9 +70,10 @@ const stubHtml = () => `<!doctype html><html><body style="margin:0;font:13px sys
   window.__cmds = [];
   let aPid = null, section = "reports";
   const projects = ${JSON.stringify(PROJECTS)};
-  const emit = () => {
+  const emit = (rowLink) => {
     const list = projects.map(p => ({ id: p.id, name: p.name, linkedSiteId: p.linkedSiteId, linkedSiteName: p.linkedSiteName }));
-    parent.postMessage({ source: "planar-seq", type: "planar:nav-state", section, activeId: aPid, projects: list }, window.location.origin);
+    // NEW-1 (B1638832) — the real embed marks the announcement that follows its own goToTask with rowLink.
+    parent.postMessage({ source: "planar-seq", type: "planar:nav-state", section, activeId: aPid, projects: list, ...(rowLink === true ? { rowLink: true } : {}) }, window.location.origin);
   };
   addEventListener("message", (e) => {
     const m = e.data;
@@ -89,7 +90,7 @@ const stubHtml = () => `<!doctype html><html><body style="margin:0;font:13px sys
       section = "reports"; emit();
     }
   });
-  window.__simulateReportRowClick = (targetPid) => { aPid = targetPid; section = "projects"; emit(); };
+  window.__simulateReportRowClick = (targetPid) => { aPid = targetPid; section = "projects"; emit(true); };
   emit();
 </script></body></html>`;
 

@@ -30,6 +30,7 @@
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { NASHVILLE_BUFFER_SOURCES, NASHVILLE_BUFFER_FIXTURE_REACH } from "./sourcesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
@@ -3790,6 +3791,7 @@ export const GIS_SOURCES = {
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...NASHVILLE_BUFFER_SOURCES, // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_SOURCES, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
@@ -4099,6 +4101,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...NASHVILLE_BUFFER_FIXTURE_REACH, // B2671266 / B2671267 (Metro Nashville buffers) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_FIXTURE_REACH, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };

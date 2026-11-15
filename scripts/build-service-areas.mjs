@@ -209,10 +209,18 @@ if (want("spalding_ga")) {
   areas.spalding_ga = { label: "Spalding County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
 if (want("davidson")) {
-  /* NEW-1 (Metro Nashville zoning, 2026-11-12): Davidson County TN, from the SAME bundled county polygons as `harris` (no network). Metro's zoning, overlay, PUD and policy rows declare it. */
-  const rec = index.counties.find((c) => c.state === "TN" && /^davidson$/i.test(c.name.replace(/ county$/i, "")));
-  if (!rec) throw new Error("Davidson County TN not found in the county polygon asset");
-  areas.davidson = { label: "Davidson County, TN (Metro Nashville)", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+  /* NEW-1 (Metro Nashville zoning, 2026-11-12) first built Davidson County TN from the bundled county polygons (no network); B2671266 / B2671267 (Metro water-quality buffers, 2026-11-15) REPLACED that outline with Metro's
+   * OWN county boundary. The bundled outline is 38 vertices and leaves out the county's north tip (Goodlettsville / Joelton / Ridgetop): 1.6% of Metro's buffer polygons sit outside it (191 of 12,000 sampled streams,
+   * measured 2026-11-12), so a site there lost every row declared for this region — the zoning rows too (Ridgetop, a satellite city, is at 36.40 N). A region must never err toward HIDING a layer where its data exists.
+   * Metro's zoning, overlay, PUD and policy rows AND its stormwater buffer / pending-flood-map rows declare it. */
+  const gj = await q("https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/DavidsonCountyBoundaryBuffer/FeatureServer/0/query", { where: "1=1", maxAllowableOffset: 0.0005 });
+  if (!gj.features || gj.features.length !== 1) throw new Error(`davidson: expected Metro's single boundary feature, got ${gj.features && gj.features.length}`);
+  /* ⛔ the layer is a MASK, not the county: its outer ring is the county buffered outward and the COUNTY itself is the hole (measured 2026-11-12: ring 0 = the buffer, bbox -87.062..-86.508 × 35.962..36.411; ring 1 = the county,
+   * -87.055..-86.515 × 35.968..36.406; ring 2 = a 5-vertex notch). Taking the polygon whole would offer the layers everywhere in the mask but not inside the county, so the region is the LARGEST INNER RING. */
+  const ringArea = (r) => Math.abs(r.reduce((a, [x1, y1], i) => { const [x2, y2] = r[(i + 1) % r.length]; return a + (x1 * y2 - x2 * y1); }, 0) / 2);
+  const inner = polysOf(gj).flatMap((poly) => poly.slice(1)).sort((a, b) => ringArea(b) - ringArea(a));
+  if (!inner.length) throw new Error("davidson: Metro's boundary layer no longer has an inner ring — it was a mask when this was written; read the layer again");
+  areas.davidson = { label: "Davidson County, TN (Metro Nashville)", source: "Metro Nashville & Davidson County — county boundary (the inner ring of DavidsonCountyBoundaryBuffer layer 0, services2.arcgis.com/HdTo6HJqh92wn4D8)", polys: [[inner[0]]] };
 }
 for (const [k, a] of Object.entries(areas)) console.log(k, a.polys.length, "polygons", a.polys.reduce((n, p) => n + p.reduce((m, r) => m + r.length, 0), 0), "vertices");
 const stamp = new Date().toISOString().slice(0, 10);
