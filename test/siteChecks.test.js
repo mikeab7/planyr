@@ -251,6 +251,13 @@ describe("wells — on the site, within the radius, or none", () => {
     expect(row.sentences[0]).not.toMatch(/old plug/);
     expect(row.caveat).toMatch(/Mont Belvieu, Stratton Ridge, Markham/);
   });
+  it("storage wells are never crowded out of the row's mix line by more numerous categories (live Targa finding)", () => {
+    const mk = (desc, n, x0, sym) => Array.from({ length: n }, (_, i) => ({ attrs: { GIS_SYMBOL_DESCRIPTION: desc, SYMNUM: sym }, lngLat: [LNG0 + (x0 + i * 20) / FT_LNG, LAT0 + 500 / FT_LAT] }));
+    const feats = [...mk("Dry Hole", 21, 100, 3), ...mk("Oil Well", 9, 1100, 4), ...mk("Plugged Oil Well", 9, 1400, 7), ...mk("Storage Well", 3, 1700, 88)];
+    const row = buildWellsRow(measureWells(SITE, feats));
+    expect(row.line).toMatch(/3 storage \(cavern\)/);
+    expect(row.line.split(" · ")[1].split(", ")).toHaveLength(3); // still three entries — storage takes a slot, the line does not grow
+  });
   it("without storage wells the caveat and the on-site sentence are exactly as before", () => {
     const row = buildWellsRow(measureWells(SITE, [pt(500, 500)]));
     expect(row.sentences[0]).toMatch(/old plug/);

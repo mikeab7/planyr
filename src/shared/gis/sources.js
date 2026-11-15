@@ -31,6 +31,7 @@ import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; //
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { FORTBEND_SOURCES, FORTBEND_FIXTURE_REACH } from "./sourcesFortBend.js"; // NEW-1 (Fort Bend County layers)
+import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
@@ -3727,6 +3728,7 @@ export const GIS_SOURCES = {
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
   ...FORTBEND_SOURCES, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
+  ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_SOURCES, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 
@@ -4032,6 +4034,7 @@ export const SOURCE_FIXTURE_REACH = {
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
   ...FORTBEND_FIXTURE_REACH, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
+  ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_FIXTURE_REACH, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 

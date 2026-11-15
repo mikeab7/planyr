@@ -34,7 +34,8 @@
 import * as EL from "esri-leaflet";
 import L from "leaflet";
 import { holdNewZoomLevels } from "../../../shared/map/steadyZoomLevels.js";
-import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField } from "./counties.js";
+import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField, stackRuleForUrl } from "./counties.js";
+import { rekeyStackedOutlines } from "./parcelStack.js";
 import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
@@ -234,6 +235,10 @@ export function makeParcelLayer(url, opts) {
     };
     layer.on("remove", () => { metaCache = null; });
   }
+  /* NEW-1 (stacked rows) — a layer that returns one lot as many rows (Bartow's parcel x improvement join: up to 170 identical polygons per lot) is keyed by the field one lot shares, not by OBJECTID, so the
+   * lot is ONE ghost: the outline draws once and the lot picker holds one lot to pick. The field rides the outline request (the layer asks for OBJECTID alone otherwise). */
+  const stackRule = (() => { const r = stackRuleForUrl(url); return r && r.outlines ? r : null; })();
+  if (stackRule && Array.isArray(layer.options.fields) && layer.options.fields[0] !== "*" && !layer.options.fields.includes(stackRule.by)) layer.options.fields = [...layer.options.fields, stackRule.by];
   if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset, pane: labelPane });
   else holdForIdField(layer); // NEW-1 — a source with no lot number still needs its real id field name (MARIS: FID)
   /* NEW-1 (Select parcels, wide view) — from two zoom steps out of today's cutoff, the larger lots only, fetched by fixed tiles through the
@@ -315,6 +320,7 @@ export function makeParcelLayer(url, opts) {
   const baseAddFeatures = layer._addFeatures;
   if (typeof baseAddFeatures === "function") {
     layer._addFeatures = function (features, coords) {
+      if (stackRule) features = rekeyStackedOutlines(features, stackRule); // NEW-1 — one ghost per lot, not per row
       ensureFeatureIds(features); // ONE rule (parcelQueryWire.ensureFeatureIds, B2416496): the worker applies it to every answer; this second call covers an answer that reached the layer WITHOUT the worker (its no-Worker fallback). A server that answers GeoJSON with no top-level `id` collapsed every lot onto ONE key (B2409408)
       if (!Array.isArray(this._currentSnapshot) || !this._cache || this.options.timeField) return baseAddFeatures.call(this, features, coords);
       let key;
