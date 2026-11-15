@@ -85,7 +85,7 @@ try {
   ok("known-good arm: 156-027.00-000 lists Rutherford County 1.876200", true);
   ok("county-only: no city row", !/City of|Town of/.test(t), JSON.stringify(t.slice(0, 160)));
   ok("estimate $7,056 with the 2026-values-× 2025-rates wording", /\$7,056/.test(t) && /2025 rates/.test(t) && /not a bill/.test(t), JSON.stringify(t.slice(-260)));
-  ok("caption says 2025 rates and names the Comptroller", /2025 rates · Tennessee Comptroller/.test(t));
+  ok("caption says 2025 rates and names the Comptroller", /Tennessee Comptroller[\s\S]*2025 rates/.test(t));
 
   await openLot("r2");
   await T("parcel-tax-table").waitFor({ timeout: 20000 });

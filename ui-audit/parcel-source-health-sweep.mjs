@@ -33,6 +33,9 @@
  * breaker (B1461731) as every other probe/discovery script in this folder, so a sweep over ~150+
  * sources backs off from a struggling host instead of hammering it.
  *
+ * PART 2 (NEW-1, 2026-11-12): re-queries the known lots in src/shared/gis/sourceFixturesParcels.js by id and asserts owner + acres (±1%) —
+ * catches a re-keyed id column / swapped owner field / unit change that "has features" cannot.
+ *
  * Exit 0 = every checked source answered with real data. Exit 1 = at least one did not (the
  * scheduled workflow turns that into a @claude GitHub issue, same shape as gis-drift.yml).
  *
@@ -42,6 +45,8 @@
 import { COUNTIES, COUNTIES_MAP } from "../src/workspaces/site-planner/lib/counties.js";
 import { fetchJson } from "./probe-statewide-parcels.mjs";
 import { measureParcelLayer, walkForReplacement } from "./lib/serviceNeighbourWalk.mjs";
+import { PARCEL_FIXTURES } from "../src/shared/gis/sourceFixturesParcels.js";
+import { checkParcelFixtures, summariseFixtureChecks } from "./lib/parcelFixtureCheck.mjs";
 import { fileURLToPath } from "node:url";
 
 const JSON_OUT = process.argv.includes("--json");
@@ -109,14 +114,33 @@ function report(sw) {
   return lines.join("\n");
 }
 
+/* NEW-1 (2026-11-12) — PART 2: known lots re-queried by id, owner + acres (±1%) asserted. A fixture the layer
+ * answers WRONG is a failure (the nightly issue opens); one whose host could not be reached is `unmeasured` and is
+ * said so, never counted as a pass (and never as drift — an outage is part 1's finding). */
+export async function sweepFixtures() {
+  const rows = await checkParcelFixtures({ fixtures: PARCEL_FIXTURES, registry: COUNTIES, fetchJson });
+  return { rows, ...summariseFixtureChecks(rows) };
+}
+
+function fixtureReport(fx) {
+  const lines = [`Parcel fixtures — ${fx.total} known lot(s) re-queried by id: ${fx.passed} matched, ${fx.failed.length} DRIFTED, ${fx.unmeasured.length} not measured.`];
+  for (const r of fx.failed) lines.push(`⛔ ${r.county} ${r.id}: ${r.problem}`);
+  for (const r of fx.unmeasured) lines.push(`⚠ ${r.county} ${r.id}: not measured — ${r.problem}`);
+  const stacked = fx.rows.filter((r) => r.stackedNote);
+  for (const r of stacked) lines.push(`ℹ ${r.county} ${r.id}: ${r.stackedNote}`);
+  return lines.join("\n");
+}
+
 async function main() {
   const sw = await sweep();
+  const fx = await sweepFixtures();
   if (JSON_OUT) {
-    console.log(JSON.stringify(sw, null, 2));
+    console.log(JSON.stringify({ ...sw, fixtures: fx }, null, 2));
   } else {
     console.log(report(sw));
+    console.log(fixtureReport(fx));
   }
-  process.exitCode = sw.broken.length ? 1 : 0;
+  process.exitCode = sw.broken.length || fx.failed.length ? 1 : 0;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
