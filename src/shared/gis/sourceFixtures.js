@@ -27,6 +27,7 @@ import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js
 import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
+import { HOUSTON_METRO_FIXTURES, HOUSTON_METRO_DOCS } from "./sourceFixturesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
 // NEW-1 (2026-11-12) — known parcels the NIGHTLY parcel health job re-queries by id (ui-audit/parcel-source-health-sweep.mjs).
@@ -34,6 +35,7 @@ import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // 
 export { PARCEL_FIXTURES as parcelFixtures } from "./sourceFixturesParcels.js";
 
 export const SOURCE_FIXTURES = {
+  ...HOUSTON_METRO_FIXTURES,
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
   ...TX_CITY_ZONING_FIXTURES,
@@ -1528,6 +1530,7 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+  ...HOUSTON_METRO_DOCS,
 ...FLORIDA_DOCS,
   ...OK_DOCS,
   ...TX_CITY_ZONING_DOCS,

@@ -23,6 +23,7 @@ import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./s
 import { CHAMBERS_LAYERS, CHAMBERS_VINTAGE, CHAMBERS_MERGE_GROUPS } from "./chambersLayers.js"; // NEW-1 (Chambers County: Mont Belvieu + Baytown zoning, utilities, Master Drainage Plan, B2671240, 2026-11-12)
 import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_MERGE_GROUPS } from "./nashvilleBufferLayers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps, 2026-11-12)
 import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
+import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
@@ -1334,6 +1335,10 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...CHAMBERS_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
+/* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
+ * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
+Object.assign(ALL_LAYERS, HOUSTON_METRO_LAYERS);
+
 /* NEW-1 (Texas city zoning): joined here, not spread into the one-line registry above — that line is edited by nearly every layer PR, and a shared line is a guaranteed merge conflict. */
 Object.assign(ALL_LAYERS, TX_CITY_ZONING_LAYERS);
 
@@ -1437,6 +1442,7 @@ export const LAYER_VINTAGE = {
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...HOUSTON_METRO_VINTAGE,
   ...FLORIDA_VINTAGE,
   ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };

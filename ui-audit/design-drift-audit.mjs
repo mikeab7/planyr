@@ -96,10 +96,8 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/oklahomaLayers.js", // NEW-1 (Oklahoma screening) — registry rows of the same kind as layers.js: map ink for drawn wells, cleanup sites, dams, tribal areas and protected waters
   "src/workspaces/site-planner/lib/desotoZoning.js", // B2507058 — zone-class map ink (a zoning wash), not chrome
   "src/workspaces/site-planner/lib/sugarLandLayers.js", // NEW-1 (City of Sugar Land) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn washes, lines and points (the legend colours), not chrome
+  "src/workspaces/site-planner/lib/houstonMetroLayers.js", // NEW-1/2/3 (Houston-metro sweep, 2026-11-12) — registry rows of the same kind as layers.js / sugarLandLayers.js: map ink for the thoroughfare-plan classes (the City's own renderer colours), the nine airport tiers and the evacuation zones, plus their legend swatches — not chrome
   "src/workspaces/site-planner/lib/sugarLandZoning.js", // NEW-1 (City of Sugar Land) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js
-  "src/workspaces/site-planner/lib/chambersLayers.js", // B2671240 (Chambers County) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn utility lines, drainage-plan washes and points
-  "src/workspaces/site-planner/lib/montBelvieuZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
-  "src/workspaces/site-planner/lib/baytownZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
   "src/workspaces/site-planner/lib/txCityZoning.js", // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford) — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
   "src/workspaces/site-planner/lib/rutherfordZoning.js", // NEW-1 (Rutherford County TN, 2026-11-12) — zone-family map ink (a zoning wash), the sibling of desotoZoning.js / sugarLandZoning.js
   "src/workspaces/site-planner/lib/sugarLandThoroughfare.js", // NEW-1 (City of Sugar Land) — the thoroughfare-class line ink (map ink and legend read one table), not chrome
@@ -132,6 +130,9 @@ export const DRAWING_SURFACE_FILES = [
   // boundary color but predates this exemption list and isn't retroactively added here — pre-
   // existing debt this item didn't touch, left for its own session.
   "src/shared/comps/lib/kmlExport.js",
+  "src/workspaces/site-planner/lib/chambersLayers.js", // B2671240 (Chambers County) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn utility lines, drainage-plan washes and points
+  "src/workspaces/site-planner/lib/montBelvieuZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
+  "src/workspaces/site-planner/lib/baytownZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
 ];
 
 const EXEMPT_FILES = new Set([...TOKEN_LAYER_FILES, ...DRAWING_SURFACE_FILES]);
