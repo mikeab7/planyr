@@ -126,6 +126,12 @@ const turnOn = async (panel, group, id) => {
 };
 const layers = () => page.evaluate(() => (window.__plannerLayers ? window.__plannerLayers() : null)).then((h) => h && { on: h.on, live: h.live, features: h.features });
 const identify = (id, at) => page.evaluate(([i, a]) => { const h = window.__plannerLayers && window.__plannerLayers(); const c = h && h.identify ? h.identify(i, a) : null; return c ? { title: c.title, rows: (c.rows || []).map((r) => ({ label: r.label, text: r.text })) } : null; }, [id, at]);
+/* A person clicks AFTER a layer has drawn; ask the layer's own identify the same way — poll until it answers (or ~25 s), so a slow first page is not scored as "no card". A genuinely absent card still fails after the wait. */
+const identifyWhenReady = async (id, at, tries = 25) => {
+  let c = null;
+  for (let i = 0; i < tries && !c; i++) { c = await identify(id, at); if (!c) await sleep(1000); }
+  return c;
+};
 const txtOf = (c) => JSON.stringify(c || {});
 
 try {
@@ -153,7 +159,7 @@ try {
   check("B · no request to the city's server failed", bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
   check("B · tx_mb_zoning: painted ≥ 1 feature at the Targa view", (F.tx_mb_zoning || 0) >= 1, String(F.tx_mb_zoning));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/B-targa-zoning.png` });
-  const zc = await identify("tx_mb_zoning", AT.tx_mb_zoning);
+  const zc = await identifyWhenReady("tx_mb_zoning", AT.tx_mb_zoning);
   console.log("card tx_mb_zoning:", JSON.stringify(zc));
   check('B · zoning card at the Targa plant: "Hill Mixed Use" and the 2017 vintage line', /Hill Mixed Use/.test(txtOf(zc)) && /2017 layer — confirm with Planning/.test(txtOf(zc)), "");
   check("B · the zoning card prints no raw field name, zero or empty row", !/ZONEDESC|ZONECLASS|:\s*"?0"?\b|null/.test(txtOf(zc)), txtOf(zc).slice(0, 120));
@@ -194,7 +200,7 @@ try {
     console.log(`${key} painted:`, JSON.stringify(Object.fromEntries(Object.entries(Fc).filter(([k]) => k.startsWith("tx_") && Fc[k] > 0))));
     for (const id of ids) {
       check(`B2 · ${key}: ${id} painted ≥ 1 feature`, (Fc[id] || 0) >= 1, String(Fc[id]));
-      const c = await identify(id, AT[id]); cards[id] = c;
+      const c = await identifyWhenReady(id, AT[id]); cards[id] = c;
       console.log(`card ${id}:`, JSON.stringify(c && { title: c.title, rows: (c.rows || []).map((r) => `${r.label}: ${r.text}`) }));
       check(`B2 · ${id}: a click card opens at a known feature, with a title`, !!(c && c.title), c ? c.title : "no card");
     }
@@ -220,7 +226,10 @@ try {
   const L2 = await layers(), F2 = (L2 && L2.features) || {};
   check("C · Baytown's zoning answered with parcels (first page of the 24,849-polygon table)", ans(/FeatureServer\/10\/query/) > 0, String(ans(/FeatureServer\/10\/query/)));
   check("C · Baytown's zoning PAINTED ≥ 1 feature at the Baytown view (the view sits on one 152-acre tract)", (F2.tx_baytown_zoning || 0) >= 1, String(F2.tx_baytown_zoning));
-  const bt = await identify("tx_baytown_zoning", AT.tx_baytown_zoning);
+  const diag = await page.evaluate((at) => { const h = window.__plannerLayers && window.__plannerLayers(); if (!h) return "no __plannerLayers"; return { on: h.on && h.on.tx_baytown_zoning, live: h.live && h.live.tx_baytown_zoning, drawn: h.drawn && h.drawn.tx_baytown_zoning, feats: h.features && h.features.tx_baytown_zoning, ids: (h.ids || []).filter((i) => /baytown|water_sewer/.test(i)), at: !!h.identify && !!h.identify("tx_baytown_zoning", at) }; }, AT.tx_baytown_zoning);
+  const frame = await page.evaluate(() => { const c = document.querySelector('[data-testid="planner-canvas"]'); return c ? { reveal: c.getAttribute("data-planner-reveal"), view: c.getAttribute("data-view-ppf"), render: c.getAttribute("data-render-ppf") } : null; });
+  console.log("C diag:", JSON.stringify(diag), "frame:", JSON.stringify(frame));
+  const bt = await identifyWhenReady("tx_baytown_zoning", AT.tx_baytown_zoning);
   console.log("card tx_baytown_zoning:", JSON.stringify(bt));
   check('C · card at the industrial ground: "HI · Heavy Industrial"', /HI · Heavy Industrial/.test(txtOf(bt)), "");
   check("C · the card says the layer predates Baytown's new code (2023-02-16 → 2025-01-01)", /2023-02-16/.test(txtOf(bt)) && /2025-01-01/.test(txtOf(bt)), "");

@@ -93,7 +93,7 @@ export const CHAMBERS_LAYERS = {
   /* ---- Mont Belvieu zoning (the city has NO industrial district in this layer) ---- */
   tx_mb_zoning: mb({
     path: "LandUsePlanning_v2/MapServer/0", label: "Zoning (Mont Belvieu)", role: "area", group: "jurisdiction", order: 34, minZoom: 11,
-    fields: ["ZONEDESC", "LASTUPDATE"],
+    fields: ["OBJECTID", "ZONEDESC", "LASTUPDATE"],   // the layer's ID column MUST be listed: esri-leaflet keys features by it, and without it every polygon in a view collapses to ONE (the first answer to arrive)
     styleFn: mbStyle, lineLabel: { field: "ZONEDESC", minZoom: 13, format: mbLabel, declutter: true }, identifyCard: mbZoningCard,
     viewLegend: (features) => mbLegend(mbLegendItems(features)),
     note: "Zoning districts within the City of Mont Belvieu (41 polygons). Colour = district family; the name prints at close zoom and the legend lists the districts in view. Click for the district.",
@@ -198,7 +198,7 @@ export const CHAMBERS_LAYERS = {
   tx_baytown_zoning: {
     kind: "esriFeature", ...BT, url: `${BAYTOWN_AGOL}/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/10`,
     label: "Zoning (Baytown)", role: "area", group: "jurisdiction", order: 35, minZoom: 14, source: "City of Baytown GIS — Zoning", hoverSource: "City of Baytown GIS",
-    fields: ["ULDCZON_20", "ORD_num", "ORD_Date", "Comment_1"],
+    fields: ["OBJECTID_1", "ULDCZON_20", "ORD_num", "ORD_Date", "Comment_1"],   // OBJECTID_1 is this table's ID column — see the Mont Belvieu zoning row
     /* MEASURED 2026-11-12: 24,849 PARCEL-level polygons in one table (the DeSoto zoning table's problem at ten times the size). Asked simplified server-side and with every page followed, so a view fits the draw budget at
      * any zoom and the layer never refuses; parcels, so the outline stays hairline. */
     simplifyFactor: 1.5, fetchAll: true,

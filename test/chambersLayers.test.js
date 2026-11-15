@@ -229,13 +229,22 @@ describe("the registry rows", () => {
     for (const id of PLAN_IDS) expect(ALL_LAYERS[id].group, id).toBe("flood");
   });
   it("Mont Belvieu's zoning asks only the two columns it reads; Baytown's asks the four it reads, simplified, following every page", () => {
-    expect(ALL_LAYERS.tx_mb_zoning.fields).toEqual(["ZONEDESC", "LASTUPDATE"]);
+    expect(ALL_LAYERS.tx_mb_zoning.fields).toEqual(["OBJECTID", "ZONEDESC", "LASTUPDATE"]);
     const b = ALL_LAYERS.tx_baytown_zoning;
-    expect(b.fields).toEqual(["ULDCZON_20", "ORD_num", "ORD_Date", "Comment_1"]);
+    expect(b.fields).toEqual(["OBJECTID_1", "ULDCZON_20", "ORD_num", "ORD_Date", "Comment_1"]);
     expect(b.simplifyFactor).toBeGreaterThan(0);
     expect(b.fetchAll).toBe(true);
     expect(b.vertexBudget).toBeUndefined();            // the default budget stands — the fix is in the request
     expect(b.minZoom).toBeGreaterThanOrEqual(14);      // 24,849 parcel-level polygons: close zoom only
+  });
+  it("EVERY row that limits its columns lists the layer's ID column (esri-leaflet keys features by it — without it every polygon in a view collapses to ONE, whichever answer arrived first; measured live on Baytown, 2026-11-15)", () => {
+    const ID_COLUMN = { tx_mb_zoning: "OBJECTID", tx_baytown_zoning: "OBJECTID_1" };   // from each service's own metadata (objectIdField / uniqueIdField)
+    for (const id of IDS) {
+      const c = ALL_LAYERS[id];
+      if (!c.fields) continue;                                  // no list = every column, ID included
+      expect(ID_COLUMN[id], `${id}: declare its ID column here when you limit its fields`).toBeTruthy();
+      expect(c.fields, id).toContain(ID_COLUMN[id]);
+    }
   });
   it("line labels print only a real pipe size (the data's 0 / −1 / −9 placeholders print nothing)", () => {
     const cfg = ALL_LAYERS.tx_mb_water_main;
