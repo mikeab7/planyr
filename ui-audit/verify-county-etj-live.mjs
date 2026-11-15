@@ -7,7 +7,7 @@
  * and reads the header jurisdiction pill (`data-jurisdiction-full`) from the DEPLOYED build — `/version.json` is read in the same call.
  *   KNOWN-GOOD ARM (the instrument is on trial): from the page's OWN origin (so the CORS answer is the real browser's) the run asks the county layers and
  *   H-GAC at each case point and prints what they say. A case whose ground truth cannot be read, or does not match its stated expectation, is VOID — never scored.
- *   CASES: the 4,663.8-ac Fulshear petition release (filed 2023-09-28) · Rosenberg Ordinance 2026-16 · the Fulshear cluster (still ETJ) · La Porte's ETJ
+ *   CASES: the 4,663.8-ac Fulshear petition release (filed 2023-09-28) · Rosenberg Ordinance 2026-16 · the Fulshear cluster (county table says ETJ; H-GAC now silent) · La Porte's ETJ
  *   and Katy's (H-GAC answers nothing; Harris's table does) · downtown Houston (H-GAC answers; unchanged).
  * `--pre-fix` asserts the OLD answers (H-GAC alone) — the red proof against a build from before this change.
  * Throwaway plans are deleted and the deletion re-read (owner rule 15). FOREGROUND-OR-VOID first. */
@@ -39,8 +39,9 @@ const CASES = [
     truth: { fb5: [], fb16: ["Rosenberg ETJ"], hgac: ["ROSENBERG"] },
     want: "Rosenberg ETJ release area (SB 2038) · Fort Bend County", preFix: "City of Rosenberg ETJ · Fort Bend County" },
   { key: "fulshear-cluster", why: "the Fulshear cluster — still Fulshear's ETJ, in no release", at: [-95.9235, 29.7488],
-    truth: { fb5: ["FULSHEAR"], fb16: [], hgac: ["FULSHEAR"] },
-    want: "City of Fulshear ETJ · Fort Bend County", preFix: "City of Fulshear ETJ · Fort Bend County" },
+    // H-GAC answered FULSHEAR here on 2026-10-30 and answers NOTHING on 2026-11-15 (read live) — another H-GAC gap the county table covers.
+    truth: { fb5: ["FULSHEAR"], fb16: [], hgac: [] },
+    want: "City of Fulshear ETJ · Fort Bend County", preFix: "Unincorporated · Fort Bend County" },
   { key: "la-porte-etj", why: "La Porte's ETJ — H-GAC answers nothing, Harris's table does", at: [-95.05901, 29.71901],
     truth: { harris: ["LA PORTE"], hgac: [] },
     want: "City of La Porte ETJ · Harris County", preFix: "Unincorporated · Harris County" },
