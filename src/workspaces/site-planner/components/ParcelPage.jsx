@@ -204,6 +204,8 @@ function TaxTable({ data }) {
   const rows = data.rows || data.perLot || [];
   const mills = data.unit === "mills"; // Georgia: mills per $1,000 of ASSESSED value (40% of FMV), not Texas's rate per $100
   const dp = mills ? 3 : 6;
+  const note = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm };
+  const noBill = data.rows && data.total == null; // Tennessee IDB / PILOT account: no rate table, no total — only the plain note
   if (data.held) {
     return (
       <PageSection title="Tax rates" testid="parcel-tax-table">
@@ -214,6 +216,7 @@ function TaxTable({ data }) {
   }
   return (
     <PageSection title="Tax rates" testid="parcel-tax-table">
+      {!noBill && (
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
         <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? (mills ? "Mills" : "Rate per $100") : "Total"}</th></tr></thead>
         <tbody>
@@ -221,6 +224,9 @@ function TaxTable({ data }) {
           <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(dp) : "—"}</td></tr>
         </tbody>
       </table>
+      )}
+      {(data.notes || []).map((n, i) => <div key={i} style={note} data-testid="parcel-tax-note">{n}</div>)}
+      {data.estimate && <div style={{ ...note, color: "var(--text-primary)" }} data-testid="parcel-tax-estimate">{data.estimate.text}</div>}
       {data.source && <div data-testid="parcel-tax-caption" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.caption ? ` · ${data.caption}` : data.year ? ` · ${data.year}` : ""}</div>}
     </PageSection>
   );
