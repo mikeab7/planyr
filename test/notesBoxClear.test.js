@@ -49,25 +49,55 @@ describe("planClear — an overlap the person already had is never touched", () 
   });
 });
 
-describe("planClear — movers do not push each other; a drop pushes AWAY from the dropped box", () => {
+describe("planClear — a box the PERSON PLACED never pushes anything (NEW-2, owner 2026-11-15: \"like PowerPoint\")", () => {
   it("a group moved together keeps its arrangement", () => {
     const before = M({ a: R(40, 100, 200, 37), b: R(40, 140, 200, 37) });
     const after = M({ a: R(40, 300, 200, 37), b: R(40, 340, 200, 37) });
-    expect(planClear(before, after).size).toBe(0);
+    expect(planClear(before, after, new Set(["a", "b"])).size).toBe(0);
   });
-  it("dropping a box onto one BELOW its centre pushes that one down; onto one ABOVE pushes it up", () => {
+  it("dropping a box onto one below, or above, it moves NOTHING when it was placed by hand", () => {
     const before = M({ m: R(500, 400, 200, 37), low: R(40, 300, 200, 37), high: R(40, 100, 200, 37) });
     const down = new Map(before); down.set("m", R(40, 290, 200, 37));
-    const dp = planClear(before, down);
-    expect(dp.get("low")).toBeGreaterThan(300);
+    expect(planClear(before, down, new Set(["m"])).size).toBe(0);
     const up = new Map(before); up.set("m", R(40, 110, 200, 37));
-    const upPlan = planClear(before, up);
-    expect(upPlan.get("high")).toBeLessThan(100);
+    expect(planClear(before, up, new Set(["m"])).size).toBe(0);
+  });
+  it("narrowing a box until it grows taller covers the box below and moves NOTHING when the narrowing was a placement", () => {
+    const before = page(); const after = page(); after.set("b", R(40, 150, 230, 90));
+    expect(planClear(before, after, new Set(["b"])).size).toBe(0);
+  });
+  it("…but the SAME rectangle change from the box's own words (not placed) still pushes the box below down", () => {
+    const before = page(); const after = page(); after.set("b", R(40, 150, 560, 54));
+    const plan = planClear(before, after, new Set());
+    expect(plan.get("c")).toBe(210);
+    expect(plan.get("d")).toBeGreaterThanOrEqual(247 + 6);
+  });
+  it("one box placed and ANOTHER grown in the same edit: only the grown one pushes", () => {
+    const before = M({ g: R(40, 100, 300, 37), below: R(40, 150, 300, 37), p: R(600, 100, 100, 37), under: R(600, 140, 100, 37) });
+    const after = new Map(before); after.set("g", R(40, 100, 300, 70)); after.set("p", R(600, 100, 100, 80));
+    const plan = planClear(before, after, new Set(["p"]));
+    expect(plan.has("below")).toBe(true);
+    expect(plan.has("under")).toBe(false);
   });
 });
 
 describe("changedIds", () => {
   it("ignores boxes present on only one side", () => {
     expect(changedIds(M({ a: R(0, 0, 1, 1) }), M({ a: R(0, 0, 1, 1), n: R(5, 5, 5, 5) }))).toEqual([]);
+  });
+});
+
+import { placedBetween } from "../src/workspaces/notes/lib/notesBoxClearPlugin.js";
+describe("placedBetween — which boxes had their STORED placement changed by an edit", () => {
+  const doc = (boxes) => ({ forEach: (fn) => boxes.forEach((b) => fn({ type: { name: "noteAnchor" }, attrs: b }, 0)) });
+  const A = (aid, x, y, w, h = null) => ({ aid, x, y, w, h });
+  it("a drop (x / y), a width drag (w) and a nudge are placed; typing (no stored change) is not", () => {
+    const before = doc([A("a", 40, 100, 560), A("b", 40, 150, 560), A("c", 40, 190, 560)]);
+    const after = doc([A("a", 40, 100, 560), A("b", 40, 150, 230), A("c", 61, 190, 560)]);
+    expect(placedBetween(before, after).sort()).toEqual(["b", "c"]);
+    expect(placedBetween(before, before)).toEqual([]);
+  });
+  it("a brand-new box is not 'placed' (it is nobody's to push and pushes nobody it did not already overlap)", () => {
+    expect(placedBetween(doc([A("a", 1, 1, 100)]), doc([A("a", 1, 1, 100), A("n", 5, 5, 100)]))).toEqual([]);
   });
 });

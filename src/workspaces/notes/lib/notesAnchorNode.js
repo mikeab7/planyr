@@ -51,6 +51,7 @@ import { cascadeRemoveArrows } from "./notesArrows.js";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { unnestTr } from "./notesAnchorNest.js";
 import { boxClearPlugin } from "./notesBoxClearPlugin.js";
+import { copyScopePlugin } from "./notesBoxClipboard.js";
 /* The ONE shared drag-cursor pin (owner convention 2026-10-20). A drag keeps ITS cursor for the whole
  * gesture even once the pointer has left the box — pointer capture keeps the events coming, but what the
  * browser PAINTS is decided by whatever element is under the pointer (or the capture target's own rule). */
@@ -269,7 +270,8 @@ export const NoteAnchor = Node.create({
     return [new Plugin({
       key: new PluginKey("noteAnchorNoNest"),
       appendTransaction: (trs, _old, newState) => (trs.some((t) => t.docChanged) ? unnestTr(newState) : null),
-    }), boxClearPlugin()];   // ⛔ AND A BOX THAT GROWS ONTO ANOTHER MOVES IT CLEAR (B2671237/4) — lib/notesBoxClear.js
+    }), boxClearPlugin(),   // ⛔ AND A BOX THAT GROWS FROM ITS OWN WORDS ONTO ANOTHER MOVES IT CLEAR (B2671237/4; placed boxes may overlap, NEW-2 2026-11-15) — lib/notesBoxClear.js
+    copyScopePlugin()];     // ⛔ A TEXT COPY NEVER CARRIES THE BOX (NEW-1 2026-11-15) — lib/notesBoxClipboard.js
   },
 
   /** ⛔ THE POSITION IS IN THE MARKUP, NOT IN A STYLESHEET. `renderHTML` is what the PRINT
@@ -320,6 +322,16 @@ export const NoteAnchor = Node.create({
        *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
        *  not the start of a sentence, and an atom has no text position to land in anyway — asking
        *  for one puts the selection somewhere arbitrary. */
+      /** ⛔ PASTE WHOLE BOXES (NEW-1, 2026-11-15) — every box in ONE transaction (one Ctrl+Z), before the document's trailing block like
+       *  `addNoteAnchorAt`. The nodes arrive complete (fresh ids and places chosen by `planBoxPaste`); nothing else is touched. */
+      pasteNoteAnchors: (boxes = []) => ({ chain, state }) => {
+        if (!Array.isArray(boxes) || !boxes.length) return false;
+        const { doc } = state;
+        const tail = doc.lastChild;
+        const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
+        return chain().setMeta("planyrBoxPaste", true).insertContentAt(at, boxes, { updateSelection: false }).run();
+      },
+
       addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null, aid = null, fit = undefined }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;

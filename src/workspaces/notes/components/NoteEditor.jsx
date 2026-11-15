@@ -39,6 +39,9 @@ import { undoDepth } from "@tiptap/pm/history";
 import { blockAt, snapbackVerdict, snapbackReport } from "../lib/notesCaretSnapback.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { contentOfBoxes } from "../lib/notesTableClipboard.js";
+import {
+  BOX_ATTR, MAX_PAYLOAD_CHARS, boxesForCopy, carriesBoxCopy, decodeBoxPayload, encodeBoxPayload, mediaRefs, mintToken, nextRepeat, planBoxPaste, remapMedia,
+} from "../lib/notesBoxClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
 import { ANCHOR_WIDTH, ANCHOR_FIT_MIN, ANCHOR_START_MIN, anchorStartPreferred, fitWidthFor, growWidthFor } from "../lib/notesBoxResize.js";
@@ -82,7 +85,7 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage, notesScope,
+  readNoteView, writeNoteView, applyExternalToOpenNote, putNoteImage, putNoteFile, readNoteImage, readNoteFile, notesScope,
 } from "../lib/notesStore.js";
 import { captureHistory, planRestore, forgetOutside } from "../lib/notesUndoCarry.js";
 import {
@@ -422,6 +425,18 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    or a box-shadow: both of those paint outside the element's box, which would put chrome over the
    neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
 .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; }
+/* ⛔ A COPIED BOX WEARS EXCEL'S MOVING DASHED OUTLINE (NEW-1, 2026-11-15) — "marching ants", drawn on the box and only on a BOX copy (a text copy draws nothing).
+   One pseudo-element hung just outside the frame: it takes no press (pointer-events none) and changes no layout. The dashes alternate the text colour and
+   the page colour so they read on any theme; under reduced motion they hold still but stay dashed. No backticks in this block. */
+.planyr-note .ProseMirror .planyr-anchor[data-copied="1"]::after { content: ""; position: absolute; inset: -4px; pointer-events: none; z-index: 4; border-radius: 6px;
+  background:
+    linear-gradient(90deg, var(--text-primary) 50%, var(--surface-raised) 0) 0 0 / 10px 2px repeat-x,
+    linear-gradient(90deg, var(--text-primary) 50%, var(--surface-raised) 0) 0 100% / 10px 2px repeat-x,
+    linear-gradient(0deg, var(--text-primary) 50%, var(--surface-raised) 0) 0 0 / 2px 10px repeat-y,
+    linear-gradient(0deg, var(--text-primary) 50%, var(--surface-raised) 0) 100% 0 / 2px 10px repeat-y;
+  animation: planyr-ants 0.5s linear infinite; }
+@keyframes planyr-ants { to { background-position: 10px 0, -10px 100%, 0 -10px, 100% 10px; } }
+@media (prefers-reduced-motion: reduce) { .planyr-note .ProseMirror .planyr-anchor[data-copied="1"]::after { animation: none; } }
 /* ⛔ SELECTED AND EDITING MUST NOT LOOK IDENTICAL (B1555152 part 1, owner report 2026-09-11:
    "sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd").
    Measured: before this rule, selected-alone and selected-plus-editing painted the exact same
@@ -2472,6 +2487,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       const html = dt?.getData("text/html") || "";
       const text = dt?.getData("text/plain") || "";
       if (!html && !text) return;
+      if (carriesBoxCopy(html)) return;                                // a copied BOX is claimed by `pasteBoxCopy` (NEW-1, 2026-11-15)
       const hasImage = [...(dt?.files || [])].some((f) => f.type?.startsWith("image/"));
       if (hasImage && !tableOwnsClipboard(dt)) return;                 // a picture on its own has its own route
       e.preventDefault();
@@ -2515,13 +2531,20 @@ const NoteEditor = forwardRef(function NoteEditor({
     return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
   }, [editor, pasteClipboardIntoEditor]);
 
-  /* ⛔ COPY AND CUT WITH A BOX SELECTED (NEW-1, owner report 2026-10-06: "I'm trying to copy a table that's
-   * already in the notebook module, and I can't paste it."). The first press on a box only SELECTS it and takes
-   * focus off the editor, so Ctrl+C / Ctrl+X reached no listener and the clipboard kept whatever it held before —
-   * the next Ctrl+V pasted THAT, or nothing. The selected boxes' CONTENT (a table, text, a picture) is written
-   * through ProseMirror's own clipboard serializer, so it pastes back exactly like a copy made with the caret in
-   * the box: into another box it inserts, onto blank paper it makes a box. Cut also removes the boxes (one undo).
-   * Declines whenever a real field or the editor itself has focus — those own their copy. */
+  /* ⛔ COPYING A BOX IS NOT COPYING TEXT, AND IT SHOWS (NEW-1, owner 2026-11-15: "it must be obvious when he is copying a BOX as opposed to TEXT, the
+   * way Excel shows a copied cell"). TWO KINDS OF COPY, ONE RULE TO TELL THEM APART:
+   *   · BOX COPY — a box is SELECTED (he clicked its outline) and there is NO text selection. Ctrl+C puts the whole box on the clipboard
+   *     (`lib/notesBoxClipboard.js`: position, width, formatting, table, picture reference, all of it, in a data attribute of the HTML; the HTML and
+   *     the plain text still carry the CONTENT, so Word / Excel / an email paste it like any copy), and the box gets Excel's moving dashed outline
+   *     (`data-copied`) until Esc, a new copy, or an edit. Ctrl+V then makes a NEW box. Ctrl+X cuts: the box leaves (one Ctrl+Z puts it back) and the
+   *     clipboard still holds it, so a paste brings it back as a new box — there is nothing left to outline.
+   *   · TEXT COPY — any text selection (a drag, Shift+arrows, Ctrl+A) or a caret in an entered box. That is ProseMirror's own copy, declined here, and
+   *     `transformCopied` (`copyScopePlugin`) keeps the box frame out of what it writes. No outline. A paste inserts text.
+   * Declines whenever a real field has focus. A selected box whose first press took focus off the editor is the ordinary case; the editor still holding
+   * focus after a click on the outline is the other, and is a box copy exactly when its selection is EMPTY and it is not being typed in. */
+  const [copiedIds, setCopiedIds] = useState(null);       // the boxes wearing the moving outline, or null
+  const copiedRef = useRef(null);
+  copiedRef.current = copiedIds;
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     const onClip = (e) => {
@@ -2530,28 +2553,142 @@ const NoteEditor = forwardRef(function NoteEditor({
       if (!sel || !sel.size) return;
       const dom = editor.view.dom;
       const a = document.activeElement;
-      if (a && a !== document.body && a !== document.documentElement && (dom.contains(a) || a.closest?.("input, textarea, select, [contenteditable='true']"))) return;
+      const inEditor = !!(a && dom.contains(a));
+      if (a && a !== document.body && a !== document.documentElement && !inEditor && a.closest?.("input, textarea, select, [contenteditable='true']")) return;
+      if (inEditor && (!editor.state.selection.empty || editingRef.current)) return;   // a text selection, or a caret in an entered box, owns the copy
       const root = noteRootRef.current;
       if (!root || root.offsetParent === null) return;                 // this Notes surface is not on screen
       if (String(window.getSelection?.() || "").length) return;         // a highlighted run of page text owns the copy
+      const boxes = boxesForCopy(editor.state.doc, sel);
       const slice = contentOfBoxes(editor.state.doc, sel);
-      if (!slice) return;
+      if (!boxes.length || !slice) return;
+      let packed = null;
       try {
         const { dom: out, text } = editor.view.serializeForClipboard(slice);
-        e.clipboardData.setData("text/html", out.innerHTML);
-        e.clipboardData.setData("text/plain", text);
+        const payload = encodeBoxPayload({ token: mintToken(), pageId: imageCtxRef.current?.pageId ?? null, boxes });
+        if (payload.length > MAX_PAYLOAD_CHARS) onPrintNotice?.("That box is too large to copy as a box, so only its content was copied.");
+        else (out.firstElementChild || out).setAttribute(BOX_ATTR, payload);
+        packed = { html: out.innerHTML, text };
       } catch (_) { onPrintNotice?.("Planyr couldn't copy that box. Open it and select what you want, then press Ctrl+C."); return; }
+      e.clipboardData.setData("text/html", packed.html);
+      e.clipboardData.setData("text/plain", packed.text);
       e.preventDefault();
       e.stopPropagation();
       if (e.type === "cut") {
+        setCopiedIds(null);
         editor.commands.removeNoteAnchors([...sel]);
         clearSelection();
+        /* Focus goes back to the document — the same fix as a group Delete, and for the same reason: clearing the selection unbinds the window handler
+         * that forwards Ctrl+Z, so without a focused editor the cut could not be undone. */
+        editor.commands.focus();
+      } else {
+        setCopiedIds(new Set([...sel].map(String)));
       }
     };
     window.addEventListener("copy", onClip, { capture: true });
     window.addEventListener("cut", onClip, { capture: true });
     return () => { window.removeEventListener("copy", onClip, { capture: true }); window.removeEventListener("cut", onClip, { capture: true }); };
   }, [editor, onPrintNotice]);
+
+  /* THE OUTLINE ENDS WITH Esc, A NEW COPY (it replaces it above) OR AN EDIT — Excel's three. A paste is not an edit (Excel keeps the outline so the
+   * same copy can be pasted again); typing, deleting, moving, undoing are. Housekeeping transactions (kept out of the history, appended steps, the
+   * box-clear push, a hovered paste preview) never count. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !copiedIds) return undefined;
+    const onTx = ({ transaction: tr }) => {
+      if (!tr.docChanged || tr.getMeta("planyrBoxPaste") || tr.getMeta("addToHistory") === false || tr.getMeta("appendedTransaction") || tr.getMeta("planyrBoxClear") || tr.getMeta("pastePreview")) return;
+      setCopiedIds(null);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setCopiedIds(null); };
+    editor.on("transaction", onTx);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => { editor.off("transaction", onTx); window.removeEventListener("keydown", onKey, { capture: true }); };
+  }, [editor, copiedIds]);
+
+  /* ⛔ PASTING A COPIED BOX MAKES A NEW BOX — wherever the caret is (NEW-1). The clipboard HTML of a box copy carries the boxes (`BOX_ATTR`); the paste
+   * is claimed here, before ProseMirror or the loose-paste route sees it, so a box is never poured into another box's text:
+   *   · position — at the armed point when he clicked blank paper first, else offset from the source on the same page (one step further each time it
+   *     is pasted), else in place on another page;
+   *   · another PAGE — a picture or attachment in the box gets bytes of its own (a copy that shared the source's id would break when the source is purged);
+   *   · one transaction, so one Ctrl+Z removes the paste; the new box(es) end up selected, as in PowerPoint;
+   *   · with the caret inside another box's text, the paste-options tab offers KEEP TEXT ONLY — the same words inserted at the caret instead (the box is
+   *     taken back out in the same undo step).
+   * Ctrl+Shift+V never reaches here (it is the plain-text route, handled on keydown). LOUD-FAILURE: a box payload that cannot be read says so and the paste
+   * falls through to the ordinary one. */
+  const pasteBoxCopy = useCallback(async (payload, plainText, caretInBox) => {
+    if (!editor || editor.isDestroyed) return;
+    const ctx = imageCtxRef.current || {};
+    const pageId = ctx.pageId ?? null;
+    const samePage = payload.pageId === (pageId == null ? null : String(pageId));
+    const at = pendingRef2.current;
+    const armed = at ? { x: at.x, y: at.y } : null;
+    if (at) { pendingRef2.current = null; setPendingPlace(null); }
+    const repeat = nextRepeat(payload.token, pageId);
+    let boxes = payload.boxes;
+    if (!samePage) {
+      const idMap = new Map();
+      for (const ref of mediaRefs(boxes)) {
+        if (idMap.has(ref.id)) continue;
+        const dataUrl = ref.kind === "file" ? (await readNoteFile(ref.id)) : (await readNoteImage(ref.id));
+        if (!dataUrl) { onPrintNotice?.("A picture in that box is no longer on this device, so it was pasted without its bytes."); continue; }
+        const newId = `${ref.kind === "file" ? "file" : "img"}${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+        const put = ref.kind === "file"
+          ? await putNoteFile({ id: newId, pageId, dataUrl, name: ref.name, mime: ref.mime, notebookPageIds: ctx.notebookPageIds || null })
+          : await putNoteImage({ id: newId, pageId, dataUrl, mime: ref.mime, w: ref.w, h: ref.h, notebookPageIds: ctx.notebookPageIds || null });
+        if (put.ok) idMap.set(ref.id, newId);
+      }
+      boxes = remapMedia(boxes, idMap);
+    }
+    if (editor.isDestroyed) return;
+    const placed = planBoxPaste({ boxes, samePage, repeat, armed });
+    const aids = placed.map((b) => String(b.attrs.aid));
+    const caretFrom = editor.state.selection.from;
+    if (!editor.commands.pasteNoteAnchors(placed)) { onPrintNotice?.("Planyr couldn't paste that box."); return; }
+    const baseDoc = editor.state.doc;
+    let boxPos = null;
+    baseDoc.forEach((n, pos) => { if (boxPos == null && n.type.name === "noteAnchor" && aids.includes(String(n.attrs.aid))) boxPos = pos; });
+    lastCaretPosRef.current = editor.state.selection.from;   // the caret did not move by choice: do not let the paint pass read the shift as "he left the box"
+    setEditingId(null);
+    setSelection(new Set(aids));
+    if (caretInBox) {
+      setPasteOffer({
+        from: caretFrom, to: caretFrom, curTo: caretFrom, baseDoc, kind: "box", tables: [], cells: [],
+        meta: { tables: [] }, applied: "source", at: Date.now(), boxAids: aids, caretFrom, text: plainText || "", dom: boxPos,
+      });
+      setPasteExpanded(false); setPasteFocusIn(false);
+    }
+    try { editor.view.dom.blur(); } catch (_) { /* a selection of boxes is the point; focus is a nicety */ }
+  }, [editor, onPrintNotice]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onBoxPaste = (e) => {
+      if (e.defaultPrevented || !e.clipboardData) return;
+      const html = e.clipboardData.getData("text/html") || "";
+      if (html.indexOf(BOX_ATTR) < 0) return;
+      const dom = editor.view.dom;
+      const t = e.target;
+      if (t instanceof Element && !dom.contains(t) && t.closest("input, textarea, select, [contenteditable='true']")) return;   // a real field keeps its own paste
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;                  // this Notes surface is not on screen
+      const bodyLike = t === document.body || t === document.documentElement || t == null;
+      /* Focus may still be on the rail row of the page he just opened (a press on the canvas does not take focus from it): that is not "somewhere else in the app". */
+      const onRail = t instanceof Element && !!t.closest("[role='treeitem']");
+      if (!bodyLike && !onRail && !(t instanceof Node && root.contains(t))) return;
+      const payload = decodeBoxPayload(html);
+      if (!payload) return;
+      if (payload.error) { onPrintNotice?.("Planyr couldn't read that copied box, so it was pasted as ordinary content."); return; }
+      e.preventDefault();
+      e.stopPropagation();
+      const inEditor = !!(document.activeElement && dom.contains(document.activeElement));
+      const $f = editor.state.selection.$from;
+      let inBox = false;
+      for (let d = $f.depth; d > 0; d--) if ($f.node(d).type.name === "noteAnchor") { inBox = true; break; }
+      pasteBoxCopy(payload, e.clipboardData.getData("text/plain") || "", inEditor && inBox);
+    };
+    window.addEventListener("paste", onBoxPaste, { capture: true });
+    return () => window.removeEventListener("paste", onBoxPaste, { capture: true });
+  }, [editor, onPrintNotice, pasteBoxCopy]);
 
   /* B2530690 — the table's multi-cell selection says "this won't work on multiple selections" through a DOM event on
    * the editor (it has no prop to call); show it where every other editor notice shows. */
@@ -2640,6 +2777,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       }
       const html = e.clipboardData?.getData("text/html") || "";
       const text = e.clipboardData?.getData("text/plain") || "";
+      if (carriesBoxCopy(html)) return;               // a copied BOX lands at the armed point through `pasteBoxCopy` (NEW-1, 2026-11-15)
       if (!text && !html) { cancelPendingPlace(); return; }
       e.preventDefault();
       e.stopPropagation();
@@ -3271,6 +3409,9 @@ const NoteEditor = forwardRef(function NoteEditor({
          * same way and for the same reason as `data-selected`/`data-editing` above. */
         if (arrowConnectRef.current?.from === id) el.setAttribute("data-arrow-source", "1");
         else el.removeAttribute("data-arrow-source");
+        /* ⛔ THE MOVING DASHED OUTLINE OF A COPIED BOX (NEW-1, 2026-11-15) — painted the same way and for the same reason as the rest. */
+        if (copiedRef.current && copiedRef.current.has(id)) el.setAttribute("data-copied", "1");
+        else el.removeAttribute("data-copied");
       }
       const curPos = editor.state.selection.from;
       const moved = lastCaretPosRef.current !== null && curPos !== lastCaretPosRef.current;
@@ -3295,7 +3436,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     editor.on("focus", paint);
     editor.on("blur", paint);
     return () => { editor.off("transaction", paint); editor.off("focus", paint); editor.off("blur", paint); };
-  }, [editor, selection, editingId, docTick, arrowConnect]);
+  }, [editor, selection, editingId, docTick, arrowConnect, copiedIds]);
 
   const clearSelection = useCallback(() => {
     setSelection((s) => (s.size ? new Set() : s));
@@ -5539,6 +5680,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (!editor || editor.isDestroyed || !offer) return;
     const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches;
     if (touch) return;
+    if (offer.kind === "box") return;               // a pasted BOX is not previewed: its one alternative moves a whole box, and a hover must not
     if (mode == null || mode === offer.applied || mode === "picture") { restorePreview(); return; }
     if (previewRef.current?.mode === mode) return;
     const pv = previewRef.current || { snapshot: editor.state.doc, selJSON: editor.state.selection.toJSON() };
@@ -5624,6 +5766,44 @@ const NoteEditor = forwardRef(function NoteEditor({
       } finally { releasePasteApply(); }
       return { ok, end };
     };
+
+    if (offer.kind === "box") {
+      /* ⛔ A PASTED BOX'S TWO FORMS (NEW-1, 2026-11-15). Source = the new box as it landed. Text = no box: the same words inserted at the caret he pasted at,
+       * the box taken back out in the same step — both as ONE undo step, and either can be picked again. */
+      if (mode === "source") {
+        const { ok } = run((tr) => { revertToBase(tr, offer.baseDoc); return { ok: true, end: offer.caretFrom }; });
+        if (!ok) { sizeUp("Planyr couldn't put that box back."); return; }
+        setSelection(new Set(offer.boxAids || []));
+        setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "source", curTo: offer.caretFrom } : cur));
+        return;
+      }
+      if (mode === "text") {
+        /* The boxes' ranges and the caret are read off the BASE document (the paste as it landed), so the insert point is known before the chain runs:
+         * the caret less every pasted box that sat before it (a box never contains the caret). */
+        const hits = [];
+        offer.baseDoc.forEach((n, pos) => { if (n.type.name === "noteAnchor" && (offer.boxAids || []).includes(String(n.attrs.aid || ""))) hits.push([pos, pos + n.nodeSize]); });
+        const removedBefore = hits.reduce((sum, [from, to]) => (to <= offer.caretFrom ? sum + (to - from) : sum), 0);
+        const insertAt = Math.max(0, offer.caretFrom - removedBefore);
+        applyingPasteModeRef.current = true;
+        let ok = false;
+        try {
+          ok = editor.chain()
+            .command(({ tr }) => {
+              tr.setMeta("uiEvent", "paste");
+              revertToBase(tr, offer.baseDoc);
+              for (const [from, to] of [...hits].reverse()) tr.delete(from, to);
+              return true;
+            })
+            .insertContentAt(insertAt, plainTextToContent(offer.text || ""))
+            .run();
+        } finally { releasePasteApply(); }
+        if (!ok) { sizeUp("Planyr couldn't apply Keep Text Only to that paste."); return; }
+        setSelection(new Set());
+        setPasteOffer((cur) => (cur === offer ? { ...offer, applied: "text", curTo: editor.state.selection.to, dom: null } : cur));
+        return;
+      }
+      return;
+    }
 
     if (mode === "picture") {
       const sources = (offer.tables || []).map((t) => ({ pos: t.pos, node: offer.baseDoc.nodeAt(t.pos) })).filter((t) => t.node);
