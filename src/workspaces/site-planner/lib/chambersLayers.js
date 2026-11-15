@@ -55,18 +55,14 @@ export function ownerLabel(raw) {
   return OWNER_WORDS[String(Math.trunc(Number(raw)))] || null;
 }
 
-/* Every card reads through these so a row never prints an empty value. */
-const cleanText = (v) => { const t = String(v == null ? "" : v).trim(); return t && !/^(null|none|n\/a|<null>)$/i.test(t) ? t : null; };
-
 /* ───────────────────────── The registry rows ───────────────────────── */
 const MB = { states: ["TX"], regions: ["montbelvieu"] };
 const PLAN = { states: ["TX"], regions: ["montbelvieu_plan"] };
 const BT = { states: ["TX"], regions: ["baytown"] };
-const ID = "Mont Belvieu";
 const SRC = "City of Mont Belvieu GIS";
 
 const mb = (o) => ({ kind: "esriFeature", ...MB, hoverIdentify: true, canvasIdentify: true, hoverSource: SRC, source: SRC, ...o, url: `${CMB_RELAY}/${o.path}` });
-const plan = (o) => ({ kind: "esriFeature", ...PLAN, hoverIdentify: true, canvasIdentify: true, group: "flood", hoverSource: `${SRC} — Master Drainage Plan`, source: `${SRC} — Master Drainage Plan`, ...o, url: `${CMB_RELAY}/LandUsePlanning_v2/MapServer/${o.layer}` });
+const plan = (o) => ({ kind: "esriFeature", ...PLAN, hoverIdentify: true, canvasIdentify: true, group: "flood", floodTier: "advisory", agency: "City of Mont Belvieu", hoverSource: `${SRC} — Master Drainage Plan`, source: `${SRC} — Master Drainage Plan`, ...o, url: `${CMB_RELAY}/LandUsePlanning_v2/MapServer/${o.layer}` });
 const line = (o) => mb({ role: "line", group: "utilities", minZoom: 14, ...o });
 const point = (o) => mb({ role: "point", group: "utilities", minZoom: 16, ...o });
 
@@ -228,4 +224,3 @@ export const CHAMBERS_VINTAGE = {
 };
 for (const id of Object.keys(CHAMBERS_LAYERS)) if (id.startsWith("tx_mb_plan_")) CHAMBERS_VINTAGE[id] = "City of Mont Belvieu Master Drainage Plan (consultant study) — publication date not stated in the layer";
 
-export { ID as MONT_BELVIEU };

@@ -57,7 +57,7 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     // exactly as the MUD/CCN rows are in Texas. It is a fifth MEMBER of the one consolidated row,
     // not a second row — which is the whole point of the merge group.
     // B2507057 — the DeSoto County MS / Olive Branch utilities joined the one row (Mississippi has no CCN; the city's and the regional authority's own mains are the provider data there).
-    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_easements", "ms_dcrua_main", "ms_dcrua_service_area", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp", "ms_psc_sewer", "ms_psc_water", "ok_water_systems", "tn_pws"].sort());
+    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud", "ms_dcrua_easements", "ms_dcrua_main", "ms_dcrua_service_area", "ms_dcrua_structures", "ms_ob_lift_stations", "ms_ob_manholes", "ms_ob_sewer_force", "ms_ob_sewer_gravity", "ms_ob_water_main", "ms_ob_wwtp", "ms_psc_sewer", "ms_psc_water", "ok_water_systems", "tn_pws", "tx_mb_lift_stations", "tx_mb_sewer_force", "tx_mb_sewer_gravity", "tx_mb_water_main"].sort()); // B2671240 — the City of Mont Belvieu's water mains, gravity + force sewer and lift stations
   });
   it("every member keeps group 'utilities' and its own fetch (url/kind) untouched", () => {
     for (const [, cfg] of membersOf("water_sewer")) {
@@ -84,16 +84,16 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     const slots = buildGroupSlots(utilEntries);
     const waterSlot = slots.find((s) => s.kind === "merge" && s.mergeGroup === "water_sewer");
     expect(waterSlot).toBeTruthy();
-    expect(waterSlot.members.length).toBe(19); // NEW-1 (Oklahoma) — ok_water_systems joined too; B2521584 — tn_pws (Tennessee TDEC water service areas) joined; NEW-2 — co_water_districts joined the group; B2507057 — the 12 DeSoto / Olive Branch / PSC / DCRUA members (see the member list above)
+    expect(waterSlot.members.length).toBe(23); // B2671240 — the four City of Mont Belvieu water / sewer members joined (19 → 23); NEW-1 (Oklahoma) — ok_water_systems joined too; B2521584 — tn_pws (Tennessee TDEC water service areas) joined; NEW-2 — co_water_districts joined the group; B2507057 — the 12 DeSoto / Olive Branch / PSC / DCRUA members (see the member list above)
     // and only ONE such slot — never split across two rows
     expect(slots.filter((s) => s.kind === "merge" && s.mergeGroup === "water_sewer").length).toBe(1);
   });
 });
 
 describe("B898 — Fire hydrants consolidated to ONE layer", () => {
-  it("exactly the 5 hydrant-relevant adapters merge under fire_hydrants", () => {
+  it("exactly the 6 hydrant-relevant adapters merge under fire_hydrants", () => {
     const members = membersOf("fire_hydrants");
-    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants", "sl_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants; NEW-1 — the City of Sugar Land's
+    expect(members.map(([id]) => id).sort()).toEqual(["coh_hydrants", "mapillary", "ms_ob_hydrants", "osm_hydrants", "sl_hydrants", "tx_mb_hydrants"].sort()); // B2507057 — Olive Branch's own hydrants; NEW-1 — the City of Sugar Land's
   });
   it("MERGE_GROUPS.fire_hydrants has the single consolidated label 'Fire Hydrants'", () => {
     expect(MERGE_GROUPS.fire_hydrants.label).toBe("Fire Hydrants");
