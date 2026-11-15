@@ -27,6 +27,7 @@
  * Plain JS (the stack is plain JS/JSX — the brief's `.ts` sketch maps to .js here).
  */
 
+import { HOUSTON_METRO_SOURCES, HOUSTON_METRO_FIXTURE_REACH } from "./sourcesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
 import { TX_CITY_ZONING_SOURCES, TX_CITY_ZONING_FIXTURE_REACH } from "./sourcesTxCityZoning.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster)
@@ -71,6 +72,7 @@ export const availabilityOf = (entry) => (entry && entry.availability) || "live"
 //   point fixture: [lng, lat] → a ~1 km envelope around it → expect ≥ expectMinCount
 // ---------------------------------------------------------------------------
 export const GIS_SOURCES = {
+  ...HOUSTON_METRO_SOURCES, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...FLORIDA_SOURCES, // NEW-1 (Florida, B2452976): own file so sibling state sessions' edits to this one stay additive
   // ---- Site Analysis screening sources ----
   flood: {
@@ -4033,6 +4035,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraAirportNoise: ["local", "City of Aurora's published airport contours — one city, ~25 km across."],
   auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
+  ...HOUSTON_METRO_FIXTURE_REACH, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
   ...TX_CITY_ZONING_FIXTURE_REACH, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
