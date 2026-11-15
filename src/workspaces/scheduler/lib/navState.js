@@ -62,6 +62,9 @@ export function parseNavState(message) {
     section: message.section || "projects",
     activeId: message.activeId ?? null,
     projects: sanitizeProjects(message.projects),
+    // NEW-1 (B1638832) — true ONLY when the embed says this announcement is the result of a person jumping
+    // to a task row inside it (`goToTask`). Strictly boolean: anything else — absent, "true", 1 — is false.
+    rowLink: message.rowLink === true,
   };
 }
 
@@ -343,13 +346,16 @@ export function shouldNeutralizeToReports({
  * within one frame. Captured message log (BACKLOG.md B1614528): nav-state "projects" 3 → shell fires
  * nav-dashboard → nav-state "reports" 3 — under 200ms round trip, invisible from the user's chair.
  *
- * The fix distinguishes a genuine row click from ordinary ambient drift by WHEN the transition
- * happens, not by any new message field: ambient drift is what an iframe LOAD's first confirmed
- * nav-state can report (its own persisted, account-wide aPid, left over from anything); a Task
- * Report row click is a "reports" → "projects" section change that happens AFTER this same load has
- * already confirmed "reports" at least once. Scheduler.jsx tracks that with a `prevConfirmedSectionRef`
- * (reset to null on every iframe load, exactly like `navConfirmedRef`) and passes `cameFromReports`
- * in — this function only ever sees that one boolean, never raw timing.
+ * The fix distinguished a genuine row click from ordinary ambient drift by WHEN the transition
+ * happens: ambient drift is what an iframe LOAD's first confirmed nav-state can report (its own
+ * persisted, account-wide aPid, left over from anything); a Task Report row click is a "reports" →
+ * "projects" section change that happens AFTER this same load has already confirmed "reports" at
+ * least once. Scheduler.jsx tracks that with a `prevConfirmedSectionRef` (reset to null on every
+ * iframe load, exactly like `navConfirmedRef`) and passes `cameFromReports` in.
+ * ⛔ AMENDED (NEW-1, B1638832, 2026-11-15): TIMING ALONE WAS NOT ENOUGH, and `cameFromReports` is now
+ * only the first of THREE conditions — see the comment inside the function. The embed also marks the
+ * one announcement that follows its own `goToTask` with `rowLink: true` (`parseNavState` → `nav.rowLink`)
+ * and the announced section must be "projects"; without both, no route write happens.
  *
  * The outcome mirrors selectSchedule's own explicit-pick handling exactly, because it's the same
  * situation from the other direction:
@@ -366,8 +372,19 @@ export function shouldNeutralizeToReports({
  * Pure; returns the resolved `{activeId, linkedSiteId}` action or null when there's nothing to do.
  * The caller (Scheduler.jsx) is responsible for actually setting `explicitPickRef` and calling
  * `onProjectChange` — this only decides WHETHER a navigation is owed and with what site id. */
-export function resolveReportRowNavigation({ cameFromReports = false, projectId = null, activeId = null, linkedSiteId = null } = {}) {
-  if (!cameFromReports || projectId != null || activeId == null) return null;
+export function resolveReportRowNavigation({ cameFromReports = false, section = null, rowLink = false, projectId = null, activeId = null, linkedSiteId = null } = {}) {
+  // ⛔ NEW-1 (B1638832, owner report 2026-11-15, build adfbc60: a cold load of a bare "#/schedule" was rewritten
+  // to "#/project/<last-opened>/schedule"). THE TIMING SIGNAL ABOVE WAS NEVER ENOUGH: "this announcement follows a
+  // 'reports' one and names a linked schedule" is true of EVERY later announcement the embed makes — it re-announces
+  // whenever its schedule list changes (a task added, a cloud refresh, a rename, another device) and answers every
+  // `planar:nav-request` — so on a live account one more announcement after the neutral Reports view read as "a person
+  // clicked a row" and silently adopted the stale account-wide `aPid`'s project into the URL. Measured live: cold
+  // "#/schedule" settles bare, one extra embed announcement → "#/project/<id>/schedule". A genuine row click is now
+  // EXPLICIT: the embed marks the one announcement that follows its own `goToTask` with `rowLink`, AND the section
+  // must really be "projects" (a click lands on a schedule; a "reports" announcement is never a click). Anything else
+  // is ambient and never touches the route.
+  if (!cameFromReports || section !== "projects" || rowLink !== true) return null;
+  if (projectId != null || activeId == null) return null;
   return { activeId, linkedSiteId: linkedSiteId != null ? linkedSiteId : null };
 }
 
