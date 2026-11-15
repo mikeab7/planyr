@@ -4050,7 +4050,6 @@ export const SOURCE_FIXTURE_REACH = {
  * this list may only SHRINK: when a host becomes reachable, widen that row's fixtures and delete
  * its row here in the same commit. */
 export const SOURCE_FIXTURE_REACH_PENDING = {
-  nashCcm: "maps.nashville.gov is refused by this build environment's egress (measured 2026-11-12: CONNECT 403) and its relay allow-list entry only exists once this commit deploys, so both fixtures are the sweep's facts, not this build's. → V2115889.",
   femaEbfe: "txgeo.usgs.gov is blocked by this build environment's egress policy (verified 2026-08-06: every request returns 'Host not in allowlist'). Its four sampleFixtures were measured live on 2026-08-05 from an unblocked network and are kept. → V17706.",
   hcfcdMaapnext: "fximgservices.hcfcd.org unreachable (this row is already `availability: down` with an outage record, so its fixtures deliberately assert the OUTAGE). → V17706.",
   bkddStreams: "gisclient.quiddity.com blocked by egress policy. → V17706.",
