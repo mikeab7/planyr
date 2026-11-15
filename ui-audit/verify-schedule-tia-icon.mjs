@@ -1,22 +1,23 @@
-/* SCHEDULE › the custom-drawn TIA task icon — cars on a road (NEW-1, owner-approved artwork 2026-11-12) — rendered check in a real browser.
+/* SCHEDULE › the TIA task icon IN COLOUR — cars on a road (NEW-1 2026-11-15; artwork approved 2026-11-12, recoloured to match the Permit) —
+ * rendered check in a real browser.
  *
  * Drives the REAL public/sequence/index.html and proves, one assertion at a time:
- *   A  the windshields are TRUE cut-outs: rasterised on a TRANSPARENT canvas, each of the three windshields has alpha 0 while the car
- *      body round it is solid, the dashed centre line has gaps, the road edges are solid — and the markup holds no <mask>, no id, no
- *      fixed colour
- *   B  the same on the actual page: on a normal, a HOVERED and a SELECTED row, in light AND with a dark row simulated, the pixels at
- *      the middle of every windshield equal the row's own background beside the icon (so they read as openings, not as coloured
- *      blocks), while a car-body pixel differs from it
- *   C  the icon follows the row's text colour (currentColor): the drawing's computed colour and its cars' fill = the cell's text colour
- *   D  the picker: the TIA is offered (green "drawn for Planyr" dot, hover label, inline <svg>, in Entitlements and permits), found by
+ *   A  rasterised on a TRANSPARENT canvas with a loud text colour set on it: the three cars are red / blue / green, the windshields the
+ *      light blue #e3f3fb (solid), the road edges navy, the centre-line dash yellow with a gap after it — and none of it is the text
+ *      colour; the markup holds no <mask>, no id, no currentColor, no white
+ *   B  the same on the actual page: on a normal, a HOVERED and a SELECTED row, in light AND with a dark row simulated, the car / windshield /
+ *      road-edge pixels are the palette colours, and the drawing's corner is the row's own background (no white or coloured box behind it)
+ *   C  the colours are FIXED: in the dark sim (light text) the computed fills are still red / blue / green, the windshields have no outline
+ *   D  the picker: the TIA is offered (green "drawn for Planyr" dot, hover label, inline coloured <svg>, in Entitlements and permits), found by
  *      tia / traffic / impact / analysis, the traffic light is NO LONGER offered; picking it draws it in the row before the name
  *   E  what is STORED is the key `svg:tia` — never markup — and a save → import round trip (the app's own path) brings it back
  *   F  a task that ALREADY saved 🚦 still shows it (a real Twemoji image that loaded, with its hover label) — saved data is untouched
  *   G  a collapsed phase's faded summary shows the TIA, drawn from the same artwork
+ *   H  26 TIA icons on one page: every one paints the full colour drawing and none carries an id / mask (nothing to collide on)
  * KNOWN-GOOD ARM: the emoji row reports an <img> and no <svg>, the TIA row reports an <svg> and no <img>; a run that cannot see both
  *   is VOID.
- * Teeth: PLANYR_TIA_MUTANT=1 serves a taskIcons.js whose windshields are the "painted over" kind (a solid car body with each
- *   windshield drawn in a fixed white on top) and A and B must go RED.
+ * Teeth: PLANYR_TIA_MUTANT=1 serves a taskIcons.js whose TIA is the OLD one-colour kind (every car and the road in currentColor) and
+ *   A, B, C and H must go RED.
  *
  * Run: node ui-audit/verify-schedule-tia-icon.mjs   [--shots]   (PNGs to ui-audit/_shots/tia-icon/)
  */
@@ -44,13 +45,10 @@ const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); c
 const src = await readFile(HTML_PATH, "utf8");
 let iconsJs = await readFile(join(ROOT, "sequence/taskIcons.js"), "utf8");
 if (MUTANT) {
-  // the defect the rule forbids: a solid car body with each windshield painted over it in a fixed white
-  let n = 0;
-  iconsJs = iconsJs.replace(/<path fill="currentColor" stroke="none" fill-rule="evenodd" d="([^"]+)"\/>/g, (m, d) => {
-    const [body, ws] = d.split("Z"); n++;
-    return `<path fill="currentColor" stroke="none" d="${body}Z"/><path fill="#fff" stroke="none" d="${ws}Z"/>`;
-  });
-  if (n !== 3) throw new Error("mutant: expected 3 car paths, found " + n);
+  // the defect this change removes: the old one-colour TIA — cars, outlines and road all in the row's text colour
+  const before = iconsJs;
+  iconsJs = iconsJs.replace(/(tia: \{[\s\S]*?\n    \}\n)/, blk => blk.replace(/#(d4506c|3f7fe0|3fa36b|2f3a6b|f2b632|e3f3fb)/g, "currentColor"));
+  if (iconsJs === before) throw new Error("mutant: nothing was replaced");
 }
 const pageHtml = () => rewriteCdn(src);
 
@@ -85,6 +83,9 @@ const FIXTURE = {
     task({ id: 8, name: "Spacer row" }),
   ] } },
 };
+
+const MANY = { aPid: 1, nPid: 2, nTid: 1000, view: "grid", section: "projects",
+  projects: { 1: { id: 1, name: "TIA Many Fixture", tasks: Array.from({ length: 26 }, (_, i) => task({ id: i + 1, name: "Traffic study " + (i + 1), icons: ["svg:tia"] })) } } };
 
 async function boot(page, url, fixture = FIXTURE) {
   page.removeAllListeners("dialog"); page.on("dialog", d => d.accept());
@@ -132,7 +133,10 @@ try {
   ok("0 KNOWN-GOOD: the emoji row reports an <img> and no <svg>; the TIA row an <svg> and no <img>",
     g3?.length === 1 && g3[0].img && !g3[0].svg && g1?.length === 1 && g1[0].svg && !g1[0].img, JSON.stringify({ g1, g3 }));
 
-  // ── A the cut-outs, in isolation, on a TRANSPARENT canvas ────────────────────
+  // ── A the colours, in isolation, on a TRANSPARENT canvas ─────────────────────
+  // The drawing is rasterised exactly the way the page draws it (root fill none, stroke currentColor) but with the TEXT colour set to a
+  // loud (200,30,30): if any element still followed the text colour it would come out that colour and the palette checks would fail.
+  const PAL = { navy: [47, 58, 107], blue: [63, 127, 224], red: [212, 80, 108], green: [63, 163, 107], light: [227, 243, 251], yellow: [242, 182, 50] };
   const A = await page.evaluate(async () => {
     const TI = window.PlanyrTaskIcons, b = TI.BUILTIN_SVG.tia;
     const S = 240, k = S / 24;
@@ -144,21 +148,22 @@ try {
     const at = (u, v) => Array.from(cx.getImageData(Math.round(u * k), Math.round(v * k), 1, 1).data);
     return {
       markup: b.markup,
-      ws1: at(7.4, 7.7), ws1Top: at(7.4, 6.6), ws1Bot: at(7.4, 8.8), ws2: at(16.1, 7.7), ws3: at(15.4, 16.3), ws3Top: at(15.4, 15.2), ws3Bot: at(15.4, 17.4),
-      body1: at(3.6, 7.7), body1Top: at(6, 5.9), body2: at(12.6, 7.7), body3: at(19.6, 16.3), body3Rear: at(20.4, 16.3),
-      edgeTop: at(12, 3.5), edgeBot: at(12, 20.5), dash: at(3.2, 12), gap: at(6, 12), between: at(12, 4.7), outside: at(12, 1),
+      ws1: at(7.4, 7.7), ws2: at(16.1, 7.7), ws3: at(15.4, 16.3),
+      body1: at(3.6, 7.7), body1Top: at(6, 6.3), body2: at(12.6, 7.7), body3: at(19.6, 16.3), body3Rear: at(20.4, 16.3),
+      outline1: at(1.8, 7.7), edgeTop: at(12, 3.5), edgeBot: at(12, 20.5), dash: at(3.2, 12), gap: at(6, 12), between: at(12, 4.7), outside: at(12, 1),
     };
   });
   const alpha = p => p[3];
-  ok("A every windshield is EMPTY (alpha 0), top to bottom, in all three cars", [A.ws1, A.ws1Top, A.ws1Bot, A.ws2, A.ws3, A.ws3Top, A.ws3Bot].every(p => alpha(p) === 0), JSON.stringify({ ws1: A.ws1, ws2: A.ws2, ws3: A.ws3 }));
-  ok("A the car bodies round the windshields are SOLID (alpha 255) — three cars, the third one in the other lane", [A.body1, A.body1Top, A.body2, A.body3, A.body3Rear].every(p => alpha(p) === 255 && p[0] > 150 && p[1] < 80), JSON.stringify({ b1: A.body1, b2: A.body2, b3: A.body3 }));
-  ok("A the road edges and a centre-line dash are solid; the gap between dashes, the strip between edge and cars, and outside the road are empty",
-    alpha(A.edgeTop) >= 200 && alpha(A.edgeBot) >= 200 && alpha(A.dash) >= 200 && alpha(A.gap) === 0 && alpha(A.between) === 0 && alpha(A.outside) === 0,
-    JSON.stringify({ edgeTop: A.edgeTop, edgeBot: A.edgeBot, dash: A.dash, gap: A.gap, between: A.between, outside: A.outside }));
-  ok("A the drawing holds no <mask>, no id=, no fixed colour — only currentColor", !/<mask|\sid=|#[0-9a-fA-F]{3,8}\b|rgb\(|url\(/.test(A.markup) && /currentColor/.test(A.markup), A.markup.slice(0, 80) + "…");
+  const is = (p, want, t = 6) => p[3] === 255 && want.every((v, i) => Math.abs(p[i] - v) <= t);
+  ok("A the three car bodies are red, blue and green (the approved palette), solid", is(A.body1, PAL.red) && is(A.body1Top, PAL.red) && is(A.body2, PAL.blue) && is(A.body3, PAL.green) && is(A.body3Rear, PAL.green), JSON.stringify({ b1: A.body1, b2: A.body2, b3: A.body3 }));
+  ok("A every windshield is the light blue #e3f3fb and SOLID (not empty, not white), in all three cars", [A.ws1, A.ws2, A.ws3].every(p => is(p, PAL.light)), JSON.stringify({ ws1: A.ws1, ws2: A.ws2, ws3: A.ws3 }));
+  ok("A the road edges are navy, the car outline is navy, the centre-line dash is yellow with a clear gap after it; outside the drawing and between edge and cars is empty",
+    is(A.edgeTop, PAL.navy) && is(A.edgeBot, PAL.navy) && is(A.outline1, PAL.navy, 40) && is(A.dash, PAL.yellow) && alpha(A.gap) === 0 && alpha(A.between) === 0 && alpha(A.outside) === 0,
+    JSON.stringify({ edgeTop: A.edgeTop, edgeBot: A.edgeBot, outline1: A.outline1, dash: A.dash, gap: A.gap, between: A.between, outside: A.outside }));
+  ok("A none of it is the text colour (200,30,30) — the drawing ignores currentColor entirely", ![A.body1, A.body2, A.body3, A.edgeTop, A.dash, A.ws1].some(p => Math.abs(p[0] - 200) < 6 && Math.abs(p[1] - 30) < 6 && Math.abs(p[2] - 30) < 6));
+  ok("A the drawing holds no <mask>, no id=, no currentColor, no white — fixed colours only", !/<mask|<clipPath|\sid=|url\(|currentColor|#fff\b|white/i.test(A.markup) && /#d4506c/.test(A.markup) && /#3fa36b/.test(A.markup), A.markup.slice(0, 80) + "…");
 
   // ── B on the page: normal / hovered / selected, light and simulated dark ─────
-  const WS = [[7.4, 7.7], [16.1, 7.7], [15.4, 16.3]];
   const rowPixels = async (id, label) => {
     const svg = page.locator(`${row(id)} [data-task-icon="svg:tia"] svg`).first();
     const r = await svg.boundingBox();
@@ -169,18 +174,13 @@ try {
     if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}${label}-row.png`, clip: { x: 0, y: r.y - 14, width: 520, height: r.height + 28 } });
     const k = (r.width * DSF) / 24, ox = M * DSF, oy = M * DSF;
     const pt = (u, v) => [ox + u * k, oy + v * k];
-    // a windshield is ~1 css px wide at row size: sample a small grid round its middle (all of it must read as the row's background)
-    const probes = []; WS.forEach(([cu, cv]) => { for (const du of [-0.1, 0, 0.1]) for (const dv of [-0.4, 0, 0.4]) probes.push(pt(cu + du, cv + dv)); });
-    const [bg, body1, body2, body3, ...ws] = await samplePng(page, buf, [[1.5 * DSF, oy + (r.height * DSF) / 2], pt(3.6, 7.7), pt(12.6, 7.7), pt(19.6, 16.3), ...probes]);
-    return { ws, body1, body2, body3, bg };
+    const [bg, body1, body2, body3, ws1, ws2, ws3, edge, corner] = await samplePng(page, buf, [[1.5 * DSF, oy + (r.height * DSF) / 2], pt(3.6, 7.7), pt(12.6, 7.7), pt(19.6, 16.3), pt(7.4, 7.7), pt(16.1, 7.7), pt(15.4, 16.3), pt(12, 3.5), pt(1, 1)]);
+    return { bg, body1, body2, body3, ws1, ws2, ws3, edge, corner };
   };
-  const near = (a, b, t = 3) => a.slice(0, 3).every((v, i) => Math.abs(v - b[i]) <= t);
-  const differs = (a, b, t = 8) => a.slice(0, 3).some((v, i) => Math.abs(v - b[i]) >= t);
-  // A windshield is under one CSS pixel wide at row size, so its outer columns are anti-aliased against the car body; it reads as
-  // OPEN when the clear majority of its sample points (5 of 9) are the row's own background.
-  const open = (p, bg, t = 3) => [0, 1, 2].every(w => p.ws.slice(w * 9, w * 9 + 9).filter(c => near(c, bg, t)).length >= 5);
-  const judge = (label, p) => ok(`B ${label}: every windshield reads as OPEN (it is the row's own background), the car bodies are drawn`,
-    open(p, p.bg) && differs(p.body1, p.bg) && differs(p.body2, p.bg) && differs(p.body3, p.bg), JSON.stringify({ bg: p.bg, ws: p.ws.filter(c => !near(c, p.bg)).slice(0, 3), bodies: [p.body1, p.body2, p.body3] }));
+  const near = (a, b, t = 8) => a.slice(0, 3).every((v, i) => Math.abs(v - b[i]) <= t);
+  const judge = (label, p) => ok(`B ${label}: red / blue / green cars, light windshields, navy road edge — and NO box behind the drawing (its corner is the row's own background)`,
+    near(p.body1, PAL.red) && near(p.body2, PAL.blue) && near(p.body3, PAL.green) && [p.ws1, p.ws2, p.ws3].every(c => near(c, PAL.light, 14)) && near(p.edge, PAL.navy, 14) && near(p.corner, p.bg, 6),
+    JSON.stringify(p));
 
   await page.mouse.move(5, 5); await pacedWait(page, 200);
   judge("normal row", await rowPixels(1, "normal"));
@@ -197,17 +197,34 @@ try {
   await page.mouse.move(5, 5); await pacedWait(page, 250);
   const dark = await rowPixels(1, "dark");
   judge("dark row (simulated)", dark);
-  ok("B dark row: the windshields are the DARK background — not white, not black", open(dark, [22, 27, 34], 4), JSON.stringify(dark.ws.slice(0, 3)));
-  ok("B dark row: the car bodies are light (the light text colour)", [dark.body1, dark.body2, dark.body3].every(c => c[0] > dark.bg[0] + 100), JSON.stringify([dark.body1, dark.body2, dark.body3]));
+  ok("B dark row: the row really is dark, and the windshields stay light (not the dark row, not white)", near(dark.bg, [22, 27, 34], 4) && [dark.ws1, dark.ws2, dark.ws3].every(c => near(c, PAL.light, 14)), JSON.stringify({ bg: dark.bg, ws: [dark.ws1, dark.ws2, dark.ws3] }));
+  ok("B dark row: the car bodies are NOT the light text colour — they keep red / blue / green", [dark.body1, dark.body2, dark.body3].every(c => !near(c, [230, 237, 243], 40)), JSON.stringify([dark.body1, dark.body2, dark.body3]));
 
-  // ── C follows the row's text colour ──────────────────────────────────────────
+  // ── C the colours are fixed: they do NOT follow the row's text colour ────────
   const C = await page.evaluate(() => {
     const cell = document.querySelector('[data-task-row="1"] [data-col-key="name"]');
     const svg = cell.querySelector('[data-task-icon="svg:tia"] svg');
-    const car = svg.querySelector('path[fill-rule="evenodd"]');
-    return { cell: getComputedStyle(cell).color, svgColor: getComputedStyle(svg).color, stroke: getComputedStyle(svg).stroke, carFill: getComputedStyle(car).fill };
+    const cs = [...svg.querySelectorAll("rect")].filter(r => r.getAttribute("width") === "7.5").map(r => getComputedStyle(r).fill);
+    const ws = [...svg.querySelectorAll("rect")].filter(r => r.getAttribute("width") === "1.4").map(r => [getComputedStyle(r).fill, getComputedStyle(r).stroke]);
+    return { cell: getComputedStyle(cell).color, cars: cs, ws, edge: getComputedStyle(svg.querySelector("path")).stroke };
   });
-  ok("C the drawing's colour and its cars' fill ARE the cell's text colour (light text in the dark sim)", C.svgColor === C.cell && C.stroke === C.cell && C.carFill === C.cell && C.cell === "rgb(230, 237, 243)", JSON.stringify(C));
+  ok("C in the dark sim (light text) the cars' computed fills are still red / blue / green, the windshields have NO outline, the road edge is navy — none is the cell's text colour",
+    C.cell === "rgb(230, 237, 243)" && JSON.stringify(C.cars) === JSON.stringify(["rgb(212, 80, 108)", "rgb(63, 127, 224)", "rgb(63, 163, 107)"]) && C.ws.length === 3 && C.ws.every(([f, s]) => f === "rgb(227, 243, 251)" && s === "none") && C.edge === "rgb(47, 58, 107)", JSON.stringify(C));
+
+  // ── H many TIA icons on one page: every one renders, none shares an id ───────
+  await boot(page, url, MANY);
+  const H = await page.evaluate(() => {
+    const svgs = [...document.querySelectorAll('[data-task-icon="svg:tia"] svg')];
+    return { n: svgs.length, ids: svgs.reduce((n, s) => n + s.querySelectorAll("[id],mask,clipPath,defs").length, 0), docIds: document.querySelectorAll('svg [id]').length };
+  });
+  ok("H the page draws at least 20 TIA icons at once and none of them carries an id / mask / clipPath / defs (so none can collide)", H.n >= 20 && H.ids === 0, JSON.stringify(H));
+  const manyIdx = await page.evaluate(() => [...document.querySelectorAll('[data-task-icon="svg:tia"]')].map(e => e.closest("[data-task-row]").getAttribute("data-task-row")));
+  let bad = [];
+  for (const id of manyIdx.slice(0, 24)) {
+    const p = await rowPixels(Number(id), "many-" + id);
+    if (!(near(p.body1, PAL.red) && near(p.body2, PAL.blue) && near(p.body3, PAL.green) && [p.ws1, p.ws2, p.ws3].every(c => near(c, PAL.light, 14)))) bad.push(id);
+  }
+  ok(`H every one of the ${Math.min(24, manyIdx.length)} sampled TIA icons paints the full colour drawing (none lost its colours to a neighbour)`, bad.length === 0 && manyIdx.length >= 20, "bad rows: " + JSON.stringify(bad));
 
   // ── D the picker ─────────────────────────────────────────────────────────────
   // boot() navigates afresh, which drops the dark simulation
@@ -232,7 +249,7 @@ try {
   ok("D in the picker: labelled “Traffic impact analysis (TIA) · drawn for Planyr”, drawn as an <svg>, with the green dot",
     await cell.evaluate(b => b.title === "Traffic impact analysis (TIA) · drawn for Planyr" && !!b.querySelector("svg") && !b.querySelector("img") && [...b.querySelectorAll("span")].some(s => s.style.background === "rgb(22, 163, 74)")));
   ok("D in the picker it sits in Entitlements and permits", await cell.evaluate(b => b.closest("[data-icon-group]").getAttribute("data-icon-group") === "ent"));
-  ok("D in the picker it is drawn in the picker's text colour (dark ink on the white card)", await cell.evaluate(b => getComputedStyle(b.querySelector("svg")).color === getComputedStyle(b).color && getComputedStyle(b).color !== "rgb(255, 255, 255)"));
+  ok("D in the picker it is drawn in full colour (red / blue / green cars), whatever the picker's text colour", await cell.evaluate(b => ["#d4506c", "#3f7fe0", "#3fa36b"].every(c => !!b.querySelector(`rect[fill="${c}"]`)) && !b.querySelector("[fill='currentColor']")));
   if (SHOTS) { await picker.locator("input").fill("traffic"); await pacedWait(page, 150); await page.screenshot({ path: SHOT_DIR + "picker-open.png" }); await picker.locator("input").fill(""); await pacedWait(page, 100); }
   await page.evaluate(() => { window.__saves = []; const o = window.storage.set; window.storage.set = function (k, v, opts) { if (opts && opts.label === "auto") window.__saves.push(v); return o.apply(this, arguments); }; });
   await picker.locator("input").fill("traffic"); await picker.locator('[data-icon-id="svg:tia"]').click(); await pacedWait(page, 250);
