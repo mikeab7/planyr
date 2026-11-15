@@ -8,8 +8,9 @@
  * the all-Texas TxGIO layer scoped to that one county, so a search still answers and
  * can't leak into a neighbouring county.
  */
-import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
-import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl } from "./counties.js";
+import { resolveLayerUrl, getLayerInfo, queryFeatures, queryDistinctValues } from "./arcgis.js";
+import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl, stackRuleForUrl } from "./counties.js";
+import { collapseStacked } from "./parcelStack.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue, countyRecord } from "./appraisal.js";
 import { normalizeIdFor } from "./tnParcelId.js";
@@ -117,6 +118,21 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere
   const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
   // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot (counties.js `pointOrderBy`) is asked newest-first, and one lot is listed once.
   const orderBy = pointOrderByForUrl(layerUrl);
+  /* NEW-1/2/3 (stacked rows, lib/parcelStack.js) — a layer that returns several rows for one lot declares `dedupeBy`; the search then lists a LOT once. Bartow (`distinct`) asks the server for the distinct
+   * PARCELIDs first and fetches one row per id, so ten copies of one lot never fill the ten-result window (an address search matched 249 rows over 68 lots); the others fetch a wider window and collapse it. */
+  const stack = stackRuleForUrl(layerUrl);
+  if (stack) {
+    let feats = null;
+    if (stack.distinct && okField(stack.by)) {
+      try {
+        const keys = await queryDistinctValues(layerUrl, { where, field: stack.by, count: 10, timeoutMs });
+        const lots = await Promise.all(keys.map((k) => queryFeatures(layerUrl, { where: typeof k === "number" ? `${stack.by} = ${k}` : `${stack.by} = '${String(k).replace(/'/g, "''")}'`, count: 1, outSR: 4326, timeoutMs })));
+        feats = lots.map((l) => l[0]).filter(Boolean);
+      } catch (e) { if (e && e.unavailable) throw e; feats = null; } // the distinct ask is an optimisation: a refusal falls back to the wide window below
+    }
+    if (!feats) feats = collapseStacked(await queryFeatures(layerUrl, { where, count: 100, outSR: 4326, timeoutMs, ...(orderBy ? { orderBy } : {}) }), stack).slice(0, 10);
+    return { feats, layerUrl, idField, addrField };
+  }
   let feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326, timeoutMs, ...(orderBy ? { orderBy } : {}) }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
   if (orderBy && idField) {
     const seen = new Set();
