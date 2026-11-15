@@ -874,11 +874,13 @@ export function DrainagePanel({
             }
             // An unmodeled city keeps the county number but MUST carry the caveat (coexists
             // with a truthy req, so it lives outside the req-shaped chain above).
-            if (d.authorityFlags.includes("city-criteria-unverified")) detR.push(warnNote("This city's detention criteria aren't modeled — county floor shown; verify with the city.", "city-unv", "The county requirement is a screening floor, not the city's own rule — confirm the city's criteria before design. This note only appears when the parcel is materially INSIDE the city's limits (an edge sliver or ETJ-only overlap no longer triggers it — B823)."));
+            if (d.authorityFlags.includes("city-criteria-unverified") && !(d.cityNotes || []).length) detR.push(warnNote("This city's detention criteria aren't modeled — county floor shown; verify with the city.", "city-unv", "The county requirement is a screening floor, not the city's own rule — confirm the city's criteria before design. This note only appears when the parcel is materially INSIDE the city's limits (an edge sliver or ETJ-only overlap no longer triggers it — B823)."));
             if (d.authorityFlags.includes("jurisdiction-partial")) detR.push(warnNote("City-limits lookup incomplete — re-check (Houston limits would change the reviewer).", "jur-partial", "The city-limits source didn't answer completely (an outage). If this parcel is actually inside Houston's city limits, the reviewing authority would be the City of Houston, not the county."));
             // ETJ context: being in a city's ETJ does NOT make that city the detention authority —
             // the county's criteria govern (owner rule 2026-07-10). Surfaced so it's never mistaken
             // for a city-limits detection.
+            // NEW-1 — Baytown / Mont Belvieu: the city's own policy line REPLACES the generic "city-unv" sentence above for these cities.
+            for (const cn of (d.cityNotes || [])) detR.push(warnNote(cn.short, "citynote-" + cn.id, cn.detail || null));
             for (const e of d.etjNotes) detR.push(warnNote(e.short || e.note, "etj-" + String(e.city || "").toLowerCase(), e.detail || null));
             // B750 — the two overridable assumptions (reviewing agency + channel discharge).
             { const ab = assumptionsBlock(); if (ab) detR.push(ab); }

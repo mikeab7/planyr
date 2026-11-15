@@ -8,10 +8,11 @@
  * What this pins, on the REAL app (a located plan):
  *   1. the card holds exactly the header row and the two panes — none of the four old texts anywhere inside it, and Map Base › Labels
  *      lists Road Names AND City Names (both on the same row anatomy as every other layer row: checkbox · name · ▾);
- *   2. the five evidence tools did NOT vanish — they are a "Utility Evidence" section on the right rail, each arms;
- *   3. Easement rules is reachable from the Easement tool's ▾, and the route tools' no-rule path opens it THERE and says where;
- *   4. an UNLOCATED plan shows no Utility Evidence section (they read the aerial / GIS around the site).
- * Red-proof: on c542ffc every assertion in 1–3 fails.
+ *   2. (RETIRED 2026-11-14 — owner decision: the five Utility Evidence tools were removed; the right-rail section's absence is
+ *      pinned in utility-evidence-removed.spec.js);
+ *   3. Easement rules is reachable from the Easement tool's ▾ (the disclosure is the one way in);
+ *   4. an UNLOCATED plan shows no extra rows under its card.
+ * Red-proof: on c542ffc every assertion in 1 and 3 fails.
  */
 import { test, expect } from "@playwright/test";
 import { panelSel, openPlannerLayers } from "./lib/layersPanel.js";
@@ -82,33 +83,7 @@ test("the layers card is the header row + the two panes, with Road Names AND Cit
   await expect(panel.getByTestId("layer-row-road_names-menu")).toBeVisible();
 });
 
-test("the five evidence tools live on the right rail under Utility Evidence, and each arms", async ({ page }) => {
-  await open(page, site());
-  const rail = page.locator(".rail-hdr", { hasText: "Utility Evidence" });
-  await expect(rail, "a Utility Evidence heading on the rail").toHaveCount(1);
-  for (const [id, label] of [["rail-ev-trace", /Trace overhead electric/], ["rail-ev-route-elec", /Route electric service/], ["rail-ev-route-water", /Route water service/], ["rail-ev-infer-main", /Infer water main/], ["rail-ev-xsec", /Cross-section \(ditch\)/]]) {
-    await expect(page.getByTestId(id), id).toContainText(label);
-  }
-  // Trace arms (aria-pressed) and disarms.
-  const trace = page.getByTestId("rail-ev-trace");
-  await trace.click();
-  await expect(trace).toHaveAttribute("aria-pressed", "true");
-  await trace.click();
-  await expect(trace).toHaveAttribute("aria-pressed", "false");
-  // Cross-section arms and says what to do.
-  const xsec = page.getByTestId("rail-ev-xsec");
-  await xsec.click();
-  await expect(xsec).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText(/Click one bank of the ditch/)).toBeVisible();
-  await xsec.click();
-  await expect(xsec).toHaveAttribute("aria-pressed", "false");
-  // Route electric with no traced line declines with its own existing message (the handler is the same one).
-  await page.getByTestId("rail-ev-route-elec").click();
-  await expect(page.getByText(/Trace an overhead pole line first/)).toBeVisible();
-});
-
-test("Easement rules opens from the Easement ▾, and the route tools' no-rule path opens it there and says where", async ({ page }) => {
-  // No county on file → no easement criteria, so Route water service declines and points at the rules.
+test("Easement rules opens from the Easement ▾ (and is not under the layers card)", async ({ page }) => {
   await open(page, site({ county: null }));
   await page.getByRole("button", { name: "Easement options" }).click();
   const toggle = page.getByTestId("easement-rules-toggle");
@@ -120,10 +95,6 @@ test("Easement rules opens from the Easement ▾, and the route tools' no-rule p
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("easement-rules")).toHaveCount(0);
 
-  // The no-rule path: Route water service → the flash names the NEW place, and the menu opens with the rules showing.
-  await page.getByTestId("rail-ev-route-water").click();
-  await expect(page.getByText(/pick one in the Easement ▾ menu/)).toBeVisible();
-  await expect(page.getByTestId("easement-rules")).toBeVisible();
   // The old home is gone: no rules disclosure anywhere in the layers card.
   await openPlannerLayers(page);
   await expect(page.locator(panelSel("planner")).first()).not.toContainText(/Easement rules/i);
@@ -144,9 +115,8 @@ test("on a phone the card sits fully on screen between the two edge tabs, with t
   for (const re of OLD_TEXTS) await expect(card).not.toContainText(re);
 });
 
-test("an unlocated plan has no Utility Evidence section and no extra rows under its card", async ({ page }) => {
+test("an unlocated plan has no extra rows under its card", async ({ page }) => {
   await open(page, site({ origin: null }));
-  await expect(page.locator(".rail-hdr", { hasText: "Utility Evidence" })).toHaveCount(0);
   await openPlannerLayers(page);
   const card = page.locator(panelSel("planner")).first().locator("xpath=ancestor::div[@data-wheelscroll='1'][1]");
   for (const re of OLD_TEXTS) await expect(card).not.toContainText(re);

@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl } from "./counties.js";
+import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl, pointWhereForUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -288,6 +288,7 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       returnGeometry: "true",
       outSR: 4326,
       ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
+      ...(pointWhereForUrl(layerUrl) ? { where: pointWhereForUrl(layerUrl) } : {}), // NEW-2 — a layer's placeholder polygons never answer a click
     }, { timeoutMs });
     const feats = j.features || [];
     return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0] || null;
@@ -302,7 +303,8 @@ export async function queryAtPoint(layerUrl, lng, lat, { timeoutMs } = {}) {
       outFields: "*",
       returnGeometry: "true",
       outSR: 4326,
-      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}), // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
+      ...(pointOrderByForUrl(layerUrl) ? { orderByFields: pointOrderByForUrl(layerUrl) } : {}),
+      ...(pointWhereForUrl(layerUrl) ? { where: pointWhereForUrl(layerUrl) } : {}), // NEW-2 — a layer's placeholder polygons never answer a click // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot hands back the newest first
     }, { timeoutMs });
     return (j.features || [])[0] || null;
   } catch (e) {
