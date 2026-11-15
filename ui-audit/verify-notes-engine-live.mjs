@@ -14,6 +14,9 @@
  *     an arm that was skipped and passed quietly). (Not between the paste and its options tab: any other action ends that offer, as
  *     in Word.) Then one last border move that is KEPT, whose position must survive the reload
  *   5 reload with a cache-busting query: everything persisted (formatting, table, and that box position)
+ *   7 B2671237 / B2671238: nothing draws on top of anything after an edit — stacked one-line boxes, then the owner's paste (a REAL copy from one box,
+ *     Ctrl+V into another) and a representative set of the other box-changing actions (ui-audit/lib/notesOverlap.mjs); every box's rendered
+ *     rectangle after each action, after ONE Ctrl+Z and (for the owner's case) after a cache-busting reload; a box nested in a box fails
  *   6 delete the throwaway and prove it is gone from the list and the Bin (ui-audit/lib/notesSweep.mjs)
  * `BASE_URL` (default https://planyr.io) · `EXPECT_BUILD=<sha>` fails if /version.json differs (read in the same run).
  * Known-good arms VOID the run (exit 2): a real bold lights B; the Excel paste lands a table at all. */
@@ -22,6 +25,7 @@ import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { sweepNotesThrowaways } from "./lib/notesSweep.mjs";
 import { loadBank, summariseDoc, checkEntry, checkOptionFills } from "./lib/pasteBank.mjs";
+import { runSweep, readRects } from "./lib/notesOverlap.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const TITLE = "ZZ throwaway engine check " + Date.now().toString(36);
@@ -240,6 +244,25 @@ try {
       ok("the box position persisted (the border move made after the paste is where the box reopens)", !!want.pos && !!b && b.attrs.x === want.pos[0] && b.attrs.y === want.pos[1], `wanted ${JSON.stringify(want.pos)}, reopened at ${JSON.stringify(b && [b.attrs.x, b.attrs.y])}`); }
     ok("the table persisted (same cells, same merge)", JSON.stringify(summariseDoc(after).tables[0]?.cells.map((c) => [c.r, c.c, c.text, c.colspan])) === want.grid);
     const sv = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json())); console.log("   served build after reload:", sv.build); }
+  console.log("\n=== 7 · nothing draws on top of anything after an edit (B2671237 / B2671238) ===");
+  {
+    const seedLive = async (d) => { await page.evaluate((x) => window.__noteEditor.setDoc(x), d); await settle(1300); };
+    const reopenRead = async () => {
+      await page.waitForTimeout(4000);
+      await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid^="notes-row-"]', { timeout: 30000 }); await settle(2500);
+      const idx = await page.evaluate((t) => [...document.querySelectorAll('[data-testid^="notes-row-"]')].findIndex((r) => r.innerText.split("\n")[0].trim() === t), TITLE);
+      if (idx >= 0) { await page.locator('[data-testid^="notes-row-"]').nth(idx).click(); await settle(2500); }
+      await page.waitForSelector('[data-testid="note-body"]', { timeout: 30000 }); await settle(1800);
+      return { rects: await readRects(page), doc: await live() };
+    };
+    const results = await runSweep({
+      page, seed: seedLive, ok, settle, voided, reloadRead: reopenRead, reloadIds: ["paste-from-box"],
+      only: ["paste-from-box", "paste-plain", "type-wrap", "enter-lines", "paste-option-merge", "paste-option-text", "bullets", "font-size", "table", "shrink", "resize-width", "move-onto"],
+    });
+    console.log("   sweep:", results.map((r) => `${r.id}:${r.status}`).join(" "));
+    ok("the live sweep reached every scenario it was asked to run (none skipped)", results.length === 12 && results.every((r) => r.status === "done"), JSON.stringify(results));
+  }
 } catch (e) {
   if (e.message !== "void") { fail++; console.log("  ✗ run aborted:", String(e).slice(0, 300)); }
 } finally {
