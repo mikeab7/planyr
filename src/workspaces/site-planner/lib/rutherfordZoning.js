@@ -217,7 +217,7 @@ export function zoningStyleFor(member) {
 
 /* `site` = what the state's city limits say about the clicked POINT: a city's name ("Murfreesboro", "Smyrna", "La Vergne", "Eagleville"), UNINCORPORATED, or null while the limits are still loading
  * (rutherfordJurisdiction.js). The card names the government ONCE, in its title (#41/#50). */
-export function zoningCard(member, props, site) {
+export function zoningCard(member, props, site, stack = null) {
   const z = readZone(member, props);
   const own = JURISDICTION[member];
   const rows = [];
@@ -242,17 +242,45 @@ export function zoningCard(member, props, site) {
     return { title: site ? `Zoning · ${UNINCORPORATED}` : "Zoning · Rutherford County", dedupeKey: DEDUPE_KEY, rows };
   }
 
-  const t = zoneText(z);
-  if (t) rows.push({ label: "Zone", text: t });
-  if (z.alsoReads) rows.push({ label: "City record also reads", text: z.alsoReads });
-  if (z.classWord) rows.push({ label: "Class", text: z.classWord });
-  if (z.date) rows.push({ label: "Record updated", text: z.date });
+  const stacked = stackedZones(member, props, stack);
+  if (stacked.length > 1) {
+    /* A layer whose polygons STACK (Smyrna: overlay districts over a base district, and a few overlapping records): every district at the point is listed — base districts first, overlays after —
+     * never just whichever polygon happened to draw first. More than one BASE district is the town's own data disagreeing with itself, and is said plainly. */
+    const base = stacked.filter((x) => !x.overlay), over = stacked.filter((x) => x.overlay);
+    base.forEach((x, i) => rows.push({ label: i === 0 ? "Zone" : "Also mapped here", text: x.text }));
+    over.forEach((x) => rows.push({ label: "Overlay", text: x.text }));
+    if (base.length > 1) rows.push({ label: "Note", text: `${own}'s layer holds more than one district here — confirm with ${own} Planning.` });
+    // the date and the ZONE_ID disagreement belong to the district listed FIRST, so the card is the same whichever polygon of the stack was clicked
+    if (stacked[0].z.alsoReads) rows.push({ label: "City record also reads", text: stacked[0].z.alsoReads });
+    if (stacked[0].z.date) rows.push({ label: "Record updated", text: stacked[0].z.date });
+  } else {
+    const t = zoneText(z);
+    if (t) rows.push({ label: "Zone", text: t });
+    if (z.alsoReads) rows.push({ label: "City record also reads", text: z.alsoReads });
+    if (z.classWord) rows.push({ label: "Class", text: z.classWord });
+    if (z.date) rows.push({ label: "Record updated", text: z.date });
+  }
   const link = member === MURFREESBORO ? (z.href ? { href: z.href, text: "Zoning ordinance (Murfreesboro)" } : null) : ORDINANCE_LINK[member];
   if (link) rows.push({ label: "Ordinance", text: link.text, href: link.href });
   if (site && site !== own) {
     rows.push({ label: "City limits", text: site === UNINCORPORATED ? `Outside ${own}'s limits on the state's city map — confirm which government zones this land.` : `Inside ${site}'s limits on the state's city map — confirm which government zones this land.` });
   }
   return { title: `Zoning · ${own}`, dedupeKey: DEDUPE_KEY, rows };
+}
+
+/* Every DISTINCT district under the click for a member whose polygons can stack: [{ z, text, overlay }], the clicked polygon first among its kind, newest record first among base districts. */
+export function stackedZones(member, props, stack) {
+  const all = [props, ...((Array.isArray(stack) ? stack : []).filter((p) => p !== props))];
+  const seen = new Set(), out = [];
+  for (const p of all) {
+    const z = readZone(member, p);
+    const text = zoneText(z);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push({ z, text, overlay: z.listed && zoneClass(z.code, z.name) === "overlay", stamp: Number(p && p.LastUpdate) || 0 });
+  }
+  const base = out.filter((x) => !x.overlay).sort((a, b) => b.stamp - a.stamp), over = out.filter((x) => x.overlay);
+  return [...base, ...over];
 }
 
 /* ───────────────────────── The legend ───────────────────────── */

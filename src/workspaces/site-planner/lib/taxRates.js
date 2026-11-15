@@ -36,12 +36,17 @@
  * An account's codes come from parcel attrs[codeField] (comma separated). Any code missing from
  * `units` => the list is incomplete => null (hide).
  */
+import { isTnTaxCounty, tnTaxTableFor } from "./tnTaxUnits.js";
 import { millageTableFor } from "./georgiaMillage.js";
 import bartowMillage from "./data/gaMillage-ga_bartow-2025.json";
 
 export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
+  /* Tennessee (NEW-1/NEW-2, 2026-11-15): membership rides the county parcel layer's own attributes, so these two are
+   * covered through lib/tnTaxUnits.js (a Tennessee lot never reaches the Texas paths below — owner constraint #3). */
+  tn_rutherford: { covered: true, reason: "DistrictGroup (taxing district) + AccountType (class) on the county parcel layer; 2025 certified rates from the TN Comptroller Tax Aggregate Report. See lib/tnTaxUnits.js." },
+  tn_davidson: { covered: true, reason: "TaxDist (USD / GSD / satellite city) on Metro's parcel layer; 2025 rates from the TN Comptroller. Berry Hill, improvement districts and unassigned lots stay hidden (no sourced levy). No class field, so no dollar estimate." },
   // `server: true` = rendered from /api/taxunits (taxUnitsClient.TAX_UNIT_COUNTIES), not from a static data file; `covered` stays the static-file flag.
   harris: { covered: false, server: true, reason: "Rendered from /api/taxunits: HCAD's own per-account unit list + adopted rates, from the precomputed Supabase index (B2158065). The static-file path here is unused for Harris." },
   fortbend: { covered: false, server: true, reason: "Rendered from /api/taxunits (NEW-1): membership = the FBCAD parcel layer's TAXUNITS codes; names + adopted rates = the Fort Bend County Tax Office rate portal, keyed by the same codes; the newest year in which every unit has a reported rate. An account with a unit the portal does not publish (e.g. M256, SM106) is incomplete and the table is hidden with the reason." },
@@ -80,6 +85,7 @@ export async function loadTaxTable(parcel, ctx = {}) {
 /** Sync; `ctx.data` is a loaded data file. Null = hide. */
 export function taxTableFor(parcel, ctx = {}) {
   const county = ctx.county || parcel?.county || null;
+  if (isTnTaxCounty(county)) return tnTaxTableFor(parcel, county); // attribute-driven; never falls through to a Texas data file
   if (county && MILLAGE_DATA[county]) return millageTableFor(parcel, ctx.data || MILLAGE_DATA[county], { covered: ctx.covered ?? !!(TAX_COVERAGE[county] && TAX_COVERAGE[county].covered) });
   const data = ctx.data || loaded[county];
   if (!county || !data || !data.units || !data.codeField || !data.year || !data.source) return null;
@@ -100,7 +106,7 @@ export function taxTableFor(parcel, ctx = {}) {
 export function taxTableForCombined(parcels, ctx = {}) {
   const tableOf = ctx.tableOf || ((p) => taxTableFor(p, ctx)); // B2158065: async per-account tables plug in here
   const per = (parcels || []).map((p) => { const t = tableOf(p); return { name: p?.label || p?.name || p?.acct || "Lot", t: t && t.held ? null : t }; }); // a PILOT-held lot has no total, so a combine that includes one hides
-  if (!per.length || per.some((x) => !x.t)) return null;
+  if (!per.length || per.some((x) => !x.t || x.t.total == null)) return null; // a lot with no bill (a PILOT / IDB account) has no total, so a combine that includes one hides
   const totals = per.map((x) => x.t.total);
   const allShare = totals.every((t) => t === totals[0]);
   return { allShare, total: allShare ? totals[0] : null, perLot: per.map((x) => ({ name: x.name, total: x.t.total })) };

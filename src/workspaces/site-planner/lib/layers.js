@@ -19,6 +19,7 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
+import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_MERGE_GROUPS } from "./nashvilleBufferLayers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps, 2026-11-12)
 import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
 import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
@@ -134,6 +135,7 @@ export const MERGE_GROUPS = {
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
   ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
+  ...NASHVILLE_BUFFER_MERGE_GROUPS, // B2671266 / B2671267 (Metro Nashville): the water-quality buffers row of four, the pending / preliminary flood maps row of two
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
   ...TN_MERGE_GROUPS, // NEW-1 (Rutherford County TN): the Zoning row of four governments
 };
@@ -1328,7 +1330,11 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...HOUSTON_METRO_LAYERS, ...NASHVILLE_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+
+/* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
+ * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
+Object.assign(ALL_LAYERS, HOUSTON_METRO_LAYERS);
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the

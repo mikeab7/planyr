@@ -11,7 +11,12 @@
  *     scenario whose action did nothing would otherwise pass vacuously, the exact way V2115860 once passed with a skipped arm);
  *   · the stored document is read for NESTED boxes (a box inside a box is how the reported paste hid) and the paste-options tab is judged against
  *     every line of text on the page, not against boxes.
- * Real key and mouse input throughout; a few steps that need a native dialog or a drag-to-size grid go through the toolbar's own controls. */
+ * Real key and mouse input throughout; a few steps that need a native dialog or a drag-to-size grid go through the toolbar's own controls.
+ *
+ * ⛔ AMENDED 2026-11-15 (NEW-2, owner: "I want it to function slightly like PowerPoint, where you can post stuff over each other"): there are TWO kinds of
+ * scenario now. GROWTH FROM A BOX'S OWN WORDS (typing, paste, lists, font size, a table, an image…) must still leave nothing overlapping — that overlap is
+ * the one he did not choose. A box the person PLACES (dropped by its border, narrowed by its handle) MAY overlap, and the check flips: the placed box
+ * must really end up over another one (precondition — otherwise the run proves nothing) and EVERY OTHER BOX MUST BE EXACTLY WHERE IT WAS. */
 import { loadBank } from "./pasteBank.mjs";
 
 const para = (t) => ({ type: "paragraph", content: t ? [{ type: "text", text: t }] : [] });
@@ -153,20 +158,20 @@ export async function runSweep(ctx) {
   add("shrink", "deleting text so a box shrinks (nothing may move)", async () => {
     await enter(LINES.b, true); await key("Home"); await page.keyboard.down("Shift"); await key("End"); await page.keyboard.up("Shift"); await key("Delete"); await settle(500);
   }, { grows: false, noMove: true });
-  add("resize-width", "narrowing a box by its width handle", async () => {
+  add("resize-width", "narrowing a box by its width handle (a placement: it may cover the box below, which must NOT move)", async () => {
     await click(LINES.b);   // press 1 selects: the handles appear
     const h = await page.evaluate(() => { const e = [...document.querySelectorAll(".planyr-anchor")].find((a) => a.textContent.includes("preliminary")); const hd = e?.querySelector('[data-handle="e"]'); if (!hd) return null; const r = hd.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
     if (!h) throw new Error("no east handle on the selected box");
     await page.mouse.move(h.x, h.y, { steps: 3 }); await settle(150); await page.mouse.down(); await page.mouse.move(h.x - 330, h.y, { steps: 10 }); await page.mouse.move(h.x - 330, h.y, { steps: 2 }); await page.mouse.up(); await settle(1000);
-  });
-  add("move-onto", "moving a box by its border onto another", async () => {
+  }, { overlapOk: true, actor: "b" });
+  add("move-onto", "moving a box by its border onto another (a placement: it may cover it, and the other must NOT move)", async () => {
     const r = await page.evaluate(() => { const e = [...document.querySelectorAll(".planyr-anchor")].find((a) => a.textContent.includes("Understand")); const q = e.getBoundingClientRect(); return { l: q.left, t: q.top, w: q.width, h: q.height }; });
     const at = { x: r.l + r.w * 0.3, y: r.t - 1 };
     await page.mouse.move(at.x, at.y, { steps: 4 }); await settle(200);
     const onBand = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest?.(".planyr-anchor-edge"), [at.x, at.y]);
     if (!onBand) throw new Error("the top border band is not under the pointer");
     await page.mouse.down(); await page.mouse.move(at.x + 10, at.y + 70, { steps: 10 }); await page.mouse.move(at.x + 10, at.y + 70, { steps: 2 }); await page.mouse.up(); await settle(1000);
-  }, { grows: false, moved: true });
+  }, { grows: false, moved: true, overlapOk: true, actor: "a" });
 
   /* ── the judge's own known-good arms ── */
   ok("[known-good] the overlap judge flags a pair that really overlaps", overlapPairs([{ aid: "p", x: 0, y: 0, w: 100, h: 40 }, { aid: "q", x: 10, y: 30, w: 100, h: 40 }]).length === 1);
@@ -190,7 +195,13 @@ export async function runSweep(ctx) {
       const moved = Object.entries(posMap(doc)).some(([id, p]) => seedPos[id] && (p[0] !== seedPos[id][0] || p[1] !== seedPos[id][1]));
       if (sc.grows && !grew) { ok(`${sc.label}: the action really grew a box (precondition — otherwise the check below proves nothing)`, false, "no box got taller or wider"); results.push({ id: sc.id, status: "not-exercised" }); continue; }
       const pairs = overlapPairs(rects);
-      ok(`${sc.label}: no two boxes overlap`, pairs.length === 0, pairs.join(", "));
+      if (sc.overlapOk) {
+        /* PLACED BY HAND: it must really overlap something (else nothing was exercised), and nothing but the placed box may have moved. */
+        ok(`${sc.label}: the placed box really covers another one (precondition — otherwise "nothing moved" proves nothing)`, pairs.some((q) => q.includes(sc.actor)), pairs.join(", ") || "no overlap");
+        const now = posMap(doc);
+        const strays = Object.keys(seedPos).filter((id) => id !== sc.actor && (!now[id] || now[id][0] !== seedPos[id][0] || now[id][1] !== seedPos[id][1]));
+        ok(`${sc.label}: no OTHER box moved to make room (owner: boxes may overlap when he places them)`, strays.length === 0, `${strays.join(",")} ${JSON.stringify(now)} vs ${JSON.stringify(seedPos)}`);
+      } else ok(`${sc.label}: no two boxes overlap`, pairs.length === 0, pairs.join(", "));
       ok(`${sc.label}: no box sits inside another box (stored document)`, maxBoxDepth(doc) === 0, `max nesting depth ${maxBoxDepth(doc)}`);
       if (sc.noMove) ok(`${sc.label}: no box was moved by a shrink`, !moved, JSON.stringify(posMap(doc)));
       if (!sc.moved && sc.grows !== false || sc.id === "type-wrap") {
@@ -215,8 +226,10 @@ export async function runSweep(ctx) {
         ok(`${sc.label}: ONE Ctrl+Z puts every box back where it was`, same && overlapPairs(ur).length === 0, `${JSON.stringify(up)} vs ${JSON.stringify(seedPos)}`);
       }
       if (ctx.reloadRead && sc.reload && (!ctx.reloadIds || ctx.reloadIds.includes(sc.id))) {
+        const onScreen = posMap((await readDoc(page)) || { content: [] });   // the layout at the moment of the reload (after any Ctrl+Z above)
         const after = await ctx.reloadRead();
-        ok(`${sc.label}: after a reload nothing overlaps and the layout is the one on screen`, !!after && overlapPairs(after.rects).length === 0 && maxBoxDepth(after.doc) === 0, after ? overlapPairs(after.rects).join(", ") : "reload read failed");
+        if (sc.overlapOk) ok(`${sc.label}: after a reload the layout is the one he left (the overlap stays, nothing was moved behind his back)`, !!after && JSON.stringify(posMap(after.doc)) === JSON.stringify(onScreen) && maxBoxDepth(after.doc) === 0, after ? `${JSON.stringify(posMap(after.doc))} vs ${JSON.stringify(onScreen)}` : "reload read failed");
+        else ok(`${sc.label}: after a reload nothing overlaps and the layout is the one on screen`, !!after && overlapPairs(after.rects).length === 0 && maxBoxDepth(after.doc) === 0, after ? overlapPairs(after.rects).join(", ") : "reload read failed");
       }
       results.push({ id: sc.id, status: "done" });
     } catch (e) {

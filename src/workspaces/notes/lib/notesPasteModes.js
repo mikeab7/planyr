@@ -68,6 +68,9 @@ export function pasteSetFor(offer) {
     ];
   }
   if (kind === "grown") return [{ title: null, modes: ["source", "merge"] }];
+  /* A COPIED BOX pasted while the caret was inside another box's text (NEW-1, 2026-11-15): it landed as its own new box ("Keep Source Formatting"); the one
+   * other thing a person might have meant is the words alone, at the caret ("Keep Text Only"). Nothing to merge — a box has no foreign formatting. */
+  if (kind === "box") return [{ title: null, modes: ["source", "text"] }];
   return [{ title: null, modes: ["source", "merge", "text"] }];
 }
 
