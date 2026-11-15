@@ -29,6 +29,7 @@
 
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
+import { TX_CITY_ZONING_SOURCES, TX_CITY_ZONING_FIXTURE_REACH } from "./sourcesTxCityZoning.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { NASHVILLE_BUFFER_SOURCES, NASHVILLE_BUFFER_FIXTURE_REACH } from "./sourcesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
@@ -3726,6 +3727,7 @@ export const GIS_SOURCES = {
     // Live 2026-10-29 (through the relay): Aurora box 511.
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_SOURCES, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
   ...NASHVILLE_BUFFER_SOURCES, // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
@@ -4032,6 +4034,7 @@ export const SOURCE_FIXTURE_REACH = {
   auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_FIXTURE_REACH, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
   ...NASHVILLE_BUFFER_FIXTURE_REACH, // B2671266 / B2671267 (Metro Nashville buffers) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
