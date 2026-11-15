@@ -1,14 +1,15 @@
-/* NEW-1 / NEW-2 (Texas city zoning — Richmond, Fulshear, Stafford, Webster; 2026-11-12) — THE GIS REGISTRY ROWS of the city zoning layers (lib/txCityZoning.js reads them).
+/* NEW-1 / NEW-2 (Texas city zoning — Richmond, Fulshear, Stafford, Webster; 2026-11-12, Webster measured 2026-11-15) — THE GIS REGISTRY ROWS of the Texas city zoning layers (lib/txCityZoning.js reads them).
  *
  * Every row is `states: ["TX"]`, production tier. Spread into `GIS_SOURCES` (sources.js) in one line so this block does not share a patch hunk with another state's rows; fixtures and
  * notes live in `sourceFixturesTxCityZoning.js`, off the app bundle, like every other row.
  *
- * WHERE EACH CITY'S LAYER LIVES (all MEASURED 2026-11-12 from the build sandbox — fields, counts, edit dates, geometry):
+ * WHERE EACH CITY'S LAYER LIVES (all MEASURED — fields, counts, edit dates, geometry):
  *   · Richmond  — the city's ArcGIS Online org (services6.arcgis.com/riku34rn6C8cs2t5): CORZONINGDISTRICTS020320, 114 polygons, layer edited 2021-03-23. Public, CORS-open, read directly.
  *   · Fulshear  — the city's ArcGIS Online org (services5.arcgis.com/k1ZyjVw1fpWcwy7h): ZONING (67 polygons, edited 2023-09-06) + ZONING_NEWER (9 polygons, edited 2026-10-26). Public, read directly.
  *   · Stafford  — the city's ArcGIS Online org (services.arcgis.com/Ga5PFntoooL0Dlwu): Zoning_Designations_Current, 11 polygons, edited 2024-04-10. Public, read directly.
- *   · Webster   — the city's own ArcGIS Server (www1.cityofwebster.com): Landbase/Zoning/MapServer. It sends no CORS header and the build sandbox's egress refuses it, so it is read through the
- *                 same-origin /gis-proxy relay (the host is on its ALLOWED_HOSTS). See the Webster row for what has and has not been measured.
+ *   · Webster   — the city's own ArcGIS Server (www1.cityofwebster.com): Landbase/Zoning/MapServer, layers 0 (base districts, 226) and 1 (planned developments, 45), last edited 2025-12-29.
+ *                 It sends no CORS header and the build sandbox's egress refuses it (403 on CONNECT), so it is read through the same-origin /gis-proxy relay (the host is on its ALLOWED_HOSTS) and was
+ *                 MEASURED through the branch preview's relay on 2026-11-15 (fields, counts, codes, geometry, overlap of the two layers).
  * NOT FOUND, and so not here (each measured): Rosenberg (maps.rosenbergtx.gov publishes no zoning layer), Katy (none public), Missouri City (gis.missouricitytx.gov refuses non-browser clients).
  * Unincorporated Fort Bend County keeps the "Texas counties have no zoning" sentence — these layers are drawn only inside a city's limits (lib/txCityZoningLayers.js, `regions`). */
 
@@ -16,7 +17,7 @@ const RICHMOND = "https://services6.arcgis.com/riku34rn6C8cs2t5/arcgis/rest/serv
 const FULSHEAR_OLD = "https://services5.arcgis.com/k1ZyjVw1fpWcwy7h/arcgis/rest/services/ZONING/FeatureServer/0";
 const FULSHEAR_NEW = "https://services5.arcgis.com/k1ZyjVw1fpWcwy7h/arcgis/rest/services/ZONING_NEWER/FeatureServer/0";
 const STAFFORD = "https://services.arcgis.com/Ga5PFntoooL0Dlwu/arcgis/rest/services/Zoning_Designations_Current/FeatureServer/0";
-export const WEBSTER_ZONING_URL = "https://www1.cityofwebster.com/arcgis/rest/services/Landbase/Zoning/MapServer/0";
+const WEBSTER = "https://www1.cityofwebster.com/arcgis/rest/services/Landbase/Zoning/MapServer";
 
 const base = { states: ["TX"], tier: "production", lastVerified: "2026-11-12", layerId: null, geometryType: "polygon" };
 
@@ -50,10 +51,18 @@ export const TX_CITY_ZONING_SOURCES = {
     // Live 2026-11-12: 11 polygons — AE · PDD · IS · MU-2 · MU-1 · MFR · RCLM · RCT · MU · SFR · PC. Layer edited 2024-04-10.
   },
   websterZoning: {
-    key: "websterZoning", label: "Zoning districts (City of Webster)", provider: "City of Webster — Planning (zoning districts)",
-    serviceUrl: WEBSTER_ZONING_URL, relay: true, coverage: "webster", fields: {},
+    key: "websterZoning", label: "Zoning districts (City of Webster)", provider: "City of Webster — Planning (zoning districts, Landbase/Zoning layer 0)",
+    serviceUrl: `${WEBSTER}/0`, relay: true, coverage: "webster",
+    fields: { code: "ZONE_", ordinance: "ORDINANCE", date: "DATE_", section: "Zone_Link", uses: "Use_Link", summary: "District_Summary" },
     ...base,
-    // PROVISIONAL: not yet measured (see NEW-2).
+    // Live 2026-11-15 (through the relay): 226 polygons — NP 38 · R1 37 · C3 34 · C2 33 · C1 25 · R2 19 · O 17 · M1 16 · R1A 7 (the renderer also lists M2; none are drawn). Layer edited 2025-12-29.
+  },
+  websterPlannedDev: {
+    key: "websterPlannedDev", label: "Planned developments (City of Webster)", provider: "City of Webster — Planning (planned development districts, Landbase/Zoning layer 1)",
+    serviceUrl: `${WEBSTER}/1`, relay: true, coverage: "webster",
+    fields: { code: "ZONE_", name: "PD_Guide_Name", location: "PD_Guide_Location", ordinance: "PD_Guide_Ordinance", ordLink: "Ord_Link", guide: "PD_Guide_Hyperlink" },
+    ...base,
+    // Live 2026-11-15 (through the relay): 45 PD polygons (17 with a named development guide). They do not overlap the base layer. PD_Guide_Hyperlink is typed with backslashes on 16 of 17.
   },
 };
 

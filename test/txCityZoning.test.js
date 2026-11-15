@@ -1,7 +1,7 @@
 /* Texas city zoning — Richmond, Fulshear, Stafford (NEW-1, 2026-11-12): the pure rules, over the REAL values each city's layer holds (measured 2026-11-12, every polygon). */
 import { describe, it, expect } from "vitest";
 import {
-  normalizeCode, dateFromMs, docHref, withName, makeCityZoning, ZONE_COLORS, RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, TX_CITY_ZONING,
+  normalizeCode, dateFromMs, docHref, withName, makeCityZoning, ZONE_COLORS, RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD, WEBSTER_ZONE_NAMES, TX_CITY_ZONING,
 } from "../src/workspaces/site-planner/lib/txCityZoning.js";
 
 const ms = (y, m, d) => Date.UTC(y, m - 1, d);
@@ -147,6 +147,60 @@ describe("Stafford — real values", () => {
   it("classes all eleven codes", () => {
     const fam = { AE: "institutional", PDD: "pud", IS: "other", "MU-2": "mixed", "MU-1": "mixed", MFR: "residential", RCLM: "business", RCT: "business", MU: "mixed", SFR: "residential", PC: "business" };
     for (const [z, f] of Object.entries(fam)) expect(STAFFORD.familyOf({ ZONE_CODE: z }), z).toBe(f);
+  });
+});
+
+describe("Webster — real values, two layers of one map", () => {
+  const MUNI = "https://library.municode.com/tx/webster/codes/code_of_ordinances?nodeId=PTIICOOR_CH98ZO_ARTIIIZODIRE_S98-47SECODI";
+  const USE = "https://www.municode.com/library/tx/webster/codes/code_of_ordinances?nodeId=PTIICOOR_CH98ZO_ARTIVSCUS";
+  const C2 = { ZONE_: "C2", ORDINANCE: " ", DATE_: null, Zone_Link: MUNI, Use_Link: USE, District_Summary: "https://www1.cityofwebster.com/Link/Zoning/C2.pdf" };
+  it("a base polygon reads its code and the city's renderer name; a blank ordinance and a null date make no rows", () => {
+    const c = WEBSTER.card(C2);
+    expect(c.title).toBe("Zoning · Webster");
+    const r = rows(c);
+    expect(r.Zone.text).toBe("C2 · Second Commercial District");
+    expect(r.Ordinance).toBeUndefined();
+    expect(r.Adopted).toBeUndefined();
+    expect(r["District section of the code"].href).toBe(MUNI);
+    expect(r["Allowed uses"].href).toBe(USE);
+    expect(r["District summary (PDF)"].href).toBe("https://www1.cityofwebster.com/Link/Zoning/C2.pdf");
+  });
+  it("names are the layer's own renderer labels for every code the layer draws (and M2, which it lists but draws none of)", () => {
+    expect(WEBSTER_ZONE_NAMES).toEqual({
+      NP: "NASA Parkway District", R1: "Single Family Residential", R1A: "Enhanced Single Family Residential", R2: "Multiple Family Residential", O: "Office District",
+      C1: "First Commercial District", C2: "Second Commercial District", C3: "Third Commercial District", M1: "First Industrial District", M2: "Second Industrial District", PD: "Planned Development",
+    });
+    expect(rows(WEBSTER.card({ ZONE_: "M1" })).Zone.text).toBe("M1 · First Industrial District");
+    expect(rows(WEBSTER.card({ ZONE_: "R1A" })).Zone.text).toBe("R1A · Enhanced Single Family Residential");
+  });
+  it("a code the city's legend has no name for shows bare — never a guess", () => {
+    expect(rows(WEBSTER.card({ ZONE_: "Q9" })).Zone.text).toBe("Q9");
+    expect(WEBSTER.familyOf({ ZONE_: "Q9" })).toBe("other");
+  });
+  it("classes every code", () => {
+    const fam = { R1: "residential", R1A: "residential", R2: "residential", O: "business", C1: "business", C2: "business", C3: "business", NP: "mixed", M1: "industrial", M2: "industrial", PD: "pud" };
+    for (const [z, f] of Object.entries(fam)) expect(WEBSTER.familyOf({ ZONE_: z }), z).toBe(f);
+  });
+  it("a real ordinance and date show; the layer's 1899-12-30 blank date does not", () => {
+    expect(rows(WEBSTER.card({ ZONE_: "C1", ORDINANCE: "03-23", DATE_: Date.UTC(2003, 1, 4) })).Adopted.text).toBe("Feb 4, 2003");
+    expect(rows(WEBSTER_PD.card({ ZONE_: "PD", DATE_: Date.UTC(1899, 11, 30) })).Adopted).toBeUndefined();
+  });
+  it("a planned development card: the named development, its location, the guide's ordinance, and links — backslashes mended, off-host links refused", () => {
+    const pd = { ZONE_: "PD", ORDINANCE: "06-04", DATE_: Date.UTC(2006, 3, 4), PD_Guide_Name: "Egret Bay Center", PD_Guide_Location: "18401 Egret Bay Blvd, Webster, TX", PD_Guide_Ordinance: "21-09",
+      PD_Guide_Hyperlink: "https://www1.cityofwebster.com\\Link\\Planned_Development\\Egret_Bay_Center_21_09.pdf", Ord_Link: "https://www1.cityofwebster.com/Link/Ordinance/Egret_Bay_Center_21_09.pdf", Zone_Link: MUNI };
+    const c = WEBSTER_PD.card(pd);
+    expect(c.title).toBe("Zoning · Webster (planned development)");
+    const r = rows(c);
+    expect(r.Zone.text).toBe("PD · Planned Development");
+    expect(r["Planned development"].text).toBe("Egret Bay Center");
+    expect(r.Location.text).toBe("18401 Egret Bay Blvd, Webster, TX");
+    expect(r["Development guide ordinance"].text).toBe("21-09");
+    expect(r["Development guide (PDF)"].href).toBe("https://www1.cityofwebster.com/Link/Planned_Development/Egret_Bay_Center_21_09.pdf");
+    expect(r["Ordinance (PDF)"].href).toBe("https://www1.cityofwebster.com/Link/Ordinance/Egret_Bay_Center_21_09.pdf");
+    expect(rows(WEBSTER_PD.card({ ZONE_: "PD", Ord_Link: "https://evil.example.com/x.pdf" }))["Ordinance (PDF)"]).toBeUndefined();
+  });
+  it("a PD polygon with no named guide (28 of 45) has only the rows it has", () => {
+    expect(WEBSTER_PD.card({ ZONE_: "PD", ORDINANCE: "07-25" }).rows.map((x) => x.label)).toEqual(["Zone", "Ordinance"]);
   });
 });
 

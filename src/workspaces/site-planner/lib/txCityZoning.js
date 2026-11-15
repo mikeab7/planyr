@@ -22,6 +22,13 @@
  *   · STAFFORD (Zoning_Designations_Current, 11 polygons, edited 2024-04-10): `ZONE_CODE` + `ZONE_DESCR`; `CODE_LINK` is a Municode link on ten and the text "SEE ORDINANCES #986, 1036, & 1037"
  *     on MU-2 — a link is offered only where it is one, and the text is shown as the city's note otherwise.
  *
+ *   · WEBSTER (Landbase/Zoning/MapServer, the city's own ArcGIS Server, read through /gis-proxy; layers 0 and 1 both named "Zoning"): layer 0 is the base districts (226 polygons, 9 of the 10 renderer
+ *     codes in use — C1 25 · C2 33 · C3 34 · NP 38 · O 17 · M1 16 · R1 37 · R1A 7 · R2 19; no M2), layer 1 the Planned Developments (45). The two do NOT overlap (0 % of 6,555 sampled PD points sit
+ *     in a base polygon): they are one map in two layers, drawn as two rows. `ZONE_` is the code; its NAME is the layer's own renderer label ("R1-Single Family Residential", read from the layer's
+ *     drawingInfo 2026-11-15 — `WEBSTER_ZONE_NAMES`). `ORDINANCE` is blank on 207 of 226 base polygons and `DATE_` null on 212 (a PD layer date reads 1899-12-30, the blank — dropped by
+ *     `dateFromMs`). Links: `Zone_Link` / `Use_Link` are Municode sections (Chapter 98), `District_Summary` and `Ord_Link` PDFs on the city's own host; `PD_Guide_Hyperlink` is typed with
+ *     BACKSLASHES on 16 of 17 PD polygons ("https://www1.cityofwebster.com\Link\Planned_Development\X.pdf") and is mended before it is offered.
+ *
  * Pure: no network, no React, no Leaflet — unit-tested in test/txCityZoning.test.js. */
 
 import { titleWords } from "./sugarLandZoning.js";
@@ -193,5 +200,48 @@ export const STAFFORD = makeCityZoning({
   },
 });
 
+/* ───────────────────────── WEBSTER ───────────────────────── */
+/* The city's own district names: the labels of its zoning layer's renderer ("R1-Single Family Residential" → code R1, name "Single Family Residential"), read from the layer 2026-11-15. */
+export const WEBSTER_ZONE_NAMES = Object.freeze({
+  NP: "NASA Parkway District", R1: "Single Family Residential", R1A: "Enhanced Single Family Residential", R2: "Multiple Family Residential", O: "Office District",
+  C1: "First Commercial District", C2: "Second Commercial District", C3: "Third Commercial District", M1: "First Industrial District", M2: "Second Industrial District", PD: "Planned Development",
+});
+const WEBSTER_FAMILY = Object.freeze({ R1: "residential", R1A: "residential", R2: "residential", O: "business", C1: "business", C2: "business", C3: "business", NP: "mixed", M1: "industrial", M2: "industrial", PD: "pud" });
+const WEBSTER_HOST = /(^|\.)(municode\.com|cityofwebster\.com)$/i;
+const websterDef = (suffix, extra) => ({
+  city: "Webster",
+  titleSuffix: suffix,
+  codeOf: (p) => str(p.ZONE_),
+  nameOf: (p) => WEBSTER_ZONE_NAMES[normalizeCode(p.ZONE_)] || "",
+  classOf: (code) => WEBSTER_FAMILY[code] || "other",
+  labelField: "ZONE_",
+  citation: "District names are the City of Webster's own zoning-layer labels; Chapter 98 of the city's code of ordinances is the legal text.",
+  extraRows: (p) => {
+    const rows = [];
+    for (const r of extra(p)) rows.push(r);
+    if (has(p.ORDINANCE)) rows.push({ label: "Ordinance", text: str(p.ORDINANCE) });
+    const dt = dateFromMs(p.DATE_);
+    if (dt) rows.push({ label: "Adopted", text: dt });
+    for (const [field, label] of [["Zone_Link", "District section of the code"], ["Use_Link", "Allowed uses"], ["District_Summary", "District summary (PDF)"]]) {
+      const href = docHref(p[field], WEBSTER_HOST);
+      if (href) rows.push({ label, text: "Open", href });
+    }
+    return rows;
+  },
+});
+export const WEBSTER = makeCityZoning(websterDef("", () => []));
+export const WEBSTER_PD = makeCityZoning(websterDef("(planned development)", (p) => {
+  const rows = [];
+  if (has(p.PD_Guide_Name)) rows.push({ label: "Planned development", text: str(p.PD_Guide_Name) });
+  if (has(p.PD_Guide_Location)) rows.push({ label: "Location", text: str(p.PD_Guide_Location) });
+  if (has(p.PD_Guide_Ordinance)) rows.push({ label: "Development guide ordinance", text: str(p.PD_Guide_Ordinance) });
+  // the city types some PD links with backslashes; mend them to slashes before they are checked as links
+  for (const [field, label] of [["Ord_Link", "Ordinance (PDF)"], ["PD_Guide_Hyperlink", "Development guide (PDF)"]]) {
+    const href = docHref(str(p[field]).replace(/\\/g, "/"), WEBSTER_HOST);
+    if (href) rows.push({ label, text: "Open", href });
+  }
+  return rows;
+}));
+
 /* The layers.js `lineLabel.format` for each city is its `labelText`. */
-export const TX_CITY_ZONING = Object.freeze({ richmond: RICHMOND, fulshear: FULSHEAR, fulshearNewer: FULSHEAR_NEWER, stafford: STAFFORD });
+export const TX_CITY_ZONING = Object.freeze({ richmond: RICHMOND, fulshear: FULSHEAR, fulshearNewer: FULSHEAR_NEWER, stafford: STAFFORD, webster: WEBSTER, websterPd: WEBSTER_PD });

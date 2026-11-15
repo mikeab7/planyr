@@ -1,4 +1,4 @@
-/* Texas CITY zoning layer rows (NEW-1, 2026-11-12) — Richmond, Fulshear (two layers), Stafford, and (NEW-2) Webster. The registry spreads TX_CITY_ZONING_LAYERS into ALL_LAYERS exactly as
+/* Texas CITY zoning layer rows (NEW-1 / NEW-2, 2026-11-12) — Richmond, Fulshear (two layers), Stafford and Webster (two layers: base districts and planned developments). The registry spreads TX_CITY_ZONING_LAYERS into ALL_LAYERS exactly as
  * Sugar Land's rows are (sugarLandLayers.js is the shape; sugarLandZoning.js the pure half this follows via txCityZoning.js).
  *
  * Every row is a REGIONAL source: it declares `states: ["TX"]` and `regions: ["<city>"]` (serviceAreas.js: that city's LIMITS from TxGIO Texas_City_Boundaries, built by
@@ -13,7 +13,7 @@
  * PURE: no network, no React — unit-tested in test/txCityZoningLayers.test.js. */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD } from "./txCityZoning.js";
+import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD } from "./txCityZoning.js";
 
 const srcOf = (k) => {
   const s = GIS_SOURCES[k];
@@ -21,9 +21,14 @@ const srcOf = (k) => {
   return s;
 };
 
+/* A relay row's URL: the city's own server sends no CORS header, so it is read through the same-origin /gis-proxy relay (the host is on its ALLOWED_HOSTS); the public ArcGIS Online orgs are read directly. */
+export const relayedUrl = (url) => {
+  const m = /^https:\/\/([^/]+)(\/.*)$/.exec(String(url || ""));
+  return m ? `/gis-proxy/${m[1]}${m[2]}` : url;
+};
 const feature = (sourceKey, region, o) => {
   const s = srcOf(sourceKey);
-  return { kind: "esriFeature", states: ["TX"], regions: [region], hoverIdentify: true, canvasIdentify: true, ...o, url: s.serviceUrl, ...(s.where ? { where: s.where } : {}) };
+  return { kind: "esriFeature", states: ["TX"], regions: [region], hoverIdentify: true, canvasIdentify: true, ...o, url: s.relay ? relayedUrl(s.serviceUrl) : s.serviceUrl, ...(s.where ? { where: s.where } : {}) };
 };
 
 /* The row fields every city shares: an AREA layer in the Jurisdictions group, labelled by its codes at close zoom, legend headed by the city. */
@@ -56,6 +61,16 @@ export const TX_CITY_ZONING_LAYERS = {
     fields: ["OBJECTID", "ZONE_CODE", "ZONE_DESCR", "CODE_LINK"],
     note: "Zoning districts within the City of Stafford. Colour = district family; the code prints at close zoom; the legend lists the districts in view with the city's own names. Click for the district and a link to its section of the city's code.",
   }),
+  webster_zoning: zoningRow("websterZoning", "webster", "Webster", WEBSTER, {
+    label: "Webster Zoning", order: 44, source: "City of Webster — Zoning Districts",
+    fields: ["OBJECTID_1", "ZONE_", "ORDINANCE", "DATE_", "Zone_Link", "Use_Link", "District_Summary"],
+    note: "Zoning districts within the City of Webster. Colour = district family; the code prints at close zoom; the legend lists the districts in view with the city's own names. The city's planned developments are the separate Webster Planned Developments row. Click for the district, its ordinance and links into the city's code.",
+  }),
+  webster_pd: zoningRow("websterPlannedDev", "webster", "Webster", WEBSTER_PD, {
+    label: "Webster Planned Developments", order: 45, source: "City of Webster — Planned Development Districts",
+    fields: ["OBJECTID_1", "ZONE_", "ORDINANCE", "DATE_", "Zone_Link", "Use_Link", "District_Summary", "PD_Guide_Name", "PD_Guide_Location", "PD_Guide_Ordinance", "Ord_Link", "PD_Guide_Hyperlink"],
+    note: "The City of Webster's planned development districts — land zoned by its own development guide rather than a standard district. They sit where the base Webster Zoning row has no polygon. Click for the development's name, location, ordinance and guide.",
+  }),
 };
 
 /* Vintage lines for the (i) popover — the dates each publisher's own layer reports (2026-11-12). */
@@ -64,4 +79,6 @@ export const TX_CITY_ZONING_VINTAGE = {
   fulshear_zoning: "City of Fulshear earlier zoning layer — edited 2023-09-06",
   fulshear_zoning_newer: "City of Fulshear newer zoning layer — edited 2026-10-26",
   stafford_zoning: "City of Stafford zoning layer — edited 2024-04-10",
+  webster_zoning: "City of Webster zoning layer — edited 2025-12-29",
+  webster_pd: "City of Webster planned development layer — edited 2025-12-29",
 };

@@ -22,28 +22,29 @@ import { layerAvailableHere, drawnOverlaysOf, inRegion } from "../src/workspaces
 import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
-import { TX_CITY_ZONING_LAYERS } from "../src/workspaces/site-planner/lib/txCityZoningLayers.js";
-import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD } from "../src/workspaces/site-planner/lib/txCityZoning.js";
+import { TX_CITY_ZONING_LAYERS, relayedUrl } from "../src/workspaces/site-planner/lib/txCityZoningLayers.js";
+import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD } from "../src/workspaces/site-planner/lib/txCityZoning.js";
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
 const IDS = Object.keys(TX_CITY_ZONING_LAYERS);
-const REGION_OF = { richmond_zoning: "richmond", fulshear_zoning: "fulshear", fulshear_zoning_newer: "fulshear", stafford_zoning: "stafford" };
+const REGION_OF = { richmond_zoning: "richmond", fulshear_zoning: "fulshear", fulshear_zoning_newer: "fulshear", stafford_zoning: "stafford", webster_zoning: "webster", webster_pd: "webster" };
 /* Real points, each ON a vertex of that city's own zoning layer (sourceFixturesTxCityZoning.js). */
 const INSIDE = {
   richmond: { lat: 29.5822, lng: -95.76094 },
   fulshear: { lat: 29.69419, lng: -95.89986 },
   stafford: { lat: 29.61618, lng: -95.5574 },
+  webster: { lat: 29.5203, lng: -95.10914 }, // the deepest point of an M1 polygon of the city's own layer
 };
 const ELSEWHERE = {
   sugarLandAcademy: { lat: 29.6122, lng: -95.6693 }, houston: { lat: 29.7604, lng: -95.3698 }, dallas: { lat: 32.7767, lng: -96.797 }, atlanta: { lat: 33.749, lng: -84.388 },
   katy: { lat: 29.7858, lng: -95.8245 }, rosenberg: { lat: 29.5572, lng: -95.8087 }, sienna: { lat: 29.485, lng: -95.51 }, memphis: { lat: 35.1495, lng: -90.049 },
 };
 const scopeOf = (p) => ({ state: siteState(p), loc: p });
-const SERVICE_HOSTS = /(riku34rn6C8cs2t5|k1ZyjVw1fpWcwy7h|Ga5PFntoooL0Dlwu)/;
+const SERVICE_HOSTS = /(riku34rn6C8cs2t5|k1ZyjVw1fpWcwy7h|Ga5PFntoooL0Dlwu|cityofwebster\.com)/;
 
 describe("each city's service area is a real boundary (TxGIO city limits)", () => {
-  it.each(["richmond", "fulshear", "stafford"])("%s is built into the generated area data", (k) => {
+  it.each(["richmond", "fulshear", "stafford", "webster"])("%s is built into the generated area data", (k) => {
     expect(SERVICE_AREAS[k]).toBeTruthy();
     expect(SERVICE_AREAS[k].polys.length).toBeGreaterThan(0);
     expect(SERVICE_AREAS[k].source).toMatch(/Texas_City_Boundaries/);
@@ -58,6 +59,8 @@ describe("each city's service area is a real boundary (TxGIO city limits)", () =
     expect(inRegion("richmond", INSIDE.fulshear)).toBe(false);
     expect(inRegion("fulshear", INSIDE.stafford)).toBe(false);
     expect(inRegion("stafford", INSIDE.richmond)).toBe(false);
+    expect(inRegion("webster", INSIDE.stafford)).toBe(false);
+    expect(inRegion("webster", { lat: 29.5822, lng: -95.76094 })).toBe(false);
   });
 });
 
@@ -70,20 +73,30 @@ describe("every row is registered whole and scoped to its city", () => {
       expect(c.regions, id).toEqual([REGION_OF[id]]);
     }
   });
-  it("reads each city's own public ArcGIS Online service directly (no relay needed), URL from the registry row", () => {
-    const want = { richmond_zoning: "richmondZoning", fulshear_zoning: "fulshearZoning", fulshear_zoning_newer: "fulshearZoningNewer", stafford_zoning: "staffordZoning" };
+  it("reads the public ArcGIS Online cities directly and Webster's own server ONLY through the same-origin relay (it sends no CORS header); URL from the registry row", () => {
+    const want = { richmond_zoning: "richmondZoning", fulshear_zoning: "fulshearZoning", fulshear_zoning_newer: "fulshearZoningNewer", stafford_zoning: "staffordZoning", webster_zoning: "websterZoning", webster_pd: "websterPlannedDev" };
     for (const id of IDS) {
-      expect(ALL_LAYERS[id].url, id).toBe(GIS_SOURCES[want[id]].serviceUrl);
+      const src = GIS_SOURCES[want[id]];
+      expect(ALL_LAYERS[id].url, id).toBe(src.relay ? relayedUrl(src.serviceUrl) : src.serviceUrl);
       expect(ALL_LAYERS[id].url, id).toMatch(SERVICE_HOSTS);
-      expect(ALL_LAYERS[id].url.startsWith("https://"), id).toBe(true);
+      if (/cityofwebster/.test(src.serviceUrl)) {
+        expect(src.relay, id).toBe(true);
+        expect(ALL_LAYERS[id].url, id).toMatch(/^\/gis-proxy\/www1\.cityofwebster\.com\/arcgis\/rest\/services\/Landbase\/Zoning\/MapServer\/[01]$/);
+      } else {
+        expect(ALL_LAYERS[id].url.startsWith("https://"), id).toBe(true);
+      }
     }
+  });
+  it("Webster's two layers are the two layers of the city's one MapServer: 0 = base districts, 1 = planned developments", () => {
+    expect(GIS_SOURCES.websterZoning.serviceUrl).toMatch(/Landbase\/Zoning\/MapServer\/0$/);
+    expect(GIS_SOURCES.websterPlannedDev.serviceUrl).toMatch(/Landbase\/Zoning\/MapServer\/1$/);
   });
   it("carries the full row the panel reads; names say the city; legend and card are the city's", () => {
     for (const id of IDS) {
       const c = ALL_LAYERS[id];
       expect(c.role, id).toBe("area");
       expect(c.group, id).toBe("jurisdiction");
-      expect(c.label, id).toMatch(/^(Richmond|Fulshear|Stafford) Zoning/);
+      expect(c.label, id).toMatch(/^(Richmond|Fulshear|Stafford|Webster) (Zoning|Planned Developments)/);
       expect(c.source, id).toBeTruthy();
       expect(c.note, id).toBeTruthy();
       expect(c.infoCaveat, id).toMatch(/limits only/);
@@ -100,6 +113,10 @@ describe("every row is registered whole and scoped to its city", () => {
     expect(ALL_LAYERS.fulshear_zoning.lineLabel.field).toBe("Zone_Distr");
     expect(ALL_LAYERS.fulshear_zoning_newer.lineLabel.field).toBe("Zone_Distr");
     expect(ALL_LAYERS.stafford_zoning.lineLabel.field).toBe("ZONE_CODE");
+    expect(ALL_LAYERS.webster_zoning.lineLabel.field).toBe("ZONE_");
+    expect(ALL_LAYERS.webster_pd.lineLabel.field).toBe("ZONE_");
+    expect(ALL_LAYERS.webster_zoning.styleFn).toBe(WEBSTER.style);
+    expect(ALL_LAYERS.webster_pd.styleFn).toBe(WEBSTER_PD.style);
     expect(ALL_LAYERS.richmond_zoning.styleFn).toBe(RICHMOND.style);
     expect(ALL_LAYERS.fulshear_zoning.styleFn).toBe(FULSHEAR.style);
     expect(ALL_LAYERS.fulshear_zoning_newer.styleFn).toBe(FULSHEAR_NEWER.style);
@@ -121,15 +138,17 @@ describe("every row is registered whole and scoped to its city", () => {
   it("no `fields` list omits the object-id field (it collapses every feature into one), and each asks for the field it prints", () => {
     for (const id of IDS) {
       const f = ALL_LAYERS[id].fields;
-      expect(f.some((x) => /^(OBJECTID|FID)$/i.test(x)), id).toBe(true);
+      expect(f.some((x) => /^(OBJECTID(_1)?|FID)$/i.test(x)), id).toBe(true);
       expect(f, id).toContain(ALL_LAYERS[id].lineLabel.field);
     }
+    expect(ALL_LAYERS.webster_zoning.fields).toContain("OBJECTID_1"); // Webster's object-id field (layer 0 also holds a plain integer called OBJECTID)
+    expect(ALL_LAYERS.webster_pd.fields).toContain("OBJECTID_1");
     expect(ALL_LAYERS.fulshear_zoning.fields).toContain("FID");           // the earlier layer's object-id field
     expect(ALL_LAYERS.fulshear_zoning_newer.fields).toContain("OBJECTID"); // the newer layer's
   });
   it("is in the verified GIS registry with fixtures and notes (the weekly drift job asks about it)", () => {
     expect(auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS).problems).toEqual([]);
-    for (const k of ["richmondZoning", "fulshearZoning", "fulshearZoningNewer", "staffordZoning"]) {
+    for (const k of ["richmondZoning", "fulshearZoning", "fulshearZoningNewer", "staffordZoning", "websterZoning", "websterPlannedDev"]) {
       expect(GIS_SOURCES[k].states).toEqual(["TX"]);
       expect(SOURCE_FIXTURES[k].fixtures.length, k).toBeGreaterThanOrEqual(2);
     }
@@ -165,6 +184,10 @@ describe("requests actually issued — a city's URL fires inside that city and n
     } finally { globalThis.fetch = realFetch; }
     return { fetched: fetched.filter((u) => SERVICE_HOSTS.test(u)), built: featureLayerCalls.map((o) => o.url).filter((u) => SERVICE_HOSTS.test(u)) };
   }
+  it("inside Webster both of Webster's layers are built, through the relay", async () => {
+    const r = await run(INSIDE.webster);
+    expect(r.built.sort()).toEqual(["/gis-proxy/www1.cityofwebster.com/arcgis/rest/services/Landbase/Zoning/MapServer/0", "/gis-proxy/www1.cityofwebster.com/arcgis/rest/services/Landbase/Zoning/MapServer/1"]);
+  });
   it("inside Richmond only Richmond's service is built; inside Fulshear both Fulshear services; inside Stafford only Stafford's", async () => {
     expect((await run(INSIDE.richmond)).built).toEqual([GIS_SOURCES.richmondZoning.serviceUrl]);
     expect((await run(INSIDE.fulshear)).built.sort()).toEqual([GIS_SOURCES.fulshearZoning.serviceUrl, GIS_SOURCES.fulshearZoningNewer.serviceUrl].sort());

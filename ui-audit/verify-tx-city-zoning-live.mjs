@@ -28,10 +28,11 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${
 const HOSTS = /riku34rn6C8cs2t5|k1ZyjVw1fpWcwy7h|Ga5PFntoooL0Dlwu|cityofwebster\.com/;
 /* Points DEEP INSIDE one polygon of each city's own layer (≥ 60 m from any edge; found 2026-11-12 from the layers' own geometry) and what the card must read there. */
 const CITIES = {
-  richmond: { label: "Richmond", at: { lat: 29.57854, lng: -95.77439 }, ids: ["richmond_zoning"], code: "IN", name: "Industrial", legend: /IN · Industrial/ },
-  fulshear: { label: "Fulshear", at: { lat: 29.68929, lng: -95.8798 }, ids: ["fulshear_zoning", "fulshear_zoning_newer"], code: "I", name: "Industrial", legend: /I · Industrial/ },
-  stafford: { label: "Stafford", at: { lat: 29.61953, lng: -95.5548 }, ids: ["stafford_zoning"], code: "RCT", name: "Residential, Commercial, & Technology District", legend: /RCT · Residential, Commercial, & Technology District/ },
-  webster: { label: "Webster", at: { lat: 29.5379, lng: -95.1183 }, ids: ["webster_zoning"], code: null, name: null, legend: null },
+  richmond: { label: "Richmond", at: { lat: 29.57854, lng: -95.77439 }, ids: ["richmond_zoning"], cards: { richmond_zoning: { at: { lat: 29.57854, lng: -95.77439 }, zone: "IN · Industrial" } }, legend: /IN · Industrial/ },
+  fulshear: { label: "Fulshear", at: { lat: 29.68929, lng: -95.8798 }, ids: ["fulshear_zoning", "fulshear_zoning_newer"], cards: { fulshear_zoning: { at: { lat: 29.68929, lng: -95.8798 }, zone: "I · Industrial" }, fulshear_zoning_newer: { at: { lat: 29.68965, lng: -95.87995 }, zone: "I · Industrial" } }, legend: /I · Industrial/ },
+  stafford: { label: "Stafford", at: { lat: 29.61953, lng: -95.5548 }, ids: ["stafford_zoning"], cards: { stafford_zoning: { at: { lat: 29.61953, lng: -95.5548 }, zone: "RCT · Residential, Commercial, & Technology District" } }, legend: /RCT · Residential, Commercial, & Technology District/ },
+  /* Webster: layer 0 (base districts) at the deepest point of an M1 polygon; layer 1 (planned developments) at the deepest point of a PD polygon — the two layers do not overlap. */
+  webster: { label: "Webster", at: { lat: 29.5203, lng: -95.10914 }, ids: ["webster_zoning", "webster_pd"], cards: { webster_zoning: { at: { lat: 29.5203, lng: -95.10914 }, zone: "M1 · First Industrial District" }, webster_pd: { at: { lat: 29.51375, lng: -95.1249 }, zone: "PD · Planned Development" } }, legend: /M1 · First Industrial District/ },
 };
 const SUGAR_LAND = { lat: 29.6122, lng: -95.6693 };
 const HOUSTON = { lat: 29.80, lng: -95.54 };
@@ -107,7 +108,6 @@ try {
   for (const key of ONLY) {
     const C = CITIES[key];
     if (!C) continue;
-    if (key === "webster" && !C.code) { console.log("(Webster: card expectations are filled in once the layer is measured — NEW-2)"); }
     log = [];
     const plan = await insert(`${LIVE_PREFIX}txz-${key}-${Date.now().toString(36)}`, C.at, C.label);
     const panel = await openPanel(plan.id);
@@ -125,13 +125,13 @@ try {
     const bad = log.filter((e) => !e.req && typeof e.status === "number" && e.status >= 400);
     check(`B · ${C.label}: no request failed`, bad.length === 0, bad.slice(0, 3).map((e) => `${e.status} ${e.url.slice(-90)}`).join(" | "));
     for (const id of C.ids) check(`B · ${id}: painted ≥ 1 feature at the ${C.label} view`, (F[id] || 0) >= 1, String(F[id]));
-    if (C.code) {
+    {
       for (const id of C.ids) {
-        const c = await identify(id, C.at);
+        const c = await identify(id, C.cards[id].at);
         console.log(`card ${id}:`, JSON.stringify(c && { title: c.title, rows: c.rows.map((r) => `${r.label}: ${r.text}`) }));
         check(`B · ${id}: a card opens at the known polygon, titled "Zoning · ${C.label}"`, !!(c && new RegExp(`^Zoning · ${C.label}`).test(c.title || "")), c ? c.title : "no card");
         const zone = c && c.rows.find((r) => r.label === "Zone");
-        check(`B · ${id}: Zone reads "${C.code} · ${C.name}" — the city's own code and name`, !!zone && zone.text === `${C.code} · ${C.name}`, zone ? zone.text : "no Zone row");
+        check(`B · ${id}: Zone reads "${C.cards[id].zone}" — the city's own code and name`, !!zone && zone.text === C.cards[id].zone, zone ? zone.text : "no Zone row");
         check(`B · ${id}: no blank row, no raw field name, no raw URL in the card`, !!c && c.rows.every((r) => String(r.text || "").trim() && !/^https?:/.test(r.text) && !/_/.test(r.label)), "");
       }
       await panel.getByTestId("layer-group-jur").click(); await sleep(300);
