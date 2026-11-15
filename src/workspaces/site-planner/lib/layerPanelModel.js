@@ -50,14 +50,17 @@ export function groupEntriesFor(layers, panelGroup) {
 /* ── Location ───────────────────────────────────────────────────────────────────────────────── */
 
 /* DECLARED region scopes. A registry row names the region(s) its source can serve with `regions: [...]`; two kinds of name:
- *   · a CIRCLE in this table — only `houston_metro`, the USGS growth-fault STUDY extent (a metro-scale study, not an agency's area);
+ *   · a BOX in this table — only `houston_metro`, the growth-fault layer's REAL data extent (measured 2026-11-12 off the service: the
+ *     traces end at -94.8376°, so Mont Belvieu / Cove are covered and Anahuac / Winnie are not — the old 65-mile circle offered the row
+ *     there and it drew nothing);
  *   · a real BOUNDARY in lib/serviceAreas.js (built into serviceAreaData.js): `harris` (HCFCD's channels), `houston` (the City of
  *     Houston limits + ETJ — its water / sewer / storm / hydrant data), `bkdd` (the Brookshire–Katy Drainage District).
  * Declared, never inferred from coverage (owner 2026-10-11) — coverage is a live, view-dependent guess, a region is a standing fact
  * about the source. (The old 65-mile "houston" circle claimed HCFCD / BKDD / City of Houston data reached Chambers, Galveston and
  * Brazoria; none of those sources serves them — B2436066.) */
 export const REGION_ZONES = Object.freeze({
-  houston_metro: Object.freeze({ lat: 29.7604, lng: -95.3698, radiusMiles: 65, label: "Houston metro (growth-fault study area)" }),
+  // [west, south, east, north] — the Fault_Houston layer's full extent (-95.9808, 29.3392, -94.8376, 30.3136) rounded OUT by <= 0.01°.
+  houston_metro: Object.freeze({ box: Object.freeze([-95.99, 29.33, -94.83, 30.32]), label: "Houston metro (growth-fault data extent)" }),
 });
 
 const toRad = (d) => (d * Math.PI) / 180;
@@ -75,6 +78,7 @@ export function inRegion(region, loc) {
   if (!loc) return null;
   const lat = Number(loc.lat), lng = Number(loc.lng != null ? loc.lng : loc.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (z.box) { const [w, s, e, n] = z.box; return lng >= w && lng <= e && lat >= s && lat <= n; }
   return distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles;
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fetchTaxUnits, tableFromUnits, accountOf, _resetTaxUnitsCache } from "../src/workspaces/site-planner/lib/taxUnitsClient.js";
+import { fetchTaxUnits, tableFromUnits, accountOf, TAX_UNIT_COUNTIES, _resetTaxUnitsCache } from "../src/workspaces/site-planner/lib/taxUnitsClient.js";
 import { taxTableForCombined } from "../src/workspaces/site-planner/lib/taxRates.js";
 import { normalizeCounty } from "../functions/api/taxrates.js";
 
@@ -41,6 +41,41 @@ describe("accountOf", () => {
   });
 });
 
+describe("Fort Bend (NEW-1)", () => {
+  it("the account keeps its R: QUICKREFID 'R33231' (never digits-only)", () => {
+    expect(accountOf({ attrs: { QUICKREFID: "R33231" } }, "QUICKREFID", "fortbend")).toBe("R33231");
+    expect(accountOf({ attrs: {}, acct: "r033231" }, "QUICKREFID", "fortbend")).toBe("R33231");
+    expect(accountOf({ attrs: { QUICKREFID: "33231" } }, "QUICKREFID", "fortbend")).toBeNull();
+    expect(accountOf({ attrs: { HCAD_NUM: "0591420000105" } }, "HCAD_NUM", "harris")).toBe("0591420000105");
+  });
+  it("the county is wired, and a row note + the year ride into the table", () => {
+    expect(TAX_UNIT_COUNTIES.has("fortbend")).toBe(true);
+    const t = tableFromUnits({ complete: true, year: 2025, source: "Fort Bend County Tax Office", units: [{ code: "G01", name: "Fort Bend County General Fund", rate: 0.412 }, { code: "T203", name: "Imperial Redevelopment Zone", rate: 0, note: "TIRZ — levies no tax" }] });
+    expect(t.rows[1]).toEqual({ unit: "Imperial Redevelopment Zone", rate: 0, note: "TIRZ — levies no tax" });
+    expect(t.rows[0].note).toBeUndefined();
+    expect(t.total).toBe(0.412);
+    expect(t.year).toBe(2025);
+  });
+});
+
+describe("stale-roll caption (NEW-3)", () => {
+  const units = [{ code: "1", name: "A", rate: 1 }];
+  it("carries the server's caption and state; a current answer carries neither", () => {
+    const t = tableFromUnits({ complete: true, year: 2025, rollYear: 2025, source: "s", units, staleState: "not-adopted", caption: "2025 rates — 2026 not yet adopted" });
+    expect(t).toMatchObject({ caption: "2025 rates — 2026 not yet adopted", staleState: "not-adopted", rollYear: 2025 });
+    const c = tableFromUnits({ complete: true, year: 2026, source: "s", units, staleState: "current" });
+    expect(c.caption).toBeUndefined();
+    expect(c.staleState).toBeUndefined();
+  });
+  it("the ops row fires once per (county, roll year)", async () => {
+    const { noteStaleRoll, _resetStaleNotes } = await import("../src/workspaces/site-planner/lib/taxRollStale.js");
+    _resetStaleNotes();
+    expect(noteStaleRoll("harris", 2025)).toBe(true);
+    expect(noteStaleRoll("harris", 2025)).toBe(false);
+    expect(noteStaleRoll("harris", 2026)).toBe(true);
+  });
+});
+
 describe("fetchTaxUnits", () => {
   beforeEach(() => _resetTaxUnitsCache());
   it("fetches once per account and shares the result", async () => {
@@ -52,7 +87,7 @@ describe("fetchTaxUnits", () => {
   });
   it("never fetches for a county that is not wired, and does not cache a failure", async () => {
     const f = vi.fn(async () => ({ ok: false }));
-    expect(await fetchTaxUnits("fortbend", "1", f)).toBeNull();
+    expect(await fetchTaxUnits("galveston", "1", f)).toBeNull();
     expect(f).not.toHaveBeenCalled();
     expect(await fetchTaxUnits("harris", "9", f)).toBeNull();
     expect(await fetchTaxUnits("harris", "9", f)).toBeNull();
