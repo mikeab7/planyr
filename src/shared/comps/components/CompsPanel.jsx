@@ -30,6 +30,7 @@ import {
   resolveCapTriangle, sortCompsByRecency, compDateLabel, anchorTeamConflict, compRecordSections, compBadgeLabel,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
+import { resolveCompFocus, COMP_FOCUS_MISSING_NOTICE } from "../lib/compFocus.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
 import {
@@ -665,7 +666,8 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
  *    mounted (not torn down) while inactive so its scroll position / in-progress form survive a
  *    tab flip; only `display` toggles.
  *  - pendingAnchor {kind,lat,lon,county,parcelApn,parcelGeom} | null, onAnchorConsumed()
- *  - focusCompId, onFocusHandled()
+ *  - focusCompId, onFocusHandled() — a request to open one comp; it waits for the list to load (compFocus.js).
+ *  - focusReveal — also pan the map to the focused comp (a request from outside the map, e.g. the Dashboard card)
  *  - projects [{id,site|name}] — the host's already-loaded site list, for the optional
  *    project-association dropdown (cheap to pass down; no separate fetch needed)
  *  - onCompsChange(comps) — fired whenever the loaded list changes, so a map layer can render it
@@ -689,7 +691,7 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
  * otherwise held by SitePlannerApp today.
  */
 export default function CompsPanel({
-  open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
+  open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled, focusReveal = false,
   projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken, onFocusAnchor,
   onArmMapPin, onDisarmMapPin,
   // B1167712-B1167714 (NEW-1/2/3) — `onDetailCompChange({id,projectId}|null)` tells MapFinder
@@ -706,6 +708,10 @@ export default function CompsPanel({
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  // NEW-1 (2026-11-15) — true once the first fetch has answered, so a focus request that arrived
+  // before the list did (the Dashboard Comps card's click) waits instead of being dropped.
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [focusMissNotice, setFocusMissNotice] = useState(null);
   const [view, setView] = useState("list"); // list | detail | form | grid | drafts
   const [activeComp, setActiveComp] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -829,6 +835,7 @@ export default function CompsPanel({
     setLoading(false);
     if (error) { setLoadError(error.message || "Failed to load comps"); return; }
     setLoadError(null);
+    setLoadedOnce(true);
     // NEW-5 — the definitive recency order: newest Executed date first, an undated comp falling
     // back to its own Date entered rather than the DB's raw `comp_date desc` order (which,
     // post-migration, would otherwise put every undated comp first under Postgres's own NULLS
@@ -1003,13 +1010,24 @@ export default function CompsPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [armedRowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clicking a comp's map marker opens its detail view.
+  // Clicking a comp's map marker — or the Dashboard Comps card — opens that comp's detail view.
+  // NEW-1 (2026-11-15): this used to look the id up ONCE, when it arrived, and clear the request
+  // either way. From the Dashboard the panel mounts cold (list still loading), so the lookup found
+  // nothing and the request was dropped — the Records tab opened with no comp focused. The request
+  // now waits for the list (`resolveCompFocus`), opens the comp when it is there, and says so when
+  // the loaded list doesn't hold it (LOUD-FAILURE) instead of silently doing nothing.
   useEffect(() => {
-    if (!focusCompId) return;
-    const c = comps.find((x) => x.id === focusCompId);
-    if (c) { setActiveComp(c); setView("detail"); setAssignNotice(null); }
+    const r = resolveCompFocus({ focusCompId, comps, loaded: loadedOnce || !!loadError });
+    if (r.action === "idle" || r.action === "wait") return;
+    if (r.action === "open") {
+      setActiveComp(r.comp); setView("detail"); setAssignNotice(null); setFocusMissNotice(null);
+      if (focusReveal && r.comp.anchor) onFocusAnchor?.(r.comp.anchor);
+    } else {
+      setFocusMissNotice(loadError ? null : COMP_FOCUS_MISSING_NOTICE);
+      tele("comp-focus-missing", "comp focus request found no comp", { id: focusCompId, loadError: !!loadError });
+    }
     onFocusHandled?.();
-  }, [focusCompId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusCompId, comps, loadedOnce, loadError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {
     if (view === "list" && !loading && scrollRef.current) scrollRef.current.scrollTop = listScrollTop.current;
@@ -1240,6 +1258,7 @@ export default function CompsPanel({
       <div ref={scrollRef} onScroll={(e) => { if (view === "list" && !loading) listScrollTop.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
         {loading && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>Loading…</div>}
         {loadError && <div style={{ padding: 14, fontSize: 12, color: "var(--danger-text)" }}>{loadError}</div>}
+        {focusMissNotice && view === "list" && !loading && <div data-testid="comp-focus-missing" role="status" style={{ padding: "10px 14px 0", fontSize: 12, color: "var(--text-primary)" }}>{focusMissNotice}</div>}
 
         {!loading && !loadError && view === "list" && (
           <>
