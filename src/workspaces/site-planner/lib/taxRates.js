@@ -34,9 +34,15 @@
  * An account's codes come from parcel attrs[codeField] (comma separated). Any code missing from
  * `units` => the list is incomplete => null (hide).
  */
+import { isTnTaxCounty, tnTaxTableFor } from "./tnTaxUnits.js";
+
 export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
+  /* Tennessee (NEW-1/NEW-2, 2026-11-15): membership rides the county parcel layer's own attributes, so these two are
+   * covered through lib/tnTaxUnits.js (a Tennessee lot never reaches the Texas paths below — owner constraint #3). */
+  tn_rutherford: { covered: true, reason: "DistrictGroup (taxing district) + AccountType (class) on the county parcel layer; 2025 certified rates from the TN Comptroller Tax Aggregate Report. See lib/tnTaxUnits.js." },
+  tn_davidson: { covered: true, reason: "TaxDist (USD / GSD / satellite city) on Metro's parcel layer; 2025 rates from the TN Comptroller. Berry Hill, improvement districts and unassigned lots stay hidden (no sourced levy). No class field, so no dollar estimate." },
   harris: { covered: false, reason: "HCAD GIS has no taxing-unit fields; hcad.org / hctax.net blocked from sandbox. Existing Comptroller+polygon panel is an incomplete estimate." },
   fortbend: { covered: false, reason: "Parcels carry TAXUNITS codes (complete) but no reachable code->name->rate legend (fbcad.org blocked); mapping codes would be a guess." },
   chambers: { covered: false, reason: "No taxing-unit field known/readable; service returned no field list from sandbox." },
@@ -63,6 +69,7 @@ export async function loadTaxTable(parcel, ctx = {}) {
 /** Sync; `ctx.data` is a loaded data file. Null = hide. */
 export function taxTableFor(parcel, ctx = {}) {
   const county = ctx.county || parcel?.county || null;
+  if (isTnTaxCounty(county)) return tnTaxTableFor(parcel, county); // attribute-driven; never falls through to a Texas data file
   const data = ctx.data || loaded[county];
   if (!county || !data || !data.units || !data.codeField || !data.year || !data.source) return null;
   const raw = parcel?.attrs?.[data.codeField];
@@ -82,7 +89,7 @@ export function taxTableFor(parcel, ctx = {}) {
 export function taxTableForCombined(parcels, ctx = {}) {
   const tableOf = ctx.tableOf || ((p) => taxTableFor(p, ctx)); // B2158065: async per-account tables plug in here
   const per = (parcels || []).map((p) => ({ name: p?.label || p?.name || p?.acct || "Lot", t: tableOf(p) }));
-  if (!per.length || per.some((x) => !x.t)) return null;
+  if (!per.length || per.some((x) => !x.t || x.t.total == null)) return null; // a lot with no bill (an IDB / PILOT account) makes a combined total meaningless → hide
   const totals = per.map((x) => x.t.total);
   const allShare = totals.every((t) => t === totals[0]);
   return { allShare, total: allShare ? totals[0] : null, perLot: per.map((x) => ({ name: x.name, total: x.t.total })) };

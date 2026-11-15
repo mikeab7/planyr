@@ -197,8 +197,11 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
  * it returns null (and this never mounts) for every county that has no reliable per-account source. */
 function TaxTable({ data }) {
   const rows = data.rows || data.perLot || [];
+  const note = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm };
+  const noBill = data.rows && data.total == null; // Tennessee IDB / PILOT account: no rate table, no total — only the plain note
   return (
     <PageSection title="Tax rates" testid="parcel-tax-table">
+      {!noBill && (
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
         <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? "Rate per $100" : "Total"}</th></tr></thead>
         <tbody>
@@ -206,7 +209,10 @@ function TaxTable({ data }) {
           <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(6) : "—"}</td></tr>
         </tbody>
       </table>
-      {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.year ? ` · ${data.year}` : ""}</div>}
+      )}
+      {(data.notes || []).map((n, i) => <div key={i} style={note} data-testid="parcel-tax-note">{n}</div>)}
+      {data.estimate && <div style={{ ...note, color: "var(--text-primary)" }} data-testid="parcel-tax-estimate">{data.estimate.text}</div>}
+      {data.source && <div style={note}>{data.caption ? `${data.caption} · ${data.source}` : `${data.source}${data.year ? ` · ${data.year}` : ""}`}</div>}
     </PageSection>
   );
 }
