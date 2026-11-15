@@ -4,6 +4,12 @@
  * covers, and writes their new `y` as ONE appended transaction — so the push rides the edit's own undo step (one Ctrl+Z puts the
  * words AND the neighbours back), survives a reload (it is stored on the node, like any placement) and is announced to nothing.
  *
+ * ⛔ WHICH BOXES ARE "PLACED BY HAND" (owner decision 2026-11-15, NEW-2: a dropped / resized / pasted box may overlap, nothing moves for it).
+ * Every USER transaction is compared box-by-box against the document before it: a box whose STORED placement (x, y, width, height on the
+ * node) changed was placed by a gesture's commit, an arrow-key nudge or a paste — those write the attributes — whereas growth from a box's
+ * own words changes only its rendered height and leaves the stored attributes alone. The quiet self-fitting width write is not a user
+ * transaction, so it never counts. A placed box is handed to the planner as `placed`, and the planner never lets it push anything.
+ *
  * WHEN IT ACTS, and when it deliberately does not:
  *   · only after a `user` transaction (typing, paste, a toolbar change, a resize / move commit). NOT after undo / redo (the history
  *     already restores the positions it saved), NOT after the pass's own push, NOT after a whole-document replace (a sync or a
@@ -22,6 +28,24 @@ import { planClear } from "./notesBoxClear.js";
 export const BOX_CLEAR_META = "planyrBoxClear";
 const key = new PluginKey("noteBoxClear");
 const RECENT_EDIT_MS = 3000;
+
+/** The stored placement of every top-level box by id: "x|y|w|h". */
+function storedPlacements(doc) {
+  const out = new Map();
+  doc.forEach((node) => {
+    if (node.type.name !== "noteAnchor" || !node.attrs.aid) return;
+    const a = node.attrs;
+    out.set(String(a.aid), [Number(a.x) || 0, Number(a.y) || 0, a.w == null ? "" : Number(a.w), a.h == null ? "" : Number(a.h)].join("|"));
+  });
+  return out;
+}
+/** Ids present in both documents whose stored placement differs. Pure. */
+export function placedBetween(before, after) {
+  const out = [];
+  const a = storedPlacements(before);
+  for (const [id, now] of storedPlacements(after)) { const was = a.get(id); if (was !== undefined && was !== now) out.push(id); }
+  return out;
+}
 
 const replacesWholeDoc = (tr) => tr.steps.some((s, i) => s instanceof ReplaceStep && s.from === 0 && s.to === tr.docs[i].content.size && tr.docs[i].content.size > 0);
 
@@ -50,13 +74,18 @@ function measureBoxes(view) {
 const gestureLive = () => typeof document !== "undefined" && !!document.head.querySelector("style[data-pinned-cursor]");
 
 export function boxClearPlugin() {
+  /* ids placed by hand since the last stable measurement; filled by the state's `apply` (every transaction passes through it exactly once),
+   * drained by `run`. A closure rather than plugin state because several transactions can land inside one microtask batch. */
+  const placedAcc = new Set();
   return new Plugin({
     key,
     state: {
       init: () => ({ kind: "init", n: 0 }),
       apply(tr, prev) {
         if (!tr.docChanged) return prev;
-        return { kind: kindOf(tr, prev.kind), n: prev.n + 1 };
+        const kind = kindOf(tr, prev.kind);
+        if (kind === "user") for (const id of placedBetween(tr.before, tr.doc)) placedAcc.add(id);
+        return { kind, n: prev.n + 1 };
       },
     },
     view(editorView) {
@@ -71,8 +100,9 @@ export function boxClearPlugin() {
         if (!view || view.isDestroyed || !view.dom?.isConnected) return;
         if (gestureLive()) return;                       // the release commits; `last` stays the pre-gesture picture
         const { map, at } = measureBoxes(view);
+        const placed = new Set(placedAcc); placedAcc.clear();
         if (!last || kind !== "user") { last = map; return; }
-        const plan = planClear(last, map);
+        const plan = planClear(last, map, placed);
         if (!plan.size) { last = map; return; }
         const tr = view.state.tr;
         const next = new Map(map);

@@ -5,6 +5,7 @@
  * change a box's size or position — typing to wrap, Enter, paste of plain text / of text copied from a box / with each paste option / from the
  * committed Word, Outlook, Excel and Chrome clipboards, lists, indent, font size, headings, a table and its rows, an image, a shrink, a width
  * drag, a border move onto another box — measuring every box's RENDERED rectangle after each one, after ONE Ctrl+Z, and after a reload.
+ * (AMENDED 2026-11-15, NEW-2 / B2671289: the width drag and the border move are PLACEMENTS — the placed box may cover another and every OTHER box must not move.)
  *
  * Local run: BASE_URL (default http://127.0.0.1:5199) · PW_CHROME (executable) · ONLY=id,id to run a subset. Red-proof: run it against a
  * build WITHOUT the fix (git stash the src/ change) — NEW-1's scenarios must fail there and pass on the fix. The same sweep runs LIVE, signed in,

@@ -22,8 +22,9 @@
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
-import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { TX_CITY_ZONING_FIXTURES, TX_CITY_ZONING_DOCS } from "./sourceFixturesTxCityZoning.js"; // NEW-1 (Texas city zoning)
+import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
@@ -35,8 +36,9 @@ export { PARCEL_FIXTURES as parcelFixtures } from "./sourceFixturesParcels.js";
 export const SOURCE_FIXTURES = {
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
-  ...SUGARLAND_FIXTURES,
   ...TX_CITY_ZONING_FIXTURES,
+  ...SUGARLAND_FIXTURES,
+  ...NASHVILLE_BUFFER_FIXTURES,
   ...RUTHERFORD_FIXTURES,
   ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
@@ -1512,8 +1514,9 @@ export function fixturesFor(key) {
 export const SOURCE_DOCS = {
 ...FLORIDA_DOCS,
   ...OK_DOCS,
-  ...SUGARLAND_DOCS,
   ...TX_CITY_ZONING_DOCS,
+  ...SUGARLAND_DOCS,
+  ...NASHVILLE_BUFFER_DOCS,
   ...RUTHERFORD_DOCS,
   ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {

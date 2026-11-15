@@ -51,7 +51,7 @@ describe("sanitizeProjects — always a safe array of objects", () => {
 
 describe("parseNavState — validate + sanitize at the source", () => {
   it("returns the validated, sanitized nav state for a real message", () => {
-    expect(parseNavState(navMsg())).toEqual({ section: "projects", activeId: 3, projects: WELL_FORMED });
+    expect(parseNavState(navMsg())).toEqual({ section: "projects", activeId: 3, projects: WELL_FORMED, rowLink: false });
   });
 
   it("ignores anything that isn't the embedded scheduler's nav-state", () => {
@@ -64,7 +64,7 @@ describe("parseNavState — validate + sanitize at the source", () => {
 
   it("defaults section to 'projects' and activeId to null when absent", () => {
     const nav = parseNavState({ source: "planar-seq", type: "planar:nav-state", projects: [] });
-    expect(nav).toEqual({ section: "projects", activeId: null, projects: [] });
+    expect(nav).toEqual({ section: "projects", activeId: null, projects: [], rowLink: false });
   });
 
   it("sanitizes a malformed project list inside the message (no undefined entries survive)", () => {
@@ -784,26 +784,84 @@ describe("Scheduler.jsx — the neutralize-to-reports post retries (B1644368)", 
  * these lock the pure decision function plus the two Scheduler.jsx wiring facts a source guard can
  * verify without a jsdom/React harness (this repo has none — Node-only vitest, per convention). */
 describe("resolveReportRowNavigation — a genuine Task Report row click must not read as ambient drift (B1614528)", () => {
+  // NEW-1 (B1638832): a genuine click is EXPLICIT — the embed marks it (`rowLink`) and the section is "projects".
+  const CLICK = { cameFromReports: true, section: "projects", rowLink: true };
+
   it("null when this isn't a reports→projects transition (an ordinary ambient/boot report)", () => {
-    expect(resolveReportRowNavigation({ cameFromReports: false, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+    expect(resolveReportRowNavigation({ ...CLICK, cameFromReports: false, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
   });
 
   it("null when a project is already routed — nothing to adopt, the route already outranks this", () => {
-    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: "gp", activeId: 3, linkedSiteId: "gc" })).toBeNull();
+    expect(resolveReportRowNavigation({ ...CLICK, projectId: "gp", activeId: 3, linkedSiteId: "gc" })).toBeNull();
   });
 
   it("null when there's no activeId to navigate to", () => {
-    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: null, linkedSiteId: "gc" })).toBeNull();
+    expect(resolveReportRowNavigation({ ...CLICK, projectId: null, activeId: null, linkedSiteId: "gc" })).toBeNull();
   });
 
   it("a linked schedule resolves to adopting its site into the route", () => {
-    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: 3, linkedSiteId: "gc" }))
+    expect(resolveReportRowNavigation({ ...CLICK, projectId: null, activeId: 3, linkedSiteId: "gc" }))
       .toEqual({ activeId: 3, linkedSiteId: "gc" });
   });
 
   it("an UNLINKED schedule (Pursuits/Operations) resolves to a cross-cutting pick — linkedSiteId null, not skipped", () => {
-    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: 5, linkedSiteId: null }))
+    expect(resolveReportRowNavigation({ ...CLICK, projectId: null, activeId: 5, linkedSiteId: null }))
       .toEqual({ activeId: 5, linkedSiteId: null });
+  });
+
+  /* ⛔ NEW-1 (B1638832, owner report 2026-11-15, build adfbc60) — a cold load of a bare "#/schedule" was
+   * rewritten to "#/project/<last-opened>/schedule". The embed re-announces its state whenever its schedule
+   * list changes and answers every nav-request; with only `cameFromReports` required, ONE more announcement
+   * after the neutral Reports view read as "a person clicked a row" and adopted the stale account-wide aPid's
+   * project. These are RED against the pre-fix resolver (which returned the adoption for all three). */
+  it("RED-FIRST: a reports→reports RE-ANNOUNCEMENT (same section, nothing clicked) never adopts a project", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "reports", rowLink: false, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+  });
+
+  it("RED-FIRST: an announcement that lands on 'projects' WITHOUT the embed's row-jump mark (e.g. a late cloud document re-applying its own aPid) never adopts", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "projects", rowLink: false, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "projects", projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull(); // mark omitted entirely
+  });
+
+  it("a row-jump mark on a 'reports' announcement is not a click either (a click always lands on a schedule)", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "reports", rowLink: true, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+  });
+
+  it("the mark must be exactly true — a truthy non-boolean never counts", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "projects", rowLink: "true", projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+    expect(resolveReportRowNavigation({ cameFromReports: true, section: "projects", rowLink: 1, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+  });
+});
+
+describe("parseNavState — carries the embed's row-jump mark as a strict boolean (NEW-1, B1638832)", () => {
+  it("rowLink is true only for a literal boolean true", () => {
+    expect(parseNavState(navMsg({ rowLink: true })).rowLink).toBe(true);
+    for (const v of [undefined, null, false, "true", 1, {}, []]) expect(parseNavState(navMsg({ rowLink: v })).rowLink).toBe(false);
+  });
+});
+
+describe("public/sequence/index.html — only goToTask marks an announcement as a row jump (NEW-1, B1638832)", () => {
+  const EMBED = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("the ref is set in goToTask and nowhere else", () => {
+    expect(EMBED.match(/rowJumpRef\.current = true/g)).toHaveLength(1);
+    const i = EMBED.indexOf("const goToTask = useCallback((pid, taskId) => {");
+    expect(i).toBeGreaterThan(-1);
+    expect(EMBED.slice(i, i + 400)).toMatch(/rowJumpRef\.current = true;/);
+  });
+
+  it("the nav-state emit consumes the ref (clears it) BEFORE the unchanged-signature early return, so a stale mark can't ride a later ambient announcement", () => {
+    const i = EMBED.indexOf("const rowLink = rowJumpRef.current; rowJumpRef.current = false;");
+    expect(i).toBeGreaterThan(-1);
+    const sigReturn = EMBED.indexOf("if (sig === navSigRef.current) return;", i);
+    expect(sigReturn).toBeGreaterThan(i);
+    expect(EMBED).toMatch(/\.\.\.\(rowLink \? \{ rowLink: true \} : \{\}\),/);
+  });
+
+  it("the nav-request reply (answered every time the shell asks) never carries the mark", () => {
+    const i = EMBED.indexOf('if (m.type === "planar:nav-request") {\n        // The shell\'s loader asks us');
+    expect(i).toBeGreaterThan(-1);
+    expect(EMBED.slice(i, i + 2400)).not.toMatch(/rowLink/);
   });
 });
 
@@ -851,7 +909,7 @@ describe("Scheduler.jsx — the Task Report row-click fix is wired in (B1614528)
   it("a resolved navigation with a linked site adopts it into the route via the freshness ref, not a stale closure", () => {
     const i = SRC.indexOf("const navAction = resolveReportRowNavigation(");
     expect(i).toBeGreaterThan(-1);
-    const block = SRC.slice(i, i + 1100);
+    const block = SRC.slice(i, i + 1400);
     expect(block).toMatch(/onProjectChangeRef\.current\?\.\(navAction\.linkedSiteId\)/);
     expect(block).toMatch(/explicitPickRef\.current = \{ id: navAction\.activeId, projectId: navAction\.linkedSiteId \};/);
   });

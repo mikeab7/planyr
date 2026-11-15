@@ -306,6 +306,24 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-box-edge.mjs && node ui-audit/verify-notes-box-edge-touch.mjs
+      # Notes BOX COPY vs TEXT COPY (NEW-1, 2026-11-15). Owner: it must be obvious when he is copying a BOX as opposed to TEXT, the way Excel
+      # shows a copied cell. Click a box's outline + Ctrl+C = Excel's moving dashed outline and a BOX on the clipboard; Ctrl+V (blank paper,
+      # inside another box's text, another page) makes a NEW box with all its text and formatting; Ctrl+X + one Ctrl+Z; the outline ends with
+      # Esc / a new copy / an edit. Any text selection (Ctrl+A, Shift+End, a drag) copies TEXT ONLY - no outline, no box on the clipboard, a
+      # paste inserts text. Real keys + mouse + the real system clipboard, judged on the STORED document; 19 x on pre-feature main, the
+      # known-good arm fails (it does not void) there. Reuses the preview server.
+      - name: Notes box copy vs text copy (Excel-style copied-box outline; a text copy never carries the box - NEW-1, 2026-11-15)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-box-copy.mjs
+      # Notes boxes MAY OVERLAP when he places them (NEW-2, 2026-11-15, "like PowerPoint"): a dropped / narrowed box covers its neighbour and
+      # NOTHING moves; growth from a box's own words (typing, paste, Enter) still pushes the box below clear. The placement scenarios are red on
+      # the pre-NEW-2 build (4 x). The full 17-action sweep is verify-notes-no-overlap without ONLY; this is its fast core.
+      - name: Notes overlap rule (placed boxes may overlap and nothing moves; text growth still pushes - NEW-2, 2026-11-15)
+        env:
+          BASE_URL: "http://localhost:4173/"
+          ONLY: "type-wrap,enter-lines,paste-plain,resize-width,move-onto"
+        run: node ui-audit/verify-notes-no-overlap.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at

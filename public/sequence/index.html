@@ -10836,12 +10836,17 @@ function App() {
       scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : 'Cell'};
   };
 
+  // NEW-1 (B1638832) — set by goToTask (a person clicking a row's "Open row in <project>" link, or any
+  // other in-embed jump); consumed by the nav-state emit effect below so the shell can tell a deliberate
+  // jump from the embed merely RE-ANNOUNCING where it already was. Never set by a shell message.
+  const rowJumpRef = useRef(false);
   // ── Jump to a task's row from anywhere (dashboard, modals) ──
   // Expands any collapsed ancestors (a hidden row can't be scrolled to),
   // switches to the task's project, and hands GridView a goToFocus token so it
   // scrolls the row into a comfortable position and pulses it on landing.
   // Gantt-only view flips to split, since there's no grid row to land on.
   const goToTask = useCallback((pid, taskId) => {
+    rowJumpRef.current = true; // NEW-1 (B1638832) — the next nav-state announcement carries `rowLink` (see the emit effect)
     setData(d => {
       const proj = d.projects[pid];
       if (!proj) return d;
@@ -11474,6 +11479,10 @@ function App() {
   const navSigRef = useRef("");
   useEffect(() => {
     if (!inShell || !data) return;
+    // NEW-1 (B1638832) — consume the row-jump flag on the first effect after it was set, whether or not
+    // the announcement below is emitted (an unchanged signature emits nothing, and a stale flag must never
+    // ride a later, ambient re-announcement).
+    const rowLink = rowJumpRef.current; rowJumpRef.current = false;
     // Carry the cross-module link (linkedSiteId/Name) so the shell can map this schedule ↔ a
     // Site Planner project (group_id) and keep the project the same across the header tabs.
     // B1404352 — taskCount rides along so the shell's per-schedule delete confirmation can name
@@ -11486,6 +11495,7 @@ function App() {
       window.parent.postMessage({
         source: "planar-seq", type: "planar:nav-state",
         section: data.section ?? "projects", activeId: data.aPid ?? null, projects: list,
+        ...(rowLink ? { rowLink: true } : {}),
       }, window.location.origin);
     } catch (_) {}
   }, [data, inShell]);
