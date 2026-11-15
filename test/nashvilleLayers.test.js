@@ -127,8 +127,9 @@ describe("the registry rows (GIS_SOURCES) the weekly health check covers", () =>
     expect(has("nashZoning", [-86.715502, 36.148911])).toBe(true);
     expect(has("nashOverlays", [-86.7176, 36.1222])).toBe(true);
   });
-  it("only the relayed policy row (maps.nashville.gov, unreachable from the build) defers its fixture reach, and it says which V# closes it", () => {
+  it("only the policy row is read through the relay (maps.nashville.gov, unreachable from a session build); its fixtures were measured live on 2026-11-15 and carry no deferral", async () => {
     expect(GIS_SOURCES.nashCcm.relay).toBe(true);
+    expect(Object.keys((await import("../src/shared/gis/sources.js")).SOURCE_FIXTURE_REACH_PENDING)).not.toContain("nashCcm");
     expect(GIS_SOURCES.nashZoning.relay).toBeUndefined();
   });
 });
