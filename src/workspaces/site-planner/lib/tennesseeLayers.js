@@ -53,7 +53,8 @@ const rzMember = (member, srcKey, o) => ({
   styleFn: zoningStyleFor(member), lineLabel: { field: LABEL_FIELD[member], minZoom: 14, format: labelFormat(member), declutter: true },
   hoverIdentify: true, canvasIdentify: true, hoverTitle: "Zoning", hoverSource: JURISDICTION[member],
   warm: () => { ensureRutherfordLimits(); }, // the State's city limits name the government a click falls in
-  identifyCard: (props, at) => rutherfordCard(member, props, at && Number.isFinite(at.lat) ? rutherfordSiteAt(at.lat, at.lng) : null),
+  identifyStack: true, // Smyrna's overlay districts stack over a base district: the card lists every district under the click
+  identifyCard: (props, at) => rutherfordCard(member, props, at && Number.isFinite(at.lat) ? rutherfordSiteAt(at.lat, at.lng) : null, at && at.stack),
   viewLegend: (features) => memberLegend(member, features.map((f) => f.properties)),
   ...o,
 });
