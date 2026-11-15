@@ -1476,6 +1476,20 @@ const polygonEdgeNear = (rings, lng, lat, tolDeg) =>
  * reachable as the channel centreline next to it, and changes nothing for a wide polygon
  * (a tap in its middle was already a hit; a tap just outside its edge now hits it, which is
  * what a user pointing at a boundary means anyway). */
+/* EVERY polygon feature that CONTAINS the point (exact containment, no edge tolerance), in the collection's order — for a layer whose polygons STACK (Smyrna's zoning holds overlay
+ * districts over base districts), where `hitFeature`'s one answer would hide the others. Pure. */
+export function hitFeatures(fc, { lat, lng } = {}) {
+  if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+  const out = [];
+  for (const f of fc.features) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon" && inPolygon(g.coordinates, lng, lat)) out.push(f);
+    else if (g.type === "MultiPolygon" && (g.coordinates || []).some((poly) => inPolygon(poly, lng, lat))) out.push(f);
+  }
+  return out;
+}
+
 export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
   if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   /* TWO PASSES, and the order matters. An EXACT hit anywhere in the collection beats a

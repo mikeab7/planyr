@@ -3,6 +3,7 @@
  * Owner rules pinned here: #41 (a result is labelled by the government the SITE falls in — never the county's older shape inside a city), #42 (100%), #43 (click only), #45 (clean card),
  * #46 (names from each government's own source, bare code otherwise), #50 (legend headed by the government, one code per row), #3 (nothing Texas-derived on a Tennessee site). */
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import * as fsMod from "node:fs";
 
 vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), featureLayer: vi.fn(), tiledMapLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
@@ -11,9 +12,10 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVe
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 import {
   COUNTY, MURFREESBORO, SMYRNA, LAVERGNE, MEMBERS, JURISDICTION, UNINCORPORATED, DEDUPE_KEY,
-  isCountyHole, COUNTY_WHERE, MURFREESBORO_WHERE, COUNTY_NAMES, MURFREESBORO_NAMES, SMYRNA_DISTRICTS, SMYRNA_ZONE_ID_CODES, LAVERGNE_NAMES,
+  isCountyHole, stackedZones, COUNTY_WHERE, MURFREESBORO_WHERE, COUNTY_NAMES, MURFREESBORO_NAMES, SMYRNA_DISTRICTS, SMYRNA_ZONE_ID_CODES, LAVERGNE_NAMES,
   murfreesboroOrdinanceHref, titleName, readZone, labelOf, zoneText, zoneClass, ZONE_COLORS, zoningStyleFor, zoningCard, memberLegend,
 } from "../src/workspaces/site-planner/lib/rutherfordZoning.js";
+import { hitFeatures, hitFeature } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { jurisdictionFrom } from "../src/workspaces/site-planner/lib/rutherfordJurisdiction.js";
 import { ALL_LAYERS, MERGE_GROUPS, layerVintage } from "../src/workspaces/site-planner/lib/layers.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
@@ -333,3 +335,63 @@ describe("the registry rows", () => {
     ["Nashville", 36.1627, -86.7816], ["Memphis", 35.1495, -90.049], ["Knoxville", 35.9606, -83.9207], ["Olive Branch MS", 34.9618, -89.8295], ["Houston", 29.7604, -95.3698], ["Atlanta", 33.749, -84.388],
   ])("%s is offered none of it", (_n, lat, lng) => { const o = offeredAt(lat, lng); for (const id of ids) expect(o.has(id), id).toBe(false); });
 });
+
+describe("stacked polygons (Smyrna's overlay districts sit over a base district: ~1 in 10 sampled points, measured 2026-11-15) — the card lists every district under the click", () => {
+  const BASE_R1 = { ZONING_DIST: 11, ZONE_ID: 11, LastUpdate: 1245196800000 };
+  const BASE_C4 = { ZONING_DIST: 6, ZONE_ID: 6, LastUpdate: 1500000000000 };
+  const HIST = { ZONING_DIST: 20, ZONE_ID: 20, LastUpdate: 1576195200000 };
+  const UNL = { ZONING_DIST: 26, ZONE_ID: null };
+  it("a base district under an overlay shows BOTH — the base as Zone, the overlay as Overlay (the overlay no longer hides the base)", () => {
+    const c = zoningCard(SMYRNA, HIST, "Smyrna", [HIST, BASE_R1]);
+    expect(c.title).toBe("Zoning · Smyrna");
+    expect(c.rows.filter((r) => r.label === "Zone")).toEqual([{ label: "Zone", text: "R-1 · Low Density Residential" }]);
+    expect(c.rows).toContainEqual({ label: "Overlay", text: "Historic Overlay District" });
+    expect(c.rows.map((r) => r.label).indexOf("Zone")).toBeLessThan(c.rows.map((r) => r.label).indexOf("Overlay"));
+  });
+  it("the clicked polygon being the BASE one gives the same card (the answer does not depend on which polygon drew first)", () => {
+    const a = zoningCard(SMYRNA, HIST, "Smyrna", [HIST, BASE_R1]).rows.map((r) => `${r.label}|${r.text}`).sort();
+    const b = zoningCard(SMYRNA, BASE_R1, "Smyrna", [BASE_R1, HIST]).rows.map((r) => `${r.label}|${r.text}`).sort();
+    expect(a).toEqual(b);
+  });
+  it("two BASE districts at one point (the town's own data disagreeing) are both listed, newest record first, and the card says so plainly", () => {
+    const c = zoningCard(SMYRNA, UNL, "Smyrna", [UNL, BASE_R1, BASE_C4, HIST]);
+    const zones = c.rows.filter((r) => r.label === "Zone" || r.label === "Also mapped here");
+    expect(zones[0]).toEqual({ label: "Zone", text: "C-4 · Neighborhood Service" }); // newest LastUpdate
+    expect(zones.map((r) => r.text)).toEqual(expect.arrayContaining(["R-1 · Low Density Residential", "Unlisted district (code 26)"]));
+    expect(c.rows).toContainEqual({ label: "Overlay", text: "Historic Overlay District" });
+    expect(c.rows.find((r) => r.label === "Note").text).toMatch(/Smyrna's layer holds more than one district here/);
+  });
+  it("one polygon, or the same district twice, is the ordinary single card (no Note, no Overlay row)", () => {
+    for (const stack of [null, [], [BASE_R1], [BASE_R1, { ...BASE_R1 }]]) {
+      const c = zoningCard(SMYRNA, BASE_R1, "Smyrna", stack);
+      expect(c.rows.map((r) => r.label)).not.toContain("Note");
+      expect(c.rows.map((r) => r.label)).not.toContain("Overlay");
+      expect(c.rows[0]).toEqual({ label: "Zone", text: "R-1 · Low Density Residential" });
+    }
+  });
+  it("an overlay alone is shown as an Overlay, not as the zone", () => {
+    const c = zoningCard(SMYRNA, HIST, "Smyrna", [HIST, { ...HIST }]);
+    expect(c.rows[0]).toEqual({ label: "Zone", text: "Historic Overlay District" }); // a single distinct polygon keeps the ordinary card
+    const two = zoningCard(SMYRNA, HIST, "Smyrna", [HIST, { ZONING_DIST: 23, ZONE_ID: 23 }]);
+    expect(two.rows.filter((r) => r.label === "Overlay").map((r) => r.text).sort()).toEqual(["Height", "Historic Overlay District"]);
+    expect(two.rows.map((r) => r.label)).not.toContain("Zone");
+  });
+  it("stackedZones: distinct, base before overlay", () => {
+    expect(stackedZones(SMYRNA, HIST, [HIST, BASE_R1, BASE_R1]).map((x) => x.text)).toEqual(["R-1 · Low Density Residential", "Historic Overlay District"]);
+  });
+  it("hitFeatures returns EVERY containing polygon (hitFeature keeps returning the first)", () => {
+    const sq = (x0, y0, x1, y1) => ({ type: "Polygon", coordinates: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]] });
+    const fc = { type: "FeatureCollection", features: [{ properties: { n: "overlay" }, geometry: sq(0, 0, 2, 2) }, { properties: { n: "base" }, geometry: sq(-1, -1, 3, 3) }, { properties: { n: "far" }, geometry: sq(10, 10, 11, 11) }, { properties: { n: "none" }, geometry: null }] };
+    expect(hitFeatures(fc, { lat: 1, lng: 1 }).map((f) => f.properties.n)).toEqual(["overlay", "base"]);
+    expect(hitFeature(fc, { lat: 1, lng: 1 }).properties.n).toBe("overlay");
+    expect(hitFeatures(fc, { lat: 50, lng: 50 })).toEqual([]);
+    expect(hitFeatures(null, { lat: 1, lng: 1 })).toEqual([]);
+    expect(hitFeatures(fc, { lat: NaN, lng: 1 })).toEqual([]);
+  });
+  it("every member opts in to the stack, and the canvas identify hands it to the card", () => {
+    for (const id of ["tn_rz_murfreesboro", "tn_rz_smyrna", "tn_rz_lavergne", "tn_rz_county"]) expect(ALL_LAYERS[id].identifyStack, id).toBe(true);
+    const src = require_fs().readFileSync("src/workspaces/site-planner/lib/featureHoverAttach.js", "utf8");
+    expect((src.match(/itemFor\(cfg, [^\n]*withStack\(lyr, cfg,/g) || []).length).toBe(2); // the Map-view click AND the planner canvas
+  });
+});
+const require_fs = () => fsMod;
