@@ -69,7 +69,8 @@ try {
   try {
     // Records tab is the default rail tab for comps only once chosen; open it if a tab control exists.
     const tab = page.getByRole("tab", { name: /records/i }).first();
-    if (await tab.count()) await tab.click().catch(() => {});
+    await tab.waitFor({ timeout: 30000 }); // a fresh origin opens on the Sites tab; wait for the rail to render
+    await tab.click();
     await page.locator(rowSel).first().click({ timeout: 30000 });
     rowOk = await waitFor(page, (t) => !!document.querySelector('[data-testid="comp-record-name"]')?.textContent.includes(t), TITLE, 15000);
   } catch { /* handled below */ }
