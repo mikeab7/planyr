@@ -377,6 +377,7 @@ describe("NEW-2 / NEW-3 (Bartow sweep, 2026-11-12) — Bartow County water & sew
       expect(c.mergeGroup).toBe("water_sewer"); expect(c.group).toBe("utilities"); expect(c.role).toBe("line"); expect(c.regions).toEqual(["bartow_ga"]);
       expect(c.minZoom).toBeGreaterThanOrEqual(14); expect(c.fetchAll, "the county answers 2,000 lines a request; a z14 cell holds more").toBe(true); expect(c.fields).toBeUndefined();
       expect(c.lineLabel.field).toBe("SIZE_D");
+      expect(c.lineLabel.maxLabels, "a dense network at close zoom froze the tab binding thousands of tooltips (measured 2–10 s)").toBe(300);
       expect(JSON.stringify(c.identifyCard({ DIAMETER: 12, MATERIAL: "XX", SIZE_D: "8", MAT_D: "PVC" }))).not.toMatch(/DIAMETER|MATERIAL|\b12\b|XX/);
     }
     expect(MERGE_GROUPS.water_sewer).toBeTruthy();

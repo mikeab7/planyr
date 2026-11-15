@@ -195,6 +195,8 @@ const pipeRows = (p) => {
   const size = pipeSize(p), mat = pipeMaterial(p), install = /^(19|20)\d\d$/.test(text(p && p.INSTAL_DATE)) ? text(p.INSTAL_DATE) : "";
   return [rowIf("Size", size ? `${size}"` : ""), rowIf("Material", materialWords(mat)), rowIf("Installed", install)];
 };
+/* The most pipe labels one Bartow layer will bind at once: past it the lines draw unlabelled (see layers.js `lineLabel.maxLabels` — 2,135 permanent tooltips was a 2–3 s freeze). */
+export const BARTOW_MAX_LABELS = 300;
 export const BARTOW_UTILITY_SCOPE = "Bartow County Water Department only — Cartersville and Adairsville run their own water and sewer systems and publish no map, so a missing line here is not proof there is none.";
 
 /* ───────────────────────────── Allatoona Lake (USACE Mobile District) (NEW-3, 2026-11-12) ───────────────────────────── */
@@ -493,7 +495,7 @@ export const GEORGIA_LAYERS = {
   ga_bartow_water: row("gaBartowWater", {
     label: "Water Mains (Bartow County)", source: "Bartow County Water Department", group: "utilities", mergeGroup: "water_sewer", regions: ["bartow_ga"], role: "line", order: 40, minZoom: 14, fetchAll: true, simplifyFactor: 1,
     color: BARTOW_WATER_COLORS.water, weight: 2, opacity: 0.55, styleFn: bartowWaterStyle(),
-    lineLabel: { field: "SIZE_D", minZoom: 16, format: (_v, props) => bartowPipeLabel(props) },
+    lineLabel: { field: "SIZE_D", minZoom: 16, maxLabels: BARTOW_MAX_LABELS, format: (_v, props) => bartowPipeLabel(props) },
     legend: [{ label: "Water main", color: BARTOW_WATER_COLORS.water }],
     hoverTitle: "Water main", hoverSource: "Bartow County Water Department", hoverFields: [{ names: ["SIZE_D"], label: "Size" }, { names: ["MAT_D"], label: "Material" }],
     identifyCard: (props) => card(bartowPipeLabel(props) ? `${bartowPipeLabel(props)} water main` : "Water main", pipeRows(props || {}), BARTOW_UTILITY_SCOPE),
@@ -503,7 +505,7 @@ export const GEORGIA_LAYERS = {
   ga_bartow_sewer: row("gaBartowSewer", {
     label: "Sanitary Sewer (Bartow County)", source: "Bartow County Water Department", group: "utilities", mergeGroup: "water_sewer", regions: ["bartow_ga"], role: "line", order: 41, minZoom: 14, fetchAll: true, simplifyFactor: 1,
     color: BARTOW_WATER_COLORS.gravity, weight: 2, opacity: 0.55, styleFn: bartowSewerStyle,
-    lineLabel: { field: "SIZE_D", minZoom: 16, format: (_v, props) => bartowPipeLabel(props) },
+    lineLabel: { field: "SIZE_D", minZoom: 16, maxLabels: BARTOW_MAX_LABELS, format: (_v, props) => bartowPipeLabel(props) },
     legend: [{ label: "Gravity sewer", color: BARTOW_WATER_COLORS.gravity }, { label: "Force main (pressure)", color: BARTOW_WATER_COLORS.force }],
     hoverTitle: "Sanitary sewer", hoverSource: "Bartow County Water Department", hoverFields: [{ names: ["SIZE_D"], label: "Size" }, { names: ["MAT_D"], label: "Material" }],
     identifyCard: (props) => {

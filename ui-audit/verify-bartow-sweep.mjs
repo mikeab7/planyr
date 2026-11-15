@@ -3,6 +3,7 @@
  *
  *   node ui-audit/verify-bartow-sweep.mjs [http://localhost:4173]                 local `vite preview` (the /gis-proxy relay is stood in with planyr.io's own)
  *   E2E_LOGIN_KEY=… node ui-audit/verify-bartow-sweep.mjs https://planyr.io --expect-sha <sha>     LIVE: signed in as the test account (nothing is written to the account)
+ *   node ui-audit/verify-bartow-sweep.mjs https://<branch>.planyr.pages.dev --anon --expect-sha <sha>     a PR preview (no sign-in key there): signed out, through the preview's own relay
  *
  * ARMS (each prints ✅/❌; the run is VOID — exit 2, never 0 — if the browser cannot reach a layer's host, or the tab is not foreground):
  *   LISTING  Allatoona rows are listed on the Cherokee shore and at Gerdau (Bartow) and NOT at Savannah, Griffin or Houston; Bartow zoning is listed at Gerdau and NOT on the Cherokee shore.
@@ -19,6 +20,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 const args = process.argv.slice(2);
 const base = (args.find((a) => /^https?:/.test(a)) || "http://localhost:4173").replace(/\/$/, "");
 const live = !/localhost|127\.0\.0\.1/.test(base);
+const anon = args.includes("--anon"); // a PR preview has no sign-in key: drive the finder signed out, through that deploy's own /gis-proxy relay
 const expectSha = args.includes("--expect-sha") ? args[args.indexOf("--expect-sha") + 1] : null;
 const LONG_TASK_BUDGET_MS = Number(process.env.BARTOW_LONG_TASK_MS || 1500);
 let failed = 0, voided = 0;
@@ -36,7 +38,7 @@ const CASES = [
     expect: [/I-1 — General Industrial District/, /I1 \(wC\)/, /with conditions/, /ARZ-2450-21/], link: /revize\.com\/revize\/bartowga\// },
   { name: "Bartow zoning · BPD is Business Park", row: "ga_bartow_zoning", group: "jur", needle: "BartowZoning/MapServer/0", zoom: 17, find: { url: `${COUNTY}/AGOServices/BartowZoning/MapServer/0`, where: "STZONECODE='BPD' AND REZONING='ARZ-2065'", kind: "polygon" },
     expect: [/BP — Business Park District/, /BPD/], link: /revize\.com\/revize\/bartowga\// },
-  { name: "KNOWN-GOOD · Bartow zoning · Incorporated is a city, no Ordinance link", row: "ga_bartow_zoning", group: "jur", needle: "BartowZoning/MapServer/0", zoom: 17, find: { url: `${COUNTY}/AGOServices/BartowZoning/MapServer/0`, where: "STZONECODE='Incorporated'", kind: "polygon", near: [34.37, -84.93] },
+  { name: "KNOWN-GOOD · Bartow zoning · Incorporated is a city, no Ordinance link", row: "ga_bartow_zoning", group: "jur", needle: "BartowZoning/MapServer/0", zoom: 17, find: { url: `${COUNTY}/AGOServices/BartowZoning/MapServer/0`, where: "STZONECODE='Incorporated'", kind: "polygon", near: [34.17, -84.80] },
     expect: [/Inside a city/, /city zones this ground/], noLink: true },
   { name: "Bartow water mains", row: "water_sewer", group: "util", needle: "waterdepartmentapp/MapServer/21", zoom: 17, find: { url: `${COUNTY}/Water/waterdepartmentapp/MapServer/21`, where: "SIZE_D='16' AND MAT_D='DIP'", kind: "line", near: [34.24, -84.79] },
     expect: [/16" DIP water main/, /ductile iron/, /Cartersville and Adairsville/] },
@@ -57,7 +59,7 @@ const POINTS = [
 
 let page, close, browser;
 const seen = {};
-if (live) {
+if (live && !anon) {
   const { openSignedIn } = await import("./lib/signedInSession.mjs");
   const s = await openSignedIn({ base, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
   page = s.page; close = () => s.close();
@@ -71,7 +73,7 @@ if (live) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   page = await ctx.newPage();
   // `vite preview` has no Cloudflare Functions: stand the /gis-proxy relay in with planyr.io's own (what the app reaches in production)
-  await page.route(/\/gis-proxy\//, async (route) => {
+  if (!live) await page.route(/\/gis-proxy\//, async (route) => {
     const u = new URL(route.request().url());
     try { const r = await route.fetch({ url: "https://planyr.io" + u.pathname + u.search }); await route.fulfill({ response: r }); } catch (e) { await route.abort(); }
   });
@@ -140,6 +142,7 @@ const readCard = () => page.evaluate(() => {
 try {
   await assertMeasurable(page, "verify-bartow-sweep");
   if (live) {
+    if (anon) await page.goto(`${base}/`, { waitUntil: "load" }); // the signed-in helper lands on the app already; a bare browser starts on about:blank
     const v = await page.evaluate(async () => (await fetch("/version.json", { cache: "no-store" })).json());
     console.log("served build:", v.build);
     if (expectSha) check("served build matches the merge commit", String(v.build).startsWith(expectSha.slice(0, 7)), `${v.build} vs ${expectSha}`);
@@ -164,12 +167,12 @@ try {
     const pt = await findPoint(C.find);
     if (!pt || pt.error) { console.log(`  VOID — could not find a feature to click: ${pt && pt.error}`); voided++; continue; }
     console.log(`  feature found at ${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)} (${pt.n} returned)`);
-    await page.evaluate(([la, lo, z]) => window.__mapFinderMap.setView([la, lo], z, { animate: false }), [pt.lat, pt.lng, C.zoom]);
+    await page.evaluate(([la, lo, z]) => window.__mapFinderMap.setView([la, lo], z, { animate: false }), [pt.lat, pt.lng, Number(process.env.BARTOW_ZOOM || C.zoom)]);
     await page.evaluate(longTaskInit);
     await page.waitForTimeout(1200);
     await rowIds(fp, C.group);
     const row = fp.getByTestId(`layer-row-${C.row}`);
-    if (!(await row.count())) { check(`${C.name}: row ${C.row} present`, false); continue; }
+    if (!(await row.count())) { check(`${C.name}: row ${C.row} present`, false, `rows listed: ${(await rowIds(fp, C.group)).join(",")}`); continue; }
     const before = await drawn();
     const box = row.locator('input[type="checkbox"]').first();
     if (!(await box.isChecked())) await box.check();
