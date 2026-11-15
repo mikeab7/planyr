@@ -58,8 +58,12 @@ export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, building
     .filter((c) => !excluded.includes(c))
     .map((c) => ({ c, cost: cornerCost(c, fr, pw, ph, inset, obstacles || []) }))
     .sort((a, b) => a.cost - b.cost);
-  let barC, northC;
-  if (!obstacles || !obstacles.length) {
+  let barC = null, northC;
+  if (!bar) {
+    // NEW-1 (2026-11-13) — the owner left the scale bar off the sheet: it reserves NO corner, so the north arrow keeps the
+    // historical top-left and the buildings table ranks over the three remaining corners (never an empty hole where the bar was).
+    northC = !obstacles || !obstacles.length ? "tl" : rank(north.plateW, north.plateH, [])[0].c;
+  } else if (!obstacles || !obstacles.length) {
     // No content to weigh — keep the historical defaults exactly as they were.
     barC = "br"; northC = "tl";
   } else {
@@ -67,11 +71,11 @@ export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, building
     northC = rank(north.plateW, north.plateH, [barC])[0].c;
   }
   const result = {
-    bar: { ...cornerXY(barC, fr, bar.plateW, bar.plateH, inset), corner: barC },
     north: { ...cornerXY(northC, fr, north.plateW, north.plateH, inset), corner: northC },
   };
+  if (bar) result.bar = { ...cornerXY(barC, fr, bar.plateW, bar.plateH, inset), corner: barC };
   if (buildings) {
-    const bldgC = rank(buildings.plateW, buildings.plateH, [barC, northC])[0].c;
+    const bldgC = rank(buildings.plateW, buildings.plateH, [barC, northC].filter(Boolean))[0].c;
     result.buildings = { ...cornerXY(bldgC, fr, buildings.plateW, buildings.plateH, inset), corner: bldgC };
   }
   return result;
@@ -87,7 +91,9 @@ export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, building
 // array, a compact Buildings SF inset is built and placed in a third no-occlude corner; omitted
 // (or empty — a plan with no buildings) → no plate is built and `furnitureLayout` returns exactly
 // what it always has, so every existing caller is unaffected.
-export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, obstacles = null, buildingRows = null, buildingTotal = 0, fmtSf }) {
+// `showScaleBar` (NEW-1, 2026-11-13) — the Print panel's "Scale bar" checkbox. Default true = exactly what this always built;
+// false builds NO bar plate (no group, no corner reserved), so `scaleBar` is absent from the result.
+export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, obstacles = null, buildingRows = null, buildingTotal = 0, fmtSf, showScaleBar = true }) {
   const refS = Math.min(w, h);
   // The EXPORT frame's user unit is "one foot × the live zoom", not a screen pixel — so the
   // absolute px floors are off here (NEW-1 / V481(f)). Everything the furniture draws is then
@@ -95,22 +101,22 @@ export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bear
   const m = furnitureMetrics(refS, { unitIsPx: false });
   const inset = refS * 0.035;
   const { feet, lengthU } = pickScaleBar({ frameW: w, ftPerUnit });
-  const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
+  const sb = showScaleBar === false ? null : scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
   const na = northArrowPlate({ m, pal, bearingDeg });
   const bp = buildingRows && buildingRows.length ? buildingsPlate({ rows: buildingRows, total: buildingTotal, m, pal, fmtSf }) : null;
   const place = chooseFurnitureCorners({ x, y, w, h, inset, bar: sb, north: na, buildings: bp, obstacles });
   const out = {
     refS, inset, m, feet, lengthU,
-    scaleBar: { ...sb, tx: place.bar.tx, ty: place.bar.ty, corner: place.bar.corner },
     north: { ...na, arrowH: m.arrowH, tx: place.north.tx, ty: place.north.ty, corner: place.north.corner },
   };
+  if (sb) out.scaleBar = { ...sb, tx: place.bar.tx, ty: place.bar.ty, corner: place.bar.corner };
   if (bp) out.buildings = { ...bp, tx: place.buildings.tx, ty: place.buildings.ty, corner: place.buildings.corner };
   return out;
 }
 
 export function buildSheetFurnitureSvg(opts) {
   const L = furnitureLayout(opts);
-  let s = translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup, "scale-bar") +
+  let s = (L.scaleBar ? translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup, "scale-bar") : "") +
     translate(L.north.tx, L.north.ty, L.north.markup, "north-arrow");
   if (L.buildings) s += translate(L.buildings.tx, L.buildings.ty, L.buildings.markup, "buildings-table");
   return s;

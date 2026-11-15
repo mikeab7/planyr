@@ -156,6 +156,8 @@ export const LAYER_TIER = {
   fb_levees: "constraint", fb_brazos_inundation: "constraint", fb_brazos_floodplain: "constraint", fb_mtp_proposed: "constraint",
   fb_lid: "reference", fb_dev_agreements: "reference",
   fb_tirz: "context", fb_mmd: "context",
+  // Metro Nashville (NEW-1, 2026-11-12): zoning, overlays, the downtown code and PUDs are look-ups; the NashvilleNext policy is planning-intent wash.
+  tn_nash_zoning: "reference", tn_nash_overlays: "reference", tn_nash_dtc: "reference", tn_nash_pud: "reference", tn_nash_ccm: "context",
   sl_flu: "context",
   sl_zoning_cup: "context",
   sl_zoning_exception: "context",
