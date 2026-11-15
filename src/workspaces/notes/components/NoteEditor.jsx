@@ -5733,7 +5733,13 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     /* The box-clearing push (lib/notesBoxClearPlugin.js) is layout housekeeping after the paste, not further editing: it must not retire the offer. */
-    const retire = (e) => { if (e?.transaction?.getMeta?.("planyrBoxClear")) return; if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
+    const retire = (e) => {
+      if (e?.transaction?.getMeta?.("planyrBoxClear")) return;
+      /* A pasted BOX blurs the box he was typing in, and a self-fitting box writes its width when it is left — a housekeeping step kept out of the history,
+       * never an edit of his. It must not take the offer away (found by the first live run, where typed boxes are self-fitting and seeded ones are not). */
+      if (pasteRef.current?.kind === "box" && e?.transaction?.getMeta?.("addToHistory") === false) return;
+      if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null);
+    };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);
