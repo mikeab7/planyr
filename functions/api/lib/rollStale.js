@@ -1,48 +1,58 @@
-/* rollStale.js — is the INDEXED Harris answer behind a newer roll? (NEW-3, 2026-11-12)
+/* rollStale.js — is the INDEXED Harris answer behind a newer roll? (NEW-3, 2026-11-12; per-account rule 2026-11-15)
  *
- * `/api/taxunits` answers Harris from the Supabase shard index (cad_taxunit_shards), which is built once per roll year
- * by hand (B2158065 "Yearly refresh") and never refreshes itself: when HCAD posts the next year's `Real_jur_exempt.zip` the
- * index keeps serving the old year, and nothing said so. This module decides — PURELY, from facts the handler reads —
- * which of three things is true so the caption can say it and ops can see it:
+ * `/api/taxunits` answers Harris from the Supabase shard index (cad_taxunit_shards), built once per roll year by hand
+ * (B2158065 "Yearly refresh") and never refreshed by itself: when HCAD posts the next year's `Real_jur_exempt.zip` the index
+ * keeps serving the old year, and nothing said so. This module decides — PURELY, from facts the handler reads — which of three
+ * things is true so the caption can say it and ops can see it:
  *   current          the answer's roll year is this calendar year (or later)
- *   not-adopted      a newer roll exists, or does not, but its rates are still placeholders (curr = 0 where last year's was
- *                    positive) → serving the older year is CORRECT ("2025 rates — 2026 not yet adopted")
- *   refresh-pending  a newer roll is published AND adopted (non-zero rates) → the older answer is stale; rebuild the index
- * "Adopted" = at least ADOPTED_SHARE of the units that levied last year show a positive current rate. A share, not "all":
- * one dormant district that never posts a rate must not hold the verdict at "not adopted" forever, and the verdict is only a
- * caption and an ops signal — each account's own answer is still complete-or-hidden (hcadUnits.buildUnits).
+ *   not-adopted      a newer roll file is absent, or THIS ACCOUNT'S units have not all posted a rate in it → serving the older year
+ *                    is CORRECT ("2025 rates — 2026 not yet adopted")
+ *   refresh-pending  a newer roll is published AND every unit on this account has adopted in it → the older answer is stale;
+ *                    rebuild the index
+ * THE TEST IS PER ACCOUNT, NOT PER ROLL. The first cut asked for 95 % of ALL Harris units to have a positive current rate;
+ * measured live 2026-11-15 it said "not yet adopted" for an account whose units had ALL adopted 2026 (the live scan answered
+ * it complete at 2026) because hundreds of small districts lag the big ones. "Adopted for this account" = exactly what
+ * hcadUnits.buildUnits needs to answer it: each of the account's unit codes shows a positive current rate, or never levied
+ * (prior = 0 and current = 0). A unit missing from the newer file is NOT adopted (never an alarm on a guess).
  */
-export const ADOPTED_SHARE = 0.95;
 
-/** Rate table (Map code → { prop, curr }) → { levied, adopted, share }. Pure. */
-export function adoptionOf(rates) {
-  let levied = 0, adopted = 0;
-  for (const r of (rates && typeof rates.values === "function" ? rates.values() : [])) {
-    if (!(r.prop > 0)) continue;
-    levied++;
-    if (r.curr > 0) adopted++;
+/** Rate table (Map code → { prop, curr }) → a small JSON-able summary { adopted:[codes], zero:[codes] }. Pure. */
+export function summariseRates(rates) {
+  const adopted = [], zero = [];
+  for (const [code, r] of (rates && typeof rates.entries === "function" ? rates.entries() : [])) {
+    if (r.curr > 0) adopted.push(code);
+    else if (!(r.prop > 0)) zero.push(code);
   }
-  return { levied, adopted, share: levied ? adopted / levied : 0 };
+  return { adopted, zero };
+}
+
+/** Has every one of `codes` adopted in this summary? Returns { ok, missing }. Pure. */
+export function accountAdopted(summary, codes) {
+  if (!summary) return { ok: false, missing: [...(codes || [])] };
+  const have = new Set([...(summary.adopted || []), ...(summary.zero || [])]);
+  const missing = (codes || []).filter((c) => !have.has(c));
+  return { ok: !!(codes && codes.length) && !missing.length, missing };
 }
 
 /**
  * @param rollYear  the year of the indexed answer
  * @param nowYear   the calendar year
- * @param newer     [{ year, rates }] for each year in (rollYear, nowYear] — `rates` a Map from parseRateTable, or null when
- *                  that year's file is not published
- * @returns { state, stale, rollYear, newerYear?, share? }
+ * @param codes     the account's unit codes (from the indexed answer)
+ * @param newer     [{ year, summary }] for each year in (rollYear, nowYear]; `summary` from summariseRates, or null when that
+ *                  year's file is not published
+ * @returns { state, stale, rollYear, newerYear?, missing? }
  */
-export function decideStaleness({ rollYear, nowYear, newer = [] }) {
+export function decideStaleness({ rollYear, nowYear, codes = [], newer = [] }) {
   if (!(rollYear > 0) || rollYear >= nowYear) return { state: "current", stale: false, rollYear };
   const byYear = [...newer].sort((a, b) => b.year - a.year);
   let seen = null;
   for (const n of byYear) {
-    if (!n.rates || !n.rates.size) continue;
-    const a = adoptionOf(n.rates);
-    if (a.levied && a.share >= ADOPTED_SHARE) return { state: "refresh-pending", stale: true, rollYear, newerYear: n.year, share: a.share };
-    if (!seen) seen = { year: n.year, share: a.share };
+    if (!n.summary) continue;
+    const a = accountAdopted(n.summary, codes);
+    if (a.ok) return { state: "refresh-pending", stale: true, rollYear, newerYear: n.year };
+    if (!seen) seen = { year: n.year, missing: a.missing };
   }
-  return { state: "not-adopted", stale: false, rollYear, newerYear: seen ? seen.year : nowYear, ...(seen ? { share: seen.share } : {}) };
+  return { state: "not-adopted", stale: false, rollYear, newerYear: seen ? seen.year : nowYear, ...(seen ? { missing: seen.missing } : {}) };
 }
 
 /** The caption suffix for a verdict, or null (nothing to add). Pure. */

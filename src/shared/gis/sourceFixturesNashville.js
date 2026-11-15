@@ -34,10 +34,9 @@ export const NASHVILLE_FIXTURES = {
     { label: "Oak Hill", point: [-86.78569, 36.07366], expectMinCount: 1 }, // live: 1
   ] },
   nashCcm: { fixtures: [
-    // NOT measured in this build: maps.nashville.gov is refused by the build environment's egress. The sweep (2026-11-01) read a Conservation ("CO") policy at the Elm Hill Pike site; the policy
-    // layer covers the whole county (33,105 polygons), so the downtown point is expected to answer too. SOURCE_FIXTURE_REACH_PENDING names V2115889, which measures both through the deployed relay.
-    { label: "Elm Hill Pike (CO — Conservation)", point: ELM_HILL, expectMinCount: 1 },
-    { label: "Downtown Nashville", point: [-86.7816, 36.1627], expectMinCount: 1 },
+    // MEASURED 2026-11-15 through the deployed relay (maps.nashville.gov is refused by the build sandbox, so only a signed-in run on planyr.io can read it — ui-audit/verify-nashville-live, V2115889).
+    { label: "Elm Hill Pike (CO — Conservation)", point: ELM_HILL, expectMinCount: 1 }, // live 2026-11-15: 1
+    { label: "Downtown Nashville (OS — Open Space, T6 Downtown)", point: [-86.7816, 36.1627], expectMinCount: 1 }, // live 2026-11-15: 1
   ] },
 };
 

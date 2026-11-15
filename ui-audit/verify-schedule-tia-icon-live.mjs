@@ -1,4 +1,4 @@
-/* B2671232 / V2115884 — the custom-drawn TIA task icon (cars on a road) on a REAL deploy, signed in as the test account, in a
+/* B2671232 + the colour pass (NEW-1 2026-11-15; V2115884, and the colour V filed with it) — the TIA task icon (cars on a road, now in colour) on a REAL deploy, signed in as the test account, in a
  * THROWAWAY cloud schedule that is deleted afterwards (constraint #15). Steps 1-5 of V2115884 (step 6 is the owner's own look).
  *   E2E_LOGIN_KEY=… EXPECT_SHA=<merge commit> node ui-audit/verify-schedule-tia-icon-live.mjs [https://planyr.io]
  *
@@ -8,8 +8,8 @@
  *      as an inline drawing (no image) before the name
  *   3  persistence: the saved cloud row carries the KEY svg:tia (never markup); a cache-busted reload of the same page AND a fresh
  *      page (a second device) show it
- *   4  looks: the three windshields are open (the row's own background) on a normal, a hovered and a selected row, the car bodies
- *      are drawn (device pixel ratio 4 through the context so a ~1 px windshield is measurable)
+ *   4  looks: red / blue / green cars, light-blue windshields and a navy road edge on a normal, a hovered and a selected row, with no
+ *      box behind the drawing (device pixel ratio 4 through the context so a ~1 px windshield is measurable)
  *   5  nothing else moved: a task that already saved 🚦 still shows it (a loaded image); an emoji task still shows its emoji; a
  *      collapsed phase's faded summary draws the TIA
  * KNOWN-GOOD ARMS: signed in as the test account; the emoji row reports an <img> and no <svg>; every sampled background is opaque;
@@ -98,8 +98,8 @@ try {
   const build = await buildOf(page);
   const contains = !EXPECT_SHA || String(build).startsWith(EXPECT_SHA.slice(0, 7)) || (() => { try { execSync(`git merge-base --is-ancestor ${EXPECT_SHA} ${build}`, { stdio: "ignore" }); return true; } catch { return false; } })();
   ok(`1 the served build ${build} contains the merge commit ${EXPECT_SHA.slice(0, 7) || "(unset)"} (read in this page session)`, contains, build);
-  const js = await page.evaluate(async () => { const r = await fetch("/sequence/taskIcons.js?cb=" + Date.now(), { cache: "no-store" }); return { status: r.status, has: (await r.text()).includes("svg:tia") }; });
-  ok("1 GET /sequence/taskIcons.js is 200 and carries svg:tia", js.status === 200 && js.has, JSON.stringify(js));
+  const js = await page.evaluate(async () => { const r = await fetch("/sequence/taskIcons.js?cb=" + Date.now(), { cache: "no-store" }); const t = await r.text(); return { status: r.status, has: t.includes("svg:tia"), colour: ["#d4506c", "#3f7fe0", "#3fa36b", "#f2b632"].every((c) => t.includes(c)), old: t.includes('fill-rule="evenodd" d="M3.2 5.6H7.9') }; });
+  ok("1 GET /sequence/taskIcons.js is 200, carries svg:tia in the new colours and not the old one-colour cars", js.status === 200 && js.has && js.colour && !js.old, JSON.stringify(js));
 
   // ── KNOWN-GOOD ARM ──────────────────────────────────────────────────────────
   const g2 = await glyphs(page, 2);
@@ -140,23 +140,20 @@ try {
   await page2.close();
 
   // ── 4 looks: pixels at device ratio 4 ───────────────────────────────────────
-  const WS = [[7.4, 7.7], [16.1, 7.7], [15.4, 16.3]];
+  const PAL = { navy: [47, 58, 107], blue: [63, 127, 224], red: [212, 80, 108], green: [63, 163, 107], light: [227, 243, 251] };
   const pixels = async () => {
     const svg = page.locator(`${row(1)} [data-task-icon="svg:tia"] svg`).first();
     const r = await svg.boundingBox(); const M = 3;
     const buf = await page.screenshot({ clip: { x: r.x - M, y: r.y - M, width: r.width + 2 * M, height: r.height + 2 * M } });
     const k = (r.width * DSF) / 24, ox = M * DSF, oy = M * DSF, pt = (u, v) => [ox + u * k, oy + v * k];
-    const probes = []; WS.forEach(([cu, cv]) => { for (const du of [-0.1, 0, 0.1]) for (const dv of [-0.4, 0, 0.4]) probes.push(pt(cu + du, cv + dv)); });
-    const [bg, body1, body2, body3, ...ws] = await samplePng(page, buf, [[1.5 * DSF, oy + (r.height * DSF) / 2], pt(3.6, 7.7), pt(12.6, 7.7), pt(19.6, 16.3), ...probes]);
-    return { ws, body1, body2, body3, bg };
+    const [bg, body1, body2, body3, ws1, ws2, ws3, edge, corner] = await samplePng(page, buf, [[1.5 * DSF, oy + (r.height * DSF) / 2], pt(3.6, 7.7), pt(12.6, 7.7), pt(19.6, 16.3), pt(7.4, 7.7), pt(16.1, 7.7), pt(15.4, 16.3), pt(12, 3.5), pt(1, 1)]);
+    return { bg, body1, body2, body3, ws1, ws2, ws3, edge, corner };
   };
-  const near = (a, b, t = 3) => a.slice(0, 3).every((v, i) => Math.abs(v - b[i]) <= t);
-  const differs = (a, b, t = 8) => a.slice(0, 3).some((v, i) => Math.abs(v - b[i]) >= t);
-  // a windshield is under one CSS pixel wide at row size, so its outer columns are anti-aliased: it reads as OPEN when 5 of its 9 sample points are the row's background
-  const open = (p) => [0, 1, 2].every((w) => p.ws.slice(w * 9, w * 9 + 9).filter((c) => near(c, p.bg)).length >= 5);
+  const near = (a, b, t = 8) => a.slice(0, 3).every((v, i) => Math.abs(v - b[i]) <= t);
   const judge = (label, p) => {
     ok(`4 [known-good] ${label}: the sampled row background is an OPAQUE pixel (a transparent sample means the instrument returned a blank image)`, p.bg[3] === 255, JSON.stringify(p.bg));
-    ok(`4 ${label}: all three windshields read as OPEN (the row's own background), the car bodies are drawn`, open(p) && differs(p.body1, p.bg) && differs(p.body2, p.bg) && differs(p.body3, p.bg), JSON.stringify({ bg: p.bg, bodies: [p.body1, p.body2, p.body3] }));
+    ok(`4 ${label}: red / blue / green cars, light windshields, navy road edge, and no box behind the drawing (its corner is the row's own background)`,
+      near(p.body1, PAL.red) && near(p.body2, PAL.blue) && near(p.body3, PAL.green) && [p.ws1, p.ws2, p.ws3].every((c) => near(c, PAL.light, 14)) && near(p.edge, PAL.navy, 14) && near(p.corner, p.bg, 6), JSON.stringify(p));
   };
   await page.mouse.move(5, 5); await pacedWait(page, 250);
   judge("normal row", await pixels());
