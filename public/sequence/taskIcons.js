@@ -6,7 +6,7 @@
  *
  * DATA MODEL: a task carries `icons: string[]` (0–2 entries), NEVER inside the task name. An entry is either an emoji
  * character (drawn as a bundled Twemoji SVG), a custom id "c:<name>" (a coloured drawing with FIXED colours, 36x36 unless CUSTOM_VIEWBOX says otherwise, below), or a built-in
- * line-art id "svg:<name>" (BUILTIN_SVG, below: drawn in currentColor so it follows the row's text colour). The stored
+ * id "svg:<name>" (BUILTIN_SVG, below: line art in currentColor so it follows the row's text colour — or, flagged fixedColour, a coloured drawing like the TIA). The stored
  * value is only ever the KEY — never markup. Absent = none.
  *
  * Emoji art: Twemoji 15.1.0 (jdecked/twemoji), graphics © Twitter, Inc. and other contributors, CC-BY 4.0.
@@ -170,9 +170,10 @@
     return m ? m.split("__UID__").join(String(uid == null ? "0" : uid)) : "";
   };
 
-  // Built-in line-art icons, "svg:<name>". Inner markup of <svg viewBox=... fill="none" stroke="currentColor"
-  // stroke-linecap="round" stroke-linejoin="round"> (the component sets those root attributes), so the drawing takes the
-  // colour of whatever text it sits in: light/dark, hovered, selected, striped rows all stay right with no per-theme art.
+  // Built-in drawings, "svg:<name>". Inner markup of <svg viewBox=... fill="none" stroke="currentColor"
+  // stroke-linecap="round" stroke-linejoin="round"> (the component sets those root attributes), so a line-art drawing (Plat) takes the
+  // colour of whatever text it sits in: light/dark, hovered, selected, striped rows all stay right with no per-theme art. A drawing flagged
+  // `fixedColour: true` (the TIA) names every colour itself and ignores the text colour, exactly like a "c:" drawing.
   // PLAT (owner-approved artwork, 2026-11-11, picked from eight variants — do not redesign): lots shaded, a street with its
   // cul-de-sac bulb set in from the right edge so the three pie lots past it read as lots, lot lines, outer frame.
   // The street is a TRUE cut-out: the shading is ONE outline that walks round the street (down the left edge to the street's
@@ -186,16 +187,21 @@
         '<path d="M7 2.5V10.7M12 2.5V9.13M7 13.3V21.5M12 14.87V21.5M16.47 9.53L21.5 4.5M17.5 12H21.5M16.47 14.47L21.5 19.5" stroke-width="1"/>' +
         '<rect x="2.5" y="2.5" width="19" height="19" rx="1.5" stroke-width="1.4"/>'
     },
-    // TIA (owner-approved artwork, 2026-11-12, picked from about a dozen variants — do not redesign): a two-lane road with three
-    // cars, two in the upper lane facing right and one in the lower lane facing left. Each car is ONE evenodd path (the body with
-    // its windshield as a second, inner outline), so the windshield is a TRUE cut-out: no mask, no id, no fixed background colour.
+    // TIA (owner-approved artwork, 2026-11-12, recoloured 2026-11-15 NEW-1 to match the Permit — do not redesign; same id, same layout): a
+    // two-lane road with three cars, two in the upper lane facing right (red, blue) and one in the lower lane facing left (green; the
+    // windshield is on the front). FIXED colours like an emoji and like c:permit (navy #2f3a6b, blue #3f7fe0, red #d4506c, light #e3f3fb,
+    // plus the lane yellow #f2b632 and green #3fa36b), so they hold in light / dark and on hovered / selected rows. Every element names its
+    // own fill AND stroke (this markup is drawn inside a root of fill="none" stroke="currentColor", so a bare element would pick up the text
+    // colour), and there is NO <mask> / <clipPath> / id in it — the windshield is a plain filled rect, not a cut-out — so there is nothing
+    // for many TIA icons on one page to collide on (unlike the Permit's mask, which needs the __UID__ seam).
     tia: {
       viewBox: "0 0 24 24",
-      markup: '<path d="M2 3.5h20M2 20.5h20" stroke-width="1.4"/>' +
-        '<path d="M2 12h20" stroke-width="1" stroke-dasharray="2.5 3"/>' +
-        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M3.2 5.6H7.9A1.4 1.4 0 0 1 9.3 7V8.4A1.4 1.4 0 0 1 7.9 9.8H3.2A1.4 1.4 0 0 1 1.8 8.4V7A1.4 1.4 0 0 1 3.2 5.6ZM7.1 6.4H7.7A0.4 0.4 0 0 1 8.1 6.8V8.6A0.4 0.4 0 0 1 7.7 9H7.1A0.4 0.4 0 0 1 6.7 8.6V6.8A0.4 0.4 0 0 1 7.1 6.4Z"/>' +
-        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M11.9 5.6H16.6A1.4 1.4 0 0 1 18 7V8.4A1.4 1.4 0 0 1 16.6 9.8H11.9A1.4 1.4 0 0 1 10.5 8.4V7A1.4 1.4 0 0 1 11.9 5.6ZM15.8 6.4H16.4A0.4 0.4 0 0 1 16.8 6.8V8.6A0.4 0.4 0 0 1 16.4 9H15.8A0.4 0.4 0 0 1 15.4 8.6V6.8A0.4 0.4 0 0 1 15.8 6.4Z"/>' +
-        '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M14.9 14.2H19.6A1.4 1.4 0 0 1 21 15.6V17A1.4 1.4 0 0 1 19.6 18.4H14.9A1.4 1.4 0 0 1 13.5 17V15.6A1.4 1.4 0 0 1 14.9 14.2ZM15.1 15H15.7A0.4 0.4 0 0 1 16.1 15.4V17.2A0.4 0.4 0 0 1 15.7 17.6H15.1A0.4 0.4 0 0 1 14.7 17.2V15.4A0.4 0.4 0 0 1 15.1 15Z"/>'
+      fixedColour: true,
+      markup: '<path d="M2 3.5h20M2 20.5h20" fill="none" stroke="#2f3a6b" stroke-width="1.4" stroke-linecap="round"/>' +
+        '<path d="M2 12h20" fill="none" stroke="#f2b632" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="2.5 3"/>' +
+        '<rect x="1.8" y="5.6" width="7.5" height="4.2" rx="1.4" fill="#d4506c" stroke="#2f3a6b" stroke-width="0.7"/><rect x="6.7" y="6.4" width="1.4" height="2.6" rx="0.4" fill="#e3f3fb" stroke="none"/>' +
+        '<rect x="10.5" y="5.6" width="7.5" height="4.2" rx="1.4" fill="#3f7fe0" stroke="#2f3a6b" stroke-width="0.7"/><rect x="15.4" y="6.4" width="1.4" height="2.6" rx="0.4" fill="#e3f3fb" stroke="none"/>' +
+        '<rect x="13.5" y="14.2" width="7.5" height="4.2" rx="1.4" fill="#3fa36b" stroke="#2f3a6b" stroke-width="0.7"/><rect x="14.7" y="15.0" width="1.4" height="2.6" rx="0.4" fill="#e3f3fb" stroke="none"/>'
     }
   };
 

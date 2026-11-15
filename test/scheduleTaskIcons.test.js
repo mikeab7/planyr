@@ -109,9 +109,9 @@ describe("the built-in Plat icon (svg:plat, B2671217)", () => {
   });
 });
 
-describe("the built-in TIA icon (svg:tia — cars on a road, replaces the traffic light)", () => {
+describe("the built-in TIA icon (svg:tia — cars on a road in colour, replaces the traffic light)", () => {
   const tia = TI.BUILTIN_SVG.tia;
-  const carPaths = tia.markup.match(/<path fill="currentColor" stroke="none" fill-rule="evenodd" d="[^"]+"\/>/g) || [];
+  const cars = [...tia.markup.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="7\.5" height="4\.2" rx="1\.4" fill="(#[0-9a-f]{6})" stroke="#2f3a6b" stroke-width="0\.7"\/><rect x="([\d.]+)" y="([\d.]+)" width="1\.4" height="2\.6" rx="0\.4" fill="#e3f3fb" stroke="none"\/>/g)];
   it("is a stored KEY, drawn (not an emoji), offered once in Entitlements and permits with the old label and keywords", () => {
     expect(TI.isBuiltinSvg("svg:tia")).toBe(true);
     expect(TI.isKnown("svg:tia")).toBe(true);
@@ -134,20 +134,18 @@ describe("the built-in TIA icon (svg:tia — cars on a road, replaces the traffi
     expect(TI.iconLabel("🚦")).toBe("Traffic impact analysis (TIA)");
     expect(existsSync(root("public/sequence/vendor/twemoji/" + TI.twemojiFile("🚦") + ".svg"))).toBe(true);
   });
-  it("carries the approved artwork exactly (24x24, road edges, dashed centre line)", () => {
+  it("carries the approved artwork exactly (24x24, navy road edges, dashed yellow centre line)", () => {
     expect(tia.viewBox).toBe("0 0 24 24");
-    expect(tia.markup).toContain('<path d="M2 3.5h20M2 20.5h20" stroke-width="1.4"/>');
-    expect(tia.markup).toContain('<path d="M2 12h20" stroke-width="1" stroke-dasharray="2.5 3"/>');
+    expect(tia.markup).toContain('<path d="M2 3.5h20M2 20.5h20" fill="none" stroke="#2f3a6b" stroke-width="1.4" stroke-linecap="round"/>');
+    expect(tia.markup).toContain('<path d="M2 12h20" fill="none" stroke="#f2b632" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="2.5 3"/>');
   });
-  it("draws three cars, each 7.5 x 4.2 (rx 1.4) in the approved places, each with a 1.4 x 2.6 (rx 0.4) windshield inset 0.8 from the car's top", () => {
-    expect(carPaths.length).toBe(3);
-    // [x, y, windshield x] — straight from the brief
-    const spec = [[1.8, 5.6, 6.7], [10.5, 5.6, 15.4], [13.5, 14.2, 14.7]];
-    const f = (n) => String(+n.toFixed(2));
-    const rr = (x, y, w, h, r) => `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w - r)} ${f(y + h)}H${f(x + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x)} ${f(y + h - r)}V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}Z`;
-    spec.forEach(([x, y, wx], i) => {
-      const d = carPaths[i].match(/ d="([^"]+)"/)[1];
-      expect(d, "car " + (i + 1)).toBe(rr(x, y, 7.5, 4.2, 1.4) + rr(wx, y + 0.8, 1.4, 2.6, 0.4));
+  it("draws three cars, each 7.5 x 4.2 (rx 1.4) with a navy 0.7 outline, in the approved places and body colours, each with a 1.4 x 2.6 (rx 0.4) #e3f3fb windshield inset 0.8 from the car's top", () => {
+    expect(cars.length).toBe(3);
+    // [x, y, body, windshield x] — straight from the brief: red, blue (front on the right), green in the opposite lane (front on the left)
+    const spec = [[1.8, 5.6, "#d4506c", 6.7], [10.5, 5.6, "#3f7fe0", 15.4], [13.5, 14.2, "#3fa36b", 14.7]];
+    spec.forEach(([x, y, body, wx], i) => {
+      const [, cx, cy, cb, wxx, wy] = cars[i];
+      expect([+cx, +cy, cb, +wxx, +(+wy).toFixed(2)], "car " + (i + 1)).toEqual([x, y, body, wx, +(y + 0.8).toFixed(2)]);
     });
   });
   it("front directions: cars 1 and 2 face right (windshield right of centre), car 3 faces left (windshield left of centre)", () => {
@@ -156,11 +154,23 @@ describe("the built-in TIA icon (svg:tia — cars on a road, replaces the traffi
     expect(ws[1] + 0.7 > centre[1]).toBe(true);
     expect(ws[2] + 0.7 < centre[2]).toBe(true);
   });
-  it("the windshields are TRUE cut-outs: one evenodd path per car, no mask, no id, no fixed colour — only currentColor", () => {
-    expect(tia.markup).not.toMatch(/<mask|\sid=|url\(|#[0-9a-fA-F]{3,8}\b|rgb|white|black/);
-    expect(tia.markup).toMatch(/currentColor/);
-    for (const p of carPaths) expect((p.match(/M/g) || []).length).toBe(2);   // the body + its windshield, nothing painted over it
-    expect(tia.markup).not.toMatch(/<rect/);
+  it("FIXED colours like the Permit: the same navy / blue / red / light palette, no currentColor, no theme variable, no white (nothing can render as a white box)", () => {
+    expect(tia.fixedColour).toBe(true);
+    expect(tia.markup).not.toMatch(/currentColor|var\(--|#fff\b|#ffffff|white|black|rgb/i);
+    const used = new Set(tia.markup.match(/#[0-9a-f]{6}\b/gi));
+    expect([...used].sort()).toEqual(["#2f3a6b", "#3f7fe0", "#3fa36b", "#d4506c", "#e3f3fb", "#f2b632"]);
+    for (const c of ["#2f3a6b", "#3f7fe0", "#d4506c", "#e3f3fb"]) expect(TI.CUSTOM_SVG.permit, "permit palette " + c).toContain(c);
+  });
+  it("EVERY element names its own fill and stroke, so the root's fill=none stroke=currentColor can never leak through (a windshield with no stroke=none would get a text-coloured outline)", () => {
+    const els = tia.markup.match(/<(path|rect)\b[^>]*>/g);
+    expect(els.length).toBe(8);   // 2 road paths + 3 x (car + windshield)
+    for (const e of els) { expect(e, e).toMatch(/\bfill="/); expect(e, e).toMatch(/\bstroke="/); }
+  });
+  it("no mask, clipPath or id in it, so many TIA icons on one page cannot collide (and no __UID__ seam is needed); the other svg: drawing is still currentColor line art", () => {
+    expect(tia.markup).not.toMatch(/<mask|<clipPath|<defs|\sid=|url\(|__UID__/);
+    expect(tia.markup).not.toMatch(/<(circle|ellipse|polygon|g)\b/);
+    expect(TI.BUILTIN_SVG.plat.fixedColour).toBeUndefined();
+    expect(TI.BUILTIN_SVG.plat.markup).toMatch(/currentColor/);
   });
 });
 
