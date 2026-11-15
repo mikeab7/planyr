@@ -1,6 +1,6 @@
 /* verify-tx-city-zoning-live — Texas city zoning layers (B2671234 Richmond · Fulshear · Stafford; B2671235 Webster), LIVE on planyr.io, signed in as the test account.
  *
- *   E2E_LOGIN_KEY=… node ui-audit/verify-tx-city-zoning-live.mjs [https://planyr.io] [--expect-sha <sha>] [--shots <dir>] [--cities richmond,fulshear,stafford,webster]
+ *   E2E_LOGIN_KEY=… node ui-audit/verify-tx-city-zoning-live.mjs [https://planyr.io] [--expect-sha <sha>] [--shots <dir>] [--cities richmond,fulshear,stafford,webster,websterpd]
  *
  * Against the DEPLOYED build (read from /version.json in the same call as the assertions), per city, on a throwaway LOCATED plan at a point deep inside one of that city's zoning polygons:
  *   A. the Jurisdictions group offers that city's "<City> Zoning" row(s) — and not another city's;
@@ -20,7 +20,7 @@ const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : n
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const EXPECT_SHA = flag("--expect-sha");
 const SHOTS = flag("--shots");
-const ONLY = (flag("--cities") || "richmond,fulshear,stafford,webster").split(",");
+const ONLY = (flag("--cities") || "richmond,fulshear,stafford,webster,websterpd").split(",");
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 let failed = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "✅" : "❌"} ${name}${detail ? "  — " + detail : ""}`); if (!ok) failed++; };
@@ -31,12 +31,14 @@ const CITIES = {
   richmond: { label: "Richmond", at: { lat: 29.57854, lng: -95.77439 }, ids: ["richmond_zoning"], cards: { richmond_zoning: { at: { lat: 29.57854, lng: -95.77439 }, zone: "IN · Industrial" } }, legend: /IN · Industrial/ },
   fulshear: { label: "Fulshear", at: { lat: 29.68929, lng: -95.8798 }, ids: ["fulshear_zoning", "fulshear_zoning_newer"], cards: { fulshear_zoning: { at: { lat: 29.68929, lng: -95.8798 }, zone: "I · Industrial" }, fulshear_zoning_newer: { at: { lat: 29.68965, lng: -95.87995 }, zone: "I · Industrial" } }, legend: /I · Industrial/ },
   stafford: { label: "Stafford", at: { lat: 29.61953, lng: -95.5548 }, ids: ["stafford_zoning"], cards: { stafford_zoning: { at: { lat: 29.61953, lng: -95.5548 }, zone: "RCT · Residential, Commercial, & Technology District" } }, legend: /RCT · Residential, Commercial, & Technology District/ },
-  /* Webster: layer 0 (base districts) at the deepest point of an M1 polygon; layer 1 (planned developments) at the deepest point of a PD polygon — the two layers do not overlap. */
-  webster: { label: "Webster", at: { lat: 29.5203, lng: -95.10914 }, ids: ["webster_zoning", "webster_pd"], cards: { webster_zoning: { at: { lat: 29.5203, lng: -95.10914 }, zone: "M1 · First Industrial District" }, webster_pd: { at: { lat: 29.51375, lng: -95.1249 }, zone: "PD · Planned Development" } }, legend: /M1 · First Industrial District/ },
+  /* Webster: layer 0 (base districts) at the deepest point of an M1 polygon; layer 1 (planned developments) at the deepest point of a PD polygon. A layer holds only the features in the view,
+   * and the two points are ~2 km apart, so each layer is checked on its OWN plan; the rows of both are offered at either. */
+  webster: { label: "Webster", at: { lat: 29.5203, lng: -95.10914 }, ids: ["webster_zoning"], offers: ["webster_zoning", "webster_pd"], cards: { webster_zoning: { at: { lat: 29.5203, lng: -95.10914 }, zone: "M1 · First Industrial District" } }, legend: /M1 · First Industrial District/ },
+  websterpd: { label: "Webster", at: { lat: 29.51375, lng: -95.1249 }, ids: ["webster_pd"], offers: ["webster_zoning", "webster_pd"], cards: { webster_pd: { at: { lat: 29.51375, lng: -95.1249 }, zone: "PD · Planned Development" } }, legend: /PD · Planned Development/ },
 };
 const SUGAR_LAND = { lat: 29.6122, lng: -95.6693 };
 const HOUSTON = { lat: 29.80, lng: -95.54 };
-const ALL_IDS = Object.values(CITIES).flatMap((c) => c.ids);
+const ALL_IDS = [...new Set(Object.values(CITIES).flatMap((c) => c.offers || c.ids))];
 
 let s = null;
 for (let attempt = 1; attempt <= 6 && !s; attempt++) {
@@ -113,8 +115,8 @@ try {
     const panel = await openPanel(plan.id);
     const jur = await rowsIn(panel, "jur");
     console.log(`${C.label} · Jurisdictions rows:`, jur.join(", "));
-    for (const id of C.ids) check(`A · ${C.label} offers "${id}"`, jur.includes(id));
-    const others = ALL_IDS.filter((id) => !C.ids.includes(id) && jur.includes(id));
+    for (const id of C.offers || C.ids) check(`A · ${C.label} offers "${id}"`, jur.includes(id));
+    const others = ALL_IDS.filter((id) => !(C.offers || C.ids).includes(id) && jur.includes(id));
     check(`A · ${C.label} offers no other city's zoning row`, others.length === 0, others.join(", "));
     check(`A · nothing from the city's service is requested before a layer is switched on`, sent().length === 0, `${sent().length} sent`);
     for (const id of C.ids) await turnOn(panel, id);
