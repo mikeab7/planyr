@@ -63,8 +63,8 @@ export const NASHVILLE_SOURCES = {
     serviceUrl: `${NASH_SERVER}/Planning/CCM/MapServer/2`, relay: true, geometryType: "polygon",
     fields: { code: "PolicyCode", name: "PolicyDesc", transect: "Transect", adopted: "DateAdopted" },
     ...base,
-    // Sweep 2026-11-01: 33,105 polygons; PolicyCode / PolicyDesc / Transect / DateAdopted; the Elm Hill Pike site reads "CO" (Conservation). NOT re-measured here — maps.nashville.gov is refused by this build environment's
-    // egress and the relay allow-list entry only exists once this commit deploys; the PR preview's relay is the first place it can be read (V2115889).
+    // Sweep 2026-11-01, re-measured 2026-11-15 through the deployed relay (V2115889): 33,105 polygons; PolicyCode / PolicyDesc / Transect / DateAdopted; Elm Hill Pike reads CO (Conservation), downtown OS (Open Space, T6 Downtown).
+    // maps.nashville.gov is refused by a session's build environment (CONNECT 403), so the relay is the only way a session can read it.
   },
 };
 

@@ -539,7 +539,9 @@ export default function LayerPanel({
     const lift = showAbove && members.some(([, c]) => configCanLift(c));
     const ramp = id === "elevation" ? rampGradient(cfg0) : null;
     const viewLegendRow = !ramp && members.some(([, c]) => typeof c.viewLegend === "function");
-    const legend = ramp ? [] : (viewLegendRow ? (viewLegends[id] || []) : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
+    /* An in-view legend is published per LAYER id; a merged row (Rutherford's four governments' zoning) lists each ON member's — one heading per government — in registry order. */
+    const viewLegendOf = () => (slot.kind === "merge" ? members.filter(([mid, c]) => typeof c.viewLegend === "function" && overlays[mid]?.on).flatMap(([mid]) => viewLegends[mid] || []) : (viewLegends[id] || []));
+    const legend = ramp ? [] : (viewLegendRow ? viewLegendOf() : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
     const zoomGated = vis.state === "dormant-zoom";
     const plan = dropdownPlan({ on: anyOn, zoomGated, canLift: lift, hasStatus: !!status, settings, hasLegend: legend.length > 0, hasRamp: !!ramp, hasInfo: info.some((s) => s && s.text) });
     const corr = overlays.txrrc_pipe_easement || {};
