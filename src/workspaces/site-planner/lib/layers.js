@@ -16,6 +16,7 @@ import * as EL from "esri-leaflet";
 import { guardRasterErrors } from "./parcelOpacityGuard.js"; // NEW-1 (2026-11-12): an /export image failing after its row was switched off must not throw "removeLayer of null"
 import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
 import { JURISDICTION_LAYERS } from "./counties.js";
+import { CHAMBERS_LAYERS, CHAMBERS_VINTAGE, CHAMBERS_MERGE_GROUPS } from "./chambersLayers.js"; // NEW-1 (Chambers County: Mont Belvieu + Baytown zoning, utilities, Master Drainage Plan, B2671240, 2026-11-12)
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
 import { TX_CITY_ZONING_LAYERS, TX_CITY_ZONING_VINTAGE } from "./txCityZoningLayers.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster, 2026-11-12)
@@ -1335,6 +1336,11 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...FORTBEND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
 
+/* B2671240 (Chambers County: Mont Belvieu + Baytown) — joined here, in lines of its own, not spread into the one-line registry / merge-group / vintage
+ * lists above: those are edited by nearly every layer PR and this branch lost four 45-minute builds in a row to the resulting merge conflicts. */
+Object.assign(ALL_LAYERS, CHAMBERS_LAYERS);
+Object.assign(MERGE_GROUPS, CHAMBERS_MERGE_GROUPS);
+
 /* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
  * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
 Object.assign(ALL_LAYERS, HOUSTON_METRO_LAYERS);
@@ -1445,6 +1451,8 @@ export const LAYER_VINTAGE = {
   ...FLORIDA_VINTAGE,
   ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };
+Object.assign(LAYER_VINTAGE, CHAMBERS_VINTAGE); // B2671240 (Chambers County) — its own line, see the note by CHAMBERS_LAYERS above
+
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
 export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;

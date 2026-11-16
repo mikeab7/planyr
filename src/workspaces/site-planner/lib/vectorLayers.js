@@ -739,7 +739,7 @@ export const VECTOR_SOURCES = {
         id: r.id, url: r.url + "/query", bbox: r.bbox,
         nameCol: (r.fields && r.fields.name) || null, row: r,
       })),
-      keyRev: 3, // 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
+      keyRev: 4, // 4 = the Chambers County sources joined the list (NEW-1, 2026-11-12); 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
       /* ⛔ B2472945 — THE DRAWN ETJ IS NET OF CITY LIMITS, the same rule the header applies (B2472944): an ETJ is the ground OUTSIDE every
        * city's limits, so a published ETJ polygon is cut by the city layer's own limits (the `jur_city` source below — one source of
        * truth for what a city's limits ARE, read through its own cache) before it is cached and drawn. `fetchCached` does the cut. */

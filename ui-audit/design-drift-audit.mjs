@@ -130,6 +130,9 @@ export const DRAWING_SURFACE_FILES = [
   // boundary color but predates this exemption list and isn't retroactively added here — pre-
   // existing debt this item didn't touch, left for its own session.
   "src/shared/comps/lib/kmlExport.js",
+  "src/workspaces/site-planner/lib/chambersLayers.js", // B2671240 (Chambers County) — registry rows of the same kind as layers.js / desotoLayers.js: map ink for drawn utility lines, drainage-plan washes and points
+  "src/workspaces/site-planner/lib/montBelvieuZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
+  "src/workspaces/site-planner/lib/baytownZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
 ];
 
 const EXEMPT_FILES = new Set([...TOKEN_LAYER_FILES, ...DRAWING_SURFACE_FILES]);
