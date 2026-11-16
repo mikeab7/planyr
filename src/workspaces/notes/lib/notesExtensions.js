@@ -49,6 +49,7 @@ import NoteToggle, { NoteToggleTitle } from "./notesToggleNode.js";
 import NoteAnchor from "./notesAnchorNode.js";
 import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteTabKey from "./notesTabKey.js";
+import { NoteSelectAll } from "./notesSelectAll.js";
 import NoteListIndent from "./notesListIndent.js";
 import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
@@ -643,6 +644,9 @@ export const NOTE_EXTENSIONS = [
   // see lib/notesTabKey.js for which cases each of them already claimed and which ones were
   // falling through to Chrome's toolbar.
   NoteTabKey,
+
+  // CTRL+A BELONGS TO THE BOX THE CARET IS IN (NEW-1, 2026-11-15) — lib/notesSelectAll.js. Priority 200: the engine's own Mod-a is the whole-document selection.
+  NoteSelectAll,
 
   // PASTE JUST THE TEXT (B36051). It WATCHES the paste rather than intercepting it — the
   // default Ctrl+V is deliberately unchanged — so the "Keep text only" option can be offered

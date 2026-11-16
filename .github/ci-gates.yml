@@ -324,6 +324,15 @@ jobs:
           BASE_URL: "http://localhost:4173/"
           ONLY: "type-wrap,enter-lines,paste-plain,resize-width,move-onto"
         run: node ui-audit/verify-notes-no-overlap.mjs
+      # Notes CTRL+A belongs to the thing you are in (NEW-1, 2026-11-15, "approved PowerPoint behaviour"): the caret inside a box selects THAT
+      # box's text only (a table cell steps cell -> table -> box text, never another box); Ctrl+C then copies TEXT (no box, no outline), typing
+      # replaces only that box and one Ctrl+Z restores it. With no caret in a box (a box selected by its outline, or blank paper) Ctrl+A selects
+      # every BOX as boxes and Ctrl+C copies them as boxes with the moving outline. Real keys + mouse + the system clipboard, judged on the stored
+      # document; 19 x red on pre-feature main. Reuses the preview server.
+      - name: Notes Ctrl+A scope (in a box = that box's text; no caret in a box = every box as boxes - NEW-1, 2026-11-15)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-select-all.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at
