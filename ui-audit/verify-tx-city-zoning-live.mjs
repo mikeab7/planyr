@@ -147,7 +147,8 @@ try {
       const canvas = page.getByTestId("planner-canvas");
       const box = await canvas.boundingBox();
       let cardText = "";
-      for (const [dx, dy] of [[0, 0], [60, 40], [-60, 40], [90, -50], [-90, -50], [0, 90]]) {
+      /* well off-centre: the throwaway plan's own building sits at the exact centre and would take the press (the Sugar Land check clicks off-centre for the same reason) */
+      for (const [dx, dy] of [[260, 40], [-300, 60], [280, 200], [-280, 200], [320, -60], [0, 230], [-120, -150]]) {
         await page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
         await sleep(2500);
         cardText = await page.getByTestId("gis-identify").first().innerText().catch(() => "");
