@@ -315,6 +315,9 @@ export function attachWideOutlines(layer, { url, GhostClass, TilesClass, IndexCl
       return true;
     },
     carrying: () => carryKeys.size + carriedGhosts.size,
+    /** NEW-1 (Add parcels, 2026-11-16) — the larger-lot ghosts held for the current wide / mid view, so a click can find the lot under it
+     *  (`parcelOutlineSet.featureAt`). Read-only: the ghosts stay in their own index, never in `layer._layers`. */
+    eachFeature: (fn) => { byId.forEach((rec) => fn(rec.g)); },
     info: () => info,
     stats: () => (engine ? { ...engine.stats, loaded: engine.loaded.size, held: byId.size } : null),
   };
