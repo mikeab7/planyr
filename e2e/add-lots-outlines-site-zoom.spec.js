@@ -38,11 +38,11 @@ const FIELDS = [
   { name: "site_str_name", type: "esriFieldTypeString" }, { name: "Shape.STArea()", type: "esriFieldTypeDouble" },
 ];
 
-/** Mock Harris' parcel service; records what the page asked of it. */
+/** Mock Harris' parcel service; records what the page asked of it. The larger-lots band goes through Planyr's own relay (/api/gis-cache/svc/<base64 of the layer URL>) where one exists — a deployment has it, a local preview does not and falls back to the county — so BOTH doors are answered by the same handler and the spec reads the same on either. */
+const HCAD_RELAY_B64 = Buffer.from("https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0").toString("base64url");
 async function mockCounty(page, log, { pointDelayMs = 1500 } = {}) {
-  // no relay on a preview server: /api/gis-cache answers with the SPA page (200, not ArcGIS) and the larger-lots band falls back to the county directly — exactly as on a dev server
   await page.route("**/*.jpg", (route) => route.abort());
-  await page.context().route(/gis\.hctx\.net/, async (route) => {
+  const handle = (viaRelay) => async (route) => {
     const req = route.request();
     const u = new URL(req.url());
     const params = new URLSearchParams(u.search);
@@ -52,7 +52,7 @@ async function mockCounty(page, log, { pointDelayMs = 1500 } = {}) {
     const json = (body) => route.fulfill({ status: 200, headers: cors, contentType: "application/json", body: JSON.stringify(body) });
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { ...cors, "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,OPTIONS" } });
     // only the HCAD parcel layer is the subject; the jurisdiction lookups ride the same host and are answered empty
-    if (!/HCAD\/Parcels\/MapServer\/0\/?/.test(u.pathname)) return json({ features: [] });
+    if (!viaRelay && !/HCAD\/Parcels\/MapServer\/0\/?/.test(u.pathname)) return json({ features: [] });
     if (!/\/query$/.test(u.pathname)) {
       return json({ id: 0, name: "Parcels", type: "Feature Layer", geometryType: "esriGeometryPolygon", objectIdField: "OBJECTID", maxRecordCount: 1000, fields: FIELDS, extent: { xmin: -96, ymin: 29, xmax: -94.5, ymax: 30.5, spatialReference: { wkid: 4326 } } });
     }
@@ -66,7 +66,7 @@ async function mockCounty(page, log, { pointDelayMs = 1500 } = {}) {
       log.pointAnswered += 1;
       return json({ geometryType: "esriGeometryPolygon", spatialReference: { wkid: 4326 }, features: hit ? [esriLot(hit)] : [] });
     }
-    // an envelope query: the larger-lots band's tile (size-filtered `where`) or the close stage's cell (`1=1`-style, no size filter)
+    // an envelope query: the larger-lots band's tile (size-filtered `where`) or the close stage's cell (no size filter)
     const sized = /Shape\.STArea\(\)\s*>=\s*[\d.]+/.test(where);
     (sized ? log.band : log.close).push(where);
     let env = null; const gm = params.get("geometry") || "";
@@ -75,7 +75,9 @@ async function mockCounty(page, log, { pointDelayMs = 1500 } = {}) {
     if (/returnCountOnly/.test(u.search + (post || ""))) return json({ count: LOTS.filter(inEnv).length });
     if (/returnIdsOnly/.test(u.search + (post || ""))) return json({ objectIdFieldName: "OBJECTID", objectIds: LOTS.filter(inEnv).map((l) => l.oid) });
     return json({ geometryType: "esriGeometryPolygon", spatialReference: { wkid: 4326 }, objectIdFieldName: "OBJECTID", fields: FIELDS, features: LOTS.filter(inEnv).map(esriLot) });
-  });
+  };
+  await page.context().route(/gis\.hctx\.net/, handle(false));
+  await page.context().route((url) => url.pathname.startsWith(`/api/gis-cache/svc/${HCAD_RELAY_B64}`), handle(true));
 }
 
 async function load(page, log) {
@@ -148,6 +150,8 @@ test("at a site-scale zoom under 16 the county's lot lines draw by default, no '
   expect((await outlines(page)).lots).toBeGreaterThanOrEqual(LOTS.length);
 
   // ── a click: the clicked lot's outline is on screen THIS frame, before the county answers ──
+  // (let the lot set settle first: a click that lands in the instant a tile is being re-laid has nothing drawn under it to outline — the ring is its feedback then, not this)
+  await expect.poll(async () => { const a = (await outlines(page)).lots; await page.waitForTimeout(700); return a === (await outlines(page)).lots; }, { timeout: 15000 }).toBe(true);
   const target = LOTS[1];
   const pt = await lotCentre(page, target);
   await page.evaluate(() => {
