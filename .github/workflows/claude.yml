@@ -37,4 +37,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-sonnet-5-5"
+          claude_args: >-
+            --model claude-sonnet-5-5
+            --allowedTools "Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+            --append-system-prompt "When you have pushed a code change for this issue, finish the job yourself: open a pull request from your branch into main with gh pr create (not a draft, title naming the fix, body ending with Closes #<issue number>), then arm auto-merge on it with gh pr merge --auto --squash. If you made no code change, open no pull request. Do not create scheduled tasks or check-ins."
