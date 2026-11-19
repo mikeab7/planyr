@@ -436,3 +436,47 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     expect(refused).toHaveLength(1);
   });
 });
+
+describe("lineLabel.maxLabels — a dense network never binds thousands of permanent tooltips (NEW-2 Bartow sewer: 2,135 lines froze the tab 2–3 s at z17, 10 s at z16)", () => {
+  const build = async (lineLabel) => {
+    const handlers = {}, layers = [];
+    let opts = null;
+    vi.resetModules();
+    vi.doMock("esri-leaflet", () => ({
+      dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
+      featureLayer: vi.fn((o) => {
+        opts = o;
+        return { _layers: {}, _map: { getZoom: () => 17, on() {}, off() {} }, createLayers() {}, fire() {}, on(n, f) { (handlers[n] = handlers[n] || []).push(f); return this; }, eachFeature(fn) { layers.forEach(fn); } };
+      }),
+    }));
+    vi.doMock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
+    vi.doMock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
+    vi.doMock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
+    vi.doMock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Pipes", color: "#000", lineLabel }, 1, "pane");
+    (handlers.add || []).forEach((f) => f());
+    // deliver one feature the way esri-leaflet does: onEachFeature(feature, layer)
+    const deliver = (n) => { for (let i = 0; i < n; i++) { const l = { bound: 0, unbound: 0, bindTooltip() { this.bound++; }, unbindTooltip() { this.unbound++; }, getTooltip: () => null }; layers.push(l); opts.onEachFeature({ properties: { SIZE: "8" } }, l); } };
+    return { lyr, deliver, layers, handlers };
+  };
+  it("binds a label on every line while the layer is under its cap", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16, maxLabels: 5 });
+    deliver(5);
+    expect(layers.every((l) => l.bound === 1)).toBe(true);
+  });
+  it("past the cap it takes every label down and binds no more — the lines stay, unlabelled", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16, maxLabels: 5 });
+    deliver(5);
+    deliver(1); // the sixth line crosses the cap
+    expect(layers.slice(0, 5).every((l) => l.unbound >= 1)).toBe(true);
+    const boundAfter = layers.reduce((n, l) => n + l.bound, 0);
+    deliver(20);
+    expect(layers.reduce((n, l) => n + l.bound, 0)).toBe(boundAfter); // nothing binds once over the cap
+  });
+  it("a row with NO cap behaves exactly as before — every line is labelled however many there are", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16 });
+    deliver(500);
+    expect(layers.every((l) => l.bound === 1)).toBe(true);
+  });
+});

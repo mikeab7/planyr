@@ -144,7 +144,7 @@ export function lineLabelText(cfg, props) {
   const ll = cfg && cfg.lineLabel;
   if (!ll || !ll.field || !props) return null;
   const fmt = typeof ll.format === "function" ? ll.format : pipeSizeLabel;
-  const t = fmt(props[ll.field]);
+  const t = fmt(props[ll.field], props); // the whole feature rides along as a 2nd argument, for a label built from more than one field (Bartow: size + material)
   return t ? String(t) : null;
 }
 

@@ -1699,7 +1699,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
    * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
    * every zoom is a wall of numbers) and unbound again below it. The tooltip lives in the label pane so it sits over the strokes. */
-  let labelsOn = false;
+  let labelsOn = false, labelCount = 0;
   const labelOpts = () => ({ permanent: true, direction: "center", className: "pf-line-label", interactive: false, opacity: 1, ...(labelPane ? { pane: labelPane } : {}) });
   const wantLabels = (l) => !!(l && l._map && l._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17));
   /* THE ONE WAY a label is bound: a tooltip positioned with a 2D transform (flatLabel.js — a 3D one made every label its own compositor layer and stalled a pan). */
@@ -1707,7 +1707,13 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
-    ...(cfg.lineLabel ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn) bindLabel(layer, text); } } : {}),
+    ...(cfg.lineLabel ? { onLabel: (layer, text) => {
+      layer.__pfLabel = text;
+      /* A row may cap how many labels it will bind (`lineLabel.maxLabels`): a dense network at close zoom is thousands of permanent tooltips, and binding them froze the tab for seconds
+       * (Bartow sewer in downtown Cartersville: 2,135 lines → a 2–3 s task at z17, 10 s at z16, measured on a deployed preview). Past the cap the lines draw UNLABELLED — a wall of numbers is no label. */
+      if (cfg.lineLabel.maxLabels != null && ++labelCount > cfg.lineLabel.maxLabels && labelsOn) { labelsOn = false; try { lyr.eachFeature((l) => { if (typeof l.unbindTooltip === "function") l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ } }
+      if (labelsOn) bindLabel(layer, text);
+    } } : {}),
   }));
   /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
    * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
@@ -1812,7 +1818,8 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   }
   if (cfg.lineLabel) {
     const syncLabels = () => {
-      const want = wantLabels(lyr);
+      let want = wantLabels(lyr);
+      if (want && cfg.lineLabel.maxLabels != null) { let n = 0; try { lyr.eachFeature((l) => { if (l.__pfLabel) n++; }); } catch (_) { /* counted so far */ } labelCount = n; want = n <= cfg.lineLabel.maxLabels; }
       if (want === labelsOn) return;
       labelsOn = want;
       try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) bindLabel(l, l.__pfLabel); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
