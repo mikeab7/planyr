@@ -173,9 +173,11 @@ try {
     await rowIds(fp, C.group);
     const row = fp.getByTestId(`layer-row-${C.row}`);
     if (!(await row.count())) { check(`${C.name}: row ${C.row} present`, false, `rows listed: ${(await rowIds(fp, C.group)).join(",")}`); continue; }
-    const before = await drawn();
     const box = row.locator('input[type="checkbox"]').first();
-    if (!(await box.isChecked())) await box.check();
+    /* a signed-in account remembers its layer toggles per site: start every case from OFF so "DRAWS" compares drawn-with against drawn-without */
+    if (await box.isChecked()) { console.log("  (row was already on — turning it off first)"); await box.uncheck(); await page.waitForTimeout(2500); }
+    const before = await drawn();
+    await box.check();
     await page.waitForTimeout(9000);
     const after = await drawn();
     const codes = reached(C.needle);
