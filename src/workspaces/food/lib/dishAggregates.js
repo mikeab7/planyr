@@ -76,7 +76,10 @@ export function dishRowsForTable(dishesWithDate) {
   const groups = groupDishesByName(dishesWithDate);
   return [...groups.entries()].map(([key, rows]) => {
     const [latest, ...history] = rows;
-    return { key, ...latest, latestScore: latest.score, history, timesHad: rows.length };
+    // ⛔ An UNSCORED rating row is a placeholder, never a rating that erases an earlier score (B2671295 ×2): the dish's score is its
+    // newest NON-null score, so a null-score row written after a real one can't turn the card's badge into "—".
+    const scored = rows.find((r) => r.score != null);
+    return { key, ...latest, latestScore: scored ? scored.score : latest.score, history, timesHad: rows.length };
   });
 }
 
