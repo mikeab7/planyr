@@ -27,10 +27,21 @@ export function dishDate(d) {
   return d.rated_on || d.visited_on || null;
 }
 
+/** The viewer's LOCAL calendar day of a timestamp — the same clock `rated_on` is written with (DishesSection.todayLocal). */
+function localDay(iso) {
+  const t = iso ? new Date(iso) : null;
+  if (!t || Number.isNaN(t.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+}
+
 function dishSortKey(d) {
   // The rating's day first (an undated one falls back to when the row was written), then the row's own creation time, so two
   // ratings of one dish on the same day (a re-rate from the place page) still order oldest -> newest.
-  const day = dishDate(d) || (d.created_at || "").slice(0, 10);
+  // ⛔ The fallback day is the LOCAL day, never `created_at.slice(0, 10)` (the UTC day): `rated_on` is a local date, so mixing the
+  // two let an older unscored row (written 7 PM Central = next UTC day) outrank a newer rating dated "today" and the place card
+  // showed "—" for a dish that had been rated (NEW-1, 2026-11-19).
+  const day = dishDate(d) || localDay(d.created_at);
   return `${day}|${d.created_at || ""}`;
 }
 
