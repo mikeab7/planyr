@@ -17,7 +17,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ETJ_SOURCES, etjSourcesForPoint, identifyJurisdiction, formatJurisdictionBadge,
+  ETJ_SOURCES, etjUpstreamUrl, etjSourcesForPoint, identifyJurisdiction, formatJurisdictionBadge,
   etjPointCoverage, inDfwZone, distanceMiles, DFW_ZONE, normalizeFeature, cityAreasFromFeatures, buildIdentifyParams,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { etjNamesOf } from "../src/workspaces/site-planner/lib/etjNames.js";
@@ -32,7 +32,7 @@ function makeStore() {
 const freshCache = () => createGisCache({ store: makeStore(), now: () => 1_000_000 });
 
 // Service needles — each is the URL PATH of one registry row, so a needle can only ever match that row.
-const needleOf = (id) => new URL(ETJ_SOURCES.find((s) => s.id === id).url).pathname;
+const needleOf = (id) => new URL(etjUpstreamUrl(ETJ_SOURCES.find((s) => s.id === id))).pathname;
 const N = {
   county: "Texas_County_Boundaries", city: "Texas_City_Boundaries",
   collin: needleOf("etj_collin"), rockwall: needleOf("etj_rockwall"), denton: needleOf("etj_denton"), fortworth: needleOf("etj_fortworth"),

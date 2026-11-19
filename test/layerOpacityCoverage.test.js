@@ -52,11 +52,11 @@ describe("NEW-2 — every toggleable GIS layer exposes opacity", () => {
         else reached.add(slot.entry[0]);
       }
     }
-    // Only the county-scoped fold row (it has no `group`; the panel folds it into Topography) and the Pipelines row's
+    // Nothing is county-scoped-and-ungrouped any more (the Fort Bend contour fold row was removed, NEW-2 2026-11-12); only the Pipelines row's
     // easement-corridor SETTING (a checkbox + width inside the Pipelines dropdown, drawn at its declared default opacity)
     // are not rows of their own.
     const ungrouped = Object.entries(ALL_LAYERS).filter(([, c]) => !panelGroupOf(c)).map(([id]) => id);
-    expect(ungrouped).toEqual(["fb_contours"]);
+    expect(ungrouped).toEqual([]);
     const settings = Object.entries(ALL_LAYERS).filter(([, c]) => c.settingOf).map(([id]) => id);
     expect(settings).toEqual(["txrrc_pipe_easement"]);
     for (const id of Object.keys(ALL_LAYERS)) {

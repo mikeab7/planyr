@@ -739,7 +739,7 @@ export const VECTOR_SOURCES = {
         id: r.id, url: r.url + "/query", bbox: r.bbox,
         nameCol: (r.fields && r.fields.name) || null, row: r,
       })),
-      keyRev: 3, // 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
+      keyRev: 4, // 4 = the Chambers County sources joined the list (NEW-1, 2026-11-12); 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
       /* ⛔ B2472945 — THE DRAWN ETJ IS NET OF CITY LIMITS, the same rule the header applies (B2472944): an ETJ is the ground OUTSIDE every
        * city's limits, so a published ETJ polygon is cut by the city layer's own limits (the `jur_city` source below — one source of
        * truth for what a city's limits ARE, read through its own cache) before it is cached and drawn. `fetchCached` does the cut. */
@@ -1476,6 +1476,20 @@ const polygonEdgeNear = (rings, lng, lat, tolDeg) =>
  * reachable as the channel centreline next to it, and changes nothing for a wide polygon
  * (a tap in its middle was already a hit; a tap just outside its edge now hits it, which is
  * what a user pointing at a boundary means anyway). */
+/* EVERY polygon feature that CONTAINS the point (exact containment, no edge tolerance), in the collection's order — for a layer whose polygons STACK (Smyrna's zoning holds overlay
+ * districts over base districts), where `hitFeature`'s one answer would hide the others. Pure. */
+export function hitFeatures(fc, { lat, lng } = {}) {
+  if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+  const out = [];
+  for (const f of fc.features) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon" && inPolygon(g.coordinates, lng, lat)) out.push(f);
+    else if (g.type === "MultiPolygon" && (g.coordinates || []).some((poly) => inPolygon(poly, lng, lat))) out.push(f);
+  }
+  return out;
+}
+
 export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
   if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   /* TWO PASSES, and the order matters. An EXACT hit anywhere in the collection beats a

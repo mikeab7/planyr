@@ -4,11 +4,25 @@
  * no-parcel-data message carries, with the ask worded for this case. Renders NOTHING for an official county / statewide row.
  * Module scope; theme tokens only; no DOM dependency, so it renders in a unit test. Shared by the address-search card and the
  * Add-parcel result so the two cannot grow apart. */
-import { parcelCopyNotice } from "../lib/parcelCopies.js";
+import { useState, useEffect } from "react";
+import { parcelCopyNotice, hasLiveCopyDate, readLiveCopyAsOf } from "../lib/parcelCopies.js";
 import ParcelRequestLink from "./ParcelRequestLink.jsx";
 
+/* NEW-2 (2026-11-12): a live-date county (Fort Bend) reads the layer's own last-edit month once; until it answers — and if it never does — the line says "date not published". */
+function useLiveAsOf(county) {
+  const [v, setV] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setV(null);
+    if (hasLiveCopyDate(county)) readLiveCopyAsOf(county).then((r) => { if (live) setV(r); });
+    return () => { live = false; };
+  }, [county]);
+  return v;
+}
+
 export default function ParcelCopyNote({ county, point, testId = "parcel-copy-note", style }) {
-  const n = parcelCopyNotice(county, point);
+  const liveAsOf = useLiveAsOf(county);
+  const n = parcelCopyNotice(county, point, liveAsOf);
   if (!n) return null;
   return (
     <div data-testid={testId} style={{ marginTop: 8, fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)", ...style }}>

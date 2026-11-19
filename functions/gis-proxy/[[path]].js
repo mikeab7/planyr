@@ -44,6 +44,9 @@ export const ALLOWED_HOSTS = new Set([
    * It sends no CORS header and the build sandbox's egress refuses it, so every layer on it is read through this relay and was MEASURED on the PR preview. Login-gated folders
    * (PW_Utilities, CIP, CityHall, CWOL_Services, GTG) are never read. */
   "interactivemaps.sugarlandtx.gov",
+  /* NEW-2 (Webster zoning, 2026-11-12) — the City of Webster's own ArcGIS Server (Landbase/Zoning). It sends no CORS header and the build sandbox's egress refuses it (403 on CONNECT), so the layer
+   * is read through this relay and was MEASURED through planyr.io/gis-proxy after this host landed. Only the Landbase/Zoning service is ever read. */
+  "www1.cityofwebster.com",
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
    * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */
   "adairgis.integritygis.com", "audraingis.integritygis.com", "barrygis.integritygis.com", "bartongis.integritygis.com", "bentongis.integritygis.com",
@@ -172,6 +175,9 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
+  /* NEW-1 (Chambers County TX, 2026-11-12) — the City of Mont Belvieu's own self-hosted ArcGIS Server (60 services: AdministrativeArea_v2 ETJ + limits, LandUsePlanning_v2 zoning + the Master Drainage Plan,
+   * WaterDistribution_v2, SewerStormwater_v2, Stormwater_v2). The build sandbox cannot reach it (CONNECT 403) and its CORS header is unmeasured, so it is relayed and MEASURED through the PR preview. */
+  "www.cmbgis.com", // City of Mont Belvieu GIS
   /* NEW-1 (Florida, B2452976, 2026-10-29) — the Florida state / district agency hosts the due-diligence layers read (FDEP OpenData contamination / karst / ERP; SFWMD canals and rights of way; FWC eagle nests;
    * Broward's FLL noise contours). The build sandbox cannot reach any of them (CONNECT 403): each was MEASURED through planyr.io before its layer was wired. */
   "ca.dep.state.fl.us", // Florida DEP — OpenData MapServers (CLEANUP_SP, DWM_STCM, FGS_*, ERP, OFW, BROWNFIELD_AREAS …)

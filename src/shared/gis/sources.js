@@ -27,9 +27,12 @@
  * Plain JS (the stack is plain JS/JSX — the brief's `.ts` sketch maps to .js here).
  */
 
+import { HOUSTON_METRO_SOURCES, HOUSTON_METRO_FIXTURE_REACH } from "./sourcesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
+import { TX_CITY_ZONING_SOURCES, TX_CITY_ZONING_FIXTURE_REACH } from "./sourcesTxCityZoning.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster)
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { FORTBEND_SOURCES, FORTBEND_FIXTURE_REACH } from "./sourcesFortBend.js"; // NEW-1 (Fort Bend County layers)
 import { NASHVILLE_BUFFER_SOURCES, NASHVILLE_BUFFER_FIXTURE_REACH } from "./sourcesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
@@ -70,6 +73,7 @@ export const availabilityOf = (entry) => (entry && entry.availability) || "live"
 //   point fixture: [lng, lat] → a ~1 km envelope around it → expect ≥ expectMinCount
 // ---------------------------------------------------------------------------
 export const GIS_SOURCES = {
+  ...HOUSTON_METRO_SOURCES, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...FLORIDA_SOURCES, // NEW-1 (Florida, B2452976): own file so sibling state sessions' edits to this one stay additive
   // ---- Site Analysis screening sources ----
   flood: {
@@ -2090,6 +2094,50 @@ export const GIS_SOURCES = {
     availability: "live",
     lastVerified: "2026-08-09",
   },
+  /* NEW-1 (2026-11-12, Mont Belvieu sweep) — CHAMBERS COUNTY'S CITY ETJs. Neither H-GAC's mosaic (zero Chambers cities, measured 2026-11-01) nor Baytown's own ETJ row (answers 0 at Mont Belvieu)
+   * carries them, so a site at (-94.86, 29.89) — inside Mont Belvieu's ETJ — read "Unincorporated". The City of Mont Belvieu publishes its own ArcGIS Server (www.cmbgis.com, 60 services, EPSG:2278,
+   * self-hosted so its CORS is unknown): `relay: true` — the app reads it through the same-origin /gis-proxy relay; the https URL below is the upstream the weekly verifier reaches directly.
+   *   · layer 1 of AdministrativeArea_v2 is the city's OWN ETJ (one polygon, NAME "MONT BELVIEU ETJ"; layer 0 is its limits). Its published layer EXTENT is garbled (xmin in degrees, xmax in feet) —
+   *     a geometry query is right, the extent is not, so the coverage engine must never be asked to trust it (`coverage: "city"`, no `extent`).
+   *   · layer 5 "Surrounding Cities ETJs" is the same office's copy of NEIGHBOURING cities' ETJ lines (`CITY` ∈ BAYTOWN / BEACH CITY / COVE / DAYTON / LIBERTY / OLD RIVER, " ETJ" suffixed, vintage
+   *     unpublished). It is a COPY, not the neighbours' own layer, so the row says so and carries no date (constraint #40: "date not published"). Baytown, Dayton and Liberty are filtered out: Baytown
+   *     keeps its own publisher's row (`etj_baytown`), and Dayton / Liberty are not Chambers County cities this row can vouch for. */
+  etj_montbelvieu: {
+    key: "etj_montbelvieu",
+    label: "ETJ — Mont Belvieu",
+    provider: "City of Mont Belvieu GIS",
+    serviceUrl: "https://www.cmbgis.com/arcgis/rest/services/AdministrativeArea_v2/MapServer/1",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    nameBy: "publisher (City of Mont Belvieu GIS — layer 'MONT BELVIEU ETJ')",
+    coverage: "city",
+    states: ["TX"],
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  etj_chambers_neighbors: {
+    key: "etj_chambers_neighbors",
+    label: "ETJ — Beach City, Cove, Old River-Winfree (Mont Belvieu's copy)",
+    provider: "City of Mont Belvieu GIS — 'Surrounding Cities ETJs' (a copy of neighbouring cities' ETJ lines; date not published)",
+    serviceUrl: "https://www.cmbgis.com/arcgis/rest/services/AdministrativeArea_v2/MapServer/5",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "CITY" },
+    // ` ETJ` is the layer's own suffix ("BEACH CITY ETJ"); the roster is the honest bound on what this copy can answer (Baytown / Dayton / Liberty are deliberately NOT in it — see the row note above).
+    nameStrip: ["\\s+ETJ$"],
+    where: "CITY IN ('BEACH CITY ETJ','COVE ETJ','OLD RIVER ETJ')",
+    roster: ["BEACH CITY", "COVE", "OLD RIVER-WINFREE"],
+    rosterCheckedAt: "2026-11-01",
+    coverage: "regional",
+    states: ["TX"],
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
   etj_austin: {
     key: "etj_austin",
     label: "ETJ — Austin",
@@ -3790,7 +3838,9 @@ export const GIS_SOURCES = {
     // Live 2026-10-29 (through the relay): Aurora box 511.
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_SOURCES, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
   ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...FORTBEND_SOURCES, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
   ...NASHVILLE_BUFFER_SOURCES, // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_SOURCES, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
@@ -3884,7 +3934,7 @@ export function sourceCoversState(entry, state) {
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
 // NEW-1 (FL/GA pipelines) — the four EIA rows the Florida/Georgia pipeline screen reads (one finding).
 export const EIA_PIPELINE_KEYS = ["eiaGas", "eiaPetroleum", "eiaCrude", "eiaHgl"];
-export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale"];
+export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale", "etj_montbelvieu", "etj_chambers_neighbors"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
@@ -4052,6 +4102,9 @@ export const SOURCE_FIXTURE_REACH = {
   city_fortbend: ["regional", "Fort Bend County's city-limits table — one county."],
   etj_harris: ["regional", "Harris County's City ETJ table — one county; eight cities."],
   etj_baytown: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
+  // NEW-1 (2026-11-12) — Chambers County. Mont Belvieu's own ETJ is one polygon a few km across; its copy of the neighbours' lines is three small rings (Beach City, Cove, Old River-Winfree).
+  etj_montbelvieu: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
+  etj_chambers_neighbors: ["regional", "Three neighbouring cities' ETJ rings in southern Chambers County."],
   city_baytown: ["local", "One city's incorporated limits — a few km across, with no wider extent to probe."],
   // The BKDD tier — ONE drainage district, roughly 20 km across. `local` is the honest class:
   // two separated points inside the district is the most separation that exists to buy.
@@ -4099,8 +4152,11 @@ export const SOURCE_FIXTURE_REACH = {
   auroraAirportNoise: ["local", "City of Aurora's published airport contours — one city, ~25 km across."],
   auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
+  ...HOUSTON_METRO_FIXTURE_REACH, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_FIXTURE_REACH, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
   ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...FORTBEND_FIXTURE_REACH, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
   ...NASHVILLE_BUFFER_FIXTURE_REACH, // B2671266 / B2671267 (Metro Nashville buffers) — sourcesNashvilleBuffers.js
   ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
   ...NASHVILLE_FIXTURE_REACH, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js

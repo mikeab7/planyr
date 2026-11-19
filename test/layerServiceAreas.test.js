@@ -38,6 +38,9 @@ const has = (ids, pt) => ids.map((id) => showing(pt).includes(id));
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
+/* B2671240 — the City of Mont Belvieu's Master Drainage Plan rows (Flood & Drainage). They are offered over the plan's own data extent, which includes Grand Port and Mont Belvieu. */
+const MB_PLAN = Object.keys(ALL_LAYERS).filter((id) => id.startsWith("tx_mb_plan_")).sort();
+
 describe("the declared service areas", () => {
   it("every region name a registry row declares exists — a typo would silently fail open", () => {
     const names = new Set();
@@ -105,10 +108,11 @@ describe("which rows a site gets (the adjacent cases)", () => {
     expect(has(BKDD, P.katyBkdd)).toEqual([true, true, true]);
     expect(has([HCFCD, ...COH], P.katyBkdd).some(Boolean)).toBe(false);
   });
-  it("Flood & Drainage at Grand Port is exactly FEMA + streams — what the finder showed at Mont Belvieu", () => {
+  it("Flood & Drainage at Grand Port is FEMA + streams + the Gulf-coast evacuation zones + the City of Mont Belvieu's Master Drainage Plan (B2671240: its watersheds reach this ground) — and not one HCFCD / Houston / BKDD row", () => {
+    // Chambers County sits inside the Zip-Zone layer's extent (the sweep asked for Chambers by name), so its sites DO list `tx_evac_zones`; what must never appear is a Houston-only drainage row.
     for (const pt of [P.grandPort, P.montBelvieu]) {
       const ids = availableEntries(groupEntriesFor(ALL_LAYERS, "flood"), { state: "TX", loc: pt }).map(([id]) => id).sort();
-      expect(ids).toEqual(["fema", "nhd_flowlines"]);
+      expect(ids).toEqual(["fema", "nhd_flowlines", "tx_evac_zones", ...MB_PLAN].sort());
     }
   });
 });
@@ -122,7 +126,7 @@ describe("one answer for the panel, the map and both surfaces", () => {
     expect(open.tiers.flatMap((t) => t.rows).map(([id]) => id)).toEqual(expect.arrayContaining([HCFCD, ...BKDD, "coh_storm"]));
     // …and the location rule alone now removes them, with the county still null
     const scoped = scopeFloodEntries(entries, { county: null });
-    expect(scoped.tiers.flatMap((t) => t.rows).map(([id]) => id).sort()).toEqual(["fema", "nhd_flowlines"]);
+    expect(scoped.tiers.flatMap((t) => t.rows).map(([id]) => id).sort()).toEqual(["fema", "nhd_flowlines", "tx_evac_zones", ...MB_PLAN].sort());
     expect(floodRowRelevance(ALL_LAYERS[HCFCD], { county: null }).relevant).toBe(true); // (the fail-open that was the planner's input)
   });
   it("the panel's list and the map's draw filter are the SAME decision for every point", () => {

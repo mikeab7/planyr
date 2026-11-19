@@ -120,3 +120,28 @@ describe("sheet rubber band", () => {
     expect(dragVisibleHeight(-900, { min: 0, max: 500 })).toBe(0);
   });
 });
+
+describe("NEW-1 (2026-11-19): a dish rated in the evening shows its score on the card", () => {
+  // An undated visit's dish row written 7 PM Central (= 01:00 UTC the NEXT day), then rated the same evening via Rate again
+  // (rated_on is the LOCAL day). The UTC-day fallback used to sort the old unscored row as the newest, so the card showed "—".
+  const old = { id: "a", visit_id: "v1", name: "Salmon Nigiri", score: null, order_again: "yes", visited_on: null, created_at: "2026-11-17T01:00:00Z" };
+  const ratedAt = "2026-11-17T01:30:00Z"; // rated_on is what the app writes at that moment: the viewer's LOCAL day (todayLocal)
+  const mk = () => ({ id: "b", visit_id: "v1", name: "Salmon Nigiri", score: 8.25, order_again: "yes", visited_on: null, rated_on: todayLocal(new Date(ratedAt)), created_at: ratedAt });
+  for (const tz of ["America/Chicago", "UTC", "Asia/Tokyo"]) {
+    it(`latest rating wins in ${tz}`, () => {
+      const prev = process.env.TZ;
+      process.env.TZ = tz;
+      try {
+        const [row] = dishRowsForTable([old, mk()]);
+        expect(row.latestScore).toBe(8.25);
+        expect(row.history.map((h) => h.id)).toEqual(["a"]);
+      } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev; }
+    });
+  }
+  it("a dish rated in place on a single row, in each eat-again group, keeps its score", () => {
+    for (const oa of ["yes", "maybe", "no", null]) {
+      const [row] = dishRowsForTable([{ id: "z", visit_id: "v1", name: "X", score: 7.5, order_again: oa, created_at: "2026-11-17T01:00:00Z" }]);
+      expect(row.latestScore).toBe(7.5);
+    }
+  });
+});

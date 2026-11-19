@@ -73,6 +73,7 @@ import { prepareTablePicture } from "../lib/notesTablePicture.js";
 import { newId } from "../lib/notesModel.js";
 import { PasteGlyph, ClipboardGlyph, PASTE_ICON_CSS } from "./PasteIcons.jsx";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
+import { selectAllScope, selectAllTarget } from "../lib/notesSelectAll.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
   PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS, leftEdgeDrag, normalizePageMargin, pageWidthLabel,
@@ -3697,6 +3698,37 @@ const NoteEditor = forwardRef(function NoteEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [selection, selectionKeyDown]);
 
+  /* ⛔ CTRL+A WITH NO CARET IN ANY BOX SELECTS EVERY BOX, AS BOXES (NEW-1, owner 2026-11-15: PowerPoint's rule). A caret inside a box is the
+   * document keymap's (`lib/notesSelectAll.js`: that box's text only, stepping out of a table cell first); this window handler takes the other
+   * case — a box selected by its outline, or blank paper — so Ctrl+C then copies the boxes (the box-copy path above, several at once) and
+   * Ctrl+Z / Delete / arrows act on all of them. It declines for a form field, for a Notes surface that is not on screen or does not hold the
+   * focus (the Templates editor open over the page), and when the page has no box (the browser's own Ctrl+A stands). `selectAllScope` is the
+   * one decision; the keymap and this handler can never both claim a press because this one stops it. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return undefined;
+    const onKey = (e) => {
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key !== "a" && e.key !== "A")) return;
+      const a = document.activeElement;
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;
+      const dom = editor.view.dom;
+      const inEditor = !!(a && dom.contains(a));
+      if (formFieldOwnsTheKey()) return;                   // the title, the search box, a rename field: the field's own Ctrl+A
+      if (a && a !== document.body && a !== document.documentElement && !inEditor && !root.contains(a)) return;
+      const boxes = boxesNow();
+      const scope = selectAllScope({ editing: !!editingRef.current, boxSelected: selRef.current.size > 0, caretInBox: inEditor && selectAllTarget(editor.state) !== null, hasBoxes: boxes.length > 0 });
+      if (scope !== "boxes") return;                       // "text": the keymap's; "none": the browser's
+      e.preventDefault();
+      e.stopPropagation();
+      if (pendingRef2.current) { pendingRef2.current = null; setPendingPlace(null); }
+      setEditingId(null);
+      setSelection(new Set(boxes.map((b) => String(b.id))));
+      try { dom.blur(); } catch (_) { /* a selection of boxes is the point; focus is a nicety */ }
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [editor, readOnly, boxesNow]);
+
   /* ⛔ ONE RULE FOR EVERY PRESS ON THE PAGE, AND IT IS ONE SENTENCE:
    *
    *      A PRESS BESIDE A LINE OF WRITING GOES INTO THAT LINE.
@@ -5733,7 +5765,13 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     /* The box-clearing push (lib/notesBoxClearPlugin.js) is layout housekeeping after the paste, not further editing: it must not retire the offer. */
-    const retire = (e) => { if (e?.transaction?.getMeta?.("planyrBoxClear")) return; if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null); };
+    const retire = (e) => {
+      if (e?.transaction?.getMeta?.("planyrBoxClear")) return;
+      /* A pasted BOX blurs the box he was typing in, and a self-fitting box writes its width when it is left — a housekeeping step kept out of the history,
+       * never an edit of his. It must not take the offer away (found by the first live run, where typed boxes are self-fitting and seeded ones are not). */
+      if (pasteRef.current?.kind === "box" && e?.transaction?.getMeta?.("addToHistory") === false) return;
+      if (pasteRef.current && !applyingPasteModeRef.current) setPasteOffer(null);
+    };
     editor.on("update", retire);
     return () => { editor.off("update", retire); };
   }, [editor]);

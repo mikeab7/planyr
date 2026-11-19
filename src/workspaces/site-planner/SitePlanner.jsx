@@ -272,6 +272,7 @@ import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW
 import { apprRows, apprVal } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
+import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, WALL_PIECE_TEXT, WALL_PIECE_EDGE, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
@@ -10193,6 +10194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
     if (d && d.mode === "pan" && d.tapIdentify
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
+      flashLotAt(d.tapIdentify); // NEW-1 (Add parcels) — the lot's outline this frame, not after the county's round trip
       quickAddAt(d.tapIdentify, d.ack);
     } else if (d && d.ack) d.ack.cancel(); // NEW-1 — a real drag (a pan) is not a click: drop the ring
     // B416: committing a building reshape that flipped its long-side axis can leave a
@@ -17041,6 +17043,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
   const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
+  const [outlineRefused, setOutlineRefused] = useState(false); // NEW-1 (Add parcels): a county server REFUSED part of the larger-lots band — said, never a silent blank patch
+  const lotFlashRef = useRef(null);             // NEW-1 (Add parcels): the clicked lot's outline, drawn the instant the click lands (before the county answers)
   const outlineLayersRef = useRef(null);        // the outline set (lib/parcelOutlineSet.js) while identify mode is on — also read by the E2E hook below
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
   // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
@@ -17238,6 +17242,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
   // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
+  /* NEW-1 (Add parcels, 2026-11-16 — Goose Creek: "I tried to click lots … no outline showed up"). The outline of the lot a click lands on is
+   * drawn the same frame, from the lot lines the map already holds (the outline set's `featureAt`), in the plan's own parcel colour and in the
+   * Parcels-in-front pane (so it is above everything). The county's point query is still the authority (B137): the flash is removed the moment
+   * it answers — by the real parcel, or by the honest "no lot". Skipped over a lot the plan already has (that one is outlined already, and a
+   * re-click removes it — a flash there would promise the opposite). */
+  const clearLotFlash = () => { const f = lotFlashRef.current; lotFlashRef.current = null; if (f) { try { f.remove(); } catch (_) { /* map gone */ } } };
+  const flashLotAt = (fp) => {
+    clearLotFlash();
+    const set = outlineLayersRef.current, m = geoMapRef.current;
+    if (!set || !m || !origin || !fp) return;
+    if (parcelAtPoint(stateRef.current.parcels || [], fp)) return;
+    const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+    const feat = set.featureAt(lat, lng);
+    const geom = feat && feat.geometry;
+    if (!geom || !geom.coordinates) return;
+    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+    const latlngs = polys.map((rings) => rings.map((r) => r.map(([x, y]) => [y, x])));
+    if (!latlngs.length) return;
+    try {
+      lotFlashRef.current = L.polygon(latlngs, { pane: m.getPane(PANE_PARCEL_PICK) ? PANE_PARCEL_PICK : "overlayPane", interactive: false, color: PAL.parcel, weight: 2.5, opacity: 1, fillColor: PAL.parcel, fillOpacity: 0.16, className: "lot-click-flash" }).addTo(m);
+    } catch (_) { lotFlashRef.current = null; }
+  };
   const quickAddAt = async (fp, ack = null) => {
     if (!origin) { ack?.cancel(); setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later click supersedes this one (B53)
@@ -17247,6 +17273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let settled = false;
     const setRes = (r) => {
       settled = true;
+      if (tok === identifyTok.current) clearLotFlash(); // the real parcel (or the honest "no lot") takes over from the instant outline
       if (tok === identifyTok.current) {
         if (r && r.error) ack?.empty(r.noLot ? "No lot here" : "Couldn't get that lot"); else ack?.done();
       }
@@ -17352,7 +17379,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); return; }
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); setOutlineRefused(false); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
      * to mount every county source in the country (36+ full-viewport images) and the statewide
@@ -17371,6 +17398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!hosted) console.error("[planyr] the Parcels-in-front panes are missing — county lots would draw under the plan");
         return makeParcelDisplayLayer(url, {
           getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current,
+          wide: true, // NEW-1 (click-a-lot) — the larger lots from two zoom steps further out, exactly like the Map's picker (parcelWideLayer.js); a source with no verified size column keeps its own floor
           ...(hosted ? { pane: PANE_PARCEL_PICK, labelPane: PANE_PARCEL_PICK_LABEL } : null),
         });
       },
@@ -17380,12 +17408,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       isStatewideUrl: isStatewideLayerUrl,
       scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
       coversCounty: stateLayerCoversCounty, // NEW-2 — a state layer that declares the failed county missing is never pulled in for it
-      onChange: () => setOutlinePhase(set.status().phase),
+      onChange: () => { const st = set.status(); setOutlinePhase(st.phase); setOutlineRefused(!!st.refused); },
     });
     outlineLayersRef.current = set;
     setOutlinePhase("loading"); // the tool is armed: outlines are on their way until the set says otherwise
     let map = null, poll = null, tries = 0;
     const onMoved = () => set.sync();
+    let gone = false;
     // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
     const attach = () => {
       poll = null;
@@ -17393,10 +17422,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); else setOutlinePhase("none"); return; }
       map = m; m.on("moveend", onMoved); set.sync();
     };
-    attach();
+    /* NEW-1 (Add parcels) — the larger-lots module + the verified size-column table load BEFORE the first layer is built (`makeParcelLayer` reads
+     * them once, at build): a layer built first would never get its band. A failed load is reported by the loader and leaves today's floor. */
+    const ready = Promise.resolve(wideViewReady()).catch(() => null);
+    ready.then(() => { if (!gone) attach(); });
     // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
-    Promise.resolve(loadCountyPolygons()).then(() => set.sync(), () => {});
+    Promise.all([ready, Promise.resolve(loadCountyPolygons()).catch(() => null)]).then(() => { if (!gone) set.sync(); });
     return () => {
+      gone = true;
+      clearLotFlash();
       if (poll) clearTimeout(poll);
       if (map) map.off("moveend", onMoved);
       set.dispose();
@@ -22997,9 +23031,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
                     </button>
                     {/* NEW-1 (select-parcel first paint) — one short status line, from the outline set's own state; it replaces the old zoom-only hint. */}
-                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom") && (
-                      <div data-testid="parcel-outline-status" data-phase={outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
-                        {outlinePhase === "loading" ? "Loading parcels…" : outlinePhase === "empty" ? "No parcels here" : "Zoom in to see the county lot lines (a click still adds the lot)."}
+                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom" || outlineRefused) && (
+                      <div data-testid="parcel-outline-status" data-phase={outlineRefused && outlinePhase !== "zoom" && outlinePhase !== "empty" ? "refused" : outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" || outlineRefused ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
+                        {outlinePhase === "zoom" ? "Zoom in to see the county lot lines (a click still adds the lot)."
+                          : outlineRefused ? "The county server wouldn't send some of the lot lines here — zoom in, or click a lot anyway."
+                          : outlinePhase === "loading" ? "Loading parcels…" : "No parcels here"}
                       </div>
                     )}
                   </>

@@ -22,10 +22,13 @@
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
+import { TX_CITY_ZONING_FIXTURES, TX_CITY_ZONING_DOCS } from "./sourceFixturesTxCityZoning.js"; // NEW-1 (Texas city zoning)
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { FORTBEND_FIXTURES, FORTBEND_DOCS } from "./sourceFixturesFortBend.js"; // NEW-1 (Fort Bend County layers)
 import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
+import { HOUSTON_METRO_FIXTURES, HOUSTON_METRO_DOCS } from "./sourceFixturesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
 // NEW-1 (2026-11-12) — known parcels the NIGHTLY parcel health job re-queries by id (ui-audit/parcel-source-health-sweep.mjs).
@@ -33,9 +36,12 @@ import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // 
 export { PARCEL_FIXTURES as parcelFixtures } from "./sourceFixturesParcels.js";
 
 export const SOURCE_FIXTURES = {
+  ...HOUSTON_METRO_FIXTURES,
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
+  ...TX_CITY_ZONING_FIXTURES,
   ...SUGARLAND_FIXTURES,
+  ...FORTBEND_FIXTURES,
   ...NASHVILLE_BUFFER_FIXTURES,
   ...RUTHERFORD_FIXTURES,
   ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
@@ -1046,6 +1052,22 @@ export const SOURCE_FIXTURES = {
     { label: "Sunnyvale ETJ — south", point: [-96.51406, 32.75078], expectMinCount: 1 },
   ],
   },
+  /* NEW-1 (2026-11-12) — Mont Belvieu. Every point below was verified against the live service on 2026-11-12 through the PR preview's /gis-proxy relay (the build sandbox cannot reach
+   * www.cmbgis.com): each lies inside its polygon with a 0.004° margin on all four sides, and the ETJ points lie OUTSIDE the city's limits (layer 0). The Targa plant is the reason the limits-outrank-ETJ
+   * rule matters here — it is inside BOTH layer 0 and layer 1 — and is asserted in test/chambersEtj.test.js, where a zero-count fixture would carry no weight. */
+  etj_montbelvieu: {
+  fixtures: [
+    { label: "Mont Belvieu ETJ — north-east of the city (the brief's site, outside the limits)", point: [-94.86, 29.89], expectMinCount: 1 },
+    { label: "Mont Belvieu ETJ — far west edge, outside the limits", point: [-94.96078, 29.89792], expectMinCount: 1 },
+  ],
+  },
+  etj_chambers_neighbors: {
+  fixtures: [
+    { label: "Beach City ETJ — southern end", point: [-94.90825, 29.66029], expectMinCount: 1 },
+    { label: "Cove ETJ — centre", point: [-94.82899, 29.80138], expectMinCount: 1 },
+    { label: "Old River-Winfree ETJ — northern end", point: [-94.83045, 29.89004], expectMinCount: 1 },
+  ],
+  },
   mud: {
   fixtures: [
     // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.
@@ -1534,9 +1556,12 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+  ...HOUSTON_METRO_DOCS,
 ...FLORIDA_DOCS,
   ...OK_DOCS,
+  ...TX_CITY_ZONING_DOCS,
   ...SUGARLAND_DOCS,
+  ...FORTBEND_DOCS,
   ...NASHVILLE_BUFFER_DOCS,
   ...RUTHERFORD_DOCS,
   ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)

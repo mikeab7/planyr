@@ -19,7 +19,7 @@ import L from "leaflet";
 import { hoverTitle, featureCard } from "./featureHover.js";
 import { cardNode } from "./identifyCard.js";
 import { makeHighlight, setHighlight, releaseHighlight, childFor } from "./featureHighlight.js";
-import { hitFeature } from "./vectorLayers.js";
+import { hitFeature, hitFeatures } from "./vectorLayers.js";
 
 /* THE ONE card for a clicked feature (B2507062): a row's own `identifyCard(props, at)` when it has one, else its title + labelled rows. Used by the planner canvas
  * (`attachFeatureCanvasIdentify`) and by the Map view's click popup (`wireFeatureClick`), so the two surfaces cannot drift. `about` is the (i) text. */
@@ -29,6 +29,15 @@ function itemFor(cfg, props, at, about) {
     if (card) return { title: card.title || hoverTitle(cfg), rows: card.rows || [], note: card.note || null, sourceName: cfg.source || null, about, ...(card.dedupeKey ? { dedupeKey: card.dedupeKey } : {}) };
   }
   return { ...featureCard(cfg, props), sourceName: cfg.source || null, about };
+}
+
+/* A row that sets `identifyStack` (polygons that STACK, Smyrna's overlay districts) gets every painted polygon under the point as `at.stack` (their properties, collection order). */
+function withStack(lyr, cfg, at) {
+  if (!cfg.identifyStack || !lyr || typeof lyr.eachFeature !== "function") return at;
+  const features = [];
+  try { lyr.eachFeature((child) => { if (child && child.feature) features.push(child.feature); }); } catch (_) { return at; }
+  const hits = hitFeatures({ type: "FeatureCollection", features }, at);
+  return hits.length ? { ...at, stack: hits.map((f) => f.properties || {}) } : at;
 }
 
 /* Map view: a feature answers a CLICK with a pinned popup — never a hover (owner constraint #43, B2507061). Nothing is bound to mouseover, no tooltip, no hover
@@ -41,7 +50,7 @@ export function wireFeatureClick(lyr, cfg, identifyOk, about = null) {
     if (!map) return;
     const feature = e.layer && e.layer.feature;
     const props = (feature && feature.properties) || {};
-    const item = itemFor(cfg, props, { lat: e.latlng.lat, lng: e.latlng.lng }, about);
+    const item = itemFor(cfg, props, withStack(lyr, cfg, { lat: e.latlng.lat, lng: e.latlng.lng }), about);
     const node = cardNode(item);
     try {
       // opening a new popup closes the old one first (its "remove" turns the previous outline off); the clicked feature is then the only one outlined
@@ -72,7 +81,7 @@ export function attachFeatureCanvasIdentify(lyr, cfg) {
     if (!features.length) return null;
     const hit = hitFeature({ type: "FeatureCollection", features }, at);
     if (!hit) return null;
-    const item = itemFor(cfg, hit.properties || {}, at, lyr.__pfAbout || null);
+    const item = itemFor(cfg, hit.properties || {}, withStack(lyr, cfg, at), lyr.__pfAbout || null);
     const token = makeHighlight(childFor(lyr, hit)); // the planner turns it on while its card is open and off when the card closes
     return token ? { ...item, highlight: token } : item;
   };
