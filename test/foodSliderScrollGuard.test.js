@@ -32,3 +32,15 @@ describe("the one rating slider uses the guard (a refactor that drops it silentl
     expect(src).toMatch(/\{\.\.\.scrollGuard\}/);
   });
 });
+
+import { isHorizontalDrag } from "../src/workspaces/food/lib/sliderScrollGuard.js";
+describe("B2671295 x2: a sideways drag that later drifts vertically stays the slider's", () => {
+  it("classifies a sideways-first gesture as a drag", () => {
+    expect(isHorizontalDrag(40, 5)).toBe(true);
+    expect(isHorizontalDrag(3, 40)).toBe(false);
+    expect(isHorizontalDrag(0, 0)).toBe(false);
+  });
+  it("the guard stops watching once the gesture is a drag", () => {
+    expect(read("lib/sliderScrollGuard.js")).toMatch(/s\.reverted \|\| s\.dragging/);
+  });
+});
