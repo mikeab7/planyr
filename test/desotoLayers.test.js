@@ -230,7 +230,8 @@ describe("NEW-2 / NEW-1 (B2507064 ×2, B2507063 ×2, 2026-11-03) — the Zoning 
   });
   it("prints the code on the polygons from the same zoom as Sugar Land's zoning (14)", () => {
     expect(z.lineLabel.minZoom).toBe(14);
-    expect(z.lineLabel.declutter).toBe(true);   // dense small polygons: codes never pile up (screen and PDF share the rule)
+    // B2563410: dense small polygons never pile up — one code per polygon, inside it, none where it cannot fit, never overlapping (zoneLabels.js; screen and PDF share the layout). Replaces the per-feature tooltip + `declutter`.
+    expect(z.lineLabel.polygon).toBe(true);
   });
   it("its viewLegend is HEADED by government, one code per row, never a suffix — and Southaven's rows carry Southaven's names", async () => {
     const { _setMunicipalities } = await import("../src/workspaces/site-planner/lib/desotoJurisdiction.js");
@@ -259,5 +260,17 @@ describe("B2589346 — the printed sheet declutters zoning codes exactly like th
     expect(src).toMatch(/import \{[^}]*declutterBoxes[^}]*\} from "\.\/boundaryLabels\.js"/);
     expect(src).toMatch(/cfg\.lineLabel\.declutter && labels\.length > 1/);
     expect(src).toMatch(/rank = bb \? Math\.abs\(/);
+  });
+});
+
+describe("B2563410 — zone codes: one per polygon, inside it, on screen and on the sheet from ONE layout", () => {
+  it("the zoning row opts into the polygon layout; the sheet and the layer both call it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const read = (f) => readFileSync(new URL(`../src/workspaces/site-planner/lib/${f}`, import.meta.url), "utf8");
+    const { DESOTO_LAYERS } = await import("../src/workspaces/site-planner/lib/desotoLayers.js");
+    expect(DESOTO_LAYERS.ms_desoto_zoning.lineLabel.polygon).toBe(true);
+    expect(read("exportSheet.js")).toMatch(/esriZoneLabels\(zoneGj, cfg,/);
+    expect(read("zoneLabelLayer.js")).toMatch(/layoutZoneLabels\(items,/);
+    expect(read("layers.js")).toMatch(/cfg\.lineLabel && cfg\.lineLabel\.polygon\) \{\s*import\("\.\/zoneLabelLayer\.js"\)/);
   });
 });

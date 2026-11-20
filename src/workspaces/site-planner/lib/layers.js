@@ -1707,7 +1707,7 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
-    ...(cfg.lineLabel ? { onLabel: (layer, text) => {
+    ...(cfg.lineLabel && !cfg.lineLabel.polygon ? { onLabel: (layer, text) => {
       layer.__pfLabel = text;
       /* A row may cap how many labels it will bind (`lineLabel.maxLabels`): a dense network at close zoom is thousands of permanent tooltips, and binding them froze the tab for seconds
        * (Bartow sewer in downtown Cartersville: 2,135 lines → a 2–3 s task at z17, 10 s at z16, measured on a deployed preview). Past the cap the lines draw UNLABELLED — a wall of numbers is no label. */
@@ -1816,7 +1816,11 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     lyr.on("remove", () => { try { lyr._map && lyr._map.off("moveend", publish); } catch (_) { /* map already gone */ } clearViewLegend(id); });
     lyr.on("remove", () => { if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already gone */ } unsub = null; } });
   }
-  if (cfg.lineLabel) {
+  /* B2563410 — an AREA row that prints its code on each polygon (`lineLabel.polygon`: DeSoto zoning) is laid out by the pure `zoneLabels.js` — ONE label per polygon at its pole of inaccessibility (inside it, even in an
+   * L-shaped lot), hidden when the polygon is too small to hold the text, never overlapping — and drawn by the lazy `zoneLabelLayer.js`. The per-feature tooltip path below stays for lines and the city names. */
+  if (cfg.lineLabel && cfg.lineLabel.polygon) {
+    import("./zoneLabelLayer.js").then((m) => m.attachZoneLabels(lyr, cfg, { labelPane }), () => { /* the layer still paints; only its codes are unavailable */ });
+  } else if (cfg.lineLabel) {
     const syncLabels = () => {
       let want = wantLabels(lyr);
       if (want && cfg.lineLabel.maxLabels != null) { let n = 0; try { lyr.eachFeature((l) => { if (l.__pfLabel) n++; }); } catch (_) { /* counted so far */ } labelCount = n; want = n <= cfg.lineLabel.maxLabels; }

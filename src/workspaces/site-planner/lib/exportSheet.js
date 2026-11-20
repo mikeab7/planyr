@@ -48,7 +48,7 @@ import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
-import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
+import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriZoneLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { declutterBoxes, titleCaseName } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
 import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH } from "./boundaryStyle.js";
@@ -884,7 +884,7 @@ export function createExportSheet(ctx) {
     const kind = cfg.kind;
     if (kind === "esriFeature") { // every esriFeature row: lines + points + polygons (B2081252)
       if (typeof ref.eachFeature !== "function") return { features: [] };
-      const features = [], labels = [];
+      const features = [], labels = [], zoneGj = [];
       ref.eachFeature((l) => {
         const gj = l && l.feature;
         if (!gj || !gj.geometry) return;
@@ -892,12 +892,20 @@ export function createExportSheet(ctx) {
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
         // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
         // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
-        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+        if (cfg.lineLabel && cfg.lineLabel.polygon && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          zoneGj.push(gj);   // B2563410: an area row's codes are laid out together below — one per polygon, never overlapping, none where it cannot fit (the same pure layout as the screen)
+        } else if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
           const bb = l.getBounds && l.getBounds();
           const rank = bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0;
           for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text, rank }); }
         }
       });
+      if (zoneGj.length) {
+        // the codes are placed against the PRINTED FRAME (not the live canvas), so a polygon label never lands half off the page
+        const ext = exportFeetExtent(printFrame), a = ext && f2p({ x: ext.minX, y: ext.minY }), b = ext && f2p({ x: ext.maxX, y: ext.maxY });
+        const frame = a && b ? { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) } : { w: size.w, h: size.h };
+        labels.push(...esriZoneLabels(zoneGj, cfg, ([lng, lat]) => projLLtoPx([lng, lat]), frame));
+      }
       /* B2589346 — a row that declutters on screen (`lineLabel.declutter`: DeSoto zoning, whose polygons are small and dense) declutters the SAME way on the sheet (PDF-PARITY): the larger polygon keeps its code, a label that
        * would sit on top of one already kept is dropped — never a pile of overlapping codes in the PDF. Box = the on-screen label's footprint (text width ≈ 7 px a character + padding, 14 px tall) in the same map pixels. */
       if (cfg.lineLabel && cfg.lineLabel.declutter && labels.length > 1) {
