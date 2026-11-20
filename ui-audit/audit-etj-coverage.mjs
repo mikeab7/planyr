@@ -22,7 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const { ETJ_SOURCES } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/jurisdiction.js"));
+const { ETJ_SOURCES, etjUpstreamUrl } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/jurisdiction.js"));
 // NEW-1 (DFW) — a roster is written in the names the app REPORTS, i.e. after each publisher's naming
 // quirks (overlap splits, "GraysonCo-" prefixes) are applied — so the live values are read the same way.
 const { etjNamesOf } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/etjNames.js"));
@@ -32,7 +32,7 @@ const asJson = process.argv.includes("--json");
 async function distinctNames(source) {
   const field = source.fields && source.fields.name;
   if (!field) return null; // single-jurisdiction layer: its roster IS its nameConst
-  const u = new URL(source.url + "/query");
+  const u = new URL(etjUpstreamUrl(source) + "/query");
   u.searchParams.set("f", "json");
   u.searchParams.set("where", "1=1");
   u.searchParams.set("outFields", field);

@@ -24,6 +24,9 @@ import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, symlinkSync 
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBuild, measureBundle, attributeBytes, statsSnapshot, ROOT } from "../ui-audit/lib/bundleMetrics.mjs";
+// The Univer spike (B2557488) made the production build need ~3.5 GB of heap; Node's default limit is ~2 GB. `npm run build` raises it
+// in package.json — every script that runs `vite build` itself must do the same or it dies with "heap out of memory".
+const BUILD_ENV = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --max-old-space-size=4096`.trim() };
 
 const argOf = (f) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : null; };
 const OUT = argOf("--out") || join(ROOT, ".perf", "base-stats.json");
@@ -71,7 +74,7 @@ try {
 
   const dist = join(tree, "dist-base");
   try {
-    execFileSync("npx", ["vite", "build", "--outDir", dist], { cwd: tree, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+    execFileSync("npx", ["vite", "build", "--outDir", dist], { cwd: tree, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", env: BUILD_ENV });
   } catch (e) {
     bail(`the base ref ${baseSha.slice(0, 8)} did not build (${String(e.stderr || e.message).split("\n").slice(-3).join(" ").slice(0, 240)})`);
   }

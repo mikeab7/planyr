@@ -45,3 +45,23 @@ describe("orgCloudOutcome — the three ops × the store's result shapes", () =>
     expect(orgCloudOutcome("delete", undefined, { id: "w1" }).applyLocal).toBe(true);
   });
 });
+
+import { mergeOrgWorkbookLists } from "../src/workspaces/model/lib/orgWorkbookOps.js";
+
+describe("B2671225 — mergeOrgWorkbookLists", () => {
+  it("a cached workbook the cloud once listed and no longer does is dropped (deleted elsewhere)", () => {
+    const first = mergeOrgWorkbookLists([{ id: "a", name: "A", updatedAt: 2 }, { id: "b", name: "B", updatedAt: 1 }], []);
+    expect(first.every((w) => w.synced)).toBe(true);
+    const second = mergeOrgWorkbookLists([{ id: "a", name: "A", updatedAt: 2 }], first);
+    expect(second.map((w) => w.id)).toEqual(["a"]);
+  });
+  it("a workbook this device made that the cloud has never listed is kept", () => {
+    const merged = mergeOrgWorkbookLists([{ id: "a", name: "A", updatedAt: 2 }], [{ id: "n", name: "New", updatedAt: 5 }]);
+    expect(merged.map((w) => w.id)).toEqual(["n", "a"]);
+    expect(merged.find((w) => w.id === "n").synced).toBeUndefined();
+  });
+  it("an empty cloud list drops every previously confirmed workbook but keeps unsynced ones", () => {
+    const local = [{ id: "a", synced: true, updatedAt: 1 }, { id: "n", updatedAt: 2 }];
+    expect(mergeOrgWorkbookLists([], local).map((w) => w.id)).toEqual(["n"]);
+  });
+});

@@ -56,11 +56,11 @@ describe("anchorInverseCss — the in-SVG GIS hosts follow the basemap, not the 
   });
 });
 
-describe("the two in-SVG hosts use it", () => {
+describe("the in-SVG hosts use it (the lifted band, the parcels-pick band and — NEW-1 second pass, B2671190 ×2 — the default area band)", () => {
   const src = plannerSource();
-  it("both foreignObject hosts take anchorInverseCss with an explicit transform origin", () => {
+  it("every foreignObject host takes anchorInverseCss with an explicit transform origin", () => {
     const n = (src.match(/transformOrigin: "0 0",\s*\n\s*transform: anchorInverseCss\(viewT, regShift\.dx, regShift\.dy\)/g) || []).length;
-    expect(n).toBe(2);
+    expect(n).toBe(3);
   });
   it("neither is back to the bare registration translate", () => {
     expect(src).not.toMatch(/transform: \(regShift\.dx \|\| regShift\.dy\) \? `translate\(\$\{-regShift\.dx\}px/);

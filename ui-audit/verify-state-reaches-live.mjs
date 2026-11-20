@@ -23,6 +23,8 @@ const FL_ROWS = ["Water Management Districts", "Hurricane Evacuation Zones"];
 const POINTS = [
   { key: "pensacola", lat: 30.4213, lon: -87.2169, label: "Pensacola, FL (known-good arm)", want: "FL" },
   { key: "key", lat: 30.292, lon: -87.4785, label: "Perdido Key FL, west end (Natural Earth says Alabama)", want: "FL" },
+  { key: "shore", lat: 30.2845, lon: -87.4935, label: "Perdido Key FL, Gulf-shore strip (a hole in the first cut's ring; fourth-review cross-check)", want: "FL" },
+  { key: "shore2", lat: 30.282, lon: -87.51, label: "Perdido Key FL, Gulf-shore strip, west", want: "FL" },
   { key: "gulf", lat: 30.23, lon: -87.5, label: "Gulf off Perdido Key, east of Alabama Point", want: "FL" },
   { key: "ono", lat: 30.2975, lon: -87.479, label: "Ono Island, AL", want: "AL" },
   { key: "bear", lat: 30.329, lon: -87.515, label: "Bear Point, AL", want: "AL" },

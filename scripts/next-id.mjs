@@ -31,7 +31,8 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { ringFloor, nextFreeBlock } from "./idBlocks.mjs";
-import { readText, existsText, pathRole, virtualText, LEDGER_DIR } from "./lib/ledger.mjs";
+import { readText, existsText, pathRole, virtualText, LEDGER_DIR, isBranchMode, LEDGER_BRANCH } from "./lib/ledger.mjs";
+import { syncCheckout, maxIds } from "./lib/ledgerBranch.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -576,7 +577,38 @@ const flagNum = (argv, name, dflt) => {
   return hit ? Number(hit.split("=")[1]) : dflt;
 };
 
-export function main(argv, io = { out: process.stdout, err: process.stderr }) {
+/**
+ * NEW-1 (2026-11-05) — BRANCH MODE. The ledger lives on its own branch and every id is assigned ATOMICALLY when the
+ * entry lands (`npm run ledger -- add …` mints and files in ONE push; a push that loses a race redoes from the new
+ * tip), so there is no per-branch block, no peer scan and no origin/main freshness proof to do any more. This answers
+ * "what is the next free number" from the ledger branch's own tip, fetched now. The number is ADVISORY: to be sure it
+ * is yours, reserve it (`npm run ledger -- mint --b 1`) or just file the entry and read the id back.
+ */
+function branchMain(argv, io, repo = REPO) {
+  const json = argv.includes("--json");
+  let sync;
+  try { sync = syncCheckout(repo, { fetch: !argv.includes("--no-fetch") }); }
+  catch (e) { io.err.write(`\n⛔ next-id: cannot read the ledger branch — ${e.message}\n`); return 2; }
+  if (sync.stale && argv.includes("--against-main")) {
+    io.err.write(`\n⛔ next-id --against-main REFUSED: could not fetch the \`${LEDGER_BRANCH}\` branch (${sync.error}). No number printed on purpose.\n`);
+    return 2;
+  }
+  const m = maxIds(sync.dir);
+  const nextB = m.B + 1, nextV = m.V + 1;
+  if (json) { io.out.write(JSON.stringify({ ok: true, nextB, nextV, maxB: m.B, maxV: m.V, mintB: nextB, mintV: nextV, block: null, ledgerBranch: sync.sha }) + "\n"); return 0; }
+  if (argv.includes("--b")) { io.out.write(`B${nextB}\n`); return 0; }
+  if (argv.includes("--v")) { io.out.write(`V${nextV}\n`); return 0; }
+  io.out.write(
+    `Next free → B${nextB} · V${nextV}   (highest assigned: B${m.B} / V${m.V})  [${LEDGER_BRANCH}@${sync.sha.slice(0, 7)}${sync.stale ? ", STALE — fetch failed" : ", just fetched"}]\n` +
+      `You normally do not need this: \`npm run ledger -- add backlog --file entry.md\` assigns the id and files the entry in ONE push\n` +
+      `(unique across parallel sessions — a lost race is retried from the new tip). To cite a number before the entry is written:\n` +
+      `\`npm run ledger -- mint --b 1\` reserves it.\n`,
+  );
+  return 0;
+}
+
+export function main(argv, io = { out: process.stdout, err: process.stderr }, repo = REPO) {
+  if (isBranchMode(repo)) return branchMain(argv, io, repo);
   // `--against-main` (B779, hardened B779): the ship-time mint. Folds in origin/main AND every
   // in-flight peer branch, after PROVING origin/main was just fetched. Refuses rather than guess.
   // Default (no flag) stays the cheap local-only read for orientation, and says so.

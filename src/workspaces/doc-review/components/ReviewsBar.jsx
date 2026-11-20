@@ -94,7 +94,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
         <div>
           {!signedIn && (
             <div style={{ fontSize: 11.5, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 10 }}>
-              Sign in (in the Site Planner workspace) to save & file reviews to the cloud. Your work stays in memory until then.
+              Use Sign in at the top right to save & file reviews to the cloud. Your work stays in memory until then.
             </div>
           )}
 

@@ -48,3 +48,17 @@ export function orgCloudOutcome(op, r, { id } = {}) {
     telemetry: { kind: "cloud-write-failed", message: `org workbook ${verb} failed${r.reason ? ` (${r.reason})` : ""}`, extra: { id, op, reason: r.reason || null } },
   };
 }
+
+/** B2671225 — merge the cloud's workbook list with this device's cached list.
+ *  A cached entry the cloud does not list is EITHER a workbook this device made that hasn't
+ *  synced yet (keep it) OR one that was deleted from another browser (drop it). They look
+ *  identical unless we remember that the cloud once confirmed it, so every entry the cloud
+ *  returns is stamped `synced: true` here; a stamped entry that later vanishes from the cloud
+ *  list was removed elsewhere. Unstamped entries (never seen in a cloud list) are kept as before.
+ *  Pure; ModelApp's list effect applies it and writes the result back to the cache. */
+export function mergeOrgWorkbookLists(cloudRows, localList) {
+  const rows = (cloudRows || []).map((w) => ({ ...w, synced: true }));
+  const cloudIds = new Set(rows.map((w) => w.id));
+  const keptLocal = (localList || []).filter((w) => !cloudIds.has(w.id) && !w.synced);
+  return [...rows, ...keptLocal].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}

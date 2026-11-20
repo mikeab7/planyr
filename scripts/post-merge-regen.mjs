@@ -64,6 +64,9 @@ export function regenerateAndRestage(repo = REPO_DEFAULT) {
   for (const { file, build } of GENERATED) {
     const path = join(repo, file);
     if (!existsSync(path)) continue; // nothing to correct — e.g. a scratch fixture
+    // NEW-1 (2026-11-05): with the ledger on its own branch, BACKLOG_OPEN.md is a function of a branch this
+    // checkout does not hold. Regenerating it here would make every merge a "touch" of a guarded file.
+    if (file === "BACKLOG_OPEN.md" && existsSync(join(repo, ".github", "ledger-branch.json"))) continue; // = isBranchMode(); inlined so the throwaway-repo tests need no extra script copied
     const before = readFileSync(path, "utf8");
     try {
       execFileSync(process.execPath, [join(repo, ...build[0].split("/"))], { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });

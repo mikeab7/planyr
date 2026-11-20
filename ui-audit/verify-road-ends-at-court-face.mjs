@@ -73,7 +73,7 @@ async function scene(browser, label, order, roadPts, padPts, clip) {
        outside the face MUST be in the fill, or the scan proves nothing. */
     let paveInsidePad = null;
     try {
-      const store0 = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const store0 = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const cur0 = store0[localStorage.getItem("planarfit:currentSite:v1")];
       const pad0 = (cur0 && cur0.els || []).find((e) => e.type === "paving");
       const view = window.__plannerView;
@@ -96,7 +96,7 @@ async function scene(browser, label, order, roadPts, padPts, clip) {
     } catch (e) { paveInsidePad = String(e); }
     let endpoint = null;
     try {
-      const store = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const store = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const cur = store[localStorage.getItem("planarfit:currentSite:v1")];
       const road = (cur && cur.els || []).find((e) => e.type === "road");
       const pad = (cur && cur.els || []).find((e) => e.type === "paving");

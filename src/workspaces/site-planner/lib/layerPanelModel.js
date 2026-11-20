@@ -50,14 +50,22 @@ export function groupEntriesFor(layers, panelGroup) {
 /* ── Location ───────────────────────────────────────────────────────────────────────────────── */
 
 /* DECLARED region scopes. A registry row names the region(s) its source can serve with `regions: [...]`; two kinds of name:
- *   · a CIRCLE in this table — only `houston_metro`, the USGS growth-fault STUDY extent (a metro-scale study, not an agency's area);
+ *   · a BOX in this table — only `houston_metro`, the growth-fault layer's REAL data extent (measured 2026-11-12 off the service: the
+ *     traces end at -94.8376°, so Mont Belvieu / Cove are covered and Anahuac / Winnie are not — the old 65-mile circle offered the row
+ *     there and it drew nothing) — and three more boxes of the same kind, each the real extent of ONE service's data: `houston_airports` (the Houston Airport
+ *     System tiers), `tx_gulf_evac` (the hurricane evacuation Zip-Zone layer; Houston-metro sweep, 2026-11-12);
  *   · a real BOUNDARY in lib/serviceAreas.js (built into serviceAreaData.js): `harris` (HCFCD's channels), `houston` (the City of
  *     Houston limits + ETJ — its water / sewer / storm / hydrant data), `bkdd` (the Brookshire–Katy Drainage District).
  * Declared, never inferred from coverage (owner 2026-10-11) — coverage is a live, view-dependent guess, a region is a standing fact
  * about the source. (The old 65-mile "houston" circle claimed HCFCD / BKDD / City of Houston data reached Chambers, Galveston and
  * Brazoria; none of those sources serves them — B2436066.) */
 export const REGION_ZONES = Object.freeze({
-  houston_metro: Object.freeze({ lat: 29.7604, lng: -95.3698, radiusMiles: 65, label: "Houston metro (growth-fault study area)" }),
+  // [west, south, east, north] — the Fault_Houston layer's full extent (-95.9808, 29.3392, -94.8376, 30.3136) rounded OUT by <= 0.01°.
+  houston_metro: Object.freeze({ box: Object.freeze([-95.99, 29.33, -94.83, 30.32]), label: "Houston metro (growth-fault data extent)" }),
+  /* The extents of the three Houston-metro sweep layers (2026-11-12), each read off the service itself and rounded OUT by <= 0.01°: the Zip-Zone layer (Web-Mercator extent -10736722..-10481985, 3291241..3499243 —
+   * Brazoria to the Chambers / Jefferson line) and the Houston Airport System tiers (layer 7 `returnExtentOnly`, outSR 4326: -95.4423..-95.0700, 29.5206..30.0622). */
+  tx_gulf_evac: Object.freeze({ box: Object.freeze([-96.45, 28.33, -94.16, 29.97]), label: "Texas Gulf coast hurricane evacuation Zip-Zone extent" }),
+  houston_airports: Object.freeze({ box: Object.freeze([-95.45, 29.51, -95.06, 30.07]), label: "Houston Airport System tier extent (Bush Intercontinental, Hobby, Ellington Field)" }),
 });
 
 const toRad = (d) => (d * Math.PI) / 180;
@@ -75,6 +83,7 @@ export function inRegion(region, loc) {
   if (!loc) return null;
   const lat = Number(loc.lat), lng = Number(loc.lng != null ? loc.lng : loc.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (z.box) { const [w, s, e, n] = z.box; return lng >= w && lng <= e && lat >= s && lat <= n; }
   return distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles;
 }
 
@@ -187,8 +196,8 @@ const KEY_ROLE = {
   jur_etj: "ETJ",
 };
 const KEY_STYLE = {
-  County: { weight: 2.8, dash: true }, "City Limits": { weight: 3, dash: false }, ETJ: { weight: 1.5, dash: true }, // B2507065: counties DASHED grey, city limits bolder (the map's own looks)
-  "Municipal Limits": { weight: 3, dash: false }, "Town Limits": { weight: 3, dash: false }, "Village Limits": { weight: 3, dash: false },
+  County: { weight: 2.8, dash: true }, "City Limits": { weight: 3.5, dash: false }, ETJ: { weight: 2, dash: true }, // B2507065: counties DASHED grey, city limits bolder (the map's own looks); NEW-1 (2026-11-05): limits solid + bold, ETJ the same colour thinner and dashed
+  "Municipal Limits": { weight: 3.5, dash: false }, "Town Limits": { weight: 3.5, dash: false }, "Village Limits": { weight: 3.5, dash: false },
 };
 export function boundaryKey(members) {
   const seen = new Map();

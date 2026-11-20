@@ -244,7 +244,7 @@ describe("regulatory numbers are cited, and the rule's source is the agency's ow
     const t = ALL_LAYERS.ok_tribal;
     expect(courts("Creek OTSA")).toMatch(/McGirt v\. Oklahoma \(U\.S\. Supreme Court, 2020\), a criminal-jurisdiction case, held that Congress never disestablished/);
     // THIRD REVIEW: every holding carries its case. A court sentence with no cite is a holding we cannot support, so the table is pinned name by name.
-    const CITE = { Cherokee: "Hogner v. State, 2021 OK CR 4", Chickasaw: "Bosse v. State, No. PCD-2019-124", Choctaw: "Sizemore v. State, 2021 OK CR 6", Seminole: "Grayson v. State, 2021 OK CR 8", Quapaw: "State v. Lawhorn, 2021 OK CR 37" };
+    const CITE = { Cherokee: "Hogner v. State, 2021 OK CR 4", Chickasaw: "Bosse v. State, 2021 OK CR 30", Choctaw: "Sizemore v. State, 2021 OK CR 6", Seminole: "Grayson v. State, 2021 OK CR 8", Quapaw: "State v. Lawhorn, 2021 OK CR 37" };
     for (const n of Object.keys(CITE)) {
       expect(courts(n + " OTSA"), n).toMatch(new RegExp(n + ": in (a )?criminal cases? the Oklahoma Court of Criminal Appeals held in 2021 that the reservation was not disestablished \\(" + CITE[n].replace(/[.()]/g, "\\$&") + "\\)\\.$"));
     }

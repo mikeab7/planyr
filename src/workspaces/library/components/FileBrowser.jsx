@@ -718,8 +718,17 @@ export default function FileBrowser({
     setRenaming(null);
     if (!r.value.trim()) { setMoveNotice(`A name can't be empty — "${f.title || "this file"}" kept its name.`); return; }
     if (r.value.trim() === (f.title || "")) return;
-    const res = await renameReviewTitle(f.id, r.value);
-    if (!res.ok) setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}`);
+    /* NEW-1 (B2671215, owner 2026-11-10: "when I hit enter, it should immediately change the name") — THE ROW SHOWS THE NEW TITLE ON THE SAME FRAME
+     * AS ENTER. `renameReviewTitle` loads the record and saves it (a network round trip each when signed in), and the row used to keep the old
+     * title until `refresh()` after both — the lag the owner reported on plans. Same shape as `moveFileToFolder` just above: patch the list at
+     * once, put the old title back with a plain message if the save fails, then re-read to reconcile. */
+    const typed = r.value.trim();
+    const was = { title: f.title, titleAuto: f.titleAuto };
+    setReviews((rs) => rs.map((x) => (x && x.id === f.id ? { ...x, title: typed, titleAuto: false } : x)));
+    const undo = () => setReviews((rs) => rs.map((x) => (x && x.id === f.id && x.title === typed ? { ...x, title: was.title, titleAuto: was.titleAuto } : x)));
+    let res;
+    try { res = await renameReviewTitle(f.id, typed); } catch (e) { res = { ok: false, error: (e && e.message) || "the save failed" }; }
+    if (!res.ok) { undo(); setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}. It kept its old name.`); }
     refresh();
   };
   const openFileMenu = (f, x, y) => setFileMenu({ f, x, y });
@@ -747,7 +756,7 @@ export default function FileBrowser({
   // ---- empty / no-project states ------------------------------------------
   if (!signedIn) {
     return <>{dropNoticeNode}<Centered title="Sign in to see your files"
-      body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." /></>;
+      body="Document files live in your account — use Sign in at the top right. Until then, open a PDF directly to mark it up." /></>;
   }
   if (!projectId && !cross && !orgScope) {
     return <>{dropNoticeNode}<Centered title="Pick a project to see its files"
@@ -1272,7 +1281,8 @@ function DropQueue({ queue, onDismiss, onTriage, onResolveDuplicate }) {
     [S.DUPLICATE]: { color: "var(--warn-text)", label: it.duplicate?.filedAt ? `Already filed · ${fmtFiledDate(it.duplicate.filedAt)}` : "Already filed here" },
   })[it.status] || { color: "var(--text-secondary)", label: it.status };
   return (
-    <div style={{ flex: "none", margin: "0 12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div data-testid="upload-tray" style={{ flex: "none", margin: "0 60px 8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+      {/* NEW-1 (AUTH-SWEEP 3, V870512): the right margin keeps the tray's right-aligned buttons (Replace / Keep both / Cancel, Triage, Dismiss) clear of the app-wide help button, which is fixed to this exact corner and used to sit on top of Cancel. */}
       {active.map((it) => {
         const m = meta(it);
         return (

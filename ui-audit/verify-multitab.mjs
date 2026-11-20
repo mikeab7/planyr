@@ -17,7 +17,7 @@ const H = 535.5;
 const site = { id: "J", groupId: "J", site: "Jacinto", name: "Plan 1", origin: { lat: 29.7836, lon: -95.8244 }, county: "harris",
   parcels: [{ id: "pc1", locked: false, points: [{ x: -H, y: -H }, { x: H, y: -H }, { x: H, y: H }, { x: -H, y: H }] }],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, sheetOverlays: [], parcelDrawings: [], updatedAt: Date.now() };
-const seed = `(()=>{try{if(!localStorage.getItem('planarfit:sites:v1'))localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ J: site })}));localStorage.setItem('planarfit:currentSite:v1','J');}catch(e){}})();`;
+const seed = `(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1'))localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ J: site })}));localStorage.setItem('planarfit:currentSite:v1','J');}catch(e){}})();`;
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });

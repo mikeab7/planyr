@@ -31,7 +31,7 @@ const line = (s) => console.log(s);
 /** Every element id currently in the saved plan — the on-disk truth, so "did the building survive"
  *  is answered by the model rather than by whether a node happens to be painted. */
 const readEls = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return (site.els || []).map((e) => e.id);
 });
@@ -175,7 +175,7 @@ for (const path of ["select-all-type", "backspace-clear-type", "partial-then-tab
   await page.waitForTimeout(700);
   const els1 = await readEls(page);
   const depthNow = await page.evaluate((id) => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const e = (site.els || []).find((x) => x.id === id);
     return e ? { w: e.w, h: e.h } : null;

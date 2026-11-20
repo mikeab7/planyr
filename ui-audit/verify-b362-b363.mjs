@@ -93,7 +93,7 @@ function seed() {
     await page.waitForTimeout(900);
 
     const saved = await page.evaluate(([k, sid]) => {
-      const all = JSON.parse(localStorage.getItem(k) || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}");
       return (all[sid] && all[sid].els) || null;
     }, [SITES_KEY, id]);
     if (!saved) throw new Error("no saved els read back from localStorage");

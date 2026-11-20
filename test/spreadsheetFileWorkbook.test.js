@@ -12,7 +12,7 @@ import ExcelJS from "exceljs";
 import { readFileSync } from "node:fs";
 import { openFileWorkbook, saveFileWorkbook, openingNotes, isSpreadsheetRecord, recordFileName } from "../src/workspaces/model/lib/fileWorkbook.js";
 import { parseSpreadsheetFile } from "../src/workspaces/model/lib/spreadsheetFile.js";
-import { exportWorkbookToXlsxBlob } from "../src/workspaces/model/lib/xlsxIO.js";
+import { exportViaUniver } from "./fixtures/spreadsheet/exportViaUniver.js";
 import { applyToActiveSheet, commitCellText } from "../src/workspaces/model/lib/sheetModel.js";
 import { evaluateWorkbook, displayFor } from "../src/workspaces/model/lib/sheetEngine.js";
 import { versionList } from "../src/workspaces/doc-review/lib/docVersions.js";
@@ -43,7 +43,7 @@ function makeLibrary() {
     loadRecord: async (id) => (records.has(id) ? JSON.parse(JSON.stringify(records.get(id))) : null),
     readBytes: async (src) => blobs.get(src.driveKey) || null,
     parse: (bytes, name) => parseSpreadsheetFile(bytes, name),
-    exportBlob: (wb) => exportWorkbookToXlsxBlob(wb),
+    exportBlob: (wb) => exportViaUniver(wb),
     newId: () => `src${++n}`,
     store: async (srcId, blob, { name }) => {
       if (failStore) return { ok: false, driveError: "Drive is out of space." };

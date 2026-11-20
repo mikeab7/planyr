@@ -32,10 +32,19 @@ export const isCityLimitsId = (id) => id === "jur_city" || id === "ok_city" || i
   || id === "nj_city" || id === "ny_city" || id === "ny_town" || id === "ny_village" // NEW-1 (NJ + NY): same behaviour as every other state's county / municipal rows
   || id === "tn_city" || id === "fl_city"; // B2521584 (Tennessee)
 
+/* NEW-1 (owner 2026-11-05, Counties & Cities): the names of a county / city / ETJ layer stay on at EVERY zoom above their floor — they used to switch off at 13 / 14, which is
+ * exactly the working zoom of a site plan, where nothing then named the ground the site stood on. The floor (`labelZoom.min`) is unchanged. */
+export const PLACE_LABEL_MAX_ZOOM = 22;
+export const placeLabelZoom = (source) => {
+  const z = source && source.labelZoom;
+  if (!z) return z;
+  return isCountyLinesId(source.id) || isCityLimitsId(source.id) || source.id === "jur_etj" ? { min: z.min, max: PLACE_LABEL_MAX_ZOOM } : z;
+};
+
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
 import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";
-import { cityPolysFromGeoJson, netEtjFeatures } from "./etjNet.js";   // B2472945
+import { cityPolysFromGeoJson, netEtjFeatures, cutEtjBy } from "./etjNet.js";   // B2472945
 import { etjNamesOf } from "./etjNames.js";
 
 // ---------------------------------------------------------------------------
@@ -730,7 +739,7 @@ export const VECTOR_SOURCES = {
         id: r.id, url: r.url + "/query", bbox: r.bbox,
         nameCol: (r.fields && r.fields.name) || null, row: r,
       })),
-      keyRev: 3, // 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
+      keyRev: 4, // 4 = the Chambers County sources joined the list (NEW-1, 2026-11-12); 3 = netted against city limits (B2472945); 2 = the list of sources changed — bust every earlier entry
       /* ⛔ B2472945 — THE DRAWN ETJ IS NET OF CITY LIMITS, the same rule the header applies (B2472944): an ETJ is the ground OUTSIDE every
        * city's limits, so a published ETJ polygon is cut by the city layer's own limits (the `jur_city` source below — one source of
        * truth for what a city's limits ARE, read through its own cache) before it is cached and drawn. `fetchCached` does the cut. */
@@ -1081,6 +1090,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
   const meets = (b, v) => !v || (b[0] <= v.n && b[2] >= v.s && b[1] <= v.e && b[3] >= v.w);
   const subs = q.sources.filter((sub) => meets(sub.bbox, bbox));
   const sourceMs = {};
+  const softFailed = [];
   const parts = await Promise.all(subs.map(async (sub) => {
     // Every column the row's identify reads (NAME AND CITY on Denton's table); "*" when the row names none.
     const cols = Object.values((sub.row && sub.row.fields) || {}).filter(Boolean);
@@ -1090,7 +1100,18 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
     let res;
     const t0 = Date.now();
     try { res = await fetchVectorFeatures(subSource, bbox, opts); }
-    catch (_) { await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 700)); res = await fetchVectorFeatures(subSource, bbox, opts); }
+    catch (_) {
+      await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 700));
+      /* A COUNTY-PUBLISHED row that stands in for / backs up / annotates the regional layer (`softFail: true` — Fort Bend's ETJ + releases, Harris) is SOFT: if it still fails the
+       * regional layer draws as it always did (owner constraint #39) and the failure is REPORTED on the payload (`softFailed`), not thrown —
+       * a county server being down must not blank Houston's ETJ. Every other row keeps the all-or-nothing rule above. */
+      try { res = await fetchVectorFeatures(subSource, bbox, opts); }
+      catch (e) {
+        if (!(sub.row && sub.row.softFail)) throw e;
+        softFailed.push(sub.id);
+        return { out: [], truncated: false, soft: true };
+      }
+    }
     sourceMs[sub.id] = Date.now() - t0;   // per-publisher wall time, so a SLOW publisher is attributable, not guessed
     const { features, truncated } = res;
     const out = [];
@@ -1098,7 +1119,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
       // The ONE reader of a publisher's name (identify uses it too) — so a disputed strip and a release area are
       // named identically on the map and in the screening.
       const n = normalizeEtjFeature(sub.row, f.attributes || {});
-      const label = sub.row.release ? `${sub.row.nameConst || "Fort Worth"} ETJ release area (SB 2038)`
+      const label = sub.row.release ? `${n.names[0] || sub.row.nameConst || "The city's"} ETJ release area (SB 2038)`
         : n.undetermined ? "Undetermined (disputed)" : n.names.join(" / ");
       out.push({ geometry: f.geometry, attributes: {
         CITY: label, _src: sub.id, ...(sub.row.release ? { _release: true } : {}),
@@ -1107,7 +1128,38 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
     }
     return { out, truncated };
   }));
-  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated), sourceMs };
+  /* ⛔ NEW-1 / NEW-2 — THE DRAWN HALF OF "COUNTY FIRST". The identify (jurisdiction.js `supersededSourceIds`, `etjFallbackSourcesForPoint`)
+   * and this layer read the same rows, so the line you see is the line the screening reports:
+   *   • a row that `supersedes` another (Fort Bend's table over H-GAC) cuts the superseded row's polygons by the COUNTY LINE, so inside the
+   *     county only the county's own polygons draw and outside it H-GAC draws untouched. No county line, no cut (the stale polygons stay,
+   *     said on `softFailed`) — drawing H-GAC as before is the old picture, not a false clean;
+   *   • a row that is `fallbackFor` another (Harris's table under H-GAC) draws only where the primary draws NOTHING (its polygons cut by the
+   *     primary's own), because the identify asks it only when the primary is silent. */
+  const byId = new Map(subs.map((sub, i) => [sub.id, i]));
+  const outs = parts.map((p) => p.out);
+  const refOf = bbox ? [(bbox.w + bbox.e) / 2, (bbox.s + bbox.n) / 2] : [-95.4, 29.8];
+  for (let i = 0; i < subs.length; i++) {
+    const row = subs[i].row || {};
+    if (Array.isArray(row.supersedes) && row.supersedes.length && outs[i].length && row.supersedeClipUrl) {
+      const targets = row.supersedes.map((id) => byId.get(id)).filter((j) => j != null && outs[j].length);
+      if (targets.length) {
+        let county = null;
+        try {
+          const j = await opts.fetchJson(buildQueryUrl(row.supersedeClipUrl + "/query", { where: "1=1", outFields: "OBJECTID", returnGeometry: "true", outSR: 4326, geometryPrecision: 4, maxAllowableOffset: 0.0002, f: "json" }), { timeoutMs: null });
+          county = (j && !j.error && j.features) || null;
+        } catch (_) { county = null; }
+        if (county && county.length) for (const t of targets) outs[t] = cutEtjBy(outs[t], county, { ref: refOf }).features;
+        else softFailed.push(row.id + ":county-line");
+      }
+    }
+    if (row.fallbackFor && byId.has(row.fallbackFor) && outs[i].length) {
+      const prim = outs[byId.get(row.fallbackFor)];
+      if (prim.length) outs[i] = cutEtjBy(outs[i], prim, { ref: refOf }).features;
+    }
+  }
+  const result = { features: outs.flat(), truncated: parts.some((p) => p.truncated), sourceMs };
+  if (softFailed.length) result.softFailed = softFailed;
+  return result;
 }
 
 export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures, tier = null } = {}) {
@@ -1424,6 +1476,20 @@ const polygonEdgeNear = (rings, lng, lat, tolDeg) =>
  * reachable as the channel centreline next to it, and changes nothing for a wide polygon
  * (a tap in its middle was already a hit; a tap just outside its edge now hits it, which is
  * what a user pointing at a boundary means anyway). */
+/* EVERY polygon feature that CONTAINS the point (exact containment, no edge tolerance), in the collection's order — for a layer whose polygons STACK (Smyrna's zoning holds overlay
+ * districts over base districts), where `hitFeature`'s one answer would hide the others. Pure. */
+export function hitFeatures(fc, { lat, lng } = {}) {
+  if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+  const out = [];
+  for (const f of fc.features) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon" && inPolygon(g.coordinates, lng, lat)) out.push(f);
+    else if (g.type === "MultiPolygon" && (g.coordinates || []).some((poly) => inPolygon(poly, lng, lat))) out.push(f);
+  }
+  return out;
+}
+
 export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
   if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   /* TWO PASSES, and the order matters. An EXACT hit anywhere in the collection beats a
@@ -1551,6 +1617,7 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
     // UNDERCOUNT — consumers (the mitigation engine) must flag it, never read it as
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
+    if (pulled.softFailed && pulled.softFailed.length) out.softFailed = pulled.softFailed;   // NEW-1/NEW-2: a county row that did not answer — reported on the payload, never silent
     if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
     if (netNote) out.netted = netNote;        // B2472945: what the city-limits cut did, so it is reportable and testable
     return out;

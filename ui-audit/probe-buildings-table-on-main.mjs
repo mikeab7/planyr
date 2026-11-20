@@ -38,7 +38,7 @@ await ctx.route(/^https?:\/\//, (r) => (r.request().url().startsWith(BASE) ? r.c
 const page = await ctx.newPage();
 await assertMeasurable(page, "probe-buildings-table-on-main");
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
-if (!FX) await page.evaluate((r) => { const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
+if (!FX) await page.evaluate((r) => { const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, rec);
 await page.goto(`${BASE}/#/project/${rec.id}/site`, { waitUntil: "load" });
 await page.reload({ waitUntil: "load" });
 await page.getByTestId("planner-canvas").waitFor({ state: "visible", timeout: 90000 });
@@ -58,7 +58,7 @@ async function exportOnce(flatten) {
   await pacedWait(page, 600);
   await page.getByRole("button", { name: "Continue ➜" }).click();
   await pacedWait(page, 1500);
-  for (const label of ["Buildings table", "Stats band"]) { // a saved plan can have these OFF (the Goose fixture does); the owner's export had them ON
+  for (const label of ["Buildings table", "Site summary strip"]) { // a saved plan can have these OFF (the Goose fixture does); the owner's export had them ON
     const t = page.getByLabel(label);
     if ((await t.count()) && !(await t.first().isChecked())) { await t.first().click(); await pacedWait(page, 1500); }
     console.log(`   compose toggle "${label}": ${(await t.count()) ? (await t.first().isChecked()) ? "ON" : "OFF" : "absent"}`);

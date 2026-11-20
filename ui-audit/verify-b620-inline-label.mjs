@@ -162,7 +162,7 @@ if (hasPanelField) {
   await page.mouse.move(480, 740); await page.mouse.down(); await page.mouse.move(700, 740); await page.mouse.move(920, 740); await page.mouse.up();
   await page.waitForTimeout(300);
   const strayNewLine = await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = raw["verify-b620"]; if (!site) return { total: 0, labelled: 0 };
     const lines = (site.markups || []).filter((m) => m.kind === "line");
     return { total: lines.length, labelled: lines.filter((m) => (m.inlineLabel || "").trim()).length };

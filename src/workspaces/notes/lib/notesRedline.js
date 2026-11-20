@@ -127,8 +127,9 @@ function opaqueBlock(tag, label, node, path) {
 /** Walk one document model into a flat, in-order list of leaf blocks (paragraphs, headings,
  *  code blocks, and opaque non-text nodes) — never throws on a node type it doesn't know;
  *  an unrecognised node's own content is walked as more blocks, so nothing silently vanishes. */
-export function flattenBlocks(doc) {
+export function flattenBlocks(doc, opts = {}) {
   const out = [];
+  let anchorOrdinal = 0;
 
   const walk = (node, path) => {
     if (!node || typeof node !== "object") return;
@@ -212,9 +213,29 @@ export function flattenBlocks(doc) {
       case "noteSketch":
         out.push(opaqueBlock("sketch", "Sketch", node, path));
         return;
-      case "noteAnchor":
-        out.push(opaqueBlock("box", "Box", node, path));
+      /* B2671222 — A BOX IS A WRAPPER, NOT A SINGLE OPAQUE BLOCK. Every page the app opens is one `noteAnchor` holding all
+       * its paragraphs, so treating the box as one opaque leaf made the per-paragraph merge unreachable on a real page:
+       * two people editing different paragraphs of one note raised the whole-document conflict. Its paragraphs/headings/
+       * lists are walked like a blockquote's; the box's own attrs ride `raw` (excluded from the signature, so a move or
+       * resize alone is not a content disagreement) and `aid` names WHICH box. An empty box has no leaf to carry its
+       * wrapper, so it stays one opaque block rather than vanishing from a rebuilt document. */
+      case "noteAnchor": {
+        if (!Array.isArray(node.content) || !node.content.length) { out.push(opaqueBlock("box", "Box", node, path)); return; }
+        /* ⛔ THE uid IS NOT MINTED PER FLATTEN HERE. The merge flattens base, local and server separately and rebuilds by
+         * grouping equal wrappers; a per-call uid would give each side's copy of the SAME box a different wrapper and the
+         * rebuilt page would come back as several boxes. A box's identity is its `aid` (or, for a legacy unstamped box,
+         * its order among the boxes of this document), so both sides produce the same wrapper. */
+        anchorOrdinal += 1;
+        /* B2671222 (flat-base case) — a page last saved BEFORE it had boxes is wrapped into ONE box when each device opens it,
+         * and each device mints that box's `aid` on its own, so the same box carries a different name on every side. When the
+         * merge base has no box at all (`pinFirstAnchor`), the first box on each side IS that one wrapping, so it gets one
+         * shared identity (no aid, ordinal 0) and the paragraphs inside it can be compared. Later boxes keep their own aid. */
+        const pinned = !!opts.pinFirstAnchor && anchorOrdinal === 1;
+        const aid = pinned ? null : (node.attrs?.aid || null);
+        const p2 = [...path, { type: "noteAnchor", aid, raw: pinned && opts.pinRaw ? opts.pinRaw : (node.attrs || null), uid: aid ? `anchor:${aid}` : `anchor#${pinned ? 1 : anchorOrdinal}` }];
+        node.content.forEach((k) => walk(k, p2));
         return;
+      }
       case "table":
         out.push(opaqueBlock("table", "Table", node, path));
         return;

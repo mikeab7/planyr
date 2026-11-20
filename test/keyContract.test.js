@@ -628,13 +628,22 @@ describe("⛔ B1012832 — the plan-name field and every AnchoredMenu-portalled 
       .not.toMatch(/tag === "INPUT" \|\| tag === "TEXTAREA" \|\| tag === "SELECT" \|\| tag === "BUTTON" \|\| \(ae && ae\.isContentEditable\)/);
   });
 
-  it("the plan-name field's own onKeyDown never stops propagation — the guard depends on it reaching window", () => {
-    const s = plannerSource();
-    const i = s.indexOf('data-testid="plan-name-input"');
-    expect(i, "the plan-name input moved — re-point this test").toBeGreaterThan(0);
-    const nearby = s.slice(Math.max(0, i - 400), i + 40);
-    expect(nearby).toMatch(/onKeyDown=\{\(e\) => \{ if \(e\.key === "Enter"\) e\.target\.blur\(\); \}\}/);
-    expect(nearby).not.toMatch(/stopPropagation/);
+  it("the plan-name field's own onKeyDown never stops propagation of an arrow-family key — the guard depends on it reaching window", () => {
+    /* NEW-1 (2026-11-04): the separate "Plan name" input is gone; the plan name is edited IN PLACE in the current row
+       (components/PlanMenu.jsx `RenameField`). The guarantee is unchanged: a key that is not Enter / Escape (Left / Right /
+       Home / End / Shift+Arrow …) is not handled by the field at all, so it reaches the planner's window listener, which
+       resolves FIELD scope off document.activeElement. Escape is the one key it consumes (cancel the rename, keep the menu). */
+    const pm = src("../src/workspaces/site-planner/components/PlanMenu.jsx");
+    const i = pm.indexOf('data-testid="plan-rename-input"');
+    expect(i, "the rename field moved — re-point this test").toBeGreaterThan(0);
+    const field = pm.slice(i, i + 1400);
+    const onKey = field.slice(field.indexOf("onKeyDown="), field.indexOf("style="));
+    expect(onKey).toMatch(/e\.key === "Enter"/);
+    expect(onKey).toMatch(/e\.key === "Escape"/);
+    // …and nothing else is intercepted: the only stopPropagation is inside the Escape branch.
+    expect((onKey.match(/stopPropagation/g) || []).length).toBe(1);
+    expect(onKey.indexOf("stopPropagation")).toBeGreaterThan(onKey.indexOf('"Escape"'));
+    expect(onKey).not.toMatch(/Arrow|Home|End/);
   });
 
   it("AnchoredMenu hides an unplaced panel with opacity, never visibility — visibility:hidden is unfocusable", () => {

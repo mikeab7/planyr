@@ -67,7 +67,7 @@ try {
   const sub = (id) => page.locator(`[data-overlay-row="${id}"] [data-testid="overlay-row-sub"]`).first().innerText();
   const undo = async () => { await page.evaluate(() => document.activeElement && document.activeElement.blur && document.activeElement.blur()); await page.locator('button[aria-label="Undo"]').click(); await page.waitForTimeout(450); };
   // the device copy of the throwaway plan: scan every plans-store key (the signed-in key is user-scoped) for the record with our id
-  const stored = () => page.evaluate((id) => { for (const k of Object.keys(localStorage)) { if (!/^planarfit:sites/.test(k)) continue; try { const m = JSON.parse(localStorage.getItem(k) || "{}"); const r = Array.isArray(m) ? m.find((x) => x && x.id === id) : (m[id] || Object.values(m).find((x) => x && x.id === id)); if (r && r.sheetOverlays) return r.sheetOverlays; } catch (_) {} } return []; }, ID);
+  const stored = () => page.evaluate((id) => { for (const k of Object.keys(localStorage)) { if (!/^planarfit:sites/.test(k)) continue; try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); const r = Array.isArray(m) ? m.find((x) => x && x.id === id) : (m[id] || Object.values(m).find((x) => x && x.id === id)); if (r && r.sheetOverlays) return r.sheetOverlays; } catch (_) {} } return []; }, ID);
   const cloud = () => page.evaluate(async (id) => { const q = await window.pfSupabase.from("sites").select("data").eq("id", id).single(); return (q.data && q.data.data && q.data.data.sheetOverlays || []).map((o) => o.id); }, ID);
 
   const openRow = async (id) => { if (!(await page.locator(`[data-testid="overlay-open-${id}"]`).count())) await page.locator(`[data-testid="reference-open-${id}"]`).click(); await page.waitForTimeout(400); }; // a freshly added overlay is already open — a second click would COLLAPSE it
@@ -202,10 +202,10 @@ try {
   await page.waitForTimeout(2500);
   const gone = await page.evaluate(async ([id, k]) => {
     try {
-      const all = JSON.parse(localStorage.getItem(k) || "{}"); delete all[id]; localStorage.setItem(k, JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete all[id]; localStorage.setItem(k, JSON.stringify(all));
       if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
-      return { local: !JSON.parse(localStorage.getItem(k) || "{}")[id], cloud: !(q.data && q.data.length) };
+      return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
   }, [ID, KEY || "planarfit:sites:v1"]).catch((e) => ({ error: String(e) }));
   check("throwaway site deleted (local + cloud) and verified gone", !!gone.local && !!gone.cloud, JSON.stringify(gone));

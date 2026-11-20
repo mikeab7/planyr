@@ -3,7 +3,7 @@
  * ⛔ WHY THIS IS ITS OWN MODULE — the same tier split `perfSampling.js` records, for the same
  * measured reason. `main.jsx` and `AppHeader` are on the critical path of EVERY route, so a
  * static edge from either into the recorder would hoist the whole diagnostic into the chunk that
- * every route downloads. (`StoragePanel`'s header records the last time that was tried by
+ * every route downloads. (The retired Storage panel's header recorded the last time that was tried by
  * accident: an 11.3 KB chunk landed on a plain Site load and breached three bundle budgets.) The
  * recorder proper is fetched by a dynamic `import()` from `main.jsx`, so it is its own lazy chunk
  * and counts against no route budget — the bundle audit's route closure is over STATIC imports.
@@ -57,6 +57,12 @@ export function bindPerfRefusal(fn) { _refusal = typeof fn === "function" ? fn :
 export function perfCaptureRefusal() { try { return _refusal ? _refusal() : null; } catch (_) { return null; } }
 
 /** Is a recorder listening? Drives whether the manual control is offered at all. */
+/* NEW-1 (2026-11-01) — the recorder's read-only recent-window summary (perfRecorder.perfRecentWindow), bound at install so a
+ * reader (the planner's `window.__plannerPerf()`) never has to import the lazily-loaded recorder chunk. */
+let _recent = null;
+export function bindPerfRecent(fn) { _recent = typeof fn === "function" ? fn : null; }
+export function perfRecent(windowMs) { try { return _recent ? _recent(windowMs) : null; } catch (_) { return null; } }
+
 export function perfRecorderArmed() { return !!_capture; }
 
 /** "That felt slow just now." Returns true if a capture was TAKEN — see `perfCaptureDelivery`
@@ -111,4 +117,4 @@ export function noteLayerContext(overlays) {
 export function perfContext() { return { planId: _planId, planSwitches: _planSwitches, ppf: _ppf, layers: _layers }; }
 
 /** Test-only reset. */
-export function __resetPerfHandle() { _refusal = null; _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }
+export function __resetPerfHandle() { _recent = null; _refusal = null; _capture = null; _delivery = null; _planId = null; _planSwitches = 0; _ppf = NaN; _layers = ""; }

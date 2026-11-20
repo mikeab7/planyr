@@ -83,7 +83,7 @@ const cleanup = async () => {
       out.site_elements = de.error ? String(de.error.message) : "deleted";
       const ds = await window.pfSupabase.from("sites").delete().eq("id", id);
       out.sites = ds.error ? String(ds.error.message) : "deleted";
-      try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete m[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(m)); } catch (_) {}
+      try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete m[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(m)); } catch (_) {}
       const left = await window.pfSupabase.from("sites").select("id").eq("id", id);
       out.remaining = (left.data || []).length;
       return out;

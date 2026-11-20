@@ -13,14 +13,23 @@
  * server-side (export image) so each agency's standard symbology comes through.
  */
 import * as EL from "esri-leaflet";
+import { guardRasterErrors } from "./parcelOpacityGuard.js"; // NEW-1 (2026-11-12): an /export image failing after its row was switched off must not throw "removeLayer of null"
+import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
 import { JURISDICTION_LAYERS } from "./counties.js";
+import { CHAMBERS_LAYERS, CHAMBERS_VINTAGE, CHAMBERS_MERGE_GROUPS } from "./chambersLayers.js"; // NEW-1 (Chambers County: Mont Belvieu + Baytown zoning, utilities, Master Drainage Plan, B2671240, 2026-11-12)
 import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
 import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
+import { TX_CITY_ZONING_LAYERS, TX_CITY_ZONING_VINTAGE } from "./txCityZoningLayers.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster, 2026-11-12)
+import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
+import { FORTBEND_LAYERS, FORTBEND_VINTAGE, FORTBEND_MERGE_GROUPS } from "./fortBendLayers.js"; // NEW-1 (Fort Bend County layers, 2026-11-12)
+import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_MERGE_GROUPS } from "./nashvilleBufferLayers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps, 2026-11-12)
+import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
+import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
 import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
 import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
 import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
-import { TN_LAYERS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
+import { TN_LAYERS, TN_MERGE_GROUPS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -41,6 +50,7 @@ import {
   wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable, countVertices, FEATURE_VERTEX_BUDGET, FEATURE_VERTEX_TOTAL,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
+import { foldBoundaryItems } from "./jurisdictionCard.js";
 // One-line predicate, needed synchronously when a layer is built — see featureHoverAttach.js for
 // why the rest of the hover engine is deferred.
 const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
@@ -127,7 +137,11 @@ export const MERGE_GROUPS = {
     note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
   },
   ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
+  ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
+  ...FORTBEND_MERGE_GROUPS, // NEW-1 (Fort Bend County): the Brazos River Studies row of two
+  ...NASHVILLE_BUFFER_MERGE_GROUPS, // B2671266 / B2671267 (Metro Nashville): the water-quality buffers row of four, the pending / preliminary flood maps row of two
   ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
+  ...TN_MERGE_GROUPS, // NEW-1 (Rutherford County TN): the Zoning row of four governments
 };
 
 /* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
@@ -1320,7 +1334,19 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...FORTBEND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
+
+/* B2671240 (Chambers County: Mont Belvieu + Baytown) — joined here, in lines of its own, not spread into the one-line registry / merge-group / vintage
+ * lists above: those are edited by nearly every layer PR and this branch lost four 45-minute builds in a row to the resulting merge conflicts. */
+Object.assign(ALL_LAYERS, CHAMBERS_LAYERS);
+Object.assign(MERGE_GROUPS, CHAMBERS_MERGE_GROUPS);
+
+/* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
+ * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
+Object.assign(ALL_LAYERS, HOUSTON_METRO_LAYERS);
+
+/* NEW-1 (Texas city zoning): joined here, not spread into the one-line registry above — that line is edited by nearly every layer PR, and a shared line is a guaranteed merge conflict. */
+Object.assign(ALL_LAYERS, TX_CITY_ZONING_LAYERS);
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1329,6 +1355,9 @@ export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDE
  * numbers above survive as comments of intent only; the old tier CEILINGS (layerWeight.js) no longer bound a default. */
 export const DEFAULT_LAYER_OPACITY = 1;
 Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg) cfg.opacity = DEFAULT_LAYER_OPACITY; });
+/* NEW-1 (owner 2026-11-05) — every vector member of the Counties & Cities merged row answers a CLICK on the planner canvas too (it used to answer only on the Map view); the members'
+ * answers are folded into ONE card by `jurisdictionCard.foldBoundaryItems` in `identifyOverlaysAt`. Click only — never hover (constraint #43). */
+Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg && cfg.kind === "vector" && cfg.mergeGroup === "counties_cities" && cfg.canvasIdentify == null) cfg.canvasIdentify = true; });
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
@@ -1410,14 +1439,20 @@ export const LAYER_VINTAGE = {
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
-  fb_contours: "Fort Bend Drainage District — current edition",
   ...DESOTO_VINTAGE,
+  ...TX_CITY_ZONING_VINTAGE,
+  ...SUGARLAND_VINTAGE,
+  ...FORTBEND_VINTAGE,
+  ...NASHVILLE_VINTAGE,
   ...MISSISSIPPI_VINTAGE,
   ...COLORADO_VINTAGE,
   ...GEORGIA_VINTAGE,
+  ...HOUSTON_METRO_VINTAGE,
   ...FLORIDA_VINTAGE,
   ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };
+Object.assign(LAYER_VINTAGE, CHAMBERS_VINTAGE); // B2671240 (Chambers County) — its own line, see the note by CHAMBERS_LAYERS above
+
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
 export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
@@ -1501,6 +1536,13 @@ async function probeOnce(probeUrl) {
     const r = await fetchWithRetry(probeUrl, {}, 3);
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}`, httpStatus: r.status };
     const j = await r.json().catch(() => ({}));
+    /* NEW-2 (2026-11-12) — ArcGIS Server answers a DEAD site (the web adaptor up, no server machines behind it) with HTTP 200 and the ADMIN-style body
+     * {"status":"error","messages":["Could not access any server machines…"]} — no `error` key. Fort Bend's whole arcgisweb host did exactly that for weeks, and this
+     * probe read the body as a live service, so the contour row sat at a green "loaded" dot over nothing. `status:"error"` is a failure, with the server's own words. */
+    if (j && !j.error && String(j.status || "").toLowerCase() === "error") {
+      const msg = Array.isArray(j.messages) ? j.messages.map((m) => String(m)).filter(Boolean).join(" ") : "";
+      return { ok: false, error: msg || "service error" };
+    }
     return j && j.error
       ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
       // Capture the service's own data extent (fullExtent, or `extent` on a FeatureServer/layer)
@@ -1614,11 +1656,15 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
     const n = featureLayerCount(lyr);
     onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
-  // B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
-  lyr.on("overbudget", (e) => {
+  /* B2507064 (NEW-9): the draw budget refused a batch — a plain failure, never a frozen tab.
+   * NEW-2 (B2507064 ×2, owner 2026-11-03): the refusal must never CONTRADICT THE MAP. A layer that already has polygons on the map for this view (`__pfDrawnVertices`, set by
+   * `buildFeatureLayer`) keeps reading "loaded" — a red "too detailed" line over drawn polygons was the owner's complaint; only a layer with NOTHING drawn says anything, and
+   * it says it in plain words (no point counts, no units): "Zoom in to see Zoning here." A row's own `overbudgetMsg` still wins (the close-end refusals). */
+  lyr.on("overbudget", () => {
+    const drawn = typeof lyr.__pfDrawnVertices === "function" ? lyr.__pfDrawnVertices() : 0;
+    if (drawn > 0) { onStatus && onStatus(k, "loaded", null); return; }
     refused = true;
-    // B2521584: a row whose refusal is at the CLOSE end of the zoom range (whole river reaches) can say so — "zoom in" would be the wrong advice there
-    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `Zoom in to see ${String(cfg && cfg.label || "this layer").toLowerCase()} here.`);   // B2573312: plain words — no point counts, no units (owner 2026-10-30)
+    onStatus && onStatus(k, "failed", (cfg && cfg.overbudgetMsg) || `Zoom in to see ${(cfg && cfg.label) || "this layer"} here.`);
   });
   lyr.on("requesterror", (e) => {
     cycleErr = true; clearTimeout(resetTimer);   // this cycle failed: no `load` of it may reset the count
@@ -1638,19 +1684,6 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   });
 }
 
-/* A feature's bounding box [west, south, east, north] from its GeoJSON geometry (null when it has none) — the draw budget judges the view, so it must know where a held feature is. */
-function bboxOf(f) {
-  const g = f && f.geometry;
-  if (!g) return null;
-  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
-  const walk = (c) => {
-    if (typeof c[0] === "number") { if (c[0] < w) w = c[0]; if (c[0] > e) e = c[0]; if (c[1] < s) s = c[1]; if (c[1] > n) n = c[1]; return; }
-    for (const x of c) walk(x);
-  };
-  try { if (g.type === "GeometryCollection") (g.geometries || []).forEach((x) => x && x.coordinates && walk(x.coordinates)); else if (g.coordinates) walk(g.coordinates); } catch (_) { return null; }
-  return Number.isFinite(w) ? [w, s, e, n] : null;
-}
-
 /* THE ONE PLACE an esri featureLayer is constructed (NEW-1). Both call sites below go through
  * here so neither can drift back to the broken default marker: a POINT feature with no
  * `pointToLayer` gets `L.marker` + `L.Icon.Default`, whose PNG never resolved under the bundler —
@@ -1666,13 +1699,21 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   /* NEW-1 (DeSoto / Olive Branch) — an optional per-line LABEL (`cfg.lineLabel`: the pipe size printed on the line). The text is decided by the pure
    * `lineLabelText`; the label is a permanent Leaflet tooltip bound ONLY while the map is at or past `lineLabel.minZoom` (a dense network labelled at
    * every zoom is a wall of numbers) and unbound again below it. The tooltip lives in the label pane so it sits over the strokes. */
-  let labelsOn = false;
+  let labelsOn = false, labelCount = 0;
   const labelOpts = () => ({ permanent: true, direction: "center", className: "pf-line-label", interactive: false, opacity: 1, ...(labelPane ? { pane: labelPane } : {}) });
   const wantLabels = (l) => !!(l && l._map && l._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17));
+  /* THE ONE WAY a label is bound: a tooltip positioned with a 2D transform (flatLabel.js — a 3D one made every label its own compositor layer and stalled a pan). */
+  const bindLabel = (l, text) => { if (!l || typeof l.bindTooltip !== "function") return; l.bindTooltip(text, labelOpts()); if (typeof l.getTooltip === "function") flattenTooltip(l.getTooltip()); };
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
     interactive: interactive && canHover,
     pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
-    ...(cfg.lineLabel && !cfg.lineLabel.polygon ? { onLabel: (layer, text) => { layer.__pfLabel = text; if (labelsOn && typeof layer.bindTooltip === "function") layer.bindTooltip(text, labelOpts()); } } : {}),
+    ...(cfg.lineLabel && !cfg.lineLabel.polygon ? { onLabel: (layer, text) => {
+      layer.__pfLabel = text;
+      /* A row may cap how many labels it will bind (`lineLabel.maxLabels`): a dense network at close zoom is thousands of permanent tooltips, and binding them froze the tab for seconds
+       * (Bartow sewer in downtown Cartersville: 2,135 lines → a 2–3 s task at z17, 10 s at z16, measured on a deployed preview). Past the cap the lines draw UNLABELLED — a wall of numbers is no label. */
+      if (cfg.lineLabel.maxLabels != null && ++labelCount > cfg.lineLabel.maxLabels && labelsOn) { labelsOn = false; try { lyr.eachFeature((l) => { if (typeof l.unbindTooltip === "function") l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ } }
+      if (labelsOn) bindLabel(layer, text);
+    } } : {}),
   }));
   /* B2452976 — esri-leaflet's `_redraw` (run for every feature a pan re-delivers) feeds `geometry.coordinates[1]/[0]` to `pointToLayer` for any layer that has one and
    * a `setStyle`. For a POINT that is the lat/lng; for a polygon it is a ring, so `latLng` throws "Invalid LatLng object", the whole `createLayers` batch aborts and the
@@ -1693,73 +1734,58 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
   // B2507064 (NEW-9) — the draw budget: a batch of features over the vertex budget is NOT handed to Leaflet (that is what froze the tab); the layer says so instead.
   {
     const origCreate = lyr.createLayers;
+    let drawn = 0;
     const cap = cfg.vertexBudget || FEATURE_VERTEX_BUDGET, total = cfg.vertexBudget ? cfg.vertexBudget * 2 : FEATURE_VERTEX_TOTAL;
-    /* What is already on the map, by feature id → { v: the vertex count of the geometry held now, count: what it costs the budget (0 for a feature esri-leaflet already held before this wrapper saw it), bb: its bounding box [w, s, e, n] }. esri-leaflet re-delivers a feature it already holds (every pan / grid
-     * cell that touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
+    /* B2521584 — what is already on the map, by feature id → the vertex count of the geometry held now. esri-leaflet re-delivers a feature it already holds (every pan / grid cell that
+     * touches it) and only UPDATES it, so a repeat costs nothing — but a re-delivery can carry a much HEAVIER geometry (a simplified layer re-asked after a 2-level zoom sends the finer
      * copy under the same id, and `setLatLngs` replaces the old one). So a held id is charged only for the vertices it GROWS by; a refused batch leaves the old geometry in place. */
     const held = new Map();
     /* NEW-1 review (B2521584, finding 7): esri-leaflet takes a feature OFF the map when its cell leaves the view (`removefeature`) and puts it back with `addLayers` (`addfeature`, no
-     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. A feature that left the view stops counting until it returns; a `permanent` removal forgets it. */
+     * `createLayers`), keeping the Leaflet layer in `_layers` for the next visit. The total is judged against what is ON the map, so a feature that left the view stops counting until it
+     * returns — otherwise a long pan accumulates every cell ever visited and a layer is refused as "too detailed" in a view that is not. `offMap` is that set; a `permanent` removal forgets it. */
     const offMap = new Set();
-    /* B2573312 (NEW-4) — THE TOTAL IS JUDGED AGAINST THE VIEW, NOT AGAINST EVERYTHING EVER LOADED. The layer total used to be a running sum of every feature fetched and still held, so a layer panned
-     * across a county (or zoomed out once and back in) carried hundreds of thousands of vertices from places no longer on screen and refused the next small batch — "too detailed to draw (62k points)"
-     * over polygons that were visibly drawn. What freezes a tab is what the view has to draw, so only held features whose box touches the (padded) view count. A feature with no id can never be
-     * recognised again, so it is counted every time it arrives and never forgotten (the safe direction). */
-    let anon = 0;
-    const viewSum = () => {
-      const map = lyr._map, b = map && typeof map.getBounds === "function" ? map.getBounds().pad(0.25) : null;
-      let n = anon;
-      for (const [id, h] of held) {
-        if (offMap.has(id)) continue;
-        if (b && h.bb && (h.bb[2] < b.getWest() || h.bb[0] > b.getEast() || h.bb[3] < b.getSouth() || h.bb[1] > b.getNorth())) continue;
-        n += h.count;
-      }
-      return n;
-    };
+    const heldSum = () => { let n = 0; for (const [id, v] of held) if (!offMap.has(id)) n += v; return n; };
     lyr.on("removefeature", (e) => {
       const id = e && e.feature && e.feature.id;
       if (id == null || !held.has(id)) return;
-      if (e.permanent) { held.delete(id); offMap.delete(id); } else offMap.add(id);
+      if (!offMap.has(id)) { drawn = Math.max(0, drawn - held.get(id)); offMap.add(id); }
+      if (e.permanent) { held.delete(id); offMap.delete(id); }
     });
     lyr.on("addfeature", (e) => {
       const id = e && e.feature && e.feature.id;
-      if (id != null) offMap.delete(id);
+      if (id != null && offMap.has(id)) { offMap.delete(id); drawn += held.get(id) || 0; }
     });
     lyr.createLayers = function (features) {
-      let grow = 0, net = 0, anonNet = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what the view holds (judged against the layer total)
+      let grow = 0, net = 0;   // grow: vertices that are NEW or GREW (judged against the per-batch cap); net: the signed change in what is on the map (judged against the layer total)
       const mine = [];
       const inBatch = new Set();
-      const preHeld = new Set();   // ids esri-leaflet already held before this wrapper saw them: free repeats, never charged (as before)
       for (const f of features || []) {
         const fv = countVertices([f], Math.max(cap, total));
         const id = f && f.id != null ? f.id : null;
         if (id != null && inBatch.has(id)) continue;   // the same id twice in ONE batch is one feature on the map
         if (id != null) inBatch.add(id);
-        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id).v); net += fv - (offMap.has(id) ? 0 : held.get(id).v); }
-        else if (id != null && this._layers && this._layers[id]) { preHeld.add(id); /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
-        else { grow += fv; net += fv; if (id == null) anonNet += fv; }
-        if (id != null) mine.push([id, fv, f]);
+        if (id != null && held.has(id)) { grow += Math.max(0, fv - held.get(id)); net += fv - (offMap.has(id) ? 0 : held.get(id)); }
+        else if (id != null && this._layers && this._layers[id]) { /* held by esri-leaflet before this wrapper saw it: a repeat, free (as before) */ }
+        else { grow += fv; net += fv; }
+        if (id != null) mine.push([id, fv]);
       }
-      if (grow > cap || viewSum() + net > total) {
+      if (grow > cap || drawn + net > total) {
         try { this.fire("overbudget", { vertices: grow, features: (features || []).length }); } catch (_) { /* the status is best-effort; the refusal is what matters */ }
         return undefined;   // refused: nothing is recorded, the old geometry stays on the map
       }
-      anon += anonNet;
-      for (const [id, fv, f] of mine) {
-        const prev = held.get(id);
-        held.set(id, { v: fv, count: prev ? Math.max(0, prev.count + fv - prev.v) : (preHeld.has(id) ? 0 : fv), bb: bboxOf(f) });
-        offMap.delete(id);
-      }
+      drawn = Math.max(0, drawn + net);   // signed: a feature that comes back LIGHTER credits the total (a layer re-asked at several zooms must not ratchet up to a refusal)
+      for (const [id, fv] of mine) { held.set(id, fv); offMap.delete(id); }
       return origCreate.call(this, features);
     };
-    lyr.on("remove", () => { anon = 0; held.clear(); offMap.clear(); });
+    lyr.on("remove", () => { drawn = 0; held.clear(); offMap.clear(); });
+    lyr.__pfDrawnVertices = heldSum;   // NEW-2 (B2507064 ×2): what is on the map right now — attachFeatureRetry reads it so a refusal never contradicts drawn polygons
     // a row that asks the server to simplify (cfg.simplifyFactor) is re-asked when the zoom has moved 2 levels from the one it was fetched at, so a zoomed-in view never keeps the coarse copy
     if (cfg.simplifyFactor) {
       let fetchedAt = null;
       const onZoom = () => {
         const z = lyr._map && lyr._map.getZoom();
         if (fetchedAt == null || z == null || Math.abs(z - fetchedAt) < 2) return;
-        fetchedAt = z;
+        fetchedAt = z; drawn = heldSum();   // the total is what is still ON the map, not zero
         try { lyr.refresh(); } catch (_) { /* the previous copy stays up */ }
       };
       lyr.on("load", () => { if (fetchedAt == null && lyr._map) fetchedAt = lyr._map.getZoom(); });
@@ -1790,16 +1816,17 @@ function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk
     lyr.on("remove", () => { try { lyr._map && lyr._map.off("moveend", publish); } catch (_) { /* map already gone */ } clearViewLegend(id); });
     lyr.on("remove", () => { if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already gone */ } unsub = null; } });
   }
-  /* B2573312 (NEW-3) — an AREA row that prints its code on each polygon (`lineLabel.polygon`: DeSoto zoning) is laid out by the pure `zoneLabels.js` — one label per polygon at its
-   * pole of inaccessibility, hidden when the polygon is too small to hold it, never overlapping — and drawn by the lazy `zoneLabelLayer.js`. The per-feature tooltip path below is for lines. */
+  /* B2563410 — an AREA row that prints its code on each polygon (`lineLabel.polygon`: DeSoto zoning) is laid out by the pure `zoneLabels.js` — ONE label per polygon at its pole of inaccessibility (inside it, even in an
+   * L-shaped lot), hidden when the polygon is too small to hold the text, never overlapping — and drawn by the lazy `zoneLabelLayer.js`. The per-feature tooltip path below stays for lines and the city names. */
   if (cfg.lineLabel && cfg.lineLabel.polygon) {
     import("./zoneLabelLayer.js").then((m) => m.attachZoneLabels(lyr, cfg, { labelPane }), () => { /* the layer still paints; only its codes are unavailable */ });
   } else if (cfg.lineLabel) {
     const syncLabels = () => {
-      const want = wantLabels(lyr);
+      let want = wantLabels(lyr);
+      if (want && cfg.lineLabel.maxLabels != null) { let n = 0; try { lyr.eachFeature((l) => { if (l.__pfLabel) n++; }); } catch (_) { /* counted so far */ } labelCount = n; want = n <= cfg.lineLabel.maxLabels; }
       if (want === labelsOn) return;
       labelsOn = want;
-      try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) l.bindTooltip(l.__pfLabel, labelOpts()); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
+      try { lyr.eachFeature((l) => { if (!l.__pfLabel || typeof l.bindTooltip !== "function") return; if (want) bindLabel(l, l.__pfLabel); else l.unbindTooltip(); }); } catch (_) { /* a label never breaks the line */ }
     };
     /* A row that sets `lineLabel.declutter` (the municipal limits: one name per city) hides a name that would sit on top of a larger city's name — never two names piled up. */
     let ticks = [];
@@ -1865,9 +1892,9 @@ export function rasterIdentifyLayers(overlays, { layerHealthy = () => true, limi
  * the canvas ask the same question with a lat/lng it already computes for its coordinate
  * chip, and get the same answer the map finder's popover would give.
  *
- * Opt-in per layer (`cfg.canvasIdentify`), and ON layers only. Deliberately NOT every
- * vector layer: county / city / ETJ / ISD polygons blanket the view, so every empty click
- * would hit one and the card would become noise instead of an answer.
+ * Opt-in per layer (`cfg.canvasIdentify`), and ON layers only. The Counties & Cities members opt in
+ * (NEW-1, 2026-11-05) and answer as ONE combined card; ISD polygons still do not (they blanket the view,
+ * so every empty click would hit one and the card would become noise instead of an answer).
  *
  * `refs` is the same id→layer object syncOverlayLayers maintains. Returns [] when nothing
  * is under the point (or when a layer has no geometry in hand — a raster/fallback layer
@@ -1883,9 +1910,9 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
       // NEW-1 (DeSoto PSC): several layers may answer with the SAME card (one click → all four utility providers); a shared `dedupeKey` keeps one.
       if (hit && !(hit.dedupeKey && out.some((o) => o.dedupeKey === hit.dedupeKey))) out.push({ id: k, layerLabel: cfg.label, ...hit, about: hit.about || layerAbout(k, cfg) });
     } catch (_) { /* one bad layer never breaks the identify */ }
-    if (out.length >= limit) break;
+    if (out.length >= limit + 4) break; // the merged Counties & Cities row may contribute up to three members, folded into ONE item below
   }
-  return out;
+  return foldBoundaryItems(out).slice(0, limit);
 }
 
 /* NEW-1 — a ROLE-SPLIT raster layer's ref: two live export layers (one per band), presented
@@ -2171,7 +2198,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // <img> — the proxy caching win isn't worth a swap dance inside a child layerGroup.
           buildRaster: () => {
             const fb = cfg.imageFallback || {};
-            return EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, lyrPane, { proxy: false }));
+            return guardRasterErrors(EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, lyrPane, { proxy: false })));
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
@@ -2237,8 +2264,8 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             const buildRaster = (part, proxy) => {
               const pc = partOf(part), pp = paneOf(part.role, above).pane;
               return cfg.kind === "esriImage"
-                ? EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy }))
-                : EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy }));
+                ? guardRasterErrors(EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy })))
+                : guardRasterErrors(EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy })));
             };
             // Honest status wiring (NEW-3/B790): status starts at "loading" and settles ONLY on the
             // real 'load' event; a stall watchdog flips it to amber "slow" if the export never lands

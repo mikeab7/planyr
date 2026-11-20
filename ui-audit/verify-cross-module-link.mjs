@@ -88,7 +88,7 @@ async function scenarioLinkFlow(browser) {
   await postSeq(page, { type: "planar:link-changed", siteId: GID, scheduleId: SID, name: NAME });
   await page.waitForTimeout(700);
   const linked = await page.evaluate((gid) => {
-    try { const rec = (JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"))[gid]; return rec ? (rec.scheduleProjectId ?? null) : "no-record"; }
+    try { const rec = (JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"))[gid]; return rec ? (rec.scheduleProjectId ?? null) : "no-record"; }
     catch (e) { return "error:" + e.message; }
   }, GID);
   if (linked === SID) ok("site store mirrored the schedule link (scheduleProjectId=" + linked + ")");

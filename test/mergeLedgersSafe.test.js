@@ -39,7 +39,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /* The real scripts, copied verbatim — both resolve-ledgers.mjs and merge-ledgers-safe.mjs compute
  * their own REPO from `import.meta.url`, so running the COPY from inside a scratch repo's own
  * scripts/ dir is what scopes every read/write to that scratch repo instead of this real one. */
-const SCRIPT_FILES = ["lib/ledger.mjs", "merge-ledgers-safe.mjs", "resolve-ledgers.mjs", "next-id.mjs", "idBlocks.mjs"];
+const SCRIPT_FILES = ["lib/ledger.mjs", "lib/ledgerBranch.mjs", "merge-ledgers-safe.mjs", "resolve-ledgers.mjs", "next-id.mjs", "idBlocks.mjs"];
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

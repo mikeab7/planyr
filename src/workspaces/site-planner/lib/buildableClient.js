@@ -89,3 +89,26 @@ export async function buildableMaskJob({ origin, parcelRings, setbackRings, hole
   const { dem, t } = await siteDem({ origin, parcelRings, dem: have });
   return job("mask", { origin, parcelRings, setbackRings, holes, s, D, E, dem, t });
 }
+
+/* NEW-1 ("Fit the biggest building") — the search for the biggest building the ground holds, in the terrain worker. `fence` = the limit of
+ * disturbance's rings (the whole graded footprint must daylight inside it); `setbackRings` bound the BUILDING; `template`, `params`,
+ * `frontageDeg`, `currentDeg` as lib/fitBuilding.js takes them. Returns { promise, cancel } — the promise resolves with { result } (or
+ * { cancelled: true }); a missing worker context is re-sent once, like every other buildable job. */
+export function fitBuildingJob({ origin, parcelRings, setbackRings, holes = [], fence, template, params, frontageDeg = null, currentDeg = null, dem: have = null }) {
+  let cancelled = false, current = null;
+  const fenceSig = `${(fence.rings || []).map(ringSig).join(",")}|${(fence.holes || []).map(ringSig).join(",")}`;
+  const promise = (async () => {
+    const { dem, t } = await siteDem({ origin, parcelRings, dem: have });
+    if (cancelled) return { cancelled: true };
+    const key = sweepKey(dem.req.key, { setbackRings, holes, parcelRings, origin });
+    const base = { origin, rings: setbackRings, holes, parcelRings, cell: CELL_FT, marginFt: MARGIN_FT, key, fence, fenceSig, template, params, frontageDeg, currentDeg };
+    const attempt = (withDem) => { current = t.runFitJob({ ...base, dem: withDem ? { grid: dem.grid, req: dem.req } : undefined }); return current.promise; };
+    const first = !shipped.has(key);
+    try { const r = await attempt(first); shipped.add(key); return r; }
+    catch (e) {
+      if (!first && String(e && e.message) === "no-context" && !cancelled) { const r = await attempt(true); shipped.add(key); return r; }
+      throw e;
+    }
+  })();
+  return { promise, cancel: () => { cancelled = true; if (current) current.cancel(); } };
+}

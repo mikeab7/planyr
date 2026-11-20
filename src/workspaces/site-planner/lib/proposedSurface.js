@@ -37,7 +37,8 @@
  *   • off every graded edge the ground holds that edge's elevation for a 5′ SHOULDER, then slopes at the
  *     grading slope (2:1 default) until it daylights on existing ground;
  *   • graded cells outside the SETBACK polygon are counted and located (`grid.outside`) — the flag.
- * Access and drive grading are out of scope; volumes are bank volumes (no shrink/swell).
+ * A DRIVE (a road that ties into the property line, `el.drive`) is graded too (NEW-1, 2026-11-11, lib/driveGrade.js): it starts at the existing
+ * ground at the line, a near-flat landing, then one constant grade to the court / lot edge it serves. Volumes are bank volumes (no shrink/swell).
  *
  * ROUND 4 (B2349120/B2349121, 2026-10-19 — "the calcs seemed awfully rectangular"): with `grading.limit` present the
  * engine grades the site as ONE PAD inside a GRADING LIMIT (lib/gradingLimit.js — the rounded union of every graded
@@ -57,6 +58,7 @@
  * Pure, Node-testable, no DOM. Feet everywhere; elevations ft NAVD88. Screening only —
  * confirm final grading with your civil engineer. */
 import { pointInRing } from "./pondGeom.js";
+import { GRADING_DRIVE_DEFAULTS, DRIVE_TARGET_REACH_FT, DRIVE_SERVE_REACH_FT, driveProfile, driveZAt, driveZNear } from "./driveGrade.js";
 
 /* Run a step generator to completion, synchronously. Its return value is the answer. */
 export function drainSteps(gen) {
@@ -65,7 +67,7 @@ export function drainSteps(gen) {
   return r.value;
 }
 import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradingRules.js";
-import { resolveGradingLimit, pointInRegions, regionsAreaSf } from "./gradingLimit.js";
+import { resolveGradingLimit, pointInRegions, regionsAreaSf, throwEdge } from "./gradingLimit.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 import { plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
 
@@ -171,6 +173,8 @@ export function wedgeDz(zEdge, g0, od, ratio, shoulder = 0) {
 export function classifyGradeElement(el) {
   if (!el) return null;
   if (el.type === "building") return "buildingPad";
+  if (el.type === "drive") return "driveRoad"; // NEW-1 (2026-11-11): an entrance drive — road elevation at the property line → the court/lot it serves (lib/driveGrade.js)
+  if (el.type === "driveInRamp") return "driveInRamp"; // NEW-1 (2026-10-30): a drive-in ramp — its own plane, apron → FFE (lib/driveInRamp.js)
   if (el.dockStack) return "dockApron";
   if (el.type === "trailer") return "trailerParking";
   if (el.type === "parking") return el.accessible ? "carParkingAccessible" : "carParkingGeneral";
@@ -195,8 +199,10 @@ export function slopeBand(classId, rule) {
  * Returns { planes: Map(id → plane), skipped: [ids with no derivable elevation] }.
  * plane: { elId, classId, label, baseElevFt, anchor, dir, slopePct, floating,
  *          check (validateSlopeAgainstRule vs the BASE rule), zAt(pt) }. Pure. */
-export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null } = {}) {
+export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, grading = null, existAt = null } = {}) {
   const planes = new Map();
+  const driveEls = [];
+  const driveWhy = new Map();   // drive id → why it is not a plane (read-only; the live diagnostic prints it)
   const byIdEl = grading ? new Map(els.filter((e) => e && e.id != null).map((e) => [e.id, e])) : null;
   const pavSlopeG = grading ? Math.max(GRADING_DEFAULTS.minPavementSlopePct, Number.isFinite(grading.pavementSlopePct) ? grading.pavementSlopePct : GRADING_DEFAULTS.pavementSlopePct) : 0;
   const lotDropG = grading && Number.isFinite(grading.lotDropFt) ? grading.lotDropFt : GRADING_DEFAULTS.lotDropFt;
@@ -218,6 +224,23 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
     if (!el || !Array.isArray(el.ring) || el.ring.length < 3) continue;
     const classId = classifyGradeElement(el);
     if (!classId) continue;
+    if (classId === "driveRoad") { driveEls.push(el); continue; }   // built after the courts / lots it serves (second pass below)
+    // A DRIVE-IN RAMP is a pad member of its host building whose surface climbs from apron grade (host FFE − rise) at the low end to the FFE at the door.
+    // Its geometry (`el.ramp`: lowPt / axis / lengthFt / riseFt) is prepared by the planner off lib/driveInRamp.js; only the host's FINISH elevation — typed or
+    // suggested, known here and nowhere else — is added. Not an ordinary paved plane: it has no wall, no slope rule and is exempt from seam bending.
+    if (classId === "driveInRamp") {
+      const R = el.ramp, gH = el.hostId != null && byIdEl ? byIdEl.get(el.hostId) : null;
+      const hostFfe = gH && gH.padElevFt != null && isFinite(gH.padElevFt) ? gH.padElevFt : ffeFt;
+      if (!R || !(R.lengthFt > 0) || hostFfe == null || !isFinite(hostFfe)) { skipped.push(el.id); continue; }
+      const base = hostFfe - R.riseFt, rise = R.riseFt, L = R.lengthFt, lx = R.lowPt.x, ly = R.lowPt.y, ux = R.axis.x, uy = R.axis.y;
+      planes.set(el.id, {
+        elId: el.id, classId, label: "Drive-in ramp", baseElevFt: base, anchor: R.lowPt, dir: R.axis, slopePct: (rise / L) * 100, floating: false,
+        hostId: el.hostId ?? null, graded: true, ramp: true,
+        check: { ok: null, violation: null, bound: null, limitPct: null, unknown: true },
+        zAt: (pt) => base + rise * Math.min(1, Math.max(0, ((pt.x - lx) * ux + (pt.y - ly) * uy) / L)),
+      });
+      continue;
+    }
     const baseRule = GRADING_RULES[classId] || null;
     const hasOverride = el.slopeOverridePct != null && isFinite(el.slopeOverridePct);
     // An override pins the plane's slope (min = max); provenance stays the base rule's.
@@ -283,7 +306,70 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       zAt: (pt) => z0 - s * ((pt.x - ax) * dx + (pt.y - ay) * dy),
     });
   }
-  return { planes, skipped };
+  // NEW-1 (2026-11-11) — SECOND PASS: a DRIVE ties into the road's grade at the property line (lib/driveGrade.js). Its far end meets the edge
+  // elevation of the court / lot it serves (read off THAT element's plane at the drive's end point), its near end is the existing ground at the
+  // tie-in. It needs a ground sampler and a served plane; without either it is simply not a plane (the old behaviour), never a guess.
+  for (const el of driveEls) {
+    const D = el.drive;
+    if (!D || !Array.isArray(D.path) || D.path.length < 2 || !Array.isArray(el.ring) || el.ring.length < 3 || typeof existAt !== "function") { skipped.push(el.id); driveWhy.set(el.id, typeof existAt !== "function" ? "no ground sampler yet" : "no usable centerline or footprint"); continue; }
+    const far = D.path[D.path.length - 1];
+    // WHAT THE DRIVE SERVES (V2115881 re-check 2026-11-12: the owner's plan measured a road whose far end sat 41 ft from the nearest graded element and was dropped
+    // as "not a drive", leaving it at court level at the line). ANY paved graded element counts — a court, a trailer row, a car lot, paving — and the NEAREST one wins:
+    // distance is 0 where the end point or any corner of the drive's own footprint lies inside it. Within DRIVE_TARGET_REACH_FT it is "touching" (as before);
+    // out to DRIVE_SERVE_REACH_FT the drive still runs to that element's EDGE elevation (read at the nearest edge point); beyond that, or with nothing graded at all,
+    // it runs to the EXISTING GROUND at its far end. Never back to "not a plane": a road that ties into the line is always graded from the road's own elevation.
+    let target = null, td = Infinity, tEdge = null;
+    for (const e2 of els) {
+      const pl = planes.get(e2.id);
+      if (!pl || pl.classId === "buildingPad" || pl.classId === "driveInRamp" || pl.classId === "driveRoad" || !Array.isArray(e2.ring)) continue;
+      const inside = pointInRing(far, e2.ring);
+      const q = inside ? far : nearestOnRing(far, e2.ring);
+      let dd = q ? Math.hypot(far.x - q.x, far.y - q.y) : Infinity;
+      let qq = q;
+      if (dd > 0) for (const v of el.ring) if (pointInRing(v, e2.ring)) { dd = 0; qq = v; break; }
+      if (dd < td) { td = dd; target = pl; tEdge = qq; }
+    }
+    // the road's elevation at the line: the ground at the tie-in — and, where the sampler has no value exactly there (a void on the edge of the data), the first value a few
+    // feet along the drive; a drive with no ground under it at all is not graded, and says so
+    let zTie = existAt(D.tie);
+    if (!Number.isFinite(zTie)) for (const sFt of [3, 8, 15]) {
+      const v = driveZNear(D.path, sFt);
+      const zz = v ? existAt(v) : null;
+      if (Number.isFinite(zz)) { zTie = zz; break; }
+    }
+    if (!Number.isFinite(zTie)) { skipped.push(el.id); driveWhy.set(el.id, "no ground elevation at the property line"); continue; }
+    let zEndV = null, servedBy = "ground";
+    if (target && td <= DRIVE_SERVE_REACH_FT && tEdge) { const zz = target.zAt(tEdge); if (Number.isFinite(zz)) { zEndV = zz; servedBy = "element"; } }
+    if (zEndV == null) { const zg = existAt(far); if (Number.isFinite(zg)) zEndV = zg; }
+    if (zEndV == null) { skipped.push(el.id); driveWhy.set(el.id, "no ground elevation at its far end and no graded element within reach"); continue; }
+    let lengthFt = 0;
+    for (let i = 0; i + 1 < D.path.length; i++) lengthFt += Math.hypot(D.path[i + 1].x - D.path[i].x, D.path[i + 1].y - D.path[i].y);
+    const g0 = grading || {};
+    // A drive served by the GROUND has no court it must reach, so it follows the ground only as far as its own profile allows (the near-flat landing, then the max drive grade):
+    // a short drive over ground that rises a couple of feet must not raise a "too steep to reach the road" flag for an end nobody asked it to meet. (A drive that serves a
+    // court / lot still meets it exactly and flags when it cannot.)
+    if (servedBy === "ground") {
+      const lf = Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt, lp = Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct, mg = Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct;
+      const land = Math.min(Math.max(0, lf), lengthFt), reach = (lp / 100) * land + (mg / 100) * Math.max(0, lengthFt - land), dz = zEndV - zTie;
+      if (Math.abs(dz) > reach) zEndV = zTie + Math.sign(dz) * reach * 0.999;
+    }
+    const prof = driveProfile({
+      lengthFt, zTie, zEnd: zEndV,
+      landingFt: Number.isFinite(g0.driveLandingFt) ? g0.driveLandingFt : GRADING_DRIVE_DEFAULTS.driveLandingFt,
+      landingPct: Number.isFinite(g0.driveLandingPct) ? g0.driveLandingPct : GRADING_DRIVE_DEFAULTS.driveLandingPct,
+      maxGradePct: Number.isFinite(g0.driveMaxGradePct) ? g0.driveMaxGradePct : GRADING_DRIVE_DEFAULTS.driveMaxGradePct,
+    });
+    if (!prof) { skipped.push(el.id); driveWhy.set(el.id, "no profile (zero length or a non-numeric elevation)"); continue; }
+    const dirV = norm(far.x - D.tie.x, far.y - D.tie.y);
+    planes.set(el.id, {
+      elId: el.id, classId: "driveRoad", label: "Drive", baseElevFt: zTie, anchor: D.tie, dir: dirV, slopePct: Math.abs(prof.gradePct), floating: false,
+      hostId: servedBy === "element" && target ? target.hostId ?? null : null, graded: true,
+      drive: { ...prof, tie: D.tie, path: D.path, far, targetId: servedBy === "element" && target ? target.elId : null, servedBy, nearestFt: Number.isFinite(td) ? td : null },
+      check: { ok: null, violation: null, bound: null, limitPct: null, unknown: true },
+      zAt: driveZAt(D.path, prof),
+    });
+  }
+  return { planes, skipped, driveWhy };
 }
 
 /* ---- composite grid ----
@@ -303,7 +389,7 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
   const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
-  const prec = (el) => (el.type === "building" ? 0 : el.dockStack ? 1 : 2);
+  const prec = (el) => (el.type === "building" ? 0 : el.type === "driveInRamp" ? 0.5 : el.dockStack ? 1 : el.type === "drive" ? 3 : 2);   // a drive meets its court at the court's edge: the court owns the overlap // a ramp lies INSIDE its court: it wins that overlap
   const graded = els
     .filter((e) => e && planes.has(e.id) && Array.isArray(e.ring) && e.ring.length >= 3)
     .map((e) => ({ el: e, plane: planes.get(e.id), bbox: ringBBox(e.ring) }))
@@ -408,7 +494,7 @@ export function* surfaceGridSteps({ planes, els = [], existAt = null, parcelRing
   let wedgeFillCf = 0, wedgeCutCf = 0, wedgeSf = 0, wedgeEasementSf = 0;
   const perEl = {};
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.1 + 0.85 * (i / nx);   // NEW-1: how far through the whole build (the "Regrading…" banner reads it; drainSteps ignores it)
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
       let hit = null;
@@ -554,6 +640,7 @@ export const OPEN_GROUND_MIN_FALL_PCT = 0.5;   // ROUND 8: the fall a pit-filled
 const DRAIN_MAX_NODES = 60000;                 // ROUND 8: the drain lattice's density (≈ the contour lattice's)
 const DRAIN_MIN_CELL_FT = 3;
 const BAND_DEPTH_EPS_FT = 0.02;
+const BAND_BLEND_FT = 0.5;                       // ROUND 9: the depth over which the exact band blends into the open-ground lattice
 const BAND_BUCKET_FT = 40;                // a point whose band clamp is below this is open ground, not the slope band
 const LIMIT_SAMPLE_FT = 10;     // the limit ring is sampled this often for the slope reach + the daylight line
 const REACH_MAX_FT = 400;
@@ -640,6 +727,40 @@ export function regionEdgeIndex(regions, cellFt = 60) {
   };
   return { nearest };
 }
+/* PERF (NEW-2, the speed round) — the drain lattice's GEOMETRY, recorded by the first build of a geometry and read by every later
+ * build of the same one (the FFE search builds one geometry ~20 times at different elevations). Keyed by the exact outlines, the
+ * lattice and the ground source — a number's toString round-trips, so two keys are equal only when every coordinate is. A small
+ * LRU: a drag or an edit makes a new geometry, and the previous one is the likeliest to come back (undo). __drainGeometryStats
+ * is the probe the exactness guard reads (hits / misses). */
+const DRAIN_GEO_MAX = 3;
+const drainGeoCache = new Map();
+const drainGeoStats = { hits: 0, misses: 0 };
+export const __drainGeometryStats = () => ({ ...drainGeoStats, size: drainGeoCache.size });
+export const __clearDrainGeometry = () => { drainGeoCache.clear(); drainGeoStats.hits = 0; drainGeoStats.misses = 0; };
+let DRAIN_GEO_ON = true;
+export const __setDrainGeometryCache = (on) => { DRAIN_GEO_ON = !!on; if (!on) drainGeoCache.clear(); };
+const ringKey = (r) => { let s = ""; for (const p of r) s += p.x + "," + p.y + ";"; return s; };
+function drainGeometry({ graded, sRegions, pondRings, boundary, existAt, existKey, cornerRadiusFt, dbx0, dby0, dh, dnx, dny }) {
+  const DN = dnx * dny, G = graded.length;
+  if (!DRAIN_GEO_ON) return null;
+  const fresh = () => ({ ready: false, existAt, cls: new Int16Array(DN), near: new Float64Array(DN * G * 3), lim: new Float64Array(boundary ? DN * 4 : 0), seed: new Float64Array(DN), seedDone: new Uint8Array(DN) });
+  // (the rounded throw edge of ROUND 10 is the limit's regions + its corner radius, so those two carry it)
+  const key = [boundary ? 1 : 0, dbx0, dby0, dh, dnx, dny, existKey ?? "", cornerRadiusFt ?? "",
+    graded.map((g) => g.el.id + ":" + ringKey(g.el.ring)).join("|"), (pondRings || []).map(ringKey).join("|"),
+    sRegions.map((r) => [r.outer, ...r.holes].map(ringKey).join("/")).join("|")].join("#");
+  const hit = drainGeoCache.get(key);
+  if (hit && hit.existAt === existAt) {
+    drainGeoStats.hits++;
+    drainGeoCache.delete(key); drainGeoCache.set(key, hit);
+    return hit;
+  }
+  drainGeoStats.misses++;
+  const e = fresh();
+  drainGeoCache.set(key, e);
+  while (drainGeoCache.size > DRAIN_GEO_MAX) drainGeoCache.delete(drainGeoCache.keys().next().value);
+  // marked ready only when the build that fills it has visited every node (a superseded build leaves it unready → refilled)
+  return e;
+}
 function regionIndexOf(pt, regions) {
   for (let k = 0; k < regions.length; k++) if (pointInRegions(pt, [regions[k]])) return k;
   return -1;
@@ -651,7 +772,8 @@ function regionIndexOf(pt, regions) {
 export function buildSeams(graded, { maxPavementSlopePct = 5 } = {}) {
   const seams = new Map();
   const steps = [];
-  const paved = graded.filter((g) => g.plane.classId !== "buildingPad");
+  // A drive-in ramp is held by its wing walls: its sides meet the court with a step by design (like the dock wall), so it never bends or bends others.
+  const paved = graded.filter((g) => g.plane.classId !== "buildingPad" && g.plane.classId !== "driveInRamp" && g.plane.classId !== "driveRoad");
   for (const E of paved) {
     const samples = sampleRing(E.el.ring, SEAM_SAMPLE_FT);
     const c = ringCentroid(E.el.ring);
@@ -790,12 +912,22 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const ds = sv - s0;
     return pZa[q] + m * sv + Kb * Math.sqrt(ds * ds + h * h);
   };
-  const openGroundZ = (pt) => {
+  // `pre` (PERF, NEW-2): this node's nearest point + distance on every graded outline, read from the drain-geometry cache —
+  // the same numbers nearestOnRing gave the first build of this geometry (x, y, d per element; x = NaN for an empty ring)
+  const openGroundZ = (pt, pre) => {
     let D = Infinity, L = Infinity;
-    for (const g of graded) {
-      const q = nearestOnRing(pt, g.el.ring);
-      if (!q) continue;
-      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+    for (let gi = 0; gi < graded.length; gi++) {
+      const g = graded[gi];
+      let q, d;
+      if (pre) {
+        const o = pre.o + gi * 3;
+        if (pre.a[o] !== pre.a[o]) continue;
+        q = { x: pre.a[o], y: pre.a[o + 1] }; d = pre.a[o + 2];
+      } else {
+        q = nearestOnRing(pt, g.el.ring);
+        if (!q) continue;
+        d = Math.hypot(pt.x - q.x, pt.y - q.y);
+      }
       if (d < D) D = d;
       const v = zOf(g, q) + Kb * d;
       if (v < L) L = v;
@@ -825,10 +957,18 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   // bounds it too, so the surface meets existing ground ON the line (d → 0 there) and a proposed contour of level E ends
   // exactly where the existing contour of level E crosses the setback. Nothing outside the limit is ever graded here.
   let bs = null;
+  const throwRounded = boundary ? throwEdge(limit.regions, Number.isFinite(limit.cornerRadiusFt) ? limit.cornerRadiusFt : 0) : { regions: limit.regions, arcs: [] };
   if (boundary && typeof existAt === "function") {
     const xs = [], ys = [], zs = [];
     let zMin = Infinity, zMax = -Infinity;
     for (const r of limit.regions) for (const ring of [r.outer, ...r.holes]) for (const smp of sampleRing(ring, LIMIT_SAMPLE_FT)) {
+      const gz = existAt(smp);
+      if (gz == null || !isFinite(gz)) continue;
+      xs.push(smp.x); ys.push(smp.y); zs.push(gz);
+      if (gz < zMin) zMin = gz; if (gz > zMax) zMax = gz;
+    }
+    // ROUND 10 (NEW-1): the throw edge's ARCS (the limit's convex corners rounded) bound the surface too — see gradingLimit.throwEdge
+    if (throwRounded.arcs.length) for (const arc of throwRounded.arcs) for (const smp of arc) {
       const gz = existAt(smp);
       if (gz == null || !isFinite(gz)) continue;
       xs.push(smp.x); ys.push(smp.y); zs.push(gz);
@@ -845,11 +985,24 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     }
   }
   const limitIdx = FAST_LIMIT ? regionEdgeIndex(limit.regions) : { nearest: (pt) => nearestOnRegions(pt, limit.regions) };
-  const bandZ = (pt, ze) => {
+  // ROUND 10: the nearest point on the ROUNDED throw edge bounds the surface exactly, like the limit's own (an arc is circular, not a polyline)
+  const throwIdx = throwRounded.arcs.length ? (FAST_LIMIT ? regionEdgeIndex(throwRounded.regions) : { nearest: (pt) => nearestOnRegions(pt, throwRounded.regions) }) : null;
+  // `pre` (PERF, NEW-2): { d, gq, td, tgq } — the limit's (and the rounded throw edge's) nearest edge distance and the ground
+  // there, from the drain-geometry cache (a NaN ground = no usable ground, exactly the case the live read skips)
+  const bandZ = (pt, ze, pre) => {
     if (!bs) return ze;
     let L = -Infinity, U = Infinity;
-    const nl = limitIdx.nearest(pt);
-    if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
+    if (pre) {
+      if (pre.gq === pre.gq) { const dq = pre.d / apronRatio; L = pre.gq - dq; U = pre.gq + dq; }
+      if (pre.tgq === pre.tgq) { const dq = pre.td / apronRatio; if (pre.tgq - dq > L) L = pre.tgq - dq; if (pre.tgq + dq < U) U = pre.tgq + dq; }
+    } else {
+      const nl = limitIdx.nearest(pt);
+      if (nl && nl.q) { const gq = existAt(nl.q); if (gq != null && isFinite(gq)) { const dq = nl.d / apronRatio; L = gq - dq; U = gq + dq; } }
+      if (throwIdx) {
+        const nt = throwIdx.nearest(pt);
+        if (nt && nt.q) { const gq = existAt(nt.q); if (gq != null && isFinite(gq)) { const dq = nt.d / apronRatio; if (gq - dq > L) L = gq - dq; if (gq + dq < U) U = gq + dq; } }
+      }
+    }
     // a sample further than ratio × the largest possible |ze − z(b)| constrains nothing
     const R = apronRatio * Math.max(Math.abs(ze - bs.zMin), Math.abs(ze - bs.zMax)) + 1, R2 = R * R;
     const bx = bs.x, by = bs.y, bz = bs.z;
@@ -892,23 +1045,69 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
   const dK = new Int16Array(DN).fill(-1);       // region index of an open-ground node inside the limit, else −1
   const dZo = new Float64Array(DN), dZb = new Float64Array(DN), dZ = new Float64Array(DN);
   const bareAt = (pt) => { const zo = openGroundZ(pt); if (zo == null) return null; return { zo, zb: boundary ? bandZ(pt, zo) : zo }; };
+  // PERF (NEW-2, the speed round): the FFE search builds this surface ~20 times for ONE geometry, and every build used to re-ask
+  // the same geometry of every drain node — which region it is in, whether a pond / element covers it, the nearest point on every
+  // graded outline, the limit's nearest edge and the ground there. Those answers depend on the outlines alone, never on an
+  // elevation, so the first build of a geometry records them (drainGeometry) and every later build reads them: the same numbers
+  // from the same calls, so the surface is bit-identical (guard: test/gradingSurfaceExact). The elevation half is still computed.
+  const NG = graded.length;
+  const geo = drainGeometry({ graded, sRegions, pondRings, boundary, existAt, existKey: opts && opts.existKey, cornerRadiusFt: limit.cornerRadiusFt, dbx0, dby0, dh, dnx, dny });
+  const fillGeo = !!geo && !geo.ready;
+  const preO = { a: geo ? geo.near : null, o: 0 }, preL = { d: 0, gq: NaN, td: NaN, tgq: NaN };
   for (let i = 0; i < dnx; i++) {
-    yield;
+    yield 0.05 + 0.5 * (i / dnx);
     for (let j = 0; j < dny; j++) {
       // B2319137 ×2: a checkpoint every few dozen nodes — one bare-surface read is a cone search, and a whole column of them
       // ran past a frame (a yield is free when the slice has time left; runChunked decides whether it really pauses)
       if ((j & 15) === 15) yield;
-      const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
-      if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
-      const k = regionIndexOf(pt, sRegions);
-      if (k < 0) continue;
-      const b0 = bareAt(pt);
-      if (!b0) continue;
       const c = j * dnx + i;
-      dK[c] = k; dZo[c] = b0.zo; dZb[c] = b0.zb;
+      const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+      if (!geo) {
+        // the cache switched off (a test's reference arm): the original per-node reads, untouched
+        if (inAnyRing(pt, pondRings) || elementAt(pt)) continue;
+        const k0 = regionIndexOf(pt, sRegions);
+        if (k0 < 0) continue;
+        const b0 = bareAt(pt);
+        if (!b0) continue;
+        dK[c] = k0; dZo[c] = b0.zo; dZb[c] = b0.zb;
+        continue;
+      }
+      let k;
+      if (fillGeo) {
+        k = inAnyRing(pt, pondRings) || elementAt(pt) ? -1 : regionIndexOf(pt, sRegions);
+        geo.cls[c] = k;
+        if (k >= 0) {
+          for (let gi = 0; gi < NG; gi++) {
+            const q = nearestOnRing(pt, graded[gi].el.ring), o = (c * NG + gi) * 3;
+            if (!q) { geo.near[o] = NaN; continue; }
+            geo.near[o] = q.x; geo.near[o + 1] = q.y; geo.near[o + 2] = Math.hypot(pt.x - q.x, pt.y - q.y);
+          }
+          if (bs) {
+            const nl = limitIdx.nearest(pt);
+            let gq = NaN;
+            if (nl && nl.q) { const g0 = existAt(nl.q); if (g0 != null && isFinite(g0)) gq = g0; }
+            geo.lim[c * 4] = nl ? nl.d : NaN; geo.lim[c * 4 + 1] = gq;
+            let td = NaN, tgq = NaN;
+            if (throwIdx) { const nt = throwIdx.nearest(pt); if (nt && nt.q) { td = nt.d; const g1 = existAt(nt.q); if (g1 != null && isFinite(g1)) tgq = g1; } }
+            geo.lim[c * 4 + 2] = td; geo.lim[c * 4 + 3] = tgq;
+          }
+        }
+      } else k = geo.cls[c];
+      if (k < 0) continue;
+      preO.o = c * NG * 3;
+      const zo = openGroundZ(pt, preO);
+      if (zo == null) continue;
+      let zb = zo;
+      if (boundary) { preL.d = geo.lim[c * 4]; preL.gq = geo.lim[c * 4 + 1]; preL.td = geo.lim[c * 4 + 2]; preL.tgq = geo.lim[c * 4 + 3]; zb = bandZ(pt, zo, preL); }
+      dK[c] = k; dZo[c] = zo; dZb[c] = zb;
     }
   }
+  if (fillGeo) geo.ready = true;
   const pitFill = { nodes: 0, maxFt: 0, maxAt: null, unreached: 0, cellFt: dh };
+  // ROUND 9 (B2500224 ×2, NEW-2): a node the flood raised only because it sits ON the limit's outer line — raised to the ground
+  // at the line, so water leaving across it has the right outlet height — is an OUTLET, not ground. The flood keeps its raised
+  // value (dZ); every READER takes its bare value, so the outermost node row is never a lump the contours bunch against.
+  const seedRaised = new Uint8Array(DN), readRaise = new Float64Array(DN);
   const distToGradedNode = (pt) => { let D = Infinity; for (const g of graded) { const q = nearestOnRing(pt, g.el.ring); if (q) D = Math.min(D, Math.hypot(pt.x - q.x, pt.y - q.y)); } return D; };
   {
     // the filled swale keeps the 0.5% minimum fall (measured: a steeper fill, half the open-ground slope, lifted a few cells of
@@ -934,14 +1133,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       if (!edge) for (let q = 0; q < 4; q++) { if (dK[(j + N8[q][1]) * dnx + (i + N8[q][0])] < 0) { edge = true; break; } }
       if (!edge) continue;
       if (boundary && typeof existAt === "function") {
-        const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
-        const o = nearest(pt, outerRings);
-        if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
-          const g = existAt(o.q);
-          if (g != null && Number.isFinite(g) && g > dZ[c]) {
-            dZ[c] = g; pitFill.nodes++;
-            if (g - dZb[c] > pitFill.maxFt) { pitFill.maxFt = g - dZb[c]; pitFill.maxAt = pt; }
+        // PERF (NEW-2): the outlet's ground height is geometry too — recorded once per geometry (NaN = not an outlet)
+        let g;
+        if (geo && geo.seedDone[c]) g = geo.seed[c];
+        else {
+          const pt = { x: dbx0 + i * dh, y: dby0 + j * dh };
+          const o = nearest(pt, outerRings);
+          g = NaN;
+          if (o.q && o.d < 1.5 * dh && !(nearest(pt, holeRings).d < o.d) && !(distToGradedNode(pt) < o.d)) {
+            const g0 = existAt(o.q);
+            if (g0 != null && Number.isFinite(g0)) g = g0;
           }
+          if (geo) { geo.seed[c] = g; geo.seedDone[c] = 1; }
+        }
+        if (g === g && g > dZ[c]) {
+          dZ[c] = g; seedRaised[c] = 1;   // an outlet height, not a fill: never counted, never read (ROUND 9)
         }
       }
       done[c] = 1; push(dZ[c], c);
@@ -967,6 +1173,21 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
       }
     }
     for (let c = 0; c < DN; c++) if (dK[c] >= 0 && !done[c]) pitFill.unreached++;
+    // ROUND 9: what a reader takes at an outlet node — its bare value, raised only as far as the ground behind it was really
+    // filled (a bowl that spills across the line keeps its water level to the line; a bank that merely meets the line keeps
+    // its exact slope)
+    for (let c = 0; c < DN; c++) {
+      if (!seedRaised[c]) continue;
+      const i = c % dnx, j = (c - i) / dnx;
+      let nr = 0;
+      for (const [ox, oy] of N8) {
+        const ii = i + ox, jj = j + oy;
+        if (ii < 0 || jj < 0 || ii >= dnx || jj >= dny) continue;
+        const n = jj * dnx + ii;
+        if (dK[n] >= 0 && !seedRaised[n] && dZ[n] - dZb[n] > nr) nr = dZ[n] - dZb[n];
+      }
+      readRaise[c] = Math.min(dZ[c] - dZb[c], nr);
+    }
   }
   yield;
   // the open-ground surface at a point (inside the limit, off every element): { ft, zb, zo, depth } — `depth` the band's
@@ -991,8 +1212,36 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const b0 = bareAt(pt);
     return b0 ? { ft: b0.zb, zb: b0.zb, zo: b0.zo, depth: Math.abs(b0.zb - b0.zo) } : null;
   };
+  // ROUND 9 (B2500224 ×2, NEW-2) — INSIDE THE SLOPE BAND THE SURFACE IS THE EXACT PLANE AT THE RATIO, never the lattice. The band
+  // is the open ground clamped by the slope thrown from the limit (`bandZ`: z(b) ∓ d / ratio off the limit's own ground); read
+  // bilinearly off the ~7 ft drain lattice it became a few stepped cells across a 40 ft bank, and the contours drawn off it
+  // bunched and gapped instead of running every interval × ratio. Wherever the clamp binds (a corner node of the lattice cell
+  // carries band depth), the band is read analytically (plus any real pit-fill raise), blended into the lattice over the first
+  // `BAND_BLEND_FT` of depth so the toe meets the open ground without a seam.
+  const bandNear = (pt) => {
+    const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
+    const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
+    for (const c of [j0 * dnx + i0, j0 * dnx + i0 + 1, (j0 + 1) * dnx + i0, (j0 + 1) * dnx + i0 + 1]) {
+      if (dK[c] < 0 || seedRaised[c] || Math.abs(dZb[c] - dZo[c]) > BAND_DEPTH_EPS_FT) return true;
+    }
+    return false;
+  };
   const filledSurface = (pt) => {
     const lat = latticeSurface(pt);
+    if (boundary && bandNear(pt)) {
+      const b0 = bareAt(pt);
+      const depth = b0 ? Math.abs(b0.zb - b0.zo) : 0;
+      if (b0 && depth > BAND_DEPTH_EPS_FT) {
+        // where the flood really filled (a bowl spilling across the line), the water level stands to the line: never below
+        // the lattice there; elsewhere the exact bank
+        const rz = raiseAt(pt);
+        const exact = { ft: rz > 1e-9 && lat ? Math.max(b0.zb + rz, lat.ft) : b0.zb, zb: b0.zb, zo: b0.zo, depth };
+        if (!lat || depth >= BAND_BLEND_FT) return exact;
+        let t = depth / BAND_BLEND_FT; t = t * t * (3 - 2 * t);
+        const mix = (a, b) => a * (1 - t) + b * t;
+        return { ft: mix(lat.ft, exact.ft), zb: mix(lat.zb, exact.zb), zo: mix(lat.zo, exact.zo), depth: mix(lat.depth, exact.depth) };
+      }
+    }
     // (not near the LIMIT: there the lattice IS the drainage answer — an exact reading of the band between two nodes can raise
     // a thin ridge between a dish and its outlet on the limit, measured on the default harness layout, and it did not tighten
     // the tie to existing ground either)
@@ -1012,7 +1261,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     const fx = (pt.x - dbx0) / dh, fy = (pt.y - dby0) / dh;
     const i0 = Math.max(0, Math.min(dnx - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(dny - 2, Math.floor(fy)));
     const tx = Math.max(0, Math.min(1, fx - i0)), ty = Math.max(0, Math.min(1, fy - j0));
-    const R = (c) => (dK[c] >= 0 ? dZ[c] - dZb[c] : 0);
+    const R = (c) => (dK[c] < 0 ? 0 : seedRaised[c] ? readRaise[c] : dZ[c] - dZb[c]);
     return (R(j0 * dnx + i0) * (1 - tx) + R(j0 * dnx + i0 + 1) * tx) * (1 - ty) + (R((j0 + 1) * dnx + i0) * (1 - tx) + R((j0 + 1) * dnx + i0 + 1) * tx) * ty;
   };
   const latticeSurface = (pt) => {
@@ -1024,7 +1273,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     for (let q = 0; q < 4; q++) {
       const w = W[q]; if (!(w > 0)) continue;
       const c = C[q];
-      if (dK[c] >= 0) { ft += w * dZ[c]; zbS += w * dZb[c]; zoS += w * dZo[c]; } else wOff += w;
+      if (dK[c] >= 0) { ft += w * (seedRaised[c] ? dZb[c] + readRaise[c] : dZ[c]); zbS += w * dZb[c]; zoS += w * dZo[c]; } else wOff += w;
     }
     if (wOff > 0) {
       const b0 = bareAt(pt);
@@ -1103,7 +1352,7 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     else { cutCf += A * -dz; pe.cutCf += A * -dz; if (isWedge) wedgeCutCf += A * -dz; }
   };
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.6 + 0.35 * (i / nx);
     for (let j = 0; j < ny; j++) {
       if ((j & 15) === 15) yield;
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
@@ -1222,10 +1471,12 @@ function* limitGridSteps({ graded, existAt, parcelRings, pondRings, easementRing
     return { status: "value", ft: g0 + wedgeDz(ze, g0, nr.d, apronRatio, 0), elId: `limit:${nr.k}`, cls: "transition", wedge: true };
   };
   return {
-    cells, owners: graded, pondRings, apronsOn, zOf, shoulderFt: 0,
+    cells, owners: graded, pondRings, parcelRings, apronsOn, zOf, shoulderFt: 0,
     grading: { slopeRatio: apronRatio, shoulderFt: spec.shoulderFt ?? G.shoulderFt, ramp: false },
     limit: {
-      mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / SQFT_PER_ACRE,
+      // ROUND 9 (B2500224 ×2): `sig` is THE limit's identity (its definition — gradingLimit.resolveGradingLimit `defSig`) — every picture traced off this surface (band, contours, the
+      // existing-contour cut) carries the sig it was traced against and is painted only while it matches (gradingPicture.js)
+      sig: limit.defSig, mode: limit.mode, source: limit.source, regions: srcRegions, limitRegions: limit.regions, areaSf: regionsAreaSf(srcRegions), areaAc: regionsAreaSf(srcRegions) / SQFT_PER_ACRE,
       grewIds: limit.grewIds, plateaus, reachFt: reach, basis: spec.basis || null, pitFill,
       drain: { nx: dnx, ny: dny, cellFt: dh, x0: dbx0, y0: dby0, filled: dZ, bare: dZb, region: dK }, shoulderFt: limit.shoulderFt, cornerRadiusFt: limit.cornerRadiusFt,
       regions_stats: regionStats.map((r) => ({ cutCy: r.cutCf / CF_PER_CY, fillCy: r.fillCf / CF_PER_CY, areaSf: r.areaSf, slopeSf: r.slopeSf })),
@@ -1279,7 +1530,7 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
   const inside = new Float32Array(nx * ny).fill(-1);
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < nx; i++) {
-    yield;
+    yield 0.95 * (i / nx);
     const x = x0 + (i + 0.5) * cellFt;
     for (let j = 0; j < ny; j++) {
       if ((j & 15) === 15) yield;
@@ -1299,6 +1550,39 @@ export function* contourLatticeSteps(grid, { existAt = null, marginFt = CONTOUR_
       } else if (r && r.reason === "pond") z = NaN;
       else if (typeof existAt === "function") { const g = existAt(pt); z = g != null && Number.isFinite(g) ? g : NaN; }
       values[k] = z;
+    }
+  }
+  // ROUND 9 (B2500224 ×2): boundary mode — the bank meets existing ground ON the limit line at a real break (2:1 inside, the
+  // ground outside), and a lattice cell straddling the line interpolated across that kink, so a proposed contour reached the
+  // line up to a foot from where the ground is its level. Every sample just OUTSIDE the line (within 1.5 cells) instead takes
+  // the proposed surface continued across it (mirrored through its nearest point q on the line: 2·z(q) − z(mirror), z(q) the
+  // ground there); the worker clips at the line, so nothing outside is ever drawn, and each contour ends where the surface —
+  // which IS the ground on the line — is its level.
+  if (boundary && grid.limit && Array.isArray(grid.limit.limitRegions) && typeof existAt === "function") {
+    const ringsAll = grid.limit.limitRegions.flatMap((rg) => [rg.outer, ...rg.holes]);
+    const reach = 1.5 * cellFt;
+    for (let i = 0; i < nx; i++) {
+      yield;
+      const x = x0 + (i + 0.5) * cellFt;
+      for (let j = 0; j < ny; j++) {
+        const k = j * nx + i;
+        if (inside[k] > 0) continue;
+        // only a cell beside the graded area can straddle the line: a cheap neighbour test first (perf, B2319137 ×4)
+        let near = false;
+        for (let di = -2; di <= 2 && !near; di++) for (let dj = -2; dj <= 2; dj++) {
+          const ii = i + di, jj = j + dj;
+          if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && inside[jj * nx + ii] > 0) { near = true; break; }
+        }
+        if (!near) continue;
+        const pt = { x, y: y0 + (j + 0.5) * cellFt };
+        let best = null, bd = reach;
+        for (const ring of ringsAll) { const q = nearestOnRing(pt, ring); if (q) { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < bd) { bd = d; best = q; } } }
+        if (!best) continue;
+        const gq = existAt(best);
+        const mr = grid.probe({ x: 2 * best.x - pt.x, y: 2 * best.y - pt.y });
+        if (gq == null || !Number.isFinite(gq) || !mr || mr.status !== "value" || !Number.isFinite(mr.ft)) continue;
+        values[k] = 2 * gq - mr.ft;
+      }
     }
   }
   if (!(hi > lo)) return null;
@@ -1332,10 +1616,28 @@ export function gradedAreaEarthwork(grid) {
  *
  * Returns { status:"value", ft, elId, cls, wedge } or { status:"none", reason } where
  * reason ∈ "nosurface" | "pond" | "outside" | "void". Pure. */
+/* NEW-1 (B2585313 ×2, owner live check 2026-10-31 on Concept A, "Around the layout", 50-ft NW view): the chip read "Prop —" at
+ * three points on the white paper — measured on the real Concept A fixture they sit 150–530 ft PAST the daylight line, inside the
+ * property, where the grading leaves the ground alone. That ground HAS a proposed elevation: it is the existing one (the slope ties
+ * to it at the daylight line and nothing beyond is touched), so the chip says so — "Prop = Exist · On grade", marked `undisturbed`
+ * — instead of a dash that reads as "the surface is broken". Only inside the PROPERTY (`grid.parcelRings`), only where the ground is
+ * known; a pond, a DEM void and ground off the property keep their honest "—". The probe itself (which the contour lattice reads)
+ * is unchanged. */
+function undisturbedOr(grid, pt, existAt, r) {
+  if (!r || r.status === "value" || r.reason !== "outside") return r;
+  const pr = Array.isArray(grid.parcelRings) ? grid.parcelRings : [];
+  if (!pr.length || typeof existAt !== "function") return r;
+  let inside = false;
+  for (const ring of pr) if (ring && ring.length >= 3 && pointInRing(pt, ring)) { inside = true; break; }
+  if (!inside) return r;
+  const g0 = existAt(pt);
+  if (g0 == null || !Number.isFinite(g0)) return r;
+  return { status: "value", ft: g0, elId: null, cls: "undisturbed", wedge: false, undisturbed: true };
+}
 export function sampleProposedAt(grid, pt, existAt) {
   if (!grid || !Array.isArray(grid.owners) || !grid.owners.length || !pt ||
     !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return { status: "none", reason: "nosurface" };
-  if (grid.limit && typeof grid.probe === "function") return grid.probe(pt);   // ROUND 4 — the one stitched surface
+  if (grid.limit && typeof grid.probe === "function") return undisturbedOr(grid, pt, existAt, grid.probe(pt));   // ROUND 4 — the one stitched surface
   for (const pr of grid.pondRings || []) if (pointInRing(pt, pr)) return { status: "none", reason: "pond" };
   for (const g of grid.owners) {
     if (pt.x < g.bbox[0] || pt.x > g.bbox[2] || pt.y < g.bbox[1] || pt.y > g.bbox[3]) continue;
@@ -1394,7 +1696,7 @@ export function daylightRings({ planes, els = [], existAt = null, apronRatio = G
   return out;
 }
 
-const SEAM_WORD = { dockApron: "The court", trailerParking: "The trailer row", carParkingGeneral: "The lot", carParkingAccessible: "The lot", driveAisles: "The paving" };
+const SEAM_WORD = { driveRoad: "The drive", dockApron: "The court", trailerParking: "The trailer row", carParkingGeneral: "The lot", carParkingAccessible: "The lot", driveAisles: "The paving" };
 const seamName = (planes, id) => { const p = planes && planes.get ? planes.get(id) : null; const w = p ? SEAM_WORD[p.classId] : null; return w || "The pavement"; };
 /* ---- violations — data WITH copy (short ≤ the B823 one-line cap, detail = the ⓘ) ---- */
 export function surfaceViolations({ planes, grid } = {}) {
@@ -1423,6 +1725,14 @@ export function surfaceViolations({ planes, grid } = {}) {
     short: `A surface exceeds its class slope cap — check the override (${n(byBound.max)}).`,
     detail: byBound.max.map((p) => `${p.label} at ${f2(p.slopePct)}% (cap ${f2(p.check.limitPct)}%)`).join("; ") + ". Planyr screening bands — confirm intent with your civil engineer.",
   });
+  for (const p of (planes ? planes.values() : [])) {
+    if (!p.drive || !p.drive.tooSteep) continue;
+    out.push({
+      kind: "drive-steep", legal: false, elId: p.elId,
+      short: "Drive too steep to reach the road.",
+      detail: `A drive from the road at the property line to the court or lot it serves needs ${f2(Math.abs(p.drive.gradePct))}% over ${Math.round(p.drive.lengthFt)} ft; the most allowed is ${f2(p.drive.maxGradePct)}%. Lengthen the drive, move the court or lot, or raise the allowed drive grade in Standards.`,
+    });
+  }
   if (grid && grid.plFillSf > 200) out.push({
     kind: "pl-fill", legal: false,
     short: `${f2(grid.plFillSf / SQFT_PER_ACRE)} AC of graded fill lies OUTSIDE the parcel — no fill across the property line.`,
@@ -1462,7 +1772,7 @@ export function buildProposedSurface(args) { return drainSteps(buildProposedSurf
  * (lib/useGradeSurface.js, GradingController) so no step holds the main thread past a lattice column.
  * `buildProposedSurface` drains it synchronously: one implementation, identical results. */
 export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {}, grading = null } = {}) {
-  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading });
+  const { planes, skipped, driveWhy } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap, grading, existAt });
   if (!planes.size) return null;
   yield;
   // The grading model rides OPTS into the lattice (maxCells defaults up so a 520′ building keeps ~8′ cells).
@@ -1483,12 +1793,12 @@ export function* buildProposedSurfaceSteps({ els = [], ffeFt = null, dockDropFt 
     easementRings.length ? `es:${easementRings.map((r) => ringHash(r)).join(",")}` : "",
     // GRADING MODEL inputs join the identity (the B807 stale-memo discipline) — and only then, so an
     // account without the model gets the key it always had.
-    grading ? `gr:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${grading.openGroundSlopePct ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
+    grading ? `gr:${grading.driveMaxGradePct ?? ""}:${grading.driveLandingFt ?? ""}:${grading.driveLandingPct ?? ""}:${grading.pavementSlopePct ?? ""}:${grading.lotDropFt ?? ""}:${grading.slopeRatio ?? ""}:${grading.shoulderFt ?? ""}:${grading.openGroundSlopePct ?? ""}:${(grading.setbackRings || []).map((r) => ringHash(r)).join(",")}` : "",
     // ROUND 4 — the limit's inputs join the identity (the surface itself is cached by them inside gradingLimit.js)
     grading && grading.limit ? `lm:${grading.limit.mode || "layout"}:${grading.limit.shoulderFt ?? ""}:${grading.limit.cornerRadiusFt ?? ""}:${grading.limit.aisleFt ?? ""}:${grading.limit.maxPavementSlopePct ?? ""}:${grading.limit.maxCutFillFt ?? ""}:${grading.limit.edited ? ringHash(grading.limit.edited) : "-"}:${(grading.limit.extraRings || []).map((r) => ringHash(r)).join(",")}:${(grading.limit.setbackHoles || []).map((r) => ringHash(r)).join(",")}:${pondRings.map((r) => ringHash(r)).join(",")}` : "",
-    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}`).join("|"),
+    els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}${grading ? `:${e.hostId ?? ""}` : ""}${e.drive ? `:dr${e.drive.path.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}` : ""}`).join("|"),
   ].join("~");
-  return { planes, grid, violations, skipped, daylight, fieldT: clamp01(fieldT), surfaceKey };
+  return { planes, grid, violations, skipped, driveWhy, daylight, fieldT: clamp01(fieldT), surfaceKey };
 }
 
 /* Net dirt in CY: + = import (buy dirt), − = export (haul off). shrinkFactor converts

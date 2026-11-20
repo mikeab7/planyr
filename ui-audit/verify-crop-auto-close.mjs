@@ -49,7 +49,7 @@ const openPlan = async (url) => {
   await page.waitForTimeout(500);
 };
 const stored = () => page.evaluate(() => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.W1 && raw.W1.sheetOverlays.find((x) => x.id === "ovW");
   return o ? (o.crop ?? null) : undefined;
 });

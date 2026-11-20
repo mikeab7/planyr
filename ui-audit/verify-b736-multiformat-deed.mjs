@@ -32,7 +32,7 @@ const seed = `(() => { try {
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
 const markups = (page) => page.evaluate(() => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").s_mb; return (s && s.markups) || []; } catch (e) { return []; }
+  try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").s_mb; return (s && s.markups) || []; } catch (e) { return []; }
 });
 
 async function run() {

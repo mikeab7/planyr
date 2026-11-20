@@ -62,7 +62,7 @@ async function openProps(page, mkId) {
   await expect(page.getByTestId("deed-show-calls")).toBeVisible({ timeout: 20_000 });
 }
 const storedShow = (page, id, mid) => page.evaluate(([sid, m]) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return (all[sid]?.markups || []).find((x) => x.id === m)?.showCalls;
 }, [id, mid]);
 

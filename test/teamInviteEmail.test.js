@@ -103,15 +103,15 @@ describe("template branching: existing account vs new", () => {
   it("existing account → 'Accept invitation' + accept-from-the-account-menu line", () => {
     const m = buildInviteEmail({ ...base, hasAccount: true });
     expect(m.html).toContain(">Accept invitation</a>");
-    expect(m.html).toContain("Open Planyr and accept from your account menu.");
+    expect(m.html).toContain("Open the button to accept \u2014 it also confirms this email address is yours.");
     expect(m.text).toContain("Accept invitation:");
-    expect(m.html + m.text).not.toMatch(/added to the team|automatically|exact address/i);
+    expect(m.html + m.text).not.toMatch(/added to the team|automatically|exact address|account menu/i);
   });
   it("no account yet → 'Join team' + create-your-account line", () => {
     const m = buildInviteEmail({ ...base, hasAccount: false });
     expect(m.html).toContain(">Join team</a>");
-    expect(m.html).toContain("Create your Planyr account to join");
-    expect(m.html).toContain("as soon as you sign up");
+    expect(m.html).toContain("Create your Planyr account from the button to join");
+    expect(m.html).toContain("as soon as you finish");
     expect(m.html + m.text).not.toContain("account menu");
   });
   it("unknown (database not yet migrated) → neutral wording that is true either way", () => {

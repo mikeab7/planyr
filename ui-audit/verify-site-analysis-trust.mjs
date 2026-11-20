@@ -67,7 +67,7 @@ async function openApp(browser, site, mocks, { rrc = "ok" } = {}) {
   await ctx.addInitScript(`(() => { try {
     window.__PLANYR_E2E = true;
     ${process.env.THEME ? `localStorage.setItem('planyr.theme', ${JSON.stringify(process.env.THEME)});` : ""}
-    if (!localStorage.getItem('planarfit:sites:v1')) {
+    if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) {
       localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [site.id]: siteRecord(site.id, site.id, site.lat, site.lon) }))});
       localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});
     }

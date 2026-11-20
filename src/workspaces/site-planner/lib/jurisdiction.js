@@ -55,6 +55,7 @@ import {
   NJ_MUNICIPAL_NOTE, NY_MUNICIPAL_NOTE,
 } from "./njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 /* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
+import { limitLineFlags, limitLineNote } from "./limitLineFlags.js";
 import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
  * before touching how membership is decided here: point/vertex sampling measured 75% where the
@@ -311,6 +312,11 @@ export const JURISDICTION_SOURCES = {
   },
 };
 
+/* The City of Mont Belvieu's own ArcGIS Server (NEW-1, 2026-11-12), reached through the same-origin /gis-proxy relay — see GIS_SOURCES.etj_montbelvieu. */
+export const MONT_BELVIEU_RELAY = "/gis-proxy/www.cmbgis.com/arcgis/rest/services";
+/* The https address a row's URL stands for: a relayed row (`/gis-proxy/<host>/…`) is the host's own server, which the weekly verifier and the audits reach directly. Any other URL is returned unchanged. */
+export const etjUpstreamUrl = (source) => String((source && source.url) || "").replace(/^\/gis-proxy\//, "https://");
+
 /* ETJ (extraterritorial jurisdiction) sources — fragmented by region, so this is a
  * LIST, each row scoped to a metro `bbox` [latMin, lonMin, latMax, lonMax]. A click is
  * routed to only the source(s) whose bbox covers it (`etjSourcesForPoint`), so:
@@ -338,6 +344,53 @@ export const ETJ_SOURCES = [
     sourceName: "H-GAC (Houston-Galveston Area Council)", coverage: "34 named cities in the H-GAC region — NOT all of them (see `roster`)",
     note: "City ETJ across the H-GAC 13-county region. Screening only; verify with the city.",
   },
+  /* ⛔ NEW-1 (Fort Bend) — THE COUNTY'S OWN ETJ TABLE IS THE ANSWER INSIDE THE COUNTY, H-GAC IS THE BACKUP (owner constraint #39: the
+   * county's own server first, the regional one when it does not answer). H-GAC's mosaic was last edited 2024-02-23; Fort Bend County's
+   * `City ETJs` carries Rosenberg's 2026-04-23 removal of 180.73 ac and Fulshear's 2024-11-20 population-over-5K resolution, which H-GAC cannot.
+   * `supersedes` is applied by `supersededSourceIds` and only for a point the county layer proves is IN Fort Bend County (`supersedeCounty`):
+   * a Harris or Brazoria point inside this row's box keeps H-GAC exactly as before, and a county layer that fails puts H-GAC straight back. */
+  {
+    id: "etj_fortbend", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Fort Bend County", bbox: [29.25, -96.1, 29.8, -95.42],   // the county line layer's own extent (29.263–29.789, −96.085–−95.424), padded
+    url: GIS_SOURCES.etj_fortbend.serviceUrl,
+    fields: { name: "City" }, titleCaseName: true,
+    roster: GIS_SOURCES.etj_fortbend.roster,
+    softFail: true, supersedes: ["etj_hgac"], supersedeCounty: "Fort Bend", supersedeClipUrl: GIS_SOURCES.county_fortbend.serviceUrl,   // the drawn layer cuts H-GAC by the county line
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Fort Bend County GIS", dataLastEdited: GIS_SOURCES.etj_fortbend.dataLastEdited,
+    coverage: "Fort Bend County (20 cities' ETJ)",
+    note: "Fort Bend County GIS's City ETJs table — fresher than H-GAC's regional layer (newest edit 2026-04-23). Screening only; verify with the city.",
+  },
+  /* NEW-1 (Fort Bend) — THE SB 2038 EVIDENCE. `release: true` is the same contract as Fort Worth's row below: a point inside one never reads as a
+   * plain ETJ (`identifyJurisdiction` → `etjReleased`), and the share pass never counts it. What the county's Land Ordinances layer records is a
+   * filed removal from "<City> ETJ" — the city's name is the polygon's own `City` column with " ETJ" stripped, so it reads "Fulshear ETJ release
+   * area", not "Fort Worth". Which polygons count is the registry row's `where` (see there). */
+  {
+    id: "etj_release_fortbend", role: "etj", release: true, softFail: true, label: "ETJ release area (SB 2038)", kind: "polygon",
+    region: "Fort Bend County ETJ releases", bbox: [29.25, -96.1, 29.8, -95.42],
+    url: GIS_SOURCES.etj_release_fortbend.serviceUrl,
+    fields: { name: "City" }, nameStrip: GIS_SOURCES.etj_release_fortbend.nameStrip, titleCaseName: true,
+    where: GIS_SOURCES.etj_release_fortbend.where,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Fort Bend County GIS (Land Ordinances)", dataLastEdited: GIS_SOURCES.etj_release_fortbend.dataLastEdited,
+    coverage: "Fort Bend County ETJ releases and removals filed 2020 or later",
+    note: "Land the county's Land Ordinances layer records as released or removed from a city's ETJ (SB 2038 petitions and city ordinances). Status is the city's to confirm.",
+  },
+  /* ⛔ NEW-2 (Harris) — HARRIS COUNTY'S OWN ETJ TABLE, ASKED ONLY WHEN H-GAC HAS NOTHING TO SAY. `fallbackFor` keeps this row OUT of
+   * `etjSourcesForPoint` (a Houston click is still exactly one query, H-GAC) and into `etjFallbackSourcesForPoint`: the identify asks it when the
+   * primary's answer is empty or failed. `jurisdiction.js`'s own history: H-GAC answered nothing at three of six points in the owner's Houston
+   * sweep, and its ArcGIS Online org runs on a metered quota that has refused queries outright (registry `outage`). Its roster carries KATY, which
+   * H-GAC's does not. The drawn layer shows its ground only where H-GAC draws none (`vectorLayers`). */
+  {
+    id: "etj_harris", role: "etj", fallbackFor: "etj_hgac", softFail: true, label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Harris County", bbox: [29.45, -96.0, 30.2, -94.85],   // Harris County is 29.5–30.17, −95.97–−94.91; padded
+    url: GIS_SOURCES.etj_harris.serviceUrl,
+    fields: { name: "Name" }, titleCaseName: true,
+    roster: GIS_SOURCES.etj_harris.roster,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Harris County GIS", coverage: "Harris County — 8 cities' ETJ (Baytown, Deer Park, Houston, Katy, La Porte, Pasadena, Pearland, Waller)",
+    note: "Harris County GIS's City ETJ table, used when H-GAC's regional layer returns nothing. Screening only; verify with the city.",
+  },
   /* ⛔ NEW-1a — BAYTOWN, because H-GAC's "regional" mosaic does not carry it. The owner reported
    * that part of Goose Creek is in Baytown's city limits and part in its ETJ; the app showed
    * neither, because the one ETJ source it asks omits Baytown entirely (see `roster` on the H-GAC
@@ -352,6 +405,31 @@ export const ETJ_SOURCES = [
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "City of Baytown GIS", coverage: "City of Baytown ETJ",
     note: "City of Baytown ETJ, from the city's own layer (the H-GAC regional ETJ mosaic does not include Baytown). Screening only; verify with the city.",
+  },
+  /* ⛔ NEW-1 (2026-11-12) — CHAMBERS COUNTY. Neither H-GAC's mosaic (zero Chambers cities) nor Baytown's own ETJ carries Mont Belvieu, Cove, Beach City or Old River-Winfree, so a site at (-94.86, 29.89) read
+   * "Unincorporated". The City of Mont Belvieu's own server publishes its ETJ and a copy of its neighbours' ETJ lines; both are read through the same-origin relay (the server's CORS is unmeasured). The
+   * copy row has no publish date and says so (`copy`, constraint #40), and its roster is the honest bound: Baytown stays on its own publisher's row, Dayton / Liberty are not claimed. */
+  {
+    id: "etj_montbelvieu", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Mont Belvieu", bbox: [29.79, -94.99, 29.94, -94.76],   // the ETJ polygon is lat 29.82–29.91, lng −94.97 – −94.79 (measured 2026-11-12), padded ~0.03°
+    url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/1",
+    fields: { name: null }, nameConst: "Mont Belvieu",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Mont Belvieu GIS", coverage: "City of Mont Belvieu ETJ",
+    note: "City of Mont Belvieu ETJ, from the city's own layer (H-GAC's regional ETJ mosaic carries no Chambers County city). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_chambers_neighbors", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Chambers County (Beach City · Cove · Old River-Winfree)", bbox: [29.62, -94.95, 29.93, -94.75],   // the three rings span lat 29.66–29.89, lng −94.91 – −94.78 (measured 2026-11-12), padded ~0.03°
+    url: MONT_BELVIEU_RELAY + "/AdministrativeArea_v2/MapServer/5",
+    fields: GIS_SOURCES.etj_chambers_neighbors.fields, nameStrip: GIS_SOURCES.etj_chambers_neighbors.nameStrip,
+    nameDisplay: { "Old River": "Old River-Winfree" }, titleCaseName: true,
+    where: GIS_SOURCES.etj_chambers_neighbors.where,
+    roster: GIS_SOURCES.etj_chambers_neighbors.roster,
+    ttl: 7 * 24 * 3600 * 1000,
+    copy: { publisher: "City of Mont Belvieu GIS", asOf: null }, // a COPY of neighbouring cities' lines — constraint #40: say so, and say the date is not published
+    sourceName: "City of Mont Belvieu GIS (a copy of neighbouring cities' ETJ lines; date not published)", coverage: "Beach City, Cove and Old River-Winfree ETJ — a copy, not the cities' own layers",
+    note: "Beach City, Cove and Old River-Winfree ETJ as copied into the City of Mont Belvieu's GIS (not the cities' own layers; edition date not published). Screening only; verify with the city.",
   },
   {
     id: "etj_austin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
@@ -516,7 +594,30 @@ const bboxHas = (b, lat, lng) => b && lat >= b[0] && lat <= b[2] && lng >= b[1] 
  * every covered metro returns [] (honest "no ETJ layer here" rather than a wrong guess).
  * This is what keeps a Houston click at exactly one ETJ query. Pure. */
 export function etjSourcesForPoint(lat, lng) {
-  return ETJ_SOURCES.filter((s) => bboxHas(s.bbox, lat, lng));
+  return ETJ_SOURCES.filter((s) => !s.fallbackFor && bboxHas(s.bbox, lat, lng));
+}
+/* NEW-2 — the county-published ETJ rows that stand in for a primary that answered nothing (`fallbackFor`). Never part of `etjSourcesForPoint`:
+ * routing a fallback in parallel would double every Houston click's cost. The identify asks these only after the primary came back empty. */
+export function etjFallbackSourcesForPoint(lat, lng, primaryId) {
+  return ETJ_SOURCES.filter((s) => s.fallbackFor && (!primaryId || s.fallbackFor === primaryId) && bboxHas(s.bbox, lat, lng));
+}
+
+/* ⛔ NEW-1 (Fort Bend) — WHICH ROUTED SOURCES A COUNTY'S OWN LAYER REPLACES. A source that declares `supersedes: [ids]` + `supersedeCounty`
+ * replaces those sources' answers for a point the county layer proves is inside that county — and ONLY when its own query answered
+ * (no error): a county server that is down puts the regional layer straight back (owner constraint #39). `parts[i]` is the i-th source's
+ * identify outcome (`{ error }`); `countyName` is what `countyAtPoint` named for the point (null/unknown = no supersession, the old union).
+ * Returns the Set of source ids to drop. Pure. */
+export function supersededSourceIds(srcs, parts, countyName) {
+  const drop = new Set();
+  if (!countyName) return drop;
+  (srcs || []).forEach((sx, i) => {
+    if (!sx || !Array.isArray(sx.supersedes) || !sx.supersedes.length) return;
+    const bare = (n) => String(n).replace(/\s+county$/i, "");
+    if (!sx.supersedeCounty || !samePlace(bare(sx.supersedeCounty), bare(countyName))) return;
+    if (!parts[i] || parts[i].error) return;
+    for (const id of sx.supersedes) drop.add(id);
+  });
+  return drop;
 }
 
 /* ⛔ NEW-1a — DOES ANY ROUTED ETJ SOURCE ACTUALLY CARRY THIS CITY?
@@ -541,7 +642,7 @@ export function etjSourceCovers(source, cityName) {
   return true;
 }
 export function etjCoverageFor(cityName, lat, lng) {
-  const srcs = etjSourcesForPoint(lat, lng);
+  const srcs = [...etjSourcesForPoint(lat, lng), ...etjFallbackSourcesForPoint(lat, lng)];   // NEW-2 — a fallback is asked when the primary is silent, so it counts as coverage
   if (!srcs.length) return "no-layer";                                    // outside every covered metro
   return srcs.some((s) => etjSourceCovers(s, cityName)) ? "covered" : "not-mapped";
 }
@@ -684,6 +785,21 @@ export const CITY_SOURCES = [
     note: "City of Baytown's own city-limits layer. It carries three jurisdiction classes; only FEATURE='CITY' is full-purpose limits. Screening only — verify with the city.",
   },
 ];
+/* ⛔ NEW-1 (Fort Bend) — the county's own city-limits layer, FIRST inside Fort Bend County with TxGIO as the backup (constraint #39). Same
+ * contract as the ETJ row: `supersedes` applies only for a point the county proves is in Fort Bend and only when this layer answered. */
+CITY_SOURCES.push({
+  id: "city_fortbend", role: "city", label: "City limits — Fort Bend County", kind: "polygon",
+  region: "Fort Bend County", bbox: [29.25, -96.1, 29.8, -95.42],
+  url: GIS_SOURCES.city_fortbend.serviceUrl,
+  fields: { name: "CityName" }, titleCaseName: true,
+  fullPurposeOnly: GIS_SOURCES.city_fortbend.fullPurposeOnly,
+  needGeometry: true,
+  supersedes: ["city"], supersedeCounty: "Fort Bend",
+  ttl: 7 * 24 * 3600 * 1000,
+  sourceName: "Fort Bend County GIS",
+  coverage: "Fort Bend County — full-purpose city limits",
+  note: "Fort Bend County GIS's City Limits table. Full-purpose limits only (limited-purpose annexation is a separate county layer, not wired). Screening only — verify with the city.",
+});
 export function citySourcesForPoint(lat, lng) {
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
@@ -1487,7 +1603,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     ? () => (clipOutPromise || (clipOutPromise = fetchCityClipOut(clipCitySrcs, shareRings, [lng, lat], opts)))
     : null;
   await Promise.all(roles.map(async (role) => {
-    const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
+    let srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
     if (!srcs.length) {
       // no source for this role/area — e.g. ETJ outside the covered metros (honest, not a guess)
       out[role] = []; out.ages[role] = null;
@@ -1500,7 +1616,12 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     opts.onStatus && opts.onStatus(role, "loading");
     // Query every source for the role in parallel and UNION the names (a point can sit
     // in two cities' ETJ at a metro seam; a parcel can straddle two cities).
-    const parts = await Promise.all(srcs.map(async (src) => {
+    /* NEW-1 (Fort Bend) — a county's own layer replaces the regional one only for a point that county PROVES it holds; the county lookup rides
+     * alongside the source queries (same SWR cache as the county role's own pass), so it adds no serial round trip. Failure to name a county
+     * leaves the union exactly as it was. */
+    const supCountyP = srcs.some((sx) => sx.supersedes && sx.supersedes.length)
+      ? countyAtPoint(lng, lat, opts).then((c) => (c && c.name) || null).catch(() => null) : null;
+    let parts = await Promise.all(srcs.map(async (src) => {
       const q = identifySource(src, geom, opts);
       const r = await q.fresh;
       /* ⛔ NEW-1 — the CITY name union carries FULL-PURPOSE hits only. Baytown's layer names every
@@ -1518,6 +1639,38 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       const names = src.release ? [] : uniq(kept.flatMap((f) => (f.names && f.names.length ? f.names : [f.name])).filter((v) => v != null && v !== "").map(String));
       return { names, undetermined, released, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
     }));
+    if (supCountyP) {
+      const drop = supersededSourceIds(srcs, parts, await supCountyP);
+      if (drop.size) {
+        const keep = srcs.map((sx) => !drop.has(sx.id));
+        parts = parts.filter((_, i) => keep[i]);
+        srcs = srcs.filter((_, i) => keep[i]);
+        out.superseded = uniq([...(out.superseded || []), ...drop]);   // said, not silent: which regional layers a county layer stood in for
+      }
+    }
+    /* ⛔ NEW-2 (Harris) — THE COUNTY-PUBLISHED FALLBACK, ASKED ONLY WHEN ITS PRIMARY HAS NOTHING TO SAY: the primary named no ETJ, or failed.
+     * An empty primary is not trusted as "no ETJ" in Harris County — H-GAC answered nothing at three of six points in the owner's Houston sweep.
+     * Appended to `srcs` / `parts` so every later pass (errors, area shares, coverage) sees it like any other routed source. */
+    if (role === "etj") {
+      const extra = [];
+      for (const prim of srcs.filter((sx) => !sx.fallbackFor)) {
+        const pi = srcs.indexOf(prim);
+        if (parts[pi] && parts[pi].names.length) continue;
+        for (const fb of etjFallbackSourcesForPoint(lat, lng, prim.id)) if (fb.url && !fb.unavailable && !srcs.includes(fb) && !extra.includes(fb)) extra.push(fb);
+      }
+      if (extra.length) {
+        const more = await Promise.all(extra.map(async (src) => {
+          const q = identifySource(src, geom, opts);
+          const r = await q.fresh;
+          const feats = r.items.map((it) => normalizeFeature(src, it.attrs));
+          const names = uniq(feats.flatMap((f) => (f.names && f.names.length ? f.names : [f.name])).filter((v) => v != null && v !== "").map(String));
+          return { names, undetermined: [], released: [], error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
+        }));
+        srcs = [...srcs, ...extra];
+        parts = [...parts, ...more];
+        out.etjFallback = extra.filter((_, i) => more[i].names.length).map((sx) => sx.id);
+      }
+    }
     const names = uniq(parts.flatMap((p) => p.names));
     const ages = parts.map((p) => p.ageMs).filter((a) => a != null);
     out[role] = names;
@@ -1696,6 +1849,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
         // A clip below the floor is real (it touched) but never a governing peer — named on its own
         // field so a consumer (the badge's non-governing tail) can say so rather than drop it silent.
         const edge = uniq(stated.filter((r) => r.share < CITY_SHARE_MIN && r.rawShare > 0).map((r) => r.name));
+        if (role === "etj") out.etjAreas = stated.map((r) => ({ name: r.name, share: r.share })); // NEW-1 (2026-11-05): the shares themselves, so the chip can flag a site that crosses an ETJ line
         if (governing.length || edge.length || (role === "etj" && merged.netted)) {
           out[role] = governing;
           out[role + "Edge"] = edge;
@@ -2124,12 +2278,20 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const multiCore = (j.state === "NJ" || j.state === "NY")
     ? Object.values(coreCities.reduce((m, c) => { const t = municipalType(c) || "?"; m[t] = (m[t] || 0) + 1; return m; }, {})).some((n) => n > 1)
     : coreCities.length > 1;
+  /* NEW-1 (owner 2026-11-05) — a site that crosses (or merely touches) a limits / ETJ LINE is flagged, so the chip can never name one jurisdiction for a split tract. */
+  const lineFlags = limitLineFlags({
+    partialCities: partCities, coreCities, edgeCities: edgeParts, etjRows: j.etjAreas || [], etjEdge: j.etjEdge || [],
+    cityShareOf: (n) => shareOfCity(n),
+  });
   const straddle = counties.length > 1 || isds.length > 1 || multiCore
     // NEW-1 — a genuinely SPLIT site is the straddle this mark was made for.
     || partCities.length > 0
+    || lineFlags.some((f) => f.kind === "crosses")
     || (allCities === null && !containmentUnknown && cities.length > 1);
   return {
     text, jur, county, isd, straddle,
+    // NEW-1 (2026-11-05) — the limits / ETJ lines this site crosses or touches, as data + one plain sentence each (the chip's ⚑ tooltip).
+    limitLines: lineFlags, limitLineNote: limitLineNote(lineFlags),
     // NEW-1 — the non-governing tail as its own field, and WHICH of the six shapes this is. A
     // consumer that wants one of them never has to take the label apart to get it.
     tail, shape,

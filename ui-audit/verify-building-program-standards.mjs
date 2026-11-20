@@ -376,7 +376,7 @@ await openStandards(page);
     prefs.planStandards = prefs.planStandards || {};
     prefs.planStandards.buildingStyle = { rules: { clearHeight: [{ upTo: 140000, value: 77 }, { upTo: 600000, value: 36 }, { upTo: null, value: 40 }], slab: [{ upTo: 140000, value: 6 }, { upTo: null, value: 7 }] } };
     localStorage.setItem("planyr:userPrefs:v1", JSON.stringify(prefs));
-    const raw2 = localStorage.getItem("planarfit:sites:v1");
+    const raw2 = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1");
     const all = raw2 ? JSON.parse(raw2) : {};
     all["freshproj1"] = { id: "freshproj1", groupId: "freshproj1", site: "Fresh Project", name: "Plan 1", origin: null, county: null, parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: 1 };
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));

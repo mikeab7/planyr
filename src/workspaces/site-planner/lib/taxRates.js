@@ -4,7 +4,9 @@
  * units + each unit's ADOPTED rate for a stated tax year). Partial unit lists understate the
  * total (a false number), so: complete per the source, or HIDDEN. Never a guess/average.
  *
- * FINDING (researched 2026-10-06 from the Claude Code sandbox) — NO COUNTY IS COVERED YET.
+ * FINDING (researched 2026-10-06 from the Claude Code sandbox) — written BEFORE the per-account API: Harris (B2158065) and
+ *   Fort Bend (NEW-1, 2026-11-12) now render from /api/taxunits (see TAX_COVERAGE); the notes below are history for the rest.
+ *   NO COUNTY WAS COVERED YET.
  *   Reachable: comptroller.texas.gov/taxes/property-tax/docs/<year>-{county,city,school-district,
  *   special-district}-rates-levies.xlsx (200; adopted rates BY UNIT NAME, not per account — already
  *   used by harrisTaxRates.js via /api/taxrates), and the ArcGIS Online parcel layers in counties.js.
@@ -34,19 +36,39 @@
  * An account's codes come from parcel attrs[codeField] (comma separated). Any code missing from
  * `units` => the list is incomplete => null (hide).
  */
+import { isTnTaxCounty, tnTaxTableFor } from "./tnTaxUnits.js";
+import { millageTableFor } from "./georgiaMillage.js";
+import bartowMillage from "./data/gaMillage-ga_bartow-2025.json";
+
 export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
-  harris: { covered: false, reason: "HCAD GIS has no taxing-unit fields; hcad.org / hctax.net blocked from sandbox. Existing Comptroller+polygon panel is an incomplete estimate." },
-  fortbend: { covered: false, reason: "Parcels carry TAXUNITS codes (complete) but no reachable code->name->rate legend (fbcad.org blocked); mapping codes would be a guess." },
-  chambers: { covered: false, reason: "No taxing-unit field known/readable; service returned no field list from sandbox." },
+  /* Tennessee (NEW-1/NEW-2, 2026-11-15): membership rides the county parcel layer's own attributes, so these two are
+   * covered through lib/tnTaxUnits.js (a Tennessee lot never reaches the Texas paths below — owner constraint #3). */
+  tn_rutherford: { covered: true, reason: "DistrictGroup (taxing district) + AccountType (class) on the county parcel layer; 2025 certified rates from the TN Comptroller Tax Aggregate Report. See lib/tnTaxUnits.js." },
+  tn_davidson: { covered: true, reason: "TaxDist (USD / GSD / satellite city) on Metro's parcel layer; 2025 rates from the TN Comptroller. Berry Hill, improvement districts and unassigned lots stay hidden (no sourced levy). No class field, so no dollar estimate." },
+  // `server: true` = rendered from /api/taxunits (taxUnitsClient.TAX_UNIT_COUNTIES), not from a static data file; `covered` stays the static-file flag.
+  harris: { covered: false, server: true, reason: "Rendered from /api/taxunits: HCAD's own per-account unit list + adopted rates, from the precomputed Supabase index (B2158065). The static-file path here is unused for Harris." },
+  fortbend: { covered: false, server: true, reason: "Rendered from /api/taxunits (NEW-1): membership = the FBCAD parcel layer's TAXUNITS codes; names + adopted rates = the Fort Bend County Tax Office rate portal, keyed by the same codes; the newest year in which every unit has a reported rate. An account with a unit the portal does not publish (e.g. M256, SM106) is incomplete and the table is hidden with the reason." },
+  chambers: { covered: false, reason: "CCAD layer readable but carries no taxing-unit field; Location_Code (83 codes) has no published legend — hidden." },
   waller: { covered: false, reason: "No taxing-unit field in the wired source." },
   montgomery: { covered: false, reason: "Parcels carry taxingUnits codes but no reachable code legend/rates (mcad-tx.org blocked); layer's pYear reads 2027, so it needs a currency check." },
   brazoria: { covered: false, reason: "Only school/city/county fields (null in sampled rows); no ESD/MUD/college membership, so the list would be incomplete." },
   galveston: { covered: false, reason: "Parcels carry ENTITIES codes but no reachable code legend/rates." },
   liberty: { covered: false, reason: "Only school/city/county fields; incomplete membership." },
   austintx: { covered: false, reason: "Only school/city/county fields; incomplete membership." },
+  /* NEW-1 (Bartow GA): the table is BUILT and tested (georgiaMillage.js + lib/data/gaMillage-ga_bartow-2025.json — mills on the
+   * 40% assessed value, one Tax_District code → a list of levies) but the county stays HIDDEN until EVERY code's 2025 rates
+   * are transcribed. Sourced for 2025: county incorporated / unincorporated, Bartow County Schools, Cartersville M&O + BID +
+   * City Schools, Adairsville. NOT yet found: Emerson, Euharlee, Kingston, Taylorsville, White, the Cartersville parks bond,
+   * Red Top Mtn CID — they are in GA DOR's 2025 millage PDF (dor.georgia.gov is blocked from the build sandbox; read it with
+   * pdfplumber from a network that reaches it). District 12 (E Main Street TAD #1) also needs its base jurisdiction named.
+   * Flip `covered` to true only when `pendingDistricts(bartowMillage)` is empty (test/georgiaMillage.test.js enforces it). */
+  ga_bartow: { covered: false, reason: "Bartow tax-district table built; 2025 millage not yet transcribed for Emerson, Euharlee, Kingston, Taylorsville, White, the Cartersville parks bond and Red Top Mtn CID (GA DOR 2025 digest PDF), and district 12's base jurisdiction is unnamed — hidden until complete." },
 };
+
+// Georgia counties whose table is a tax-DISTRICT code → levy list in MILLS (georgiaMillage.js), not the per-$100 CAD-unit shape.
+export const MILLAGE_DATA = { ga_bartow: bartowMillage };
 
 // county key -> () => import("./data/taxRates-<county>-<year>.json"). Empty until real data lands.
 export const DATA_LOADERS = {};
@@ -63,6 +85,8 @@ export async function loadTaxTable(parcel, ctx = {}) {
 /** Sync; `ctx.data` is a loaded data file. Null = hide. */
 export function taxTableFor(parcel, ctx = {}) {
   const county = ctx.county || parcel?.county || null;
+  if (isTnTaxCounty(county)) return tnTaxTableFor(parcel, county); // attribute-driven; never falls through to a Texas data file
+  if (county && MILLAGE_DATA[county]) return millageTableFor(parcel, ctx.data || MILLAGE_DATA[county], { covered: ctx.covered ?? !!(TAX_COVERAGE[county] && TAX_COVERAGE[county].covered) });
   const data = ctx.data || loaded[county];
   if (!county || !data || !data.units || !data.codeField || !data.year || !data.source) return null;
   const raw = parcel?.attrs?.[data.codeField];
@@ -81,8 +105,8 @@ export function taxTableFor(parcel, ctx = {}) {
 
 export function taxTableForCombined(parcels, ctx = {}) {
   const tableOf = ctx.tableOf || ((p) => taxTableFor(p, ctx)); // B2158065: async per-account tables plug in here
-  const per = (parcels || []).map((p) => ({ name: p?.label || p?.name || p?.acct || "Lot", t: tableOf(p) }));
-  if (!per.length || per.some((x) => !x.t)) return null;
+  const per = (parcels || []).map((p) => { const t = tableOf(p); return { name: p?.label || p?.name || p?.acct || "Lot", t: t && t.held ? null : t }; }); // a PILOT-held lot has no total, so a combine that includes one hides
+  if (!per.length || per.some((x) => !x.t || x.t.total == null)) return null; // a lot with no bill (a PILOT / IDB account) has no total, so a combine that includes one hides
   const totals = per.map((x) => x.t.total);
   const allShare = totals.every((t) => t === totals[0]);
   return { allShare, total: allShare ? totals[0] : null, perLot: per.map((x) => ({ name: x.name, total: x.t.total })) };

@@ -382,7 +382,7 @@ async function setLastPondInterval(page, ft) {
     // and the only sanctioned handle on it is the plan store + a reload. So this arm RELOADS.
     try {
       const key = "planarfit:sites:v1";
-      const all = JSON.parse(localStorage.getItem(key) || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
       const id = localStorage.getItem("planarfit:currentSite:v1")?.replace(/^"|"$/g, "");
       const site = all[id];
       if (!site) return { ok: false, why: "no current site in the store" };
@@ -449,7 +449,7 @@ const SEED_OPTS = NO_PONDS ? scenarioArm("no-ponds") : {};
  * 8 ponds, and its perfectly plausible work numbers would have joined a trend line describing one
  * scene four times. The guard makes the context seed a DEFAULT rather than an override; the rung
  * assertion below is the second, independent half. */
-await context.addInitScript(`(() => { try { if (!localStorage.getItem('planarfit:sites:v1')) { ${perfScenarioSeed(SEED_OPTS)} } } catch (e) {} })();`);
+await context.addInitScript(`(() => { try { if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) { ${perfScenarioSeed(SEED_OPTS)} } } catch (e) {} })();`);
 await context.addInitScript(() => { window.__PLANYR_E2E = true; });
 
 let tilesServed = 0;

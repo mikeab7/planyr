@@ -56,7 +56,7 @@ async function open(page, id, rec) {
 }
 
 const readParcels = (page, id) => page.evaluate((sid) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return all[sid]?.parcels || [];
 }, id);
 

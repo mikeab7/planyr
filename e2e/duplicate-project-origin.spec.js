@@ -49,7 +49,7 @@ async function openMap(page) {
   await page.waitForTimeout(1500); // let the Leaflet map and its layer probes settle
 }
 
-const sitesInStore = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"));
+const sitesInStore = (page) => page.evaluate(() => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"));
 
 test.describe("B1399568 · FINDING B — the decide bar / 'Draw' button guards against an in-flight double-press", () => {
   test("two RAPID 'Draw' presses, before the first has finished, still yield ONE project", async ({ page }) => {

@@ -5,7 +5,23 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-29._
+_Last updated: 2026-11-12._
+
+## 🗺 One file to run: switch on the "plans with no county" nightly alarm (B2671251)
+- [ ] **Open the Supabase SQL editor for the production database and run `src/workspaces/admin/db/admin_ops_county_watch.sql` once** (it is a small read-only counter; it needs the same digest token you already set up). Until you do, the nightly step just says "not set up yet" and stays green. Today it would already count **3** plans that have drawn lots but no county — they drop out of every county feature, and I did not touch them.
+
+## 🧾 Three decisions from the pending-check triage (2026-11-11)
+Every pending check was sorted. The checks that truly need your own devices or accounts (an iPhone, Bluebeam, the admin pages, your real plans) are listed once each, with item numbers, in `docs/VERIFICATION-TRIAGE-2026-11-11.md` under "Bucket B" — that is a reference list, not an assignment. Only the three decisions below are yours:
+- [ ] **Say "go" or "no" on the cleanup of the two throwaway sign-in accounts** (`michael+resettest@` and `michael+invitetest@planyr.io`). Both still exist on the live database, along with two small proof rows; I did not touch them. The cleanup file is `src/shared/auth/db/test_accounts_cleanup_2026-11-04.sql`.
+- [ ] **Decide what happens to the unmerged Tarrant County work (draft PR #2543, open since 2026-10-24).** Its check (V1895680) cannot run until that work ships; merge it or close it, then the check is either runnable or retirable.
+- [ ] **Decide whether the 14 "superseded" checks listed under "Bucket C" in the same document should be retired.** Nothing was deleted.
+
+## 🗂 A decision: your "that felt slow just now" recordings no longer have a screen (B2660320)
+- [x] **Decided 2026-11-04: RETIRE.** The old Storage dialog file and the test that guarded it are deleted (B2666224). The recordings still save on your computer, capped at three, and still go to the server when you press "Something was slow just now" — nothing visible changed.
+
+## 🖱 A ten-second look: does the Layers panel still tremble when you slide the pointer down its left list? (B2559953 / V2010721)
+- [ ] **Once the fix is live, slide the pointer slowly up and down the group names (Map Base … Access) with a few utility layers on, and tell me "still shakes" or "calm".** I could not make it shake on my side and I found one real cause that fits what you described (every button dimmed itself and nudged half a pixel when touched) and removed it. Your answer is what closes it; if it still shakes, tell me which tab and your browser zoom.
+
 
 ## 📱 Two-minute check on your iPhone: does a pasted-table picture show straight away? (B2515969 / V1960400)
 - [ ] **In Notes on your iPhone, paste a few rows from a spreadsheet, tap the little "(Ctrl) ▾" tab, then the last picture icon.** The table should turn into a picture of itself within about a second. In the phone test I can run here, the picture sometimes shows only as a small "Pasted table" label until you tap the page once — that test uses a stand-in for Safari, so I can't tell whether your phone does it. If yours shows the label, tell me; if it just shows the picture, say so and I'll close it. (The tab itself is now thumb-sized — that was fixed.)
@@ -250,6 +266,8 @@ Everything else is built and live. Two things only you can do (the files are att
 
 ## ✅ DONE 2026-10-04 — Signup bot check turned on, nothing for you here (B1160720/B1160723)
 
+> **UPDATE 2026-11-02 (B2619760):** the check turned out to guard Sign in and Forgot password too, and the app only sent it for Sign up — so nobody signed out could get back in. Fixed in code (nothing for you to do); all three now send it. Email confirmation is already OFF (`mailer_autoconfirm` is true), so step 2 below is done — only the optional tidy-up of the unused "check your email" wording is left, and it is deliberately not being removed.
+>
 > **✅ DONE 2026-10-04 — both steps below were completed by you:** Cloudflare Turnstile widget created, `VITE_TURNSTILE_SITE_KEY` set in Cloudflare Pages Production, the Turnstile secret pasted into Supabase (Attack Protection, provider Turnstile by Cloudflare) and captcha protection switched ON. Verified live: a real production signup created the `auth.users` row for mik@live.com at 2026-10-04 16:15:35 UTC, which can only exist if Supabase accepted the Turnstile token. "Confirm email" was then switched OFF in Supabase (Sign In / Providers); PR #1971 shipped the sign-up success state. The original text is kept below as history.
 
 
@@ -1100,6 +1118,10 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       created by testing; Claude left it untouched. He may want to label it or remove it.
 - [ ] **Reload planyr.io once** after a deploy to pick up the latest fixes (his open tab runs the old build until
       reloaded). Routine — only matters right after Claude ships something.
+
+- [ ] **Delete two scratch branches on GitHub (2 clicks each, github.com/mikeab7/planyr/branches) — `ledger-probe` and `ledger-e2e-tmp`.** Claude made them while proving the new ledger branch works and then could not remove them (the sandbox can create and push branches but not delete them). They hold nothing you need; the real branch is `ledger`. (NEW-1, 2026-11-05)
+
+- [ ] **One setting, ~1 minute (B2671188): let GitHub Actions open pull requests.** In GitHub → the planyr repo → Settings → Actions → General → "Workflow permissions", tick **"Allow GitHub Actions to create and approve pull requests"** (if it is greyed out, your organization's settings are overriding it). Why: the nightly job that refreshes the index file your claude.ai Project syncs (`BACKLOG_OPEN.md`) has been failing every night since at least Nov 1 — it prepares the update but GitHub refuses to let it open the pull request, so the index goes stale. Found while moving the backlog to its own branch (not caused by it). Until you do this, a Claude session has to open that pull request by hand.
 
 ## Deferred / low-urgency (filed; no action needed unless he wants them sooner)
 - **B364 (remaining half) — two optional server backends, only if/when wanted.** The scanned-drawing reading

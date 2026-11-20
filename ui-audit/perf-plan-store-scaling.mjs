@@ -2,7 +2,7 @@
 /* perf-plan-store-scaling — B2165120's acceptance instrument. Does an edit's write cost stay FLAT as the library grows?
  *
  * Runs ui-audit/perf-edit-switch.mjs (real pointer drags on the owner's real plan, between plan switches) at several library sizes, in TWO arms
- * that differ in ONE thing — the storage layout (`--layout plan` = one entry per plan, `--layout blob` = planStore's kill switch = the old whole-library
+ * that differ in ONE thing — the storage layout (`--layout plan` = one entry per plan, `--layout blob` = planStore's harness-only unsplit lever = the old whole-library
  * entry) — same build, same machine, same plans. Verdict: lib/storeScaling.mjs (VOID, never green, if the arms did not run what they claim).
  *
  *   xvfb-run -a --server-args="-screen 0 1800x1000x24" node ui-audit/perf-plan-store-scaling.mjs [--sizes 5,50,150] [--plan-kb 8] [--edits 2] [--switches 4] [--assert]

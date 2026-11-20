@@ -24,7 +24,7 @@ try {
   // signed in, the device store is per account: planarfit:sites:cloud:<uid>
   const uid = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
   KEY = "planarfit:sites:cloud:" + uid;
-  await page.evaluate(([k, id, r]) => { const m = JSON.parse(localStorage.getItem(k) || "{}"); m[id] = r; localStorage.setItem(k, JSON.stringify(m)); localStorage.setItem("planarfit:currentSite:v1", id); }, [KEY, ID, rec]);
+  await page.evaluate(([k, id, r]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); m[id] = r; localStorage.setItem(k, JSON.stringify(m)); localStorage.setItem("planarfit:currentSite:v1", id); }, [KEY, ID, rec]);
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
   await page.goto(base + "/#/site"); await page.reload();
   const canvas = page.getByTestId("planner-canvas");
@@ -50,7 +50,7 @@ finally {
   // always clear the throwaway: the device record, then the cloud row (the server refuses a delete until the row is in the trash)
   try {
     const left = await page.evaluate(async ([k, id]) => {
-      if (k) { const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }
+      if (k) { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }
       const sb = window.pfSupabase;
       await sb.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       await sb.from("sites").delete().eq("id", id);

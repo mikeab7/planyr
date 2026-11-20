@@ -27,8 +27,15 @@
  * Plain JS (the stack is plain JS/JSX — the brief's `.ts` sketch maps to .js here).
  */
 
+import { HOUSTON_METRO_SOURCES, HOUSTON_METRO_FIXTURE_REACH } from "./sourcesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep: MTFP, airport tiers, evacuation Zip-Zones)
 import { FLORIDA_SOURCES, FLORIDA_FIXTURE_REACH } from "./sourcesFlorida.js"; // NEW-1 (Florida, B2452976)
 import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js"; // NEW-1 (Oklahoma screening)
+import { TX_CITY_ZONING_SOURCES, TX_CITY_ZONING_FIXTURE_REACH } from "./sourcesTxCityZoning.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster)
+import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { FORTBEND_SOURCES, FORTBEND_FIXTURE_REACH } from "./sourcesFortBend.js"; // NEW-1 (Fort Bend County layers)
+import { NASHVILLE_BUFFER_SOURCES, NASHVILLE_BUFFER_FIXTURE_REACH } from "./sourcesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
+import { RUTHERFORD_SOURCES, RUTHERFORD_FIXTURE_REACH } from "./sourcesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
+import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
 // Patterns that mark a NON-production / staging / test endpoint. A serviceUrl matching
 // any of these must be a `monitored-exception` (with a reason), or the CI guard fails.
 export const NON_PRODUCTION_URL_PATTERNS = [
@@ -66,6 +73,7 @@ export const availabilityOf = (entry) => (entry && entry.availability) || "live"
 //   point fixture: [lng, lat] → a ~1 km envelope around it → expect ≥ expectMinCount
 // ---------------------------------------------------------------------------
 export const GIS_SOURCES = {
+  ...HOUSTON_METRO_SOURCES, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...FLORIDA_SOURCES, // NEW-1 (Florida, B2452976): own file so sibling state sessions' edits to this one stay additive
   // ---- Site Analysis screening sources ----
   flood: {
@@ -1688,6 +1696,70 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-29",
   },
+  /* NEW-2 (Bartow sweep, 2026-11-12): Bartow County Water Department's own pipe network (`Water/waterdepartmentapp` on the county's ArcGIS Server, the same host as the zoning row). Measured through the relay 2026-11-12:
+   * layer 21 WaterPipe 62,770 lines — size and material are the STRING fields `SIZE_D` ("3/4"…"36") and `MAT_D` ("DIP", "PVC", "C900", "HDPE"…); the numeric `DIAMETER` / `MATERIAL` columns are NULL on every row, so nothing may read them. `DISPOSTN_D` is "EXIST" on every row (no abandoned pipe is carried).
+   * Scope is the COUNTY water department only — Cartersville and Adairsville run their own systems and publish no GIS (the card says so). The point-query endpoint errors intermittently; fixtures use envelopes, like the zoning row. */
+  gaBartowWater: {
+    key: "gaBartowWater",
+    label: "Water mains — Bartow County Water Department (Bartow County GIS)",
+    provider: "Bartow County Water Department — water pipes (the county's own ArcGIS Server, Water/waterdepartmentapp layer 21)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/Water/waterdepartmentapp/MapServer/21",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { size: "SIZE_D", material: "MAT_D" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  /* NEW-2: the same department's sanitary sewer (`Water/waterdepartmentapp` layer 7): 13,111 lines; `SIZE_D` / `MAT_D` as above; `FORCEMAIN` = 'Y' (pressure main) / 'N' / 'None'. Same scope and caveats as gaBartowWater. */
+  gaBartowSewer: {
+    key: "gaBartowSewer",
+    label: "Sanitary sewer — Bartow County Water Department (Bartow County GIS)",
+    provider: "Bartow County Water Department — sanitary sewer pipes (the county's own ArcGIS Server, Water/waterdepartmentapp layer 7)",
+    serviceUrl: "https://www.bartowgis.org/arcgis/rest/services/Water/waterdepartmentapp/MapServer/7",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null,
+    geometryType: "line",
+    fields: { size: "SIZE_D", material: "MAT_D", forceMain: "FORCEMAIN" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  /* NEW-3 (Bartow sweep, 2026-11-12): US Army Corps of Engineers, Mobile District — the Shoreline Management Program viewer (`SAD_Shoreline_Management_Web_Viewer`, AGOL org sdTb0lsRURdKFejG, CORS-open, no relay).
+   * Layer 6 "Lake Boundary": per the service's own description, "the reservoir boundaries of projects participating in the SAD Shoreline Management Program. Polygons should portray Normal Pool water Levels" — i.e. the WATER, not the fee-owned land
+   * around it. Allatoona Lake is RPSUID 167791 (3 polygons: the lake and two Lake Acworth pieces); the same service holds other Corps projects, so the row filters. Layer 5 "Shoreline Allocation Areas": the Corps-managed SHORE land
+   * classified by `ZONECLASSIFICATION` (limitedDevelopment · prohibitedAccess · protected · publicRecreation · specialUse · tbd; 154 polygons for Allatoona, lastEdit 2026-08-28). NO flowage-easement layer is published. */
+  gaAllatoonaLake: {
+    key: "gaAllatoonaLake",
+    label: "Allatoona Lake normal-pool boundary (USACE Mobile District)",
+    provider: "U.S. Army Corps of Engineers, Mobile District — Shoreline Management Program, Lake Boundary (ArcGIS Online services2.arcgis.com/sdTb0lsRURdKFejG)",
+    serviceUrl: "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer/6",
+    layerId: null,
+    where: "RPSUID=167791",
+    geometryType: "polygon",
+    fields: { name: "FEATURENAME", project: "RPSUID" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
+  gaAllatoonaShoreline: {
+    key: "gaAllatoonaShoreline",
+    label: "Allatoona Lake shoreline allocation areas (USACE Mobile District)",
+    provider: "U.S. Army Corps of Engineers, Mobile District — Shoreline Management Program, Shoreline Allocation Areas (ArcGIS Online services2.arcgis.com/sdTb0lsRURdKFejG)",
+    serviceUrl: "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer/5",
+    layerId: null,
+    where: "RPSUID=167791",
+    geometryType: "polygon",
+    fields: { zone: "ZONECLASSIFICATION", name: "FEATURENAME", kind: "FEATUREDESCRIPTION", project: "RPSUID" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-11-12",
+  },
   /* NEW-1 (California) — the California counterpart of `county` / `countyCo` / `countyGa`. Its OWN row with
    * `states: ["CA"]`; the Texas, Colorado and Georgia rows are untouched. VERIFIED LIVE 2026-10-02 from the
    * build sandbox: exactly 58 county polygons (California's full roster), one per county, ArcGIS-Online hosted
@@ -2022,6 +2094,50 @@ export const GIS_SOURCES = {
     availability: "live",
     lastVerified: "2026-08-09",
   },
+  /* NEW-1 (2026-11-12, Mont Belvieu sweep) — CHAMBERS COUNTY'S CITY ETJs. Neither H-GAC's mosaic (zero Chambers cities, measured 2026-11-01) nor Baytown's own ETJ row (answers 0 at Mont Belvieu)
+   * carries them, so a site at (-94.86, 29.89) — inside Mont Belvieu's ETJ — read "Unincorporated". The City of Mont Belvieu publishes its own ArcGIS Server (www.cmbgis.com, 60 services, EPSG:2278,
+   * self-hosted so its CORS is unknown): `relay: true` — the app reads it through the same-origin /gis-proxy relay; the https URL below is the upstream the weekly verifier reaches directly.
+   *   · layer 1 of AdministrativeArea_v2 is the city's OWN ETJ (one polygon, NAME "MONT BELVIEU ETJ"; layer 0 is its limits). Its published layer EXTENT is garbled (xmin in degrees, xmax in feet) —
+   *     a geometry query is right, the extent is not, so the coverage engine must never be asked to trust it (`coverage: "city"`, no `extent`).
+   *   · layer 5 "Surrounding Cities ETJs" is the same office's copy of NEIGHBOURING cities' ETJ lines (`CITY` ∈ BAYTOWN / BEACH CITY / COVE / DAYTON / LIBERTY / OLD RIVER, " ETJ" suffixed, vintage
+   *     unpublished). It is a COPY, not the neighbours' own layer, so the row says so and carries no date (constraint #40: "date not published"). Baytown, Dayton and Liberty are filtered out: Baytown
+   *     keeps its own publisher's row (`etj_baytown`), and Dayton / Liberty are not Chambers County cities this row can vouch for. */
+  etj_montbelvieu: {
+    key: "etj_montbelvieu",
+    label: "ETJ — Mont Belvieu",
+    provider: "City of Mont Belvieu GIS",
+    serviceUrl: "https://www.cmbgis.com/arcgis/rest/services/AdministrativeArea_v2/MapServer/1",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    nameBy: "publisher (City of Mont Belvieu GIS — layer 'MONT BELVIEU ETJ')",
+    coverage: "city",
+    states: ["TX"],
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  etj_chambers_neighbors: {
+    key: "etj_chambers_neighbors",
+    label: "ETJ — Beach City, Cove, Old River-Winfree (Mont Belvieu's copy)",
+    provider: "City of Mont Belvieu GIS — 'Surrounding Cities ETJs' (a copy of neighbouring cities' ETJ lines; date not published)",
+    serviceUrl: "https://www.cmbgis.com/arcgis/rest/services/AdministrativeArea_v2/MapServer/5",
+    relay: true, // sandbox-blocked host: the app reads it through the same-origin /gis-proxy relay (the https URL here is the upstream, which the weekly verifier reaches directly)
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "CITY" },
+    // ` ETJ` is the layer's own suffix ("BEACH CITY ETJ"); the roster is the honest bound on what this copy can answer (Baytown / Dayton / Liberty are deliberately NOT in it — see the row note above).
+    nameStrip: ["\\s+ETJ$"],
+    where: "CITY IN ('BEACH CITY ETJ','COVE ETJ','OLD RIVER ETJ')",
+    roster: ["BEACH CITY", "COVE", "OLD RIVER-WINFREE"],
+    rosterCheckedAt: "2026-11-01",
+    coverage: "regional",
+    states: ["TX"],
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
   etj_austin: {
     key: "etj_austin",
     label: "ETJ — Austin",
@@ -2077,6 +2193,109 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-09-30",
     browserVerified: { date: "2026-09-30", by: "owner's browser, planyr.io tab", features: null },
+  },
+
+  /* ⛔ NEW-1 (Fort Bend, 2026-11-12) — FORT BEND COUNTY'S OWN BOUNDARY LAYERS. H-GAC's regional ETJ mosaic was last edited
+   * 2024-02-23 and cannot carry what has happened since; the county GIS office publishes three layers on one MapServer that can.
+   * Measured live 2026-11-12 (planyr.io Origin answers `Access-Control-Allow-Origin: https://planyr.io` — CORS-clean, so no relay):
+   *   /5  City ETJs        — 20 polygons (`City`, `Date_Modified`, `Notes`); newest Rosenberg 2026-04-23 "ORDINANCE 2026-16 REMOVAL OF 180.73 AC FROM ETJ".
+   *   /16 Land Ordinances  — annexations AND de-annexations (`Type`, `City`, `Ordinance_Reference`, `Acreages`, `Filing_Date`). Fulshear's four
+   *                          "Petition of Release from ETJ" polygons (183.9 + 583.8 + 444.3 + 4,663.8 ac) are here; H-GAC still draws the 4,663.8-ac one as
+   *                          FULSHEAR ETJ at (-95.8537, 29.6276) while /5 no longer holds it — the repro.
+   *   /4  City Limits      — 20 polygons (`CityName`, `City_Type`).
+   * Hostname note: the sibling host `arcgisweb.fortbendcountytx.gov` (parcels, contours) sends NO CORS headers and rides the relay; THIS host
+   * (`gisportal`) does not need it. `dataLastEdited` is the newest `Date_Modified` the layer carries. */
+  etj_fortbend: {
+    key: "etj_fortbend",
+    label: "ETJ — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/5",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "City" },
+    coverage: "metro",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    dataLastEdited: "2026-04-23",
+    /* The cities this table names (distinct `City`, read live 2026-11-12) — the honest bound on what it can answer inside the county. */
+    roster: [
+      "ARCOLA", "BEASLEY", "EAST BERNARD", "FAIRCHILDS", "FULSHEAR", "HOUSTON", "KATY", "KENDLETON", "MISSOURI CITY", "NEEDVILLE",
+      "ORCHARD", "PEARLAND", "PLEAK", "RICHMOND", "ROSENBERG", "SIMONTON", "STAFFORD", "SUGAR LAND", "THOMPSONS", "WESTON LAKES",
+    ],
+    rosterCheckedAt: "2026-11-12",
+  },
+  /* The SB 2038 evidence. `where` keeps ONLY what is an ETJ release or removal: a de-annexation of "<City> ETJ" (not of the city's limits —
+   * `Type='De-annexation'` with `City='Rosenberg'` is land leaving the CITY and says nothing about an ETJ), filed 2020 or later (the 2016
+   * Sugar Land and 2000 Missouri City rows are old city-ordinance changes the ETJ layer absorbed long ago, not releases), and not Alvin's
+   * "Resolution to Expand ETJ" (mis-typed De-annexation: it grows an ETJ). 36 polygons on 2026-11-12. */
+  etj_release_fortbend: {
+    key: "etj_release_fortbend",
+    label: "ETJ releases & removals — Fort Bend County (SB 2038)",
+    provider: "Fort Bend County GIS (Land Ordinances, gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/16",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "City" },
+    where: "Type = 'De-annexation' AND City LIKE '% ETJ' AND Filing_Date >= DATE '2020-01-01' AND (Ordinance_Reference IS NULL OR Ordinance_Reference NOT LIKE '%xpand%')",
+    nameStrip: ["\\s+ETJ$"],
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    dataLastEdited: "2026-06-01",
+  },
+  /* The county line itself — used ONLY to cut H-GAC's stale polygons out of the drawn ETJ layer inside Fort Bend County (the drawn half of
+   * `etj_fortbend`'s `supersedes`). One polygon, 6,454 vertices; the cut reads it simplified (maxAllowableOffset). Read live 2026-11-12. */
+  county_fortbend: {
+    key: "county_fortbend",
+    label: "County line — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/3",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  city_fortbend: {
+    key: "city_fortbend",
+    label: "City limits — Fort Bend County (county GIS)",
+    provider: "Fort Bend County GIS (gisportal.fortbendcountytx.gov)",
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services/InteractiveMap/Boundaries_Public/MapServer/4",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CityName" },
+    /* `City_Type` is CITY / TOWN / VILL — the form of government, NOT a limits class. The layer is full-purpose limits only: the county
+     * publishes limited-purpose annexation separately (MapServer/17 "City Limited Annexation", not wired). Agreement with TxGIO measured
+     * 2026-11-12 at 150 random points across the county's extent: every point inside the county matched (the 19 that did not were in
+     * Harris, Brazoria or Wharton county, where this layer is empty by design). */
+    fullPurposeOnly: true,
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+  },
+  /* ⛔ NEW-2 (Harris, 2026-11-12) — HARRIS COUNTY'S OWN ETJ TABLE, the fallback when H-GAC answers nothing. The county GIS office
+   * (`gis.hctx.net`, layer description: "obtained from ITC Repository database, H-GAC, City of Katy GIS Hub, and FOIA requests through Deer Park and
+   * Laporte") publishes eight cities' ETJ across Harris County: BAYTOWN, DEER PARK, HOUSTON, KATY, LA PORTE, PASADENA, PEARLAND, WALLER. CORS-clean
+   * from a planyr.io Origin. Native SR is Texas South Central ftUS; the app's queries pass inSR/outSR 4326. Live: (-95.75, 30.05) → HOUSTON. */
+  etj_harris: {
+    key: "etj_harris",
+    label: "ETJ — Harris County (county GIS)",
+    provider: "Harris County GIS (gis.hctx.net)",
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/Boundaries/HC_Cities_ETJ/MapServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Name" },
+    coverage: "metro",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-12",
+    roster: ["BAYTOWN", "DEER PARK", "HOUSTON", "KATY", "LA PORTE", "PASADENA", "PEARLAND", "WALLER"],
+    rosterCheckedAt: "2026-11-12",
   },
 
   /* ⛔ NEW-1 (DFW, 2026-09-30) — "WIRE ALL THE CITY LIMITS AND ETJs WITHIN 50 MILES OF DALLAS."
@@ -3619,6 +3838,12 @@ export const GIS_SOURCES = {
     // Live 2026-10-29 (through the relay): Aurora box 511.
   },
   ...OK_SOURCES, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_SOURCES, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
+  ...SUGARLAND_SOURCES, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...FORTBEND_SOURCES, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
+  ...NASHVILLE_BUFFER_SOURCES, // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps) — sourcesNashvilleBuffers.js
+  ...RUTHERFORD_SOURCES, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
+  ...NASHVILLE_SOURCES, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 
 /* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
@@ -3643,7 +3868,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], etj_fortbend: ["TX"], etj_release_fortbend: ["TX"], city_fortbend: ["TX"], county_fortbend: ["TX"], etj_harris: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -3709,7 +3934,7 @@ export function sourceCoversState(entry, state) {
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
 // NEW-1 (FL/GA pipelines) — the four EIA rows the Florida/Georgia pipeline screen reads (one finding).
 export const EIA_PIPELINE_KEYS = ["eiaGas", "eiaPetroleum", "eiaCrude", "eiaHgl"];
-export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale"];
+export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale", "etj_montbelvieu", "etj_chambers_neighbors"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
@@ -3824,6 +4049,10 @@ export const SOURCE_FIXTURE_REACH = {
   mngwpd: ["regional", "The Metropolitan North Georgia Water Planning District is 15 metro-Atlanta counties — one polygon about 100 km across."],
   // NEW-1 (Georgia due-diligence gaps, 2026-10-29) — rows whose real extent is a region, not the state.
   gaBartowZoning: ["regional", "Bartow County's zoning polygons — one county by definition (and the incorporated cities inside it are marked 'Incorporated', not zoned)."],
+  gaBartowWater: ["regional", "Bartow County Water Department's pipes — one county department by definition (Cartersville and Adairsville run their own systems and publish no GIS)."],
+  gaBartowSewer: ["regional", "Bartow County Water Department's sanitary sewer — one county department by definition."],
+  gaAllatoonaLake: ["regional", "Allatoona Lake's normal-pool boundary — one reservoir on the Bartow / Cherokee / Cobb line (the service's other projects are filtered out by RPSUID)."],
+  gaAllatoonaShoreline: ["regional", "Allatoona Lake's USACE shoreline allocation areas — one reservoir (the service's other projects are filtered out by RPSUID)."],
   gaProtectedMountain: ["regional", "Protected mountains (2,200 ft + 25% slope) exist only in the north Georgia mountains — probing one in Savannah would assert a guaranteed zero."],
   gaMrpaCorridor: ["regional", "The Chattahoochee River Corridor under the Metropolitan River Protection Act — one river through metro Atlanta."],
   gaMrpaVegBuffer: ["regional", "The MRPA 50-ft river buffer — one river through metro Atlanta."],
@@ -3866,7 +4095,16 @@ export const SOURCE_FIXTURE_REACH = {
   // NEW-1a — Baytown's own ETJ ring, added because H-GAC's regional mosaic omits Baytown. It is one
   // city's ETJ, a few km across; two points inside it (one also inside the city limits, one not) is
   // the most separation this layer HAS, exactly as with the Austin and Fort Worth rows.
+  // NEW-1 / NEW-2 (Fort Bend, Harris — 2026-11-12) — county-published boundary tables. One county each by definition.
+  etj_fortbend: ["regional", "Fort Bend County's City ETJs table — one county (about 50 km across); probing it in Dallas would assert a guaranteed zero."],
+  etj_release_fortbend: ["regional", "Fort Bend County's recorded ETJ releases and removals — one county."],
+  county_fortbend: ["regional", "The Fort Bend County line — one polygon."],
+  city_fortbend: ["regional", "Fort Bend County's city-limits table — one county."],
+  etj_harris: ["regional", "Harris County's City ETJ table — one county; eight cities."],
   etj_baytown: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
+  // NEW-1 (2026-11-12) — Chambers County. Mont Belvieu's own ETJ is one polygon a few km across; its copy of the neighbours' lines is three small rings (Beach City, Cove, Old River-Winfree).
+  etj_montbelvieu: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
+  etj_chambers_neighbors: ["regional", "Three neighbouring cities' ETJ rings in southern Chambers County."],
   city_baytown: ["local", "One city's incorporated limits — a few km across, with no wider extent to probe."],
   // The BKDD tier — ONE drainage district, roughly 20 km across. `local` is the honest class:
   // two separated points inside the district is the most separation that exists to buy.
@@ -3914,7 +4152,14 @@ export const SOURCE_FIXTURE_REACH = {
   auroraAirportNoise: ["local", "City of Aurora's published airport contours — one city, ~25 km across."],
   auroraBuckleyApz: ["local", "Buckley SFB's runway-end zones — a few km across."],
   auroraZoning: ["local", "City of Aurora's zoning — one city, ~25 km across."],
+  ...HOUSTON_METRO_FIXTURE_REACH, // NEW-1/2/3 (Houston-metro sweep) — sourcesHoustonMetro.js
   ...OK_FIXTURE_REACH, // NEW-1 (Oklahoma screening) — sourcesOk.js
+  ...TX_CITY_ZONING_FIXTURE_REACH, // NEW-1 (Texas city zoning) — sourcesTxCityZoning.js
+  ...SUGARLAND_FIXTURE_REACH, // NEW-1 (City of Sugar Land layers) — sourcesSugarLand.js
+  ...FORTBEND_FIXTURE_REACH, // NEW-1 (Fort Bend County layers) — sourcesFortBend.js
+  ...NASHVILLE_BUFFER_FIXTURE_REACH, // B2671266 / B2671267 (Metro Nashville buffers) — sourcesNashvilleBuffers.js
+  ...RUTHERFORD_FIXTURE_REACH, // NEW-1 (Rutherford County TN zoning) — sourcesRutherford.js
+  ...NASHVILLE_FIXTURE_REACH, // NEW-1/NEW-3 (Metro Nashville zoning sweep) — sourcesNashville.js
 };
 
 /* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.

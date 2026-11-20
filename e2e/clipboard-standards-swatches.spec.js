@@ -15,7 +15,7 @@ import { openModule } from "./helpers.js";
 const canvas = (p) => p.getByTestId("planner-canvas");
 
 const site = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return map[Object.keys(map)[0]] || {};
 });
 const counts = async (page) => {

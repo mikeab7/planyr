@@ -1,5 +1,11 @@
 // src/shared/formula/formula.js
 //
+// ⛔ NOTE (NEW-1, 2026-10-31): the SPREADSHEET module no longer uses this file to compute values — its evaluator is Univer's engine run
+// headless (src/workspaces/model/lib/univerEval.js), and this evaluator is DEPRECATED there (kept as the reference the differential tests
+// compare against, until the regular grid is deleted). It remains the live engine of the Schedule's and Cost Estimating's formula columns
+// (inlined into public/sequence/index.html), and its PARSER / reference-rewrite helpers (parseFormula, rewriteFormulaFor*) are still the
+// syntax tools the regular grid and the consistency audit read formula TEXT with — they compute no values.
+//
 // Planyr formula engine — a small, dependency-free Excel-style expression
 // evaluator. It is the calculation core behind the scheduler's user-defined
 // "Formula" columns (and Cost Estimating's), and — as of A1 cell references,

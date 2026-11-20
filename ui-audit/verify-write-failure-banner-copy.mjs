@@ -56,7 +56,8 @@ if (!visible) { fail("write-failure banner did not appear for a seeded queued fa
 else {
   const text = (await bannerLocator().innerText().catch(() => "")).toLowerCase();
   const overclaims = text.includes("didn't reach the cloud") || text.includes("redo it if needed") || text.includes("redo them if needed");
-  const honest = text.includes("may not have fully synced");
+  // NEW-1 (B2671215 follow-up, 2026-11-11): a boot banner over ONLY renames reads in the owner's sentence — "didn't FULLY save" / "may still see" keeps the partial-write honesty
+  const honest = text.includes("may not have fully synced") || (text.includes("didn't fully save to the cloud") && text.includes("may still see the old name"));
   if (overclaims) fail(`banner still implies the cloud is untouched: "${text}"`);
   else if (!honest) fail(`banner does not say the sync may be partial: "${text}"`);
   else console.log('PASS 2/3 — banner text is honest about a possibly-partial sync ("may not have fully synced", no "didn\'t reach the cloud"/"redo it")');

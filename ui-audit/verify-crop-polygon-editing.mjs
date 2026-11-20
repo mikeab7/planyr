@@ -83,7 +83,7 @@ await page.waitForTimeout(700);
  * full-size sheet") --------------------------------------------------------------------------- */
 await page.locator('[data-testid="left-menu-panel"] input[type="file"][accept="application/pdf,image/*,.dxf,.dwg"]').setInputFiles(FIXTURE);
 const ov = await page.waitForFunction(() => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.C1 && raw.C1.sheetOverlays.find((x) => /l-shaped-plan/.test(x.name || ""));
   return o && o.imgW ? { id: o.id, name: o.name, imgW: o.imgW, imgH: o.imgH } : null;
 }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
@@ -93,7 +93,7 @@ await page.locator('button[title^="Zoom to fit"]').first().click(); // frame the
 await page.waitForTimeout(700);
 
 const storedCrop = () => page.evaluate((id) => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const o = raw.C1.sheetOverlays.find((x) => x.id === id);
   return o ? o.crop || null : null;
 }, ov.id);
@@ -498,7 +498,7 @@ check("Polygon mode's own 'Reset to full page' saves crop null, exactly like Rec
   await p2.waitForTimeout(500);
   await p2.locator('[data-testid="left-menu-panel"] input[type="file"][accept="application/pdf,image/*,.dxf,.dwg"]').setInputFiles(FIXTURE);
   const ov2 = await p2.waitForFunction(() => {
-    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const o = raw.C1 && raw.C1.sheetOverlays.find((x) => /l-shaped-plan/.test(x.name || ""));
     return o && o.imgW ? { id: o.id, name: o.name } : null;
   }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);

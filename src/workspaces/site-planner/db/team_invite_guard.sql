@@ -9,19 +9,11 @@
 -- exploitable, but it isn't a real boundary. This replaces that policy with one that requires
 -- an UNCLAIMED invite for the caller's verified email AT THE SAME ROLE being inserted.
 --
--- The legitimate join paths (create_team / claim_team_invites / handle_new_user) run
+-- The legitimate join paths (create_team / redeem_invite_link / respond_to_invite) run
 -- SECURITY DEFINER and bypass RLS, so they are unaffected.
 
 drop policy if exists "self add via claim"  on public.team_members;
 drop policy if exists "self join via invite" on public.team_members;
-create policy "self join via invite" on public.team_members
-  for insert to authenticated with check (
-    user_id = (select auth.uid())
-    and exists (
-      select 1 from public.team_invites i
-      where i.team_id = team_members.team_id
-        and lower(i.email) = lower((select auth.email()))
-        and i.claimed_at is null
-        and i.role = team_members.role
-    )
-  );
+-- NEW-1 (2026-11-02): the replacement "self join via invite" policy this file used to create is GONE as well —
+-- it matched on the account's address, which is not proof of the mailbox while email confirmation is off.
+-- See db/team_invite_proof.sql.

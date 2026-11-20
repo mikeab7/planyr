@@ -225,6 +225,11 @@ export const TOP_RIGHT_ROW_RESERVE_PX = 52;
  * — that inset only ever applies while `narrow` (the tab never renders there). */
 export const EDGE_TAB_TOP_PX = MAP_OVERLAY_TOP_PX; // the ONE top both edge tabs (Panels + Tools) share
 export const TOOLS_TAB_WIDTH_PX = 40; // both edge tabs' own width
+// NEW-1 — the LEFT module rail's outer width. 54 is the label room (the widest label, "Drainage", is ~47 wide); the extra 8 is the reserved
+// thin-scrollbar gutter (`.left-rail` in index.css, 7 wide + 1 slack) so a classic scrollbar (Windows Chrome) never covers a label or forces a
+// sideways scroll. A touch device (overlay scrollbars, no layout width) keeps the old 54.
+export const LEFT_RAIL_W = 62;
+export const LEFT_RAIL_W_TOUCH = 54;
 export const TOP_RIGHT_ROW_NARROW_RIGHT_PX = TOOLS_TAB_WIDTH_PX + 8; // clears the Tools tab's column + a breathing gap
 export const TOOLS_TAB_RESERVE_PX = EDGE_TAB_TOP_PX + 84 + 8; // tab's own top + height + gap = 102
 

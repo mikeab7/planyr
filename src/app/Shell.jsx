@@ -5,12 +5,16 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
-import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
+import { onAuthChange, getUser } from "../workspaces/site-planner/lib/auth.js";
+import { authReturn, authReturnNotice } from "../shared/auth/authReturn.js";
+import SignedOutNotice from "./SignedOutNotice.jsx";
 // B927105 — this is the ONLY storage-adjacent thing the shell needs at boot, and it's a
 // genuinely tiny leaf (no siteModel.js/cloudSync.js imports), so it's a plain static import —
 // see the note beside its call site below for what this replaced and why.
 import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
-import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
+import { markRecoveryPending, isRecoveryPending } from "../shared/auth/recoveryPending.js";
+import { readDraft, clearDraft, draftStorage } from "../shared/auth/panelDismiss.js";
+import { reportAuthEvent, AUTH_EVENT } from "../shared/auth/authTelemetry.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
@@ -20,9 +24,9 @@ import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
-import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
+import { writeLastRoute, seedBootRoute, pointerForRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
 import { installBuildSkewWatch, shouldOfferReload, shouldEscalate, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
@@ -32,6 +36,7 @@ import NameNoticeHost from "../shared/names/NameNoticeHost.jsx";
 import "../shared/schedule/scheduleSiteNames.js"; // registers the live project-name resolver for schedule labels
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
+import { loadAuthPanel } from "./authPanelChunk.js";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
 import { isTextControl } from "../shared/keyboard/keyScope.js";
 import { openShortcutsPage, closeShortcutsPage, subscribeShortcutsPage } from "../shared/keyboard/shortcutsPageBus.js";
@@ -41,6 +46,9 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
 // Invite-email link (NEW-2): loaded only when the address carries ?invite=, so no other visit pays for it.
 const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
+// Emailed sign-in / password-reset link (NEW-1): loaded only when the address carries ?authlink=, so no other visit pays for it.
+const AuthLinkLanding = lazy(() => import("./AuthLinkLanding.jsx"));
+const WaitingInviteNotice = lazy(() => import("./WaitingInviteNotice.jsx")); // NEW-1 (2026-11-02): "an invitation is waiting" after a no-link sign-up
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
@@ -55,6 +63,9 @@ const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
 // NEW-2 (company workspace card) — the Site tab at COMPANY scope: a map of every project, one pin
 // each. Lazy and not a WORKSPACES entry: it is the Site tab's org-scope face, mounted only while
 // the route is #/org/site (the Site Planner is not mounted for it).
+/* B329408 — the sign-in panel (~15 KB) is its own chunk (authPanelChunk.js says when it is warmed: on intent, at the header's "Sign in" pill). The panel
+ * itself is unchanged (constraint #54 — it closes only when asked — lives inside it). */
+const AuthPanel = lazy(loadAuthPanel);
 const OrgSitesView = lazy(() => import("../workspaces/site-planner/components/OrgSitesView.jsx"));
 // NEW-1 (keyboard shortcuts page, 2026-09-12) — same lazy/not-a-workspace shape as the three
 // above: reachable from every route via the global "?" listener below and the Help menu's
@@ -270,11 +281,33 @@ export default function Shell() {
   // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
   const [authKnown, setAuthKnown] = useState(false);
   const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
-  const [authOpen,  setAuthOpen]  = useState(false);
-  const [recovery,  setRecovery]  = useState(false);
+  const [hasAuthLink] = useState(() => typeof window !== "undefined" && /[?&]authlink=/.test(window.location.search || "")); // captured before AuthLinkLanding strips it
+  // NEW-1 (follow-up to B2619760): the e-mail link the person just followed was read from the URL at module load
+  // (shared/auth/authReturn.js), BEFORE anything could erase it — a reset link opens the set-new-password form
+  // even if PASSWORD_RECOVERY fired before this component subscribed, and a dead link (expired / already used)
+  // opens Forgot password with the reason instead of landing signed out with no message.
+  const [linkReturn] = useState(() => authReturn());
+  // NEW-1 (2026-11-08): a forced page reload (the stale-build rescue) must not cost a half-filled sign-in panel — the panel
+  // keeps its email + tab in sessionStorage while it is open signed out (shared/auth/panelDismiss.js), and it comes back
+  // here. A link return (reset / dead link) and an explicit ?auth= deep link have their own say and win over the draft.
+  const [restoredDraft] = useState(() => {
+    if (typeof window === "undefined" || linkReturn.recovery || linkReturn.failure) return null;
+    try { if (/[?&]auth=/.test(window.location.search || "") || /[?&]authlink=/.test(window.location.search || "")) return null; } catch (_) { /* unreadable → no draft */ }
+    return readDraft(draftStorage());
+  });
+  const restoredRef = useRef(!!restoredDraft);
+  useEffect(() => { if (restoredDraft) reportAuthEvent(AUTH_EVENT.PANEL_RESTORED, { reason: "reload" }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [authOpen,  setAuthOpen]  = useState(() => !!(linkReturn.recovery || linkReturn.failure || restoredDraft));
+  const [recovery,  setRecovery]  = useState(() => !!linkReturn.recovery);
+  const [authNotice, setAuthNotice] = useState(() => authReturnNotice(linkReturn.failure)); // why the panel opened on Forgot password
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
-  const [authEmail, setAuthEmail]  = useState("");        // invite-email deep link: ?auth=…&email=… prefills the form
-  const [authMode,  setAuthMode]  = useState("signin");  // which AuthPanel tab (signin|signup) it opens on
+  const [authEmail, setAuthEmail]  = useState(() => (restoredDraft ? restoredDraft.email : ""));        // invite-email deep link: ?auth=…&email=… prefills the form
+  const [authMode,  setAuthMode]  = useState(() => (linkReturn.failure ? "reset" : restoredDraft ? restoredDraft.mode : "signin"));  // which AuthPanel tab (signin|signup|reset) it opens on
+  // NEW-1 point 4/5: "pending" = a stored session could not be used YET (no network at boot) — not signed out, so the
+  // header shows its neutral placeholder rather than a Sign in pill; "signedOutNotice" = the session died under the person.
+  const [authPending, setAuthPending] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);   // pending for a while: the header says so and becomes pressable
+  const [signedOutNotice, setSignedOutNotice] = useState(false);
   // The account pill/dropdown + "Cloud off" popover now live in AccountControl, which owns its
   // own anchor ref + open state per mounted header instance (B734) — Shell only drives the modal.
   // Cross-workspace navigation (B191–B193, now URL-driven for project context). The
@@ -439,13 +472,41 @@ export default function Shell() {
    * so calling it here costs none of that. */
   useEffect(() => {
     if (!supabaseConfigured()) { setAuthKnown(true); return; }
-    return onAuthChange((event, u) => {
+    return onAuthChange((event, u, meta) => {
       try { setActiveUser((u && u.id) || null); } catch (_) {}
+      if (meta && meta.pending) { setAuthPending(true); return; }   // not known yet: stay neutral; TOKEN_REFRESHED / SIGNED_OUT will say
+      setAuthPending(false);
       setUser(u);
       setAuthKnown(true);
-      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+      if (u) setSignedOutNotice(false); else if (meta && meta.lost) setSignedOutNotice(true);
+      if (u) { clearDraft(draftStorage()); if (restoredRef.current) { restoredRef.current = false; setAuthOpen(false); setAuthMode("signin"); setAuthEmail(""); } }   // a panel restored after a reload, for someone whose session turned out to be live, has nothing left to ask
+      if (event === "PASSWORD_RECOVERY") { markRecoveryPending(); setRecovery(true); setAuthOpen(true); }
     });
   }, []);
+  // A dead-link notice is for someone who is signed out. If the session turns out to be live (a used link followed
+  // by a person who is already signed in), there is nothing to say and the panel should not open on Forgot password.
+  useEffect(() => {
+    if (user && authNotice && !recovery) { setAuthOpen(false); setAuthNotice(""); setAuthMode("signin"); clearDraft(draftStorage()); }
+  }, [user, authNotice, recovery]);
+  // While a stored session is waiting on the network, keep asking: supabase-js retries the refresh when the
+  // session is read, and a success arrives above as TOKEN_REFRESHED (a permanent refusal as SIGNED_OUT).
+  useEffect(() => {
+    if (!authPending || typeof window === "undefined") return undefined;
+    const ask = () => { getUser().catch(() => {}); };
+    const iv = setInterval(ask, 15000);
+    const wait = setTimeout(() => setReconnecting(true), 20000);
+    window.addEventListener("online", ask);
+    return () => { clearInterval(iv); clearTimeout(wait); setReconnecting(false); window.removeEventListener("online", ask); };
+  }, [authPending]);
+
+  /* A reset link was honoured but the new password was never set (the form was reloaded away, the tab closed):
+   * the browser holds a real session, so reopen the non-dismissable form until it is done (NEW-1, recoveryPending.js). */
+  // A native Supabase reset link read at module load (authReturn) also counts: PASSWORD_RECOVERY may have fired before we subscribed.
+  useEffect(() => { if (linkReturn.recovery) markRecoveryPending(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!authKnown || !user) return;
+    if (isRecoveryPending()) { setRecovery(true); setAuthOpen(true); }
+  }, [authKnown, user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* FIRST-TIME LANDING (NEW-1) — a genuine first boot (BOOT_WAS_ROUTELESS) redirects from the
    * Dashboard to the Map the instant we know the account/browser has never had a project (see
@@ -556,7 +617,7 @@ export default function Shell() {
   // pointer, indistinguishable from "on the plain dashboard" — so it's excluded the same way
   // Food is: a visit to /admin must never clobber the pointer to whatever project was
   // actually open before it (B711904).
-  useEffect(() => { if (!isAdminHash && !isDesignHash && !isDashboardHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash, isDashboardHash]);
+  useEffect(() => { const p = pointerForRoute(route, { admin: isAdminHash, design: isDesignHash, dashboard: isDashboardHash }); if (p) writeLastRoute(p); }, [route, isAdminHash, isDesignHash, isDashboardHash]);
 
   // B842866 — drain any problem reports that couldn't reach the server on a prior load
   // (offline, a dropped connection). Once per boot; LOUD-FAILURE means a report never
@@ -658,7 +719,10 @@ export default function Shell() {
       if (g.status === "missing") writeLastRoute({ module: "site-planner", projectId: null, cross: false, org: false });
     });
     return () => { live = false; };
-  }, [projectId, cross, org, gateRecheck]);
+    // NEW-1 (B2671231) — `authKnown` + the signed-in id are inputs: a check asked before the session was
+    // known fails open (no uid), and without these deps nothing asked again until the tab next regained
+    // focus. `cloudCheckDeleted` only ever answers "missing" for a read PROVEN to be the signed-in user's.
+  }, [projectId, cross, org, gateRecheck, authKnown, user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // B1953796 (R9) — the gate above ran once per projectId; a project deleted from another tab while
   // this one sat open stayed editable. Re-check whenever this tab regains focus.
   useEffect(() => {
@@ -758,7 +822,16 @@ export default function Shell() {
   // single effect, read by the switcher's company card and the "Map / <Company>" crumb.
   useEffect(() => { setOrgName(profileApi.org); }, [profileApi.org]);
 
-  const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
+  const openAuth    = () => { setRecovery(false); setAuthNotice(""); setAuthOpen(true); };
+  // A sign-in link carries the in-app route the person started from (already validated by safeNextRoute); land them there
+  // through the router's own navigate() — the one writer of the hash. The Dashboard / admin / design pages have no navigate()
+  // form (they all parse to the default route), so those are left to the normal boot, which resumes where they were.
+  const goToLinkRoute = useCallback((next) => {
+    const h = "#" + next;
+    if (isAdminRoute(h) || isDesignRoute(h) || isDashboardRoute(h)) return;
+    const r = parseRoute(h);
+    navigate({ module: r.module, projectId: r.projectId, cross: r.cross, org: r.org });
+  }, [navigate]);
   // Invite link (NEW-2): a signed-out visitor opens the auth screen on the right tab with the invited address filled in.
   const openAuthForInvite = useCallback(({ email, mode }) => {
     setRecovery(false);
@@ -776,6 +849,7 @@ export default function Shell() {
     <AccountControl
       user={user}
       authKnown={authKnown}
+      reconnecting={reconnecting}
       profileApi={profileApi}
       onOpenAuth={openAuth}
       onOpenAccount={openAccount}
@@ -787,7 +861,10 @@ export default function Shell() {
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
-      {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} /></Suspense>}
+      {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} onOpenWork={goDashboard} onOpenTeam={() => openAccount("team")} /></Suspense>}
+      {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} onGoTo={goToLinkRoute} /></Suspense>}
+      {/* Item 6 (NEW-1, 2026-11-02): signed up with an invited address but without the link → tell them an invitation is waiting. */}
+      {user && authKnown && !hasInviteLink && <Suspense fallback={null}><WaitingInviteNotice user={user} /></Suspense>}
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}
@@ -872,6 +949,7 @@ export default function Shell() {
                     noteIntent={noteIntent}
                     onGoDashboard={goDashboard}
                     onNewProject={newProject}
+                    onOpenAuth={openAuth}
                     onOpenReviewInDocReview={openReviewInDocReview}
                     onScheduleLinkChanged={scheduleLinkChanged}
                   />
@@ -978,6 +1056,7 @@ export default function Shell() {
         </Suspense>
       )}
       {authOpen && (
+        <Suspense fallback={null}>
         <AuthPanel
           user={user}
           recovery={recovery}
@@ -985,9 +1064,13 @@ export default function Shell() {
           initialTab={authTab}
           initialMode={authMode}
           initialEmail={authEmail}
-          onClose={() => { setAuthOpen(false); setRecovery(false); }}
+          initialNotice={authNotice}
+          onLeaveRecovery={() => setRecovery(false)}
+          onClose={() => { restoredRef.current = false; setAuthOpen(false); setRecovery(false); setAuthNotice(""); setAuthMode("signin"); }}
         />
+        </Suspense>
       )}
+      {signedOutNotice && !user && !authOpen && <SignedOutNotice onSignIn={openAuth} onDismiss={() => setSignedOutNotice(false)} />}
     </div>
   );
 }

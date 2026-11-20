@@ -205,7 +205,7 @@ async function run() {
     /unavailable|showing the last good|predates the drawn area|Flood data/i.test(tG), tG.match(/Flood data[^]{0,24}|unavailable[^]{0,24}/)?.[0]);
   const lcG = await pageG.evaluate(() => {
     try {
-      const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       return s.s_auto?.settings?.drainage?.lastCheck?.authority?.primaryReviewerId ?? null;
     } catch (e) { return "parse-error"; }
   });

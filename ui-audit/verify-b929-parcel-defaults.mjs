@@ -114,7 +114,7 @@ await page.waitForTimeout(2600); // let the autosave debounce flush to localStor
 // ---------- read the persisted site; find the drawn parcel ----------
 const drawn = await page.evaluate(() => {
   try {
-    const sites = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const sites = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = sites["uiaudit-b929"];
     if (!s || !Array.isArray(s.parcels)) return null;
     const fresh = s.parcels.filter((p) => p.id !== "pcA");

@@ -17,7 +17,10 @@
  *     / `tooShort` below for the exact tests and why.
  *   • A LOCKED road never moves: within the threshold it stays connected (the junction recomputes from where it now meets); past it, it lets go.
  *   • Moving the ROAD itself never moves the field (follow only ever writes the road), and a road the gesture itself moved (a multi-select that holds both
- *     the road and the field) is left to the gesture — it travels with the selection and does not follow twice.
+ *     the road and the field, OR THE OWNER DRAGGING ONE OF THE ROAD'S OWN CONTROL POINTS) is left to the gesture — it travels with the selection and does not
+ *     follow twice, and wherever he drops it, it STAYS (NEW-1, 2026-11-10: a write that left the dragged road's points alone — the release's junction weld,
+ *     the host road's new tee, a flush — used to put the BASE geometry back over his drop, so a control point dragged square to the main road, or nudged a
+ *     couple of feet, snapped back to where it started). "The gesture moved this road" is read off the road itself: see `ownedByGesture`.
  *
  * `followDrives(base, prev, next, opts)` — three lists, because the answer depends on what the gesture STARTED from (`base`), what the previous write
  * produced (`prev`) and what this write wants (`next`). Outside a drag, `base === prev`. Identity-preserving: returns `next` itself when no road changes.
@@ -123,6 +126,40 @@ function endOutcome(road, i, T, T2, locked) {
   return { follow: np };
 }
 
+/* What each connected END of base road `B` does when the fields are as in `fieldsById`: the ends that follow (index → new point) and the field ids whose
+ * record is cleared. The ONE place the per-end rule is applied — `followDrives` asks it for the NEW field geometry, `ownedByGesture` asks it for the PREVIOUS
+ * write's, so "where would the follow have put this road?" has one answer. */
+function followOutcomes(B, baseById, fieldsById) {
+  const moves = new Map();                                          // end index → new point
+  const letGoIds = new Set();                                       // target ids whose record is cleared
+  for (const i of [0, B.pts.length - 1]) {
+    for (const key of RECORD_KEYS) {
+      const rec = B[key];
+      if (!rec || rec.targetId == null) continue;
+      const T = baseById.get(rec.targetId);
+      if (!T || !driveTargetKindOf(T) || !bestHitAgainst(B, T, i)) continue;   // not actually connected at this end in the base
+      const out = endOutcome(B, i, T, fieldsById.get(rec.targetId), !!B.locked);
+      if (!out || out.hold) continue;
+      if (out.letGo) letGoIds.add(rec.targetId);
+      else if (out.follow) moves.set(i, out.follow);
+      break;                                                        // one record per end
+    }
+  }
+  return { moves, letGoIds };
+}
+
+/* NEW-1 (2026-11-10) — DID THE GESTURE ITSELF MOVE THIS ROAD'S POINTS? A drive is recomputed from the gesture's BASE on every write so a field drag is
+ * reversible; the price is that any write which leaves the road's points alone (the previous check, `prev.pts === next.pts`) was read as "nothing moved
+ * it, so it should read as the base plus the follow" — and when the owner had just dragged one of the road's own control points that put the BASE geometry
+ * back over his drop. A road the owner moved is told apart by its points alone: every control point of the previous write's road is either (a) where the
+ * base had it or (b) where THIS rule put it for the previous write's field geometry. A point at neither was put there by something else — the owner's drag,
+ * a multi-select travelling with its field, a vertex added or removed — so the road is the gesture's from then on and follow leaves it exactly as written. */
+function ownedByGesture(B, pr, prevById, baseById) {
+  if (pr.pts.length !== B.pts.length) return true;                  // a control point was added or removed: the owner reshaped it
+  const { moves } = followOutcomes(B, baseById, prevById);
+  return pr.pts.some((p, k) => !samePt(p, B.pts[k]) && !(moves.has(k) && samePt(p, moves.get(k))));
+}
+
 export function followDrives(base, prev, next, opts = {}) {
   if (!Array.isArray(next) || next === prev) return next;                // nothing was written this time
   const baseRoads = [];
@@ -137,22 +174,8 @@ export function followDrives(base, prev, next, opts = {}) {
     const nr = nextById.get(B.id), pr = prevById.get(B.id);
     if (!nr || !pr || !isRoad(nr)) continue;
     if (!sameRoadPts(pr.pts, nr.pts)) continue;                       // the gesture moved THIS road (a multi-select) — it keeps what the gesture wrote
-    const ends = [0, B.pts.length - 1];
-    const moves = new Map();                                          // end index → new point
-    const letGoIds = new Set();                                       // target ids whose record is cleared
-    for (const i of ends) {
-      for (const key of RECORD_KEYS) {
-        const rec = B[key];
-        if (!rec || rec.targetId == null) continue;
-        const T = baseById.get(rec.targetId);
-        if (!T || !driveTargetKindOf(T) || !bestHitAgainst(B, T, i)) continue;   // not actually connected at this end in the base
-        const out = endOutcome(B, i, T, nextById.get(rec.targetId), !!B.locked);
-        if (!out || out.hold) continue;
-        if (out.letGo) letGoIds.add(rec.targetId);
-        else if (out.follow) moves.set(i, out.follow);
-        break;                                                        // one record per end
-      }
-    }
+    if (ownedByGesture(B, pr, prevById, baseById)) continue;         // the owner moved one of this road's own points — whatever he dropped stays
+    const { moves, letGoIds } = followOutcomes(B, baseById, nextById);
     // The road as it SHOULD read: the base geometry with the following ends moved, and the base records with the let-go ones removed. Computing from the
     // BASE (not from `nr`) is what makes a drag reversible — back inside the threshold the record and the follow both come back.
     let pts = B.pts;

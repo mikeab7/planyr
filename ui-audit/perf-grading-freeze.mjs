@@ -138,8 +138,8 @@ try {
     // ---- mode switch each way at the parcel zoom
     {
       const { ctx, page } = await open(arm, "layout", "site");
-      results.push({ arm, ...await measure(page, "parcel zoom: Around the layout → To the boundary", () => page.click('[data-testid="grading-limit-mode"] button:last-child'), "boundary", STEP_BUDGET) });
-      results.push({ arm, ...await measure(page, "parcel zoom: To the boundary → Around the layout", () => page.click('[data-testid="grading-limit-mode"] button:first-child'), "layout", STEP_BUDGET) });
+      results.push({ arm, ...await measure(page, "parcel zoom: Around the layout → To the boundary", () => page.evaluate(() => window.__harness.setLimitMode("boundary")), "boundary", STEP_BUDGET) });
+      results.push({ arm, ...await measure(page, "parcel zoom: To the boundary → Around the layout", () => page.evaluate(() => window.__harness.setLimitMode("layout")), "layout", STEP_BUDGET) });
       await ctx.close();
     }
     // ---- three zoom steps at the building zoom, each mode

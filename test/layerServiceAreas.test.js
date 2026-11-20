@@ -38,15 +38,29 @@ const has = (ids, pt) => ids.map((id) => showing(pt).includes(id));
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
+/* B2671240 — the City of Mont Belvieu's Master Drainage Plan rows (Flood & Drainage). They are offered over the plan's own data extent, which includes Grand Port and Mont Belvieu. */
+const MB_PLAN = Object.keys(ALL_LAYERS).filter((id) => id.startsWith("tx_mb_plan_")).sort();
+
 describe("the declared service areas", () => {
   it("every region name a registry row declares exists — a typo would silently fail open", () => {
     const names = new Set();
     for (const cfg of Object.values(ALL_LAYERS)) for (const r of cfg.regions || []) names.add(r);
     for (const r of names) expect(REGION_ZONES[r] || SERVICE_AREAS[r], `region "${r}" is declared nowhere`).toBeTruthy();
   });
-  it("the 65-mile 'houston' circle is gone; only the growth-fault STUDY extent keeps a circle", () => {
+  it("the 65-mile 'houston' circle is gone; the growth-fault row is a BOX of the layer's real data extent", () => {
     expect(REGION_ZONES.houston).toBeUndefined();
     expect(ALL_LAYERS.faults.regions).toEqual(["houston_metro"]);
+    expect(REGION_ZONES.houston_metro.box).toHaveLength(4);
+    expect(REGION_ZONES.houston_metro.radiusMiles).toBeUndefined();
+  });
+  it("growth faults: Mont Belvieu / Cove / Houston are covered; Anahuac / Winnie / Beaumont are NOT (NEW-1, data ends at -94.838°)", () => {
+    const at = (lat, lng) => layerAvailableHere(ALL_LAYERS.faults, { state: "TX", loc: { lat, lng } });
+    expect(at(29.8405, -94.9019)).toBe(true);   // Mont Belvieu (Targa)
+    expect(at(29.7604, -95.3698)).toBe(true);   // downtown Houston
+    expect(at(29.7685, -94.6785)).toBe(false);  // Anahuac, Chambers County
+    expect(at(29.8221, -94.3794)).toBe(false);  // Winnie
+    expect(at(30.0802, -94.1266)).toBe(false);  // Beaumont
+    expect(at(32.7767, -96.797)).toBe(false);   // Dallas
   });
   it("each Houston-area source declares the area it actually serves", () => {
     expect(ALL_LAYERS[HCFCD].regions).toEqual(["harris"]);
@@ -94,10 +108,11 @@ describe("which rows a site gets (the adjacent cases)", () => {
     expect(has(BKDD, P.katyBkdd)).toEqual([true, true, true]);
     expect(has([HCFCD, ...COH], P.katyBkdd).some(Boolean)).toBe(false);
   });
-  it("Flood & Drainage at Grand Port is exactly FEMA + streams — what the finder showed at Mont Belvieu", () => {
+  it("Flood & Drainage at Grand Port is FEMA + streams + the Gulf-coast evacuation zones + the City of Mont Belvieu's Master Drainage Plan (B2671240: its watersheds reach this ground) — and not one HCFCD / Houston / BKDD row", () => {
+    // Chambers County sits inside the Zip-Zone layer's extent (the sweep asked for Chambers by name), so its sites DO list `tx_evac_zones`; what must never appear is a Houston-only drainage row.
     for (const pt of [P.grandPort, P.montBelvieu]) {
       const ids = availableEntries(groupEntriesFor(ALL_LAYERS, "flood"), { state: "TX", loc: pt }).map(([id]) => id).sort();
-      expect(ids).toEqual(["fema", "nhd_flowlines"]);
+      expect(ids).toEqual(["fema", "nhd_flowlines", "tx_evac_zones", ...MB_PLAN].sort());
     }
   });
 });
@@ -111,7 +126,7 @@ describe("one answer for the panel, the map and both surfaces", () => {
     expect(open.tiers.flatMap((t) => t.rows).map(([id]) => id)).toEqual(expect.arrayContaining([HCFCD, ...BKDD, "coh_storm"]));
     // …and the location rule alone now removes them, with the county still null
     const scoped = scopeFloodEntries(entries, { county: null });
-    expect(scoped.tiers.flatMap((t) => t.rows).map(([id]) => id).sort()).toEqual(["fema", "nhd_flowlines"]);
+    expect(scoped.tiers.flatMap((t) => t.rows).map(([id]) => id).sort()).toEqual(["fema", "nhd_flowlines", "tx_evac_zones", ...MB_PLAN].sort());
     expect(floodRowRelevance(ALL_LAYERS[HCFCD], { county: null }).relevant).toBe(true); // (the fail-open that was the planner's input)
   });
   it("the panel's list and the map's draw filter are the SAME decision for every point", () => {

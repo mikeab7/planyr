@@ -17,6 +17,7 @@ import { roadCenterline } from "./roadGeometry.js";
 import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, legTrimFor, roundaboutArea } from "./roundabout.js";
 import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
 import { roadSurfaceRing } from "./roadNetwork.js";
+import { roadTapersOf, taperedStripRing, taperedOffset } from "./roadTaper.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 export { SQFT_PER_ACRE };
@@ -248,7 +249,10 @@ export const roadDenseCenterline = (el, settings, sharpAt, trim) => {
 export const roadStripRing = (el, settings, sharpAt, trim) => {
   const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   const width = Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el));
-  return roadSurfaceRing(dense, width) || bufferPolyline(dense, width) || [];
+  /* NEW-1 (2026-11-10) — an end that meets a road of a different width narrows (or widens) into it: `trim.taper` is the derived
+     plan (lib/roadTaper.js, delivered by `roundaboutsForSite` like the roundabout shortening). A road with none is byte-identical. */
+  const tapered = trim && trim.taper ? taperedStripRing(dense, width, trim.taper) : null;
+  return tapered || roadSurfaceRing(dense, width) || bufferPolyline(dense, width) || [];
 };
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
 // B1612608 — offsetPolylineMiterLimit (a true mitered join with a limit that bevels past it),
@@ -257,7 +261,9 @@ export const roadStripRing = (el, settings, sharpAt, trim) => {
 export const roadCurbLines = (el, settings, sharpAt, trim) => {
   const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
-  return [offsetPolylineMiterLimit(dense, hw), offsetPolylineMiterLimit(dense, -hw)].filter(Boolean);
+  const tp = trim && trim.taper;     // NEW-1 — the face-of-curb lines narrow with the pavement (lib/roadTaper.js)
+  const side = (sign) => (tp && taperedOffset(dense, tp, hw, sign, "travelHalf")) || offsetPolylineMiterLimit(dense, sign * hw);
+  return [side(1), side(-1)].filter(Boolean);
 };
 
 /* NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
@@ -529,7 +535,13 @@ export function roadJunctionVerticesOf(els) {
 export function roundaboutsForSite(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const declared = roads.filter((r) => r.roundabout && r.roundabout.end);
-  if (!declared.length) return { nodes: [], geoms: [], trims: new Map(), areaById: new Map(), pairs: [], extraById: new Map() };
+  /* NEW-1 (2026-11-10) — the end-to-end TAPER plan (lib/roadTaper.js) rides the same per-road `trim` every geometry consumer already
+     reads, so the strip, the face-of-curb lines, the paved-area number, the dissolved network and the export all see ONE answer. */
+  const withTapers = (trims) => {
+    for (const [id, taper] of roadTapersOf(els, TEE_COINCIDE_FT).byRoad) { const t = trims.get(id); trims.set(id, { start: (t && t.start) || 0, end: (t && t.end) || 0, taper }); }
+    return trims;
+  };
+  if (!declared.length) return { nodes: [], geoms: [], trims: withTapers(new Map()), areaById: new Map(), pairs: [], extraById: new Map() };
   const byId = new Map(roads.map((r) => [r.id, r]));
   const derivedD = (r) => roundaboutDiameterFor(roadClassOf(settings, r.roadClass), +r.travelW || 0);
   const nodes = roundaboutNodes(
@@ -556,5 +568,5 @@ export function roundaboutsForSite(els, settings) {
     extraById.set(owner.roadId, [...(extraById.get(owner.roadId) || []), ...g.sectors, ...g.returns]);
     for (let i = 1; i < node.roadIds.length; i++) pairs.push([node.roadIds[0], node.roadIds[i]]);
   }
-  return { nodes, geoms, trims, areaById, pairs, extraById };
+  return { nodes, geoms, trims: withTapers(trims), areaById, pairs, extraById };
 }

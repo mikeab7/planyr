@@ -31,6 +31,8 @@ function fakeFetch({ cityDown = false, etj = [FIX.etjHouston], city = [FIX.city]
     fn.urls.push(url);
     if (url.includes("Texas_City_Boundaries")) { if (cityDown) throw new Error("city layer down"); return { features: city }; }
     if (url.includes("HGAC_City_ETJ")) return { features: etj };
+    // NEW-1 / NEW-2 — the county-published ETJ rows (Fort Bend, Harris) share this view's box; they hold nothing in this fixture, so H-GAC draws as it always did.
+    if (url.includes("Boundaries_Public/MapServer") || url.includes("HC_Cities_ETJ")) return { features: [] };
     throw new Error("no route for " + url);
   };
   fn.urls = [];
@@ -93,7 +95,7 @@ describe("B2472945 — the drawn ETJ layer never covers ground a city's limits h
     const fc = await drawnEtj(fakeFetch());
     expect(fc.netted.cityFeatures).toBeGreaterThan(0);
     expect(fc.netted.touched).toBeGreaterThan(0);
-    expect(vectorKey(VECTOR_SOURCES.jur_etj, BBOX, null)).toMatch(/!r3$/);
+    expect(vectorKey(VECTOR_SOURCES.jur_etj, BBOX, null)).toMatch(/!r4$/);
     expect(VECTOR_SOURCES.jur_etj.query.netAgainst).toBe("jur_city");
   });
 

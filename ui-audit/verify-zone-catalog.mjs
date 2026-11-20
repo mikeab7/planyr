@@ -55,11 +55,11 @@ const near = (a, b, eps = 2) => Math.abs(a - b) <= eps;
 
 const readEls = async (pred = () => true, tries = 14) => {
   for (let i = 0; i < tries; i++) {
-    const got = await page.evaluate((id) => { try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; } }, DEMO_ID);
+    const got = await page.evaluate((id) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || null; } catch (e) { return null; } }, DEMO_ID);
     if (got && pred(got)) return got;
     await page.waitForTimeout(300);
   }
-  return await page.evaluate((id) => { try { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
+  return await page.evaluate((id) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m[id] && m[id].els) || []; } catch (e) { return []; } }, DEMO_ID);
 };
 
 // click a visible panel button whose title/text matches `re`

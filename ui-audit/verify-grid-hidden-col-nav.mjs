@@ -144,7 +144,7 @@ if (booted) {
   // In-cell editing Shift+Tab: open the Cost editor on a leaf, Shift+Tab → Successor.
   const leafRow = await page.evaluate(() => {
     const rows = [...document.querySelectorAll("[data-task-row]")];
-    const isParent = d => /[▾▸]/.test((d.children[1]?.innerText) || "");
+    const isParent = d => !!d.querySelector('span[title="Collapse"], span[title="Expand"]');   // NEW-1 task icons: the toggle is a chevron icon now
     const leaf = rows.find(d => !isParent(d));
     return leaf ? leaf.getAttribute("data-task-row") : null;
   });

@@ -426,7 +426,7 @@ describe("MINT-CHECK-ENCODING — the gate reads a multi-megabyte ledger at orig
     const seed = clone(O, join(R, "seed"));
     for (const kind of ["backlog", "verification"]) {
       mkdirSync(join(seed, "ledger", kind), { recursive: true });
-      writeFileSync(join(seed, "ledger", kind, "_frame.md"), readFileSync(join(REPO, "ledger", kind, "_frame.md")));
+      writeFileSync(join(seed, "ledger", kind, "_frame.md"), readFileSync(join(REPO, "test", "fixtures", "ledger-mini", "ledger", kind, "_frame.md")));
     }
     const pad = "x".repeat(1100 * 1024); // one blob alone is past the 1 MB default buffer
     writeEntry(seed, "backlog", "open", "B100", `### B100 — huge open item \`[x]\` (task) #infra\n${pad}\n- Verify: sandbox`);

@@ -12,6 +12,8 @@ import { duplicateNotice, joinMentions, keepCopyLabel, numberWord, pageMention, 
 import { absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 };
+/** The recovered-notes list never grows past this (about four rows) — see the note on the list below. */
+export const LIST_MAX_PX = 112;
 
 /** ⛔ THE SAME NOTE IN TWO PROJECTS, AND A NOTE THAT WAS FILED NOWHERE — SAID OUT LOUD.
  *
@@ -78,6 +80,12 @@ export default function IntegrityBanner({ duplicates, writeRefused = 0, purgeFai
               ? "One note lost its filing and is back below — open it and file it if it belongs somewhere."
               : `${sentenceCase(numberWord(lost))} notes lost their filing and are back below — open them and file the ones that belong somewhere.`}
           </span>
+          {/* ⛔ THE LIST IS BOUNDED (NEW-1, V2115860 follow-up): the bar is IN FLOW above the page, so one row per
+              recovered note made it as tall as the count — measured on the test account with 20 recovered pages: 598 px of a
+              768 px window, the page left ~50 px and the first box's border below the fold (not under any pointer). A notice
+              must never take the working surface away, so the rows scroll inside a fixed ceiling; the summary line and the
+              buttons stay where they are, and every note stays one scroll away. */}
+          <div data-testid="notes-recovered-list" style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: LIST_MAX_PX, overflowY: "auto", overscrollBehavior: "contain" }}>
           {(recovered || []).map((r) => (
             <div key={r.pageId} data-testid={`notes-recovered-${r.pageId}`} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button
@@ -105,6 +113,7 @@ export default function IntegrityBanner({ duplicates, writeRefused = 0, purgeFai
               <button type="button" data-testid={`notes-recovered-bin-${r.pageId}`} onClick={() => onBin(r.pageId)} style={pill()}>Move to bin</button>
             </div>
           ))}
+          </div>
         </div>
       ) : null}
 

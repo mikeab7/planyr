@@ -199,3 +199,11 @@ export function routeProjectJustChanged(prevProjectId, projectId) {
 export function routeChangeNeedsDefer(prevProjectId, projectId, ownEcho) {
   return routeProjectJustChanged(prevProjectId, projectId) && !ownEcho;
 }
+
+/* NEW-1 point 5 (follow-up to B2619760) — a session that DIED under the person ("You were signed out") is not a
+ * decision to leave the project. `meta.lost` (shared/auth/sessionIntent.js) says the sign-out was nobody's request
+ * here; then the route keeps naming the project, so signing back in returns to the same plan (the resume reads the
+ * route). A deliberate Sign out still counts as leaving, exactly as before. Pure. */
+export function userLeftOnSignOut(meta) {
+  return !(meta && meta.lost);
+}

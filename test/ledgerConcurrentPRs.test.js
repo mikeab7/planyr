@@ -57,7 +57,7 @@ function newLayout() {
   const d = scratch();
   for (const kind of ["backlog", "verification"]) {
     mkdirSync(join(d, "ledger", kind), { recursive: true });
-    cpSync(join(REPO, "ledger", kind, "_frame.md"), join(d, "ledger", kind, "_frame.md"));
+    cpSync(join(REPO, "test", "fixtures", "ledger-mini", "ledger", kind, "_frame.md"), join(d, "ledger", kind, "_frame.md"));
   }
   writeEntry(d, "backlog", "open", "B100", "### B100 — existing open item `[x]` (task) #infra\n`[ ]` body\n- Verify: sandbox");
   writeEntry(d, "backlog", "open", "B101", "### B101 — another open item `[x]` (task) #infra\n`[ ]` body\n- Verify: sandbox");
@@ -125,7 +125,7 @@ describe("NEW-1 — two concurrent PRs that each file a backlog + verification e
 
   it("the real frames carry a marker for every live state (a view can place every entry)", () => {
     for (const [kind, states] of [["backlog", ["open", "bug-audit", "verify", "later"]], ["verification", ["pending", "checklist"]]]) {
-      const frame = readFileSync(join(REPO, "ledger", kind, "_frame.md"), "utf8");
+      const frame = readFileSync(join(REPO, "test", "fixtures", "ledger-mini", "ledger", kind, "_frame.md"), "utf8");
       for (const s of states) expect(frame).toContain(marker(s));
     }
   });

@@ -74,7 +74,7 @@ const weldSite = {
 const seedFor = (theme, which = "synthetic") => `(()=>{try{localStorage.setItem('planyr.theme',${JSON.stringify(theme)});`
   + `if(localStorage.getItem('planyr:harness:seeded'))return;`
   + `localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(sites)}));`
-  + `if(${JSON.stringify(which)}==='weld'){var m=JSON.parse(localStorage.getItem('planarfit:sites:v1'));m.numedit=${JSON.stringify(weldSite)};localStorage.setItem('planarfit:sites:v1',JSON.stringify(m));}`
+  + `if(${JSON.stringify(which)}==='weld'){var m=JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1'));m.numedit=${JSON.stringify(weldSite)};localStorage.setItem('planarfit:sites:v1',JSON.stringify(m));}`
   + `localStorage.removeItem('planarfit:currentSite:v1');`
   + `localStorage.setItem('planyr:harness:seeded','1');}catch(e){}})();`;
 

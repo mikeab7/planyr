@@ -84,7 +84,7 @@ const rawCur = () => page.evaluate(() => {
   try { return JSON.parse(raw); } catch { return raw; } // real app stores a bare string; seeded fixtures store JSON
 });
 const planName = await page.evaluate((cur) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const rec = map[cur] || Object.values(map)[0];
   return rec ? (rec.site || rec.name || rec.id) : null;
 }, await rawCur());
@@ -95,7 +95,7 @@ console.log(`  Throwaway plan: "${planName}" (id ${planId}) — local "this devi
 // drag sizes, both comfortably inside the viewport so a modest zoom sweep keeps both on screen. ──
 const box = await canvas.boundingBox();
 const elsCount = () => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const raw = localStorage.getItem("planarfit:currentSite:v1") || "";
   let cur; try { cur = JSON.parse(raw); } catch { cur = raw; }
   return (map[cur]?.els || []).filter((e) => e.type === "building" && !e.attachedTo && !e.dogEar).length;
@@ -129,7 +129,7 @@ await page.getByRole("button", { name: /^Select V$/ }).click().catch(() => {});
 await page.waitForTimeout(300);
 
 const model = await page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const raw = localStorage.getItem("planarfit:currentSite:v1") || "";
   let cur; try { cur = JSON.parse(raw); } catch { cur = raw; }
   const rec = map[cur];
@@ -153,7 +153,7 @@ const gridCountFor = (id) => page.evaluate(([elId, hex]) =>
 
 // Re-read cx/cy (not fetched above to keep the drawn-shape assertion minimal).
 const withPos = await page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const raw = localStorage.getItem("planarfit:currentSite:v1") || "";
   let cur; try { cur = JSON.parse(raw); } catch { cur = raw; }
   const rec = map[cur];

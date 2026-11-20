@@ -36,7 +36,7 @@ console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.bu
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
 const T = (id) => page.getByTestId(id);
-const parcelsLS = () => page.evaluate(([id, uid]) => (JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}")[id] || {}).parcels || null, [ID, UID]);
+const parcelsLS = () => page.evaluate(([id, uid]) => (JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}")[id] || {}).parcels || null, [ID, UID]);
 try {
   await page.evaluate(([uid, st]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify({ [st.id]: st })); localStorage.setItem("planarfit:currentSite:v1", st.id); }, [UID, site]);
   await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
@@ -82,7 +82,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

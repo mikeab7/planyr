@@ -28,7 +28,8 @@ const without = (names, drop) => names.filter(n => !drop.includes(n));
 export const rowsOf = page => page.evaluate(() => [...document.querySelectorAll("[data-task-row]")].map(r => ({
   id: Number(r.getAttribute("data-task-row")),
   sel: r.getAttribute("data-row-sel") === "1",
-  name: ([...r.querySelectorAll('[data-col-key="name"] span[title]')].map(e => e.getAttribute("title")).find(t => !/^(Collapse|Expand|Focus: hide|Show all tasks)/.test(t)) || "").trim(),
+  /* the icon slot (B2671196) carries its own span[title] ("Add an icon" / an icon's label) ahead of the name — skip everything inside it */
+  name: ([...r.querySelectorAll('[data-col-key="name"] span[title]')].filter(e => !e.closest("[data-task-icon-slot]")).map(e => e.getAttribute("title")).find(t => !/^(Collapse|Expand|Focus: hide|Show all tasks)/.test(t)) || "").trim(),
   chip: (() => { const c = r.querySelector('[title^="Focus: hide"], [title^="Show all tasks"]'); return c ? (c.getAttribute("title").startsWith("Show all") ? "on" : "off") : null; })(),
 })));
 const idsOf = async page => (await rowsOf(page)).map(r => r.id).join(",");

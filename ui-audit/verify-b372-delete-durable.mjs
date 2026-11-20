@@ -39,7 +39,7 @@ const seed = `(() => { try {
 
 const results = [];
 const check = (name, pass, detail = "") => { results.push({ name, pass }); console.log(`  ${pass ? "✅ PASS" : "❌ FAIL"} — ${name}${detail ? "  · " + detail : ""}`); };
-const idsInStore = async (page) => page.evaluate((k) => { try { return Object.keys(JSON.parse(localStorage.getItem(k)) || {}); } catch (_) { return ["<parse-error>"]; } }, SITES_KEY);
+const idsInStore = async (page) => page.evaluate((k) => { try { return Object.keys(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k)) || {}); } catch (_) { return ["<parse-error>"]; } }, SITES_KEY);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });

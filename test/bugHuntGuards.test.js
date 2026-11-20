@@ -126,7 +126,10 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   it("B530: AuthPanel modals close on Escape and announce as a dialog", () => {
     const src = read("../src/workspaces/site-planner/components/AuthPanel.jsx");
     expect(src).toMatch(/role="dialog"/);
-    expect(src).toMatch(/e\.key === "Escape"/);
+    // NEW-1 (2026-11-08): Escape moved from a document-level capture listener to the card's own onKeyDown, gated by escapeMayClose
+    expect(src).toMatch(/e\.key !== "Escape"/);
+    expect(src).toMatch(/onKeyDown=\{onCardKeyDown\}/);
+    expect(src).toMatch(/onCloseRef\.current\("escape"\)/);
   });
 
   it("B531: the ReviewsBar row and the SitePlanner Section header are keyboard-reachable", () => {

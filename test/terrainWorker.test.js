@@ -14,7 +14,7 @@ describe("terrainWorker — worker-safe import discipline", () => {
   it("imports ONLY the pure terrain modules", () => {
     const imports = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]).sort();
     // NEW-1: the owner-only buildable-ground sweep rides this worker; both of its modules are pure leaves.
-    expect(imports).toEqual(["./buildableGround.js", "./buildableLattice.js", "./contourTrace.js", "./demGrid.js", "./flowField.js", "./lercGrid.js"]);
+    expect(imports).toEqual(["./buildableGround.js", "./buildableLattice.js", "./contourTrace.js", "./demGrid.js", "./fitBuilding.js", "./flowField.js", "./lercGrid.js"]);
   });
   it("never touches Leaflet / React / the DOM", () => {
     expect(src).not.toMatch(/from\s+"leaflet"/);
@@ -33,7 +33,7 @@ describe("terrainWorker — worker-safe import discipline", () => {
 });
 
 describe("the pure terrain modules stay worker-safe too", () => {
-  for (const f of ["demGrid.js", "contours.js", "contourTrace.js", "flowField.js", "lercGrid.js", "buildableGround.js", "buildableLattice.js", "mapLock.js"]) {
+  for (const f of ["demGrid.js", "contours.js", "contourTrace.js", "flowField.js", "lercGrid.js", "buildableGround.js", "buildableLattice.js", "fitBuilding.js", "mapLock.js"]) {
     it(`${f} has no Leaflet/React/DOM imports`, () => {
       const src = read(`../src/workspaces/site-planner/lib/${f}`);
       expect(src).not.toMatch(/from\s+"leaflet"/);

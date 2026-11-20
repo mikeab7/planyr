@@ -37,7 +37,8 @@
  * Mirrors ui-audit/*-audit.mjs: exports an audit fn the unit test imports; exits non-zero standalone.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { readText } from "./lib/ledger.mjs";
+import { readText, isBranchMode } from "./lib/ledger.mjs";
+import { ensureLedger } from "./lib/ledgerBranch.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -241,6 +242,7 @@ export function auditIndex() {
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  if (isBranchMode(REPO)) ensureLedger(REPO); // the ledger lives on its own branch — make sure it is checked out (NEW-1)
   if (process.argv.includes("--tags-only")) {
     const { ok, problems } = auditTagLegend();
     if (!ok) { console.error("BACKLOG.md tag-legend check FAILED:\n" + problems.map((p) => "  • " + p).join("\n")); process.exit(1); }

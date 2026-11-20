@@ -47,14 +47,14 @@ const JSON_OUT = has("--json"), ASSERT = has("--assert"), PROFILE = has("--profi
 const STORE_KB = Number(argOf("--store-kb", 0)) || 0;
 const STORE_PLANS = Number(argOf("--store-plans", 0)) || 0;   // B2165120: library size in PLANS (the owner has 143) — the axis the per-edit cost must be flat in
 const PLAN_KB = Number(argOf("--plan-kb", 0)) || 0;           // B2165120: size each FILLER plan down to ~this many KB (his median plan is 1.9 KB; 143 plans = 1.30 MB) — the fixtures are far larger than his typical plan
-const LAYOUT = argOf("--layout", "plan");                       // "plan" = one entry per plan (the fix) · "blob" = the pre-B2165120 whole-library entry (planStore's kill switch) — same build, only this toggled   // other plans on the device, like his 143-plan account (1.30 MB of plan JSON; localStorage read 3.88 MB)
+const LAYOUT = argOf("--layout", "plan");                       // "plan" = one entry per plan (the fix) · "blob" = the pre-B2165120 whole-library entry (planStore's harness-only `__PLANYR_PLANSTORE_UNSPLIT` lever; the localStorage kill switch is deleted) — same build, only this toggled   // other plans on the device, like his 143-plan account (1.30 MB of plan JSON; localStorage read 3.88 MB)
 const LABEL = argOf("--label", "run"), OUT = argOf("--out", "");
 const typeOf = new Map();   // element id → type, from the committed fixtures (the DOM carries ids only)
 const HOME = "edit-cycle-plan";   // the owner's Sylvestri plan (primary fixture, carries the IndexedDB rasters)
 
 const INSTRUMENT = `(() => {
   window.__E2E = true;
-  window.__PLANYR_LEGACY_MIRROR = "idle";   // B2165120: measure the PRODUCTION policy — the legacy-copy refresh is off the edit path (the e2e default is "sync")
+
   window.__lt = []; window.__loaf = []; window.__fr = [];
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), +e.duration.toFixed(1)]); }).observe({ type: "longtask", buffered: true }); } catch (_) {}
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push({ t: Math.round(e.startTime), d: +e.duration.toFixed(1), b: +(e.blockingDuration || 0).toFixed(1), s: (e.scripts || []).map((s) => ({ fn: s.sourceFunctionName || "", inv: s.invoker || "", url: String(s.sourceURL || "").split("/").pop(), pos: s.sourceCharPosition, d: +s.duration.toFixed(1) })) }); }).observe({ type: "long-animation-frame", buffered: true }); } catch (_) {}
@@ -111,8 +111,8 @@ try {
     }
     out.store = { extraPlans: i, extraKB: Math.round(bytes / 1024), layout: LAYOUT };
   }
-  if (LAYOUT === "blob") await context.addInitScript(() => { try { localStorage.setItem("planarfit:planStore:layout", "blob"); } catch (_) {} });
-  await context.addInitScript((x) => { try { const k = "planarfit:sites:v1"; const cur = JSON.parse(localStorage.getItem(k) || "{}"); localStorage.setItem(k, JSON.stringify({ ...x, ...cur })); } catch (_) {} }, extra);
+  if (LAYOUT === "blob") await context.addInitScript(() => { window.__PLANYR_PLANSTORE_UNSPLIT = true; });   // B2200384: the harness red-proof lever (the localStorage kill switch is deleted)
+  await context.addInitScript((x) => { try { const k = "planarfit:sites:v1"; const cur = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); localStorage.setItem(k, JSON.stringify({ ...x, ...cur })); } catch (_) {} }, extra);
   await context.addInitScript(INSTRUMENT);
   await context.addInitScript(() => { window.__PLANYR_E2E = true; });
   await context.route("**/*", (route) => { const u = route.request().url(); return u.startsWith(BASE) || u.startsWith("data:") || u.startsWith("blob:") ? route.continue() : route.abort(); });
@@ -212,7 +212,7 @@ try {
   }
   /* B2165120 — what layout did the app ACTUALLY run in? A run that asked for per-plan slots and silently got the whole-library entry (the headroom
    * guard refused, a quota abort) measured the wrong program, so the verdict needs this to refuse to score it. */
-  out.layoutObserved = await page.evaluate(() => { const base = "planarfit:sites:v1"; let entries = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries++; } return { indexed: localStorage.getItem(base + ":idx") != null, entries, legacyKB: Math.round((localStorage.getItem(base) || "").length / 1000) }; });
+  out.layoutObserved = await page.evaluate(() => { const base = "planarfit:sites:v1"; let entries = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries++; } return { indexed: localStorage.getItem(base + ":idx") != null, entries, legacyKB: Math.round(((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(base) || "").length / 1000) }; });
   const budget = join(HERE, "perf-edit-switch.budget.json");
   out.verdict = editSwitchVerdict(out, existsSync(budget) ? JSON.parse(readFileSync(budget, "utf8")) : {});
   await context.close();

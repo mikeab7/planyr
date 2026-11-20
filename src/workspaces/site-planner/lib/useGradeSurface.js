@@ -17,18 +17,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildProposedSurface, buildProposedSurfaceSteps } from "./proposedSurface.js";
 import { runChunked } from "./runChunked.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import * as regrade from "./regradeProgress.js";
 
 export const DRAG_POLL_MS = 120;
 
 /* The off-render build, as a plain async function (unit-testable without React). Resolves the surface, or
  * `{ stale: true }` when superseded. Waits while `isDragging()` is true. */
-export async function buildSurfaceOffRender(inputs, { isStale, isDragging = null, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+/* NEW-1 (the "Regrading…" banner): `onStart` fires when the build ACTUALLY begins (after a drag in flight has been waited out — a
+ * held build is not a rebuild the person is waiting on), `onProgress(frac)` carries the generator's own column fraction. */
+export async function buildSurfaceOffRender(inputs, { isStale, isDragging = null, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onStart = null, onProgress = null } = {}) {
   while (isDragging && isDragging()) {
     await sleep(DRAG_POLL_MS);
     if (isStale && isStale()) return { stale: true };
   }
   if (isStale && isStale()) return { stale: true };
-  return runChunked(buildProposedSurfaceSteps(inputs), { isStale });
+  if (onStart) onStart();
+  return runChunked(buildProposedSurfaceSteps(inputs), { isStale, onProgress });
 }
 
 /**
@@ -38,7 +43,11 @@ export async function buildSurfaceOffRender(inputs, { isStale, isDragging = null
  * @param {boolean} offRender  true = grading layer on: build off the render path
  * @param {() => boolean} isDragging  a gesture is in flight (read at call time)
  */
-export function useGradeSurface({ inputs, sig, enabled, offRender, isDragging }) {
+/* NEW-1 (B2585313 ×2): what the off-render build says about itself, for `window.__plannerGradeReadout()` and the chip's no-surface
+ * telemetry. `statsRef.current` = { buildSeq, lastBuildOutcome: "pending"|"ok"|"stale"|"threw", lastBuildMs, startedAt, sigChanges }
+ * (`sigChanges` = timestamps of the last signature moves, newest last, at most 50). Read-only; written only by this hook. */
+export function newGradeBuildStats() { return { buildSeq: 0, lastBuildOutcome: null, lastBuildMs: null, startedAt: null, sigChanges: [] }; }
+export function useGradeSurface({ inputs, sig, enabled, offRender, isDragging, statsRef = null }) {
   const inRef = useRef(inputs); inRef.current = inputs;
   const dragRef = useRef(isDragging); dragRef.current = isDragging;
   // grading OFF: the old render-path memo, unchanged.
@@ -52,12 +61,27 @@ export function useGradeSurface({ inputs, sig, enabled, offRender, isDragging })
   useEffect(() => {
     if (!offRender) return undefined;
     const my = ++seq.current;
-    if (!enabled) { setBuilt(null); return undefined; }
+    if (!enabled) { if (statsRef && statsRef.current) statsRef.current.lastBuildOutcome = "disabled"; setBuilt(null); return undefined; }
     const stale = () => my !== seq.current;
-    buildSurfaceOffRender(inRef.current, { isStale: stale, isDragging: () => !!(dragRef.current && dragRef.current()) })
-      .then((s) => { if (!stale() && !(s && s.stale)) setBuilt(s || null); })
-      .catch(() => { if (!stale()) setBuilt(null); });
-    return () => { seq.current++; };
-  }, [sig, offRender, enabled]);
+    let rgToken = null;   // the "Regrading…" banner's handle on THIS build (only the newest token of a job may end it)
+    const st = statsRef && statsRef.current;
+    const t0 = Date.now();
+    if (st) { st.buildSeq++; st.lastBuildOutcome = "pending"; st.startedAt = t0; st.sigChanges.push(t0); if (st.sigChanges.length > 50) st.sigChanges.shift(); }
+    buildSurfaceOffRender(inRef.current, {
+      isStale: stale, isDragging: () => !!(dragRef.current && dragRef.current()),
+      onStart: () => { rgToken = regrade.begin("surface"); },
+      onProgress: (f) => { if (rgToken != null) regrade.progress("surface", rgToken, f); },
+    })
+      .then((s) => {
+        const ok = !stale() && !(s && s.stale);
+        if (rgToken != null) regrade.end("surface", rgToken, { ok });
+        if (st && st.startedAt === t0) { st.lastBuildOutcome = ok ? "ok" : "stale"; st.lastBuildMs = Date.now() - t0; }
+        if (ok) setBuilt(s || null);
+      })
+      // ROUND 10 (LOUD-FAILURE): a build that THROWS used to blank the surface (`setBuilt(null)`) while the grading picture kept
+      // painting its last model — the chip then read "Prop —" under a full picture. Keep the last good surface and say so.
+      .catch((e) => { if (rgToken != null) regrade.end("surface", rgToken, { ok: false }); if (st && st.startedAt === t0) { st.lastBuildOutcome = "threw"; st.lastBuildMs = Date.now() - t0; } if (!stale()) reportClientEvent("grading-surface-build-failed", String((e && e.message) || e), { keptPrevious: true }); });
+    return () => { seq.current++; if (rgToken != null) regrade.cancel("surface", rgToken); };
+  }, [sig, offRender, enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- statsRef is a ref (stable)
   return offRender ? built : sync;
 }

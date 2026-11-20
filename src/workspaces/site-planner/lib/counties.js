@@ -39,6 +39,7 @@ import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster, c
  * spelled "Harris", silently). */
 import { byCountyKey, countyKeySet, normCountyKey, countyNameSlug } from "../../../shared/gis/countyKeys.js";
 import { parcelGapNotice } from "./parcelGaps.js";
+import { METRO_POINT_WHERE } from "./davidsonParcel.js"; // NEW-2 (Metro Nashville out-of-county placeholder lots)
 /* CITY-SCOPED SOURCES (B1583296) — a point-in-city-polygon check that runs BEFORE the nationwide
  * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
  * config line: a county whose only real parcel source covers just one city inside it cannot be
@@ -192,8 +193,15 @@ const COUNTIES_RAW = {
     label: "Harris County · HCAD",
     layerUrl:
       "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+    // NEW-1 (2026-11) — HCAD dropped `LocAddr` (the live layer, 1.55M rows, has NO such field): situs is split across site_str_pfx / site_str_num (Integer) /
+    // site_str_name / site_str_sfx / site_str_sfx_dir / site_city, so the address search asked the service for a column it no longer had (HTTP 400 "Failed to execute
+    // query") and `addrParts` now says which column plays which part. `addrField` is the street-NAME column — the single-column fallback if the parts ever fail.
+    // `pinIdField` because plain detection picked `LOWPARCELID`, which differs from HCAD_NUM on 77,003 stacked rows (HCAD_NUM 1094450000015 <-> LOWPARCELID 1094440000001):
+    // an id search for a stacked account missed, and the card's account could show the wrong one.
     idField: "HCAD_NUM",
-    addrField: "LocAddr",
+    pinIdField: true,
+    addrField: "site_str_name",
+    addrParts: { num: "site_str_num", dir: "site_str_pfx", name: "site_str_name", sfx: "site_str_sfx", postDir: "site_str_sfx_dir" },
     help: "Search by HCAD account number (13 digits) or a site address.",
   },
   fortbend: {
@@ -204,10 +212,12 @@ const COUNTIES_RAW = {
     // gis.fbcad.org server, which is chronically down (503s / TLS resets — the whole
     // Fort Bend trouble history B137/B244/B382) and has already migrated servers once
     // ("serverarcgis2"). This hosted "FBCAD Public Parcel Data" layer carries all ~385k
-    // county parcels, is refreshed daily, is natively EPSG:2278 (State Plane feet, our
+    // county parcels, is natively EPSG:2278 (State Plane feet, our
     // coordinate spine), and has the full appraisal schema (owner, land/imp/total value,
     // situs, legal, acreage, land use). The statewide TxGIO layer stays the automatic
-    // outage fallback (statewideFallbackFor). Old self-hosted URL retired as primary:
+    // outage fallback (statewideFallbackFor). HOW CURRENT IT IS is never asserted here: the service's own editingInfo.lastEditDate read 2026-08-14 on 2026-10-30 and 2026-11-12 on
+    // 2026-11-12 (NEW-2, 2026-11-12), so "refreshed daily" was a claim nobody had measured — the parcel card reads the real date at runtime (lib/parcelCopies.js
+    // `readLiveCopyAsOf`) and says "date not published" when it cannot. Old self-hosted URL retired as primary:
     //   https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer
     layerUrl:
       "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
@@ -241,7 +251,11 @@ const COUNTIES_RAW = {
     // table-prefixed field list (parcelLotNumbers.resolveLotNumberField), so no prefix is hard-coded.
     lotNumberField: "Account",
     addrField: "Prop_Street",
-    help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a street name.",
+    // NEW-4 (2026-11) — the street NUMBER, direction, type and city live in their own columns (`Prop_Street_Number` / `_Dir` / `Prop_Street` / `_Suffix` / `Prop_City`), and
+    // nothing composed them: the card read "FM 565" and a typed "3525 FM 565" found nothing (`Prop_Street LIKE '%3525 FM 565%'` -> 0). Some rows bake the type into
+    // Prop_Street ("FM 565 RD"), which the composer does not append twice. Bare names: this joined layer's `where` accepts them unprefixed (its `outFields` does not).
+    addrParts: { num: "Prop_Street_Number", dir: "Prop_Street_Dir", name: "Prop_Street", sfx: "Prop_Street_Suffix", city: "Prop_City" },
+    help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a site address (e.g. 3525 FM 565).",
   },
   waller: {
     state: "TX",
@@ -1674,7 +1688,10 @@ const COUNTIES_RAW = {
     state: "GA", label: "Bartow County, GA",
     layerUrl: "https://www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2",
     idField: "PARCELID", addrField: "STREET_NAM",
-    help: "Bartow County tax parcels (county GIS). Search by parcel ID or a street name.",
+    // NEW-3 (2026-11) — the house number is its own column (HOUSE_NO, an integer; 0 = none), so the card had no address at all and "384 Old Grassdale" found nothing.
+    // `STREET_NAM` is cut at 25 characters by the county ("ADAIRSVILLE PLEASANT VALL"): a typed full name still matches by contains-LIKE on the part that is there.
+    addrParts: { num: "HOUSE_NO", name: "STREET_NAM" },
+    help: "Bartow County tax parcels (county GIS). Search by parcel ID or a site address.",
   },
   ga_cobb: {
     // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 279,635 parcel polygons —
@@ -2251,7 +2268,7 @@ const COUNTIES_RAW = {
   tn_rutherford: {
     state: "TN", label: "Rutherford County, TN",
     layerUrl: "https://services.arcgis.com/36I6IHIdr660pAyH/arcgis/rest/services/ParcelsCAMA1/FeatureServer/0",
-    idField: "ParcelID", pinIdField: true, addrField: "STREETADDRESS", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control",
+    idField: "ParcelID", pinIdField: true, addrField: "FormattedLocation", pinAddrField: true, displayMinZoom: 16, idNormalizer: "tn-control", // NEW-2 (2026-11): STREETADDRESS is filled on 48 of 123,364 lots, FormattedLocation ("1975 JOE B JACKSON PKWY") on 123,014
     help: "Rutherford County GIS parcels (CAMA-linked) — covers Murfreesboro, Smyrna, La Vergne, Eagleville, Christiana and the rest of the county. Search by parcel ID (e.g. 156-027.00-000) or a site address.",
   },
   /* NEW-2 (Tennessee pass 2, B2408834, 2026-10-22) — WILLIAMSON COUNTY, TN (Franklin, Brentwood, Spring Hill), on Williamson County government's OWN ArcGIS Online
@@ -2533,42 +2550,22 @@ const JURISDICTION_LAYERS_RAW = {
       // overlay group (lib/layers.js JURISDICTIONS.jur_mud, B176) — now a STATEWIDE TCEQ
       // source (covers Fort Bend + Harris + everywhere), available regardless of which
       // county is in view. The old Fort-Bend-only layer was removed here to avoid a dupe.
-      fb_contours: {
-        // B469/B691 — explicit dynamic (server-rendered export-image) layer. Its host
-        // (arcgisweb.fortbendcountytx.gov) sends no CORS headers: a direct ?f=json probe can never
-        // be read AND prints an uncatchable red console error per attempt, so `noCors: true` makes
-        // probeService health-check through the same-origin B445 cache proxy ONLY (see layers.js).
-        // Proxy disabled/undeployed/unreachable → the same optimistic add a direct CORS failure
-        // produced (never a hard dependency on the proxy); the f=image export already proxies and
-        // renders via a CORS-exempt <img>.
-        kind: "dynamic",
-        noCors: true,
-        // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
-        // single-layer county, so it no longer gets its own dropdown). Label names the county
-        // + authority since it sits next to the statewide USGS contours there.
-        label: "1-Ft Contours (Fort Bend DD)",
-        url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
-        layers: null,
-        // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
-        // other server-rendered layer now pins its data sublayers so an agency cannot paint its
-        // own LABEL sublayer over the plan. This host sends no CORS headers and its services
-        // catalog is unreachable from the build sandbox, so the sublayer ids cannot be READ —
-        // and inventing them would silently blank the layer, which is worse than an annotation
-        // risk on a contour service that publishes hairlines rather than point labels.
-        // Re-check on the next live pass with a browser that can reach the county host.
-        sublayersUnpinned: "county host sends no CORS headers; its sublayer catalog cannot be read from here — pin the ids on the next live pass",
-        note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else. Health checked via the same-origin proxy (county host sends no CORS headers).",
-        // NEW-1 stacking role (lib/mapStack.js): contour hairlines — they draw OVER the site
-        // elements, so a building placed on the plan never hides the ground it sits on.
-        role: "line",
-        opacity: 0.7,
-      },
+      //
+      // NEW-2 (2026-11-12) — THE 1-FT CONTOUR ROW (`fb_contours`, FLOODZONE/Contours_1Foot on arcgisweb.fortbendcountytx.gov) IS REMOVED, NOT KEPT AS A HEALTHY-LOOKING ROW:
+      // the whole host answers HTTP 200 with {"status":"error","messages":["Could not access any server machines…"]} for every path, /rest/info included (measured 2026-10-30
+      // and again 2026-11-12), and the old health probe read that body as a live service. The moved-server check (owner constraint #39) was done: the county's current public server
+      // (gisportal.fortbendcountytx.gov) lists no contour, elevation, LiDAR or DEM service in any public folder (the token-gated ones answer 499). Fort Bend's contours are the statewide "Contour Lines" row
+      // (USGS 3DEP, traced from LiDAR at the interval you pick), which covers the county. If the district republishes a service, add it back as a row with a real
+      // `GIS_SOURCES` entry and fixtures; saved plans that had the old key on simply drop it (layerPrefs ignores unknown keys).
+      //
+      // The county's own drainage / district / thoroughfare layers are in lib/fortBendLayers.js (NEW-1, 2026-11-12), not here.
     },
+    note: "Fort Bend's county-specific layers (levees, LIDs, Brazos studies, TIRZ, management districts, development agreements, proposed thoroughfares) sit in the Flood & Drainage, Jurisdictions and Access groups, shown only on a Fort Bend site. The county's 1-ft contour service has been down since at least 2026-10-30 — the Contour Lines row (USGS 3DEP) covers Fort Bend.",
   },
   chambers: {
     label: "Chambers County",
     layers: {},
-    note: "No public utility/infrastructure GIS is published for Chambers County — parcels only. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Chambers County itself publishes parcels only. The City of Mont Belvieu publishes its own zoning, water, sewer, storm and Master Drainage Plan, and the City of Baytown its zoning (its Chambers side included) — those appear in the Layers panel only on ground they cover. FEMA, wetlands and TxRRC layers above still apply.",
   },
   waller: {
     label: "Waller County",
@@ -2642,6 +2639,11 @@ const COUNTIES_MAP_RAW = {
     // matches this entry's own bbox (a real CAD), with txgio_statewide appended after it.
     layerUrl:
       "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
+    /* NEW-3 (stacked rows, 2026-11-12) — this joined layer stacks rows on one point: co-owners (one TaxParcels shape, Accounts.Sequence 1/2/3 with the interest split) and two different overlapping
+     * polygons (Parcel_Id 8039 / 8040). `dedupeBy` is the SHAPE table's OBJECTID — one shape is one lot, whatever its owner rows — `dedupeOrder` picks the primary owner (Sequence 1) by sorting CLIENT-side:
+     * the host is not reachable from the build sandbox, so a server-side orderByFields on a table-prefixed name was never measured and a rejected clause would break every Chambers click. A point that
+     * holds a second shape says so (lib/parcelStack.js `stackNote`); the account's acreage is not the polygon's when one account owns >1 shape (appraisal.countyRecord). */
+    dedupeBy: "ChambersCADWeb.DBO.TaxParcels.OBJECTID", dedupeOrder: "Sequence",
   },
   waller: {
     state: "TX",
@@ -3251,7 +3253,10 @@ const COUNTIES_MAP_RAW = {
   ga_screven: { state: "GA", center: [32.7657, -81.6262], zoom: 10, bbox: [32.49, -81.87, 33.04, -81.39], mapServer: null, layerUrl: COUNTIES.ga_screven.layerUrl },
   ga_bryan: { state: "GA", center: [31.9845, -81.4585], zoom: 10, bbox: [31.74, -81.78, 32.23, -81.14], mapServer: null, layerUrl: COUNTIES.ga_bryan.layerUrl },
   ga_liberty: { state: "GA", center: [31.8460, -81.4783], zoom: 10, bbox: [31.60, -81.82, 32.09, -81.14], mapServer: null, layerUrl: COUNTIES.ga_liberty.layerUrl },
-  ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl },
+  /* NEW-1 (stacked rows, 2026-11-12) — Bartow's layer is a parcel x improvement JOIN: one lot is up to 170 rows of identical geometry that differ only in FinishedArea / AccessoryArea (measured via the relay
+   * 2026-11-12: PARCELID 0080-0202-001 -> 170, C003-0013-001 -> 12). `dedupeBy` makes the lot ONE lot everywhere (search list, outlines, click, lot key — lib/parcelStack.js); `dedupeDistinct` lets the
+   * search ask the server for the distinct PARCELIDs first (returnDistinctValues works here, but NOT together with a record cap — measured 400), so 10 copies never fill the 10-result window. */
+  ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl, dedupeBy: "PARCELID", dedupeDistinct: true, dedupeOutlines: true },
   ga_cobb: { state: "GA", center: [33.9300, -84.5558], zoom: 11, bbox: [33.75, -84.74, 34.11, -84.38], mapServer: null, layerUrl: COUNTIES.ga_cobb.layerUrl },
   ga_cherokee: { state: "GA", center: [34.2475, -84.4595], zoom: 11, bbox: [34.08, -84.66, 34.41, -84.26], mapServer: null, layerUrl: COUNTIES.ga_cherokee.layerUrl },
   // NEW-1 (2026-09-24, third pass) — center/bbox derived from public/geo/county-polygons.json
@@ -3385,11 +3390,17 @@ const COUNTIES_MAP_RAW = {
     state: "TN", center: [36.17, -86.78], zoom: 11,
     bbox: [35.94, -87.08, 36.43, -86.49], displayMinZoom: 17,
     mapServer: null, layerUrl: COUNTIES.tn_davidson.layerUrl,
+    /* NEW-2 (2026-11-12) — the layer also holds placeholder polygons for lots across the county line (Cheatham 45, Robertson 46, Rutherford 4, Williamson 103, Wilson 58 — "ASSESSED IN WILSON COUNTY"):
+     * Metro draws them but keeps no Metro record, so a CLICK is never answered by one (`pointWhere`, keyed by URL like pointOrderBy, honoured by queryAtPoint) and a search that does find one gets no Metro rows (davidsonParcel.js). */
+    pointWhere: METRO_POINT_WHERE,
   },
   tn_rutherford: {
     state: "TN", center: [35.84, -86.42], zoom: 10,
     bbox: [35.60, -86.72, 36.12, -86.12], displayMinZoom: 16,
     mapServer: null, layerUrl: COUNTIES.tn_rutherford.layerUrl,
+    /* NEW-2 (stacked rows, 2026-11-12) — three industrial ParcelIDs carry TWO rows (126-050.14-000 Prologis: a 0.12-ac sliver beside the 74.60-ac lot; 113-020.03-000; 126-041.00-000); the id search took the
+     * first. One ParcelID is one lot and the LARGEST ring is the lot (lib/parcelStack.js). */
+    dedupeBy: "ParcelID", dedupePrefer: "largest",
   },
   tn_williamson: {
     state: "TN", center: [35.86, -86.90], zoom: 10,
@@ -4144,6 +4155,25 @@ export const POINT_ORDER_BY_LAYERS = Object.freeze(
   Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
 );
 export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
+
+/* NEW-1/2/3 (stacked rows, 2026-11-12) — a layer that returns SEVERAL ROWS FOR ONE LOT declares how they collapse, once, on its map entry, and keyed by URL exactly like pointOrderBy above (the search, the point query
+ * and the outline layer are all handed a URL, not a county key). `dedupeBy` the field one lot shares across its rows (matched by exact name or, for a joined layer, its last dotted segment) · `dedupeOrder` a field the
+ * rows are sorted by ascending before the first is kept · `dedupePrefer: "largest"` keep the row with the largest ring · `dedupeDistinct` the search asks the server for distinct keys first · `dedupeOutlines` the
+ * outline layer keys its lots by `dedupeBy`. The pure collapse itself is lib/parcelStack.js. */
+export const STACK_RULE_LAYERS = Object.freeze(
+  Object.fromEntries(Object.entries(COUNTIES_MAP).filter(([, c]) => c.dedupeBy).map(([k, c]) => [trimLayerUrl(c.layerUrl), Object.freeze({
+    county: k, by: c.dedupeBy, order: c.dedupeOrder || null, prefer: c.dedupePrefer || null, distinct: !!c.dedupeDistinct, outlines: !!c.dedupeOutlines, labelField: (COUNTIES[k] && COUNTIES[k].idField) || null,
+  })])),
+);
+export const stackRuleForUrl = (url) => STACK_RULE_LAYERS[trimLayerUrl(url)] || null;
+export const stackRuleForCounty = (county) => { const c = COUNTIES_MAP[county]; return c && c.dedupeBy ? stackRuleForUrl(c.layerUrl) : null; };
+
+/* NEW-2 (Metro Nashville, 2026-11-12) — a layer that mixes real lots with PLACEHOLDER polygons it keeps no record of declares `pointWhere` (an ArcGIS SQL `where`) on its config entry; a click's /query carries it, so a placeholder
+ * can never answer a click (the lot behind it, or the neighbouring county's own source, does). Keyed by URL exactly like pointOrderBy. */
+export const POINT_WHERE_LAYERS = Object.freeze(
+  Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointWhere).map((c) => [trimLayerUrl(c.layerUrl), c.pointWhere])),
+);
+export const pointWhereForUrl = (url) => POINT_WHERE_LAYERS[trimLayerUrl(url)] || null;
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a

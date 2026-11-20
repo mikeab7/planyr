@@ -38,7 +38,7 @@
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
@@ -66,6 +66,8 @@ import {
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
+import { evalFromPlain, circularNotice } from "./lib/evalValues.js";
+import { planyrSyntaxNote } from "./lib/planyrSyntax.js";
 import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
 import { findInconsistencies } from "./lib/formulaConsistency.js";
 import { fillDown, fillTextToCells, replaceAll, replaceInCellText, fillRight, autoSumPlan } from "./lib/sheetOps.js";
@@ -85,7 +87,7 @@ import KeyTipOverlay from "./components/KeyTipOverlay.jsx";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
-import { orgCloudOutcome } from "./lib/orgWorkbookOps.js";
+import { orgCloudOutcome, mergeOrgWorkbookLists } from "./lib/orgWorkbookOps.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
@@ -97,6 +99,18 @@ import {
 } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
+// The Univer grid is THE grid for every account (cutover steps 8–9a, docs/SPREADSHEET-UNIVER-SPIKE.md); lib/univerSwitch.js only decides
+// whether the OWNER's safety hatch (the regular grid, per device) is in force. The grid itself is a lazy chunk, loaded with the
+// Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
+import { useUniverSwitch } from "./lib/univerSwitch.js";
+import { warmUniver } from "./lib/univerWarm.js";
+import { primeCalcCache, calcCacheSettled } from "./lib/univerCalcCache.js";
+const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
+const CALC_WAIT_MS = 150;                      // the most the grid waits for the device-local calculation cache to be read
+// NEW-1 (B2587264) — every device starts fetching the grid's chunk the moment THIS chunk runs, in parallel with the
+// admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
+// A no-op only on a device that asked for the owner's regular-grid hatch (lib/univerWarm.js); the real mount below still decides.
+warmUniver();
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // NEW-1 (open an uploaded Excel in Spreadsheet) — a Library file opened as an editable workbook.
@@ -181,6 +195,9 @@ function EmptyProjectState({ onGoDashboard }) {
   );
 }
 
+/** What `workbookEval` is while the Univer grid is showing: no values, no trace graph (the regular grid's trace arrows do not run then). */
+const NO_OLD_EVAL = { get: () => ({ get: () => null }), graph: { hopsFor: () => null, dependentsOf: () => new Set() } };
+
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
   projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
@@ -199,6 +216,13 @@ export default function ModelApp({
   const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
   const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
   const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
+  // The Univer grid is the grid for every account. `univer.active` is false ONLY for the owner's hatch: a CONFIRMED is_admin() user on
+  // a device that chose "Use the regular grid" (lib/gridChoice.js). While Univer shows it owns the keyboard and the clipboard, so
+  // the regular grid's window listeners below stand down (`gridKeysOn`). `univer.deciding` = that device's admin answer is still
+  // coming: neither grid is mounted yet (a placeholder shows).
+  const univer = useUniverSwitch(userId);
+  const univerOn = univer.active;
+  const gridKeysOn = isActive && !univerOn;
   // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
   // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
   // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
@@ -461,6 +485,23 @@ export default function ModelApp({
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
   const [zoom, setZoom] = useState(() => readZoom(viewPrefsKey));
   useEffect(() => { setZoom(readZoom(viewPrefsKey)); }, [viewPrefsKey]);
+  // The grid's calculation cache (lib/univerCalcCache.js) is read from this device's large store, and the grid is mounted only once that read
+  // has settled (or after CALC_WAIT_MS, whichever is first): its first `load()` is synchronous and cannot wait for a read, and a read still in
+  // flight at that moment is a silent miss. When the Univer chunk is still downloading the read is long finished, so this costs nothing then;
+  // on a warm tab click it is a few milliseconds, repaid many times over by a first paint that is already complete.
+  const [calcReadyKey, setCalcReadyKey] = useState(null);
+  useEffect(() => {
+    if (!univerOn) return undefined;
+    let live = true; const done = () => { if (live) setCalcReadyKey(viewPrefsKey); };
+    Promise.resolve(primeCalcCache(viewPrefsKey)).then(done, done); // B2671203 — primeCalcCache(null) returns null (no scope): a bare `.then` crashed the whole workspace
+    const t = setTimeout(done, CALC_WAIT_MS);
+    return () => { live = false; clearTimeout(t); };
+  }, [univerOn, viewPrefsKey]);
+  const calcReady = !univerOn || calcCacheSettled(viewPrefsKey) || calcReadyKey === viewPrefsKey;
+  // The grid mounts with the workbook that is LOADED, never with ModelApp's blank first-render placeholder: the load effect that reads the device copy
+  // runs just after the first render, and a grid that mounted in between built a blank unit, then threw it away for the real one (and could not adopt a
+  // unit pre-built for the real workbook — B2607857). A Library file (`fileMode`) has its own loading phase and never sets `ready`.
+  const gridWorkbookReady = fileMode || ready;
   const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(viewPrefsKey, z); }, [viewPrefsKey]);
 
   // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
@@ -523,11 +564,83 @@ export default function ModelApp({
   });
   // Declared AFTER `fw` and `fileMode` (a `const` read earlier is a TDZ crash — it took the Spreadsheet down on the live build).
   const shownStatus = fileMode ? fw.status : shownModelStatus(status, diverged);
+  // NEW-2 (Univer save path) — the Univer grid hands its edits over after a short debounce, so EVERY way out of it asks the
+  // grid to flush first: Export, the grid toggle, hiding the module tab, closing a file, a project / workbook / file change,
+  // the page closing. `flushUniver()` is synchronous and idempotent and returns the workbook AS IT IS NOW (the edit included).
+  // An URGENT save is also persisted right here, synchronously: React would not render before a closing page dies, and the
+  // write-through effect only runs after a render. Same safety net the regular grid has — the stored copy is never staler
+  // than the screen — and the same dirty mark, so the next load pushes it (decideLoadSync "push-local"), never a "different copy" bar.
+  const univerHandleRef = useRef(null);
+  const readyRef = useRef(false); readyRef.current = ready;
+  const fwRef = useRef(fw); fwRef.current = fw;
+  const univerScope = fileMode ? `file:${fw.loadGen}` : (storageKey ? `${orgMode ? "org" : "project"}:${storageKey}` : "none");
+  const scopeRef = useRef(univerScope); scopeRef.current = univerScope;
+  const persistUniverNow = useCallback((scope, wb) => {
+    if (scope.fileMode) { fwRef.current.noteWorkbookNow(wb, scope.fileId); return true; }
+    if (!readyRef.current || !scope.key) return true;
+    if (!writeLocalSheet(scope.userId, scope.key, wb)) { setStatus("error"); return false; }
+    writeSyncMeta(scope.userId, scope.key, { baseVersion: baseVersionRef.current, dirty: true });
+    if (scopeRef.current === scope.id) dirtyRef.current = true;
+    return true;
+  }, []);
+  /** The grid is going away because the project / workbook CHANGED: the regular push effect for the one being left is cancelled by
+   *  the change, so start its upload here (best effort — the dirty local copy written above is the net, and the next open of
+   *  that workbook pushes it). A failure raises nothing on the badge: the badge now describes the workbook being OPENED. */
+  const uploadLeavingUniver = useCallback((scope, wb) => {
+    if (!scope.cloud) return;
+    const expected = cloudVersionRef.current;
+    const p = scope.cloud.projectId
+      ? saveCloudSheet({ uid: scope.userId, projectId: scope.cloud.projectId, sheet: wb, expected })
+      : saveOrgWorkbookCloud({ uid: scope.userId, id: scope.cloud.orgId, name: scope.cloud.name, sheet: wb, expected });
+    Promise.resolve(p).then((r) => {
+      if (!r || !r.ok) return;
+      const stored = readLocalSheet(scope.userId, scope.key);
+      if (stored && sheetsDiverge(stored, wb)) return;   // edited again since — that copy stays dirty and uploads on its own
+      writeSyncMeta(scope.userId, scope.key, { baseVersion: r.version, dirty: false });
+    }).catch(() => {});
+  }, []);
+  const reportUniverSaveError = useCallback((err, stage) => {
+    setStatus("error");
+    setFileNotice({ kind: "error", text: "Your last edit in the new grid could not be saved yet. It will be retried — keep this tab open." });
+    import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent("model-univer-save-failed", String((err && err.message) || err), { stage })).catch(() => {});
+  }, []);
+  /** Save a workbook the Univer grid just emitted. `scope` is the workbook that grid was SHOWING — a grid that is going away
+   *  because the project / file changed must save into the OLD one and never into whatever replaced it. */
+  const onUniverChange = (next, _notes, meta) => {
+    const scope = {
+      id: univerScope, key: storageKey, userId, fileMode, fileId: activeFileId,
+      cloud: !fileMode && userId && cloudSettled && !divergedRef.current && statusRef.current !== "not-provisioned"
+        ? (openProject ? { projectId } : { orgId: orgWorkbookId, name: orgWorkbookName }) : null,
+    };
+    if (meta && meta.urgent) {
+      if (!persistUniverNow(scope, next)) return;
+      if (scopeRef.current !== scope.id) uploadLeavingUniver(scope, next);
+    }
+    if (scopeRef.current === scope.id) { commit(() => next); if (next.activeSheetId) setActiveSheetId(next.activeSheetId); }
+  };
+  const flushUniver = useCallback(() => {
+    const h = univerHandleRef.current;
+    return h ? h.flush({ urgent: true }) : null;   // { workbook, changed, ok } | null (the regular grid is showing)
+  }, []);
+  // Leaving the workbook the grid is showing (project, org workbook, file) or hiding the tab: flush BEFORE the swap. A layout
+  // effect's cleanup runs ahead of every passive effect, including the load effect that replaces the workbook and the file
+  // hook's "start uploading what I'm leaving" step — both then see the newest edit.
+  useLayoutEffect(() => () => { flushUniver(); }, [univerScope, activeFileId, flushUniver]);
+  useEffect(() => { if (!isActive) flushUniver(); }, [isActive, flushUniver]);
+  const setRegularGrid = useCallback(async (regular) => {
+    const h = univerHandleRef.current;
+    if (h) {
+      await Promise.race([h.commitEditing ? h.commitEditing() : null, new Promise((r) => setTimeout(r, 400))]);
+      flushUniver();
+    } else { sheetViewRef.current?.commitPending?.(); formulaBarRef.current?.commitPending?.(); }
+    univer.setRegular(regular);
+  }, [flushUniver, univer]);
   const closeFile = useCallback(async () => {
+    flushUniver();
     const ok = await fw.flush();
     if (!ok) return; // the bar already shows why it couldn't save; never close over unsaved edits
     setActiveFile(fileScopeRef.current, null);
-  }, [fw]);
+  }, [fw, flushUniver]);
   // Leaving Organization (switching tabs elsewhere, or picking a project) always drops back to
   // the workbook list — never carry a stale workbook selection into a context that no longer
   // names it.
@@ -547,9 +660,8 @@ export default function ModelApp({
       const r = await listOrgWorkbooksCloud();
       if (!live) return;
       if (r.ok) {
-        const cloudIds = new Set(r.rows.map((w) => w.id));
-        const localOnly = readLocalOrgIndex(userId).filter((w) => !cloudIds.has(w.id));
-        const merged = [...r.rows, ...localOnly].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        // B2671225 — a cached entry the cloud once listed and no longer does was deleted elsewhere: drop it.
+        const merged = mergeOrgWorkbookLists(r.rows, readLocalOrgIndex(userId));
         setOrgWorkbooks(merged);
         writeLocalOrgIndex(userId, merged);
       } else if (r.reason === "not-provisioned") {
@@ -574,14 +686,27 @@ export default function ModelApp({
     if (o.telemetry) import("../../shared/telemetry/clientErrors.js").then((m) => m.reportClientEvent(o.telemetry.kind, o.telemetry.message, o.telemetry.extra)).catch(() => {});
     return o;
   }, []);
-  const onOrgCreate = useCallback(() => {
-    const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const name = "Untitled workbook";
-    const wb = createWorkbook();
-    writeLocalSheet(userId, id, wb);
-    setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
-    setOrgWorkbookId(id);
-    if (userId) saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }).then((r) => applyOrgOutcome("create", r, id));
+  // B2584320 — the workbook OPENS only once its first cloud row exists (or the create has said why not). It used to open at
+  // once and race the insert: the open-time load ran first, found no row, and left the version unknown — so the first edit's
+  // push was an INSERT too and the database refused it as a duplicate (409), and no edit to a new organization workbook ever
+  // reached the cloud until the page was reloaded. Opening on the create's answer makes that load find version 1.
+  const orgCreatingRef = useRef(false);
+  const onOrgCreate = useCallback(async () => {
+    if (orgCreatingRef.current) return;
+    orgCreatingRef.current = true;
+    try {
+      const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const name = "Untitled workbook";
+      const wb = createWorkbook();
+      writeLocalSheet(userId, id, wb);
+      setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
+      if (userId) {
+        let r;
+        try { r = await saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }); } catch (e) { r = { ok: false, reason: "error", error: String((e && e.message) || e) }; }
+        applyOrgOutcome("create", r, id); // a refusal is still said out loud; the workbook opens on this device either way
+      }
+      setOrgWorkbookId(id);
+    } finally { orgCreatingRef.current = false; }
   }, [userId, applyOrgOutcome]);
   const onOrgOpen = useCallback((id) => setOrgWorkbookId(id), []);
   const onOrgRename = useCallback((id, name) => {
@@ -789,7 +914,7 @@ export default function ModelApp({
   // `isActive` the same way Notes gates its own window shortcut: workspaces stay
   // mounted-but-hidden, so an ungated listener fires from a tab nobody is looking at.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onKey = (e) => {
       // STAGE 3 (NEW-1) — Esc clears an active trace, the "way to clear" the build brief asks
       // for, alongside the ribbon's own Remove Arrows button. A no-op when no trace is active.
@@ -829,14 +954,16 @@ export default function ModelApp({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
+  }, [gridKeysOn, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
 
   // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
   // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
   // own formulas included) to be live inputs, not just the one tab the user happens to be
   // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
   // SheetView/displayFor/etc, which stay unaware anything changed.
-  const workbookEval = useMemo(() => evaluateWorkbook(workbook, { projectNames }), [workbook, projectNames]);
+  // NEW-1 — with the Univer grid showing, Univer's engine is the only evaluator on screen (and for every export), so the older
+  // evaluator is NOT run at all: nothing the Univer path reads comes from it. It still feeds the regular grid until that grid is retired.
+  const workbookEval = useMemo(() => (univerOn ? NO_OLD_EVAL : evaluateWorkbook(workbook, { projectNames })), [workbook, projectNames, univerOn]);
   const evalResult = workbookEval.get(activeEntry.id);
   const totalRows = sheet.rowCount + padRowCount(sheet, 20);
 
@@ -968,25 +1095,51 @@ export default function ModelApp({
     return sanitizeFilename(name);
   }, [projectId, openOrgWorkbook, orgWorkbookName, fileMode, fw.name]);
 
+  /** NEW-2 — what Export writes is the workbook as it is NOW: with the Univer grid showing, an edit still inside its save
+   *  debounce is flushed first and read straight from the grid (the React state is a render behind it). null = the flush FAILED
+   *  (already reported) — the export must not go ahead with a stale copy. */
+  const workbookForExport = useCallback(() => {
+    const r = flushUniver();
+    if (!r) return workbook;
+    if (!r.ok || !r.workbook) { setFileNotice({ kind: "error", text: "Export stopped: the latest edit in the new grid could not be saved first. Try again in a moment." }); return null; }
+    return r.workbook;
+  }, [flushUniver, workbook]);
+
   const onExportXlsx = useCallback(async () => {
     setFileBusy(true);
     try {
-      const blob = await exportWorkbookInWorker(workbook, { projectNames });
+      const wbNow = workbookForExport();
+      if (!wbNow) return;
+      // NEW-1 — Univer's engine computes the numbers that go into the file (main thread; the writer runs in a worker).
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const evaluated = await evaluateForExport(wbNow, { projectNames });
+      const blob = await exportWorkbookInWorker(evaluated.workbook, { projectNames, evaluated });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
+      const note = [planyrSyntaxNote(evaluated.rewritten), circularNotice(evaluated.circular)].filter(Boolean).join(" ");
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
     } finally { setFileBusy(false); }
-  }, [workbook, currentFileBaseName, projectNames]);
+  }, [workbookForExport, currentFileBaseName, projectNames]);
 
-  const onExportCsv = useCallback(() => {
+  const onExportCsv = useCallback(async () => {
     try {
-      const csv = sheetToCsv(sheet, evalResult);
+      const wbNow = workbookForExport();
+      if (!wbNow) return;
+      // NEW-1 — the numbers in the CSV are Univer's (the same engine that draws the grid and fills the Excel file), computed from the
+      // flushed workbook, whichever grid is showing.
+      const { evaluateForExport } = await import("./lib/univerEval.js");
+      const ev = await evaluateForExport(wbNow, { projectNames });
+      const entry = ev.workbook.sheets.find((e) => e.id === activeSheetId) || activeSheetEntry(ev.workbook);
+      const csv = sheetToCsv(entry.sheet, evalFromPlain(ev.values).get(entry.id));
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      downloadBlob(blob, `${sanitizeFilename(sheetName)}.csv`);
+      downloadBlob(blob, `${sanitizeFilename(entry.name)}.csv`);
+      const note = circularNotice(ev.circular);
+      if (note) setFileNotice({ kind: "warn", text: `Exported. ${note}` });
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to CSV failed: ${e?.message || e}` });
     }
-  }, [sheet, evalResult, sheetName]);
+  }, [workbookForExport, activeSheetId, projectNames]);
 
   const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);
@@ -1011,9 +1164,13 @@ export default function ModelApp({
   }, [commit]);
 
   const onImportXlsxFile = useCallback((file) => {
-    if (workbookHasContent(workbook)) { setPendingXlsxImport({ file, sheetCount: workbook.sheets.length }); return; }
+    // "Does this workbook have anything in it?" must be asked of what is ON SCREEN. With the Univer grid showing, an edit made in the last few hundred
+    // ms is still inside its save debounce and not yet in `workbook`, so a quick File ▾ → Import would replace it without asking. `flushUniver()` hands
+    // over the grid's workbook as it is NOW (null when the regular grid shows).
+    const shown = (flushUniver() || {}).workbook || workbook;
+    if (workbookHasContent(shown)) { setPendingXlsxImport({ file, sheetCount: shown.sheets.length }); return; }
     runXlsxImport(file);
-  }, [workbook, runXlsxImport]);
+  }, [workbook, runXlsxImport, flushUniver]);
 
   const onConfirmXlsxImport = useCallback(() => {
     const pending = pendingXlsxImport;
@@ -1646,7 +1803,7 @@ export default function ModelApp({
   // (1) Excel's Ctrl / F-key / Alt+= chords -> registry commands (lib/keymap.js). Inside the in-cell editor only the four
   // font-style chords fire; any other text control (formula bar, name box, find bar, a dialog) keeps every key.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onKey = (e) => {
       if (keyTipRef.current.active) return; // an Alt sequence owns the keyboard (handled in the capture listener below)
       const t = e.target instanceof Element ? e.target : null;
@@ -1659,14 +1816,14 @@ export default function ModelApp({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, runCommand]);
+  }, [gridKeysOn, runCommand]);
 
   // (2) The Alt key-tip sequence. Press and release Alt ALONE -> the sequence opens; letters follow Excel's Home / View paths
   // (lib/keyTips.js); Esc backs out a level; an unmatched key, a second Alt or any click cancels. Capture phase, so while a
   // sequence is open NOTHING else (the grid's type-to-edit, a ribbon button) sees the letters. Alt+Enter / Alt+click / Alt+= are
   // chords, not "Alt alone": any other key or a mouse press between Alt down and up cancels the arming.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     let armed = false;
     const setTip = (st) => { keyTipRef.current = st; setKeyTip(st); };
     const scopeOk = (e) => {
@@ -1709,12 +1866,12 @@ export default function ModelApp({
       window.removeEventListener("blur", cancel);
       keyTipRef.current = KEYTIP_START;
     };
-  }, [isActive, runCommand, showNotice]);
+  }, [gridKeysOn, runCommand, showNotice]);
 
   // (3) The real clipboard: native copy / cut / paste EVENTS (no permission prompt) — see lib/clipboardIO.js. The functions are
   // reached through `clipFnsRef` (re-pointed every render) so a listener armed once never writes into a stale sheet / tab.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gridKeysOn) return undefined;
     const onCopyEvent = (e, cut) => {
       const F = clipFnsRef.current;
       if (!F || !F.clipboardScopeOk(e)) return;
@@ -1734,7 +1891,7 @@ export default function ModelApp({
     document.addEventListener("cut", onCut);
     document.addEventListener("paste", onPasteEvent);
     return () => { document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPasteEvent); };
-  }, [isActive]);
+  }, [gridKeysOn]);
 
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
@@ -1801,9 +1958,14 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
+              univerSwitch={univer.available ? { regular: univer.regular, setRegular: setRegularGrid } : null}
             />
-            <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
-            <AuditGroup ctx={ctx} />
+            {!univerOn && (
+              <>
+                <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
+                <AuditGroup ctx={ctx} />
+              </>
+            )}
           </>
         ) : undefined}
       />
@@ -1843,6 +2005,29 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
+          {univer.deciding ? (
+            // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
+            <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
+          ) : univerOn && !(calcReady && gridWorkbookReady) ? (
+            <div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
+          ) : univerOn ? (
+            // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
+            // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,
+            // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
+            <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>}>
+              <UniverSheet
+                key={univerScope}
+                workbook={workbook}
+                projectNames={projectNames}
+                viewKey={viewPrefsKey}
+                onChange={onUniverChange}
+                onNotice={showNotice}
+                onError={reportUniverSaveError}
+                onReady={(h) => { univerHandleRef.current = h; }}
+              />
+            </Suspense>
+          ) : (
+          <>
           {/* NEW-1 (2026-10-29, owner-approved mockup) — the toolbar and formula bar are FLAT, full-width strips
               directly under the module tabs. They replace the Round 3/4 (B1087904) floating card — rounded
               corners, drop shadow, an 8px margin on every side over the page-grey band — which the owner read as
@@ -1943,6 +2128,8 @@ export default function ModelApp({
             onDelete={onDeleteSheetTab}
             onReorder={onReorderSheetTab}
           />
+          </>
+          )}
           <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
           <KeyTipOverlay state={keyTip} />
           {dialog && <ShortcutDialog spec={dialog} onClose={() => { setDialog(null); focusGrid(); }} />}

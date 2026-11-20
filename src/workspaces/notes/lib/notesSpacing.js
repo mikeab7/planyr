@@ -240,16 +240,23 @@ export function densityStyle(id) {
  * 1.15" / "Space before: Small" — none of them a real, sayable name. These are.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 
-/** The four per-paragraph line-spacing choices the new popover's segmented control offers,
- *  in the Word/Google Docs convention: 1.0 is genuinely "Single" (not `SINGLE` above, which is
- *  1.15 — the OLD control's idea of single. This is intentionally a different, simpler ladder
- *  for the new UI; the underlying `lineHeight` attribute accepts any of these numbers same as
- *  it always has). */
+/** The per-paragraph line-spacing choices the new popover's grid offers, in the Word/Google
+ *  Docs convention: 1.0 is genuinely "Single" (not `SINGLE` above, which is 1.15 — the OLD
+ *  control's idea of single. This is intentionally a different, simpler ladder for the new UI;
+ *  the underlying `lineHeight` attribute accepts any of these numbers same as it always has).
+ *
+ *  ⛔ 0.8 AND 0.9 ARE TIGHTER THAN SINGLE ON PURPOSE (NEW-1, owner 2026-10-30: "I want to be able
+ *  to go tighter than 1.0"). They are ordinary `lineHeight` values — `num()` accepts any positive
+ *  number, the schema stores it untouched — so they save, sync and print like the rest. `label` is
+ *  the exact text on the button (what the owner typed: 0.8 / 0.9 / 1.0 / 1.15 / 1.50 / 2.0), kept
+ *  here so the popover never re-derives a format from the number. */
 export const SPACING_LINE_OPTIONS = [
-  { id: "1", name: "Single", value: 1 },
-  { id: "1.15", name: "Default", value: 1.15 },
-  { id: "1.5", name: "1.5", value: 1.5 },
-  { id: "2", name: "Double", value: 2 },
+  { id: "0.8", name: "Tighter", value: 0.8, label: "0.8" },
+  { id: "0.9", name: "Tight", value: 0.9, label: "0.9" },
+  { id: "1", name: "Single", value: 1, label: "1.0" },
+  { id: "1.15", name: "Default", value: 1.15, label: "1.15" },
+  { id: "1.5", name: "1.5", value: 1.5, label: "1.50" },
+  { id: "2", name: "Double", value: 2, label: "2.0" },
 ];
 
 /** The space-before/space-after steppers' starting point for a paragraph with no explicit

@@ -61,6 +61,7 @@ import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
+import { MenuScroll, MenuFooter, BinBackRow } from "./menuBin.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import { crumbDashboardTitle } from "./dashboardNav.js";
 import {
@@ -746,9 +747,14 @@ export default function ProjectBreadcrumb({
     // reconciling `refresh()` now runs ONLY here, once the write has actually settled — an earlier
     // synchronous call (removed) raced the same dynamic import above and clobbered the optimistic
     // patch with the stale pre-rename read.
-    const done = bridged ? onRenameProject(resolvedId, v) : storeRename(id, v);
+    /* NEW-1 (B2671215 follow-up, owner 2026-11-11) — A HOST THAT GAVE US ITS OWN RENAME USES IT, controlled or not. The Site Planner's `onRenameProject` is
+     * the writer that raises the sticky "didn't save to the cloud" banner (with Retry), records the failure for the next load and clears itself when the cloud
+     * catches up; the uncontrolled `storeRename` below it wrote the same cloud rows but told the person nothing except a toast in raw words ("TypeError:
+     * Failed to fetch") and left the cloud badge green. A breadcrumb with no host writer (the other modules) keeps `storeRename`. */
+    const hostRename = !controlled && typeof onRenameProject === "function";
+    const done = (bridged || hostRename) ? onRenameProject(hostRename ? id : resolvedId, v) : storeRename(id, v);
     Promise.resolve(done).then((res) => {
-      if (res && res.ok === false) flashToast(res.error || `“${v}” is saved on this device but couldn't be saved to the cloud — it may come back under its old name when you reload.`);
+      if (res && res.ok === false && !res.bannered) flashToast(res.error || `“${v}” is saved on this device but couldn't be saved to the cloud — it may come back under its old name when you reload.`);
       if (!bridged) { refresh(); notifyStoreChange(); }
     }).catch(() => {});
   };
@@ -1274,16 +1280,10 @@ export default function ProjectBreadcrumb({
 
         {/* THE ONE SCROLLING ELEMENT. `minHeight: 0` lets it shrink inside the flex column so the
             footer below can never be pushed out of the panel. */}
-        <div data-testid="project-list-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "4px 10px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <MenuScroll testId="project-list-scroll" style={{ padding: "4px 10px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
           {binOpen ? (
             <div data-testid="project-bin" style={CARD}>
-              <button
-                data-testid="project-bin-back"
-                onClick={() => { setBinOpen(false); setPurgeFor(null); }}
-                style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", height: 34, padding: "0 12px", border: "none", borderBottom: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, color: "var(--text-primary)" }}
-              >
-                <span aria-hidden="true">‹</span> Projects
-              </button>
+              <BinBackRow testId="project-bin-back" label="Projects" onClick={() => { setBinOpen(false); setPurgeFor(null); }} />
               <div style={{ padding: "8px 12px 6px", fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.45 }}>
                 {deleted.length === 0 ? "Nothing in Recently deleted." : `Restorable for ${DELETED_RETENTION_DAYS} days — everything in the project comes back with it.`}
               </div>
@@ -1366,10 +1366,10 @@ export default function ProjectBreadcrumb({
               </div>
             </>
           )}
-        </div>
+        </MenuScroll>
 
         {/* FOOTER — always visible, whatever the list length. */}
-        <div data-testid="project-footer" style={{ flex: "none", padding: "6px 10px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <MenuFooter testId="project-footer" style={{ padding: "6px 10px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
           <button
             data-testid="project-new"
             onClick={newProject}
@@ -1392,7 +1392,7 @@ export default function ProjectBreadcrumb({
               Recently deleted ({deleted.length})
             </button>
           )}
-        </div>
+        </MenuFooter>
       </AnchoredMenu>
 
       {/* Per-row manage menu (B439) — Rename / Delete, a SECOND portal layer stacked above the

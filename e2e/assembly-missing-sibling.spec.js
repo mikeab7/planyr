@@ -71,7 +71,7 @@ const acrossOnCanvas = (page, hostId, childId) => page.evaluate(({ hostId, child
 }, { hostId, childId });
 
 const storedEl = (page, id) => page.evaluate(({ key, site, id }) => {
-  const rec = (JSON.parse(localStorage.getItem(key) || "{}") || {})[site] || {};
+  const rec = (JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}") || {})[site] || {};
   return (rec.els || []).find((e) => e && e.id === id) || null;
 }, { key: SITE_KEY, site: SITE_ID, id });
 

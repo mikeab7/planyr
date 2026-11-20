@@ -29,7 +29,7 @@ Everything else lives in a subfolder (see "Where a new document goes" below).
 | `docs/incidents/` | One-off incident write-ups, Cowork/session handoffs, and audit writeups — a postmortem of a specific dated outage or bug, a brief handed to a teammate to finish one job, a critique/audit pass over one feature. Not a durable reference anyone opens routinely; opened to look up what happened on a specific past item. |
 | `docs/testing/` | Manual test/audit scripts a human or a Cowork session runs by hand (persistence test script, UI audit walkthrough). |
 | `docs/sessions/` | One-off session artifacts: `COWORK-BRIEF-*` / `COWORK-RESULT-*`, `HANDOFF-*`, external-tool briefs. |
-| `docs/archive/` | `BACKLOG-DONE.md` / `VERIFICATION-DONE.md` — write-only historical archives. Never read except to look up one specific past ID; never hand-edited for anything other than the archiving process itself. |
+| `docs/archive/` | (retired 2026-11-05) The write-only `*-DONE.md` archives no longer exist — the ledger lives on its own `ledger` branch (see the LEDGER block in `CLAUDE.md`); the done entries are `ledger/<kind>/done/<ID>.md` there. Look up ONE id with `npm run ledger -- show B123`. |
 
 ## Token discipline (why this split exists)
 

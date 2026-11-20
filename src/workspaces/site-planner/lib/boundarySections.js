@@ -58,6 +58,34 @@
  *     (8.3% each) still stays twelve;
  *   · neighbouring sections that border the SAME road / water / neighbour with the same setback are
  *     one section: no "(1)/(2)" twins next to each other.
+ *
+ * ── NEW-1 (owner 2026-11-06, Academy › Concept A "Parcel 1 · A": "on the north and south I can't cleanly add a
+ *    setback") — a sliver joins the side it FACES ────────────────────────────────────────────────────────
+ *  `mergeTiny` used to give a short piece to its LONGER neighbour (after a shared border). On an open-bordered
+ *  lot every border key is "open", so the long side won every time: the 650 ft top-right piece of that parcel
+ *  (running along the north, 25° off it) went to the EAST side, and the 970 ft south-west end (running along the
+ *  south) went to the WEST side. Now, after a shared border, a piece merges into the neighbour whose OUTWARD
+ *  direction is closest to its own (outward normals, length-weighted); only when the two neighbours face it
+ *  within FACING_TIE_DEG of equally (a convex corner piece facing both) does length break the tie. The
+ *  detection of the pieces is unchanged — only who they are handed to.
+ *
+ * ── NEW-1 (owner 2026-11-09, the same lot's other half, "Parcel 1 · B": "that northwest corner shouldn't be part of the
+ *    rest of the western boundary") — the "about six" count does not make a side turn a corner ──────────────────────
+ *  MEASURED on the real outline (test/fixtures/academyNwStubParcel.json): the corner detector DOES keep both ends of
+ *  that piece (vertices 24 and 26 survive the chamfer rule — 569 ft apart, farther than the smoothing window), so it
+ *  is a 570 ft candidate section: the 270 ft diagonal across the corner plus the 300 ft run before the curve, facing
+ *  NNW. Only the escalating floor that pulls a parcel down to TARGET_SECTIONS folded it into the WEST, and the facing
+ *  rule picked west purely because it was the LESS wrong side (63° off west, 87° off the curve): "nearer" is not
+ *  "facing". The cure is NOT a facing limit — Silvestri's SCHIEL has 339/446 ft pieces with the same facing gaps that
+ *  must still fold. The difference is the SHAPE: schiel's pieces zig-zag (turns −57°, +90°, −90°: a jog, absorbing it
+ *  keeps the side straight), the Academy piece turns one way the whole time (+46°, +35°, +50° = 131°: it ROUNDS a
+ *  corner, so absorbing it makes the neighbour bend round that corner). Now a count-driven (escalated) pass refuses a
+ *  piece that (a) turns one way throughout for CORNER_PIECE_MIN_TURN_DEG or more AND (b) faces neither neighbour — more
+ *  than CORNER_PIECE_MIN_GAP_DEG off the better of the two (a cap on a hairpin corner, the two sides it joins facing
+ *  100°+ apart): it stands as its own small section (such a parcel may show 7 — TARGET_SECTIONS is a target, not a
+ *  wall). (b) is what leaves a genuine CHAMFER alone: a 45° cut corner sits equally between its sides, so it still
+ *  merges into one exactly as before (a rectangle with four clipped corners stays 4 sections). The first, size-driven
+ *  sliver pass and every jog, notch and gentle bend merge exactly as before.
  */
 
 import { STREET_ABUT_FT } from "./setbackRoles.js";
@@ -74,6 +102,10 @@ export const MIN_SECTION_PERIM_FRAC = 0.03;
 export const NEIGHBOUR_COINCIDENT_FT = 3;
 export const TARGET_SECTIONS = 6;
 export const ESCALATE_FLOOR_FRACS = [0.045, 0.06, 0.075];
+export const FACING_TIE_DEG = 12;
+export const CORNER_PIECE_MIN_TURN_DEG = 80;
+export const CORNER_PIECE_MIN_GAP_DEG = 50;
+export const CORNER_PIECE_WOBBLE_DEG = 2;
 export const SMOOTH_MIN_FT = 40;
 export const SMOOTH_MAX_FT = 300;
 export const SMOOTH_PERIM_FRAC = 0.04;
@@ -358,25 +390,50 @@ function breakVertices(points, opts, A) {
   }
   for (let v = 0; v < n; v++) {
     if (forced.has(v)) { isBrk[v] = true; continue; }
-    if (joined.has(v)) continue;
+    // a JOIN is applied to the finished result (buildSections), never here: removing a break before the small-piece
+    // merge changes how many sections remain, which re-opens the "about six" pass and makes unrelated pieces
+    // pop back out (join the north and the south end splits off again).
     const pe = (v - 1 + n) % n;
     isBrk[v] = keep[v] || val[pe] !== val[v] || border[pe].key !== border[v].key;
   }
-  return { isBrk, forced };
+  return { isBrk, forced, joined };
 }
 
 const sum = (arr, f) => arr.reduce((s, e) => s + f(e), 0);
+
+/* Length-weighted OUTWARD direction of a run of edges (either winding), as a unit vector; null if the run
+ * has no length. This is the same sum the finished sections use for `side`. */
+function outwardOf(points, edges, ccw) {
+  const n = points.length;
+  let nx = 0, ny = 0;
+  for (const e of edges) {
+    const a = points[e], b = points[(e + 1) % n];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    nx += ccw ? dy : -dy;
+    ny += ccw ? -dx : dx;
+  }
+  const l = hyp(nx, ny);
+  return l > 1e-9 ? { x: nx / l, y: ny / l } : null;
+}
+
+/* Angle in degrees between two outward directions (0 = facing the same way); 180 when either is unknown,
+ * so a run with no direction never wins on facing. */
+function facingGap(a, b) {
+  if (!a || !b) return 180;
+  return (Math.acos(Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y))) * 180) / Math.PI;
+}
 
 function buildSections(points, opts) {
   const n = points.length;
   if (n < 3) return [];
   const A = analyse(points, opts);
-  const { isBrk, forced } = breakVertices(points, opts, A);
+  const { isBrk, forced, joined } = breakVertices(points, opts, A);
   const { g, val, border } = A;
   let brk = [];
   for (let v = 0; v < n; v++) if (isBrk[v]) brk.push(v);
   if (!brk.length) brk = [0];
 
+  const ccwRing = signedArea(points) > 0;
   const edgesOf = (k, list) => edgesBetween(list[k], list[(k + 1) % list.length], n);
   const stats = (edges) => {
     const uniform = edges.every((e) => val[e] === val[edges[0]]);
@@ -384,14 +441,27 @@ function buildSections(points, opts) {
     for (const e of edges) byKey.set(border[e].key, (byKey.get(border[e].key) || 0) + g.len[e]);
     let key = null, best = -1;
     for (const [k, l] of byKey) if (l > best) { best = l; key = k; }
-    return { len: sum(edges, (e) => g.len[e]), uniform, v: val[edges[0]], key };
+    return { len: sum(edges, (e) => g.len[e]), uniform, v: val[edges[0]], key, out: outwardOf(points, edges, ccwRing) };
   };
 
   // merge tiny sections into a compatible neighbour (never across a user break). A typical parcel is
   // a handful of sections: while more than TARGET_SECTIONS remain, the "tiny" floor is raised a notch
   // (never past MAX_FLOOR_FRAC of the perimeter, so a 12-sided outline of equal sides stays 12).
   const perimFt = sum(g.len, (l) => l);
-  const mergeTiny = (floorFt) => {
+  // total turn of a piece's path, from the heading before it to the heading after it, when every turn goes one way
+  // (wobbles under CORNER_PIECE_WOBBLE_DEG ignored); 0 for a zig-zag (a jog), which is never a corner.
+  const cornerTurnOf = (startV, endV) => {
+    let sumT = 0, pos = false, neg = false;
+    for (let v = startV, guard = 0; guard <= n; guard++, v = (v + 1) % n) {
+      const t = g.turns[v];
+      if (t > CORNER_PIECE_WOBBLE_DEG) pos = true;
+      else if (t < -CORNER_PIECE_WOBBLE_DEG) neg = true;
+      sumT += t;
+      if (v === endV) break;
+    }
+    return pos && neg ? 0 : Math.abs(sumT);
+  };
+  const mergeTiny = (floorFt, escalated = false) => {
     for (;;) {
       if (brk.length < 2) return;
       const secs = brk.map((_, k) => ({ k, ...stats(edgesOf(k, brk)) }));
@@ -408,7 +478,18 @@ function buildSections(points, opts) {
         if (ok(prev, brk[t.k])) cands.push({ nb: prev, drop: brk[t.k] });
         if (ok(next, brk[(t.k + 1) % m])) cands.push({ nb: next, drop: brk[(t.k + 1) % m] });
         if (!cands.length) continue;
-        cands.sort((a, b) => (b.nb.key === t.key) - (a.nb.key === t.key) || b.nb.len - a.nb.len);
+        // shared border first; then the neighbour the piece FACES (a clearly smaller angle between outward
+        // directions); only a near-tie in facing falls back to the longer neighbour.
+        cands.sort((a, b) => {
+          const k = (b.nb.key === t.key) - (a.nb.key === t.key);
+          if (k) return k;
+          const ga = facingGap(t.out, a.nb.out), gb = facingGap(t.out, b.nb.out);
+          if (Math.abs(ga - gb) > FACING_TIE_DEG) return ga - gb;
+          return b.nb.len - a.nb.len;
+        });
+        // the count-driven passes never fold a corner-rounding piece into a side it does not face (NEW-1 note up top)
+        if (escalated && facingGap(t.out, cands[0].nb.out) > CORNER_PIECE_MIN_GAP_DEG
+            && cornerTurnOf(brk[t.k], brk[(t.k + 1) % m]) >= CORNER_PIECE_MIN_TURN_DEG) continue;
         brk = brk.filter((v) => v !== cands[0].drop);
         merged = true;
         break;
@@ -419,7 +500,7 @@ function buildSections(points, opts) {
   mergeTiny(Math.max(MIN_SECTION_FT, MIN_SECTION_PERIM_FRAC * perimFt));
   for (const frac of ESCALATE_FLOOR_FRACS) {
     if (brk.length <= TARGET_SECTIONS) break;
-    mergeTiny(frac * perimFt);
+    mergeTiny(frac * perimFt, true);
   }
 
   // neighbours that border the SAME road / water / neighbour with the same stated setback are ONE section
@@ -436,6 +517,12 @@ function buildSections(points, opts) {
     }
     if (hit == null) break;
     brk = brk.filter((v) => v !== hit);
+  }
+
+  // the owner's JOINS, last: each removes exactly its own break from the automatic result and nothing else moves
+  if (joined.size) {
+    const kept = brk.filter((v) => forced.has(v) || !joined.has(v));
+    brk = kept.length ? kept : [0];
   }
 
   const ccw = signedArea(points) > 0;

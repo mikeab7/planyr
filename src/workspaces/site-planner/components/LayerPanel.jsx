@@ -63,7 +63,6 @@ import { useServiceAreas } from "../lib/useServiceAreas.js";
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 import { useViewLegends } from "../lib/viewLegendStore.js";
-import { StackedLegend } from "./ViewLegend.jsx";
 
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const TEXT = FONT_SIZE.control;
@@ -148,15 +147,17 @@ function Select({ label, value, onChange, options, testId }) {
 
 function Legend({ items }) {
   if (!items || !items.length) return null;
-  if (items.some((lg) => lg.stacked)) return <StackedLegend items={items} />;
   return (
     <div data-part="legend" style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
-      {items.map((lg) => (
-        <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK }}>
+      {items.map((lg, i) => (lg.heading ? (
+        /* NEW-1 (Sugar Land): a legend can be HEADED by its jurisdiction ("Sugar Land") instead of repeating it on every row; `row` puts one entry per line. */
+        <span key={`h:${i}:${lg.label}`} data-part="legend-heading" style={{ flexBasis: "100%", color: MUTED, fontWeight: 700 }}>{lg.label}</span>
+      ) : (
+        <span key={`${i}:${lg.label}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: INK, ...(lg.row ? { flexBasis: "100%" } : {}) }}>
           <span aria-hidden="true" style={{ width: 16, height: 0, flex: "none", borderTop: `${lg.weight ? Math.max(1.5, lg.weight / 1.4) : 3}px ${lg.dash ? "dashed" : "solid"} ${lg.color}` }} />
           {lg.label}
         </span>
-      ))}
+      )))}
     </div>
   );
 }
@@ -175,7 +176,7 @@ function RampBar({ gradient }) {
 function InfoReveal({ label, sections }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  const rows = (sections || []).filter((s) => s && s.text != null && String(s.text).trim() !== "");
+  const rows = (sections || []).filter((s) => s && ((s.text != null && String(s.text).trim() !== "") || (s.link && s.link.href)));
   if (!rows.length) return null;
   return (
     <div data-part="info">
@@ -187,7 +188,9 @@ function InfoReveal({ label, sections }) {
       {open && (
         <div id={id} role="note" data-testid="layer-info-text" style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4, lineHeight: 1.42 }}>
           {rows.map((s, i) => (
-            <div key={i} style={{ color: s.tone === "warn" ? "var(--warn-text)" : MUTED, fontStyle: s.tone === "warn" ? "italic" : "normal" }}>{s.text}</div>
+            s.link && s.link.href
+              ? <div key={i} style={{ color: MUTED }}><a href={s.link.href} target="_blank" rel="noopener noreferrer" data-testid="layer-info-link" style={{ color: "inherit", fontWeight: 600 }}>{s.link.text}</a></div>
+              : <div key={i} style={{ color: s.tone === "warn" ? "var(--warn-text)" : MUTED, fontStyle: s.tone === "warn" ? "italic" : "normal" }}>{s.text}</div>
           ))}
         </div>
       )}
@@ -309,6 +312,7 @@ function SimpleCheckRow({ id, label, checked, onChange, testId }) {
   );
 }
 
+/* A short note at the head of a panel group's rows (NEW-1, Sugar Land): why a kind of data is absent here, and the route to get it. Muted body text, one link. */
 function SectionHeading({ children, title }) {
   return <div title={title} style={{ fontWeight: 700, color: MUTED, margin: "8px 0 4px" }}>{children}</div>;
 }
@@ -535,7 +539,9 @@ export default function LayerPanel({
     const lift = showAbove && members.some(([, c]) => configCanLift(c));
     const ramp = id === "elevation" ? rampGradient(cfg0) : null;
     const viewLegendRow = !ramp && members.some(([, c]) => typeof c.viewLegend === "function");
-    const legend = ramp ? [] : (viewLegendRow ? (viewLegends[id] || []).map((e) => ({ ...e, stacked: true })) : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
+    /* An in-view legend is published per LAYER id; a merged row (Rutherford's four governments' zoning) lists each ON member's — one heading per government — in registry order. */
+    const viewLegendOf = () => (slot.kind === "merge" ? members.filter(([mid, c]) => typeof c.viewLegend === "function" && overlays[mid]?.on).flatMap(([mid]) => viewLegends[mid] || []) : (viewLegends[id] || []));
+    const legend = ramp ? [] : (viewLegendRow ? viewLegendOf() : legendFor(members, slot.kind === "merge" ? slot.mergeGroup : null));
     const zoomGated = vis.state === "dormant-zoom";
     const plan = dropdownPlan({ on: anyOn, zoomGated, canLift: lift, hasStatus: !!status, settings, hasLegend: legend.length > 0, hasRamp: !!ramp, hasInfo: info.some((s) => s && s.text) });
     const corr = overlays.txrrc_pipe_easement || {};
@@ -737,7 +743,7 @@ export default function LayerPanel({
   ) : <span style={{ flex: 1, fontWeight: 700 }}>Imagery &amp; Layers</span>;
 
   return (
-    <div ref={rootRef} data-testid="layer-panel" data-surface={surface} data-narrow={narrow ? "1" : "0"} style={{ fontSize: TEXT, color: INK }}>
+    <div ref={rootRef} className="layer-panel-steady" data-testid="layer-panel" data-surface={surface} data-narrow={narrow ? "1" : "0"} style={{ fontSize: TEXT, color: INK }}>
       <div data-testid="layers-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 0 8px" }}>
         {title}
         <ToggleChip active={hidden} aria-pressed={hidden} data-testid="layers-hide-toggle" onClick={() => setLayersHidden(!hidden)}

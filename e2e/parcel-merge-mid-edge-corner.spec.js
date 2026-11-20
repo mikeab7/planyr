@@ -34,7 +34,7 @@ async function open(page, id, rec) {
   await expect(page.getByTestId("parcel-row-pA")).toBeVisible({ timeout: 20_000 });
 }
 
-const readParcels = (page, id) => page.evaluate((sid) => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[sid]?.parcels || [], id);
+const readParcels = (page, id) => page.evaluate((sid) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[sid]?.parcels || [], id);
 const area = (pts) => Math.abs(pts.reduce((s, p, i, arr) => { const q = arr[(i + 1) % arr.length]; return s + (p.x * q.y - q.x * p.y); }, 0) / 2);
 
 async function pickBoth(page) {

@@ -22,11 +22,29 @@
  *   sampleFixtures[] — { label, point, expectValueRange|expectNoData, serviceUrl? }  (a raster probe)
  */
 import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma screening)
+import { TX_CITY_ZONING_FIXTURES, TX_CITY_ZONING_DOCS } from "./sourceFixturesTxCityZoning.js"; // NEW-1 (Texas city zoning)
+import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
+import { FORTBEND_FIXTURES, FORTBEND_DOCS } from "./sourceFixturesFortBend.js"; // NEW-1 (Fort Bend County layers)
+import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
+import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
+import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
+import { HOUSTON_METRO_FIXTURES, HOUSTON_METRO_DOCS } from "./sourceFixturesHoustonMetro.js"; // NEW-1/2/3 (Houston-metro sweep)
 import { FLORIDA_FIXTURES, FLORIDA_DOCS } from "./sourceFixturesFlorida.js"; // NEW-1 (Florida, B2452976)
 
+// NEW-1 (2026-11-12) — known parcels the NIGHTLY parcel health job re-queries by id (ui-audit/parcel-source-health-sweep.mjs).
+// Keyed by COUNTY key, not registry key, so it sits BESIDE SOURCE_FIXTURES rather than in it (auditRegistry is not involved).
+export { PARCEL_FIXTURES as parcelFixtures } from "./sourceFixturesParcels.js";
+
 export const SOURCE_FIXTURES = {
+  ...HOUSTON_METRO_FIXTURES,
   ...FLORIDA_FIXTURES,
   ...OK_FIXTURES,
+  ...TX_CITY_ZONING_FIXTURES,
+  ...SUGARLAND_FIXTURES,
+  ...FORTBEND_FIXTURES,
+  ...NASHVILLE_BUFFER_FIXTURES,
+  ...RUTHERFORD_FIXTURES,
+  ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
@@ -723,6 +741,30 @@ export const SOURCE_FIXTURES = {
     { label: "rural Bartow \u2014 west", bbox: [-84.91, 34.24, -84.89, 34.26], expectMinCount: 1 }, // live 2026-10-29: 79
   ],
   },
+  gaBartowWater: {
+  fixtures: [
+    { label: "Cartersville \u2014 Gerdau area", bbox: [-84.8, 34.23, -84.78, 34.25], expectMinCount: 1 }, // live 2026-11-12: 249
+    { label: "Allatoona Business Center (south Bartow)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 443
+  ],
+  },
+  gaBartowSewer: {
+  fixtures: [
+    { label: "Cartersville \u2014 Gerdau area", bbox: [-84.8, 34.23, -84.78, 34.25], expectMinCount: 1 }, // live 2026-11-12: 149
+    { label: "Allatoona Business Center (south Bartow)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 12
+  ],
+  },
+  gaAllatoonaLake: {
+  fixtures: [
+    { label: "Allatoona Lake \u2014 south arm (Bartow / Cobb shore)", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 1
+    { label: "Allatoona Lake \u2014 upper arm (Cherokee shore)", bbox: [-84.56, 34.16, -84.54, 34.18], expectMinCount: 1 }, // live 2026-11-12: 1
+  ],
+  },
+  gaAllatoonaShoreline: {
+  fixtures: [
+    { label: "Allatoona Lake \u2014 south arm", bbox: [-84.74, 34.08, -84.72, 34.1], expectMinCount: 1 }, // live 2026-11-12: 2
+    { label: "Allatoona Lake \u2014 upper arm", bbox: [-84.56, 34.16, -84.54, 34.18], expectMinCount: 1 }, // live 2026-11-12: 1
+  ],
+  },
   countyCa: {
   fixtures: [
     // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
@@ -908,6 +950,42 @@ export const SOURCE_FIXTURES = {
     { label: "None on the Houston coast (layer is Fort Worth-only)", bbox: [-95.5, 29.5, -95.2, 29.8], expectMinCount: 0 },
   ],
   },
+  /* NEW-1 (Fort Bend, 2026-11-12) — every point below was read live 2026-11-12 from the county's own layers (Origin: https://planyr.io).
+   * The release points are interior points of the named /16 polygons (OID 14: Fulshear 4,663.8 ac, filed 2023-09-28; OID 9162: Rosenberg
+   * Ordinance 2026-16); at each one /5 answers NOTHING (the county removed the ground) while H-GAC still answers FULSHEAR / ROSENBERG. */
+  etj_fortbend: {
+  fixtures: [
+    { label: "Fulshear ETJ (Fulshear cluster)", point: [-95.9235, 29.7488], expectMinCount: 1 },
+    { label: "Inside the Fulshear 4,663.8-ac release — the county table no longer holds it", point: [-95.85373, 29.6276], expectMinCount: 0 },
+  ],
+  },
+  etj_release_fortbend: {
+  fixtures: [
+    { label: "Fulshear 4,663.8-ac petition release (filed 2023-09-28)", point: [-95.85373, 29.6276], expectMinCount: 1 },
+    { label: "Rosenberg Ordinance 2026-16 removal", point: [-95.93562, 29.44609], expectMinCount: 1 },
+    { label: "Houston downtown (no release area)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  city_fortbend: {
+  fixtures: [
+    { label: "Sugar Land", point: [-95.63, 29.6], expectMinCount: 1 },
+    { label: "Rosenberg", point: [-95.81, 29.557], expectMinCount: 1 },
+  ],
+  },
+  county_fortbend: {
+  fixtures: [
+    { label: "Sugar Land (inside Fort Bend County)", point: [-95.63, 29.6], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  etj_harris: {
+  fixtures: [
+    { label: "Houston ETJ, north Harris (the owner's sweep point)", point: [-95.75, 30.05], expectMinCount: 1 },
+    // Both read live 2026-11-12 where H-GAC answers NOTHING (H-GAC's roster has neither city) — the cases the fallback exists for.
+    { label: "La Porte ETJ (H-GAC answers nothing here)", point: [-95.05901, 29.71901], expectMinCount: 1 },
+    { label: "Katy ETJ (H-GAC answers nothing here)", point: [-95.90246, 29.77651], expectMinCount: 1 },
+  ],
+  },
   etj_dallasco: {
   fixtures: [
     { label: "Seagoville ETJ (Dallas County)", point: [-96.60143, 32.62008], expectMinCount: 1 },
@@ -972,6 +1050,22 @@ export const SOURCE_FIXTURES = {
   fixtures: [
     { label: "Sunnyvale ETJ — north", point: [-96.56529, 32.83034], expectMinCount: 1 },
     { label: "Sunnyvale ETJ — south", point: [-96.51406, 32.75078], expectMinCount: 1 },
+  ],
+  },
+  /* NEW-1 (2026-11-12) — Mont Belvieu. Every point below was verified against the live service on 2026-11-12 through the PR preview's /gis-proxy relay (the build sandbox cannot reach
+   * www.cmbgis.com): each lies inside its polygon with a 0.004° margin on all four sides, and the ETJ points lie OUTSIDE the city's limits (layer 0). The Targa plant is the reason the limits-outrank-ETJ
+   * rule matters here — it is inside BOTH layer 0 and layer 1 — and is asserted in test/chambersEtj.test.js, where a zero-count fixture would carry no weight. */
+  etj_montbelvieu: {
+  fixtures: [
+    { label: "Mont Belvieu ETJ — north-east of the city (the brief's site, outside the limits)", point: [-94.86, 29.89], expectMinCount: 1 },
+    { label: "Mont Belvieu ETJ — far west edge, outside the limits", point: [-94.96078, 29.89792], expectMinCount: 1 },
+  ],
+  },
+  etj_chambers_neighbors: {
+  fixtures: [
+    { label: "Beach City ETJ — southern end", point: [-94.90825, 29.66029], expectMinCount: 1 },
+    { label: "Cove ETJ — centre", point: [-94.82899, 29.80138], expectMinCount: 1 },
+    { label: "Old River-Winfree ETJ — northern end", point: [-94.83045, 29.89004], expectMinCount: 1 },
   ],
   },
   mud: {
@@ -1462,8 +1556,15 @@ export function fixturesFor(key) {
  * `monitored-exception` row with no reason still fails the audit. The words just no longer
  * travel to the browser to prove it. */
 export const SOURCE_DOCS = {
+  ...HOUSTON_METRO_DOCS,
 ...FLORIDA_DOCS,
   ...OK_DOCS,
+  ...TX_CITY_ZONING_DOCS,
+  ...SUGARLAND_DOCS,
+  ...FORTBEND_DOCS,
+  ...NASHVILLE_BUFFER_DOCS,
+  ...RUTHERFORD_DOCS,
+  ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
   flood: {
   notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },
@@ -2057,6 +2158,22 @@ export const SOURCE_DOCS = {
   gaBartowZoning: {
   notes:
     "Bartow County's zoning district polygons, as the county publishes them (county GIS server; the point-query endpoint errors intermittently, the envelope query the map uses does not). Cities appear as 'Incorporated' and are zoned by the city, not shown here. REZONING is the county's case reference; ZONINGTEXT is its free-text note (mostly ordinance ids). Both are shown as published.",
+  },
+  gaBartowWater: {
+  notes:
+    "Bartow County Water Department's water pipes (county GIS server; read through the planyr.io relay). Size and material are the STRING fields SIZE_D / MAT_D — the numeric DIAMETER / MATERIAL columns are empty on every row. County department only: Cartersville and Adairsville run their own systems and publish no GIS. The envelope query the map uses answers; the point-query endpoint errors intermittently.",
+  },
+  gaBartowSewer: {
+  notes:
+    "Bartow County Water Department's sanitary sewer pipes (county GIS server; read through the planyr.io relay): FORCEMAIN = Y marks a pressure main. County department only — the cities run their own systems.",
+  },
+  gaAllatoonaLake: {
+  notes:
+    "USACE Mobile District Shoreline Management Program lake boundaries; the row keeps Allatoona Lake (RPSUID 167791). The service describes the polygons as the NORMAL POOL water level — the water, not the Corps' fee-owned shore land (that is the allocation-areas layer). No flowage-easement layer is published; flowage easements are found on the title.",
+  },
+  gaAllatoonaShoreline: {
+  notes:
+    "USACE Allatoona Lake shoreline allocation areas (limited development · prohibited access · protected · public recreation · special use · to be determined) — the Corps-managed shore land and the use class the Shoreline Management Plan gives it. The service holds other Corps projects too; the row keeps Allatoona (RPSUID 167791).",
   },
   countyCa: {
   notes:

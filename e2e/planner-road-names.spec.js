@@ -34,7 +34,7 @@ const paneState = (page) => page.evaluate((name) => {
 async function open(page, extra) {
   await installFakeVectorSource(page.context());
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
-  await page.addInitScript((s) => { try { if (!localStorage.getItem("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
+  await page.addInitScript((s) => { try { if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
   if (extra) await page.addInitScript(extra);
   await page.goto("/#/site-planner", { waitUntil: "load" });
   await page.getByText("Road Names Guard", { exact: false }).first().click();

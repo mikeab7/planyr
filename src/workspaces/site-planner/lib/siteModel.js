@@ -68,7 +68,15 @@ export { SITE_MODEL_VERSION, STATUSES, STATUS_META, statusOf, ROLES, ROLE_META, 
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
-export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
+// RETIRED (owner decision 2026-11-14): the five Utility Evidence tools (trace overhead electric, route electric /
+// water service, infer water main, ditch cross-section) were removed. Production held zero markups of these kinds, but a
+// stale device copy / old draft / paste could still carry one, so every READ drops them silently instead of crashing
+// or drawing a record nothing can edit. (`READ_NORMALIZE.markups` → `dropRetiredMarkups`; identity-preserving.)
+export const RETIRED_MARKUP_KINDS = ["utilRoute", "traced", "infwater"];
+export const dropRetiredMarkups = (list) =>
+  Array.isArray(list) && list.some((m) => m && RETIRED_MARKUP_KINDS.includes(m.kind))
+    ? list.filter((m) => !(m && RETIRED_MARKUP_KINDS.includes(m.kind)))
+    : list;
 export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon", "cloud"]; // neutral drawing markups
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
@@ -217,7 +225,7 @@ export function stampParcelNumbers(parcels) {
 export const READ_NORMALIZE = Object.freeze({
   els: (list) => ensureZ(migrateBandForce(list)),
   parcels: (list) => ensureZ(stampParcelNumbers(withLockSemantics(withStableParcelIds(list)))),
-  markups: (list) => ensureZ(list),
+  markups: (list) => ensureZ(dropRetiredMarkups(list)),
   measures: (list) => ensureZ(list),
   callouts: (list) => ensureZ(list),
 });
@@ -319,6 +327,10 @@ function normalizeBondedRotations(list, onHeal) {
     const host = byId.get(e.attachedTo);
     if (!host || host.points ||
         typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    // A drive-in ramp (NEW-1, 2026-10-30) keeps its box in step with its host at the planner's one element-write seam (lib/driveInRamp.js
+    // `refitRamps`); its angle is already host.rot, so there is nothing for this quarter-turn repair to add — and it must not rotate the ramp about
+    // the host on its own terms.
+    if (e.type === "driveInRamp") return e;
     // Corner bump-out (dog-ear): re-flush its WHOLE box to the host's CURRENT edge + angle
     // (NEW-6). Guard the side (a malformed `side` would throw in dogEarGeom's SIDE_N destructure
     // and blank the planner) and require finite host/child w·h (dogEarGeom reads them; a NaN box
@@ -2093,9 +2105,6 @@ export function constraintsOf(m) {
     liveLayers: (m.constraints && m.constraints.liveLayers) || [],
   };
 }
-
-// Utility runs: electric/water service routes, traced overhead lines, inferred mains.
-export const utilitiesOf = (m) => byKind(m.markups, UTILITY_KINDS);
 
 // First-class easement objects (NEW-1) — the kind:"easement" markups specifically
 // (a subset of constraintsOf().easements, which also includes legacy encumbrances).

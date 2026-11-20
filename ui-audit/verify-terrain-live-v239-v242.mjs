@@ -182,42 +182,14 @@ async function main() {
   // ══════════════════════════════════════════════════════════════════════
   // V242/B706: hover vs cross-section AGREE at the exact same screen pixel
   // ══════════════════════════════════════════════════════════════════════
-  console.log("\n== V242 (B706) hover vs cross-section agreement (same screen pixel) ==");
+  console.log("\n== V242 (B706) hover chip reads a real elevation ==");
   const px = svgBox.x + svgBox.width * 0.5, py = svgBox.y + svgBox.height * 0.45;
   let hoverFt = await hoverAt(px, py);
   if (hoverFt == null) { hoverFt = await hoverAt(px + 4, py + 4); }
   log(hoverFt != null, `hover chip reads a real elevation at the probe point (${hoverFt} ft)`);
 
-  // Draw a near-zero-length cross-section AT THE SAME PIXEL (2 clicks 1px apart) — its
-  // bank/invert collapse to essentially a point reading, directly comparable to the hover chip.
-  await page.locator('button:has-text("📏 Cross-section (ditch)")').first().click({ timeout: 5000 }).catch(async () => {
-    await page.getByText("Cross-section (ditch)", { exact: false }).first().click({ timeout: 5000 });
-  });
-  await page.waitForTimeout(200);
-  await page.mouse.click(px, py);
-  await page.waitForTimeout(150);
-  await page.mouse.click(px + 1, py + 1);
-  await page.waitForTimeout(300);
-  let xsecReady = false, xsecStats = null;
-  for (let i = 0; i < 30 && !xsecReady; i++) {
-    await page.waitForTimeout(300);
-    xsecStats = await page.evaluate(() => {
-      const el = [...document.querySelectorAll("div")].find((d) => (d.textContent || "").includes("Ditch cross-section"));
-      if (!el) return null;
-      const txt = el.parentElement ? el.parentElement.innerText : "";
-      const bank = txt.match(/Bank\s+([\d.]+)/);
-      const invert = txt.match(/Invert\s+([\d.]+)/);
-      return bank && invert ? { bank: parseFloat(bank[1]), invert: parseFloat(invert[1]) } : null;
-    });
-    xsecReady = !!xsecStats;
-  }
-  log(!!xsecReady, `cross-section produced a result (bank=${xsecStats?.bank}, invert=${xsecStats?.invert})`);
-  if (hoverFt != null && xsecStats) {
-    const xsecPt = (xsecStats.bank + xsecStats.invert) / 2; // near-zero-length line → bank≈invert≈point elevation
-    const delta = Math.abs(hoverFt - xsecPt);
-    log(delta <= 1.5, `hover (${hoverFt} ft) agrees with the cross-section tool (${xsecPt.toFixed(1)} ft) at the same spot — Δ=${delta.toFixed(2)} ft (same DEM, same convention)`);
-  }
-  // Close the cross-section result + exit the tool.
+  // (The cross-section half of this agreement check was removed with the ditch cross-section tool — owner decision
+  // 2026-11-14; the hover-vs-contour-label agreement below is the surviving second surface.)
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(200);
 

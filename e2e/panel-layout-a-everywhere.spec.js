@@ -200,7 +200,7 @@ test("layout A everywhere — the measurement panel has no Layer block, no label
   await expect(menu.getByText("Bring to Front", { exact: true })).toBeVisible();
   await expect(menu.getByText("Send to Back", { exact: true })).toBeVisible();
   await menu.getByText("Send behind the plan", { exact: true }).click();
-  const stored = () => page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return ((Object.values(m)[0] || {}).measures || []).find((x) => x.id === "m-area"); });
+  const stored = () => page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return ((Object.values(m)[0] || {}).measures || []).find((x) => x.id === "m-area"); });
   await expect.poll(async () => !!(await stored()).behindEls).toBe(true);
   await page.mouse.click(at.x, at.y, { button: "right" });
   await page.locator(".menu").last().getByText("Bring in front of the plan", { exact: true }).click();
@@ -214,7 +214,7 @@ test("layout A everywhere — a measurement's saved label zoom still decides whe
   // editing through the panel must not strip a saved labelPpf
   await page.getByTestId("property-panel").getByLabel("Fill opacity").fill("40");
   await page.getByTestId("property-panel").getByLabel("Fill opacity").press("Enter");
-  const read = (k) => page.evaluate((key) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return ((Object.values(m)[0] || {}).measures || []).find((x) => x.id === "m-area")?.[key]; }, k);
+  const read = (k) => page.evaluate((key) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return ((Object.values(m)[0] || {}).measures || []).find((x) => x.id === "m-area")?.[key]; }, k);
   await expect.poll(() => read("fillOpacity")).toBeCloseTo(0.4, 5);
   expect(await read("labelPpf")).toBe(0.05);
 });

@@ -60,7 +60,7 @@ let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${ok(cond)}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
 const persisted = (page) => page.evaluate(() => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").s_ctx; return { markups: (s.markups || []).map((m) => m.id), deletedIds: s.deletedIds || [] }; }
+  try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}").s_ctx; return { markups: (s.markups || []).map((m) => m.id), deletedIds: s.deletedIds || [] }; }
   catch (e) { return null; }
 });
 // an OFF-CENTRE interior point of a rendered convex polygon (blend of centroid + a vertex),

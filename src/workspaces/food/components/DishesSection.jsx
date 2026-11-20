@@ -390,6 +390,7 @@ export function DishSheet({ row, restaurantName, visits, onBack, onSaveDish, onD
 
   const done = async () => {
     if (committing.current || !name.trim()) return;
+    if (rerate && score == null) return; // a new rating with no score is never written (B2671295 ×2: it left an unscored row behind)
     committing.current = true;
     let ok = false;
     try {
@@ -412,7 +413,7 @@ export function DishSheet({ row, restaurantName, visits, onBack, onSaveDish, onD
           <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>‹</span>{/* design-exempt: a chevron glyph, not text — drawn one step larger than the label beside it */}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{restaurantName}</span>
         </button>
-        <button type="button" onClick={done} disabled={pending || !name.trim()} data-testid="dish-sheet-done" style={{ ...topBtn, fontWeight: 700, opacity: pending || !name.trim() ? 0.6 : 1, maxWidth: "none" }}>
+        <button type="button" onClick={done} disabled={pending || !name.trim() || (rerate && score == null)} data-testid="dish-sheet-done" style={{ ...topBtn, fontWeight: 700, opacity: pending || !name.trim() || (rerate && score == null) ? 0.6 : 1, maxWidth: "none" }}>
           Done
         </button>
       </div>
@@ -425,7 +426,7 @@ export function DishSheet({ row, restaurantName, visits, onBack, onSaveDish, onD
           font: "inherit", fontSize: 20, fontWeight: 700, color: "var(--text-primary)", // design-exempt: the sheet's title — the one hero line, matching the restaurant name's size
         }}
       />
-      {rerate && <div data-testid="dish-sheet-rerate-note" style={{ fontSize: FONT_SIZE.label, color: "var(--accent-food-text)", fontWeight: 700 }}>New rating · dated today · the earlier one stays in the history</div>}
+      {rerate && <div data-testid="dish-sheet-rerate-note" style={{ fontSize: FONT_SIZE.label, color: "var(--accent-food-text)", fontWeight: 700 }}>New rating · dated today · the earlier one stays in the history{score == null ? " · set a score to save it" : ""}</div>}
       <div>
         <span style={FIELD_LABEL_STYLE}>Score</span>
         <RatingSlider value={score} onChange={setScore} label="Dish score" isMobile={isMobile} testIds={{ root: "dish-score-meter", slider: "dish-score-slider", readout: "dish-score-numeral", clear: "dish-score-clear" }} />

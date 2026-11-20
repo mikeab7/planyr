@@ -48,7 +48,7 @@ await page.locator("text=Overlays").first().click(); await page.waitForTimeout(5
 await page.locator('button[title^="Zoom to fit"]').first().click(); await page.waitForTimeout(700);
 
 const select = async (id) => { if (!(await page.locator(`[data-testid="overlay-crop-${id}"]`).count())) await page.locator("button", { hasText: id + ".png" }).first().click(); await page.waitForTimeout(400); };
-const stored = (id) => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.H1 && raw.H1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop ?? null, rotation: o.rotation || 0, ftPerPx: o.ftPerPx, x: o.x, y: o.y } : null; }, id);
+const stored = (id) => page.evaluate((id) => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.H1 && raw.H1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop ?? null, rotation: o.rotation || 0, ftPerPx: o.ftPerPx, x: o.x, y: o.y } : null; }, id);
 // Geometry in CLIENT px: the full image box (unrotated frames only) + the chrome.
 const geo = (id) => page.evaluate((id) => {
   const img = document.querySelector(`image[data-overlay-id="${id}"]`);

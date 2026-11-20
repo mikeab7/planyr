@@ -45,7 +45,7 @@ try {
   console.log("served build:", JSON.stringify(s.build));
   if (want && !JSON.stringify(s.build).includes(want)) throw new Error(`deployed build does not contain ${want} yet`);
   await page.evaluate(([id, rec]) => {
-    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ ...(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")), [id]: rec }));
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ ...(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")), [id]: rec }));
     localStorage.setItem("planarfit:sites:history:v1", JSON.stringify({ [id]: [] }));
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [ID, site]);
@@ -164,7 +164,7 @@ finally {
         { const e = await window.pfSupabase.from("site_elements").delete().eq("site_id", id); out.site_elements = e.error ? String(e.error.message) : "deleted";
           const t = await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); out.trashed = t.error ? String(t.error.message) : "trashed"; // trash first, then permanent (the DB refuses a live delete)
           const d = await window.pfSupabase.from("sites").delete().eq("id", id); out.sites = d.error ? String(d.error.message) : "deleted"; }
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); delete o[id]; localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete o[id]; localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const left = await window.pfSupabase.from("sites").select("id").eq("id", id);
         out.remaining = (left.data || []).length;

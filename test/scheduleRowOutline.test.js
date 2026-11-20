@@ -2,7 +2,7 @@
  *
  * The behaviour is painted pixels (red on the pre-fix grid: the pinned ID / TASK cells paint an opaque
  * background over a row-level inset shadow, so the hover/selected line started at START). That script
- * cannot run in CI, so this pins the structure it rests on: the line is a ::before on every CELL, and the
+ * cannot run in CI, so this pins the structure it rests on: the line is ONE ::after on the ROW (B2584496; it was a ::before on every cell), and the
  * selected row's blue accent lives on the first cell, never only on the row container (which scrolls away).
  */
 import { describe, it, expect } from "vitest";
@@ -14,10 +14,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
 
 describe("Schedule grid — row outline runs through the pinned columns (NEW-1)", () => {
-  it("draws the hover/selected top+bottom line on each cell, not as a row-level box-shadow", () => {
-    expect(seq).toMatch(/\.drow:hover > \[data-col-key\]::before/);
-    expect(seq).toMatch(/\.drow\[data-row-sel\] > \[data-col-key\]::before/);
+  it("draws the hover/selected top+bottom line as ONE ::after on the row, above the frozen cells — not a row-level box-shadow under them, not a ::before per cell (B2584496)", () => {
+    expect(seq).toMatch(/\.drow:hover::after/);
+    expect(seq).toMatch(/\.drow\[data-row-sel\]::after/);
     expect(seq).not.toMatch(/\.drow:hover \{ box-shadow/);
+    expect(seq).not.toMatch(/\.drow[^{]*> \[data-col-key\]::before/);
   });
   it("marks the selected row so the same line shows without hover", () => {
     expect(seq).toMatch(/data-row-sel=\{\(isFocused && !hasRange\) \? "1" : undefined\}/);

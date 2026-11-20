@@ -113,7 +113,7 @@ async function run() {
   // Read the persisted model back.
   const stored = await page.evaluate(() => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = all.s_b596;
       return s ? { parcels: (s.parcels || []).map((p) => p.id), deletedIds: s.deletedIds || [] } : null;
     } catch (e) { return null; }

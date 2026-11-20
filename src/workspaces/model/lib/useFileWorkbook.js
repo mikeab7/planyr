@@ -28,6 +28,7 @@ export function useFileWorkbook({ fileId, userId, workbook, onLoaded, onFileChan
   const [cloudConfirmed, setCloudConfirmed] = useState(false);
   const [inPlace, setInPlace] = useState(true);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [loadGen, setLoadGen] = useState(0);                      // +1 per genuine load of a file (never when the hook re-points itself at its own copy) — NEW-2: the Univer grid's scope
   const [hasOriginal, setHasOriginal] = useState(false);              // an earlier stored version (the upload) exists to download
 
   const stateRef = useRef(null);       // fileWorkbook.js state (record/source/prior/sessionSrcId)
@@ -74,6 +75,7 @@ export function useFileWorkbook({ fileId, userId, workbook, onLoaded, onFileChan
         if (opened.id !== fileId) { adoptedRef.current = opened.id; onChangedRef.current && onChangedRef.current(opened.id, opened.name); }
         onLoadedRef.current(wb);
         setCloudConfirmed(true);
+        setLoadGen((g) => g + 1);
         setPhase("ready");
       } catch (e) {
         if (tok !== loadTok.current) return;
@@ -167,9 +169,22 @@ export function useFileWorkbook({ fileId, userId, workbook, onLoaded, onFileChan
 
   const hasUnsaved = useCallback(() => wbRef.current !== baselineRef.current, []);
 
+  /** NEW-2 — the Univer grid hands over its newest workbook the moment it flushes (leaving the file, closing the tab, the
+   *  grid toggle), BEFORE React has rendered it back as `workbook`. Take it into the refs and the on-device draft
+   *  synchronously, so a save that starts in the same breath (the leaving-file upload, `flush`, pagehide) uploads the last
+   *  edit and a failure is recovered from the draft next time. `forFileId` guards a late call for a file no longer open. */
+  const noteWorkbookNow = useCallback((wb, forFileId) => {
+    const st = stateRef.current;
+    if (!st || (forFileId && st.id !== forFileId && adoptedRef.current !== st.id)) return false;
+    wbRef.current = wb;
+    if (wb !== baselineRef.current) writeFileDraft(userRef.current, st.id, st.source.srcId, wb);
+    return true;
+  }, []);
+
   return {
     phase, error, name, notes, status, saveError, cloudConfirmed, inPlace, hasOriginal, downloadOriginal,
     retrySave: runSave, flush, reloadFromLibrary, hasUnsaved,
+    noteWorkbookNow, loadGen,
     retryOpen: useCallback(() => setReloadNonce((n) => n + 1), []),
   };
 }

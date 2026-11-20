@@ -438,6 +438,12 @@ async function run() {
               issues.push({ kind: "harness-fault", detail: "planner canvas never appeared" }));
             const fit = page.locator('button[title="Zoom to fit"]');
             for (let i = (await fit.count()) - 1; i >= 0; i--) { await fit.nth(i).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400); }
+          } else if (surface.id === "spreadsheet") {
+            // NEW-2: the Spreadsheet is the Univer grid for every account — a LAZY canvas chunk. The 3 s settle above audits the loading
+            // placeholder on a phone-class connection, so hold the audit until the canvas is up and say so loudly if it never comes.
+            await page.locator('canvas[id^="univer-sheet-main-canvas"]').first().waitFor({ state: "visible", timeout: 60000 }).catch(() =>
+              issues.push({ kind: "harness-fault", detail: "the Univer grid canvas never appeared on the spreadsheet surface" }));
+            await page.waitForTimeout(1200);
           } else if (surface.id === "map-landing") {
             // No project: this is MapFinder's Leaflet map, not the Site Planner drawing canvas.
             await page.locator(".leaflet-container").waitFor({ state: "visible", timeout: 15000 }).catch(() =>

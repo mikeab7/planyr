@@ -224,8 +224,10 @@ export function writeLocalOrgIndex(userId, list) {
 /** Add or update one entry (by id) in the local index, newest-first. Returns the new list so a
  *  caller can set state from it directly without a second read. */
 export function touchLocalOrgIndex(userId, entry) {
-  const list = readLocalOrgIndex(userId).filter((w) => w.id !== entry.id);
-  list.push(entry);
+  const all = readLocalOrgIndex(userId);
+  const prev = all.find((w) => w.id === entry.id);
+  const list = all.filter((w) => w.id !== entry.id);
+  list.push(prev && prev.synced && !entry.synced ? { ...entry, synced: true } : entry); // keep "the cloud confirmed this" across a rename (B2671225)
   list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   writeLocalOrgIndex(userId, list);
   return list;

@@ -25,8 +25,8 @@ const panel = T("property-panel");
 await page.addInitScript(() => { window.__PLANYR_E2E = true; });
 
 const markups = () => page.evaluate(([uid, sid]) => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}");
-  const loc = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}");
+  const loc = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return ((m[sid] || loc[sid] || {}).markups || []).map((k) => ({ ...k }));
 }, [UID, SITE_ID]);
 const cloudMarkups = () => page.evaluate(async (sid) => {
@@ -136,7 +136,7 @@ finally {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && (q.data || []).length === 0;
   }, [SITE_ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

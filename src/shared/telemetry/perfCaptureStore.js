@@ -1,4 +1,4 @@
-/* The on-device copy of a performance capture (NEW-1) — bounded, visible, and in the RIGHT TIER.
+/* The on-device copy of a performance capture (NEW-1) — bounded, and in the RIGHT TIER.
  *
  * ⛔ WHY INDEXEDDB AND NOT localStorage, and this is TIER-BY-REBUILDABILITY applied rather than
  * quoted. localStorage is the SMALL tier — a hard ~5 MB per-origin cap, measured 78% full on the
@@ -9,9 +9,18 @@
  *
  * ⛔ AND WHY IT IS BOUNDED ANYWAY. The large store is PERSISTENT for this origin — the browser
  * will never evict it for us — which makes the app solely responsible for its own size. Every
- * write prunes to `MAX_CAPTURES`, and the storage panel shows the class with its own clear
- * control, so this can never grow without being visible. That is rule 3 of the tier rule, not an
- * optional nicety.
+ * write prunes to `MAX_CAPTURES`, so this can never grow past three records. That is rule 3 of
+ * the tier rule, not an optional nicety. (The Storage screen that used to list and clear these
+ * was retired 2026-11-04 by owner decision, NEW-1 — the writer's own bound is now the only
+ * control, and it is enough: three records of a few tens of kilobytes.)
+ *
+ * ⛔ WHO STILL READS THIS (measured by grep, 2026-11-04 — why the store was KEPT when the panel
+ * went): the ui-audit harnesses `verify-help-report-control` (PART E — the worst long-task row's
+ * attribution), `verify-perf-recorder` (the boot-capture fields) and `verify-capture-pipe` (an
+ * automated run still keeps its on-device copy) read the FULL capture from IndexedDB, because it
+ * is the only place the untrimmed capture exists — `window.pfRec.captures()` is a triage summary
+ * and the Supabase row is trimmed to fit one column. Remove the store only together with a
+ * replacement source for those three, never on its own.
  *
  * ⛔ AND WHY THE CLASS IS `reclaimable: false` (see storageCensus.js). Nothing can rebuild a
  * capture: the moment it describes is gone. Under the tier rule, a class with no rehydration
@@ -61,24 +70,7 @@ export async function listCaptureKeys() {
   return keys.sort();
 }
 
-/* Summary for the storage panel: how many, how big, and when the newest was taken. Never throws. */
-export async function perfCaptureSummary() {
-  const out = { count: 0, bytes: 0, newestAt: null };
-  try {
-    await walkOriginStore(CAPTURE_PREFIX, (k, v) => {
-      out.count++;
-      out.bytes += (typeof v === "string" ? v.length : 0) + String(k).length;
-      try {
-        const at = JSON.parse(v).atWall;
-        if (Number.isFinite(at) && (out.newestAt == null || at > out.newestAt)) out.newestAt = at;
-      } catch (_) { /* a malformed record still counts toward the size */ }
-    });
-  } catch (_) { /* ignore */ }
-  return out;
-}
-
-/* Read them back, newest first — the offline fallback path, and what a console read uses when
- * the cloud row never made it out. */
+/* Read them back, newest first — what a console read uses when the cloud row never made it out. */
 export async function readPerfCaptures() {
   const rows = [];
   try {
@@ -87,11 +79,4 @@ export async function readPerfCaptures() {
     });
   } catch (_) { /* ignore */ }
   return rows.sort((a, b) => (a.key < b.key ? 1 : -1));
-}
-
-/* Owner-visible clear, from the storage panel. */
-export async function clearPerfCaptures() {
-  let removed = 0;
-  try { for (const k of await listCaptureKeys()) if (await deleteOriginKey(k)) removed++; } catch (_) { /* ignore */ }
-  return removed;
 }

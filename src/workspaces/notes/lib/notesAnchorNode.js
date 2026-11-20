@@ -48,6 +48,10 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import { moveSelection } from "./notesMarquee.js";
 import { cascadeRemoveArrows } from "./notesArrows.js";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { unnestTr } from "./notesAnchorNest.js";
+import { boxClearPlugin } from "./notesBoxClearPlugin.js";
+import { copyScopePlugin } from "./notesBoxClipboard.js";
 /* The ONE shared drag-cursor pin (owner convention 2026-10-20). A drag keeps ITS cursor for the whole
  * gesture even once the pointer has left the box — pointer capture keeps the events coming, but what the
  * browser PAINTS is decided by whatever element is under the pointer (or the capture target's own rule). */
@@ -161,9 +165,6 @@ export function fitAnchorBox({ x, w, hostWidth, pad = ANCHOR_EDGE_PAD, minWidth 
   return { x: Math.round(left), w: Math.round(Math.max(minWidth, Math.min(want, room))) };
 }
 
-/** The width alone, for callers that only need that. */
-export const fitAnchorWidth = (args) => fitAnchorBox(args).w;
-
 /** ⛔ IS THE SELECTION INSIDE A BOX? A table (or anything else with its own editing surface)
  *  inserted from a toolbar button or menu — as opposed to typed, which always goes through an
  *  armed/committed box first — lands wherever `state.selection` currently resolves, and that
@@ -261,6 +262,18 @@ export const NoteAnchor = Node.create({
     return [{ tag: "div[data-anchor-x]" }];
   },
 
+  /** ⛔ A BOX IS NEVER INSIDE ANOTHER BOX (B2671237) — read `notesAnchorNest.js`. A paste of text copied from a box carries
+   *  the box as its context and used to land a SECOND box inside the receiving one, drawn at the source's x/y from the
+   *  receiving box's corner (indented, and over its neighbours). The repair is an `appendTransaction`, so it shares the
+   *  paste's undo step. */
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: new PluginKey("noteAnchorNoNest"),
+      appendTransaction: (trs, _old, newState) => (trs.some((t) => t.docChanged) ? unnestTr(newState) : null),
+    }), boxClearPlugin(),   // ⛔ AND A BOX THAT GROWS FROM ITS OWN WORDS ONTO ANOTHER MOVES IT CLEAR (B2671237/4; placed boxes may overlap, NEW-2 2026-11-15) — lib/notesBoxClear.js
+    copyScopePlugin()];     // ⛔ A TEXT COPY NEVER CARRIES THE BOX (NEW-1 2026-11-15) — lib/notesBoxClipboard.js
+  },
+
   /** ⛔ THE POSITION IS IN THE MARKUP, NOT IN A STYLESHEET. `renderHTML` is what the PRINT
    *  sheet and the HTML export serialise through, so writing `left`/`top` here is what makes
    *  paper agree with the screen (PDF-PARITY by construction — the alternative is a rule in
@@ -309,6 +322,16 @@ export const NoteAnchor = Node.create({
        *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
        *  not the start of a sentence, and an atom has no text position to land in anyway — asking
        *  for one puts the selection somewhere arbitrary. */
+      /** ⛔ PASTE WHOLE BOXES (NEW-1, 2026-11-15) — every box in ONE transaction (one Ctrl+Z), before the document's trailing block like
+       *  `addNoteAnchorAt`. The nodes arrive complete (fresh ids and places chosen by `planBoxPaste`); nothing else is touched. */
+      pasteNoteAnchors: (boxes = []) => ({ chain, state }) => {
+        if (!Array.isArray(boxes) || !boxes.length) return false;
+        const { doc } = state;
+        const tail = doc.lastChild;
+        const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
+        return chain().setMeta("planyrBoxPaste", true).insertContentAt(at, boxes, { updateSelection: false }).run();
+      },
+
       addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null, aid = null, fit = undefined }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;

@@ -1,7 +1,7 @@
 // The owner-only gate (2026-10-16): the grading layer renders ONLY for a confirmed is_admin(), through ONE
 // selector, with no second mechanism — and the code behind it is never statically reachable by other accounts.
 import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { gradingEnabled } from "../src/workspaces/site-planner/lib/gradingGate.js";
 import { adminStatusStore } from "../src/workspaces/admin/lib/adminStatus.js";
@@ -10,6 +10,7 @@ import { plannerSource } from "./helpers/plannerSource.js";
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const LIB = "../src/workspaces/site-planner/lib/";
 const COMP = "../src/workspaces/site-planner/components/";
+const isFile = (d, f) => statSync(fileURLToPath(new URL(d + f, import.meta.url))).isFile();
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 const client = (answer) => ({ rpc: async () => (answer instanceof Error ? { data: null, error: { message: "boom" } } : { data: answer, error: null }) });
 
@@ -37,9 +38,12 @@ describe("gradingEnabled() — fails CLOSED", () => {
 });
 
 describe("no second gate mechanism", () => {
+  // (the 3D viewer's folder `lib/grading3d/` matches the name filter but is a directory: its FILES are listed explicitly below, so the viewer is held to
+  // the same rule — no URL flag, env var or storage switch of its own — instead of being skipped)
   const files = [
-    ...readdirSync(fileURLToPath(new URL(LIB, import.meta.url))).filter((f) => /^(grading|buildable|buildingGrade)/.test(f)).map((f) => LIB + f),
-    COMP + "GradingController.jsx", COMP + "GradingPanels.jsx",
+    ...readdirSync(fileURLToPath(new URL(LIB, import.meta.url))).filter((f) => /^(grading|buildable|buildingGrade)/.test(f) && isFile(LIB, f)).map((f) => LIB + f),
+    ...readdirSync(fileURLToPath(new URL(LIB + "grading3d/", import.meta.url))).map((f) => LIB + "grading3d/" + f),
+    COMP + "GradingController.jsx", COMP + "GradingPanels.jsx", COMP + "Grading3DViewer.jsx", COMP + "View3dMount.jsx",
   ];
   it("found the grading modules", () => { expect(files.length).toBeGreaterThanOrEqual(8); });
   for (const f of files) {
@@ -72,11 +76,11 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
   });
   it("only the gate and the small glue are static", () => {
     expect(sp).toMatch(/import \{ useGradingEnabled \} from "\.\/lib\/gradingGate\.js"/);
-    expect(sp).toMatch(/import \{ useGradingBase, hostIdMap \} from "\.\/lib\/gradingBase\.js"/);
+    expect(sp).toMatch(/import \{ useGradingBase, hostIdMap, gradingCfg \} from "\.\/lib\/gradingBase\.js"/);   // V2115881 round 3: + gradingCfg (the fence margin) — the same already-static module, no new edge
   });
   it("every render site is behind grOn (the gate)", () => {
     expect(sp).toMatch(/\{grOn && grInput && \(\s*<Suspense fallback=\{null\}><GradingController/);
-    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill \|\| grModel\.contours \|\| grLimitEdit\)/);
+    expect(sp).toMatch(/grOn && grModel && \(grModel\.buildable \|\| grModel\.cutfill \|\| grModel\.contours \|\| grLimitEdit \|\| \(grModel\.fit && grModel\.fit\.ghost\)\)/);   // NEW-1: + the Fit-the-biggest-building ghost, behind the same gate
     expect(sp).toMatch(/gradingRows=\{grOn && grModel \?/);
     // NEW-1 (amends B2315856): grading is its own dock panel, rendered only behind the gate; Site Analysis carries none of it
     expect(sp).toMatch(/_pid === "grading" && gradingOn && \(/);
@@ -99,11 +103,13 @@ describe("SitePlanner reaches the grading layer only through the gate, and lazil
     expect(sp).toMatch(/\.\.\.\(grOn && e\.type !== "building" \? \{ hostId:/);
     expect(sp).toMatch(/\.\.\.\(grOn \? \[`gr:\$\{grBase\.sig\}`/);
     // the build condition (moved into the useGradeSurface call, problem report 6cea9895) — and the off-render build is the GATE's
-    expect(sp).toMatch(/enabled: \(fmEffectivePadFt != null \|\| grAnyFfe\) && gsEls\.length > 0,\s*offRender: grOn,/);
+    // (NEW-1, B2585313 ×2: the condition is named `gsEnabled` so the readout hook can report it — same expression, same call)
+    expect(sp).toMatch(/const gsEnabled = \(fmEffectivePadFt != null \|\| grAnyFfe\) && gsEls\.length > 0;/);
+    expect(sp).toMatch(/enabled: gsEnabled,\s*offRender: grOn,/);
   });
   it("nobody was added to admin_users by this work", () => {
     for (const dir of [LIB, COMP]) for (const f of readdirSync(fileURLToPath(new URL(dir, import.meta.url)))) {
-      if (!/rading|uildable/.test(f)) continue;
+      if (!/rading|uildable/.test(f) || !isFile(dir, f)) continue;
       expect(code(read(dir + f))).not.toMatch(/admin_users/);
     }
   });

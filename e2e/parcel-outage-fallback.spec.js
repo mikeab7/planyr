@@ -32,7 +32,7 @@ async function openMap(page) {
   await page.waitForTimeout(1500); // let the Leaflet map and its layer probes settle
 }
 
-const sitesInStore = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"));
+const sitesInStore = (page) => page.evaluate(() => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"));
 
 test.describe("NEW-4 · a county outage offers the fallback instead of dead-ending", () => {
   test("'Start blank' from the map is born LOCATED at what the map is looking at", async ({ page }) => {

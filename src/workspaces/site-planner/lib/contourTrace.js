@@ -196,6 +196,7 @@ export function buildContours(grid, {
   maxLevels = 50, labelCap = 40, indexEvery = 5, clip = null,
   labelArcCells = LABEL_ARC_CELLS, labelMinRunCells = LABEL_MIN_RUN_CELLS,
   interval: forcedInterval = null,   // ROUND 4 (B2349122): the proposed-surface contours ride the EXISTING layer's interval
+  simplifyTol = SIMPLIFY_TOL,        // ROUND 10 (NEW-1): the proposed contours are traced at a fraction of a cell — see buildProposedContours
   /* NEW-1 (Imagery & Layers): the owner's chosen Interval (1/2/5/10 ft) as a FLOOR under the automatic pick, so a
    * steep view that must coarsen to stay readable still does, but a flat Houston view traces at the chosen step. */
   minInterval = null,
@@ -247,11 +248,11 @@ export function buildContours(grid, {
               run[0][0] === run[run.length - 1][0] && run[0][1] === run[run.length - 1][1];
             let simp;
             if (closed) {
-              simp = douglasPeucker(run.slice(0, -1), SIMPLIFY_TOL);
+              simp = douglasPeucker(run.slice(0, -1), simplifyTol);
               simp = simp.concat([simp[0]]);
               if (simp.length < 4) continue;
             } else {
-              simp = douglasPeucker(run, SIMPLIFY_TOL);
+              simp = douglasPeucker(run, simplifyTol);
               if (simp.length < 2) continue;
             }
             if (isIndex) {
@@ -287,7 +288,15 @@ export function buildContours(grid, {
  *   5. ONE label per index-contour piece, at its middle, with the line's own angle there (`angle`, radians, lattice
  *      px frame = the feet frame's orientation), only on a piece at least `labelMinCells` long.
  * Lines in LATTICE PIXEL coordinates. Pure; the worker's `contours-proposed` job is its only runtime caller. */
-const PROPOSED_SIMPLIFY_TOL = 0.12; // cells — after smoothing; keeps the vertex count sane without re-cornering
+/* ROUND 10 (NEW-1, third attempt at even band contours — B2571184 ×3): BOTH simplification passes were far coarser than the
+ * spacing they act on. `buildContours` simplified every traced ring at 0.5 cell (3 ft on the 6 ft contour lattice) and this
+ * file again at 0.12 cell (0.7 ft) — on a slope band whose contours are interval × ratio apart (4 ft at a 2 ft interval and a
+ * 2:1 slope) that moved lines by up to a fifth of their spacing, so a plane the surface holds exactly drew bunched and gapped
+ * (measured on the owner's Concept A: crossings of one transect 5.6 / 3.0 / 3.8 / 3.9 / 4.7 / 4.1 ft apart against a true 4.0).
+ * Marching squares with linear interpolation is exact on a plane, so the only thing that can move a contour off its level is
+ * what is done to it afterwards: the simplifier now keeps every vertex within 0.02 cell (~0.1 ft) of the traced line. */
+const PROPOSED_TRACE_TOL = 0.02;    // cells — the first pass, in buildContours
+const PROPOSED_SIMPLIFY_TOL = 0.02; // cells — after smoothing; keeps the vertex count sane without re-cornering
 const PAD_CUT_EXPAND_CELLS = 1.0;   // the wall's own interpolation band (one cell either side of the pad ring) is cut too
 const MIN_CLOSED_AREA_CELLS = 2.0;  // ROUND 6 (NEW-2): a closed ring enclosing less than this is lattice noise, not a pit or a hump — dropped
 const ringAreaCells = (ring) => { let a = 0; for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]; return Math.abs(a) / 2; };
@@ -347,7 +356,7 @@ export function pieceSpacingCells(grid, piece, interval, samples = 9) {
 export function buildProposedContours(grid, {
   interval = 1, clipRings = null, clipHoles = null, cutRings = [], smoothPasses = 2, minPieceCells = 1, labelMinCells = 8, inside = null,
 } = {}) {
-  const base = buildContours(grid, { interval, maxLevels: 400, labelCap: 0, indexEvery: 5 });
+  const base = buildContours(grid, { interval, maxLevels: 400, labelCap: 0, indexEvery: 5, simplifyTol: PROPOSED_TRACE_TOL });
   // the graded area (the daylight line) off the lattice's own field — OR, when the caller hands an explicit outer clip
   // (boundary mode: the setback and its holes, ROUND 6), that clip ALONE: inside the setback everything is graded, so the
   // field's own crossing there is only the limit line read half a cell off, and clipping to both would cut the proposed

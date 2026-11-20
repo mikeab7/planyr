@@ -154,7 +154,7 @@ async function openScenario(id) {
   const rowTxt = await row.evaluate((el) => el.innerText);
   log(rowTxt.includes("Trace a length") && rowTxt.includes("Match 2 points"), "(c) the STANDARD calibration flow is offered (Trace a length / Match 2 points)");
   // NEW-1: the Width box is GONE (owner: "WHY DO WE EVEN HAVE A WIDTH BOX?") — the rescale is read from the stored overlay instead.
-  const ftPerPxOf = () => page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = Object.values(m).flatMap((x) => x.sheetOverlays || []).find((x) => x.id === "drop1"); return o ? o.ftPerPx : null; });
+  const ftPerPxOf = () => page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = Object.values(m).flatMap((x) => x.sheetOverlays || []).find((x) => x.id === "drop1"); return o ? o.ftPerPx : null; });
   const before = await ftPerPxOf();
   await row.locator('button:has-text("Trace a length")').first().click();
   await page.waitForTimeout(400);
@@ -208,7 +208,7 @@ async function openScenario(id) {
   await migratedRow.locator('button[title="Unlock"], button[title="Lock"]').first().click();
   await page.waitForTimeout(2500); // let the debounced autosave settle
   const persisted = await page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem("planarfit:sites:v1"))["b848736-d"]; } catch (e) { return null; }
+    try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))["b848736-d"]; } catch (e) { return null; }
   });
   log(!!persisted && !("underlay" in persisted), "(d) the re-saved record carries NO `underlay` field — the fold is real, not cosmetic");
   log(!!persisted && Array.isArray(persisted.sheetOverlays) && persisted.sheetOverlays.length === 1, "(d) the re-saved record's sheetOverlays holds the folded aerial");

@@ -159,7 +159,7 @@ finally {
         const p = { ...((r.data && r.data.prefs) || {}) };
         if (orig === null || orig === undefined) delete p.dashboardProjectOrder; else p.dashboardProjectOrder = orig;
         await window.pfSupabase.from("profiles").upsert({ id: u.user.id, prefs: p, updated_at: new Date().toISOString() }, { onConflict: "id" });
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const q = await window.pfSupabase.from("sites").select("id").in("id", idList);
         const pr = await window.pfSupabase.from("profiles").select("prefs").eq("id", u.user.id).maybeSingle();

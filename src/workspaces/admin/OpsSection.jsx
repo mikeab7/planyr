@@ -12,6 +12,59 @@ import { RADIUS } from "../../shared/ui/radius.js";
 import AdminPanel, { Card, Chip, PanelState, useAdminLoad } from "./AdminPanel.jsx";
 import { exactTime } from "./lib/adminFormat.js";
 import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago, digestStamp } from "./lib/adminPanels.js";
+import { snapshotHealth, CHECK_LABELS, SOURCES, SOURCE_LABELS, staleLimitMin } from "../../shared/auth/signinHealth.js";
+
+/* NEW-1 (2026-11-02, after B2619760) — the hourly outside-in sign-in check. "Stopped" is computed here from the clock:
+ * a snapshot that says all-clear and has not been touched for hours is exactly the dead-man's-switch case. */
+const SIGNIN_TONE = { ok: "ok", broken: "danger", stale: "danger", none: "danger", blind: "warn" };
+function SigninHealth({ snap }) {
+  const h = snapshotHealth(snap, Date.now());
+  const e = (snap && snap.events) || {};
+  return (
+    <div data-testid="signin-health" data-state={h.state}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: FONT_SIZE.control }}>
+        <Chip tone={SIGNIN_TONE[h.state] || "neutral"}>{{ ok: "Sign-in OK", broken: "Sign-in BROKEN", stale: "Check stopped", none: "Never checked", blind: "Cannot confirm" }[h.state]}</Chip>
+        <span>{h.line}</span>
+      </div>
+      {snap && (
+        <>
+          <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: 6 }}>
+            Last hour from browsers: {e.ok || 0} signed in · {e.wrongPassword || 0} wrong passwords · {e.refused || 0} refused by the bot check · {e.blocked || 0} blocked scripts · {e.widgetError || 0} widget errors · {e.timeout || 0} timeouts · {e.network || 0} network failures
+            {snap.lastCheckAt ? <> · last outside check {ago(snap.lastCheckAt)}</> : null}
+          </div>
+          {snap.sources && (
+            <div data-testid="signin-sources" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: 6 }}>
+              {SOURCES.map((src, i) => {
+                const at = snap.sources[src] && snap.sources[src].lastAt;
+                const late = at && (Date.now() - new Date(at).getTime()) / 60000 > staleLimitMin(src);
+                return (
+                  <span key={src} data-source={src} data-late={late ? "1" : "0"}>
+                    {i > 0 ? " · " : ""}{SOURCE_LABELS[src]}: {at ? `last ran ${ago(at)}` : "has not run yet"}{late ? " — STOPPED" : ""}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {h.gaps.length > 0 && (
+            <div data-testid="signin-coverage-gap" style={{ fontSize: FONT_SIZE.control, marginTop: 6 }}>
+              <Chip tone="warn">Coverage gap</Chip> {h.gaps.map((g) => g.text).join(" ")}
+            </div>
+          )}
+          {Array.isArray(snap.checks) && snap.checks.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {snap.checks.map((c) => (
+                <div key={c.name} style={{ fontSize: FONT_SIZE.control, padding: "1px 0" }}>
+                  <strong>{c.status === "pass" ? "✓" : c.status === "fail" ? "✗" : c.status === "skipped" ? "–" : c.uncovered ? "∅" : "?"}</strong> {CHECK_LABELS[c.name] || c.name}{c.detail ? <span style={{ color: "var(--text-secondary)" }}> — {c.detail}</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
+          {snap.mail && !snap.mail.configured && <div style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>Alarm email is not set up in Cloudflare yet (GMAIL_SERVICE_ACCOUNT_JSON + INVITE_SENDER): a break would reach you only through the GitHub issue.</div>}
+        </>
+      )}
+    </div>
+  );
+}
 
 function Digest({ title, d }) {
   return (
@@ -84,6 +137,9 @@ export default function OpsSection() {
               Earlier: {ops.sweeps.slice(1).map((s) => `${new Date(s.at).toLocaleDateString()} (${s.archived} archived, ${s.stillOpen.length} open)`).join(" · ")}
             </div>
           )}
+          </Card>
+          <Card title="Sign-in health">
+            <SigninHealth snap={ops.signin} />
           </Card>
           <Card title="Outstanding work">
           {!ops.backlog && !ops.verification ? (

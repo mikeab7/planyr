@@ -1664,7 +1664,7 @@ export function curbStrokePx(curbFt, ppf, minPx = 0.75) {
 }
 
 /* Convex hull (monotone chain) of a point cloud → CCW-ish ring, or null if < 3 distinct points. */
-function convexHull(points) {
+export function convexHull(points) {
   const pts = (points || [])
     .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
     .map((p) => ({ x: p.x, y: p.y }))

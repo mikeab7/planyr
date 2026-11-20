@@ -19,7 +19,7 @@ const NAMES = { short1: "A", short2: "GC", mid: "Academy", long: LONG };
 
 async function seed(page, rows) {
   await page.addInitScript(([key, list]) => {
-    if (localStorage.getItem(key)) return;
+    if ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key)) return;
     const map = {};
     for (const p of list) map[p.id] = { schemaVersion: 12, updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {}, ...p };
     localStorage.setItem(key, JSON.stringify(map));
@@ -61,6 +61,8 @@ test.describe("NEW-1 — the plan crumb shows on the Site tab only", () => {
     page.on("pageerror", (e) => errors.push(String(e)));
     await seed(page, ROWS);
     await page.goto("/#/project/hc-grp/spreadsheet");
+    // NEW-2: the Spreadsheet is the Univer grid (a lazy canvas) for every account — assert the crumbs AND the page-error list with the grid mounted
+    await expect(page.locator('canvas[id^="univer-sheet-main-canvas"]')).toBeVisible({ timeout: 60_000 });
     await expect(visible(page, "project-crumb")).toBeVisible();
     await expect(visible(page, "plan-crumb")).toHaveCount(0);
     await expect(visible(page, "model-concept-crumb")).toHaveCount(0);

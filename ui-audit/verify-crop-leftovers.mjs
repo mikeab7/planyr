@@ -54,7 +54,7 @@ async function scenario(label, { crop = null, viewport = { width: 1440, height: 
   const S = {
     page, ctx,
     dlg: page.locator('[data-testid="overlay-crop-dialog"]'),
-    stored: () => page.evaluate(() => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.W1 && raw.W1.sheetOverlays.find((x) => x.id === "ovW"); return o ? (o.crop ?? null) : undefined; }),
+    stored: () => page.evaluate(() => { const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const o = raw.W1 && raw.W1.sheetOverlays.find((x) => x.id === "ovW"); return o ? (o.crop ?? null) : undefined; }),
   };
   S.waitStored = async (pred, ms = 4000) => { const t = Date.now(); let s; while (Date.now() - t < ms) { s = await S.stored(); if (pred(s)) return s; await page.waitForTimeout(150); } return s; };
   S.openCrop = async () => {

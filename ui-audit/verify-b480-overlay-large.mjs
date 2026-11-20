@@ -17,7 +17,7 @@ const results = [];
 const check = (n, p, d = "") => { results.push({ n, p }); console.log(`  ${p ? "✅ PASS" : "❌ FAIL"} — ${n}${d ? "  · " + d : ""}`); };
 const ovImgs = (page) => page.evaluate(() => document.querySelectorAll("image[data-overlay-image]").length);
 const reAddText = (page) => page.evaluate(() => (document.body.innerText.match(/Re-add|not on this device|not synced/i) || [])[0] || "");
-const ovRec = (page) => page.evaluate((k) => { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); const s = Object.values(m)[0]; const o = s && s.sheetOverlays && s.sheetOverlays[0]; return o ? { hasSrc: !!o.src, idbKey: o.idbKey || null, storageKey: o.storageKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
+const ovRec = (page) => page.evaluate((k) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); const s = Object.values(m)[0]; const o = s && s.sheetOverlays && s.sheetOverlays[0]; return o ? { hasSrc: !!o.src, idbKey: o.idbKey || null, storageKey: o.storageKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
 const idbBytes = (page, key) => page.evaluate((k) => new Promise((res) => { try { const r = indexedDB.open("planyr"); r.onsuccess = () => { try { const g = r.result.transaction("kv", "readonly").objectStore("kv").get(k); g.onsuccess = () => res(typeof g.result === "string" ? g.result.length : 0); g.onerror = () => res(0); } catch (_) { res(0); } }; r.onerror = () => res(0); } catch (_) { res(0); } }), key);
 
 // Generate a LARGE incompressible PNG in-browser (random pixels → big data-URL → slow idbGet) and feed it
@@ -63,7 +63,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const siteId = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
 const ovTab = page.locator('button[title="Overlay"]').first();

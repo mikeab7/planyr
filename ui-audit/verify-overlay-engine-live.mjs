@@ -59,7 +59,7 @@ try {
   const served = await page.evaluate(async () => (await (await fetch("/version.json", { cache: "no-store" })).json()).build);
   console.log("served build:", served, "| signed in as", s.proof.email);
   // seed on-device, then Save to the account (the app refuses to open an on-device-only site when signed in)
-  await page.evaluate(([site]) => { const k = "planarfit:sites:v1"; const cur = JSON.parse(localStorage.getItem(k) || "{}"); cur[site.id] = site; localStorage.setItem(k, JSON.stringify(cur)); localStorage.setItem("planarfit:currentSite:v1", site.id); }, [site]);
+  await page.evaluate(([site]) => { const k = "planarfit:sites:v1"; const cur = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); cur[site.id] = site; localStorage.setItem(k, JSON.stringify(cur)); localStorage.setItem("planarfit:currentSite:v1", site.id); }, [site]);
   await page.goto("https://planyr.io/#/site", { waitUntil: "load" }); await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(4000);
   await page.getByRole("button", { name: /Review each site/ }).click({ timeout: 10000 });

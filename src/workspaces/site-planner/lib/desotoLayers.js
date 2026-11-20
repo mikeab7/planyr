@@ -19,13 +19,16 @@ import { zoningLegend, ZONING_CITATIONS } from "./desotoZoningNames.js";
 import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
 import { jurisdictionAt, ensureMunicipalities, subscribeMunicipalities, DESOTO_RELAY as RELAY, titleCase } from "./desotoJurisdiction.js";
 import { providerCardAt, ensureProviders } from "./desotoProviders.js";
-import { labelSpotOf } from "./zoneLabels.js";
 
-/* A point INSIDE a GeoJSON polygon feature — the pole of inaccessibility of its largest part (zoneLabels.js) — to ask which municipal limit a zoning polygon sits in. (It was the vertex average of the first ring, which falls outside an
- * L-shaped or crescent lot and put the zone under the wrong government's heading.) */
+/* A point inside-ish a GeoJSON polygon feature (the vertex average of its first ring) — enough to ask which municipal limit a zoning polygon sits in. */
 function featureInterior(f) {
-  const s = labelSpotOf(f && f.geometry);
-  return s ? [s.lng, s.lat] : null;
+  const g = f && f.geometry;
+  if (!g) return null;
+  const ring = g.type === "Polygon" ? g.coordinates[0] : g.type === "MultiPolygon" ? g.coordinates[0] && g.coordinates[0][0] : null;
+  if (!ring || !ring.length) return null;
+  let x = 0, y = 0;
+  for (const p of ring) { x += p[0]; y += p[1]; }
+  return [x / ring.length, y / ring.length];
 }
 
 export const OB_AGOL = "https://services9.arcgis.com/VGtdH6iTQlVulSnr/ArcGIS/rest/services";
@@ -237,10 +240,12 @@ Object.assign(DESOTO_LAYERS, {
   ms_desoto_zoning: county({
     path: "CountyWebMap/Zoning/MapServer/20", label: "Zoning", role: "area", group: "jurisdiction", order: 30, minZoom: 12, opacity: 0.4,
     source: "DeSoto County GIS — Zoning (incl. the City of Olive Branch's zoning)", hoverSource: "DeSoto County GIS",
-    // B2573312 (NEW-4): the county's polygons are digitised in great detail (a z12 view of Olive Branch is 148 k–325 k vertices); asking the server for a copy generalised to ~1.5 px takes that to ~15 k with every polygon still there.
-    simplifyFactor: 1.5, overbudgetMsg: "Zoom in to see zoning here.",
-    // B2573312 (NEW-3): the code is printed ONCE on each polygon (its largest part, centred inside it, hidden when too small, never overlapping) — `zoneLabels.js`, on screen and in the PDF
-    styleFn: zoningStyle, lineLabel: { field: "ZONE", minZoom: 13, polygon: true, format: zoneLabelText },
+    styleFn: zoningStyle, lineLabel: { field: "ZONE", minZoom: 14, format: zoneLabelText, polygon: true }, // polygon (screen + PDF, B2563410): zoneLabels.js — one code per polygon, inside it, none where it cannot fit, never overlapping. (Replaces the per-feature tooltip + declutter: a tooltip sits at the centroid, which can fall outside an L-shaped lot.) // was declutter (screen + PDF): the larger polygon keeps its code, a label on top of one already kept is dropped — measured on a branch preview, an undecluttered z14 view piled codes into unreadable clusters along Goodman Rd
+    /* NEW-2 (B2507064 ×2, 2026-11-03) — MEASURED through planyr.io: 2,551 polygons, the first 2,000 alone 658,730 vertices at full precision (one polygon 21,623), against the 300 k per-layer draw
+     * budget, so a zoomed-out view drew the early cells and REFUSED the later ones — a red "too detailed" line over a map that was mostly drawn. Asked simplified (server-side, ~1.5 px; the same
+     * request at 0.00025° returns the same 2,000 polygons in 26,936 vertices) and with every page followed (`fetchAll`: the view can hold more than the service's first 2,000), the whole county
+     * fits the budget at any zoom and the layer never refuses. */
+    simplifyFactor: 1.5, fetchAll: true,
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Zoning",
     hoverFields: [{ names: ["ZONE"], label: "Zone" }, { names: ["CASE_NO"], label: "Case" }, { names: ["DATE_APPROVED"], label: "Approved", date: true }],
     warm: () => { ensureMunicipalities(); },
@@ -249,7 +254,7 @@ Object.assign(DESOTO_LAYERS, {
     onViewLegendReady: (publish) => subscribeMunicipalities(publish),
     identifyCard: (props, at) => {
       const j = at && Number.isFinite(at.lat) ? jurisdictionAt(at.lat, at.lng) : null;
-      return { title: zoningTitle(j), rows: zoningRows(props, j) };
+      return { title: zoningTitle(j), rows: zoningRows(props, j) }; // the place is named ONCE, in the title (constraint #50) — zoningRows drops its own Jurisdiction row once the city is known
     },
     note: "Zoning districts across DeSoto County — unincorporated county and the cities (Olive Branch's rezoning cases are in it). Colour = class; the code prints at close zoom. Click for zone, case, approval date and the ordinance.",
     infoCaveat: "One county table holds several governments' zoning with no jurisdiction field, so a result is labelled by the city limits (or unincorporated county) the point falls in. Confirm with the planning department.",
@@ -309,7 +314,7 @@ Object.assign(DESOTO_LAYERS, {
 });
 
 Object.assign(DESOTO_VINTAGE, {
-  ms_desoto_zoning: `DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments. District names — Olive Branch: ${ZONING_CITATIONS["Olive Branch"]}. Unincorporated DeSoto County: ${ZONING_CITATIONS["Unincorporated DeSoto County"]}. A code not in its jurisdiction\'s ordinance list is shown as written.`,
+  ms_desoto_zoning: `DeSoto County zoning table — records through the most recent case approvals (latest seen 2026-08-18); updated by the planning departments. District names — Olive Branch: ${ZONING_CITATIONS["Olive Branch"]}. Unincorporated DeSoto County: ${ZONING_CITATIONS["Unincorporated DeSoto County"]}. Southaven: ${ZONING_CITATIONS.Southaven}. Horn Lake: ${ZONING_CITATIONS["Horn Lake"]}. Hernando: ${ZONING_CITATIONS.Hernando}. Walls has no ordinance online, so its codes are shown as written. A code not in its jurisdiction\'s ordinance list is shown as written.`,
   ms_desoto_city: "DeSoto County GIS municipal limits — current edition",
   ms_psc_electric: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",
   ms_psc_gas: "Mississippi Public Service Commission certificated areas, as republished by DeSoto County GIS — edition date not published",

@@ -72,6 +72,20 @@ export function writeLastRoute(route) {
   } catch (_) { /* quota/unavailable — resume is a convenience, never blocks navigation */ }
 }
 
+/* NEW-1 (AUTH-SWEEP 3, V864433 live re-run, 2026-11-09) — WHICH pointer a route change should leave behind.
+ * Pure, so the rule is unit-testable and Shell's one writer effect has no branching of its own.
+ *   · admin / design overlays: null — a visit must never clobber the pointer to wherever the person was working (B711904).
+ *   · the Dashboard (bare "#/"): the NEUTRAL no-project pointer. Leaving a project for the Dashboard — the wordmark,
+ *     the Dashboard crumb, a typed "#/" — is as deliberate as `leaveProject`/`goMap` (NEW-2(b)), but Shell used to
+ *     SKIP the write on the Dashboard, so the pointer kept naming the project just left and a brand-new tab on the bare
+ *     domain deep-linked straight back into it (measured live on build caf2020: pointer + new tab both returned to the project).
+ *   · anything else: the route itself (writeLastRoute still refuses projectless modules such as Food). */
+export function pointerForRoute(route, { admin = false, design = false, dashboard = false } = {}) {
+  if (admin || design) return null;
+  if (dashboard) return { module: DEFAULT_MODULE, projectId: null, cross: false, org: false };
+  return route || null;
+}
+
 /* Whether a stored pointer names somewhere SPECIFIC enough to be worth seeding into a
  * fresh boot: a real project, or a deliberate cross-project view the user explicitly
  * toggled on (Notes' "All Notes" dashboard, a cross-project Library tree, …). A

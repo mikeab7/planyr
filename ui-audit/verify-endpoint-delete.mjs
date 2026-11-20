@@ -58,13 +58,13 @@ const box = await canvas.boundingBox();
 await canvas.click({ position: { x: 30, y: 30 } }); // dismiss any first-run affordance
 
 const roads = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts))
     .map((e) => ({ id: e.id, n: e.pts.length, pts: e.pts.map((p) => [Math.round(p.x), Math.round(p.y)]) }));
 });
 const easements = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.markups || []).filter((mk) => mk.kind === "easement");
 });
@@ -166,7 +166,7 @@ await canvas.screenshot({ path: `${OUT}easement-after.png` });
 // ============================================================ MEASUREMENT ============================================================
 console.log("\n=== MEASUREMENT — 2-point Length measurement, always at its own 2-point floor ===");
 const measures = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.measures || []).filter((mm) => mm && (mm.mode === "line" || (mm.a && mm.b)));
 });

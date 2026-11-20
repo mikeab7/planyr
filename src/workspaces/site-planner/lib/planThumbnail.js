@@ -42,6 +42,7 @@
  */
 import { parcelsOf, elementsOf } from "./siteModel.js";
 import { elToRingFeet, TYPE, elStyle, byZ } from "./planStyle.js";
+import { sortElsForPaint } from "./trailerOverRoads.js"; // NEW-1 (2026-11-05) — trailer parking always draws above roads, same as the canvas
 
 const VB_W = 400, VB_H = 300; // 4:3 — arbitrary viewBox units; vector output scales to any render size
 const PAD_FRAC = 0.07;
@@ -172,9 +173,7 @@ export function planThumbnailSvg(model) {
     .map((p) => ({ p, ring: p.points.filter(finitePt) }))
     .filter((r) => r.ring.length >= 3);
 
-  const elRings = elementsOf(model)
-    .filter(Boolean)
-    .sort(byZ)
+  const elRings = sortElsForPaint(elementsOf(model).filter(Boolean), byZ)
     .map((el) => ({ el, ring: el && TYPE[el.type] ? elToRingFeet(el) : null }))
     .filter((r) => Array.isArray(r.ring) && r.ring.length >= 3 && r.ring.every(finitePt));
 

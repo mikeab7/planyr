@@ -42,7 +42,7 @@ await page.goto(`${BASE}#/project/S/site`, { waitUntil: "load" });
 await page.waitForTimeout(3200);
 await page.evaluate(() => document.querySelector('[data-rail-tab="references"]')?.click());
 await page.waitForTimeout(800);
-const stored = () => page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m.S && m.S.sheetOverlays) || []; });
+const stored = () => page.evaluate(() => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); return (m.S && m.S.sheetOverlays) || []; });
 const get = async (id) => (await stored()).find((o) => o.id === id);
 const open = async (id) => { if ((await page.locator(`[data-testid="overlay-open-${id}"]`).count()) === 0) await page.locator(`[data-testid="reference-open-${id}"]`).click(); await page.waitForTimeout(300); };
 

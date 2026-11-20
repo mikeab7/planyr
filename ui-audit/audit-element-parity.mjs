@@ -90,7 +90,7 @@ const site = {
  * lists three of. Seed only when the key is absent, so the first load plants the fixture and every
  * later load reads back whatever the app actually saved. */
 const seed = `(() => { try {
-  if (!localStorage.getItem('planarfit:sites:v1')) {
+  if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) {
     localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE_ID]: site }))});
     localStorage.removeItem('planarfit:currentSite:v1');
   }
@@ -423,7 +423,7 @@ try {
   // (j) PERSISTED. An override that evaporates on reload is worse than not shipping it. Asserted
   //     twice: on the STORED bytes, and on the picture the app draws after re-reading them.
   const stored = await page.evaluate(() => {
-    try { return JSON.stringify(JSON.parse(localStorage.getItem('planarfit:sites:v1') || "{}")).includes('"bandForce"'); }
+    try { return JSON.stringify(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1') || "{}")).includes('"bandForce"'); }
     catch (e) { return null; }
   });
   ok("PERSISTED (bytes): the override is written into the saved plan", stored === true, `stored=${stored}`);

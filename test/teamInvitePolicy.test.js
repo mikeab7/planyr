@@ -1,41 +1,47 @@
-/* Team-join RLS guard — a signed-in user must NOT be able to add themselves to an arbitrary
- * team. The team_members INSERT policy must require a matching unclaimed invite (verified email +
- * same role), never the bare "are you adding yourself?" check that allowed self-join to any team
- * at any role. No DB needed: this parses the real db/teams.sql so a future edit that re-introduces
- * the over-broad policy fails here instead of shipping. */
+/* Team-join RLS guard — a signed-in user must NOT be able to add themselves to a team by ADDRESS MATCH.
+ * History: first the bare "self add via claim" (user_id = auth.uid() only — join ANY team), then "self join via
+ * invite" (an unclaimed invite for the caller's address). NEW-1 (2026-11-02) removes the second too: with email
+ * confirmation OFF the address is not proof of the mailbox, so a stranger could sign up with an invited address
+ * and insert themselves. The only joins now are the SECURITY DEFINER functions redeem_invite_link /
+ * respond_to_invite (db/team_invite_proof.sql), which need the emailed link or a proven mailbox. No DB needed:
+ * this parses the real SQL files so a future edit that re-introduces an address-match door fails here (the
+ * behavioural proof is test/teamInviteProof.test.js, against a real Postgres). */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const sql = readFileSync(
-  fileURLToPath(new URL("../src/workspaces/site-planner/db/teams.sql", import.meta.url)),
-  "utf8",
-);
+const DBDIR = "../src/workspaces/site-planner/db/";
+const read = (f) => readFileSync(fileURLToPath(new URL(DBDIR + f, import.meta.url)), "utf8");
+const stripComments = (t) => t.replace(/--.*$/gm, "");
+const FILES = ["teams.sql", "team_invite_guard.sql", "team_invite_inbox.sql", "team_invite_proof.sql"];
 
-// The body of the WITH CHECK for the team_members self-insert policy.
-const selfInsert = sql.match(/create policy "self join via invite" on public\.team_members[\s\S]*?\);/i);
-
-describe("team_members self-insert RLS is invite-gated", () => {
-  it("the over-broad 'self add via claim' policy is gone", () => {
-    expect(sql).not.toMatch(/create policy "self add via claim"/i);
+describe("no address-match door into team_members / team_invites", () => {
+  it("the over-broad 'self add via claim' policy is not created anywhere", () => {
+    for (const f of FILES) expect(stripComments(read(f)), f).not.toMatch(/create policy "self add via claim"/i);
   });
 
-  it("a 'self join via invite' policy exists", () => {
-    expect(selfInsert, "missing 'self join via invite' policy on team_members").toBeTruthy();
+  it("no file CREATES a 'self join via invite' or 'invitee reads own' policy (they are only ever dropped)", () => {
+    for (const f of FILES) {
+      const sql = stripComments(read(f));
+      expect(sql, f).not.toMatch(/create policy "self join via invite"/i);
+      expect(sql, f).not.toMatch(/create policy "invitee reads own"/i);
+    }
   });
 
-  it("the self-insert check requires a matching unclaimed invite at the same role", () => {
-    const body = selfInsert[0];
-    expect(body).toMatch(/user_id\s*=\s*\(select auth\.uid\(\)\)/i); // it IS you
-    expect(body).toMatch(/from public\.team_invites/i);             // gated on an invite
-    expect(body).toMatch(/claimed_at is null/i);                    // an OPEN invite
-    expect(body).toMatch(/lower\(\s*i\.email\s*\)\s*=\s*lower\(\s*\(select auth\.email\(\)\)/i); // your verified email
-    expect(body).toMatch(/i\.role\s*=\s*team_members\.role/i);      // no role escalation
+  it("the proof migration drops both, and no team_members INSERT policy passes on user_id alone", () => {
+    const proof = stripComments(read("team_invite_proof.sql"));
+    expect(proof).toMatch(/drop policy if exists "self join via invite"\s+on public\.team_members/i);
+    expect(proof).toMatch(/drop policy if exists "invitee reads own"\s+on public\.team_invites/i);
+    for (const f of FILES) expect(stripComments(read(f)), f).not.toMatch(/for insert[\s\S]{0,80}with check \(\s*user_id\s*=\s*\(select auth\.uid\(\)\)\s*\)/i);
   });
 
-  it("no team_members INSERT policy passes on user_id alone (no invite check)", () => {
-    // Any insert policy whose WITH CHECK is only the self-identity test is the vulnerability.
-    const bareSelf = /for insert[\s\S]{0,80}with check \(\s*user_id\s*=\s*\(select auth\.uid\(\)\)\s*\)/i;
-    expect(sql).not.toMatch(bareSelf);
+  it("handle_new_user and claim_team_invites insert into team_members NOWHERE in the shipped chain", () => {
+    for (const f of ["teams.sql", "team_invite_inbox.sql", "team_invite_proof.sql"]) {
+      const sql = stripComments(read(f));
+      for (const fn of ["handle_new_user", "claim_team_invites"]) {
+        const m = sql.match(new RegExp("create or replace function public\\." + fn + "\\(\\)[\\s\\S]*?\\n\\$\\$;", "i"));
+        if (m) expect(m[0], `${f}: ${fn}`).not.toMatch(/insert into public\.team_members/i);
+      }
+    }
   });
 });

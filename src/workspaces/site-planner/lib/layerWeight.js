@@ -77,7 +77,6 @@ export const LAYER_TIER = {
   hcfcd_row: "constraint",         // channel right-of-way, same
   bkdd_drainage: "constraint",     // district streams / BFE / sub-watersheds
   bkdd_dmp: "constraint",          // master-plan floodplains (advisory, but land-taking if adopted)
-  fb_contours: "constraint",
   mhfd_drainage: "constraint",     // NEW-2 — the Colorado district tier
   mhfd_easements: "constraint",
 
@@ -139,11 +138,50 @@ export const LAYER_TIER = {
   ga_rare_species: "reference",          // generalised ~4 mi records; DNR review is the check
   ga_mineral: "reference",               // a 2005 register of pits and quarries
   ga_bartow_zoning: "reference",         // county zoning — a look-up, like the DeSoto and Spalding rows
+  ga_bartow_water: "reference",          // NEW-2: the county water department's mains — a look-up, like the Olive Branch water rows
+  ga_bartow_sewer: "reference",          // NEW-2: the county water department's sewer — a look-up
+  ga_allatoona_lake: "reference",        // NEW-3: the lake at normal pool — a fact you look up
+  ga_allatoona_shoreline: "constraint",  // NEW-3: Corps-managed shore land — no private use without a Corps permit; it takes land off the table
   ga_opportunity_zones: "context",       // a tax-incentive wash
   ga_jtc_tiers: "context",
   // DeSoto County MS / Olive Branch (B2507057): utilities are reference — look-up facts, never louder than the plan
   ms_ob_water_main: "reference",
   ms_ob_hydrants: "reference",
+  // Chambers County (B2671240, 2026-11-12): zoning and the utility networks are look-ups; the Master Drainage Plan is a consultant's PROPOSAL (watersheds, potential ponds, improvements, culverts), so it is orientation, never louder than the plan.
+  tx_mb_zoning: "reference", tx_baytown_zoning: "reference",
+  tx_mb_water_main: "reference", tx_mb_hydrants: "reference", tx_mb_sewer_gravity: "reference", tx_mb_sewer_force: "reference", tx_mb_lift_stations: "reference",
+  tx_mb_storm_main: "reference", tx_mb_storm_culverts: "reference", tx_mb_storm_outfalls: "reference",
+  tx_mb_plan_watershed_cherry: "context", tx_mb_plan_subbasins_cherry: "context", tx_mb_plan_watershed_cotton: "context", tx_mb_plan_watershed_hackberry: "context",
+  tx_mb_plan_watershed_smith: "context", tx_mb_plan_watershed_oldriver: "context", tx_mb_plan_watershed_cedar: "context", tx_mb_plan_grand_parkway: "context",
+  tx_mb_plan_ponds: "context", tx_mb_plan_cherry_detention: "context", tx_mb_plan_cotton_detention: "context",
+  tx_mb_plan_cherry_improvements: "context", tx_mb_plan_cotton_improvements: "context", tx_mb_plan_culverts: "context",
+  // City of Sugar Land (NEW-1, 2026-11-02): a height zone around the airport binds the parcel; the rest are look-ups or orientation / incentive wash.
+  sl_airport_zoning: "constraint",
+  sl_thoroughfare: "reference",
+  harris_mtfp: "reference",         // NEW-1 (2026-11-12): the City of Houston thoroughfare plan — a fact you look up
+  has_airport_tiers: "constraint",   // NEW-2: the City regulates building height by airport tier
+  tx_evac_zones: "reference",        // NEW-3: an insurance / emergency-planning flag, not the floodplain
+  sl_zoning: "reference",
+  richmond_zoning: "reference", fulshear_zoning: "reference", fulshear_zoning_newer: "reference", stafford_zoning: "reference", webster_zoning: "reference", webster_pd: "reference", // NEW-1 (Texas city zoning) — the same tier as Sugar Land's
+  sl_public_land: "reference",
+  sl_hydrants: "reference",
+  sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network
+  sl_water_valves: "reference", sl_water_control_valves: "reference", sl_manholes: "reference", sl_cleanouts: "reference",
+  sl_lift_stations: "reference", sl_wwtp: "reference", sl_water_plants: "reference", sl_water_wells: "reference",
+  // NEW-1 (Fort Bend County, 2026-11-12)
+  fb_levees: "constraint", fb_brazos_inundation: "constraint", fb_brazos_floodplain: "constraint", fb_mtp_proposed: "constraint",
+  fb_lid: "reference", fb_dev_agreements: "reference",
+  fb_tirz: "context", fb_mmd: "context",
+  // Metro Nashville (NEW-1, 2026-11-12): zoning, overlays, the downtown code and PUDs are look-ups; the NashvilleNext policy is planning-intent wash.
+  tn_nash_zoning: "reference", tn_nash_overlays: "reference", tn_nash_dtc: "reference", tn_nash_pud: "reference", tn_nash_ccm: "context",
+  sl_flu: "context",
+  sl_zoning_cup: "context",
+  sl_zoning_exception: "context",
+  sl_zoning_variance: "context",
+  sl_capital_projects: "context",
+  sl_tirz: "context",
+  sl_available_sites: "context",
+  sl_dev_projects: "context",
   ms_ob_water_service: "reference",
   ms_ob_sewer_gravity: "reference",
   ms_ob_sewer_force: "reference",
@@ -155,6 +193,10 @@ export const LAYER_TIER = {
   ms_dcrua_main: "reference",
   ms_dcrua_structures: "reference",
   ms_desoto_zoning: "reference",
+  tn_rz_murfreesboro: "reference", // NEW-1 (Rutherford County TN zoning) — a look-up wash under the plan, like every zoning row
+  tn_rz_smyrna: "reference",
+  tn_rz_lavergne: "reference",
+  tn_rz_county: "reference",
   ms_psc_electric: "reference",
   ms_psc_gas: "reference",
   ms_psc_water: "reference",
@@ -281,6 +323,13 @@ export const LAYER_TIER = {
   tn_stream_buffers: "constraint", // 30 ft of land taken off each side of a stream (the Georgia buffer row is the same class)
   tn_cemeteries: "reference",
   tn_crit_habitat: "reference",
+  // Metro Nashville (NEW-1 / NEW-2): the water-quality buffers take land off a site (stormwater rules forbid building in them); the pending / preliminary flood maps are not adopted, so a look-up fact until they are.
+  nash_stream_buffer: "constraint",
+  nash_pond_buffer: "constraint",
+  nash_wetland_buffer: "constraint",
+  nash_floodway_buffer: "constraint",
+  nash_flood_pending: "reference",
+  nash_flood_preliminary: "reference",
   co_isd: "context",
   co_metro_districts: "context",
   co_road: "context",

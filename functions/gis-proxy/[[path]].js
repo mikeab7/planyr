@@ -31,12 +31,22 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (Tennessee pass 2, B2408834, 2026-10-22) — Hamilton County TN's own ArcGIS Server (Live_Parcels, the Assessor's tax-map parcels), MEASURED through this relay before tn_hamilton was wired. The two other
    * probe hosts (pwgis.chattanooga.gov, gis.mcgtn.org) were measured the same way and are NOT listed: nothing uses them. */
   "mapsdev.hamiltontn.gov", // Hamilton County TN GIS
+  /* NEW-3 (Metro Nashville sweep, 2026-11-12) — Metro Nashville's own ArcGIS Server: the NashvilleNext Community Character Policy (Planning/CCM/MapServer/2, 33,105 polygons, measured by the 2026-11-01 sweep).
+   * The build sandbox is refused (CONNECT 403) and the browser CORS header is unmeasured, so the policy row reads it through here; the PR preview's relay is where it is first measured. */
+  "maps.nashville.gov", // Metro Nashville & Davidson County GIS server
   "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
   /* NEW-1 (Mississippi due-diligence layers) — MDEQ's own two ArcGIS servers (Land & Water / Geology, and Pollution Control); the build sandbox reaches neither, so every layer on them was
    * MEASURED through this relay on the PR preview. (MARIS, gis.mississippi.edu, is listed above.) */
   "gis.deq.ms.gov", // MDEQ Office of Land and Water Resources + Office of Geology
   "opcgis.deq.state.ms.us", // MDEQ Office of Pollution Control (MUSTER tanks, GARD sites, 303(d) list)
   "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
+  /* NEW-1 (Sugar Land city layers, 2026-11-02) — the City of Sugar Land's own ArcGIS Server 10.91 (thoroughfare plan, zoning, airport zoning, water-system areas, districts, public land).
+   * It sends no CORS header and the build sandbox's egress refuses it, so every layer on it is read through this relay and was MEASURED on the PR preview. Login-gated folders
+   * (PW_Utilities, CIP, CityHall, CWOL_Services, GTG) are never read. */
+  "interactivemaps.sugarlandtx.gov",
+  /* NEW-2 (Webster zoning, 2026-11-12) — the City of Webster's own ArcGIS Server (Landbase/Zoning). It sends no CORS header and the build sandbox's egress refuses it (403 on CONNECT), so the layer
+   * is read through this relay and was MEASURED through planyr.io/gis-proxy after this host landed. Only the Landbase/Zoning service is ever read. */
+  "www1.cityofwebster.com",
   /* NEW-1 (Missouri, 2026-10-19, B2317680) — the county/regional hosts the wired Missouri counties sit on (each MEASURED through this relay on the PR preview before it was wired).
    * Integrity GIS runs five Geocortex pools; a county's public site lives on exactly one of them. */
   "adairgis.integritygis.com", "audraingis.integritygis.com", "barrygis.integritygis.com", "bartongis.integritygis.com", "bentongis.integritygis.com",
@@ -165,6 +175,9 @@ export const ALLOWED_HOSTS = new Set([
   /* NEW-1 (DeSoto County MS, B2507056, 2026-10-29) — the county's own ArcGIS Server (BaseLayers parcels + municipalities, CountyWebMap zoning / utilities / planning). The build sandbox cannot reach it
    * (CONNECT 403), so it is relayed and MEASURED through planyr.io before any DeSoto layer is wired to it; the Olive Branch AGOL org (services9.arcgis.com) needs no relay. */
   "gis.desotocountyms.gov", // DeSoto County MS GIS
+  /* NEW-1 (Chambers County TX, 2026-11-12) — the City of Mont Belvieu's own self-hosted ArcGIS Server (60 services: AdministrativeArea_v2 ETJ + limits, LandUsePlanning_v2 zoning + the Master Drainage Plan,
+   * WaterDistribution_v2, SewerStormwater_v2, Stormwater_v2). The build sandbox cannot reach it (CONNECT 403) and its CORS header is unmeasured, so it is relayed and MEASURED through the PR preview. */
+  "www.cmbgis.com", // City of Mont Belvieu GIS
   /* NEW-1 (Florida, B2452976, 2026-10-29) — the Florida state / district agency hosts the due-diligence layers read (FDEP OpenData contamination / karst / ERP; SFWMD canals and rights of way; FWC eagle nests;
    * Broward's FLL noise contours). The build sandbox cannot reach any of them (CONNECT 403): each was MEASURED through planyr.io before its layer was wired. */
   "ca.dep.state.fl.us", // Florida DEP — OpenData MapServers (CLEANUP_SP, DWM_STCM, FGS_*, ERP, OFW, BROWNFIELD_AREAS …)

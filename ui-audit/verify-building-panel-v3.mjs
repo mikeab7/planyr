@@ -17,6 +17,7 @@
  * Usage: BASE_URL=https://planyr.io E2E_LOGIN_KEY=… [SHOTS_DIR=/path] node ui-audit/verify-building-panel-v3.mjs */
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
+import { addWallLayer } from "./lib/wallLayerDrive.mjs";
 
 const BASE = (process.env.BASE_URL || "https://planyr.io").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -47,13 +48,13 @@ console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.bu
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 await page.addInitScript(() => { window.__PLANYR_E2E = true; });      // arms window.__plannerExportSvg (read-only) on the next load
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [CUR, UID]);
+const model = () => page.evaluate(([id, uid]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}"); return m[id] || null; }, [CUR, UID]);
 const els = async () => (await model())?.els || [];
 const bldg = async () => (await els()).find((e) => e.id === "bz1");
 const kids = async () => (await els()).filter((e) => e.attachedTo === "bz1");
 const T = (id) => page.getByTestId(id);
 const rowByRole = (role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await T(`wall-add-${key}`).click(); await sleep(450); };
+const addLayer = (r, key) => addWallLayer(page, r, key);
 async function waitFor(fn, ms = 10000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) return v; await sleep(150); } }
 const fillOf = (id) => page.evaluate((i) => { const g = document.querySelector(`[data-el-id="${i}"]`); const r = g && g.querySelector("rect, path, polygon"); return r ? (r.getAttribute("fill") || "").toLowerCase() : null; }, id);
 
@@ -204,7 +205,7 @@ try {
       const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
       if (q.error || (q.data || []).length) all = false;
     }
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((id) => delete m[id]); localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); ids.forEach((id) => delete m[id]); localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return all;
   }, [ALL_IDS, UID]).catch(() => false);
   ok("throwaway sites deleted and confirmed gone from the cloud", gone);

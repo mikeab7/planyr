@@ -71,6 +71,25 @@ function isBoundary(el) {
  *  ⛔ THIS RUNS ON PASTE ONLY (`transformPastedHTML`), which is what makes it safe: the editor
  *  also parses its OWN rendered DOM, and a rule that pushed styles down there would gradually
  *  write the app's own body font into documents as though the user had chosen it. */
+/** Colours that are "the default ink", not a choice: writing one would put a colour mark on every character, and black text
+ *  pasted into a dark theme is invisible. (Shared with notesOfficeStyle.js, which reads colours from class rules.) */
+export const DEFAULT_INK = /^(?:black|windowtext|automatic|auto|inherit|initial|unset|currentcolor|#0{3}|#0{6}|rgb\(\s*0\s*,\s*0\s*,\s*0\s*\))$/i;
+
+/** Elements whose own style is NOT a text mark and which must keep the behaviour they have always had. A spreadsheet cell
+ *  (Excel / Sheets repeat their font on EVERY cell; the Excel paste is pinned and must not grow a mark per cell). */
+const CELLS = new Set(["TD", "TH"]);
+const HEADINGS = /^H[1-6]$/;
+
+/** Wrap `text` in a `<span style>` carrying `css` (an object of CSS properties), unless it is empty. */
+function wrapInSpan(text, css) {
+  const decls = Object.entries(css).filter(([, v]) => v).map(([k, v]) => `${k}:${v}`);
+  if (!decls.length) return;
+  const span = text.ownerDocument.createElement("span");
+  span.setAttribute("style", decls.join(";"));
+  text.replaceWith(span);
+  span.appendChild(text);
+}
+
 export function pushDownInherited(root) {
   if (!root) return root;
   /* ⛔ AND STRIP THE NON-VALUES ON THE WAY IN (NEW-8). Outlook emits `color: inherit` on some
@@ -85,17 +104,45 @@ export function pushDownInherited(root) {
     }
   }
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const holders = new Set();
+  const texts = [];
   let n;
   while ((n = walker.nextNode())) {
     if (!n.nodeValue || !n.nodeValue.trim()) continue;
-    if (n.parentElement) holders.add(n.parentElement);
+    if (n.parentElement) texts.push(n);
   }
-  for (const el of holders) {
-    for (const prop of ["fontFamily", "fontSize"]) {
-      if (el.style && String(el.style[prop] || "").trim()) continue;   // already explicit
-      const inherited = inheritedStyle(el.parentElement, prop);
-      if (inherited && el.style) el.style[prop] = inherited;
+  const inkOf = (el) => {
+    const c = inheritedStyle(el, "color");
+    return c && !DEFAULT_INK.test(c) ? c : null;
+  };
+  for (const text of texts) {
+    const el = text.parentElement;
+    if (!el.style) continue;
+    if (el.tagName === "SPAN") {
+      /* A span IS what the parser reads: give it what it does not state itself but its ancestors do. */
+      for (const prop of ["fontFamily", "fontSize", "color"]) {
+        if (String(el.style[prop] || "").trim()) continue;   // already explicit
+        const inherited = prop === "color" ? inkOf(el.parentElement) : inheritedStyle(el.parentElement, prop);
+        if (inherited) el.style[prop] = inherited;
+      }
+    } else if (CELLS.has(el.tagName)) {
+      /* Unchanged on purpose (see CELLS). */
+      for (const prop of ["fontFamily", "fontSize"]) {
+        if (String(el.style[prop] || "").trim()) continue;
+        const inherited = inheritedStyle(el.parentElement, prop);
+        if (inherited) el.style[prop] = inherited;
+      }
+    } else {
+      /* ⛔ NEW-2 (2026-11-10, "Keep Source Formatting takes away the font"): THE PARSER ONLY READS A FONT, SIZE OR COLOUR OFF A
+       * `<span>`. A browser copies a whole paragraph as `<p style="color:…; font-family:…">`, and Word / Outlook put the font on the
+       * block or a wrapper `<div>` — so the text arrived in the app font (the colour too, in the same shape). The value is resolved
+       * the way the browser would (this element, then the nearest ancestor that declares one) and written onto a span around the
+       * text, which is exactly what a directly-styled run already looked like. A heading keeps its own size (it is structure), and
+       * a link keeps its link colour — neither is a text style the person chose. */
+      wrapInSpan(text, {
+        "font-family": inheritedStyle(el, "fontFamily"),
+        "font-size": HEADINGS.test(el.tagName) ? null : inheritedStyle(el, "fontSize"),
+        color: el.tagName === "A" ? null : inkOf(el),
+      });
     }
   }
   return root;

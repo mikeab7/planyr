@@ -97,7 +97,7 @@ const commitDepth = async (n) => {
 };
 
 const readModel = async () => page.evaluate((g) => {
-  const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const raw = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const els = raw[g]?.els || [];
   const byId = Object.fromEntries(els.map((e) => [e.id, e]));
   return { courtN: byId.courtN, courtS: byId.courtS };

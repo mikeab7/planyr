@@ -205,6 +205,33 @@ export function createViewChangeRecorder({ now = () => (typeof performance !== "
   return { noteGesture, noteEvent: pushEvent, noteBlocked, recordChange, snapshot, reset };
 }
 
+/** How long the frame-gap watch runs after something happens (NEW-1, 2026-11-01). */
+export const FRAME_WATCH_MS = 3000;
+export const FRAME_GAP_MS = 400;
+
+/* A requestAnimationFrame gap watch that runs only while `kick()`ed recently — never a perpetual loop (a loop that asks for every
+ * frame keeps the page rendering forever, which on a slow-drawing machine is itself the slowness). `onGap(ms)` fires for a gap
+ * over FRAME_GAP_MS between two frames of one run. Takes its window and clock; Node-testable. */
+export function watchFrames(win, onGap, { watchMs = FRAME_WATCH_MS, gapMs = FRAME_GAP_MS } = {}) {
+  let raf = 0, last = 0, until = 0, stopped = false;
+  const now = () => { try { return win.performance.now(); } catch (_) { return 0; } };
+  const tick = (t) => {
+    raf = 0;
+    if (stopped) return;
+    if (last && t - last > gapMs) { try { onGap(t - last); } catch (_) { /* never into the app */ } }
+    last = t;
+    if (t < until) { try { raf = win.requestAnimationFrame(tick); } catch (_) { raf = 0; } }
+    else last = 0;                                   // the run ends; the next one starts fresh (a quiet stretch is not a gap)
+  };
+  const kick = () => {
+    if (stopped) return;
+    until = Math.max(until, now() + watchMs);
+    if (!raf) { try { raf = win.requestAnimationFrame(tick); } catch (_) { raf = 0; } }
+  };
+  const stop = () => { stopped = true; try { if (raf) win.cancelAnimationFrame(raf); } catch (_) { /* gone */ } raf = 0; };
+  return { kick, stop, running: () => !!raf };
+}
+
 /* Install the timeline listeners on a real window. Returns a detach function. Everything here is a
  * passive listener or a PerformanceObserver — nothing is patched, nothing is written. */
 export function attachTimeline(win, rec) {
@@ -252,19 +279,25 @@ export function attachTimeline(win, rec) {
   /* ⛔ THE ANIMATION-FRAME GAP, and it is here because of FOREGROUND-OR-VOID: a suspended frame loop
      is exactly what an idle/backgrounded page has, and a view change landing on the far side of a
      multi-second gap is the signature of work that was QUEUED before the page went away and ran when
-     it came back. Nothing else on this timeline can show that. */
-  let raf = 0, last = 0;
-  const GAP_MS = 400;
-  const tick = (t) => {
-    if (last && t - last > GAP_MS) rec.noteEvent("frame-gap", `${Math.round(t - last)}ms`);
-    last = t;
-    raf = win.requestAnimationFrame(tick);
-  };
-  try { raf = win.requestAnimationFrame(tick); } catch (_) { /* no rAF — the rest still records */ }
+     it came back. Nothing else on this timeline can show that.
+     ⛔ NEW-1 (2026-11-01) — AND IT MAY NOT RUN FOREVER. It used to be a perpetual requestAnimationFrame
+     loop: armed, the tab asked for a frame EVERY frame for as long as it stayed open, so the page never
+     stopped rendering. On the owner's slow-drawing machine that turned his graded plan's idle tab into a
+     wall of ~1 s frames back to back with the code idle — exactly the 127 "long tasks" (blockingDuration
+     0) his 2026-10-31 capture recorded, on a tab armed with ?planyrDiag=1 for __plannerGradeReadout().
+     The instrument was making the reading. Now the loop runs only for `FRAME_WATCH_MS` after something
+     happens (a gesture, a view change, the page coming back), which is when a gap means anything; a
+     suspension that starts while it runs is still caught, and visibility / freeze / resume stay on the
+     timeline as events either way. */
+  const frames = watchFrames(win, (gapMs) => rec.noteEvent("frame-gap", `${Math.round(gapMs)}ms`));
+  for (const type of [...GESTURE_EVENTS, "pageshow", "focus"]) on(win, type, frames.kick, { capture: true, passive: true });
+  on(doc, "visibilitychange", frames.kick);
+  on(doc, "resume", frames.kick);
+  off.push(frames.stop);
+  frames.kick();
 
   return () => {
     for (const f of off) f();
     for (const o of observers) { try { o.disconnect(); } catch (_) { /* already gone */ } }
-    try { win.cancelAnimationFrame(raf); } catch (_) { /* already gone */ }
   };
 }

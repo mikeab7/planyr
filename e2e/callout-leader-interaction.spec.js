@@ -59,7 +59,7 @@ async function loadPlan(page, { withMarkup = false, callouts = [] } = {}) {
 }
 
 const site = (page) => page.evaluate((id) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return map[id] || {};
 }, SITE_ID);
 

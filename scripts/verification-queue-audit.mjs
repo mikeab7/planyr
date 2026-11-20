@@ -43,7 +43,8 @@
  * deterministic given a `now`, exports the pure fn the unit test imports, runnable standalone.
  */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import { readText } from "./lib/ledger.mjs";
+import { readText, isBranchMode } from "./lib/ledger.mjs";
+import { ensureLedger } from "./lib/ledgerBranch.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -212,6 +213,7 @@ function printReport(report) {
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  if (isBranchMode(REPO)) ensureLedger(REPO); // the ledger lives on its own branch — make sure it is checked out (NEW-1)
   const text = readText(REPO, "VERIFICATION.md");
   const report = auditQueue(text);
   if (process.argv.includes("--write-ceiling")) {

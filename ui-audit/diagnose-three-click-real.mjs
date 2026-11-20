@@ -42,7 +42,7 @@ const v = await page.evaluate(() => window.__plannerView.get());
 const f2s = (fx, fy) => ({ x: box.x + v.w/2 + (fx - CX)*PPF, y: box.y + v.h/2 + (fy - CY)*PPF });
 
 const before = await page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1")||"{}"); const s = Object.values(m)[0]||{};
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")||"{}"); const s = Object.values(m)[0]||{};
   return (s.els||[]).filter(e=>e.type==="road").map(e=>({id:e.id,n:(e.pts||[]).length}));
 });
 
@@ -59,7 +59,7 @@ await page.keyboard.press("Escape");
 await page.waitForTimeout(400);
 
 const after = await page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1")||"{}"); const s = Object.values(m)[0]||{};
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")||"{}"); const s = Object.values(m)[0]||{};
   return (s.els||[]).filter(e=>e.type==="road").map(e=>({id:e.id,cls:e.roadClass,w:e.travelW,n:(e.pts||[]).length,
     pts:(e.pts||[]).map(p=>[Math.round(p.x),Math.round(p.y)]), vtx:(e.vtx||[]).map(x=>x&&x.radius?`${x.treatment}:${Math.round(x.radius)}`:"-")}));
 });

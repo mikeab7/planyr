@@ -202,3 +202,55 @@ describe("mergeNoteDocs — declines cleanly when it cannot run at all", () => {
     expect(mergeNoteDocs({ baseDoc: null, localDoc: local, serverDoc: server })).toBe(null);
   });
 });
+
+describe("B2671222 — a real page is ONE noteAnchor box; edits to different paragraphs inside it still merge", () => {
+  const box = (...content) => ({ type: "noteAnchor", attrs: { aid: "a1", x: 10, y: 20, w: 400, h: null, fit: false }, content });
+  const base = doc(box(p("one"), p("two"), p("three")));
+  it("two sides editing different paragraphs of the same box merge cleanly, box attrs intact", () => {
+    const local = doc(box(p("one EDITED"), p("two"), p("three")));
+    const server = doc(box(p("one"), p("two"), p("three EDITED")));
+    const r = mergeNoteDocs({ baseDoc: base, localDoc: local, serverDoc: server });
+    expect(r.clean).toBe(true);
+    expect(words(r.mergedDoc)).toEqual(["one EDITED", "two", "three EDITED"]);
+    expect(r.mergedDoc.content).toHaveLength(1);
+    expect(r.mergedDoc.content[0].type).toBe("noteAnchor");
+    expect(r.mergedDoc.content[0].attrs.w).toBe(400);
+  });
+  it("the SAME paragraph edited differently on both sides is still a real conflict, scoped to that paragraph", () => {
+    const local = doc(box(p("one A"), p("two"), p("three")));
+    const server = doc(box(p("one B"), p("two"), p("three")));
+    const r = mergeNoteDocs({ baseDoc: base, localDoc: local, serverDoc: server });
+    expect(r.clean).toBe(false);
+    expect(words(r.mineDoc)).toEqual(["one A", "two", "three"]);
+    expect(words(r.theirsDoc)).toEqual(["one B", "two", "three"]);
+  });
+  it("an empty box survives a round trip instead of vanishing", () => {
+    const empty = doc({ type: "noteAnchor", attrs: { aid: "e", x: 0, y: 0, w: 180 } }, box(p("one")));
+    const r = mergeNoteDocs({ baseDoc: empty, localDoc: doc(empty.content[0], box(p("one X"))), serverDoc: empty });
+    expect(r.clean).toBe(true);
+    expect(r.mergedDoc.content).toHaveLength(2);
+  });
+});
+
+describe("B2671222 — a page last saved FLAT (no boxes) and opened on two devices still merges", () => {
+  // Each device wraps the flat flow into ONE box and mints that box's id on its own, so the two copies name
+  // the same box differently. The base is the flat doc the page was last saved as.
+  const wrapped = (aid, ...content) => doc({ type: "noteAnchor", attrs: { aid, x: 0, y: 0, w: 560, h: null }, content }, p(""));
+  const flat = doc(p("one"), p("two"), p("three"), p(""));
+  it("different paragraphs edited on the two devices merge cleanly into ONE box", () => {
+    const local = wrapped("aLocal", p("one"), p("two"), p("three EDITED"));
+    const server = wrapped("aServer", p("one EDITED"), p("two"), p("three"));
+    const r = mergeNoteDocs({ baseDoc: flat, localDoc: local, serverDoc: server });
+    expect(r).not.toBeNull();
+    expect(r.clean).toBe(true);
+    expect(words(r.mergedDoc).filter(Boolean)).toEqual(["one EDITED", "two", "three EDITED"]);
+    expect(r.mergedDoc.content.filter((n) => n.type === "noteAnchor")).toHaveLength(1);
+  });
+  it("the same paragraph edited on both devices is still a conflict scoped to that paragraph", () => {
+    const local = wrapped("aLocal", p("one"), p("two A"), p("three"));
+    const server = wrapped("aServer", p("one"), p("two B"), p("three"));
+    const r = mergeNoteDocs({ baseDoc: flat, localDoc: local, serverDoc: server });
+    expect(r.clean).toBe(false);
+    expect(r.regions).toBe(1);
+  });
+});

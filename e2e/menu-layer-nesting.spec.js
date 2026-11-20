@@ -79,7 +79,7 @@ test("the delete really removes the project it named, and only that one", async 
   await page.getByTestId("project-row-zzmenu-b").click({ button: "right" });
   await page.getByTestId("project-delete").click();
   await page.getByTestId("project-delete-confirm").click();
-  await expect.poll(async () => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")))).toEqual(["zzmenu-a"]);
+  await expect.poll(async () => page.evaluate(() => Object.keys(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")))).toEqual(["zzmenu-a"]);
 });
 
 test("clicking OUTSIDE every menu still dismisses the dropdown (the fix does not wedge it open)", async ({ page }) => {

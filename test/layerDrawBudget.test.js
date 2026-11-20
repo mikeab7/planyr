@@ -126,11 +126,43 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
     const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
     fire("loading"); fire("overbudget", { vertices: 523000 }); fire("load");
     expect(out.map((o) => o[1])).toEqual(["failed"]);                   // not "failed" then "empty"
-    expect(out[0][2]).toBe("Zoom in to see layer here.");   // B2573312: plain words — no point counts, no units
-    expect(out[0][2]).not.toMatch(/\d|points|k\b/i);
+    expect(out[0][2]).toBe("Zoom in to see Layer here.");              // NEW-2 (B2507064 ×2): plain words — no point count, no units, not "too detailed" 
     fire("loading"); fire("load");                                      // the next cycle (a zoom) starts clean
     expect(out).toHaveLength(2);
     expect(out[1][1]).not.toBe("failed");                                // …and reports what it found, not the old refusal
+  });
+  it("NEW-2 (B2507064 ×2): a refusal NEVER contradicts the map — with polygons already drawn the row stays 'loaded' and says nothing; with nothing drawn it says 'Zoom in…' in plain words", async () => {
+    vi.resetModules(); mocks();
+    const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const run = (drawnVertices) => {
+      const handlers = {};
+      const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, eachLayer: () => {}, _layers: {}, __pfDrawnVertices: () => drawnVertices };
+      const out = [];
+      attachFeatureRetry(lyr, "k", { label: "Zoning" }, (...a) => out.push(a));
+      const fire = (n, e) => (handlers[n] || []).forEach((h) => h(e));
+      fire("loading"); fire("overbudget", { vertices: 16000 }); fire("load");
+      return out;
+    };
+    const drawn = run(120000);
+    expect(drawn.map((o) => o[1])).not.toContain("failed");
+    expect(drawn.map((o) => o[1])).not.toContain("empty");
+    const none = run(0);
+    expect(none[0][1]).toBe("failed");
+    expect(none[0][2]).toBe("Zoom in to see Zoning here.");
+    for (const o of [...drawn, ...none]) expect(String(o[2] || "")).not.toMatch(/\d|points|too detailed|simpler copy/i);
+  });
+  it("NEW-2: buildFeatureLayer publishes what is on the map (`__pfDrawnVertices`) and it follows the draw/refuse cycle", async () => {
+    vi.resetModules(); mocks();
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Zoning", color: "#000" }, 1, "pane");
+    expect(lyr.__pfDrawnVertices()).toBe(0);
+    lyr.createLayers([{ id: 1, ...poly(100000) }]);
+    expect(lyr.__pfDrawnVertices()).toBe(100000);
+    const refused = [];
+    lyr.on("overbudget", () => refused.push(1));
+    lyr.createLayers([{ id: 2, ...poly(130000) }]);                      // over the per-batch cap → refused, and the old geometry stays the only thing drawn
+    expect(refused).toHaveLength(1);
+    expect(lyr.__pfDrawnVertices()).toBe(100000);
   });
   it("attachFeatureRetry gives up on a persistently failing service — including a SLOW one (esri-leaflet fires `load` BEFORE `requesterror`, which used to wipe the retry count every cycle)", async () => {
     vi.resetModules(); mocks();
@@ -405,64 +437,46 @@ describe("B2521584 — the budget counts a feature once, and a refusal survives 
   });
 });
 
-
-describe("B2573312 NEW-4 — the layer total is judged against the VIEW, never against everything ever loaded", () => {
-  const mocks = () => {
+describe("lineLabel.maxLabels — a dense network never binds thousands of permanent tooltips (NEW-2 Bartow sewer: 2,135 lines froze the tab 2–3 s at z17, 10 s at z16)", () => {
+  const build = async (lineLabel) => {
+    const handlers = {}, layers = [];
+    let opts = null;
+    vi.resetModules();
     vi.doMock("esri-leaflet", () => ({
       dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(),
-      featureLayer: vi.fn(() => ({
-        handlers: {}, _layers: {}, _map: null,
-        createLayers(f) { for (const x of f) if (x && x.id != null) this._layers[x.id] = x; },
-        fire(name, e) { (this.handlers[name] || []).forEach((h) => h(e)); },
-        on(name, h) { (this.handlers[name] = this.handlers[name] || []).push(h); return this; },
-      })),
+      featureLayer: vi.fn((o) => {
+        opts = o;
+        return { _layers: {}, _map: { getZoom: () => 17, on() {}, off() {} }, createLayers() {}, fire() {}, on(n, f) { (handlers[n] = handlers[n] || []).push(f); return this; }, eachFeature(fn) { layers.forEach(fn); } };
+      }),
     }));
     vi.doMock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
     vi.doMock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
     vi.doMock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
     vi.doMock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
+    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
+    const lyr = buildFeatureLayerForTest({ url: "https://example.test/FeatureServer/0", label: "Pipes", color: "#000", lineLabel }, 1, "pane");
+    (handlers.add || []).forEach((f) => f());
+    // deliver one feature the way esri-leaflet does: onEachFeature(feature, layer)
+    const deliver = (n) => { for (let i = 0; i < n; i++) { const l = { bound: 0, unbound: 0, bindTooltip() { this.bound++; }, unbindTooltip() { this.unbound++; }, getTooltip: () => null }; layers.push(l); opts.onEachFeature({ properties: { SIZE: "8" } }, l); } };
+    return { lyr, deliver, layers, handlers };
   };
-  // a polygon of n vertices clustered around (lng, lat)
-  const at = (id, n, lng, lat) => ({ id, geometry: { type: "Polygon", coordinates: [Array.from({ length: n }, (_, i) => [lng + (i % 50) * 1e-6, lat + Math.floor(i / 50) * 1e-6])] } });
-  // a stand-in map whose view can be moved: `getBounds().pad()` → a box with the four getters the guard reads
-  const mapAt = (lng, lat) => { const m = { c: [lng, lat], getBounds() { const [x, y] = m.c; const b = { getWest: () => x - 0.1, getEast: () => x + 0.1, getSouth: () => y - 0.1, getNorth: () => y + 0.1, pad: () => b }; return b; } }; return m; };
-
-  it("a layer panned across a county does not refuse a small batch in a light view (262k held far away + 62k new in view was 'too detailed (62k points)' over visible polygons)", async () => {
-    vi.resetModules(); mocks();
-    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
-    const lyr = buildFeatureLayerForTest({ url: "https://example.test/MapServer/20", label: "Zoning", color: "#000" }, 1, "pane");
-    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
-    const map = mapAt(-89.83, 34.95); lyr._map = map;
-    for (const f of [at(1, 100000, -89.83, 34.95), at(2, 100000, -89.83, 34.951), at(3, 62000, -89.83, 34.952)]) lyr.createLayers([f]);   // 262k in the first view, one cell at a time
-    expect(refused).toHaveLength(0);
-    map.c = [-89.60, 34.80];                                                                                           // the user pans 30 km away; those three are no longer in view
-    lyr.createLayers([at(4, 62000, -89.60, 34.80)]);
-    expect(refused).toHaveLength(0);                                                                                   // red on the pre-fix running total: 262k + 62k > 300k
-    for (const f of [at(5, 100000, -89.60, 34.801), at(6, 100000, -89.60, 34.802), at(7, 100000, -89.60, 34.803)]) lyr.createLayers([f]);   // a genuinely heavy VIEW (362k) is still refused
-    expect(refused).toHaveLength(1);
+  it("binds a label on every line while the layer is under its cap", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16, maxLabels: 5 });
+    deliver(5);
+    expect(layers.every((l) => l.bound === 1)).toBe(true);
   });
-  it("coming back to the first view, what is held there counts again", async () => {
-    vi.resetModules(); mocks();
-    const { buildFeatureLayerForTest } = await import("../src/workspaces/site-planner/lib/layers.js");
-    const lyr = buildFeatureLayerForTest({ url: "https://example.test/MapServer/20", label: "Zoning", color: "#000" }, 1, "pane");
-    const refused = []; lyr.on("overbudget", (e) => refused.push(e));
-    const map = mapAt(0, 0); lyr._map = map;
-    for (const f of [at(1, 110000, 0, 0), at(2, 110000, 0, 0.001), at(3, 60000, 0, 0.002)]) lyr.createLayers([f]);   // 280k here
-    map.c = [5, 5]; map.c = [0, 0];
-    lyr.createLayers([at(4, 50000, 0, 0.003)]);
-    expect(refused).toHaveLength(1);
+  it("past the cap it takes every label down and binds no more — the lines stay, unlabelled", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16, maxLabels: 5 });
+    deliver(5);
+    deliver(1); // the sixth line crosses the cap
+    expect(layers.slice(0, 5).every((l) => l.unbound >= 1)).toBe(true);
+    const boundAfter = layers.reduce((n, l) => n + l.bound, 0);
+    deliver(20);
+    expect(layers.reduce((n, l) => n + l.bound, 0)).toBe(boundAfter); // nothing binds once over the cap
   });
-  it("the plain refusal wording carries no number and no unit; a row's own wording still wins; zoning declares both", async () => {
-    vi.resetModules(); mocks();
-    const { attachFeatureRetry } = await import("../src/workspaces/site-planner/lib/layers.js");
-    const handlers = {}; const lyr = { on(n, h) { (handlers[n] = handlers[n] || []).push(h); return this; }, onRemove() {}, _layers: {} };
-    const out = [];
-    attachFeatureRetry(lyr, "k", { label: "Future Land Use (2004)" }, (...a) => out.push(a[2]));
-    (handlers.overbudget || []).forEach((h) => h({ vertices: 62000 }));
-    expect(out[0]).toBe("Zoom in to see future land use (2004) here.");
-    const { DESOTO_LAYERS } = await import("../src/workspaces/site-planner/lib/desotoLayers.js");
-    const z = DESOTO_LAYERS.ms_desoto_zoning;
-    expect(z.overbudgetMsg).toBe("Zoom in to see zoning here.");
-    expect(z.simplifyFactor).toBeGreaterThan(0);     // a z12 view of the county was 148k–325k vertices unsimplified, ~15k simplified (measured live, 2026-10-30)
+  it("a row with NO cap behaves exactly as before — every line is labelled however many there are", async () => {
+    const { deliver, layers } = await build({ field: "SIZE", minZoom: 16 });
+    deliver(500);
+    expect(layers.every((l) => l.bound === 1)).toBe(true);
   });
 });

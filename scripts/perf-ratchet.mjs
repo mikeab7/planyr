@@ -34,6 +34,9 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { loadBuild, measureBundle, kb, ROOT } from "../ui-audit/lib/bundleMetrics.mjs";
 import { isBanded, METRIC_KEYS } from "../ui-audit/lib/perfBudgetPolicy.mjs";
+// The Univer spike (B2557488) made the production build need ~3.5 GB of heap; Node's default limit is ~2 GB. `npm run build` raises it
+// in package.json — every script that runs `vite build` itself must do the same or it dies with "heap out of memory".
+const BUILD_ENV = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --max-old-space-size=4096`.trim() };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUDGETS = join(HERE, "..", "ui-audit", "perf-budgets.json");
@@ -237,7 +240,7 @@ const DIST = argOf("--dist");
 if (!DIST) {
   console.log("Building (B266083 — the ratchet builds what it measures; it will not read a dist it did not make)…");
   try {
-    execFileSync("npx", ["vite", "build", "--outDir", "dist-ratchet"], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+    execFileSync("npx", ["vite", "build", "--outDir", "dist-ratchet"], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", env: BUILD_ENV });
   } catch (e) {
     die(`the build failed, so there is nothing to measure (${String(e.stderr || e.message).split("\n").slice(-3).join(" ").slice(0, 240)})`);
   }

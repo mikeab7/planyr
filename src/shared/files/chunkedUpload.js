@@ -174,6 +174,7 @@ export async function uploadFileInChunks({
       if (res.status >= 400 && res.status < 500) return { ok: false, error: jr.error || `HTTP ${res.status}` }; // no point retrying a rejection
       throw new Error(jr.error || `HTTP ${res.status}`);
     } catch (e) {
+      if (e && e.sessionLost) return { ok: false, error: e.message }; // a dead sign-in: retrying cannot help
       if (i >= maxAttempts) return { ok: false, error: (e && e.message) || "Couldn’t record the uploaded file." };
       await sleep(backoffMs(i));
     }

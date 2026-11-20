@@ -25,7 +25,7 @@ async function seedProject(page, plans) {
   // ONCE only — this runs on every navigation, and a reload that re-seeds would overwrite exactly
   // the persistence these tests exist to prove.
   await page.addInitScript(([key, rows]) => {
-    if (localStorage.getItem(key)) return;
+    if ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key)) return;
     const map = {};
     for (const p of rows) map[p.id] = { schemaVersion: 12, updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {}, ...p };
     localStorage.setItem(key, JSON.stringify(map));
@@ -34,7 +34,7 @@ async function seedProject(page, plans) {
 
 // The stored truth — on-disk, so it doubles as the reload assertion.
 const readStore = (page) => page.evaluate((key) => {
-  const map = JSON.parse(localStorage.getItem(key) || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
   return Object.values(map).map((s) => ({ id: s.id, groupId: s.groupId, site: s.site, name: s.name, siteRenamedAt: s.siteRenamedAt ?? null }));
 }, STORE);
 
@@ -145,7 +145,7 @@ test.describe("NEW-4 / NEW-2 — renaming from the map viewer's project dropdown
     // Simulate the straggler landing from the cloud / another device, still carrying "Sylvestri" —
     // exactly what sms4zs8unbkg did seventeen minutes after the owner's rename.
     await page.evaluate((key) => {
-      const map = JSON.parse(localStorage.getItem(key) || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
       map["p-late"] = { schemaVersion: 12, id: "p-late", groupId: "grp", site: "Sylvestri", name: "Concept D", updatedAt: Date.now() + 60000, els: [], parcels: [] };
       localStorage.setItem(key, JSON.stringify(map));
     }, STORE);

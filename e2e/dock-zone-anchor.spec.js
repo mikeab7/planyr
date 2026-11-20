@@ -150,7 +150,7 @@ test.describe("NEW-1 — the owner's real Sylvestri plan: a shrink moves ONE end
     // re-runs on every navigation, so the saved bytes are re-armed AFTER it to win.
     const saved = await page.evaluate(async (id) => {
       for (let i = 0; i < 40; i++) {
-        const raw = localStorage.getItem("planarfit:sites:v1");
+        const raw = (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1");
         const rec = raw && JSON.parse(raw)[id];
         const t = rec && (rec.els || []).find((e) => e.id === "e1454796yyuqqs");
         if (t && Number.isFinite(t.alongLen)) return rec;

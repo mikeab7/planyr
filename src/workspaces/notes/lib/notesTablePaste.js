@@ -149,6 +149,14 @@ export function rowsToTableHtml(rows) {
   return `<table><tbody>${body}</tbody></table>`;
 }
 
+/** ⛔ A WORD LIST'S `text/plain` IS A TWO-COLUMN GRID ("1.<tab>Entitlements", "·<tab>Soft costs"): every line is a
+ *  list marker, a tab, then the item. As a grid it would turn a pasted numbered or bulleted list into a table of
+ *  marker + text. A grid whose FIRST COLUMN is nothing but list markers is a list. */
+export function isMarkerColumn(rows) {
+  const marker = /^(?:[^\w\s]|o|\(?(?:\d{1,4}|[a-z]|[ivxlcdm]+)[.)])$/i;
+  return rows.length > 0 && rows.every((r) => marker.test(String(r[0] ?? "").replace(/[\s\u00a0]+/g, "")));
+}
+
 /** The grid in a clipboard's tab-separated `text/plain`, else null. By default only when the clipboard has
  *  no html table (the html is then the better source). `ignoreHtml` is the FALLBACK ("tab-separated rows
  *  must always become a table, whenever the HTML route yields none" — owner, 2026-10-06): the caller has
@@ -156,7 +164,8 @@ export function rowsToTableHtml(rows) {
 export function tabularFromClipboard(dt, { ignoreHtml = false } = {}) {
   try {
     if (!ignoreHtml && clipboardHasTable(dt)) return null;
-    return parseTabular(dt?.getData?.("text/plain") || "");
+    const rows = parseTabular(dt?.getData?.("text/plain") || "");
+    return rows && !isMarkerColumn(rows) ? rows : null;
   } catch (_) { return null; }
 }
 
@@ -311,12 +320,17 @@ export function cssLengthPx(value) {
   return n > 0 ? Math.round(n) : null;
 }
 
-/** The fill a CSS declaration block names (a hex or an rgb triple after `background` / `background-color`), as lowercase hex, or null.
- *  White and "no fill" are not a look anyone chose. */
+/** The standard colour names Excel and Word write for a standard fill (`background:yellow`) — a named fill used to read as "no
+ *  fill", so the paste options that bring the source shading in (E, R) dropped every standard-colour cell. */
+const NAMED_FILLS = { yellow: [255, 255, 0], red: [255, 0, 0], lime: [0, 255, 0], aqua: [0, 255, 255], fuchsia: [255, 0, 255], blue: [0, 0, 255], silver: [192, 192, 192], gray: [128, 128, 128], grey: [128, 128, 128], maroon: [128, 0, 0], olive: [128, 128, 0], green: [0, 128, 0], teal: [0, 128, 128], navy: [0, 0, 128], purple: [128, 0, 128], orange: [255, 165, 0] };  // rgb triples: content colours read off a foreign clipboard, not chrome literals
+
+/** The fill a CSS declaration block names (a hex, an rgb triple or a standard colour name after `background` /
+ *  `background-color`), as lowercase hex, or null. White and "no fill" are not a look anyone chose. */
 export function fillFromDeclarations(css) {
   const m = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i.exec(String(css || ""));
   const token = m && /#[0-9a-f]{3,6}\b|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)/i.exec(m[1]);
-  const hex = normalizeFill(token ? token[0] : "");
+  const word = m && !token && (m[1].toLowerCase().match(/[a-z]+/g) || []).find((w) => NAMED_FILLS[w]);
+  const hex = normalizeFill(token ? token[0] : word ? `rgb(${NAMED_FILLS[word].join(",")})` : "");
   return !hex || hex === "transparent" || /^#(?:f{6}|f{3})$/i.test(hex) ? null : hex;
 }
 
@@ -325,12 +339,18 @@ export function fillFromDeclarations(css) {
  *  every real spreadsheet fill (found by driving the committed Excel fixture, whose header row is shaded this way). */
 export function fillsByClass(cssText) {
   const out = {};
-  const css = String(cssText || "").replace(/<!--|-->/g, " ");
-  for (const m of css.matchAll(/(?:^|[}\s,])(?:td|th)?\.([A-Za-z_][\w-]*)\s*\{([^}]*)\}/g)) {
-    const fill = fillFromDeclarations(m[2]);
-    if (fill && !out[m[1]]) out[m[1]] = fill;
+  for (const [cls, block] of classRules(cssText)) {
+    const fill = fillFromDeclarations(block);
+    if (fill && !out[cls]) out[cls] = fill;
   }
   return out;
+}
+
+/** `[className, declarationBlock]` for every class rule in the clipboard's `<style>` text (`.xl65 {…}`, `td.xl65 {…}`) — the one
+ *  reader of Office's class-named formats, shared by the fill reader above and the text-mark reader in notesOfficeStyle.js. */
+export function classRules(cssText) {
+  const css = String(cssText || "").replace(/<!--|-->/g, " ");
+  return Array.from(css.matchAll(/(?:^|[}\s,])(?:td|th|p|span|div)?\.([A-Za-z_][\w-]*)\s*\{([^}]*)\}/g), (m) => [m[1], m[2]]);
 }
 
 /** A source cell's shading as `#rrggbb`, or null: inline style first, then `bgcolor`, then its classes' rules. */
@@ -365,6 +385,22 @@ function realTables(root) {
     const up = t.parentElement?.closest?.("table");
     return !up || isScaffold(up);
   });
+}
+
+/** The text grid of every real table in a clipboard document, in the same order `readSourceTables` reports them:
+ *  one array of cell strings per row (a cell's paragraphs joined by a space). The SAFETY NET's copy of the data —
+ *  if the parse ever drops a table the clipboard plainly held, these rebuild it (notesPastePlain.js). Never throws. */
+export function tableGridsOf(root) {
+  if (!root?.querySelectorAll) return [];
+  const out = [];
+  for (const table of realTables(root)) {
+    try {
+      const rows = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
+      const grid = rows.map((tr) => cellsOf(tr).map((c) => (c.textContent || "").replace(/[\s\u00a0]+/g, " ").trim()));
+      if (grid.length && grid.some((r) => r.length >= 2)) out.push(grid);
+    } catch (_) { /* one unreadable table costs its rescue, never the paste */ }
+  }
+  return out;
 }
 
 /** `{ widths, fills }` per real table in a clipboard document. `widths[i]` is column i's source width in CSS pixels

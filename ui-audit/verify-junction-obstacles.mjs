@@ -64,7 +64,7 @@ const under = await page.evaluate(() => {
   const v = window.__plannerView.get();
   const f2p = (x, y) => new DOMPoint(x * v.ppf + v.offX, y * v.ppf + v.offY);
   const paths = [...document.querySelectorAll('[data-testid="road-network-surface"]')];
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const rec = Object.values(map)[0] || {};
   const out = [];
   for (const b of (rec.els || []).filter((e) => e.type === "building" && !e.points && e.w > 0 && e.h > 0)) {

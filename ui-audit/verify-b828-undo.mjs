@@ -27,7 +27,7 @@ const settle = (page, ms = 250) => page.waitForTimeout(ms);
 
 // The first parcel's fill state, straight from the on-disk site model.
 const parcel0 = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   const p = (site.parcels || [])[0] || null;
   return p ? { count: (site.parcels || []).length, fill: p.fill ?? null, fillOpacity: (p.fillOpacity === undefined ? null : p.fillOpacity) } : { count: 0, fill: null, fillOpacity: null };

@@ -102,14 +102,10 @@ try {
       throw e;
     });
     // show every status so the seeded tasks are listed whatever the filter pill defaulted to, and group by project
-    await frame.evaluate(() => {
-      const pill = [...document.querySelectorAll("button")].find((b) => /In Progress/.test(b.textContent)); void pill;
-      const m = [...document.querySelectorAll("span")].find((x) => x.textContent.trim() === "Group by");
-      const seg = m && [...m.parentElement.querySelectorAll("span")].find((x) => x.textContent.trim() === "Project");
-      if (seg) seg.click();
-    });
+    await frame.locator('[data-tr-btn="group"]').click();   // NEW-1 — Group by is a dropdown now (None / Project)
+    await frame.locator('[data-group-opt="project"]').click();
     await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 }).catch(async (e) => {
-      console.log("no group headers; report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 400)), "| groupBy buttons:", JSON.stringify(await frame.evaluate(() => [...document.querySelectorAll("span")].filter((x) => ["None", "Project"].includes(x.textContent.trim())).map((x) => x.textContent.trim() + ":" + getComputedStyle(x).backgroundColor))));
+      console.log("no group headers; report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 400)), "| group button:", JSON.stringify(await frame.evaluate(() => (document.querySelector('[data-tr-btn="group"]') || {}).textContent || null)));
       throw e;
     });
     await pacedWait(page, 1500);
@@ -213,7 +209,7 @@ finally {
         const p = { ...((r.data && r.data.prefs) || {}) };
         if (orig === null || orig === undefined) delete p.dashboardProjectOrder; else p.dashboardProjectOrder = orig;
         await sb.from("profiles").upsert({ id: u.user.id, prefs: p, updated_at: new Date().toISOString() }, { onConflict: "id" });
-        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); idList.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const q = await sb.from("sites").select("id").in("id", idList);
         const live = await sb.from("schedules").select("id").in("linked_site_id", idList).is("deleted_at", null);

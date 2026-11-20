@@ -59,12 +59,12 @@ try {
   KEY = await page.evaluate(() => Object.keys(localStorage).find((k) => /^planarfit:sites:cloud:/.test(k)) || "planarfit:sites:v1");
   check("the signed-in plans store key is the user-scoped one", /cloud:/.test(KEY), KEY);
   if (p) {
-    const pos = () => page.evaluate(([k, id]) => { const m = JSON.parse(localStorage.getItem(k) || "{}"); for (const r of Object.values(m)) { if (!r || (r.id !== id && r.groupId !== id)) continue; const e = (r.els || []).find((x) => x.id === "b1"); if (e) return Math.round(e.cx) + "," + Math.round(e.cy); } return null; }, [KEY, ID]);
+    const pos = () => page.evaluate(([k, id]) => { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); for (const r of Object.values(m)) { if (!r || (r.id !== id && r.groupId !== id)) continue; const e = (r.els || []).find((x) => x.id === "b1"); if (e) return Math.round(e.cx) + "," + Math.round(e.cy); } return null; }, [KEY, ID]);
     const before = await pos();
     check("precondition: the building is readable from the device store (else the position checks are vacuous)", before !== null, String(before));
-    if (before === null) console.log("store keys:", await page.evaluate((k) => JSON.stringify(Object.entries(JSON.parse(localStorage.getItem(k) || "{}")).map(([a, r]) => [a, r && r.id, r && (r.els || []).length]).slice(0, 8)), KEY));
+    if (before === null) console.log("store keys:", await page.evaluate((k) => JSON.stringify(Object.entries(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}")).map(([a, r]) => [a, r && r.id, r && (r.els || []).length]).slice(0, 8)), KEY));
     await page.evaluate((k) => { window.__w = 0; window.__by = {}; const o = Storage.prototype.setItem; Storage.prototype.setItem = function (a, b) { window.__by[a] = (window.__by[a] || 0) + 1; if (a === k) window.__w++; return o.call(this, a, b); }; }, KEY);
-    console.log("localStorage keys:", await page.evaluate(() => JSON.stringify(Object.keys(localStorage).map((k) => [k, (localStorage.getItem(k) || "").length]).filter((x) => /planarfit|planyr/.test(x[0])).slice(0, 25))));
+    console.log("localStorage keys:", await page.evaluate(() => JSON.stringify(Object.keys(localStorage).map((k) => [k, ((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "").length]).filter((x) => /planarfit|planyr/.test(x[0])).slice(0, 25))));
     const rect = () => page.evaluate(() => { const r = document.querySelector('[data-feature^="el:"]').getBoundingClientRect(); return Math.round(r.left) + "," + Math.round(r.top); });
     const rectBefore = await rect();
     console.log("diag hit", JSON.stringify(await page.evaluate(([x, y]) => window.__plannerHitTarget(x, y), [p.x, p.y])), "features", await page.evaluate(() => JSON.stringify([...document.querySelectorAll("[data-feature]")].map((e) => e.getAttribute("data-feature")).slice(0, 8))), "banner", await page.evaluate(() => (document.body.innerText.match(/(read-only|locked|can.t save|offline|changed in another)[^\n]{0,80}/i) || [""])[0]));
@@ -120,10 +120,10 @@ try {
 } finally {
   const gone = await page.evaluate(async (id) => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
       if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
-      return { local: !JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
+      return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
   }, ID).catch((e) => ({ error: String(e) }));
   check("throwaway plan deleted (local + cloud) and verified gone", !!gone.local && !!gone.cloud, JSON.stringify(gone));

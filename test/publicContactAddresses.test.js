@@ -14,7 +14,10 @@ const texty = tracked.filter((f) => /\.(html|jsx?|mjs|json|md|txt)$/.test(f) && 
 /* michael@planyr.io is public in exactly TWO places, each named here by file (never loosened to a pattern): the signed owner note on the
  * landing page (owner decision 2026-10-20) and the "Email Michael to request it" link a county with no parcel data shows (owner request
  * 2026-10-21, NEW-1 — `lib/parcelGaps.js`, which holds the address once as PARCEL_REQUEST_EMAIL). A third place is a new owner decision. */
-const MICHAEL_EXCEPTIONS = ["public/landing/index.html", "src/workspaces/site-planner/lib/parcelGaps.js"];
+const MICHAEL_EXCEPTIONS = ["functions/api/lib/signinHealthEmail.js", "public/landing/index.html", "src/workspaces/site-planner/lib/parcelGaps.js"];
+/* …and a third that is NOT public: the sign-in ALARM sends mail TO the owner (NEW-1, 2026-11-02 — his own brief: "to michael@planyr.io").
+ * It lives in a Cloudflare Pages Function, which runs on the server and is never sent to a browser. The next test pins that: nothing
+ * under src/ (what the browser downloads) may import that file. */
 
 describe("public contact addresses", () => {
   it("michael@planyr.io appears only in the landing owner note and the parcel-request link", () => {
@@ -24,6 +27,12 @@ describe("public contact addresses", () => {
     expect(html.match(/michael@planyr\.io/g).length).toBe(2); // mailto href + visible text, one link
     expect(html).toContain("Planyr is new, and I read every email. If something's off or you have an idea, write me at");
     expect(read("src/workspaces/site-planner/lib/parcelGaps.js").match(/michael@planyr\.io/g).length).toBe(2); // the constant + the header note naming the exception
+  });
+  it("the server-only alarm address is never reachable from browser code", () => {
+    const importers = tracked.filter((f) => f.startsWith("src/") && /\.(jsx?|mjs)$/.test(f) && /signinHealthEmail/.test(read(f)));
+    expect(importers).toEqual([]);
+    const builtIn = tracked.filter((f) => f.startsWith("public/")).filter((f) => /signinHealthEmail/.test(read(f)));
+    expect(builtIn).toEqual([]);
   });
   it("postmaster@ and abuse@ appear nowhere", () => {
     const hits = texty.filter((f) => /\b(postmaster|abuse)@/i.test(read(f)));

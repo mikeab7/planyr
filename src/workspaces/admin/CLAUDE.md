@@ -51,7 +51,7 @@ proof harness: ui-audit verify-admin-surfaces (repo-root ui-audit folder).
 the repo-root ops-snapshot script (`--push`) after each successful Build on main, through the token-gated `ops_ingest_snapshots()` door
 (`db/admin_ops_ingest.sql`; needs the `OPS_INGEST_TOKEN` secret + a one-time hash insert); header reads "Updated … after <commit>".
 Support has the shared "Hide internal" switch (`lib/adminSupport.js` `filterTickets`; badge + Overview tile follow it). Deploy-reload
-rule for a user's recent errors = `adminIssues.splitDeployReloads`. The weekly sweep records via `window.pfAdminRecordSweep`
+rule for a user's recent errors = `adminIssues.splitDeployReloads`. The Ops page also carries a **Sign-in health** card (NEW-1) reading the `signin` snapshot the hourly check writes — the shared sign-in-health module's `snapshotHealth` decides ok / broken / **stopped** at read time; the repo-root ops-snapshot script run with `--signin` gives the daily sweep the same verdict. The weekly sweep records via `window.pfAdminRecordSweep`
 (`lib/sweepHook.js`). Harnesses that file reports clean up with the repo-root ui-audit report-cleanup helper.
 
 **Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**

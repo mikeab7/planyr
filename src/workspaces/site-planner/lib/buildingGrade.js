@@ -90,6 +90,8 @@ export function netLabel(netCy) {
 function roleOfPlane(plane, dockN, el) {
   if (plane.classId === "buildingPad") return "building";
   if (plane.classId === "dockApron") return el && el.type === "trailer" ? "trailer" : "court";
+  if (plane.classId === "driveInRamp") return "ramp";
+  if (plane.classId === "driveRoad") return "drive";   // NEW-1 (2026-11-11)
   if (!dockN || !plane.wall) return "lot";
   const dot = plane.wall.n.x * dockN.x + plane.wall.n.y * dockN.y;
   if (dot > 0.9) return "lot-dock-side";
@@ -99,7 +101,7 @@ function roleOfPlane(plane, dockN, el) {
 const ROLE_PHRASE = {
   building: "the building", court: "the truck court", trailer: "the trailer parking",
   "lot-dock-side": "the dock-side parking", "lot-opposite": "the parking opposite the docks",
-  "lot-end": "the end-wall parking", lot: "the parking",
+  "lot-end": "the end-wall parking", lot: "the parking", ramp: "the drive-in ramp", drive: "the drive",
 };
 export const rolePhrase = (r) => ROLE_PHRASE[r] || "the building";
 
@@ -130,7 +132,7 @@ export function describeFlag(surface, ids, { buildingCentre, elements = [], slop
     if (basis && basis.kind === "property") {
       const place = limitCrossPlace(basis, property);
       return {
-        side: cap(side), over, kind, property, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
+        side: cap(side), over, kind, property, place, elementId: worst.id, element: "the graded area", role: "limit", centroid, sf: out.sf, limit: true,
         span: { pt: centroid, radiusFt: Math.max(60, Math.sqrt(out.sf) / 2) },
         text: {
           title: `Slope runs ${place} · ${cap(side)}`,
@@ -270,6 +272,7 @@ export const GRADE_TAG_MIN_DEPTH_FT = 90;
  *   { elId, kind, depthFt, widthFt, face: { a, b, z, label }, stations: [{ b, far: { a, z }, from, to }],
  *     tag: { a, b, text } | null, slopePct, world }
  * Returns null when the element has no wall frame (not a graded layer of a building). */
+export const DOCK_FACE_TOUCH_FT = 3;   // a court's near edge within this of the dock wall IS the dock face
 export function spotElevationsFor(plane, ring, zAt) {
   if (!plane || !plane.wall || !ring || ring.length < 3) return null;
   const { A, n, t } = plane.wall;
@@ -285,7 +288,11 @@ export function spotElevationsFor(plane, ring, zAt) {
   const m = isCourt ? (width > STATION_COURT_WIDE_FT ? 3 : 2) : (width > LOT_WIDE_FT ? 2 : 1);
   const bMid = (b0 + b1) / 2;
   const zFace = zAt(world(a0, bMid));
-  const face = { a: a0, b: bMid, z: zFace, label: `${isCourt ? "dock" : "curb"} ${f1(zFace)}` };
+  // NEW-2 (2026-11-04): only a court whose near edge TOUCHES the dock wall has a dock face (FFE − the dock drop). A trailer row sits a
+  // court's depth out along the same fall, so its near edge reads lower; it is labelled "row", never "dock" — the owner read the row's
+  // 784.5 as a 6 ft dock drop on a plan whose drop is 4 ft (the court itself read 786.5).
+  const atWall = !isCourt || a0 <= ((plane.wall && Number.isFinite(plane.wall.d0) ? plane.wall.d0 : 0) + DOCK_FACE_TOUCH_FT);
+  const face = { a: a0, b: bMid, z: zFace, atWall, label: `${isCourt ? (atWall ? "dock" : "row") : "curb"} ${f1(zFace)}` };
   const stations = [];
   for (let i = 0; i < m; i++) {
     const b = b0 + ((i + 0.5) / m) * width;
@@ -327,18 +334,18 @@ export function padCorners(ring) {
 }
 
 /* "cut 9.1" / "fill 6.8" at each pad corner: existing ground against the finished floor. `existAt(pt)` → ft | null.
- * A corner over a DEM void has no spot (never a guessed number). Returns [{ pt, existFt, kind, depthFt, text }]. */
+ * A corner over a DEM void has no spot (never a guessed number). Returns [{ pt, idx, existFt, kind, depthFt, text }]. */
 export function padCornerSpots(ring, ffe, existAt) {
   const cs = padCorners(ring);
   if (!cs || !Number.isFinite(ffe) || typeof existAt !== "function") return [];
   const out = [];
-  for (const pt of cs) {
+  cs.forEach((pt, idx) => {   // `idx` = which of the four corners (padCorners order) — a corner over a void is skipped, the rest keep theirs
     const g = existAt(pt);
-    if (g == null || !Number.isFinite(g)) continue;
+    if (g == null || !Number.isFinite(g)) return;
     const d = ffe - g;
-    if (Math.abs(d) < 0.05) out.push({ pt, existFt: g, kind: "grade", depthFt: 0, text: "grade" });
-    else out.push({ pt, existFt: g, kind: d < 0 ? "cut" : "fill", depthFt: Math.abs(d), text: `${d < 0 ? "cut" : "fill"} ${f1(Math.abs(d))}` });
-  }
+    if (Math.abs(d) < 0.05) out.push({ pt, idx, existFt: g, kind: "grade", depthFt: 0, text: "grade" });
+    else out.push({ pt, idx, existFt: g, kind: d < 0 ? "cut" : "fill", depthFt: Math.abs(d), text: `${d < 0 ? "cut" : "fill"} ${f1(Math.abs(d))}` });
+  });
   return out;
 }
 

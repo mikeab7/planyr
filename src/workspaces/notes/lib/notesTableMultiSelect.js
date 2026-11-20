@@ -210,7 +210,7 @@ export const NoteTableMultiSelect = Extension.create({
         handleDOMEvents: {
           mousedown(view, event) {
             if (event.button !== 0 || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false;
-            if (view.dom.classList.contains("resize-cursor")) return false;          // on a column border
+            if (view.dom.classList.contains("resize-cursor") || view.dom.classList.contains("planyr-row-resize")) return false;          // on a column border
             // The box must be ENTERED: stage 1 of select-then-enter blurs the editor, and a Ctrl press on a box that is
             // not entered is the box's own (this native handler runs before the mat's, so it cannot rely on the mat's
             // preventDefault having happened yet).

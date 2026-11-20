@@ -35,6 +35,9 @@ import { flowArrows } from "./flowField.js";
 // so even the resample stays off the main thread.
 import { latticeFromDem, sweepBBox } from "./buildableLattice.js";
 import { prepareSweep, summarizeCtx, cachedMaskAt } from "./buildableGround.js";
+// NEW-1 ("Fit the biggest building"): the inverse search rides the same lattice — pure, no DOM; it runs sliced (below) so the worker stays
+// answerable to the sweep / contour jobs while it works.
+import { prepareFit, fitBuildingSteps } from "./fitBuilding.js";
 
 // Smoothing sigmas are spec'd in GROUND METERS (same terrain detail at every zoom)
 // then converted to cells per grid — but CAPPED in cells so the kernel radius
@@ -53,10 +56,10 @@ const round6 = (v) => Math.round(v * 1e6) / 1e6;
  * the reply to an unknown key is the LOUD "no-context" and the caller re-sends the full payload. */
 const ctxCache = new Map();
 const CTX_MAX = 3;
-function buildableJob(id, d) {
+function ensureEntry(id, d) {
   let entry = ctxCache.get(d.key);
   if (!entry) {
-    if (!d.dem) { self.postMessage({ id, ok: false, error: "no-context" }); return; }
+    if (!d.dem) { self.postMessage({ id, ok: false, error: "no-context" }); return null; }
     const bbox = sweepBBox(d.parcelRings, d.marginFt ?? 200);
     const lattice = latticeFromDem({ grid: d.dem.grid, req: d.dem.req, origin: d.origin, bbox, cell: d.cell });
     const ctx = prepareSweep({ lattice, rings: d.rings, holes: d.holes || [] });
@@ -64,6 +67,42 @@ function buildableJob(id, d) {
     ctxCache.set(d.key, entry);
     while (ctxCache.size > CTX_MAX) ctxCache.delete(ctxCache.keys().next().value);
   }
+  return entry;
+}
+
+/* NEW-1 ("Fit the biggest building") — the search for the biggest building the ground holds (lib/fitBuilding.js), driven in ~25 ms
+ * slices with a timer between them so a sweep / contour job that arrives meanwhile is answered in between; a newer request (or the
+ * caller) cancels it by id. Replies once: { result } or { cancelled: true }. */
+const fitCtxCache = new Map();
+const fitCancelled = new Set();
+function fitJob(id, d) {
+  const entry = ensureEntry(id, d);
+  if (!entry) return;
+  const fkey = `${d.key}|${d.fenceSig}`;
+  let fctx = fitCtxCache.get(fkey);
+  if (!fctx) {
+    fctx = prepareFit({ lattice: entry.ctx.lattice, setbackRings: d.rings, setbackHoles: d.holes || [], fenceRings: d.fence.rings, fenceHoles: d.fence.holes || [] });
+    fitCtxCache.set(fkey, fctx);
+    while (fitCtxCache.size > 2) fitCtxCache.delete(fitCtxCache.keys().next().value);
+  }
+  const gen = fitBuildingSteps({ ctx: fctx, template: d.template, params: d.params, frontageDeg: d.frontageDeg, currentDeg: d.currentDeg, shouldAbort: () => fitCancelled.has(id) });
+  const step = () => {
+    try {
+      const t0 = Date.now();
+      let r = gen.next();
+      while (!r.done && Date.now() - t0 < 25) r = gen.next();
+      if (fitCancelled.has(id) || (r.done && r.value && r.value.aborted)) { fitCancelled.delete(id); self.postMessage({ id, ok: true, cancelled: true }); return; }
+      if (r.done) { self.postMessage({ id, ok: true, result: r.value }); return; }
+      setTimeout(step, 0);
+    } catch (err) { fitCancelled.delete(id); self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
+  };
+  step();
+}
+
+function buildableJob(id, d) {
+  if (d.op === "fit") { fitJob(id, d); return; }
+  const entry = ensureEntry(id, d);
+  if (!entry) return;
   const { ctx } = entry;
   if (d.op === "mask") {
     const r = cachedMaskAt(ctx, d.E, d.s, d.D);
@@ -96,6 +135,7 @@ function proposedContoursJob(id, d) {
 
 self.onmessage = (e) => {
   const { id, req, buffer, opts = {} } = e.data || {};
+  if (e.data && e.data.kind === "fit-cancel") { fitCancelled.add(e.data.target); return; }
   if (e.data && e.data.kind === "buildable") {
     try { buildableJob(id, e.data); } catch (err) { self.postMessage({ id, ok: false, error: String((err && err.message) || err) }); }
     return;

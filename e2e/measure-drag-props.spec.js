@@ -14,7 +14,7 @@ const selected = (p) => p.getByTestId("measure-selected");
 
 function measures(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return site.measures || [];
   });
@@ -172,7 +172,7 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
     for (const [x, y] of corners) { await page.mouse.click(x, y); await page.waitForTimeout(60); }
     await page.mouse.click(corners[0][0], corners[0][1]); // close the ring (zoom-fits)
     await expect.poll(() => page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       return ((map[Object.keys(map)[0]] || {}).parcels || []).length;
     })).toBeGreaterThanOrEqual(1);
     await page.keyboard.press("Escape");

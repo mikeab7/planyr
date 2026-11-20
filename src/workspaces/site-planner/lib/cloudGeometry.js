@@ -24,6 +24,29 @@ export const CLOUD_ARC_MAX_FT = 30;
 export const CLOUD_ARC_STEP_FT = 5;
 export const CLOUD_ARC_DEFAULT_FT = CLOUD_ARC_PRESETS.medium;
 
+// NEW-1 (2026-11-06, owner: a cloud drawn round two ramps on a whole-site view "reads as a plain polygon").
+// The arc size is stored in FEET (so a cloud scales with the plan), which at a whole-site zoom is a
+// radius of about ONE pixel — the scallops are there but cannot be seen. So the DRAWN radius never goes
+// below CLOUD_ARC_MIN_PX (in label-space px, i.e. what the owner sees; × the export frame's `labelK` on a
+// printed sheet so the sheet matches the screen). Zoomed in far enough that the feet size is bigger, the
+// stored feet size rules exactly as before.
+export const CLOUD_ARC_MIN_PX = 5;
+// A NEW cloud is born sized to read at the zoom it was drawn at (stored in feet, so it still scales).
+export const CLOUD_ARC_TARGET_PX = 8;
+
+/** The arc radius to DRAW, in canvas px. `rppf` = canvas px per foot; `labelK` = label-space → canvas px (1 on screen). */
+export function cloudArcPx(arcFt, rppf, labelK = 1) {
+  const feet = clampCloudArcFt(arcFt) * (rppf > 0 ? rppf : 0);
+  return Math.max(feet, CLOUD_ARC_MIN_PX * (labelK > 0 ? labelK : 1));
+}
+
+/** The feet size a NEW cloud starts with at zoom `ppf` (px per foot): the usual default, or whatever
+ *  makes the scallops CLOUD_ARC_TARGET_PX wide on screen if that is bigger — rounded to whole feet. */
+export function cloudDefaultArcFt(ppf) {
+  if (!(ppf > 0)) return CLOUD_ARC_DEFAULT_FT;
+  return clampCloudArcFt(Math.max(CLOUD_ARC_DEFAULT_FT, Math.round(CLOUD_ARC_TARGET_PX / ppf)));
+}
+
 /** Clamp/validate a user-typed arc size to a sane real-world range; a bad value falls back to the
  *  default rather than drawing a degenerate (zero/negative/absurdly large) scallop. */
 export function clampCloudArcFt(ft) {

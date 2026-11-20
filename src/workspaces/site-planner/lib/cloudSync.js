@@ -55,6 +55,14 @@ export const _siteVersions = siteVersions; // test seam (read/seed in unit tests
 export const _headerBase = headerBase; // test seam
 export const _pulledHeader = pulledHeader; // test seam
 export const _lastHeaderSig = lastHeaderSig; // test seam
+/* NEW-1 (B2671215 follow-up) — "THE CLOUD NOW HOLDS THIS PLAN'S HEADER" as an event. A banner that says a rename (or any write) didn't reach the cloud
+ * has to go away the moment a LATER sync proves it did — an ordinary edit's autosave, a Retry, the browser coming back online — not only when the person
+ * presses Retry. Every success path of the header write announces here; the planner app clears the matching banner / failure record. Listeners are
+ * isolated (one throwing never blocks the write or the others) and the signed-out no-op never announces (nothing was confirmed). */
+const syncedListeners = new Set();
+export function onSiteSynced(fn) { syncedListeners.add(fn); return () => syncedListeners.delete(fn); }
+/* `held` = the header facts the cloud now holds (a push that was built BEFORE a rename carries the old name — the listener compares before clearing anything). */
+function announceSynced(id, held) { for (const fn of [...syncedListeners]) { try { fn(id, held || {}); } catch (_) { /* a listener must never break the write */ } } }
 // The signature: the slim header exactly as a push would store it, minus the volatile updatedAt.
 // Exported for tests and for cloudList's seeding (sig of the row the cloud already has).
 export function headerSig(model) {
@@ -227,7 +235,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
   // entirely (see lastHeaderSig above). Only when a version token exists (a prior sync happened
   // and CAS is live); pre-migration/degrade DBs keep today's always-push behavior.
   const sig = headerSig(model);
-  if (!isRetry && lastHeaderSig[m.id] === sig && siteVersions[m.id] != null) return { ok: true, skipped: true };
+  if (!isRetry && lastHeaderSig[m.id] === sig && siteVersions[m.id] != null) { announceSynced(m.id, { name: m.name, site: m.site }); return { ok: true, skipped: true }; }
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
   // a shared row never re-stamps the original owner (team feature).
   const row = siteRowFor(m, { isNew: siteVersions[m.id] == null, teamId: model.teamId });
@@ -241,6 +249,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
   }
   if (r.ok) {
     siteVersions[m.id] = r.version; lastHeaderSig[m.id] = sig; headerBase[m.id] = headerSlice(m); delete pulledHeader[m.id];
+    announceSynced(m.id, { name: m.name, site: m.site });
     return preAdopted ? { ok: true, adopted: preAdopted, merged: headerSlice(m) } : { ok: true };
   }
   if (r.conflict) {
@@ -313,7 +322,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
     let { error } = await supabase.from("sites").upsert(noTeam, { onConflict: "id" });
     if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change DB: target is (user_id,id)
       ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
-    if (!error) lastHeaderSig[m.id] = sig;
+    if (!error) { lastHeaderSig[m.id] = sig; announceSynced(m.id, { name: m.name, site: m.site }); }
     return { ok: !error, error: error ? error.message : null };
   }
   /* NEW-1 (B2163344) — UNKNOWN OUTCOME, not failure. The reply to this write was lost (network), so
@@ -702,22 +711,58 @@ export async function cloudDeletedRows(uid) {
  *                  the group, `name`/`groupId` come from that same row, so a caller can offer a
  *                  restore without a second round trip. A single LIVE row anywhere in the group is
  *                  enough to answer `deleted:false` — that is the whole fix. */
+/* ⛔ NEW-1 (B2671231, owner report 2026-11-12 — a live project, Bain, briefly showed "This project doesn't
+ * exist") — AN EMPTY ANSWER IS NOT "MISSING" UNTIL THE READ IS PROVEN TO HAVE BEEN MADE AS THE SIGNED-IN
+ * USER. supabase-js sends the ANONYMOUS key whenever it cannot hand back a usable session (a token refresh
+ * that failed on a slow / dropped connection, a tab that just regained focus with an expired token), and the
+ * database's row-level security answers an anonymous read with ZERO rows and NO error — byte-for-byte the
+ * answer a project that really is gone gives. So `exists:false` is issued only when (1) the client's own
+ * session is the caller's (`sessionProves`) and (2) a second read, taken after that proof, is empty too;
+ * anything less is `ok:false` (inconclusive), which every caller fails OPEN on. Positive facts (a row came
+ * back) need no such proof — an anonymous read cannot invent rows. */
+async function sessionProves(uid) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const s = data && data.session;
+    if (!s || !s.user || s.user.id !== uid) return false;
+    const exp = Number(s.expires_at) * 1000;
+    return !Number.isFinite(exp) || exp - Date.now() > 15000; // a token about to lapse is not proof
+  } catch (_) { return false; }
+}
+
+async function readGroupRows(id) {
+  const cols = "id, group_id, site, name, deleted_at";
+  const [byId, byGroup] = await Promise.all([
+    supabase.from("sites").select(cols).eq("id", id),
+    supabase.from("sites").select(cols).eq("group_id", id),
+  ]);
+  const error = byId.error || byGroup.error;
+  if (error) return { error };
+  // A read that neither errored nor returned an array is not an answer (never "an empty list").
+  if (!Array.isArray(byId.data) || !Array.isArray(byGroup.data)) return { error: { message: "deletion check returned no rows array" } };
+  const rows = new Map();
+  for (const r of [...byId.data, ...byGroup.data]) if (r && r.id) rows.set(r.id, r);
+  return { all: [...rows.values()] };
+}
+
 export async function cloudCheckDeleted(uid, id) {
   if (!supabase || !uid || !id) return { ok: false, exists: false, deleted: false };
   try {
-    const cols = "id, group_id, site, name, deleted_at";
-    const [byId, byGroup] = await Promise.all([
-      supabase.from("sites").select(cols).eq("id", id),
-      supabase.from("sites").select(cols).eq("group_id", id),
-    ]);
-    const error = byId.error || byGroup.error;
+    let read = await readGroupRows(id);
+    if (!read.error && !read.all.length) {
+      // Empty: only believe it with the session proven before AND an agreeing second read after.
+      if (!(await sessionProves(uid))) return { ok: false, exists: false, deleted: false, error: "session not ready — an empty answer proves nothing" };
+      read = await readGroupRows(id);
+      if (!read.error && !read.all.length && !(await sessionProves(uid))) {
+        return { ok: false, exists: false, deleted: false, error: "session lapsed during the check — an empty answer proves nothing" };
+      }
+    }
+    const error = read.error;
     if (error) {
       if (isMissingColumn(error, "deleted_at")) return { ok: true, exists: true, deleted: false };
       return { ok: false, exists: false, deleted: false, error: error.message || "deletion check failed" };
     }
-    const rows = new Map();
-    for (const r of [...(byId.data || []), ...(byGroup.data || [])]) if (r && r.id) rows.set(r.id, r);
-    const all = [...rows.values()];
+    const all = read.all;
     if (!all.length) return { ok: true, exists: false, deleted: false };
     const live = all.find((r) => !r.deleted_at);
     if (live) {

@@ -8,6 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
+import { PROJECT_RENAME_TEXT, isAuthExpiredError } from "./renameSyncNotice.js";
 import * as planStore from "./planStore.js";
 import { plainCopy } from "./planStore.js";
 import { elsProven, recordElsProof } from "./elsProof.js";
@@ -1116,8 +1117,18 @@ export async function backupNowVerified(id) {
   try { return writeHistoryAll(historyMem) === true; } catch (_) { return false; }
 }
 /** planStore's make-room hook (B2200385): free localStorage that is PROVEN safe to free, in order, only as far as needed. Resolves { freedChars, steps }. */
-export async function makeRoomForPlanStore({ reason, shortBy } = {}) {
+export async function makeRoomForPlanStore({ base, reason, shortBy } = {}) {
   const steps = []; let freed = 0;
+  /* B2200384 — FIRST: the whole-library entry, if one is still on the device and every plan in it verifies as its own entry. It is by far the biggest thing
+   * that can be freed and the only one that is a duplicate of what the entries already hold. */
+  if (base) {
+    try { const r = planStore.retireLegacy(base); steps.push("legacy:" + r.reason + ":" + r.freedChars); freed += r.freedChars || 0; }
+    catch (e) { steps.push("legacy:error"); }
+  }
+  if (freed >= (shortBy || 0) && freed > 0) {
+    reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan move", { reason, shortByBefore: shortBy, freedChars: freed, enough: true, steps: steps.join(" · ") });
+    return { freedChars: freed, steps };
+  }
   const h = await relocateHistoryToIdb();
   steps.push("history:" + (h.ok ? "moved" : h.reason) + ":" + h.freedChars); freed += h.freedChars || 0;
   if (freed < (shortBy || 0)) {                       // still short → re-fetchable caches (rebuild source declared in the storage census)
@@ -1195,6 +1206,10 @@ function dropIdbBackedSrc(m) {
  * B217540's byte-exact whole-store snapshot still serves a store that could not be split (planStore "blob" mode). */
 /** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
 export function siteExistsLocally(id) { return planStore.has(sitesKey(), id); }
+/** Why the device last refused to store plan `id` ({ reason: "quota" | <error name> | "unavailable", … }), or null. NEW-1 (2026-11-03). */
+export function lastSaveRefusal(id) { return planStore.lastRefusal(id); }
+/** Make room in this device's plan storage ONCE per page load (shared with the automatic attempt); `force` = an explicit user Retry. */
+export function requestPlanStoreRoom({ force = false } = {}) { return planStore.requestRoom({ base: sitesKey(), reason: "quota", force }); }
 /** The stored record for `id` as the persistence verifier needs it (its drawn collections). */
 export function readBackSite(id) { return planStore.readBack(sitesKey(), id) || loadSite(id); }
 function readSharedStore() { return planStore.readShared(sitesKey()); }
@@ -1203,8 +1218,15 @@ export function sitesWriteStillCurrent(stamp) { return planStore.writeStillCurre
 const writeSites = (map) => planStore.writeMap(sitesKey(), map);
 const writeSite = (id, rec) => planStore.writeOne(sitesKey(), id, rec);
 const removeSite = (id) => planStore.removeOne(sitesKey(), id);
+/** A durable tombstone (signed-in stores) says this plan was deleted on this device — a legacy whole-library entry may never resurrect it (B2200384). */
+function planStoreIsDeleted(base, id) {
+  const pre = "planarfit:sites:cloud:";
+  if (!base || !base.startsWith(pre)) return false;
+  return id in readSiteTombs(base.slice(pre.length));
+}
 planStore.configure({
   makeRoom: (a) => makeRoomForPlanStore(a),
+  isDeleted: planStoreIsDeleted,
   persistForm: dropIdbBackedSrc,
   slim: stripDataUrls,
   merge: (mine, theirs) => {
@@ -1416,10 +1438,10 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
     return pushSiteToCloud(groupId).then((r) => {
       if (r && r.ok === false) {
         reportClientEvent("cloud-push-failed", "a renamed never-drawn project's row failed to reach the cloud (kept on this device)", { id: groupId, error: r.error || "" });
-        return { ok: false, groupId, name, plans: 1, materialized: true, error: r.error || "The new name is saved on this device but couldn't reach the cloud yet." };
+        return { ok: false, groupId, name, plans: 1, materialized: true, error: PROJECT_RENAME_TEXT, rawError: r.error || "", authExpired: isAuthExpiredError(r.error) };
       }
       return renameSiteGroup(groupId, name, true); // once only — the row exists now, so the group rename can match it
-    }).catch((e) => ({ ok: false, groupId, name, plans: 1, materialized: true, error: (e && e.message) || "rename failed" }));
+    }).catch((e) => ({ ok: false, groupId, name, plans: 1, materialized: true, error: PROJECT_RENAME_TEXT, rawError: (e && e.message) || "rename failed", authExpired: isAuthExpiredError(e) }));
   }
   const at = Math.max(Date.now(), maxStampOf(localPlans) + 1);
   localPlans.forEach((s) => saveSite({ id: s.id, site: name, siteRenamedAt: at }));
@@ -1427,8 +1449,8 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
   // LOADED ON DEMAND — see lib/cloudRename.js. A rename is rare and user-initiated, so its cloud
   // path (an RPC plus the whole un-migrated-DB degrade) stays off the chunk every page load pays for.
   return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUid(), groupId, name, at))
-    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error }))
-    .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
+    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error, authExpired: !!(cloud && cloud.authExpired) }))
+    .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: PROJECT_RENAME_TEXT, rawError: (e && e.message) || "rename failed", authExpired: isAuthExpiredError(e) }));
 }
 
 /* B843792 (NEW-1) — THE ONE ROLE FLIP, mirroring renameSiteGroup's exact shape above (LOCAL
@@ -2203,7 +2225,7 @@ export function notifySitesListChanged() {
 // can never lose the edit, but snapshotting on every drag frame would spam the ring — the debounced
 // settle-tick save (no flag) is the single, natural history-snapshot point. (doc-review already
 // splits immediate-mirror from debounced-cloud this way; this brings the Site Planner to parity.)
-export function saveSite(partial, { skipHistory = false } = {}) {
+export function saveSite(partial, { skipHistory = false, planRename = false } = {}) {
   if (!partial || !partial.id) return false;
   const sites = readSharedStore();     // NEW-1 (B217540 ×3): shared objects, READ-ONLY — only `existing` is ever changed, and it is a private copy
   const existing = sites[partial.id] ? plainCopy(sites[partial.id]) : sites[partial.id];
@@ -2227,6 +2249,18 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   }
   if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
   let model = { ...createSiteModel(merged), updatedAt: nextUpdatedAt() };
+  /* ⛔ NEW-1 (B2671215) — A CONTENT SAVE MAY NEVER MOVE A PLAN'S NAME. Only a deliberate rename (`planRename: true`, the plan menu's one rename
+   * through `renamePlan`) may change the `name` of a record that already exists. The planner's autosave sends `...metaRef.current`, and
+   * `metaRef.current.name` is a COPY of the plan's name taken at render time — so an autosave whose payload was built before a rename (the
+   * 50 ms mirror write, the 400 ms settle tick, a flush on leaving) wrote the OLD name straight back over the new one, in storage and then,
+   * through the push, in the cloud. Measured on a seeded plan: "Scheme Z" saved, then "Concept A" again 50-200 ms later in 3 of 8 runs
+   * (2 of 8 even before the instant-display fix above) — a rename silently undone. The same shape as the project-name split below, one
+   * level down: a copy of a name written back over the source of truth. For a record the store already holds, the store's name stands;
+   * a brand-new record (no `existing`) still takes the name it is born with. */
+  if (existing && !planRename && typeof existing.name === "string" && existing.name.trim() && model.name !== existing.name) {
+    reportClientEvent("plan-name-write-corrected", "a save tried to move a plan's name without being a rename — corrected before it could reach the cloud", { id: model.id, attempted: model.name, kept: existing.name });
+    model = { ...model, name: existing.name };
+  }
   /* ⛔ NEW-1 — THE WRITE CHOKE POINT. A plan may never be written carrying a name that contradicts
    * its own project. Every local write lands here, so enforcing the group's authority at this one
    * spot is what makes "a stale plan hydrating later READS the project name, never re-publishes its
@@ -2321,13 +2355,27 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   lastSeenAt[partial.id] = model.updatedAt;
   lastSeenHeader[partial.id] = headerSlice(model); // B1953797 — this tab's own write is its new base
   const ok = writeSite(partial.id, model);          // B2165120: this plan's entry only — never the library
+  if (!ok) {
+    /* ⛔ NEW-1 (2026-11-03) — A REFUSED DEVICE WRITE IS NEVER SILENT. `planStore` already reported WHY (`plan-store-write-refused`: reason, sizes, the cap
+     * inventory); this is the plan-level twin so a caller that ignores the boolean still leaves a trace naming the plan. Callers on a path the user
+     * watches (the three plan mints, rename, status/dates) read the boolean and say so — see lib/planMint.js. */
+    const why = planStore.lastRefusal(partial.id);
+    reportClientEvent("site-save-refused", "the device refused to store this plan — nothing was saved to this device", { id: partial.id, reason: (why && why.reason) || "unknown", existing: !!existing });
+  }
   if (ok) {
     notifySiteModelChanged(partial.id);
     // B1525088 (NEW-1) — announce an identity change (name/status/role/which group) on the
     // shared "planarfit:sites" channel too, so a still-mounted map/Sites panel, project switcher
     // or Notes/Model project list refreshes without a reload. A plain content edit (geometry,
     // dates, …) leaves neither of those fields different from `existing` and stays quiet.
-    if (!existing || existing.site !== model.site || existing.status !== model.status ||
+    //
+    // ⛔ NEW-1 (B2671215, owner 2026-11-10: "I renamed it and it took a second for it to go into effect") — A PLAN'S OWN
+    // `name` IS IDENTITY TOO. This condition named the project's `site` and not the plan's `name`, so a plan rename wrote
+    // the device copy and announced NOTHING: the names store (`usePlanName` → the crumb and the plan menu's current row)
+    // keeps a 2 s id→name index that only this signal clears, so the old name stayed on screen until the cache expired AND
+    // something else happened to re-render the planner. Measured on the owner's Quiddity plan: the new name was in storage
+    // at once and still absent from the DOM 9 s later. Do not narrow this back to `site`.
+    if (!existing || existing.site !== model.site || existing.name !== model.name || existing.status !== model.status ||
         existing.role !== model.role || groupKeyOf(existing) !== groupKeyOf(model))
       notifySitesListChanged();
   }

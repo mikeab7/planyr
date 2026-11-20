@@ -39,7 +39,7 @@ const PPF = 1.5;                    // pixels per foot — big enough that an 18
  * on RELEASE — so a single read straight after mouse-up can catch the mid-drag state (where the side
  * road has already moved and the host has not). Every post-release assertion polls. */
 const readRoad = (page, id) => page.evaluate((rid) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   const r = (site.els || []).find((e) => e.id === rid);
   return r ? { pts: r.pts.map((p) => ({ x: p.x, y: p.y })), vtx: r.vtx } : null;

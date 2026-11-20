@@ -31,7 +31,7 @@ const site = { id: "J", groupId: "J", site: "Jacinto", name: "Plan 1", origin: {
 // Seed ONCE (guard on the key): addInitScript re-runs on every reload, so an unconditional
 // seed would re-plant the original overlay on each reload and mask whatever the app persisted.
 // Guarding lets the app's own saved state (hide / delete) survive the reload — the whole point.
-const seed = `(()=>{try{if(!localStorage.getItem('planarfit:sites:v1'))localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ J: site })}));localStorage.setItem('planarfit:currentSite:v1','J');}catch(e){}})();`;
+const seed = `(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1'))localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ J: site })}));localStorage.setItem('planarfit:currentSite:v1','J');}catch(e){}})();`;
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -51,7 +51,7 @@ page.on("dialog", async (d) => { console.log("  [DIALOG — should never appear,
 
 const hasOverlayImg = () => page.evaluate(() => !!document.querySelector('image[data-overlay-image="1"]'));
 const overlayRowListed = () => page.evaluate(() => Array.from(document.querySelectorAll("button")).some((b) => b.textContent.trim() === "Jacinto Port.pdf"));
-const storedSite = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("planarfit:sites:v1")).J; } catch (e) { return null; } });
+const storedSite = () => page.evaluate(() => { try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")).J; } catch (e) { return null; } });
 const boot = async () => { await page.goto(BASE, { waitUntil: "load" }); await page.waitForTimeout(1500); try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 4000 }); } catch (e) {} await page.waitForTimeout(500); };
 const openOverlayPanel = async () => { await page.evaluate(() => document.querySelector('[data-rail-tab="references"]')?.click()); await page.waitForTimeout(300); };
 

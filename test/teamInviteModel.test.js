@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { mapInviteRows, inviteLine, badgeLabel, answerNote, roleWord, TEAMS_CHANGED_EVENT } from "../src/shared/teams/teamInviteModel.js";
+import { mapInviteRows, splitInvites, waitingLine, redeemNote, resendNote, inviteLine, badgeLabel, answerNote, roleWord, TEAMS_CHANGED_EVENT } from "../src/shared/teams/teamInviteModel.js";
 import { groupRoster } from "../src/workspaces/site-planner/lib/teamRoster.js";
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), "utf8");
@@ -10,13 +10,48 @@ const src = (rel) => readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta
 describe("mapInviteRows / inviteLine", () => {
   it("maps list_my_invites rows and words the line", () => {
     const [inv] = mapInviteRows([{ invite_id: "i1", team_id: "t1", team_name: "USEC", role: "admin", invited_by_name: "Chris Seward", created_at: "2026-10-28T18:14:16Z" }]);
-    expect(inv).toEqual({ id: "i1", teamId: "t1", teamName: "USEC", role: "admin", invitedBy: "Chris Seward", createdAt: "2026-10-28T18:14:16Z" });
+    expect(inv).toEqual({ id: "i1", proven: true, teamId: "t1", teamName: "USEC", role: "admin", invitedBy: "Chris Seward", createdAt: "2026-10-28T18:14:16Z" });
     expect(inviteLine(inv)).toBe("Chris Seward invited you as admin");
   });
   it("is defensive about junk and missing names", () => {
     expect(mapInviteRows(null)).toEqual([]);
     expect(mapInviteRows([null, {}, { invite_id: "i2" }])[0]).toMatchObject({ teamName: "A team", invitedBy: "A teammate", role: "member" });
     expect(roleWord("owner")).toBe("member");
+  });
+});
+
+describe("NEW-1 (2026-11-02) — an unproven mailbox is told only that an invitation is waiting", () => {
+  it("an unproven row keeps NOTHING identifying (no id, team, inviter, role) and is split off from the answerable ones", () => {
+    const rows = [
+      { invite_id: null, team_id: null, team_name: null, role: null, invited_by_name: null, created_at: "2026-11-02T10:00:00Z", proven: false },
+      { invite_id: "i1", team_id: "t1", team_name: "USEC", role: "member", invited_by_name: "Chris", created_at: "2026-11-02T09:00:00Z", proven: true },
+    ];
+    const list = mapInviteRows(rows);
+    expect(list).toHaveLength(2);
+    expect(JSON.stringify(list[0])).not.toMatch(/USEC|Chris|t1|i1/);
+    expect(list[0]).toMatchObject({ proven: false });
+    const { ready, waiting } = splitInvites(list);
+    expect(ready.map((i) => i.id)).toEqual(["i1"]);
+    expect(waiting).toHaveLength(1);
+  });
+  it("a row from a database that predates `proven` reads as proven (nothing hidden, nothing broken)", () => {
+    expect(mapInviteRows([{ invite_id: "i1", team_name: "USEC" }])[0]).toMatchObject({ proven: true, teamName: "USEC" });
+  });
+  it("words: the waiting heading never names a team; every refusal has a next step", () => {
+    expect(waitingLine(1)).toBe("A team invitation is waiting for you.");
+    expect(waitingLine(3)).toBe("3 team invitations are waiting for you.");
+    expect(answerNote({ ok: false, reason: "unproven" }, true, "X")).toMatchObject({ ok: false, unproven: true });
+    expect(answerNote({ ok: false, reason: "claimed" }, true, "USEC").text).toMatch(/ask a team admin to invite you again/);
+    expect(redeemNote({ ok: true, team_name: "USEC" }, true).text).toBe("You're on USEC.");
+    expect(redeemNote({ ok: false, reason: "wrong_account" }, true)).toMatchObject({ ok: false, wrongAccount: true });
+    expect(redeemNote({ ok: false, reason: "declined", team_name: "USEC" }, true).text).toMatch(/ask a team admin to invite you again/);
+    expect(redeemNote({ ok: false, reason: "not_found" }, true).text).toMatch(/Ask a team admin/);
+  });
+  it("resend words: 'We sent a confirmation to <address>.' on success, a minute-wait on throttle", () => {
+    expect(resendNote(200, { ok: true, email: "p@x.com" }, "q@x.com")).toEqual({ ok: true, text: "We sent a confirmation to p@x.com." });
+    expect(resendNote(429, { reason: "throttled" })).toMatchObject({ ok: false, throttled: true });
+    expect(resendNote(404, null).ok).toBe(false);
+    expect(resendNote(502, { error: "boom" }).text).toBe("boom");
   });
 });
 
@@ -54,6 +89,9 @@ describe("the account menu is wired to the inbox", () => {
     expect(ac.indexOf("account-invites")).toBeLessThan(ac.indexOf('onOpenAccount("profile")'));
     expect(ac).toMatch(/account-invite-accept/);
     expect(ac).toMatch(/account-invite-decline/);
+    expect(ac).toMatch(/account-invite-waiting/);   // NEW-1: the unproven account's card
+    expect(ac).toMatch(/account-invite-resend/);
+    expect(ac).toMatch(/We sent a confirmation to/);
   });
   it("uses design tokens, not raw hex or off-scale radii", () => {
     const block = ac.slice(ac.indexOf("const inviteBadge"), ac.indexOf("const acctDivider"));

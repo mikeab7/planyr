@@ -74,7 +74,7 @@ const centered = (children) => (
  * file counts (`fileCounts`: Map folderId→n, null key = total), and publishes its rows upward
  * (`onRowsChange`) so the file list can place files into this same tree. */
 export default function FolderTree({
-  projectId = null, signedIn = false, projectName = "",
+  projectId = null, signedIn = false, projectName = "", onOpenAuth = null,
   embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
   // Library-Home pins: which folder ids are pinned + the ☆ toggle (both optional).
   pinnedIds = null, onTogglePin = null,
@@ -289,8 +289,9 @@ export default function FolderTree({
     setPendingDelete({ id: row.id, name: row.name, folders: [], files: [], subfolderCount, empty: false, loading: true });
     const plan = await planFolderDelete(projectId, row.id); // live Drive enumeration
     const known = !!plan.ok;                  // we actually listed Drive contents
-    const driveOff = !!plan.skipped;          // Drive mirror off → index-only, no Drive files exist
-    const failed = !plan.ok && !plan.skipped; // couldn't check (network / auth / 5xx) → UNKNOWN
+    // A dead sign-in carries `skipped` too (the shape signed-out callers read) but it is NOT "Drive is off": nothing was listed.
+    const driveOff = !!plan.skipped && !plan.authExpired; // Drive mirror off → index-only, no Drive files exist
+    const failed = !plan.ok && !driveOff;     // couldn't check (network / auth / 5xx) → UNKNOWN
     setPendingDelete((p) => (p && p.id === row.id ? {
       ...p, loading: false, driveOff, failed,
       folders: known ? plan.folders : [],
@@ -539,7 +540,7 @@ export default function FolderTree({
       </div>
 
       {/* Drive-mirror status pinned at the rail's foot, always visible while syncing. */}
-      <DriveBadge drive={drive} onSync={() => scheduleSync(0)} />
+      <DriveBadge drive={drive} onSync={() => scheduleSync(0)} onSignIn={onOpenAuth} />
 
       {menu && (
         <FolderContextMenu
@@ -623,7 +624,7 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
  *   error   → red, PERSISTENT failure text + a loud Retry. Never silently green.
  * "Sync now" is the demoted secondary action (quiet tertiary link): it forces a full
  * reconcile pass — every folder re-checked against Drive, anything missing re-mirrored. */
-function DriveBadge({ drive, onSync }) {
+export function DriveBadge({ drive, onSync, onSignIn }) {
   // Ticking clock for "· N min ago" (60s beat — relTime is minute-grained).
   const [, bump] = useState(0);
   useEffect(() => {
@@ -641,7 +642,13 @@ function DriveBadge({ drive, onSync }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12, color, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span>{glyph}</span>
       <span style={{ flex: 1, minWidth: 0, lineHeight: 1.4 }}>{label}</span>
-      {drive.state !== "syncing" && (
+      {drive.state === "error" && drive.signIn && onSignIn ? (
+        // NEW-1 (2026-11-10): the failure IS the sign-in, so the action is the app's sign-in — not a Retry that fails the same way.
+        <button onClick={onSignIn} data-testid="library-drive-signin"
+          style={{ flex: "none", border: "none", background: "none", cursor: "pointer", font: "inherit", color: "var(--danger-text)", fontWeight: 700, textDecoration: "underline" }}>
+          Sign in
+        </button>
+      ) : drive.state !== "syncing" && (
         <button onClick={onSync}
           title="Force a full re-check: verifies every folder against Google Drive and re-mirrors anything missing"
           style={{ flex: "none", border: "none", background: "none", cursor: "pointer", font: "inherit",

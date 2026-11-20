@@ -56,7 +56,7 @@ async function loadPlan(page) {
      the pristine plan back on `page.reload()` — and the reload assertions below (does the edit
      actually persist?) would then be testing the seed rather than the app. */
   await page.addInitScript(([id, rec]) => {
-    if (!localStorage.getItem("planarfit:sites:v1"))
+    if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1"))
       localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [id]: rec }));
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [SITE_ID, site]);
@@ -90,7 +90,7 @@ const answerAtChip = async (page) => {
 };
 
 const savedParcel = (page) => page.evaluate((id) => {
-  const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return ((all[id] || {}).parcels || [])[0] || null;
 }, SITE_ID);
 

@@ -17,7 +17,7 @@ const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAVUlEQVR42u3OMQ0
 
 const results = [];
 const check = (n, p, d = "") => { results.push({ n, p }); console.log(`  ${p ? "✅ PASS" : "❌ FAIL"} — ${n}${d ? "  · " + d : ""}`); };
-const ulRec = (page) => page.evaluate((k) => { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); const s = Object.values(m)[0]; const u = s && s.underlay; return u ? { hasSrc: typeof u.src === "string" && u.src.startsWith("data:"), idbKey: u.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
+const ulRec = (page) => page.evaluate((k) => { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); const s = Object.values(m)[0]; const u = s && s.underlay; return u ? { hasSrc: typeof u.src === "string" && u.src.startsWith("data:"), idbKey: u.idbKey || null } : null; } catch (_) { return null; } }, SITES_KEY);
 const ulImgs = (page) => page.evaluate(() => Array.from(document.querySelectorAll("image")).filter((im) => { const h = im.getAttribute("href") || im.getAttribute("xlink:href") || ""; return h.startsWith("data:"); }).length);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -48,7 +48,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const siteId = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
 // Open the "Aerial" panel so its file input mounts, then drop an aerial underlay image.

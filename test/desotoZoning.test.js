@@ -65,10 +65,9 @@ describe("ordinanceRef — a link only when it is a real http(s) URL", () => {
 
 describe("zoningRows — labelled by the jurisdiction the SITE falls in, never by the layer", () => {
   const props = { ZONE: "M-1", PREV_ZONE: "A-R", CASE_NO: "RZN-26-0003", DATE_APPROVED: Date.UTC(2026, 7, 18, 12), ORDINANCE: "https://library.municode.com/ms/olive_branch/codes/code_of_ordinances?nodeId=COOR_APXAZOOR", NAME: "Hacks Cross Logistics" };
-  it("shows zone, jurisdiction, previous zone, case, approval date, ordinance link and name", () => {
+  it("shows zone, previous zone, case, approval date, ordinance link and name", () => {
     expect(zoningRows(props, "Olive Branch")).toEqual([
       { label: "Zone", text: "M-1 · Light Industrial" },
-      { label: "Jurisdiction", text: "Olive Branch" },
       { label: "Previously", text: "A-R" },
       { label: "Case", text: "RZN-26-0003" },
       { label: "Approved", text: "Aug 18, 2026" },
@@ -77,14 +76,19 @@ describe("zoningRows — labelled by the jurisdiction the SITE falls in, never b
     ]);
   });
   it("the same polygon outside every city reads Unincorporated DeSoto County — the label comes from the site, not the layer", () => {
-    expect(zoningRows({ ZONE: "A-R" }, "Unincorporated DeSoto County")[1]).toEqual({ label: "Jurisdiction", text: "Unincorporated DeSoto County" });
+    // the place is named ONCE, in the card title (constraint #50) — never a second time as a row, never a suffix on the district name
+    expect(zoningTitle("Unincorporated DeSoto County")).toBe("Zoning · Unincorporated DeSoto County");
+    const rows = zoningRows({ ZONE: "A-R" }, "Unincorporated DeSoto County");
+    expect(rows.map((r) => r.label)).toEqual(["Zone"]);
+    expect(rows[0].text).not.toMatch(/Unincorporated|\(/);
   });
   it("while the city limits are still loading it says so rather than guessing", () => {
     expect(zoningRows({ ZONE: "C-2" }, null)[1].text).toMatch(/Checking/);
+    expect(zoningRows({ ZONE: "C-2" }, null)[1].label).toBe("Jurisdiction");
   });
   it("omits what is empty — no Case, Approved or Ordinance rows for a bare record", () => {
     const labels = zoningRows({ ZONE: "R-1", CASE_NO: null, DATE_APPROVED: null, ORDINANCE: "" }, "Southaven").map((r) => r.label);
-    expect(labels).toEqual(["Zone", "Jurisdiction"]);
+    expect(labels).toEqual(["Zone"]);
   });
   it("the card title names the jurisdiction, not the layer", () => {
     expect(zoningTitle("Olive Branch")).toBe("Zoning · Olive Branch");

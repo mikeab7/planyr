@@ -111,7 +111,8 @@ export function isHidden(hidden, key) {
 
 /** Is this element hidden — by its own type's row? */
 export function elHidden(hidden, el) {
-  return !!el && isHidden(hidden, elKey(el.type));
+  // A drive-in ramp is part of its building (NEW-1, 2026-10-30): it has no View row of its own and goes with the Buildings row.
+  return !!el && isHidden(hidden, elKey(el.type === "driveInRamp" ? "building" : el.type));
 }
 
 /**

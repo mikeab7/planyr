@@ -35,7 +35,7 @@ const check = (name, ok, extra = "") => { console.log(`  ${ok ? "✓" : "✗"} $
 
 async function run(siteId, rowText, urlNeedle) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-california-lines");
   const seen = [];
@@ -90,7 +90,7 @@ for (const [row, needle, label] of [["County boundaries (California)", "Californ
  * known-good control (its badge must not say California). */
 async function badge(siteId) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-california-lines");
   await page.goto(BASE, { waitUntil: "load" });

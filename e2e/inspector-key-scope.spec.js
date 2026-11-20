@@ -26,7 +26,7 @@ import { openModule, panelPlus } from "./helpers.js";
 const canvas = (p) => p.getByTestId("planner-canvas");
 
 const readModel = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   const els = site.els || [];
   return { total: els.length, buildings: els.filter((e) => e.type === "building" && !e.attachedTo).length };
@@ -111,7 +111,7 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
     const before = await page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       const b = (s.els || []).find((e) => e.type === "building" && !e.attachedTo);
       return { cx: b.cx, cy: b.cy };
@@ -119,7 +119,7 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     await page.keyboard.press("ArrowLeft");
     await page.waitForTimeout(400);
     const after = await page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       const b = (s.els || []).find((e) => e.type === "building" && !e.attachedTo);
       return { cx: b.cx, cy: b.cy };
@@ -178,7 +178,7 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     }
     await page.keyboard.press("Enter");
     await expect.poll(() => page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = map[Object.keys(map)[0]] || {};
       return (s.markups || []).filter((m) => m.kind === "polygon").length;
     })).toBe(1);

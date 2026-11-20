@@ -48,7 +48,7 @@ async function load(page) {
 }
 
 const stored = (page, id) => page.evaluate((i) => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const e = ((map[Object.keys(map)[0]] || {}).els || []).find((x) => x.id === i);
   return e ? (e.points ? { cx: e.points[0].x, cy: e.points[0].y } : { cx: e.cx, cy: e.cy }) : null;
 }, id);

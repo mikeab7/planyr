@@ -42,12 +42,12 @@
 import { reportClientEvent, SUPPRESSED_AUTOMATED } from "./clientErrors.js";
 import { readScene } from "./perfScene.js";
 import { perfEditCount } from "./perfSampling.js";
-import { bindPerfRecorder, bindPerfDelivery, bindPerfRefusal, perfContext } from "./perfRecorderHandle.js";
+import { bindPerfRecorder, bindPerfDelivery, bindPerfRefusal, bindPerfRecent, perfContext } from "./perfRecorderHandle.js";
 import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, feedBootTask, feedFreeze, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
+import { createTrigger, feedFrame, feedBootTask, feedFreeze, feedSlowRun, inSlowRun, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, encodeSupplements, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -106,7 +106,7 @@ let _prevFrameT = 0;                 // 0 = next frame starts a new run, so its 
 let _rafId = 0, _timer = 0, _tick = 0;
 let _activeMs = 0;                   // cumulative interacting time
 let _lastScene = {};
-let _taskTotal = 0, _taskCount = 0, _taskMax = 0;
+let _taskTotal = 0, _taskCount = 0, _taskMax = 0, _taskBlock = 0;
 let _sent = 0, _manual = 0;
 let _manualAt = [], _sentAt = [];     // NEW-4 — when each manual / any capture was taken, for the rolling budgets (pruned on use)
 let _refusal = null;                  // NEW-4 — why the last capture() was refused: { reason: "budget", retryInMs } or null
@@ -151,6 +151,8 @@ function onFrame(t) {
   pushFrame(_frames, t, dt);
   /* B2319137 ×2 — a frame that took a second or more to come while the page stayed visible is a FREEZE, which `feedFrame`
    * would drop as "not a frame". `_hiddenAt` is a number, so this stays allocation-free; the fire branch is the rare one. */
+  /* B2319137 ×4 — a RUN of slow frames (1 fps for seconds) is a freeze too, though no single frame reaches `freezeMs` */
+  if (!(_hiddenAt >= prev) && feedSlowRun(_trig, t, dt)) return true;
   if (dt >= _trig.cfg.freezeMs && !(_hiddenAt >= prev)) return feedFreeze(_trig, t, dt, "frame");
   return feedFrame(_trig, t, dt);
 }
@@ -162,6 +164,8 @@ function loop() {
   let fire = false;
   try { fire = onFrame(t); } catch (_) { /* a recorder fault must never break the frame */ }
   if (fire) { try { capture("auto"); } catch (_) { /* ignore */ } }
+  // B2319137 ×4 — keep watching through a slow run (a struggling page is the one that must not go unrecorded), capped
+  if (inSlowRun(_trig)) _activeUntil = Math.max(_activeUntil, t + _cfg.idleStopMs);
   if (t < _activeUntil) schedule();
   else { _running = false; _prevFrameT = 0; }
 }
@@ -276,9 +280,13 @@ function heapMB() {
  * NAMES the script responsible; `longtask` as the fallback, which can only say "something blocked
  * the main thread for N ms". The owner's browser is Chrome, so the good one is the one that will
  * actually run — but a recorder that reports nothing on Safari would be a silent hole. */
+/* NEW-1 (2026-11-01) — below this much blocking time a long animation frame is a wait on drawing, not on the page's code
+ * (the LoAF "long" bar itself is 50 ms of blocking). Exported for the test. */
+export const RENDER_WAIT_BLOCK_MS = 50;
+
 function observeTasks() {
-  const record = (t, dur, blk, name) => {
-    _taskTotal += dur; _taskCount++;
+  const record = (t, dur, blk, name, isLoaf) => {
+    _taskTotal += dur; _taskCount++; _taskBlock += blk;
     if (dur > _taskMax) _taskMax = dur;
     pushTask(_tasks, t, dur, blk, internString(_strings, name));
     /* NEW-3 — the BOOT-WINDOW judgment. This observer is the one piece of the recorder that is
@@ -287,7 +295,11 @@ function observeTasks() {
      * header for the full reasoning. */
     try { if (feedBootTask(_trig, t, dur)) capture("auto"); } catch (_) { /* a recorder fault must never break the frame */ }
     /* B2319137 ×2 — one entry a second or longer is a freeze at ANY time, not only during boot (perfTrigger.feedFreeze). */
-    try { if (feedFreeze(_trig, t, dur, "task")) capture("auto"); } catch (_) { /* ignore */ }
+    /* NEW-1 (2026-11-01) — a LoAF entry whose main thread was barely blocked is a frame that waited on DRAWING, not on code:
+     * judged "render", never "task" (perfTrigger.fireFreeze). The bare `longtask` fallback carries no blocking figure and
+     * every entry there IS a task, so it stays "task". */
+    const via = isLoaf && blk < RENDER_WAIT_BLOCK_MS ? "render" : "task";
+    try { if (feedFreeze(_trig, t, dur, via)) capture("auto"); } catch (_) { /* ignore */ }
   };
   let loaf = false;
   try {
@@ -298,7 +310,7 @@ function observeTasks() {
           const top = (e.scripts || []).slice().sort((a, b) => b.duration - a.duration)[0];
           if (top) name = attributionLabel(top);
         } catch (_) { /* attribution is optional; the timing is not */ }
-        record(e.startTime, e.duration, e.blockingDuration || 0, name);
+        record(e.startTime, e.duration, e.blockingDuration || 0, name, true);
       }
     }).observe({ type: "long-animation-frame", buffered: true });
     loaf = true;
@@ -306,7 +318,7 @@ function observeTasks() {
   if (loaf) return;
   try {
     new _win.PerformanceObserver((list) => {
-      for (const e of list.getEntries()) record(e.startTime, e.duration, 0, (e.attribution && e.attribution[0] && e.attribution[0].name) || "");
+      for (const e of list.getEntries()) record(e.startTime, e.duration, 0, (e.attribution && e.attribution[0] && e.attribution[0].name) || "", false);
     }).observe({ type: "longtask", buffered: true });
   } catch (_) { /* Safari has neither; the rest of the recorder still works */ }
 }
@@ -315,6 +327,25 @@ function observeTasks() {
 
 /** Take a capture. `reason` is "auto" (the trigger fired) or "manual" (he pressed the control).
  *  Returns true if one was taken. Never throws. */
+/* NEW-1 (2026-11-01) — a READ-ONLY summary of the last `windowMs` of the recorder's own rings, for the planner's
+ * `window.__plannerPerf()` diagnostic. It reads what the always-on recorder already keeps — it starts no loop and requests no
+ * frame (a rAF counter of its own would itself keep the page drawing and change what it measures). Frames are the INTERACTING
+ * frames the recorder's input-gated loop saw; long frames are every LoAF/long-task entry, with blocking split out. Never throws. */
+export function perfRecentWindow(windowMs = 60_000) {
+  try {
+    if (!_installed) return null;
+    const t = now(), since = t - windowMs;
+    const fi = ringOrderSince(_frames, since);
+    const d = fi.map((i) => _frames.dt[i]).sort((a, b) => a - b);
+    const q = (p) => (d.length ? Math.round(d[Math.min(d.length - 1, Math.floor(p * d.length))]) : null);
+    const ti = ringOrderSince(_tasks, since);
+    let ms = 0, blk = 0, max = 0;
+    for (const i of ti) { ms += _tasks.dur[i]; blk += _tasks.blk[i]; if (_tasks.dur[i] > max) max = _tasks.dur[i]; }
+    return { windowMs, frames: d.length, p50Ms: q(0.5), p95Ms: q(0.95), maxFrameMs: d.length ? Math.round(d[d.length - 1]) : null,
+      longFrames: ti.length, longFrameMs: Math.round(ms), blockingMs: Math.round(blk), maxLongFrameMs: Math.round(max) };
+  } catch (_) { return null; }
+}
+
 export function capture(reason) {
   try {
     if (!_installed) return false;
@@ -413,6 +444,7 @@ export function capture(reason) {
       longTasks: _taskCount,
       longTaskMs: _taskTotal,
       longTaskMaxMs: _taskMax,
+      longTaskBlockMs: Math.round(_taskBlock),
       heapMB: heapMB(),
       domNodes: scene.documentNodes,
       canvasNodes: scene.canvasNodes,
@@ -486,7 +518,7 @@ export function capture(reason) {
      * just now") the one most able to vanish without trace, and it would have taken a week of his
      * normal use producing nothing before anyone noticed. The record now carries what actually
      * happened, and `perfCaptureDelivery()` hands the promise to the UI so the ✓ means DELIVERED. */
-    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null };
+    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null, freezeVia: cap.freezeVia || null, freezeMs: cap.freezeMs ?? null };
     _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
 
@@ -588,6 +620,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
   } catch (_) { /* ignore */ }
 
   bindPerfRecorder((reason) => capture(reason));
+  bindPerfRecent(perfRecentWindow);
   bindPerfRefusal(() => _refusal);
 
   /* Live handles for a console read and for the harness. `__benchFrame` runs the REAL hot path
@@ -633,9 +666,10 @@ export function __resetPerfRecorder(win) {
   _installed = false; _win = null; _timer = 0; _rafId = 0; _tick = 0;
   _frames = _tasks = _counters = _strings = _trig = _scratch = null;
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
-  _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
+  _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0; _taskBlock = 0;
   _sent = 0; _manual = 0; _manualAt = []; _sentAt = []; _refusal = null; _captures = []; _gapMarks = []; _selfUs = 0; _envMarks = []; _lastEnvSize = ""; _lastTickAt = 0; _hiddenAt = -1;
   _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
+  bindPerfRecent(null);
   bindPerfDelivery(null);
 }

@@ -87,7 +87,7 @@ finally {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    for (const k of ["planarfit:sites:cloud:" + uid, "planarfit:sites:v1"]) { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {} }
+    for (const k of ["planarfit:sites:cloud:" + uid, "planarfit:sites:v1"]) { try { const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {} }
     return { cloudRemaining: (q.data || []).length, err: q.error && q.error.message };
   }, ID).catch((e) => String(e));
   console.log("CLEANUP", JSON.stringify(gone));

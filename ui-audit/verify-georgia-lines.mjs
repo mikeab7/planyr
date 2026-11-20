@@ -35,7 +35,7 @@ const check = (name, ok, extra = "") => { console.log(`  ${ok ? "✓" : "✗"} $
 
 async function run(siteId, rowText, urlNeedle) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(SITES)}));localStorage.setItem('planarfit:currentSite:v1','${siteId}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-georgia-lines");
   const seen = [];

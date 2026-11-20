@@ -51,7 +51,7 @@ async function pickRoad() {
   await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 }
 const roads = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts))
     .map((e) => ({ id: e.id, cls: e.roadClass, w: e.travelW, n: e.pts.length,

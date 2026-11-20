@@ -26,7 +26,10 @@ export const FRAME_WAIT_MS = 8;
 /* ONE clock for every job: several grading solvers run at once (surface, FFE search, fixes, contours), and a per-job clock
  * would let each take its full turn back to back between two frames. */
 let lastFrameAt = null;
-export function runChunked(gen, { sliceMs = 10, frameGapMs = FRAME_GAP_MS, frameWaitMs = FRAME_WAIT_MS, isStale = null, now = () => (typeof performance !== "undefined" ? performance.now() : Date.now()) } = {}) {
+/* `onProgress(frac)` (NEW-1, the "Regrading…" banner): a generator may `yield` a NUMBER in [0,1] — how far through its whole job it is —
+ * instead of a bare `yield`. The driver hands it on; nothing else about the run changes (a bare yield, the only kind there was, is
+ * ignored here, and `drainSteps` ignores every yielded value, so a build drained synchronously is byte-identical). */
+export function runChunked(gen, { sliceMs = 10, frameGapMs = FRAME_GAP_MS, frameWaitMs = FRAME_WAIT_MS, isStale = null, onProgress = null, now = () => (typeof performance !== "undefined" ? performance.now() : Date.now()) } = {}) {
   const tick = () => new Promise((res) => {
     if (typeof MessageChannel === "undefined") { setTimeout(res, 0); return; }
     const mc = new MessageChannel(); mc.port1.onmessage = () => { mc.port1.close(); res(); }; mc.port2.postMessage(0);
@@ -53,6 +56,7 @@ export function runChunked(gen, { sliceMs = 10, frameGapMs = FRAME_GAP_MS, frame
         if (isStale && isStale()) return { stale: true };
       }
       r = gen.next();
+      if (onProgress && !r.done && typeof r.value === "number") onProgress(r.value);
     }
     return r.value;
   })();

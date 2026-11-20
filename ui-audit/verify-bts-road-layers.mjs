@@ -24,7 +24,7 @@ async function open(site) {
   if (PROXY) launch.args.push("--proxy-server=" + PROXY, "--proxy-bypass-list=localhost;127.0.0.1");
   const browser = await chromium.launch(launch);
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  await ctx.addInitScript(`(()=>{try{if(!localStorage.getItem('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ [site.id]: site })}));localStorage.setItem('planarfit:currentSite:v1','${site.id}');}}catch(e){}})()`);
+  await ctx.addInitScript(`(()=>{try{if(!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')){localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify({ [site.id]: site })}));localStorage.setItem('planarfit:currentSite:v1','${site.id}');}}catch(e){}})()`);
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-bts-road-layers");
   const reqs = [];

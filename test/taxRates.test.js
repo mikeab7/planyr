@@ -32,6 +32,15 @@ describe("taxRates", () => {
   it("coverage table is honest and complete", () => {
     for (const k of ["harris", "fortbend", "montgomery", "galveston"]) expect(TAX_COVERAGE[k].reason.length).toBeGreaterThan(10);
   });
+  it("NEW-2: Chambers says exactly why it is hidden (CCAD layer has no unit field; Location_Code has no legend)", () => {
+    expect(TAX_COVERAGE.chambers.covered).toBe(false);
+    expect(TAX_COVERAGE.chambers.reason).toBe("CCAD layer readable but carries no taxing-unit field; Location_Code (83 codes) has no published legend — hidden.");
+  });
+  it("NEW-1: Fort Bend renders from /api/taxunits — the 'legend unreachable' blocker is gone", () => {
+    expect(TAX_COVERAGE.fortbend.server).toBe(true);
+    expect(TAX_COVERAGE.fortbend.reason).not.toMatch(/blocked|guess/i);
+    expect(TAX_COVERAGE.fortbend.reason).toMatch(/taxunits/);
+  });
   it("every shipped data file has unit names, year, source", () => {
     const dir = path.resolve(__dirname, "../src/workspaces/site-planner/lib/data");
     const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^taxRates-.*\.json$/.test(f)) : [];

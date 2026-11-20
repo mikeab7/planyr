@@ -22,7 +22,7 @@ const PTS = [[300, 220], [520, 240], [560, 430], [360, 470], [250, 360]];
 // Read the logged-out site model's markups straight from localStorage (on-disk truth).
 function readMarkups(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const markups = site.markups || [];
     const polys = markups.filter((m) => m.kind === "polygon" || m.kind === "polyline");
@@ -47,7 +47,7 @@ const panel = (p) => p.getByTestId("property-panel");
 
 function buildingCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).filter((e) => e.type === "building").length;
   });
@@ -55,7 +55,7 @@ function buildingCount(page) {
 
 function calloutCount(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.callouts || []).length;
   });
@@ -86,7 +86,7 @@ async function openProperties(page, cx, cy) {
 // Read the first parcel's raw boundary weight straight from localStorage (on-disk truth). Undefined until something sets it.
 function rawParcelWeight(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const p = (site.parcels || [])[0];
     return p ? p.weight : undefined;
@@ -111,12 +111,12 @@ async function seedParcelPage(page) {
   for (const [x, y] of pts) { await page.mouse.click(box.x + x, box.y + y); await page.waitForTimeout(60); }
   await page.mouse.click(box.x + pts[0][0], box.y + pts[0][1]);
   await expect.poll(async () => page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     return ((map[Object.keys(map)[0]] || {}).parcels || []).length;
   })).toBeGreaterThanOrEqual(1);
   await page.keyboard.press("Escape");
   const id = await page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     return ((map[Object.keys(map)[0]] || {}).parcels || [])[0].id;
   });
   const back = page.getByRole("button", { name: /All parcels/ });

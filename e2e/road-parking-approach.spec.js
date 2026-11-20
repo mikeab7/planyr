@@ -57,7 +57,7 @@ async function drawRoad(page, pts) {
   await page.keyboard.press("Escape");
 }
 const planEls = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   return (map[Object.keys(map)[0]] || {}).els || [];
 });
 const clipOf = async (page, id) => ((await roadNetwork(page))?.stallClips || []).find((c) => c.id === id) || null;

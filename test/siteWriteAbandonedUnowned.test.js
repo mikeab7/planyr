@@ -47,6 +47,7 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
 }));
 
 import { cloudUpsert, _siteVersions, clearSiteVersions } from "../src/workspaces/site-planner/lib/cloudSync.js";
+import { sitesObject } from "./helpers/sitesView.js";
 
 const model = (over = {}) => ({ id: "ghost1", name: "Concept A", updatedAt: 1000, settings: {}, ...over });
 const CLOUD_KEY = "planarfit:sites:cloud:uOwner";
@@ -83,7 +84,7 @@ describe("NEW-1 — a write against a row this account never owned retires inste
     expect(r).toEqual({ ok: false, conflict: true, abandoned: true });
     expect(_siteVersions.ghost1).toBeUndefined();
 
-    const cache = JSON.parse(localStorage.getItem(CLOUD_KEY));
+    const cache = sitesObject(CLOUD_KEY);
     expect(cache).toEqual({ other: { id: "other" } }); // the ghost is gone; an unrelated entry is untouched
   });
 
@@ -101,7 +102,7 @@ describe("NEW-1 — a write against a row this account never owned retires inste
     expect(r.abandoned).toBeFalsy();
     expect(r.unresolved).toBe(true);
     expect(_siteVersions.ghost1).toBe(5); // reconcile refreshed it — this id is still tracked, not retired
-    const cache = JSON.parse(localStorage.getItem(CLOUD_KEY));
+    const cache = sitesObject(CLOUD_KEY);
     expect(cache).toEqual({ ghost1: model() }); // never dropped — this account DOES own it
   });
 

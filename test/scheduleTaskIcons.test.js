@@ -1,0 +1,478 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// SCHEDULE › TASK ICONS (NEW-1, owner-approved design 2026-11-06). The pure rules + the wiring, run against the REAL files:
+// public/sequence/taskIcons.js is evaluated (not mirrored) and the page source is sliced for the few functions that must carry
+// icons through a copy. The rendered behaviour (alignment, picker, summary, fallback) is ui-audit/verify-schedule-task-icons.mjs.
+const root = (p) => fileURLToPath(new URL("../" + p, import.meta.url));
+const libSrc = readFileSync(root("public/sequence/taskIcons.js"), "utf8");
+const page = readFileSync(root("public/sequence/index.html"), "utf8");
+
+const TI = (() => { const g = {}; new Function("globalThis", "window", libSrc.replace(/\}\)\(typeof window[^\n]*\n?$/, "})(globalThis);\n"))(g, undefined); return g.PlanyrTaskIcons; })();
+
+const extractFn = (signature) => {
+  const start = page.indexOf(signature);
+  if (start === -1) throw new Error(`"${signature}" not found in public/sequence/index.html`);
+  let depth = 0, i = start, seen = false;
+  for (; i < page.length; i++) {
+    if (page[i] === "{") { depth++; seen = true; }
+    else if (page[i] === "}") { depth--; if (seen && depth === 0) { i++; break; } }
+  }
+  return page.slice(start, i);
+};
+
+const ids = (groups) => groups.flatMap(g => g.items.map(i => i.id));
+
+describe("the icon library", () => {
+  it("has the eight categories in the owner's order", () => {
+    expect(TI.CATEGORIES.map(c => c.title)).toEqual(["Acquisition and diligence", "Entitlements and permits", "Design", "Utilities", "Sitework", "Building", "Leasing and finance", "Status and milestones"]);
+  });
+  it("offers 78 distinct icons: 60 emoji + the 16 coloured c: drawings + 2 built-in line-art svg: (Plat, TIA)", () => {
+    expect(TI.ALL_IDS.length).toBe(78);
+    expect(TI.EMOJI_IDS.length).toBe(60);
+    expect(TI.ALL_IDS.filter(TI.isCustom).length).toBe(16);
+    expect(TI.ALL_IDS.filter(TI.isBuiltinSvg)).toEqual(["svg:tia", "svg:plat"]);
+  });
+  it("every custom id has inline SVG markup, and nothing in CUSTOM_SVG is unused", () => {
+    const used = new Set(TI.ALL_IDS.filter(TI.isCustom).map(TI.customName));
+    for (const n of used) expect(TI.CUSTOM_SVG[n], "c:" + n).toBeTruthy();
+    expect([...Object.keys(TI.CUSTOM_SVG)].sort()).toEqual([...used].sort());
+  });
+  it("reproduces the owner's markup as given (spot-checked verbatim; the Permit has its own block below)", () => {
+    expect(TI.CUSTOM_SVG.manhole).toBe('<circle cx="18" cy="18" r="16" fill="#66757F"/><circle cx="18" cy="18" r="13" fill="#8899A6"/><path d="M8 13h20M6 18h24M8 23h20M13 7v22M18 5v26M23 7v22" stroke="#66757F" stroke-width="1.5"/>');
+    expect(TI.CUSTOM_SVG.joist).toBe('<path d="M1 11h34M1 25h34" stroke="#66757F" stroke-width="3"/><path d="M3 25l4.5-14 4.5 14 4.5-14 4.5 14 4.5-14 4.5 14 4.5-14" stroke="#8899A6" stroke-width="2" fill="none"/>');
+    for (const [n, m] of Object.entries(TI.CUSTOM_SVG)) {
+      const open = (m.match(/<(rect|path|circle|ellipse|g)\b/g) || []).length, closedG = (m.match(/<\/g>/g) || []).length, openG = (m.match(/<g\b/g) || []).length;
+      expect(openG, n + " <g> balanced").toBe(closedG);
+      expect(open, n).toBeGreaterThan(1);
+    }
+  });
+  it("the three ids that sit in two categories appear once in EACH, never twice in one", () => {
+    for (const dupe of ["c:pond", "c:joist", "🏦"]) {
+      const cats = TI.CATEGORIES.filter(c => c.items.some(i => i[0] === dupe));
+      expect(cats.length, dupe).toBe(2);
+      for (const c of cats) expect(c.items.filter(i => i[0] === dupe).length).toBe(1);
+    }
+  });
+  it("the owner's icon decisions hold: permit ≠ contract scroll, TIA is the cars-on-a-road drawing, sewer is the manhole, roof is the flat roof, civil ≠ design", () => {
+    const where = (id) => TI.CATEGORIES.find(c => c.items.some(i => i[0] === id)).items.find(i => i[0] === id);
+    expect(where("c:permit")[2]).toMatch(/permit/);
+    expect(where("📜")[2]).toMatch(/contract/);
+    expect(where("📜")[2]).not.toMatch(/permit/);
+    expect(where("svg:tia")[2]).toMatch(/TIA/);
+    expect(where("c:manhole")[2]).toMatch(/sewer/);
+    expect(where("c:dump")[2]).toMatch(/grading/);
+    expect(where("c:roof")[2]).toMatch(/roof/);
+    expect(where("c:civil")[0]).not.toBe(where("📐")[0]);
+  });
+});
+
+describe("the built-in Plat icon (svg:plat, B2671217)", () => {
+  const plat = TI.BUILTIN_SVG.plat;
+  it("is a stored KEY, kept by normalize, and is recognised as a built-in drawing (not an emoji, not a c: id)", () => {
+    expect(TI.isBuiltinSvg("svg:plat")).toBe(true);
+    expect(TI.isBuiltinSvg("c:plat")).toBe(false);
+    expect(TI.isBuiltinSvg("🗺️")).toBe(false);
+    expect(TI.svgName("svg:plat")).toBe("plat");
+    expect(TI.isKnown("svg:plat")).toBe(true);
+    expect(TI.normalizeTaskIcons(["🚦", "svg:plat"])).toEqual(["🚦", "svg:plat"]);
+    expect(TI.normalizeTaskIcons(["svg:from-a-newer-client"])).toEqual(["svg:from-a-newer-client"]);   // kept, just not drawn
+    expect(TI.toggleTaskIcon(["svg:plat"], "🚦")).toEqual(["svg:plat", "🚦"]);
+  });
+  it("is offered once, in Entitlements and permits, labelled Plat, and found by every keyword the owner named", () => {
+    const cats = TI.CATEGORIES.filter(c => c.items.some(i => i[0] === "svg:plat"));
+    expect(cats.map(c => c.key)).toEqual(["ent"]);
+    for (const q of ["plat", "final plat", "mylar", "recordation", "subdivision", "lots"]) expect(ids(TI.searchTaskIcons(q)), q).toContain("svg:plat");
+    expect(ids(TI.searchTaskIcons("zoning"))).not.toContain("svg:plat");
+    expect(TI.iconLabel("svg:plat")).toBe("Plat · drawn for Planyr");
+    expect(TI.EMOJI_IDS).not.toContain("svg:plat");   // no Twemoji file is looked up for it
+  });
+  it("the older c:plat is untouched: still offered, still drawable", () => {
+    expect(TI.ALL_IDS).toContain("c:plat");
+    expect(TI.CUSTOM_SVG.plat).toBeTruthy();
+  });
+  it("carries the approved artwork exactly (24x24, frame, street outline, lot lines)", () => {
+    expect(plat.viewBox).toBe("0 0 24 24");
+    expect(plat.markup).toContain('<path d="M2.5 10.7H10.75A3.5 3.5 0 1 1 10.75 13.3H2.5" stroke-width="1.3"/>');
+    expect(plat.markup).toContain('<path d="M7 2.5V10.7M12 2.5V9.13M7 13.3V21.5M12 14.87V21.5M16.47 9.53L21.5 4.5M17.5 12H21.5M16.47 14.47L21.5 19.5" stroke-width="1"/>');
+    expect(plat.markup).toContain('<rect x="2.5" y="2.5" width="19" height="19" rx="1.5" stroke-width="1.4"/>');
+  });
+  it("the street is a TRUE cut-out: one shading outline that walks round the street; no mask, no id, no fixed colour", () => {
+    expect(plat.markup).not.toMatch(/<mask|\sid=|url\(|#[0-9a-fA-F]{3,8}\b|rgb|white|black/);
+    expect(plat.markup).toMatch(/currentColor/);
+    const shade = plat.markup.match(/<path d="([^"]+)" fill="currentColor" fill-opacity="\.2" stroke="none"\/>/);
+    expect(shade, "shading path").toBeTruthy();
+    expect((shade[1].match(/M/g) || []).length).toBe(1);                 // ONE outline (not a square with a second shape on it)
+    expect(shade[1]).toContain("H10.75A3.5 3.5 0 1 0 10.75 10.7H2.5");   // it goes round the cul-de-sac bulb, the long way
+    expect(plat.markup).not.toMatch(/<rect[^>]*fill-opacity/);           // the old "full shaded square" form is gone
+  });
+});
+
+describe("the built-in TIA icon (svg:tia — cars on a road in colour, replaces the traffic light)", () => {
+  const tia = TI.BUILTIN_SVG.tia;
+  const cars = [...tia.markup.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="7\.5" height="4\.2" rx="1\.4" fill="(#[0-9a-f]{6})" stroke="#2f3a6b" stroke-width="0\.7"\/><rect x="([\d.]+)" y="([\d.]+)" width="1\.4" height="2\.6" rx="0\.4" fill="#e3f3fb" stroke="none"\/>/g)];
+  it("is a stored KEY, drawn (not an emoji), offered once in Entitlements and permits with the old label and keywords", () => {
+    expect(TI.isBuiltinSvg("svg:tia")).toBe(true);
+    expect(TI.isKnown("svg:tia")).toBe(true);
+    expect(TI.EMOJI_IDS).not.toContain("svg:tia");
+    const cats = TI.CATEGORIES.filter(c => c.items.some(i => i[0] === "svg:tia"));
+    expect(cats.map(c => c.key)).toEqual(["ent"]);
+    expect(cats[0].items.find(i => i[0] === "svg:tia")).toEqual(["svg:tia", "Traffic impact analysis (TIA)", "traffic TIA impact analysis"]);
+    expect(TI.iconLabel("svg:tia")).toBe("Traffic impact analysis (TIA) · drawn for Planyr");
+    expect(TI.normalizeTaskIcons(["svg:tia", "svg:plat"])).toEqual(["svg:tia", "svg:plat"]);
+  });
+  it("is found by tia and traffic (and not by unrelated words)", () => {
+    for (const q of ["tia", "traffic", "impact", "analysis", "traffic impact"]) expect(ids(TI.searchTaskIcons(q)), q).toContain("svg:tia");
+    expect(ids(TI.searchTaskIcons("zoning"))).not.toContain("svg:tia");
+  });
+  it("🚦 left the picker but is not erased: a task that saved it keeps it (kept by normalize, still labelled, file still bundled)", () => {
+    expect(TI.ALL_IDS).not.toContain("🚦");
+    expect(ids(TI.searchTaskIcons("traffic"))).not.toContain("🚦");
+    expect(TI.LEGACY_EMOJI).toEqual(["🚦"]);
+    expect(TI.normalizeTaskIcons(["🚦", "svg:plat"])).toEqual(["🚦", "svg:plat"]);
+    expect(TI.iconLabel("🚦")).toBe("Traffic impact analysis (TIA)");
+    expect(existsSync(root("public/sequence/vendor/twemoji/" + TI.twemojiFile("🚦") + ".svg"))).toBe(true);
+  });
+  it("carries the approved artwork exactly (24x24, navy road edges, dashed yellow centre line)", () => {
+    expect(tia.viewBox).toBe("0 0 24 24");
+    expect(tia.markup).toContain('<path d="M2 3.5h20M2 20.5h20" fill="none" stroke="#2f3a6b" stroke-width="1.4" stroke-linecap="round"/>');
+    expect(tia.markup).toContain('<path d="M2 12h20" fill="none" stroke="#f2b632" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="2.5 3"/>');
+  });
+  it("draws three cars, each 7.5 x 4.2 (rx 1.4) with a navy 0.7 outline, in the approved places and body colours, each with a 1.4 x 2.6 (rx 0.4) #e3f3fb windshield inset 0.8 from the car's top", () => {
+    expect(cars.length).toBe(3);
+    // [x, y, body, windshield x] — straight from the brief: red, blue (front on the right), green in the opposite lane (front on the left)
+    const spec = [[1.8, 5.6, "#d4506c", 6.7], [10.5, 5.6, "#3f7fe0", 15.4], [13.5, 14.2, "#3fa36b", 14.7]];
+    spec.forEach(([x, y, body, wx], i) => {
+      const [, cx, cy, cb, wxx, wy] = cars[i];
+      expect([+cx, +cy, cb, +wxx, +(+wy).toFixed(2)], "car " + (i + 1)).toEqual([x, y, body, wx, +(y + 0.8).toFixed(2)]);
+    });
+  });
+  it("front directions: cars 1 and 2 face right (windshield right of centre), car 3 faces left (windshield left of centre)", () => {
+    const centre = [1.8 + 3.75, 10.5 + 3.75, 13.5 + 3.75], ws = [6.7, 15.4, 14.7];
+    expect(ws[0] + 0.7 > centre[0]).toBe(true);
+    expect(ws[1] + 0.7 > centre[1]).toBe(true);
+    expect(ws[2] + 0.7 < centre[2]).toBe(true);
+  });
+  it("FIXED colours like the Permit: the same navy / blue / red / light palette, no currentColor, no theme variable, no white (nothing can render as a white box)", () => {
+    expect(tia.fixedColour).toBe(true);
+    expect(tia.markup).not.toMatch(/currentColor|var\(--|#fff\b|#ffffff|white|black|rgb/i);
+    const used = new Set(tia.markup.match(/#[0-9a-f]{6}\b/gi));
+    expect([...used].sort()).toEqual(["#2f3a6b", "#3f7fe0", "#3fa36b", "#d4506c", "#e3f3fb", "#f2b632"]);
+    for (const c of ["#2f3a6b", "#3f7fe0", "#d4506c", "#e3f3fb"]) expect(TI.CUSTOM_SVG.permit, "permit palette " + c).toContain(c);
+  });
+  it("EVERY element names its own fill and stroke, so the root's fill=none stroke=currentColor can never leak through (a windshield with no stroke=none would get a text-coloured outline)", () => {
+    const els = tia.markup.match(/<(path|rect)\b[^>]*>/g);
+    expect(els.length).toBe(8);   // 2 road paths + 3 x (car + windshield)
+    for (const e of els) { expect(e, e).toMatch(/\bfill="/); expect(e, e).toMatch(/\bstroke="/); }
+  });
+  it("no mask, clipPath or id in it, so many TIA icons on one page cannot collide (and no __UID__ seam is needed); the other svg: drawing is still currentColor line art", () => {
+    expect(tia.markup).not.toMatch(/<mask|<clipPath|<defs|\sid=|url\(|__UID__/);
+    expect(tia.markup).not.toMatch(/<(circle|ellipse|polygon|g)\b/);
+    expect(TI.BUILTIN_SVG.plat.fixedColour).toBeUndefined();
+    expect(TI.BUILTIN_SVG.plat.markup).toMatch(/currentColor/);
+  });
+});
+
+describe("the Permit / approval icon (c:permit — colour clipboard + approved seal + rubber stamp)", () => {
+  const m = TI.CUSTOM_SVG.permit;
+  const g = (uid) => TI.customMarkup("permit", uid);
+  it("keeps its stored id, so a task that already uses the permit icon picks the new drawing up; still offered once, in Entitlements and permits", () => {
+    expect(TI.ALL_IDS.filter(id => id === "c:permit").length).toBe(1);
+    const cat = TI.CATEGORIES.find(c => c.key === "ent");
+    expect(cat.items[0][0]).toBe("c:permit");
+    expect(cat.items[0][1]).toBe("Permit / approval");
+    expect(TI.normalizeTaskIcons(["c:permit"])).toEqual(["c:permit"]);
+    expect(TI.isCustom("c:permit")).toBe(true);
+    expect(TI.iconLabel("c:permit")).toBe("Permit / approval · drawn for Planyr");
+  });
+  it("is drawn on a 24x24 board (the other c: drawings stay 36x36)", () => {
+    expect(TI.customViewBox("permit")).toBe("0 0 24 24");
+    expect(TI.customViewBox("plat")).toBe("0 0 36 36");
+    expect(TI.customViewBox("hydrant")).toBe("0 0 36 36");
+  });
+  it("carries the approved artwork exactly: board, clip, two text lines, seal + check, and the four-piece stamp at (18.6, 14.2)", () => {
+    expect(m).toContain('<rect x="3" y="3.5" width="13.5" height="18" rx="1.6" fill="#e3f3fb" stroke="#2f3a6b" stroke-width="1.5"/>');
+    expect(m).toContain('<rect x="6.75" y="2" width="6" height="3.2" rx="1" fill="#3f7fe0" stroke="#2f3a6b" stroke-width="0.8"/>');
+    expect(m).toContain('<path d="M6 7.5h7.5M6 10.5h7.5" stroke="#2f3a6b" stroke-width="1.3" stroke-linecap="round" fill="none"/>');
+    expect(m).toContain('<circle cx="9.75" cy="16" r="3" fill="#3f7fe0"/>');
+    expect(m).toContain('<path d="M8.4 16l1 1 1.8-2" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>');
+    const stamp = m.match(/<g transform="translate\(18\.6 14\.2\)" fill="#d4506c">(.*?)<\/g>/);
+    expect(stamp, "stamp group").toBeTruthy();
+    expect(stamp[1]).toBe('<ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/>');
+  });
+  it("the gap round the stamp is a TRUE cut-out: a <mask> (white field, the stamp's silhouette in black grown by 1.1) over the clipboard", () => {
+    const mask = m.match(/<mask id="pm-__UID__"[^>]*>(.*?)<\/mask>/);
+    expect(mask, "mask").toBeTruthy();
+    expect(mask[1]).toContain('<rect x="0" y="0" width="24" height="24" fill="#fff"/>');
+    // the black silhouette = the SAME four stamp shapes, same transform, stroked 2.2 (1.1 each side)
+    expect(mask[1]).toContain('<g transform="translate(18.6 14.2)" fill="#000" stroke="#000" stroke-width="2.2" stroke-linejoin="round">');
+    expect(mask[1]).toContain('<ellipse cx="0" cy="0" rx="1.8" ry="1.6"/><path d="M-1 1.2h2l.5 2.1h-3z"/><rect x="-3.7" y="3.1" width="7.4" height="2.3" rx="0.7"/><rect x="-3.7" y="5.9" width="7.4" height="0.9" rx="0.35"/>');
+    expect(m).toContain('<g mask="url(#pm-__UID__)"><rect x="3" y="3.5"');   // the mask wraps the clipboard (board, clip, lines, seal)
+    expect(m.indexOf('<g mask=')).toBeLessThan(m.indexOf('fill="#d4506c"'));    // …and the stamp itself is NOT inside it
+  });
+  it("NO white / background-coloured gap stroke: the only white in the drawing is the mask's field and the seal's check mark", () => {
+    const whites = m.match(/#fff\b|#ffffff|white/gi) || [];
+    expect(whites.length).toBe(2);
+    expect(m).not.toMatch(/currentColor/);   // fixed colours, like an emoji
+    expect(m).not.toMatch(/var\(--/);
+  });
+  it("the mask / clip id is unique per rendered instance: customMarkup swaps the token, leaves none behind, never reuses an id", () => {
+    expect(m.split("__UID__").length - 1).toBe(2);   // the id and the one reference
+    const a = g("ti1"), b = g("ti2");
+    expect(a).not.toContain("__UID__");
+    expect(a).toContain('id="pm-ti1"');
+    expect(a).toContain('url(#pm-ti1)');
+    expect(b).toContain('id="pm-ti2"');
+    expect(a).not.toBe(b);
+    const ids = new Set(); for (let i = 0; i < 50; i++) { const id = (g("ti" + i).match(/id="([^"]+)"/) || [])[1]; ids.add(id); }
+    expect(ids.size).toBe(50);
+  });
+  it("the other c: drawings are untouched by the id seam (no token, markup returned verbatim)", () => {
+    for (const [n, mk] of Object.entries(TI.CUSTOM_SVG)) {
+      if (n === "permit") continue;
+      expect(mk, n).not.toContain("__UID__");
+      expect(TI.customMarkup(n, "ti9"), n).toBe(mk);
+    }
+    expect(TI.customMarkup("nope", "ti1")).toBe("");
+  });
+  it("TaskIconGlyph gives EACH rendered c: icon its own id and its own viewBox (module counter + per-instance ref)", () => {
+    const i = page.indexOf("function TaskIconGlyph(");
+    const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
+    expect(page).toMatch(/let TASK_ICON_UID = 0;/);
+    expect(body).toContain('uidRef.current = "ti" + (++TASK_ICON_UID)');
+    expect(body).toContain("viewBox={TI.customViewBox(nm)}");
+    expect(body).toContain("TI.customMarkup(nm, uidRef.current)");
+    expect(body).toMatch(/if \(!TI\.CUSTOM_SVG\[nm\]\) return null;/);
+  });
+  it("is found by permit, approval and approved", () => {
+    for (const q of ["permit", "approval", "approved"]) expect(ids(TI.searchTaskIcons(q))).toContain("c:permit");
+  });
+});
+
+describe("Twemoji files", () => {
+  it("names follow the codepoint rule: hex codepoints joined by '-', fe0f dropped", () => {
+    expect(TI.twemojiFile("🧭")).toBe("1f9ed");
+    expect(TI.twemojiFile("✍️")).toBe("270d");       // 270d + fe0f
+    expect(TI.twemojiFile("🗺️")).toBe("1f5fa");     // 1f5fa + fe0f
+    expect(TI.twemojiFile("⚠️")).toBe("26a0");
+    expect(TI.twemojiFile("🛣️")).toBe("1f6e3");
+    expect(TI.twemojiFile("🏁")).toBe("1f3c1");
+  });
+  it("EVERY emoji the library offers has its SVG bundled (a missing one would be a broken image)", () => {
+    const dir = root("public/sequence/vendor/twemoji/");
+    const missing = TI.EMOJI_IDS.filter(e => !existsSync(dir + TI.twemojiFile(e) + ".svg"));
+    expect(missing).toEqual([]);
+  });
+  it("only the SVGs the library uses are bundled (+ the credits note) — nothing hot-linked, nothing extra", () => {
+    const want = new Set(TI.EMOJI_IDS.concat(TI.LEGACY_EMOJI).map(e => TI.twemojiFile(e) + ".svg"));   // + the emoji the picker no longer offers but saved tasks may still hold
+    want.add("CREDITS.txt");
+    const have = readdirSync(root("public/sequence/vendor/twemoji/"));
+    expect(have.sort()).toEqual([...want].sort());
+    expect(page).not.toMatch(/cdn\.jsdelivr\.net\/gh\/jdecked|twemoji\.maxcdn|cdnjs[^"']*twemoji/i);
+  });
+  it("each bundled file is a real SVG", () => {
+    for (const e of TI.EMOJI_IDS) expect(readFileSync(root("public/sequence/vendor/twemoji/" + TI.twemojiFile(e) + ".svg"), "utf8").trimStart().startsWith("<svg")).toBe(true);
+  });
+  it("the CC-BY 4.0 attribution is in the credits note, and the picker links it", () => {
+    const credits = readFileSync(root("public/sequence/vendor/twemoji/CREDITS.txt"), "utf8");
+    expect(credits).toMatch(/CC-BY 4\.0/);
+    expect(credits).toMatch(/jdecked\/twemoji/);
+    expect(credits).toMatch(/15\.1\.0/);
+    expect(page).toContain("/sequence/vendor/twemoji/CREDITS.txt");
+  });
+});
+
+describe("search", () => {
+  it('"tia" finds the TIA drawing — and nothing else ("substantial" must not match)', () => {
+    expect(ids(TI.searchTaskIcons("tia"))).toEqual(["svg:tia"]);
+  });
+  it('"sewer" finds the manhole, "roof" the roof, "tilt" the tilt-wall icon', () => {
+    expect(ids(TI.searchTaskIcons("sewer"))).toEqual(["c:manhole"]);
+    expect(ids(TI.searchTaskIcons("roof"))).toEqual(["c:roof"]);
+    expect(ids(TI.searchTaskIcons("tilt"))).toEqual(["c:tilt"]);
+  });
+  it("is case-insensitive, matches word starts, and every word must match", () => {
+    expect(ids(TI.searchTaskIcons("SEWER"))).toEqual(["c:manhole"]);
+    expect(ids(TI.searchTaskIcons("sprink"))).toEqual(["c:sprink"]);
+    expect(ids(TI.searchTaskIcons("fire hydrant"))).toEqual(["c:hydrant"]);
+    expect(ids(TI.searchTaskIcons("fire zzz"))).toEqual([]);
+  });
+  it("empty search = everything, in order; nothing matching = no groups", () => {
+    expect(ids(TI.searchTaskIcons("")).length).toBeGreaterThan(78);   // 81 slots (3 ids sit in two categories)
+    expect(TI.searchTaskIcons("   ").length).toBe(8);
+    expect(TI.searchTaskIcons("qqqq")).toEqual([]);
+  });
+  it("a duplicated id never shows twice inside one category, but is found under both", () => {
+    const g = TI.searchTaskIcons("pond");
+    expect(g.map(x => x.key)).toEqual(["ent", "sit"]);
+    for (const c of g) expect(new Set(c.items.map(i => i.id)).size).toBe(c.items.length);
+    expect(ids(TI.searchTaskIcons("bond")).filter(i => i === "🏦").length).toBe(2);   // 🏦 sits in ent (MUD / district / bond) and fin (loan / lender); either category's words find it in both
+  });
+  it("hover labels: custom icons add ' · drawn for Planyr'; emoji do not", () => {
+    expect(TI.iconLabel("c:manhole")).toBe("Sanitary sewer · drawn for Planyr");
+    expect(TI.iconLabel("🚦")).toBe("Traffic impact analysis (TIA)");
+    expect(TI.iconLabel("c:pond", "Detention / drainage review")).toBe("Detention / drainage review · drawn for Planyr");
+  });
+});
+
+describe("the two-icon rule", () => {
+  it("adds up to two; a third replaces the OLDEST; a picked one is removed", () => {
+    let c = [];
+    c = TI.toggleTaskIcon(c, "🚦"); expect(c).toEqual(["🚦"]);
+    c = TI.toggleTaskIcon(c, "c:manhole"); expect(c).toEqual(["🚦", "c:manhole"]);
+    c = TI.toggleTaskIcon(c, "c:roof"); expect(c).toEqual(["c:manhole", "c:roof"]);
+    c = TI.toggleTaskIcon(c, "c:manhole"); expect(c).toEqual(["c:roof"]);
+    c = TI.toggleTaskIcon(c, "c:roof"); expect(c).toEqual([]);
+  });
+  it("normalize: only short distinct strings, at most two (newest kept), anything else is no icons", () => {
+    expect(TI.normalizeTaskIcons(undefined)).toEqual([]);
+    expect(TI.normalizeTaskIcons("🚦")).toEqual([]);
+    expect(TI.normalizeTaskIcons(["🚦", "🚦", "", 5, null, "c:roof", "💧"])).toEqual(["c:roof", "💧"]);
+    expect(TI.normalizeTaskIcons(["x".repeat(40)])).toEqual([]);
+    expect(TI.normalizeTaskIcons(["c:from-a-newer-client"])).toEqual(["c:from-a-newer-client"]);   // kept, just not drawn
+  });
+});
+
+describe("collapsed-phase summary", () => {
+  const T = (id, parentId, icons) => ({ id, parentId, name: "t" + id, ...(icons ? { icons } : {}) });
+  const tasks = [T(1, null), T(2, 1, ["🚦"]), T(3, 1, ["🚦", "c:roof"]), T(4, 1), T(5, 4, ["💧"]), T(6, null, ["⭐"])];
+  it("lists the DISTINCT icons of every leaf inside the phase, in tree order, with the leaf count", () => {
+    expect(TI.phaseIconSummary(tasks, 1)).toEqual({ icons: ["🚦", "c:roof", "💧"], leaves: 3 });
+  });
+  it("a sub-summary's own icons are not leaves; the other phase is untouched", () => {
+    const withMid = tasks.map(t => t.id === 4 ? { ...t, icons: ["🔥"] } : t);
+    expect(TI.phaseIconSummary(withMid, 1).icons).not.toContain("🔥");
+    expect(TI.phaseIconSummary(tasks, 6)).toEqual({ icons: [], leaves: 0 });
+  });
+  it("a parentId cycle cannot hang it", () => {
+    const cyc = [T(1, 2), T(2, 1, ["⭐"])];
+    expect(() => TI.phaseIconSummary(cyc, 1)).not.toThrow();
+  });
+});
+
+describe("wiring in public/sequence/index.html", () => {
+  it("loads the library before the app compiles, and the app never touches the icons without it", () => {
+    const a = page.indexOf('<script src="/sequence/taskIcons.js"></script>'), b = page.indexOf('<script type="text/babel">');
+    expect(a).toBeGreaterThan(-1);
+    expect(a).toBeLessThan(b);
+  });
+  it("updateTask sanitises `icons` on write and an empty list removes the key", () => {
+    const i = page.indexOf("if ('icons' in updates)");
+    expect(i).toBeGreaterThan(-1);
+    const line = page.slice(i, page.indexOf("\n", i));
+    expect(line).toContain("PlanyrTaskIcons.normalizeTaskIcons(updates.icons)");
+    expect(line).toContain("delete u.icons");
+  });
+  it("an icon edit is NOT a schedule edit (no date cascade) and the name is never composed from icons", () => {
+    const keys = page.match(/const SCHEDULE_INPUT_KEYS = \[([^\]]*)\]/)[1];
+    expect(keys).not.toContain("icons");
+    expect(page).not.toMatch(/name:\s*[^,}]*\bicons\b/);
+  });
+  it("the name cell is chevron → icon slot → name; the text triangle is gone from it", () => {
+    const i = page.indexOf('case "name": return (\n      <span style={{...s,paddingLeft:4+task.level*14');
+    expect(i).toBeGreaterThan(-1);
+    const block = page.slice(i, page.indexOf("rowCanFocus(task) && (", i));
+    const chev = block.indexOf("ti-chevron-right"), slot = block.indexOf("<TaskIconSlot"), nm = block.indexOf('{task.name || "New task"}'), sum = block.indexOf("<PhaseIconSummary");
+    expect(chev).toBeGreaterThan(-1);
+    expect(chev).toBeLessThan(slot);
+    expect(slot).toBeLessThan(nm);
+    expect(nm).toBeLessThan(sum);
+    expect(block).toContain("ti-chevron-down");
+    expect(block).not.toMatch(/[▾▸]/);
+    expect(block).toContain('title={task.isExpanded?"Collapse":"Expand"}');   // harnesses find the toggle by this
+    expect(block).toMatch(/!task\.isExpanded && task\.hasChildren && <PhaseIconSummary/);
+  });
+  it("the name EDITOR's text starts where the displayed name starts (the icons' own width folded in — zero when there are none)", () => {
+    expect(page).toContain("paddingLeft:20+taskIconsW(window.PlanyrTaskIcons.normalizeTaskIcons(task.icons).length)+task.level*14");
+    const fn = page.match(/const taskIconsW = n => [^\n]*;/)[0];
+    const taskIconsW = new Function(`const TASK_ICON_PX = 16, TASK_ICON_GAP = 2, TASK_ICON_PAD = 2, TASK_ICON_AFTER = 2; ${fn}; return taskIconsW;`)();
+    expect(taskIconsW(0)).toBe(0);                                // no icons → no reserved width at all
+    expect(taskIconsW(2)).toBeGreaterThan(taskIconsW(1));         // width follows the icons
+    expect(page).not.toContain("ICON_SLOT_W");                    // the fixed-width slot is gone (owner, 2026-11-09)
+  });
+  it("NO hover 'add icon' glyph: an empty slot renders nothing and no add-glyph markup / CSS remains (owner: \"This is a serious software\")", () => {
+    const i = page.indexOf("function TaskIconSlot(");
+    const body = page.slice(i, page.indexOf("function TaskIconPickerHost(", i));
+    expect(body).toMatch(/if \(icons\.length === 0\) return null;/);
+    expect(body).not.toMatch(/ti-mood|ti-slot-add|Add an icon/);
+    expect(page).not.toMatch(/ti-mood-plus|ti-slot-add/);
+  });
+  it("NO 'N tasks' count on a collapsed phase; the faded icon summary stays, and an icon-free phase shows nothing", () => {
+    const i = page.indexOf("function PhaseIconSummary(");
+    const body = page.slice(i, page.indexOf("function Cell(", i));
+    expect(body).not.toMatch(/ti-count|data-phase-count|" tasks"|sum\.leaves/);
+    expect(body).toContain("if (!sum.icons.length) return null;");
+    expect(body).toContain("faded");
+    expect(page).not.toContain(".ti-count");
+  });
+  it("proposed (review) rows reserve no icon slot", () => {
+    expect(page).not.toMatch(/aria-hidden="true" style=\{\{width:ICON/);
+  });
+  it("the row's right-click menu carries Set icon… / Change icon… / Remove icon, wired to the app-level picker host", () => {
+    const m = page.slice(page.indexOf("function TaskContextMenu("), page.indexOf("// ── HealthColHeader"));
+    expect(m).toContain('label={hasIcons ? "Change icon…" : "Set icon…"}');
+    expect(m).toMatch(/\{hasIcons && <Item icon="ti-icons-off" label="Remove icon" onClick=\{onRemoveIcon\} \/>\}/);
+    expect(page).toContain("hasIcons={window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0}");
+    expect(page).toContain("onRemoveIcon={() => { updateTask(taskCtx.task.id, {icons: []}, taskCtx.projId); setTaskCtx(null); }}");
+    expect(page).toMatch(/onSetIcon=\{\(\) => \{ setIconPickerCtx\(\{taskId: taskCtx\.task\.id/);
+    expect(page).toContain("<TaskIconPickerHost ctx={iconPickerCtx}");
+    // not gated on a task kind: phase (hasChildren) and leaf rows both get it
+    expect(m.slice(m.indexOf("Set icon"), m.indexOf("Set icon") + 5)).toBe("Set i");
+    expect(m).not.toMatch(/hasChildren[^\n]*Set icon/);
+  });
+  it("the picker host anchors to the task's NAME (data-task-name), falling back to the click point; it writes through the live task", () => {
+    const i = page.indexOf("function TaskIconPickerHost(");
+    const body = page.slice(i, page.indexOf("// Collapsed summary/phase row", i));
+    expect(body).toContain("[data-task-name]");
+    expect(body).toContain("anchorHidden(");
+    expect(body).toContain("updateTask(ctx.taskId, {icons: next}, ctx.projId)");
+    expect(page).toContain("title={task.name || undefined} data-task-name style=");
+  });
+  it("the picker: no-autofill search box; portal root carries the grid-press isolation; anchored popover; Clear + Done + Esc", () => {
+    const i = page.indexOf("function TaskIconPicker(");
+    const body = page.slice(i, page.indexOf("function TaskIconSlot(", i));
+    expect(body).toContain("<input {...NO_AUTOFILL}");
+    expect(body).toContain("{...MENU_STOPS_GRID}");
+    expect(body).toContain("useAnchoredPopover(true, anchorRef");
+    expect(body).toContain("data-icon-clear");
+    expect(body).toContain("data-icon-done");
+    expect(body).toContain('e.key === "Escape"');
+    expect(body).toContain("Nothing matches “");
+    expect(body).toContain("Try another word.");
+    expect(body).not.toMatch(/getBoundingClientRect\(\)[^;]*;[^]{0,80}setPos\(/);   // positioning is the shared hook's, not a one-shot read
+  });
+  it("a missing Twemoji file falls back to the plain character (never a broken image)", () => {
+    const i = page.indexOf("function TaskIconGlyph(");
+    const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
+    expect(body).toContain("onError={() => setFailed(true)}");
+    expect(body).toMatch(/if \(failed\) return <span[^>]*>\{id\}<\/span>/);
+  });
+  it("TaskIconGlyph draws an svg: key as inline currentColor line art (no image fetch), a newer client's unknown svg: key as nothing", () => {
+    const i = page.indexOf("function TaskIconGlyph(");
+    const body = page.slice(i, page.indexOf("function TaskIconPicker(", i));
+    expect(body).toContain("TI.isBuiltinSvg(id)");
+    expect(body).toContain("TI.BUILTIN_SVG[TI.svgName(id)]");
+    expect(body).toContain('stroke="currentColor"');
+    expect(body).toMatch(/if \(!b\) return null;/);
+    expect(page).toContain("TI.isDrawn(it.id) && <span");   // the picker's green "drawn for Planyr" dot covers both drawn kinds
+  });
+  it("a Duplicate schedule carries the icons (a fresh array, not shared)", () => {
+    const fn = extractFn("const buildDuplicateProject = (src, newId) => {");
+    const build = new Function("copyMeetingBodyWithNewId", `${fn}; return buildDuplicateProject;`)(() => ({ id: "x" }));
+    const src = { id: 1, name: "S", meetingBodies: undefined, tasks: [{ id: 1, name: "a", notes: [], icons: ["🚦", "c:roof"] }, { id: 2, name: "b", notes: [] }] };
+    const copy = build(src, 9);
+    expect(copy.tasks[0].icons).toEqual(["🚦", "c:roof"]);
+    expect(copy.tasks[0].icons).not.toBe(src.tasks[0].icons);
+    expect("icons" in copy.tasks[1]).toBe(false);
+  });
+  it("a copied / pasted row carries its icons", () => {
+    const fn = extractFn("const collectSubtreeFor = (rootId, allTasks) => {");
+    const collect = new Function(`${fn}; return collectSubtreeFor;`)();
+    const all = [{ id: 1, parentId: null, notes: [], predecessors: [], icons: ["⭐"] }, { id: 2, parentId: 1, notes: [], predecessors: [] }];
+    const out = collect(1, all);
+    expect(out[0].icons).toEqual(["⭐"]);
+    expect(out[0].icons).not.toBe(all[0].icons);
+    expect("icons" in out[1]).toBe(false);
+  });
+});

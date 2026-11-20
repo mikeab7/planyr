@@ -64,7 +64,7 @@ try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 5000 
 await page.waitForTimeout(500);
 
 // Read the persisted Site Model (what autosave wrote to the local mirror).
-const readModel = () => page.evaluate(({ k, id }) => { try { return JSON.parse(localStorage.getItem(k))[id]; } catch (e) { return null; } }, { k: SITES_KEY, id: DEMO_ID });
+const readModel = () => page.evaluate(({ k, id }) => { try { return JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k))[id]; } catch (e) { return null; } }, { k: SITES_KEY, id: DEMO_ID });
 const zoneIdsOf = (m) => (m && m.els || []).filter((e) => e.id !== "b1").map((e) => e.id);
 const tombsOf = (m) => (m && m.deletedIds) || [];
 

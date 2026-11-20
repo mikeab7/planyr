@@ -355,7 +355,7 @@ try {
           JSON.stringify(forcedOrder.filter((k) => k !== `el:${pond.id}`)) === JSON.stringify(base.filter((k) => k !== `el:${pond.id}`)));
 
         const stored = await page.evaluate(() => {
-          try { return JSON.stringify(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")).includes('"bandForce"'); }
+          try { return JSON.stringify(JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")).includes('"bandForce"'); }
           catch (e) { return null; }
         });
         ok("NEW-1: the override is written into the saved plan record", stored === true, `stored=${stored}`);

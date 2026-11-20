@@ -240,6 +240,29 @@ describe("wells — on the site, within the radius, or none", () => {
     expect(severityWells(m)).toBe("red");
     expect(buildWellsRow(m).figure).toBe("1 on site");
   });
+  it("a salt-dome STORAGE well on the pad is named as an active cavern wellhead, not 'other' or an old plug (NEW-1)", () => {
+    const sw = { attrs: { GIS_SYMBOL_DESCRIPTION: "Storage Well", SYMNUM: 88 }, lngLat: [LNG0 + 500 / FT_LNG, LAT0 + 500 / FT_LAT] };
+    const m = measureWells(SITE, [sw, pt(1500, 500)]);
+    const row = buildWellsRow(m);
+    expect(row.severity).toBe("red");
+    expect(row.line).toMatch(/1 storage \(cavern\)/);
+    expect(row.line).not.toMatch(/other/);
+    expect(row.sentences[0]).toMatch(/salt-dome storage well/);
+    expect(row.sentences[0]).not.toMatch(/old plug/);
+    expect(row.caveat).toMatch(/Mont Belvieu, Stratton Ridge, Markham/);
+  });
+  it("storage wells are never crowded out of the row's mix line by more numerous categories (live Targa finding)", () => {
+    const mk = (desc, n, x0, sym) => Array.from({ length: n }, (_, i) => ({ attrs: { GIS_SYMBOL_DESCRIPTION: desc, SYMNUM: sym }, lngLat: [LNG0 + (x0 + i * 20) / FT_LNG, LAT0 + 500 / FT_LAT] }));
+    const feats = [...mk("Dry Hole", 21, 100, 3), ...mk("Oil Well", 9, 1100, 4), ...mk("Plugged Oil Well", 9, 1400, 7), ...mk("Storage Well", 3, 1700, 88)];
+    const row = buildWellsRow(measureWells(SITE, feats));
+    expect(row.line).toMatch(/3 storage \(cavern\)/);
+    expect(row.line.split(" · ")[1].split(", ")).toHaveLength(3); // still three entries — storage takes a slot, the line does not grow
+  });
+  it("without storage wells the caveat and the on-site sentence are exactly as before", () => {
+    const row = buildWellsRow(measureWells(SITE, [pt(500, 500)]));
+    expect(row.sentences[0]).toMatch(/old plug/);
+    expect(row.caveat).not.toMatch(/Salt-dome/);
+  });
   it("a well within a quarter mile but off the site is amber", () => {
     const m = measureWells(SITE, [pt(1500, 500), pt(1700, 500)]);
     expect(m.onSite).toBe(0); expect(m.near).toBe(2);

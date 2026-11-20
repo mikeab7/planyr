@@ -37,7 +37,7 @@ try {
 
   // (2) spacing — three throwaway local projects
   await page.evaluate((combos) => {
-    const key = "planarfit:sites:v1", map = JSON.parse(localStorage.getItem(key) || "{}");
+    const key = "planarfit:sites:v1", map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
     combos.forEach(([site, name], i) => { const id = `zz-crumb-${i}`; map[id] = { schemaVersion: 12, id, groupId: id, site, name, updatedAt: Date.now() + i, els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {} }; });
     localStorage.setItem(key, JSON.stringify(map));
   }, COMBOS);
@@ -59,7 +59,7 @@ try {
 } finally {
   // cleanup — local rows, then any cloud rows the app pushed; verify none remain
   const left = await page.evaluate(async () => {
-    const key = "planarfit:sites:v1", map = JSON.parse(localStorage.getItem(key) || "{}");
+    const key = "planarfit:sites:v1", map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(key) || "{}");
     for (const k of Object.keys(map)) if (k.startsWith("zz-crumb-")) delete map[k];
     localStorage.setItem(key, JSON.stringify(map));
     let cloud = null;

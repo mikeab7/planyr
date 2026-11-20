@@ -8,6 +8,8 @@
  * is true. The one thing that still happens for a project that is no longer shown is remembering
  * that ITS mirror was confirmed (`remember`), because that fact is true of A whatever B is showing.
  * Everything is injected, so test/libraryDriveSyncSwitch.test.js drives it with a fake sync. */
+import { signInMessage, isSignInAnswer } from "../../../shared/auth/signInText.js";
+
 export async function runDriveSync({ projectId, isShown, setDrive, sync, now = Date.now, remember }) {
   const show = (status) => { if (isShown(projectId)) setDrive(status); };
   show({ state: "syncing", msg: "Mirroring to Google Drive…" });
@@ -19,7 +21,10 @@ export async function runDriveSync({ projectId, isShown, setDrive, sync, now = D
   } catch (e) {
     r = { ok: false, error: (e && e.message) || "Drive sync had a problem." }; // LOUD-FAILURE: a throw is a red status, not a stuck "Mirroring…"
   }
-  if (r && r.skipped) show({ state: "off", msg: "Saved in Planyr — Google Drive isn't connected.", at: 0 });
+  // NEW-1 (2026-11-10): a dead sign-in is the person's to fix, not "Drive isn't connected" (its `skipped` flag) and never the
+  // server's own words ("Invalid or expired session (403)."). `signIn` lets the footer offer the app's sign-in.
+  if (r && (r.authExpired || (!r.ok && isSignInAnswer(0, r.error)))) show({ state: "error", msg: signInMessage("sync"), at: 0, signIn: true });
+  else if (r && r.skipped) show({ state: "off", msg: "Saved in Planyr — Google Drive isn't connected.", at: 0 });
   else if (r && r.ok) {
     // A CONFIRMED reconcile — the only thing that may claim "Synced" (the label is driven by the
     // real backend result, never a static checkmark).

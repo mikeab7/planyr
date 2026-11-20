@@ -4,7 +4,7 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
@@ -102,8 +102,8 @@ import {
 import { elStyle, elToRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf, roleOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
-import { findAttr, situsAddress, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
-import { idAttrFor } from "./lib/parcelQuery.js";
+import { findAttr, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
+import { idAttrFor, situsFor } from "./lib/parcelQuery.js";
 import { looksLikeTnParcelId } from "./lib/tnParcelId.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
  * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
@@ -166,6 +166,7 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 // macrotask, see scheduleSaveSitesFrame below) is caller glue, same as terrainLayers.js's own.
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
+import { stackNote } from "./lib/parcelStack.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
 import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
 import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
@@ -556,7 +557,7 @@ function RailTab({ label, count, active, onClick, title }) {
   );
 }
 
-function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
+function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, focusCompReveal = false, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
   // B1310209 (NEW-2) — the map's own relatively-positioned host box (below), the same one every
   // other floating map panel (the Comps rail, the Layers panel) is already a position:absolute
@@ -2157,7 +2158,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { mode: "site", includePois: false });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, decorateFallback: (layer) => throttleTilePruning(layer) }); // NEW-1: one prune per burst
       labelsRef.current = handle;
     }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };
@@ -3318,7 +3319,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   /* Stable per-parcel key (county-namespaced — OBJECTIDs are only unique within one
      CAD layer, so a multi-county assembly could otherwise collide). */
   const parcelKey = (county, rings, attrs) => {
-    return parcelKeyOf(attrs, rings, { namespace: county });
+    return parcelKeyOf(attrs, rings, { namespace: county, stack: stackRuleForCounty(county) }); // NEW-1 — a county whose layer stacks rows on one lot keys the LOT, not the row
   };
 
   /* B441 — find the parcel outline already DRAWN under a click, with zero network.
@@ -3401,7 +3402,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
       // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
       hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: situsAddress(attrs), acct: idAttrFor(county, attrs), attrs, county }])); // dedupe by key (B22)
+      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: situsFor(county, attrs), acct: idAttrFor(county, attrs), attrs, county }])); // dedupe by key (B22)
       // B36(a): the statewide TxGIO layer can answer for a Harris/FB lot — relabel via a
       // true point-in-county lookup (non-blocking). Keyed off STATEWIDE_KEYS, not a
       // hardcoded "chambers": B787 moved the statewide role from the `chambers` key to the
@@ -3664,7 +3665,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         ]).catch(() => null);
         if (!r || !r.feats || !r.feats.length) continue;
         const pick = pickAddressSnap(r.feats, label, latlng, {
-          addrOf: (f) => situsAddress(f.attributes || {}),
+          addrOf: (f) => situsFor(c.county, f.attributes || {}),
           centreOf: (f) => interiorPointOf(f),
         });
         if (pick) return interiorPointOf(pick);
@@ -3719,7 +3720,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           const v = snapshotVintage(cached.county);
           setParcelInfo({
             status: "found", label, key: added.key, county: cached.county, attrs: added.attrs,
-            addr: situsAddress(added.attrs), acct: idAttrFor(cached.county, added.attrs), acres: ringsAcres(added.rings),
+            addr: situsFor(cached.county, added.attrs), acct: idAttrFor(cached.county, added.attrs), acres: ringsAcres(added.rings),
             cached: { asOf: v ? v.asOf : null },
           });
           return;
@@ -3749,7 +3750,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
-      addr: situsAddress(added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
+      addr: situsFor(hit.county, added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
+      stackNote: stackNote(hit.feature), // NEW-1/2/3 — "N owners on record" / "another lot overlaps this spot" (parcelStack.js), never a silent drop
       backup: viaBackup || hit.fallback ? backupCountyLabel(hit.feature.attributes || {}) : null,
       ...(hit.fallback ? { backupNote: fallbackBackup(hit).text, backupKind: hit.fallback.kind } : {}),
     });
@@ -5311,6 +5313,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   pendingAnchor={pendingCompAnchor}
                   onAnchorConsumed={onCompAnchorConsumed}
                   focusCompId={focusCompId}
+                  focusReveal={focusCompReveal}
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}

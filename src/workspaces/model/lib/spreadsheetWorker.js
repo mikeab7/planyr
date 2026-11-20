@@ -10,7 +10,7 @@
  *
  * Protocol:
  *   in:  { id, op:"parse",  name, buffer }                (buffer is TRANSFERRED, not copied)
- *        { id, op:"export", workbook, projectNames }
+ *        { id, op:"export", workbook, projectNames, evaluated }   (evaluated = { workbook, values } from univerEval.evaluateForExport — computed on the MAIN thread; this worker never imports Univer)
  *   out: { id, ok:true, workbook, kind, notes, unsupportedCount }   (parse)
  *        { id, ok:true, blob }                                     (export)
  *   or   { id, ok:false, code, error }                              (LOUD — the client rejects with `error` verbatim) */
@@ -18,10 +18,10 @@ import { parseSpreadsheetFile } from "./spreadsheetFile.js";
 import { exportWorkbookToXlsxBlob } from "./xlsxIO.js";
 
 self.onmessage = async (e) => {
-  const { id, op, name, buffer, workbook, projectNames } = e.data || {};
+  const { id, op, name, buffer, workbook, projectNames, evaluated } = e.data || {};
   try {
     if (op === "export") {
-      const blob = await exportWorkbookToXlsxBlob(workbook, { projectNames });
+      const blob = await exportWorkbookToXlsxBlob(workbook, { projectNames, evaluated });
       self.postMessage({ id, ok: true, blob });
       return;
     }

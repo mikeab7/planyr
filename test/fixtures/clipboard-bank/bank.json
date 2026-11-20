@@ -1,0 +1,748 @@
+{
+ "_about": "The Notes clipboard regression bank (see ui-audit/lib/pasteBank.mjs). `outlines` = the clipboard-lists fixtures and the outline each must become (moved here from verify-notes-list-paste.mjs's WANT table — that harness keeps its own copy); `entries` = the cases added with the bank; the clipboard-tables fixtures take their expectation from that directory's manifest.json. A fixture committed to any of the three directories without an entry fails test/notesPasteBank.test.js.",
+ "outlines": {
+  "word-outline-table": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "      • Fees step down as the building gets larger",
+   "  • Permits and impact fees",
+   "    • Impact fees are charged per lot",
+   "• Hard costs"
+  ],
+  "word-outline-tab-rows": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "  • Permits and impact fees"
+  ],
+  "word-outline-table-outside": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "[table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "Closing paragraph after the table."
+  ],
+  "word-numbered-outline": [
+   "1. Entitlements",
+   "  1. Zoning",
+   "    1. Confirm the district",
+   "    2. Check the overlay",
+   "  2. Platting",
+   "2. Construction"
+  ],
+  "onenote-outline-table-in-li": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "      [table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]",
+   "      • Fees step down as the building gets larger",
+   "  • Permits and impact fees",
+   "• Hard costs"
+  ],
+  "onenote-outline-table-after-ul": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size, per square foot",
+   "[table SF | $/SF ; <100K | 1 ; 100K - 250K | .60-.75 ; 500K - 750K | .50 - .40 ; 750K - 1M | .40 - .35]"
+  ],
+  "onenote-hanging-markers": [
+   "• Soft costs",
+   "  • Design and engineering",
+   "    • Fee by building size",
+   "      • Fees step down"
+  ]
+ },
+ "entries": {
+  "spike-bgcolor-attr": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 1 — a fill written as the legacy bgcolor attribute. DECIDED BEHAVIOUR (notesTableFill.js / notesPasteModes.js): a plain paste imports NO foreign cell shading; 'Values and Source Formatting' (E) applies it. So the default paste is judged no-fill and the option is judged to bring the bgcolor fills in.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 2,
+      "text": [
+       [
+        "Yellow fill",
+        "No fill"
+       ],
+       [
+        "Below",
+        "Green fill"
+       ]
+      ],
+      "noFillAll": true,
+      "optionFills": {
+       "mode": "valuesFormat",
+       "fills": [
+        {
+         "r": 0,
+         "c": 0,
+         "color": "#ffff00"
+        },
+        {
+         "r": 1,
+         "c": 1,
+         "color": "#00b050"
+        }
+       ],
+       "noFill": [
+        {
+         "r": 0,
+         "c": 1
+        },
+        {
+         "r": 1,
+         "c": 0
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "spike-font-color": {
+   "kind": "runs",
+   "spike": true,
+   "about": "Spike loss 2 — <font color> / <font face> (the HTML 3.2 spelling Office still emits) lost the colour and the typeface.",
+   "expect": {
+    "noTables": true,
+    "plainText": "Red words and blue Arial words and plain.",
+    "runs": [
+     {
+      "text": "Red words",
+      "color": "#c00000"
+     },
+     {
+      "text": "blue Arial words",
+      "color": "#0070c0",
+      "fontFamily": "Arial"
+     }
+    ]
+   }
+  },
+  "spike-excel-nbsp-cell": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 3a — Excel's &nbsp; cell (and its truly empty <td></td>) arrived as a cell holding a space; an empty cell must be EMPTY.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 3,
+      "text": [
+       [
+        "Left",
+        "",
+        "Right"
+       ],
+       [
+        "Under",
+        "",
+        "Also"
+       ]
+      ],
+      "empty": [
+       {
+        "r": 0,
+        "c": 1
+       },
+       {
+        "r": 1,
+        "c": 1
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "spike-word-o-p-cell": {
+   "kind": "table",
+   "spike": true,
+   "about": "Spike loss 3b — Word's <p><o:p>&nbsp;</o:p></p> cell arrived as a space, and Word's trailing spacer paragraph must not become content.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 2,
+      "cols": 2,
+      "text": [
+       [
+        "Parcel",
+        "Owner"
+       ],
+       [
+        "A-1",
+        ""
+       ]
+      ],
+      "empty": [
+       {
+        "r": 1,
+        "c": 1
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "spike-word-bullets": {
+   "kind": "outline",
+   "spike": true,
+   "about": "Spike loss 4 — Word bullets (mso-list, Symbol glyph) arrived as '·' paragraphs; a bulleted list and a numbered list in one clipboard must become two real lists with a paragraph between.",
+   "expect": {
+    "outline": [
+     "• First bullet",
+     "• Second bullet",
+     "Between the lists",
+     "1. Step one",
+     "2. Step two"
+    ]
+   }
+  },
+  "excel-mixed-cells": {
+   "kind": "table",
+   "about": "An Excel range with a merged header, a filled cell, an empty cell, a bold cell and a red-text cell — formats written as CLASSES in the head <style>, which is how Excel really writes a whole-cell format. Default paste: marks arrive, shading does not (decided); 'Values and Source Formatting' brings the shading.",
+   "expect": {
+    "noPicture": true,
+    "tables": [
+     {
+      "rows": 3,
+      "cols": 3,
+      "text": [
+       [
+        "Header AB",
+        "Header C"
+       ],
+       [
+        "Filled",
+        "",
+        "Red text"
+       ],
+       [
+        "Bold cell",
+        "Plain",
+        "12,500"
+       ]
+      ],
+      "merges": [
+       {
+        "r": 0,
+        "c": 0,
+        "colspan": 2
+       }
+      ],
+      "empty": [
+       {
+        "r": 1,
+        "c": 1
+       }
+      ],
+      "cellMarks": [
+       {
+        "r": 0,
+        "c": 0,
+        "mark": "bold"
+       },
+       {
+        "r": 2,
+        "c": 0,
+        "mark": "bold"
+       }
+      ],
+      "cellColors": [
+       {
+        "r": 1,
+        "c": 2,
+        "color": "#c00000"
+       }
+      ],
+      "noFillAll": true,
+      "optionFills": {
+       "mode": "valuesFormat",
+       "fills": [
+        {
+         "r": 0,
+         "c": 0,
+         "color": "#dbe5f1"
+        },
+        {
+         "r": 1,
+         "c": 0,
+         "color": "#ffff00"
+        }
+       ],
+       "noFill": [
+        {
+         "r": 2,
+         "c": 0
+        },
+        {
+         "r": 2,
+         "c": 1
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "browser-block-styles": {
+   "kind": "runs",
+   "about": "NEW-2 (2026-11-10): THE REAL CLIPBOARD of Chromium 1254 after Ctrl+C on a styled page (captured by selecting two paragraphs whose red serif font comes from a stylesheet class; ui-audit/capture-chrome-copy.mjs). Chrome writes the computed colour / font-family / font-size on each <p> itself — never on a span — and the parser only reads a font, size or colour off a span, so Keep Source Formatting took the font, size and colour away. Every run must keep all three, plus bold / italic / underline / strike / highlight / link.",
+   "expect": {
+    "noTables": true,
+    "plainText": "Red serif paragraph copied from a chat answer in a browser.Then bold words, italic words, underlined words, struck words, highlighted words and a link.",
+    "runs": [
+     {
+      "text": "Red serif paragraph",
+      "color": "#cc0000",
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "bold words",
+      "marks": [
+       "bold"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "italic words",
+      "marks": [
+       "italic"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "underlined words",
+      "marks": [
+       "underline"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "struck words",
+      "marks": [
+       "strike"
+      ],
+      "color": "#cc0000",
+      "fontFamily": "Georgia"
+     },
+     {
+      "text": "highlighted words",
+      "highlight": true,
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     },
+     {
+      "text": "a link",
+      "marks": [
+       "link"
+      ],
+      "fontFamily": "Georgia",
+      "fontSize": "16px"
+     }
+    ]
+   }
+  },
+  "word-class-font": {
+   "kind": "runs",
+   "about": "NEW-2 (2026-11-10): Word desktop. The document font is NOT on the run — it comes from `p.MsoNormal { font-family: Calibri; font-size: 11pt }` in the clipboard's <style>, so a run with only a colour lost its font; a highlighter is `background:yellow;mso-highlight:yellow` on a span. Every run keeps the font and size the page showed; the explicit Cambria 14pt red run keeps its own.",
+   "expect": {
+    "noTables": true,
+    "runs": [
+     {
+      "text": "Red words in the document font",
+      "color": "#c00000",
+      "fontFamily": "Calibri",
+      "fontSize": "14.67px"
+     },
+     {
+      "text": "plain words",
+      "fontFamily": "Calibri",
+      "fontSize": "14.67px"
+     },
+     {
+      "text": "bold words",
+      "marks": [
+       "bold"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "italic words",
+      "marks": [
+       "italic"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "underlined words",
+      "marks": [
+       "underline"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "struck words",
+      "marks": [
+       "strike"
+      ],
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "highlighted words",
+      "highlight": true,
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Large red Cambria words",
+      "color": "#c00000",
+      "fontFamily": "Cambria",
+      "fontSize": "18.67px"
+     }
+    ]
+   }
+  },
+  "outlook-nested-cycle": {
+   "kind": "outline",
+   "about": "NEW-1 (2026-11-12): Outlook / Word desktop (mso-list paragraphs, Word 15 markup, modelled on the committed word-numbered-outline) — a 3-level numbered outline (1. / a. / i.) with red runs and an empty <o:p> paragraph. Must arrive as three real nested levels, red and Calibri kept, no empty items, no character lost.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-legal": {
+   "kind": "outline",
+   "about": "NEW-1: the same outline numbered 1. / 1.1. / 1.1.1. (Word's legal style — the owner's own 'the 1 / 1.1 / 1.1.1 outline'). `classifyMarker` read '1.1.' as a BULLET, so the sub-levels arrived as bullets.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-restart": {
+   "kind": "outline",
+   "about": "NEW-1: decimal numbering restarting at every level (1. / 1. / 1. — how the owner described the source) and the number itself inside the red run (<span style='color:red'><![if !supportLists]>…).",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "outlook-nested-restart-blanks": {
+   "kind": "outline",
+   "about": "NEW-1: as outlook-nested-restart, plus Word's EMPTY numbered paragraphs (a marker and nothing else) after the items — 1, 2, 1 and 2 of them, the exact counts the owner saw as blank '1.' items. None may arrive.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-restart-blanks": {
+   "kind": "outline",
+   "about": "NEW-1 (the one that matches the owner's symptoms): the blank-paragraph outline above RE-COPIED OUT OF A CHROMIUM PAGE with a real Ctrl+C (ui-audit/capture-chrome-copy.mjs — what Outlook on the web / the new Outlook / any browser puts on the clipboard). Chromium rebuilds each style attribute from its own property table, which has no `mso-list`, so the list information is GONE: each item is a hanging-indent paragraph that begins with its number as TEXT ('1.' + eight non-breaking spaces). Before the fix: the markers stayed in the text, every level read as level 1 (they are all '1.'), and the empty ones were numbered blank items.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-cycle": {
+   "kind": "outline",
+   "about": "NEW-1: the 1. / a. / i. outline re-copied out of Chromium (mso-list gone; margin shorthand `margin: 0in 0in 0in 1in`). Levels come from the margins.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  },
+  "owa-recopy-legal": {
+   "kind": "outline",
+   "about": "NEW-1: the 1. / 1.1. / 1.1.1. outline re-copied out of Chromium. Levels come from the number's depth.",
+   "expect": {
+    "outline": [
+     "Updates in red for tracking.",
+     "1. Final Plat",
+     "  1. Baytown Submittal",
+     "    1. Let me know if Baytown provides feedback on the bonding item. I plan to take this up with the planning director shortly if they don't respond.",
+     "  2. Easements (Sanitary Sewer, Lift Station, Access, Water Meter)",
+     "    1. I have our counsel reviewing the language now. Do y'all have an update on the timing for the metes & bounds/exhibits?",
+     "    2. Also from our meeting, please ask CCID3 to have SPH to compress the timeline to leave room for review before the next board meeting.",
+     "2. Force Main",
+     "  1. Surveying is complete"
+    ],
+    "runs": [
+     {
+      "text": "Updates in red",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Final Plat",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Let me know if Baytown",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "I have our counsel",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Also from our meeting",
+      "color": "#ff0000",
+      "fontFamily": "Calibri"
+     },
+     {
+      "text": "Force Main",
+      "fontFamily": "Calibri"
+     }
+    ]
+   }
+  }
+ }
+}

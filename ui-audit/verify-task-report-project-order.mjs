@@ -128,7 +128,7 @@ const openMenuAndPick = async (siteId, label) => {
 if (booted) {
   await page.evaluate(() => window.__nav());
   await frame.waitForSelector("text=TASK REPORT", { timeout: 10000 }).catch(() => {});
-  await frame.evaluate(() => { const m = [...document.querySelectorAll("span")].find(s => s.textContent.trim() === "Group by"); const seg = m && [...m.parentElement.querySelectorAll("span")].find(s => s.textContent.trim() === "Project"); if (seg) seg.click(); });
+  await frame.click('[data-tr-btn="group"]'); await frame.click('[data-group-opt="project"]');   // NEW-1 — Group by is a dropdown now
   await pacedWait(page, 600);
   await assertMeasurable(page, "verify-task-report-project-order");
 

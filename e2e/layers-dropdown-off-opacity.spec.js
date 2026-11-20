@@ -26,7 +26,7 @@ async function boot(page, surface) {
   await page.route(/hazards\.fema\.gov/, (r) => (/\/export/.test(r.request().url())
     ? r.fulfill({ status: 200, contentType: "image/png", headers: { "access-control-allow-origin": "*" }, body: PNG })
     : r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ currentVersion: 11, name: "NFHL", layers: [{ id: 27 }, { id: 28 }] }) })));
-  await page.addInitScript((j) => { try { if (!localStorage.getItem("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify({ [site.id]: site }));
+  await page.addInitScript((j) => { try { if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")) localStorage.setItem("planarfit:sites:v1", j); window.__PLANYR_E2E = true; } catch (_) {} }, JSON.stringify({ [site.id]: site }));
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(surface === "planner" ? `/#/project/${site.id}/site` : "/#/site-planner", { waitUntil: "load" });
   if (surface === "planner") {

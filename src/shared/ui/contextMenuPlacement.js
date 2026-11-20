@@ -13,7 +13,9 @@
  * fixed-position (left, top) plus a maxHeight, doing, in order:
  *   1. anchor the menu's top-left at the cursor (+ a small gap);
  *   2. flip LEFT (open to the left of the cursor) if it would overflow the right edge;
- *   3. flip UP   (open above the cursor)        if it would overflow the bottom edge;
+ *   3. when it would overflow the bottom edge: SLIDE UP just far enough to fit (the first row stays
+ *      as close to the pointer as the screen allows) — and FLIP UP (open above the cursor) only
+ *      when sliding would leave the pointer in the lower half of the menu (NEW-1, 2026-11-10);
  *   4. a final hard-clamp to `margin` on all four edges (covers corner clicks where both flips
  *      fire, browser zoom, and a menu larger than the viewport);
  *   5. a maxHeight of (viewport height − 2·margin) so an over-tall menu scrolls instead of
@@ -50,8 +52,19 @@ export function placeContextMenu({
   // 2. flip LEFT when the default would overflow the right edge — open to the left of the cursor.
   if (left + menuW > viewportW - M) left = cursorX - gap - menuW;
 
-  // 3. flip UP when the default would overflow the bottom edge — open above the cursor.
-  if (top + menuH > viewportH - M) top = cursorY - gap - menuH;
+  // 3. the default would overflow the bottom edge. NEW-1 (2026-11-10) — it used to FLIP the whole menu above the cursor on ANY
+  //    overflow, even 25 px of it, which put the first row (a road's "Add control point") a full menu-height above the pointer.
+  //    Now: SLIDE up by just the overflow so the first row stays as near the pointer as the screen allows, and flip only when
+  //    sliding would leave the pointer in the menu's lower half (a near-edge click — the menu then clears the pointer entirely).
+  //    A menu taller than the viewport can't slide; step 4 pins it to the top margin and it scrolls.
+  if (top + menuH > viewportH - M) {
+    const slideTop = viewportH - M - menuH;
+    const flipTop = cursorY - gap - menuH;
+    const fitsViewport = menuH <= viewportH - 2 * M;
+    const pointerStaysHigh = cursorY - slideTop <= menuH / 2;
+    if (fitsViewport && (pointerStaysHigh || flipTop < M)) top = slideTop;
+    else top = flipTop;
+  }
 
   // 4. final hard-clamp to the margins on all four edges (corner clicks fire both flips; a menu
   //    wider/taller than the viewport still lands its top-left inside the margin box).

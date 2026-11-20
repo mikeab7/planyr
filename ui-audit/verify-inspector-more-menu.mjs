@@ -18,7 +18,7 @@ const { browser, page } = s;
 console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
 const UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
 const T = (id) => page.getByTestId(id);
-const nBldg = () => page.evaluate(([id, uid]) => ((JSON.parse(localStorage.getItem("planarfit:sites:cloud:" + uid) || "{}")[id] || {}).els || []).filter((e) => e.type === "building").length, [ID, UID]);
+const nBldg = () => page.evaluate(([id, uid]) => ((JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:cloud:" + uid) || "{}")[id] || {}).els || []).filter((e) => e.type === "building").length, [ID, UID]);
 const open = async () => { await T("building-more").click(); await T("building-delete").waitFor({ timeout: 5000 }); };
 const closed = async () => { await sleep(300); return (await T("building-delete").count()) === 0; };
 const intact = async () => (await nBldg()) === 1 && (await T("building-header").isVisible()) && (await page.locator('[data-el-id="bz1"]').count()) === 1;
@@ -57,7 +57,7 @@ try {
     await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     await window.pfSupabase.from("sites").delete().eq("id", id);
     const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
-    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+    try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
     return !q.error && !(q.data || []).length;
   }, [ID, UID]).catch(() => false);
   ok("throwaway site deleted and confirmed gone from the cloud", gone);

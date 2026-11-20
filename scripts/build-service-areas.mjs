@@ -53,6 +53,19 @@ if (want("desoto")) {
   if (!rec) throw new Error("DeSoto County MS not found in the county polygon asset");
   areas.desoto = { label: "DeSoto County, MS", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Fort Bend County layers, 2026-11-12): `fortbend` — Fort Bend County TX, from the SAME bundled county polygons as `harris` (no network). Rebuild just it with `--only=fortbend`. */
+if (want("fortbend")) {
+  const rec = index.counties.find((c) => c.state === "TX" && /^fort ?bend$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Fort Bend County TX not found in the county polygon asset");
+  areas.fortbend = { label: "Fort Bend County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+/* NEW-1 (Rutherford County TN zoning): `rutherford` = Rutherford County TN, from the SAME bundled county polygons as `harris` (no network). The county / Murfreesboro / Smyrna / La Vergne
+ * zoning rows are declared for this area, so a Texas, Georgia, Mississippi or Nashville-side Tennessee site never lists them. */
+if (want("rutherford")) {
+  const rec = index.counties.find((c) => c.state === "TN" && /^rutherford$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Rutherford County TN not found in the county polygon asset");
+  areas.rutherford = { label: "Rutherford County, TN", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 /* NEW-1 (Florida, B2452976): the county- and district-scoped Florida rows.
  *   broward / miamidade               the county, from the SAME bundled county polygons as `harris` (no network).
  *   sfwmd                             the South Florida Water Management District, from its own published boundary (SFWMD's hosted
@@ -96,6 +109,31 @@ if (want("olivebranch")) {
   const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
   areas.olivebranch = { label: "Olive Branch, MS and its utility service area", source: "Union of the data extents of the City of Olive Branch ArcGIS Online utility, planning-area and annexation layers (services9.arcgis.com/VGtdH6iTQlVulSnr), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
 }
+/* NEW-1 / NEW-2 (Texas city zoning, 2026-11-12): the CITY LIMITS of the four Houston-area cities whose own zoning layers the Layers panel carries — richmond, fulshear, stafford, webster — each from TxGIO's
+ * Texas_City_Boundaries (full-purpose limits; the same service the Houston area above uses). Zoning applies inside a city's limits only, so no ETJ is added. maxAllowableOffset ≈ 40 m keeps
+ * the edge honest for a city a few miles across (the Houston fetch above is 10× coarser, which would swallow Stafford). A hole is kept: it is another government's enclave. */
+for (const [key, name] of [["richmond", "Richmond"], ["fulshear", "Fulshear"], ["stafford", "Stafford"], ["webster", "Webster"]]) {
+  if (!want(key)) continue;
+  const gj = await q("https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0/query", { where: `city_name='${name}'`, maxAllowableOffset: 0.0004 });
+  if (!gj.features.length) throw new Error(`TxGIO City_Boundaries holds no city_name='${name}'`);
+  areas[key] = { label: `City of ${name} limits`, source: `TxGIO Texas_City_Boundaries (city_name='${name}'), full-purpose city limits`, polys: polysOf(gj) };
+}
+if (want("sugarland")) {
+  /* NEW-1 (Sugar Land city layers, 2026-11-02): the City of Sugar Land's limits (layer 0, one polygon) ∪ its ETJ (layer 1, 14 polygons), from the city's own CityLimits_ETJ map service.
+   * The city's ArcGIS Server is not reachable from a build sandbox, so it is read through planyr.io's same-origin relay (a browser-style User-Agent is needed: Cloudflare refuses a bare
+   * script one); PLANYR_RELAY_BASE points this at a branch preview before the relay host is on the apex. Esri JSON, every ring its own polygon (a hole is filled — an area may only err toward SHOWING a layer). */
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  const SL = `${base}/gis-proxy/interactivemaps.sugarlandtx.gov/512/rest/services/AGO_ServiceLayers/CityLimits_ETJ/MapServer`;
+  const polys = [];
+  for (const layer of [0, 1]) {
+    const u = new URL(`${SL}/${layer}/query`);
+    for (const [k, v] of Object.entries({ f: "json", where: "1=1", outSR: 4326, returnGeometry: "true", maxAllowableOffset: 0.0004 })) u.searchParams.set(k, v);
+    const r = await fetch(u, { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+    const j = await r.json(); if (j.error || !j.features || !j.features.length) throw new Error(`${u} → ${JSON.stringify(j.error || "no features")}`);
+    for (const f of j.features) for (const ring of f.geometry.rings) polys.push([ring.map(([x, y]) => [round(x), round(y)])]);
+  }
+  areas.sugarland = { label: "City of Sugar Land limits and ETJ", source: "City of Sugar Land AGO_ServiceLayers/CityLimits_ETJ layers 0 (City_Limits) and 1 (ETJ)", polys };
+}
 /* NEW-1 (Colorado due-diligence layers, B2528688): the county / city areas the Weld, Adams and Aurora rows are declared for.
  *   co_weld, co_adams   the county, from the SAME bundled county polygons as `harris` (no network).
  *   co_aurora           the union of the data extents of the City of Aurora's airport-noise, Buckley APZ, zoning and city-limits layers (ags.auroragov.org/aurora/rest/services/OpenData/MapServer
@@ -117,7 +155,7 @@ if (want("co_aurora")) {
  *   mngwpd       the 15-county Metropolitan North Georgia Water Planning District (ARC's `MNGWPD_Boundary` layer 1 — the SAME outline the stream-buffer rule uses).
  *                The Chattahoochee MRPA corridor/buffers and the District's small water supply watersheds are declared for this area.
  *   spalding_ga  Spalding County GA, from the SAME bundled county polygons as `harris` (no network) — the county's own unincorporated zoning layer.
- * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,mrpa_corridor` rebuilds just these five and keeps every other area as committed. */
+ * `--only=mngwpd,spalding_ga,ga_blue_ridge,bartow_ga,allatoona_ga,mrpa_corridor` rebuilds just these six and keeps every other area as committed. */
 /* NEW-1 (B2539744 review, finding 2) — ms_tn_line: the Mississippi counties that touch Tennessee (a ring vertex at/above 34.95°N: DeSoto, Marshall, Tippah,
  * Alcorn, Tishomingo, Benton — printed below), from the SAME bundled county polygons. The Tennessee county lines (State of Tennessee STS, TN only) are offered across
  * the state line there, where a Mississippi view reaches Shelby / Fayette / Hardeman / McNairy / Hardin counties — and nowhere else in Mississippi (Jackson, Vicksburg,
@@ -166,10 +204,80 @@ if (want("bartow_ga")) {
   if (!rec) throw new Error("Bartow County GA not found in the county polygon asset");
   areas.bartow_ga = { label: "Bartow County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+if (want("allatoona_ga")) {
+  /* NEW-3 (Bartow sweep, 2026-11-12): Allatoona Lake's USACE rows are declared for `["bartow_ga", "allatoona_ga"]` — the lake lies on the Bartow / Cherokee / Cobb line, so the Bartow county polygon alone would hide them for a Cherokee or Cobb shore site.
+   * The region is the union of the published data extents of the Corps' Lake Boundary (layer 6) and Shoreline Allocation Areas (layer 5) for Allatoona (RPSUID 167791; returnExtentOnly, WGS84, ArcGIS Online — reachable from a build sandbox), padded 0.02° (≈1.4 mi)
+   * — a rectangle, honestly "on or near Allatoona Lake". */
+  const SAD = "https://services2.arcgis.com/sdTb0lsRURdKFejG/arcgis/rest/services/SAD_Shoreline_Management_Web_Viewer/FeatureServer";
+  let ext = null;
+  for (const l of [5, 6]) {
+    const u = new URL(`${SAD}/${l}/query`); for (const [k, v] of Object.entries({ f: "json", where: "RPSUID=167791", returnExtentOnly: "true", outSR: 4326 })) u.searchParams.set(k, v);
+    const j = await (await fetch(u)).json(); if (!j.extent) throw new Error(`Allatoona layer ${l} → no extent ${JSON.stringify(j)}`);
+    const e = j.extent; ext = ext ? { xmin: Math.min(ext.xmin, e.xmin), ymin: Math.min(ext.ymin, e.ymin), xmax: Math.max(ext.xmax, e.xmax), ymax: Math.max(ext.ymax, e.ymax) } : e;
+  }
+  const PAD = 0.02, x0 = round(ext.xmin - PAD), y0 = round(ext.ymin - PAD), x1 = round(ext.xmax + PAD), y1 = round(ext.ymax + PAD);
+  areas.allatoona_ga = { label: "On or near Allatoona Lake (USACE project), GA", source: "Union of the data extents of the USACE Mobile District Shoreline Management Program Lake Boundary and Shoreline Allocation Areas layers for Allatoona Lake (RPSUID 167791), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
+}
 if (want("spalding_ga")) {
   const rec = index.counties.find((c) => c.state === "GA" && /^spalding$/i.test(c.name.replace(/ county$/i, "")));
   if (!rec) throw new Error("Spalding County GA not found in the county polygon asset");
   areas.spalding_ga = { label: "Spalding County, GA", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
+/* NEW-2 (Chambers County TX, B2671240, 2026-11-12):
+ *   montbelvieu  the City of Mont Belvieu's limits (AdministrativeArea_v2 layer 0) ∪ its ETJ (layer 1), from the city's own ArcGIS Server. That host is not reachable from a build sandbox, so it is read through the
+ *                same-origin relay (a browser-style User-Agent; PLANYR_RELAY_BASE points this at a branch preview before the host is on the apex). Layer 1's published extent is garbled (degrees / feet mixed), so the
+ *                query is by "1=1" with outSR=4326 and the rings are what is kept — never the extent.
+ *   baytown      the City of Baytown's limits (City_of_Baytown_Citizen_Map_WFL1 layer 12 — full-purpose, limited-purpose and strip annexation: the zoning layer covers all three), from the city's AGOL org (no relay).
+ * Every ring is its own polygon (a hole is filled — an area may only err toward SHOWING a layer). */
+const ringsOf = (j) => j.features.flatMap((f) => f.geometry.rings.map((ring) => [ring.map(([x, y]) => [round(x), round(y)])]));
+const esriQuery = async (url, params, headers = {}) => {
+  const u = new URL(url);
+  for (const [k, v] of Object.entries({ f: "json", where: "1=1", outSR: 4326, returnGeometry: "true", ...params })) u.searchParams.set(k, v);
+  const r = await fetch(u, { headers }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+  const j = await r.json(); if (j.error || !j.features || !j.features.length) throw new Error(`${u} → ${JSON.stringify(j.error || "no features")}`);
+  return j;
+};
+if (want("montbelvieu")) {
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  const MB = `${base}/gis-proxy/www.cmbgis.com/arcgis/rest/services/AdministrativeArea_v2/MapServer`;
+  const polys = [];
+  for (const layer of [0, 1]) polys.push(...ringsOf(await esriQuery(`${MB}/${layer}/query`, { maxAllowableOffset: 0.0004 }, { "user-agent": "Mozilla/5.0 Chrome/120" })));
+  areas.montbelvieu = { label: "City of Mont Belvieu limits and ETJ", source: "City of Mont Belvieu AdministrativeArea_v2 layers 0 (city limits) and 1 (ETJ)", polys };
+}
+if (want("montbelvieu_plan")) {
+  /* The Master Drainage Plan's own data extent: the union of the plan layers' extents (LandUsePlanning_v2 layers 4-17 hold the six watersheds, detention sites, improvements and culverts), padded 0.02°. The watersheds run
+   * south of the city's ETJ into Baytown's side, so the plan draws where it has something to say and nowhere else — a padded rectangle ("within or near"), the Olive Branch shape. */
+  const base = process.env.PLANYR_RELAY_BASE || "https://planyr.io";
+  const LP = `${base}/gis-proxy/www.cmbgis.com/arcgis/rest/services/LandUsePlanning_v2/MapServer`;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const layer of [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
+    const u = new URL(`${LP}/${layer}/query`);
+    for (const [k, v] of Object.entries({ f: "json", where: "1=1", returnExtentOnly: "true", outSR: 4326 })) u.searchParams.set(k, v);
+    const r = await fetch(u, { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } }); if (!r.ok) throw new Error(`${u} → ${r.status}`);
+    const e = (await r.json()).extent; if (!e) throw new Error(`${u} → no extent`);
+    x0 = Math.min(x0, e.xmin); y0 = Math.min(y0, e.ymin); x1 = Math.max(x1, e.xmax); y1 = Math.max(y1, e.ymax);
+  }
+  const PAD = 0.02;
+  x0 = round(x0 - PAD); y0 = round(y0 - PAD); x1 = round(x1 + PAD); y1 = round(y1 + PAD);
+  areas.montbelvieu_plan = { label: "Mont Belvieu Master Drainage Plan area", source: "Union of the data extents of the City of Mont Belvieu LandUsePlanning_v2 layers 4-17 (Master Drainage Plan), padded 0.02°", polys: [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]] };
+}
+if (want("baytown")) {
+  const j = await esriQuery("https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/12/query", { maxAllowableOffset: 0.0004 });
+  areas.baytown = { label: "City of Baytown (full-purpose, limited-purpose and strip annexation)", source: "City of Baytown GIS City_of_Baytown_Citizen_Map_WFL1 layer 12", polys: ringsOf(j) };
+}
+if (want("davidson")) {
+  /* NEW-1 (Metro Nashville zoning, 2026-11-12) first built Davidson County TN from the bundled county polygons (no network); B2671266 / B2671267 (Metro water-quality buffers, 2026-11-15) REPLACED that outline with Metro's
+   * OWN county boundary. The bundled outline is 38 vertices and leaves out the county's north tip (Goodlettsville / Joelton / Ridgetop): 1.6% of Metro's buffer polygons sit outside it (191 of 12,000 sampled streams,
+   * measured 2026-11-12), so a site there lost every row declared for this region — the zoning rows too (Ridgetop, a satellite city, is at 36.40 N). A region must never err toward HIDING a layer where its data exists.
+   * Metro's zoning, overlay, PUD and policy rows AND its stormwater buffer / pending-flood-map rows declare it. */
+  const gj = await q("https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/DavidsonCountyBoundaryBuffer/FeatureServer/0/query", { where: "1=1", maxAllowableOffset: 0.0005 });
+  if (!gj.features || gj.features.length !== 1) throw new Error(`davidson: expected Metro's single boundary feature, got ${gj.features && gj.features.length}`);
+  /* ⛔ the layer is a MASK, not the county: its outer ring is the county buffered outward and the COUNTY itself is the hole (measured 2026-11-12: ring 0 = the buffer, bbox -87.062..-86.508 × 35.962..36.411; ring 1 = the county,
+   * -87.055..-86.515 × 35.968..36.406; ring 2 = a 5-vertex notch). Taking the polygon whole would offer the layers everywhere in the mask but not inside the county, so the region is the LARGEST INNER RING. */
+  const ringArea = (r) => Math.abs(r.reduce((a, [x1, y1], i) => { const [x2, y2] = r[(i + 1) % r.length]; return a + (x1 * y2 - x2 * y1); }, 0) / 2);
+  const inner = polysOf(gj).flatMap((poly) => poly.slice(1)).sort((a, b) => ringArea(b) - ringArea(a));
+  if (!inner.length) throw new Error("davidson: Metro's boundary layer no longer has an inner ring — it was a mask when this was written; read the layer again");
+  areas.davidson = { label: "Davidson County, TN (Metro Nashville)", source: "Metro Nashville & Davidson County — county boundary (the inner ring of DavidsonCountyBoundaryBuffer layer 0, services2.arcgis.com/HdTo6HJqh92wn4D8)", polys: [[inner[0]]] };
 }
 for (const [k, a] of Object.entries(areas)) console.log(k, a.polys.length, "polygons", a.polys.reduce((n, p) => n + p.reduce((m, r) => m + r.length, 0), 0), "vertices");
 const stamp = new Date().toISOString().slice(0, 10);

@@ -57,6 +57,10 @@ export const CAPTURE_NUMERIC_KEYS = [
   "worstWindowMeanMs", "worstWindowSlowFraction", "worstWindowRatio", "worstWindowFrames", "worstWindowAtMs",
   "p50Ms", "p95Ms", "p99Ms", "maxMs", "jankFrames",
   "longTasks", "longTaskMs", "longTaskMaxMs",
+  /* NEW-1 (2026-11-01) — of `longTaskMs`, how much the main thread was actually BLOCKED (LoAF blockingDuration summed). A long
+   * animation frame's duration includes waiting for the frame to be drawn; on a machine that draws slowly that wait is most of it,
+   * so `longTaskMs` alone cannot tell "the page's code was busy" from "frames came slowly". 0 where the browser has no LoAF. */
+  "longTaskBlockMs",
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
@@ -85,7 +89,7 @@ export const CAPTURE_ENUM_KEYS = [
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
   "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
-  "freezeVia",   // B2319137 ×2 — "frame" | "task", which signal saw the freeze; see FREEZE_VIA_VOCAB
+  "freezeVia",   // B2319137 ×2/×4 — "frame" | "task" | "sustained" | "render" (NEW-1), which signal saw the freeze; see FREEZE_VIA_VOCAB
   "part",        // NEW-2 (B1317824) — a supplement row's series: "f" frames | "c" counters | "t" tasks; see PART_VOCAB
 ];
 
@@ -96,7 +100,7 @@ export const PART_VOCAB = ["f", "c", "t"];
 export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
 
 /* A capture's `freezeVia` may only ever be one of these. */
-export const FREEZE_VIA_VOCAB = ["", "frame", "task"];
+export const FREEZE_VIA_VOCAB = ["", "frame", "task", "sustained", "render"];   // "render" — NEW-1 2026-11-01, a long frame the main thread did NOT block   // "sustained" — B2319137 ×4, a run of slow frames (perfTrigger.feedSlowRun)
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
  * about itself ("baseline never sealed") without opening a free-text channel.
@@ -122,21 +126,9 @@ export const NOTE_VOCAB = [
 ];
 
 /* ── Plan identity ───────────────────────────────────────────────────────────────────────────
- * A plan id here may be an opaque key OR a name the owner typed. Opaque-looking ids pass; anything
- * else becomes a short FNV-1a hash. Non-reversible, stable within and across sessions, and enough
- * to answer "is this always the same plan?" — which is the only question the recorder needs it for. */
-export function safePlanId(raw) {
-  const s = raw == null ? "" : String(raw);
-  if (!s) return { plan: "", planIdKind: "id" };
-  if (/^[A-Za-z0-9_-]{1,40}$/.test(s)) return { plan: s, planIdKind: "id" };
-  return { plan: hash32(s), planIdKind: "hash" };
-}
-
-export function hash32(s) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return (h >>> 0).toString(36);
-}
+ * `safePlanId` / `hash32` live in the leaf planIdSafe.js (B329408 — the always-loaded shell needs them without this whole module). */
+import { safePlanId, hash32 } from "./planIdSafe.js";
+export { safePlanId, hash32 };
 
 /* ── Frame statistics ────────────────────────────────────────────────────────────────────────
  * Percentiles over the kept frames. `jankFrames` counts frames at or past the trigger's own slow
@@ -218,6 +210,7 @@ export function buildCapture(parts) {
   num("longTasks", p.longTasks);
   num("longTaskMs", p.longTaskMs);
   num("longTaskMaxMs", p.longTaskMaxMs);
+  num("longTaskBlockMs", p.longTaskBlockMs);
 
   /* The scene, at the moment of capture. */
   num("heapMB", p.heapMB, 1);

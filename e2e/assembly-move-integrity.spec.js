@@ -16,7 +16,7 @@ import { openModule, panelPlus } from "./helpers.js";
 // Every drawn element in the logged-out site model, keyed by id (on-disk truth).
 function readEls(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).map((e) => ({ id: e.id, type: e.type, attachedTo: e.attachedTo || null, cx: e.cx, cy: e.cy }));
   });

@@ -25,7 +25,7 @@
  * We hand-roll the entire UI. We never hand-roll the engine.
  */
 import StarterKit from "@tiptap/starter-kit";
-import { Extension, getStyleProperty, mergeAttributes } from "@tiptap/core";
+import { Extension, getStyleProperty, isValidCSSStyleValue } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 
 import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle, fontSizePx } from "./notesSpacing.js";
@@ -38,8 +38,8 @@ import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
 import { NoteTableFill } from "./notesTableFill.js";
 import { NoteTableMultiSelect } from "./notesTableMultiSelect.js";
-import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
-import { TaskList, TaskItem } from "@tiptap/extension-list";
+import { Table, TableCell, TableHeader, TableRow, TableView } from "@tiptap/extension-table";
+import { ListKeymap, TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
 import NoteImage from "./notesImageNode.js";
@@ -49,6 +49,7 @@ import NoteToggle, { NoteToggleTitle } from "./notesToggleNode.js";
 import NoteAnchor from "./notesAnchorNode.js";
 import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteTabKey from "./notesTabKey.js";
+import { NoteSelectAll } from "./notesSelectAll.js";
 import NoteListIndent from "./notesListIndent.js";
 import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
@@ -56,8 +57,10 @@ import NoteTableClipboard from "./notesTableClipboard.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 import NoteTableToText from "./notesTableToText.js";
-import NoteTableColumns, { NoteTableView } from "./notesTableColumns.js";
+import NoteTableColumns, { tableColumnWidths } from "./notesTableColumns.js";
 import { TABLE_COL_MIN_WIDTH } from "./notesTableWidth.js";
+import { adoptEmptyBlockSize, rowCarryPlugin, seedMark, sizeEmptyBlocks } from "./notesTableRowStyle.js";
+import { NoteTableRowHeight, rowNodeView } from "./notesTableRowHeight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
@@ -114,39 +117,34 @@ function deriveBlockSizes(doc, tr) {
   return touched;
 }
 
-/* ⛔ A TABLE NEVER GOES WITHOUT A NODE VIEW, EVEN THOUGH `resizable: true` (NEW-1/NEW-2, owner
- * report 2026-09-11, found verifying "undo/redo of a resize as a single step"). `Table`'s own
- * `addNodeView()` returns `null` whenever `resizable` is on — the library's live-drag preview
- * (`displayColumnWidth` in `@tiptap/pm/tables`) patches the `<colgroup><col>` elements' styles
- * directly, so its authors evidently judged a persistent node view unnecessary. It IS necessary:
- * that direct-DOM patch is the ONLY thing that ever touches those `<col>` elements, so any
- * colwidth change that does NOT come from a live drag — an undo, a redo, or this module's own
- * `NoteTableColumns` repair — leaves them showing the OLD widths forever. Measured live: undo a
- * resize and the STORED document correctly reverts (`colwidth` back to `null`, proven by reading
- * it straight off `editor.getJSON()`), while the rendered `<col>` styles stay exactly as they
- * were, so the table looks completely unchanged — a silently broken-looking undo, on a table
- * whose data was actually fine.
+/* ⛔ THE UPSTREAM TABLE VIEW, WITH ONE CORRECTION (B1554272/B1554273; still true on Tiptap 3.33). The library's `updateColumns` sets
+ * only whichever of `width` / `min-width` the column needs NOW and never clears the other, so a column dragged to 260px and then
+ * undone keeps its stale `width` (which beats `min-width`) and the table looks unchanged while the stored `colwidth` is right —
+ * Ctrl+Z reads as broken. This used to be a ~60-line copy of the whole view; it is now `TableView` plus a clean-up of each `<col>`
+ * after every build and update. A table never goes without a node view: without one an undo/redo/repair leaves the `<col>`s at their
+ * old widths (3.29 returned no view when `resizable`; 3.33 always builds `options.View`, so `View: NoteTableView` below is the hook).
  *
- * ⛔ AND THE LIBRARY'S OWN NODE VIEW COULD NOT BE REUSED AS-IS, WHICH IS WHY `notesTableColumns.js`
- * HAS ITS OWN `NoteTableView` RATHER THAN THIS FILE IMPORTING `TableView` DIRECTLY. Wiring the
- * library's `TableView` in here first (same idea, less code) surfaced a SECOND, independent bug:
- * its `updateColumns` only ever sets the ONE CSS property (`width` or `min-width`) the CURRENT
- * state wants and never clears the other, so a column going from explicit back to unset (an undo)
- * keeps its stale `width:` alongside a freshly-added `min-width:` — and `width` wins, so the
- * column goes on rendering at the old size forever regardless of how many times `update()` runs.
- * `NoteTableView`'s own header has the full measurement. Overriding `addNodeView()` to drop the
- * `isResizable` early return is still the only structural change here; the resize plugin's own
- * live-drag preview is untouched (it finds and patches this SAME real `<table>` DOM through
- * `view.domAtPos`, and `ignoreMutation`, also unchanged, is what stops ProseMirror's mutation
- * observer from fighting that preview mid-drag). */
+ * `keep` (NEW-1, OneNote paste): a bordered one-column table is data, not an Outlook layout table (`isLayoutTable`,
+ * notesPastePlain.js) — set by `normalizeTableMarkup`, round-tripped through `data-planyr-keep-table`. Default false. */
+export class NoteTableView extends TableView {
+  constructor(...args) {
+    super(...args);
+    this.settleColumnStyles();
+  }
+
+  update(node) {
+    const kept = super.update(node);
+    if (kept) this.settleColumnStyles();
+    return kept;
+  }
+
+  settleColumnStyles() {
+    const widths = tableColumnWidths(this.node);
+    Array.from(this.colgroup.children).forEach((col, i) => col.style.removeProperty(widths[i] ? "min-width" : "width"));
+  }
+}
+
 const NoteTable = Table.extend({
-  /* ⛔ `keep` — "THIS ONE-COLUMN TABLE IS DATA" (NEW-1, OneNote paste). The paste path unwraps a
-   * single-column table into plain lines because that is what an Outlook signature's layout
-   * scaffolding is (`isLayoutTable`, notesPastePlain.js). A bordered one-column table — OneNote's
-   * checklist — is a real table and was being flattened with it. Set by `normalizeTableMarkup` from
-   * the clipboard's own markup, round-tripped through `data-planyr-keep-table` so copy/paste inside
-   * Notes keeps it too. Default false and absent from the stored JSON's meaning: nothing existing
-   * changes. */
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -157,11 +155,18 @@ const NoteTable = Table.extend({
       },
     };
   },
-  addNodeView() {
-    return ({ node, view, HTMLAttributes }) => {
-      const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes);
-      return new NoteTableView(node, this.options.cellMinWidth, view, mergedAttributes);
-    };
+});
+
+/** NEW-3: a table row with its own view, so a live height drag survives (lib/notesTableRowHeight.js). */
+const NoteTableRow = TableRow.extend({ addNodeView() { return rowNodeView; } });
+
+/* ⛔ Tiptap 3.33's list keymap gained a Tab that moves a paragraph starting right after a list INTO the list's last item — it
+ * contradicts the pinned Tab table (notesTabKey.js: a plain paragraph gets a real tab character; Tab never re-parents a node).
+ * So the kit's list keymap is off and the same extension is added back WITHOUT its Tab. Guard: verify-notes-engine-contract.mjs. */
+const NoteListKeymap = ListKeymap.extend({
+  addKeyboardShortcuts() {
+    const { Tab: _upstreamTab, ...kept } = this.parent?.() ?? {};
+    return kept;
   },
 });
 
@@ -171,9 +176,12 @@ export const NOTE_EXTENSIONS = [
   // undo/redo · drop+gap cursors · list keymap · trailing node.
   StarterKit.configure({
     heading: { levels: HEADING_LEVELS },
+    listKeymap: false,                        // re-added below as NoteListKeymap (no upstream Tab)
     // Clicking a link while editing should place the caret, not navigate away mid-sentence.
     link: { openOnClick: false, autolink: true, HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" } },
   }),
+
+  NoteListKeymap,
 
   // textStyle + color + fontFamily + fontSize. `backgroundColor` and `lineHeight` are
   // switched OFF deliberately: highlight already owns background (with its own multicolor
@@ -203,7 +211,7 @@ export const NOTE_EXTENSIONS = [
           fontFamily: {
             default: null,
             parseHTML: (el) => inheritedStyle(el, "fontFamily", (n) => getStyleProperty(n, "font-family")),
-            renderHTML: (attrs) => (attrs.fontFamily ? { style: `font-family: ${attrs.fontFamily}` } : {}),
+            renderHTML: (attrs) => (isValidCSSStyleValue(attrs.fontFamily) ? { style: `font-family: ${attrs.fontFamily}` } : {}),
           },
         },
       }];
@@ -220,7 +228,7 @@ export const NOTE_EXTENSIONS = [
               const px = fontSizePx(inheritedStyle(el, "fontSize", (n) => getStyleProperty(n, "font-size")));
               return px ? `${px}px` : null;
             },
-            renderHTML: (attrs) => (attrs.fontSize ? { style: `font-size: ${attrs.fontSize}` } : {}),
+            renderHTML: (attrs) => (isValidCSSStyleValue(attrs.fontSize) ? { style: `font-size: ${attrs.fontSize}` } : {}),
           },
         },
       }];
@@ -239,8 +247,8 @@ export const NOTE_EXTENSIONS = [
    * above for why a persistent node view is not optional here. `TableCell`/`TableHeader`/
    * `TableRow` ride in unmodified (imported directly rather than through `TableKit`, which only
    * bundles the four for convenience and offers no hook to swap one out). */
-  NoteTable.configure({ resizable: true, allowTableNodeSelection: true, cellMinWidth: TABLE_COL_MIN_WIDTH }),
-  TableCell, TableHeader, TableRow,
+  NoteTable.configure({ resizable: true, allowTableNodeSelection: true, cellMinWidth: TABLE_COL_MIN_WIDTH, View: NoteTableView }),
+  TableCell, TableHeader, NoteTableRow,
   // Header row on ANY row + cell fill (NEW-1/NEW-2, 2026-10-28) — see lib/notesTableFill.js.
   NoteTableFill,
   NoteTableMultiSelect,   // B2530690 — Ctrl+click adds table cells to the selection
@@ -261,6 +269,12 @@ export const NOTE_EXTENSIONS = [
    * called once on editor mount (Tiptap's initial `setContent` never runs `appendTransaction`, so
    * an already-squeezed table needs a separate on-load recovery path). */
   NoteTableColumns,
+
+  /* NEW-2: a new row / column takes its neighbour's size (and a row its height). */
+  Extension.create({ name: "noteTableRowCarry", addProseMirrorPlugins() { return [rowCarryPlugin()]; } }),
+
+  /* NEW-3: drag the line under a row to change its height (adds `rowHeight` to tableRow). */
+  NoteTableRowHeight,
 
   // ⛔ HOW FAR APART THE LINES ARE (NEW-7). A BLOCK property, extending paragraph and heading
   // rather than riding textStyle — half a line cannot be one-and-a-half spaced. The value is
@@ -285,7 +299,12 @@ export const NOTE_EXTENSIONS = [
         appendTransaction: (trs, _old, newState) => {
           if (!trs.some((t) => t.docChanged)) return null;
           const tr = newState.tr;
-          if (!deriveBlockSizes(newState.doc, tr)) return null;
+          /* ⛔ ADOPT BEFORE DERIVE (NEW-1/NEW-2): text typed into an EMPTY block that carries a size must
+           * take that size as a mark first, or the derivation below would read "unsized run" and reset the
+           * block — the cell looked 9 and the word typed into it came out default. */
+          const adopted = adoptEmptyBlockSize(trs, _old, newState, tr);
+          const derived = deriveBlockSizes(tr.doc, tr);
+          if (!adopted && !derived) return null;
           /* ⛔ AND IT MUST HAND THE STORED MARKS BACK (NEW-ENTER-INHERIT). ProseMirror clears
            * `storedMarks` on any transaction that does not restate them, so this housekeeping
            * pass was silently stripping the marks a split had just carried to the new line — the
@@ -382,6 +401,8 @@ export const NOTE_EXTENSIONS = [
            * shorter than its own font's strut — measured: every word set to 11px still rendered
            * in the 24.75px row the 15px paragraph above it used. See lib/notesSpacing.js. */
           fontSize: { default: null, parseHTML: (el) => spacingFromElement(el).fontSize, renderHTML: () => ({}) },
+          /* NEW-1: marks an EMPTY block hands to the first text typed into it (lib/notesTableRowStyle.js). */
+          seed: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
           spaceBefore: { default: null, parseHTML: (el) => spacingFromElement(el).spaceBefore, renderHTML: () => ({}) },
           spaceAfter: {
             default: null,
@@ -484,6 +505,10 @@ export const NOTE_EXTENSIONS = [
           if (dispatch) dispatch(tr.setDocAttribute("pageHeight", next));
           return true;
         },
+
+        /* ⛔ SIZE THE EMPTY BLOCKS IN THE SELECTION (NEW-1) — see lib/notesTableRowStyle.js. */
+        sizeEmptyBlocks: (px) => sizeEmptyBlocks(px),
+        seedMark: (name, patch, mode) => seedMark(name, patch, mode),
 
         syncBlockFontSize: () => ({ state, tr, dispatch }) => {
           const touched = deriveBlockSizes(state.doc, tr);
@@ -619,6 +644,9 @@ export const NOTE_EXTENSIONS = [
   // see lib/notesTabKey.js for which cases each of them already claimed and which ones were
   // falling through to Chrome's toolbar.
   NoteTabKey,
+
+  // CTRL+A BELONGS TO THE BOX THE CARET IS IN (NEW-1, 2026-11-15) — lib/notesSelectAll.js. Priority 200: the engine's own Mod-a is the whole-document selection.
+  NoteSelectAll,
 
   // PASTE JUST THE TEXT (B36051). It WATCHES the paste rather than intercepting it — the
   // default Ctrl+V is deliberately unchanged — so the "Keep text only" option can be offered

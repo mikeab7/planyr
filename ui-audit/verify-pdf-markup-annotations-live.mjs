@@ -99,10 +99,10 @@ try {
 } finally {
   const gone = await page.evaluate(async (id) => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
       if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); } // the table refuses a hard delete until the row is in the trash
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
-      return { local: !JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
+      return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
   }, ID).catch((e) => ({ error: String(e) }));
   check(!!gone.local && !!gone.cloud, "throwaway plan deleted (local + cloud) and verified gone " + JSON.stringify(gone));

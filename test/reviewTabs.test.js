@@ -1,6 +1,6 @@
 // Review TABS (NEW-1, 2026-10-04) — the pure model + the account sync (two devices, one account).
 import { describe, it, expect } from "vitest";
-import { upsertTab, findOpenTab, closeTab, moveTab, serializeTabs, parseTabs, mergeRestored, droppedNotice, mergeLiveRecord, withKnownKeys, syncSig, parseSyncDoc, applyRemote, tabTitle, srcKeyOf } from "../src/workspaces/doc-review/lib/reviewTabs.js";
+import { buildSyncDoc, upsertTab, findOpenTab, closeTab, moveTab, serializeTabs, parseTabs, mergeRestored, droppedNotice, mergeLiveRecord, withKnownKeys, syncSig, parseSyncDoc, applyRemote, tabTitle, srcKeyOf } from "../src/workspaces/doc-review/lib/reviewTabs.js";
 import { createTabSync } from "../src/workspaces/doc-review/lib/tabSync.js";
 
 const T = (id, extra = {}) => ({ id, name: `${id}.pdf`, projectId: null, project: "", kind: "pdf", srcKey: "", ...extra });
@@ -20,6 +20,13 @@ describe("tab list model", () => {
     expect(findOpenTab(tabs, { name: "plan.pdf", size: 10, projectId: "p2" }).id).toBe("b");
     expect(findOpenTab(tabs, { name: "plan.pdf", size: 10, projectId: "p3" })).toBe(null);
     expect(findOpenTab(tabs, { name: "plan.pdf", size: 11, projectId: "p1" })).toBe(null);
+  });
+  it("B2671221 — no tab field the account copy stores may contain U+0000 (Postgres jsonb refuses it, failing the whole prefs write); a legacy NUL key still matches", () => {
+    const t = T("a", { name: "plan.pdf", srcKey: srcKeyOf("plan.pdf", 10) });
+    expect(JSON.stringify(buildSyncDoc({ tabs: [t], activeId: "a", states: {}, at: 1 }))).not.toMatch(/\\u0000/);
+    expect(srcKeyOf("plan.pdf", 10)).not.toContain("\u0000");
+    const legacy = T("b", { name: "plan.pdf", srcKey: "plan.pdf\u000010" });
+    expect(findOpenTab([legacy], { name: "plan.pdf", size: 10, projectId: null }).id).toBe("b");
   });
   it("closing the active tab shows its right neighbour, or the left one when it was last, or nothing", () => {
     const tabs = [T("a"), T("b"), T("c")];

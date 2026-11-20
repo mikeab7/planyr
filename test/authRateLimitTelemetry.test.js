@@ -37,22 +37,25 @@ async function signUpWithError(errorMessage) {
   return signUp("someone@floodattempt.example", "password1", {});
 }
 
+/* NEW-1 (2026-11-02): every signUp now ALSO reports its outcome through the one auth-telemetry helper (auth-ok / auth-user-error / …).
+ * This file is about the ORIGINAL event, so it looks only at `signup-rate-limited`. */
+const rateLimited = () => h.events.filter((e) => e.kind === "signup-rate-limited");
+
 describe("signUp() — rate-limit telemetry (B1160721, NEW-2)", () => {
   it("logs a signup-rate-limited event, with domain only, when the server rejects for rate limiting", async () => {
     await signUpWithError(`${SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT}. Please try again later.`);
-    expect(h.events).toHaveLength(1);
-    expect(h.events[0].kind).toBe("signup-rate-limited");
-    expect(h.events[0].extra.domain).toBe("floodattempt.example");
-    expect(JSON.stringify(h.events[0])).not.toContain("someone@");
+    expect(rateLimited()).toHaveLength(1);
+    expect(rateLimited()[0].extra.domain).toBe("floodattempt.example");
+    expect(JSON.stringify(h.events)).not.toContain("someone@");
   });
 
   it("does not fire for an unrelated signup error", async () => {
     await signUpWithError("Password should be at least 6 characters.");
-    expect(h.events).toHaveLength(0);
+    expect(rateLimited()).toHaveLength(0);
   });
 
   it("does not fire on a clean signup", async () => {
     await signUpWithError(null);
-    expect(h.events).toHaveLength(0);
+    expect(rateLimited()).toHaveLength(0);
   });
 });

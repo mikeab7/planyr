@@ -64,7 +64,7 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 
 const pondCount = () => page.evaluate(() => {
   try {
-    const sites = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const sites = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const s = sites.s_e1; return (s.els || []).filter((e) => e.type === "pond").length;
   } catch (_) { return -1; }
 });

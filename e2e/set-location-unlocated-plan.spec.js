@@ -73,7 +73,7 @@ async function openUnlocated(page) {
  * moved" with "the camera moved". The promise under test is about the FEET. */
 async function ringFromStore(page) {
   return page.evaluate((id) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const pc = (all[id]?.parcels || [])[0];
     return pc ? pc.points.map((p) => ({ x: p.x, y: p.y })) : null;
   }, SITE_ID);
@@ -81,7 +81,7 @@ async function ringFromStore(page) {
 
 async function originFromStore(page) {
   return page.evaluate((id) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     return all[id]?.origin ?? null;
   }, SITE_ID);
 }
@@ -214,7 +214,7 @@ test.describe("NEW-3 · a hand-drawn parcel carries a record, and says where it 
     await page.getByTestId("parcel-field-statedAcres").blur();
 
     await expect.poll(async () => page.evaluate((id) => {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const pc = (all[id]?.parcels || [])[0];
       return pc ? `${pc.label}|${pc.statedAcres}` : null;
     }, SITE_ID), { timeout: 10_000 }).toBe("North tract|12.5");

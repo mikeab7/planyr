@@ -32,7 +32,7 @@ const site = { id: SITE_ID, groupId: SITE_ID, site: "Verify Arrange", name: "Pla
 // (incl. reload), so a non-conditional seed would clobber what the app persisted — making the
 // reload persistence check meaningless. Guarding on absence lets the reload read the app's own save.
 const seed = `(() => { try {
-  if (!localStorage.getItem('planarfit:sites:v1')) {
+  if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [SITE_ID]: site })}));
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(SITE_ID)});
   }
@@ -135,7 +135,7 @@ log(after.mk >= 0 && after.mk < after.firstB, `"Send behind buildings" moved the
 
 // --- 5b: the app WROTE behindEls to storage (isolates save from load) ---
 await page.waitForTimeout(1200);
-const savedBehind = await page.evaluate((sid) => { try { const s = JSON.parse(localStorage.getItem('planarfit:sites:v1') || '{}'); const st = s[sid]; const m = st && (st.markups || []).find((x) => x.id === 'm1'); return m ? !!m.behindEls : 'no-markup'; } catch (e) { return 'ERR:' + e.message; } }, SITE_ID);
+const savedBehind = await page.evaluate((sid) => { try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1') || '{}'); const st = s[sid]; const m = st && (st.markups || []).find((x) => x.id === 'm1'); return m ? !!m.behindEls : 'no-markup'; } catch (e) { return 'ERR:' + e.message; } }, SITE_ID);
 log(savedBehind === true, `behindEls persisted to localStorage (saved flag = ${savedBehind})`);
 
 // --- 6: persistence — reload; the behind-buildings flag survives ---

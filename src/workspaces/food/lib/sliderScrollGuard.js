@@ -19,6 +19,13 @@ export function isVerticalScroll(dx, dy, slop = SCROLL_SLOP_PX) {
   return Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx);
 }
 
+/** Is this finger movement a deliberate sideways SLIDER drag? Once a touch has gone sideways it is the slider's for good: a finger
+ *  drifting up or down afterwards (it always does on a real thumb) must never revert the value he just dragged to (B2671295 x2: on a
+ *  phone, a drag that wandered vertically put the score back to "not rated" at touch-end, so the row was saved unscored). */
+export function isHorizontalDrag(dx, dy, slop = SCROLL_SLOP_PX) {
+  return Math.abs(dx) > slop && Math.abs(dx) >= Math.abs(dy);
+}
+
 /** Touch handlers to spread on the `<input type="range">`. `value` is the CURRENT value (null = not rated); `onChange` takes a value or null. */
 export function useScrollSafeSlider(value, onChange) {
   const g = useRef(null);
@@ -26,11 +33,12 @@ export function useScrollSafeSlider(value, onChange) {
   return {
     onTouchStart: (e) => {
       const t = e.touches && e.touches[0];
-      g.current = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, before: value, reverted: false } : null;
+      g.current = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, before: value, reverted: false, dragging: false } : null;
     },
     onTouchMove: (e) => {
       const s = g.current, t = e.touches && e.touches[0];
-      if (!s || !t || s.reverted) return;
+      if (!s || !t || s.reverted || s.dragging) return;
+      if (isHorizontalDrag(t.clientX - s.x, t.clientY - s.y)) { s.dragging = true; return; }
       if (isVerticalScroll(t.clientX - s.x, t.clientY - s.y)) { s.reverted = true; onChange(s.before); }
     },
     onTouchEnd: settle,

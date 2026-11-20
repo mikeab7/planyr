@@ -54,11 +54,11 @@ describe("NEW-2(c) — the onAuthChange subscription always runs the LATEST appl
   it("the subscription callback invokes applyUserRef.current(...), never the bare applyUser identifier", () => {
     const block = subscriptionBlock();
     // The callback body itself — after the ref declaration — must call through the ref.
-    const callbackAt = block.indexOf("return onAuthChange((event, u) => {");
+    const callbackAt = block.indexOf("return onAuthChange((event, u, meta) => {");
     expect(callbackAt, "the onAuthChange callback was not found").toBeGreaterThan(-1);
     const callback = block.slice(callbackAt);
-    expect(callback).toMatch(/applyUserRef\.current\(u, event\)/);
-    expect(callback).not.toMatch(/[^.]applyUser\(u, event\)/); // never the un-ref'd, staleness-prone call
+    expect(callback).toMatch(/applyUserRef\.current\(u, event, meta\)/);
+    expect(callback).not.toMatch(/[^.]applyUser\(u, event(, meta)?\)/); // never the un-ref'd, staleness-prone call
   });
 
   it("the subscription itself still subscribes exactly ONCE (empty deps) — this fix must not turn into a re-subscribe-every-render bug instead", () => {
@@ -70,12 +70,12 @@ describe("NEW-2(c) — the onAuthChange subscription always runs the LATEST appl
   });
 
   it("MUTATION CHECK — reverting to the bare (stale-closure-prone) applyUser call fails the guard", () => {
-    const preFix = src.replace("applyUserRef.current(u, event);", "applyUser(u, event);");
+    const preFix = src.replace("applyUserRef.current(u, event, meta);", "applyUser(u, event, meta);");
     expect(preFix).not.toBe(src);
     const at = preFix.indexOf("const applyUserRef = useRef(applyUser);");
     const closeAt = preFix.indexOf("}, []);", at);
     const block = preFix.slice(at, closeAt + "}, []);".length);
-    const callbackAt = block.indexOf("return onAuthChange((event, u) => {");
+    const callbackAt = block.indexOf("return onAuthChange((event, u, meta) => {");
     const callback = block.slice(callbackAt);
     expect(callback).not.toMatch(/applyUserRef\.current\(u, event\)/);
   });

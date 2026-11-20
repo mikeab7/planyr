@@ -199,7 +199,7 @@ async function run() {
 
   const stored = await page.evaluate(() => {
     try {
-      const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
       const s = all.perf_merge_fixture;
       return s ? { parcelCount: (s.parcels || []).length, deletedCount: (s.deletedIds || []).length } : null;
     } catch (e) { return null; }

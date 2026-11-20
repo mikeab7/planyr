@@ -49,7 +49,7 @@ const dropSmallOverlay = (page) => page.evaluate(async () => {
 // which writes the in-memory state (with no ghost) back over the injection.
 const armMissingInjection = (page) => page.addInitScript((SITES_KEY) => {
   try {
-    const m = JSON.parse(localStorage.getItem(SITES_KEY) || "{}");
+    const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(SITES_KEY) || "{}");
     const sid = Object.keys(m)[0];
     if (!sid) return;
     const site = m[sid];
@@ -66,7 +66,7 @@ const armMissingInjection = (page) => page.addInitScript((SITES_KEY) => {
   } catch (_) { /* leave storage untouched on any parse error */ }
 }, SITES_KEY);
 const seededCount = (page) => page.evaluate((SITES_KEY) => {
-  const m = JSON.parse(localStorage.getItem(SITES_KEY) || "{}");
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(SITES_KEY) || "{}");
   const s = Object.values(m)[0];
   return s && s.sheetOverlays ? s.sheetOverlays.length : 0;
 }, SITES_KEY);
@@ -103,7 +103,7 @@ if (await startCaret.isVisible().catch(() => false)) {
   await page.getByTestId("map-toolbar-draw").first().click();
   await page.waitForTimeout(2500);
 }
-const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
+const siteId = await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
 // Open Overlays so the panel's file input is available, then drop the valid overlay.

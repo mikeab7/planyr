@@ -410,6 +410,14 @@
     }
   ],
   "ownedColumns": {
+    "signin_incidents": [
+      "kind",
+      "alert_emailed_at",
+      "recovery_emailed_at"
+    ],
+    "signin_stop_alerts": [
+      "emailed_at"
+    ],
     "recovery_20261008_parcel_account_snapshot": [
       "site_id"
     ],
@@ -419,6 +427,9 @@
     "ops_ingest_tokens": ["label"],
     "signup_attempts_log": [
       "email_domain"
+    ],
+    "auth_email_link_log": [
+      "email_key"
     ],
     "cad_taxunit_shards": ["county"],
     "comp_import_drafts": [
@@ -564,6 +575,9 @@
       "email",
       "role",
       "team_id"
+    ],
+    "mailbox_proofs": [
+      "email"
     ],
     "jurisdictions": [
       "name"

@@ -70,7 +70,7 @@ console.log("\nAFTER — flags remaining:", after.length ? JSON.stringify(after)
 
 // Prove it in the DATA too, not just the absence of a badge.
 const geom = await page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = Object.values(m)[0] || {};
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && e.pts).map((e) => ({ id: e.id, cls: e.roadClass,
     pts: e.pts.map((p) => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]),
     vtx: (e.vtx || []).map((v) => (v && v.radius ? `${v.treatment}:${Math.round(v.radius)}` : "-")) }));

@@ -48,7 +48,7 @@ page.on("pageerror", (e) => pageErrors.push(e.message));
 
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const tb = (id) => page.locator(`[data-testid="${id}"]`);
-const readTree = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), TREE_KEY);
+const readTree = () => page.evaluate((k) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "null"), TREE_KEY);
 
 const pg = (id, title, projectId) => ({ id, title, projectId, createdAt: 1, updatedAt: 1, pages: [] });
 

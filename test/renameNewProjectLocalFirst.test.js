@@ -72,7 +72,8 @@ describe("renaming a freshly minted, never-drawn project while signed in", () =>
     markProjectFreshlyMinted("gnew3");
     const res = await renameSiteGroup("gnew3", "Kept");
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/network down|couldn.t reach/i);
+    expect(res.error).toBe("Rename didn't fully save to the cloud. Your other devices may still see the old name."); // NEW-1 (2026-11-11): plain words for the person…
+    expect(res.rawError).toMatch(/network down|couldn.t reach/i);                                                      // …the raw message kept for telemetry
     expect(loadSite("gnew3").site).toBe("Kept");
   });
 });

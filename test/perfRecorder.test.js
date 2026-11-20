@@ -977,7 +977,6 @@ describe("wiring guards — the parts that only exist as a call site", () => {
   const planner = plannerSource();
   const helpControl = src("app/HelpReportControl.jsx");
   const census = src("shared/storage/storageCensus.js");
-  const panel = src("shared/storage/StoragePanel.jsx");
 
   it("main.jsx installs the recorder by DYNAMIC import — a static edge charges every route", () => {
     expect(main).toMatch(/import\(\s*["']\.\/shared\/telemetry\/perfRecorder\.js["']\s*\)/);
@@ -1033,8 +1032,12 @@ describe("wiring guards — the parts that only exist as a call site", () => {
     expect(cls).toContain("reclaimable: false");
   });
 
-  it("the storage panel surfaces the recordings, so the class cannot grow unseen", () => {
-    expect(panel).toContain('data-testid="perf-captures"');
-    expect(panel).toContain('data-testid="clear-perf-captures"');
+  /* NEW-1 (2026-11-04, owner decision: RETIRE) replaced the old "surfaced and clearable in the Storage panel" guard. The
+   * recordings have no screen now; what keeps the class from growing is its own writer's bound, so THAT is what is pinned. */
+  it("the on-device copy is bounded by its own writer (three), since no screen lists or clears it any more", () => {
+    const store = src("shared/telemetry/perfCaptureStore.js");
+    expect(store).toMatch(/export const MAX_CAPTURES = 3;/);
+    expect(store).toMatch(/excess = keys\.length - MAX_CAPTURES/);
+    expect(store).not.toMatch(/export (async )?function (clearPerfCaptures|perfCaptureSummary)/);
   });
 });

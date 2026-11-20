@@ -74,7 +74,7 @@ try {
 
   /* ---- owner: a throwaway plan with a real PDF upload ---- */
   await O.evaluate(async (r) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
+    const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
     const e = await window.pfSupabase.from("sites").upsert({ id: r.id, group_id: r.id, site: r.site, name: r.name, county: "harris", updated_at: new Date().toISOString(), data: r });
     if (e.error) throw new Error("seed: " + e.error.message);
   }, rec);
@@ -105,7 +105,7 @@ try {
   check((await sees(M, "comps", compId)) === 1, "teammate sees the comp attached to the project (B2244017)");
 
   /* ---- teammate opens it in the app, sees the image, reloads ---- */
-  await M.evaluate((r) => { const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, (await O.evaluate(async (i) => (await window.pfSupabase.from("sites").select("data").eq("id", i).single()).data.data, A)));
+  await M.evaluate((r) => { const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); all[r.id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all)); }, (await O.evaluate(async (i) => (await window.pfSupabase.from("sites").select("data").eq("id", i).single()).data.data, A)));
   await openPlan(M, "verify-shared-overlay-access:teammate");
   await until(M, async () => ((await F(M, "own")) || []).find((o) => o.id === ov.id && o.hasSrc), "teammate's planner draws the overlay image");
   check(true, "teammate's planner shows the overlay picture");
@@ -127,7 +127,7 @@ try {
 } catch (e) { console.error("ERROR", e.message); failed = true; }
 finally {
   try {
-    if (mate) await mate.page.evaluate((i) => { try { const o = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete o[i]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(o)); } catch (_) {} localStorage.removeItem("planarfit:currentSite:v1"); }, A).catch(() => {});
+    if (mate) await mate.page.evaluate((i) => { try { const o = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); delete o[i]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(o)); } catch (_) {} localStorage.removeItem("planarfit:currentSite:v1"); }, A).catch(() => {});
     if (owner) {
       await pacedWait(owner.page, 6000);
       const gone = await owner.page.evaluate(async ([id, k, t, c]) => {

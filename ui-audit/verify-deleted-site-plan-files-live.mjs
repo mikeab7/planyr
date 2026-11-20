@@ -99,9 +99,11 @@ try {
   // ---- B. the plan menu of the throwaway project lists it ----
   await openProject(page, base, gid);
   await page.getByTestId("plan-crumb").click();
+  await page.getByTestId("plan-bin-toggle").waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
+  await page.getByTestId("plan-bin-toggle").click();   // NEW-1 (2026-11-04): "Recently deleted (n)" is a row that opens the bin view
   const fileRow = page.getByTestId("deleted-site-plan-file").filter({ hasText: FILE });
   await fileRow.waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
-  record("3a the plan menu's \"Recently deleted\" lists the file, tagged \"site plan\" (tag stays visible, page 3 in the tooltip)", (await fileRow.count()) === 1 && /site plan/.test(await fileRow.innerText().catch(() => "")) && /page 3/.test((await fileRow.locator("span[title]").first().getAttribute("title").catch(() => "")) || ""), (await fileRow.innerText().catch(() => "")).replace(/\s+/g, " "));
+  record("3a the plan menu's \"Recently deleted\" lists the file, tagged \"site plan\" (tag stays visible, page 3 in the tooltip)", (await fileRow.count()) === 1 && /site plan/.test(await fileRow.innerText().catch(() => "")) && /page 3/.test((await fileRow.getAttribute("title").catch(() => "")) || ""), (await fileRow.innerText().catch(() => "")).replace(/\s+/g, " "));
   const bg = await fileRow.evaluate((el) => getComputedStyle(el).backgroundColor).catch(() => "");
   record("3b the row has no grey fill", /rgba\(0, 0, 0, 0\)|transparent/.test(bg), bg);
   await page.screenshot({ path: OUT + "deleted-site-plans-02-plan-menu.png" });
@@ -122,11 +124,14 @@ try {
   // ---- D. delete again, then Delete forever through the menu's inline confirm ----
   await sb(async (id) => window.pfSupabase.rpc("soft_delete_site_plan_overlay", { p_overlay_id: id }), OID);
   await page.getByTestId("plan-crumb").click();
+  await page.getByTestId("plan-bin-toggle").waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
+  await page.getByTestId("plan-bin-toggle").click();
   const row2 = page.getByTestId("deleted-site-plan-file").filter({ hasText: FILE });
   await row2.waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
-  await page.getByRole("button", { name: `Delete site plan ${FILE} forever` }).click();
+  await row2.locator('[data-testid^="deleted-more-"]').click();      // Delete forever lives in the row's ⋯, never next to Restore
+  await page.getByTestId("deleted-ctx-purge").click();
   record("6a Delete forever asks first (inline confirm, nothing deleted yet)", (await page.getByText(/Permanently delete site plan/).count()) === 1 && (await sb(async (id) => (await window.pfSupabase.from("site_plan_overlays").select("id").eq("id", id)).data.length, OID)) === 1);
-  await page.getByRole("button", { name: "Delete", exact: true }).last().click();
+  await page.getByTestId("deleted-purge-go").click();
   let gone = false; const t1 = Date.now();
   while (Date.now() - t1 < 20000 && !gone) { gone = (await sb(async (id) => (await window.pfSupabase.from("site_plan_overlays").select("id").eq("id", id)).data.length, OID)) === 0; if (!gone) await page.waitForTimeout(400); }
   record("6b Delete forever removes the row for good", gone);

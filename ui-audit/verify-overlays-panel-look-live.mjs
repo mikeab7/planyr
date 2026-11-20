@@ -114,10 +114,10 @@ try {
   await page.waitForTimeout(2500);
   const gone = await page.evaluate(async ([id, k]) => {
     try {
-      const all = JSON.parse(localStorage.getItem(k) || "{}"); delete all[id]; localStorage.setItem(k, JSON.stringify(all));
+      const all = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}"); delete all[id]; localStorage.setItem(k, JSON.stringify(all));
       if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
-      return { local: !JSON.parse(localStorage.getItem(k) || "{}")[id], cloud: !(q.data && q.data.length) };
+      return { local: !JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }
   }, [ID, KEY || "planarfit:sites:v1"]).catch((e) => ({ error: String(e) }));
   check("throwaway site deleted (local + cloud) and verified gone", !!gone.local && !!gone.cloud, JSON.stringify(gone));

@@ -5,6 +5,9 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
+import univerPrune from "./scripts/vite-plugin-univer-prune.mjs";
+import spreadsheetPreload from "./scripts/vite-plugin-spreadsheet-preload.mjs";
+import plannerPreload from "./scripts/vite-plugin-planner-preload.mjs";
 import { UNSAFE_BUILDS } from "./src/app/unsafeBuilds.js";
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
@@ -118,7 +121,12 @@ function chunkModuleStats() {
  * regression on three routes, and it is invisible unless you look. Pinning the helper to its
  * own `cjs-interop` chunk breaks the merge: the helper stays shared and ~0.3 KB, and the map
  * bytes stay on the routes that actually use a map. */
-const MAP_VENDOR = ["leaflet", "esri-leaflet", "clipper-lib", "@terraformer"];
+/* B329408 — TWO vendor chunks, not one. The map itself (leaflet) is needed by every route that shows a map (the Site route, the Spreadsheet's
+ * map, Food). The GEOMETRY / GIS closure — esri-leaflet (the ArcGIS layer client), clipper-lib (polygon dissolve / offset) and the terraformer
+ * ArcGIS->GeoJSON converter — is needed only where a page draws GIS layers or does polygon math. Held together (as `map-vendor` was) Food
+ * downloaded ~130 KB of clipper + esri-leaflet it never calls; split, it fetches only leaflet. Same bytes on the Site route, in one more file. */
+const MAP_VENDOR = ["leaflet"];
+const GEO_VENDOR = ["esri-leaflet", "clipper-lib", "@terraformer"];
 function mapVendorChunk(id) {
   const norm = id.replace(/\\/g, "/");
   // Keep the shared CJS interop helper out of any vendor chunk — see the trap note above.
@@ -126,7 +134,8 @@ function mapVendorChunk(id) {
   if (!norm.includes("node_modules")) return undefined;
   const after = norm.slice(norm.lastIndexOf("node_modules/") + "node_modules/".length);
   const pkg = after.startsWith("@") ? after.split("/").slice(0, 2).join("/") : after.split("/")[0];
-  return MAP_VENDOR.includes(pkg) ? "map-vendor" : undefined;
+  if (MAP_VENDOR.includes(pkg)) return "map-vendor";
+  return GEO_VENDOR.includes(pkg) ? "geo-vendor" : undefined;
 }
 
 // Build identifier (short git SHA, timestamp fallback) baked into the bundle so the
@@ -191,6 +200,9 @@ export default defineConfig(({ command }) => ({
   // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
+  // A Web Worker is bundled WITHOUT the app's plugins, so the Univer prune has to be named here too (lib/univerFormulaWorker.js
+  // reaches the render engine through @univerjs/sheets; unpruned, the engine's lazy language files make the worker un-bundlable).
+  worker: { plugins: () => [univerPrune()] },
   build: {
     // Emit dist/.vite/manifest.json — the chunk graph (per-chunk `imports` = static deps,
     // `dynamicImports` = lazy deps, plus each chunk's file name). The performance-budget
@@ -212,6 +224,12 @@ export default defineConfig(({ command }) => ({
      * with no hooks unless PLANYR_PROBE=1 is in the environment, so a production build is byte-for-
      * byte unaffected (asserted by test/recomputeProbe.test.js). Never enabled by `npm run build`. */
     recomputeProbe(),
+    /* NEW-1 (B2587264) — drop the ~77 unused per-language hyphenation files Univer's render engine would otherwise emit. */
+    univerPrune(),
+    /* NEW-1 (B2604xxx) — a page opening ON the Spreadsheet starts fetching its chunks at t=0 instead of three hops later (see the plugin's header). */
+    spreadsheetPreload(),
+    /* B329408 — a page opening ON a plan starts fetching the plan editor's chunk at t=0 (it is its own chunk now; see the plugin's header). */
+    plannerPreload(),
     pdfjsAssets(),
     chunkModuleStats(),
     buildStamp(),

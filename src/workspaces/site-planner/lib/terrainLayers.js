@@ -53,12 +53,13 @@ import {
   latticeCover, latticeTileAt, LATTICE_MAX_BAND, LATTICE_MIN_BAND,
 } from "./demGrid.js";
 import {
-  composeContourPaint, contourLabelText, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
+  composeContourPaint, contourLabelText, hoverMarkerPaneOptions, buildContourIndex, hitContour, clipContourLinesOutside, labelInsideClip,
   hoverLabelPlacement, hoverLabelSize,
   contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 import { runBudgeted, drainBudgeted, PAINT_FRAME_BUDGET_MS } from "./paintSchedule.js";
+import { planAllContourLabels, CONTOUR_LABEL_ALL } from "./contourLabelPlan.js";
 
 const paintNowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
 
@@ -105,15 +106,22 @@ function workerSlot(label) {
     };
     return worker;
   };
-  // post one job → a promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash)
-  const post = (msg, transfer = []) => new Promise((resolve, reject) => {
+  // post one job → { id, promise }: the promise of the worker's reply (rejects LOUDLY: a throw while posting, an error reply, a crash). The id is
+  // what a caller cancels by ("Fit the biggest building" — the worker never answers a cancel).
+  const postJob = (msg, transfer = []) => {
     const id = ++seq;
-    pending.set(id, { resolve, reject });
-    try { get().postMessage({ id, ...msg }, transfer); }
-    catch (e) { pending.delete(id); reject(e); }
-  });
+    const promise = new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      try { get().postMessage({ id, ...msg }, transfer); }
+      catch (e) { pending.delete(id); reject(e); }
+    });
+    return { id, promise };
+  };
+  const post = (msg, transfer = []) => postJob(msg, transfer).promise;
+  // fire-and-forget (a cancel): no reply is registered
+  const fire = (msg) => { try { if (worker) worker.postMessage({ id: ++seq, ...msg }); } catch (_) { /* a dead worker has nothing left to cancel */ } };
   const dispose = () => { try { worker && worker.terminate(); } catch (_) {} worker = null; };
-  return { post, dispose };
+  return { post, postJob, fire, dispose };
 }
 const tileWorker = workerSlot("terrain");
 const gradingWorker = workerSlot("grading");
@@ -124,6 +132,12 @@ if (import.meta.hot) import.meta.hot.dispose(() => { tileWorker.dispose(); gradi
  * resolves with the worker's reply, rejects LOUDLY. */
 export function runBuildableJob(payload) {
   return gradingWorker.post({ kind: "buildable", ...payload });
+}
+/* NEW-1 ("Fit the biggest building") — the search for the biggest building the ground holds, on the GRADING worker: resolves with the worker's
+ * reply ({ result } or { cancelled: true }), rejects LOUDLY; `cancel()` tells the worker to stop it at the next slice. */
+export function runFitJob(payload) {
+  const j = gradingWorker.postJob({ kind: "buildable", op: "fit", ...payload });
+  return { promise: j.promise, cancel: () => gradingWorker.fire({ kind: "fit-cancel", target: j.id }) };
 }
 /* ROUND 7 (NEW-1) — trace the slope band's outline on the grading worker: { values: Float32Array (the band field), nx, ny }
  * → { rings, holes } in lattice pixels. The values buffer is TRANSFERRED. */
@@ -354,6 +368,7 @@ const CONTOUR_INDEX_COL = "#5B2E0D";
 const ARROW_COL = "#0369A1";          // drainage blue (not the status palette)
 export const CONTOUR_HOVER_CLASS = "planyr-contour-hover"; // marks the ONE transient hover label
 
+
 /* `offset` (NEW-1) shifts the tag off the anchor by an exact number of SCREEN pixels, with
  * the span's TOP-LEFT at the offset instead of its centre on the anchor — that is what
  * gets the hover tag out from under the mouse pointer. Omitted (every permanent index
@@ -421,14 +436,40 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
  * ⇒ byte-for-byte the historic paint (every account that cannot see grading). */
 const CONTOUR_EXISTING_DASH = "6 5";
 const CONTOUR_EXISTING_MUTED_OPACITY = 0.8;
-function renderContours(parts, { opacity, canvas, onComposed, labelPane = null, gradingClip = null }) {
+/* ROUND 10 (NEW-2) — the existing lines' labels at working zoom: contourLabelPlan over the lines as map PIXELS (map.project at the
+ * current zoom — pan-invariant), trimmed to the view plus a margin, then back to lat/lng for the label markers. null = below the
+ * labelling zoom (the caller keeps its index labels). Horizontal markers: the box is the label's own, no rotation. */
+export const LABEL_VIEW_MARGIN = 0.25;
+export const LABEL_CLIP_CLEAR_PX = 16;
+function allLineLabels(lines, map, clip = null) {
+  if (!map || !lines || !lines.length) return null;
+  const z = map.getZoom(), c = map.getCenter();
+  const ftPerPx = (156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / Math.pow(2, z) * 3.280839895;
+  const ppf = 1 / ftPerPx;
+  if (!(ppf >= CONTOUR_LABEL_ALL.minPpf)) return null;
+  const b = map.getPixelBounds(), w = b.max.x - b.min.x, h = b.max.y - b.min.y;
+  const rect = { minX: b.min.x - w * LABEL_VIEW_MARGIN, maxX: b.max.x + w * LABEL_VIEW_MARGIN, minY: b.min.y - h * LABEL_VIEW_MARGIN, maxY: b.max.y + h * LABEL_VIEW_MARGIN };
+  const proj = lines.map((ln, i) => ({ key: contourLineKey(ln) + "#" + i, level: ln.level, isIndex: ln.isIndex, text: contourLabelText(ln.level), pts: ln.coords.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return { x: p.x, y: p.y }; }) }));
+  // stay clear of the daylight line (the clip's rings), where the proposed family's own labels run up to it
+  const ringPx = clip && clip.rings ? [...clip.rings, ...(clip.holes || [])].map((r) => r.map((q) => { const p = map.project(L.latLng(q[0], q[1]), z); return [p.x, p.y]; })) : [];
+  const keepOut = ringPx.length ? (x, y) => { for (const r of ringPx) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1; let t = ((x - a[0]) * dx + (y - a[1]) * dy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t; if (Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) < LABEL_CLIP_CLEAR_PX) return true; } return false; } : null;
+  return planAllContourLabels(proj, 1, { rect, opts: { minPpf: 0, keepOut } }).map((lab) => {
+    const ll = map.unproject(L.point(lab.pt.x, lab.pt.y), z);
+    return { ll: [ll.lat, ll.lng], level: lab.level, text: lab.text, key: lab.key };
+  });
+}
+function renderContours(parts, { opacity, canvas, onComposed, map = null, labelPane = null, gradingClip = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
   // its output into keyed Leaflet-build recipes.
   const composed = composeContourPaint(parts);
   const lines = gradingClip ? clipContourLinesOutside(composed.lines, gradingClip) : composed.lines;
-  const labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
+  let labels = gradingClip ? composed.labels.filter((lab) => !labelInsideClip(lab, gradingClip)) : composed.labels;
+  // ROUND 10 (NEW-2): while the owner's grading picture is on and the zoom is working zoom, EVERY existing line in view carries its
+  // elevation (the index-only labels above are what the owner's 50-ft view had none of). Only on this branch — every other account
+  // keeps the historic labels byte for byte.
+  if (gradingClip && map) { const all = allLineLabels(lines, map, gradingClip); if (all) labels = all; }
   if (onComposed) onComposed({ lines, labels });
   const items = [];
   for (const ln of lines) {
@@ -768,6 +809,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       // index labels — a ghost or a stacked pair is otherwise invisible to a DOM check
       icon: labelIcon(text, CONTOUR_HOVER_CLASS, place),
       interactive: false, keyboard: false,
+      ...hoverMarkerPaneOptions(labelPane),
     }).addTo(hoverGroup);
     return hit;
   };

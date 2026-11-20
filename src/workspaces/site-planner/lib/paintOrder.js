@@ -49,6 +49,11 @@
  * in this ladder is about what an untouched or deliberately-flagged object does. See
  * `SitePlanner.jsx`'s `elPaintItems` for where the lift actually happens.
  *
+ * ⛔ NEW-1 (2026-11-05) — ONE OWNER-ORDERED EXCEPTION INSIDE THE "element" RUNG: a trailer-parking row always paints above every road /
+ * road cluster (`lib/trailerOverRoads.js`; root /CLAUDE.md constraint 10). It is a render-order rule applied after the z sort — no stored
+ * z changes, the selection lift is untouched — so this ladder still describes FAMILIES; inside "element" it is plain creation order
+ * except trailer-over-road. Do not add it as a rung and do not widen it to another type pair.
+ *
  * Pure data + pure predicates. No React, no DOM.
  */
 

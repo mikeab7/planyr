@@ -150,25 +150,27 @@ export function prepareSweep({ lattice, rings, holes = [] }) {
   };
 }
 
-/* ---- the mask at one E ---- */
+/* ---- the daylight test, as one reusable piece (NEW-1 "Fit the biggest building") ---- */
 
-/* The pad-able mask at finish elevation E — the LARGEST 4-connected component of the cells that satisfy
- * (a)(b)(c). Returns { mask: Uint8Array, cells, areaSf, areaAc }. `scratch` lets a sweep reuse buffers. */
-export function maskAt(ctx, E, s = DEFAULT_SLOPE, D = DEFAULT_MAX_DEPTH_FT) {
-  const { lattice: lat, inside, bs } = ctx;
-  const { nx, ny, cell, x0, y0, z } = lat;
-  const N = nx * ny;
-  const ok = new Uint8Array(N);
-  for (let k = 0; k < N; k++) {
-    if (!inside[k]) continue;
-    const zz = z[k];
-    if (zz === zz && Math.abs(E - zz) <= D) ok[k] = 1;
-  }
-  // (c) disc painting — a boundary sample blocks every cell centre within s·|E − z(b)| of it.
-  for (let q = 0; q < bs.x.length; q++) {
-    const r = s * Math.abs(E - bs.z[q]);
+/* Boundary-sample positions in CELL-CENTRE INDEX space of the context's lattice (cached on the context — the samples never move). */
+function sampleCellCoords(ctx) {
+  if (ctx._bc) return ctx._bc;
+  const { x0, y0, cell } = ctx.lattice, bs = ctx.bs;
+  const cx = new Float64Array(bs.x.length), cy = new Float64Array(bs.x.length);
+  for (let q = 0; q < cx.length; q++) { cx[q] = (bs.x[q] - x0) / cell - 0.5; cy[q] = (bs.y[q] - y0) / cell - 0.5; }
+  ctx._bc = { cx, cy };
+  return ctx._bc;
+}
+
+/* THE DAYLIGHT TEST (c): every boundary sample b blocks each cell centre within  s·|E − z(b)| + extraFt  of it. `ok` is an nx × ny
+ * Uint8 mask on ANY regular grid (the world lattice, or the fit search's rotated one); (bcx, bcy) are the samples in that grid's
+ * cell-centre index space; bz their ground. `extraFt` is a constant run added to every radius (the 5-ft shoulder a graded
+ * footprint carries before its slope starts) — 0 for the Level-ground sweep, which keeps `maskAt` exactly as it was. */
+export function blockByBoundary(ok, nx, ny, cell, bcx, bcy, bz, E, s, extraFt = 0) {
+  for (let q = 0; q < bcx.length; q++) {
+    const r = s * Math.abs(E - bz[q]) + extraFt;
     if (!(r > 0)) continue;
-    const cx = (bs.x[q] - x0) / cell - 0.5, cy = (bs.y[q] - y0) / cell - 0.5;  // sample position in cell-centre index space
+    const cx = bcx[q], cy = bcy[q];
     const rc = r / cell, r2 = rc * rc;
     const j0 = Math.max(0, Math.ceil(cy - rc)), j1 = Math.min(ny - 1, Math.floor(cy + rc));
     for (let j = j0; j <= j1; j++) {
@@ -181,6 +183,25 @@ export function maskAt(ctx, E, s = DEFAULT_SLOPE, D = DEFAULT_MAX_DEPTH_FT) {
       for (let i = i0; i <= i1; i++) ok[j * nx + i] = 0;
     }
   }
+}
+
+/* ---- the mask at one E ---- */
+
+/* The pad-able mask at finish elevation E — the LARGEST 4-connected component of the cells that satisfy
+ * (a)(b)(c). Returns { mask: Uint8Array, cells, areaSf, areaAc }. `scratch` lets a sweep reuse buffers. */
+export function maskAt(ctx, E, s = DEFAULT_SLOPE, D = DEFAULT_MAX_DEPTH_FT) {
+  const { lattice: lat, inside, bs } = ctx;
+  const { nx, ny, cell, z } = lat;
+  const N = nx * ny;
+  const ok = new Uint8Array(N);
+  for (let k = 0; k < N; k++) {
+    if (!inside[k]) continue;
+    const zz = z[k];
+    if (zz === zz && Math.abs(E - zz) <= D) ok[k] = 1;
+  }
+  // (c) disc painting — a boundary sample blocks every cell centre within s·|E − z(b)| of it.
+  const bc = sampleCellCoords(ctx);
+  blockByBoundary(ok, nx, ny, cell, bc.cx, bc.cy, bs.z, E, s);
   // largest 4-connected component
   const label = new Int32Array(N);
   const stack = new Int32Array(N);

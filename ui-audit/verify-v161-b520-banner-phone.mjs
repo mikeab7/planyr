@@ -58,7 +58,7 @@ async function triggerSaveFailedBanner(viewport, label) {
   await page.evaluate((key) => {
     const orig = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k, v) {
-      if (k === key) throw new DOMException("Quota exceeded (test)", "QuotaExceededError");
+      if (k === key || (typeof k === "string" && k.startsWith(key + ":p:"))) throw new DOMException("Quota exceeded (test)", "QuotaExceededError");   // B2200384: the plan lives in a per-plan entry now
       return orig.call(this, k, v);
     };
   }, SITES_KEY);
@@ -73,10 +73,15 @@ async function triggerSaveFailedBanner(viewport, label) {
   await page.keyboard.press("Control+v");
   await page.waitForTimeout(500);
 
-  await page.locator('[data-testid="plan-crumb"]:visible').first().click();
-  await page.waitForTimeout(500);
-  await page.locator('[data-testid="save-now"]:visible').first().click();
-  await page.waitForTimeout(1500);
+  // NEW-1 (2026-11-04): the plan menu's "Save now" row is gone (the banner's own Save now button, which this harness is about,
+  // stays). The save that raises the banner is now forced by the app's own flush on the page going to the background — the same
+  // `flushSite()` the row called first — so what is proved (a failed write raises the banner and its button fits the phone) is unchanged.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+  });
+  await page.waitForTimeout(2500);
 
   const banner = page.locator('[data-testid="local-save-failed"]');
   const bannerCount = await banner.count();

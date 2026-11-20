@@ -69,9 +69,10 @@ test.describe("smooth zoom lives in Settings → Interface", () => {
     await expect(page.getByTestId("smooth-zoom-toggle")).toHaveCount(0);
     await view.click(); // close it again so it cannot cover the plan crumb below
 
-    // The plan menu: Storage is still in it (deliberately, see the item), Smooth zoom is not.
+    // The plan menu: it is open and really rendered (its footer is there), and Smooth zoom is not in it.
+    // (NEW-1, 2026-11-04: the "Storage on this device…" row this used as its proof-of-render is retired — the footer is the probe now.)
     await page.getByTitle("Switch or rename plan").first().click();
-    await expect(page.getByTestId("storage-menu-item")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("plan-footer")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("smooth-zoom-toggle")).toHaveCount(0);
   });
 
@@ -83,7 +84,7 @@ test.describe("smooth zoom lives in Settings → Interface", () => {
     await toggle(page).click();
     await expect(toggle(page).locator('input[type="checkbox"]')).not.toBeChecked();
     // The localStorage key the owner said not to change, prefix included.
-    expect(await page.evaluate((k) => localStorage.getItem(k), KEY)).toBe("0");
+    expect(await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), KEY)).toBe("0");
 
     await page.reload();
     await openSettings(page);
@@ -92,6 +93,6 @@ test.describe("smooth zoom lives in Settings → Interface", () => {
     // …and back on, so the guard covers both directions rather than just the off switch.
     await toggle(page).click();
     await expect(toggle(page).locator('input[type="checkbox"]')).toBeChecked();
-    expect(await page.evaluate((k) => localStorage.getItem(k), KEY)).toBe("1");
+    expect(await page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), KEY)).toBe("1");
   });
 });

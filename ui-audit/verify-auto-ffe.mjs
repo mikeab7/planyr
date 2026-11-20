@@ -41,7 +41,7 @@ const site = {
 // Idempotent seed — only writes if absent, so a page RELOAD preserves what the live check
 // persisted (the NEW-2 round trip); a non-idempotent seed would wipe the remembered lastCheck.
 const seed = `(() => { try {
-  if (!localStorage.getItem('planarfit:sites:v1')) localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)}));
+  if (!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))('planarfit:sites:v1')) localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)}));
   if (!localStorage.getItem('planarfit:currentSite:v1')) localStorage.setItem('planarfit:currentSite:v1', 's_ffe');
 } catch (e) {} })();`;
 
@@ -202,7 +202,7 @@ async function run() {
   // remembered ledger — the exact regression NEW-2 fixes (it used to vanish on a restored view).
   await page.waitForTimeout(1500); // let the settings autosave flush the lastCheck to localStorage
   const persisted = await page.evaluate(() => {
-    try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1")); const lc = s?.s_ffe?.settings?.drainage?.lastCheck; return { hasMit: !!(lc && lc.mitigation), mitIntersect: lc?.mitigation?.summary?.intersectAcres }; } catch (e) { return { err: String(e) }; }
+    try { const s = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1")); const lc = s?.s_ffe?.settings?.drainage?.lastCheck; return { hasMit: !!(lc && lc.mitigation), mitIntersect: lc?.mitigation?.summary?.intersectAcres }; } catch (e) { return { err: String(e) }; }
   });
   expect("NEW-2: the live check PERSISTS the slim mitigation summary (numbers only) to localStorage", persisted.hasMit === true && persisted.mitIntersect > 0, `intersect=${persisted.mitIntersect}`);
   await page.reload({ waitUntil: "load" });

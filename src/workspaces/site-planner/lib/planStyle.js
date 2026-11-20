@@ -32,6 +32,8 @@ export const TYPE = {
   sidewalk: { fill: "#f7f6f2", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
   road: { fill: "#9eabb7", stroke: "#66737f", label: "Road", weight: 1.25 },
+  // NEW-1 (2026-10-30) — a drive-in ramp is poured concrete: a plain concrete grey, lighter than paving so the wing walls (drawn in ink) read on it.
+  driveInRamp: { fill: "#c8c9c6", stroke: "#6c7075", label: "Drive-in Ramp", weight: 1 },
 };
 
 /* Building panel v3 (NEW-4) — the "Docks & walls" strip. A piece is filled with its layer's PLAN colour (read from
@@ -276,6 +278,10 @@ export const toHex6 = (c) => {
  * is migrated on load (see `siteModel.js`) rather than read here — `zOrder` no longer looks at it.
  */
 
+/* ⛔ NEW-1 (2026-11-05) — ONE OWNER-ORDERED EXCEPTION TO CREATION ORDER: TRAILER PARKING ALWAYS DRAWS ABOVE ROADS
+ * (root /CLAUDE.md constraint 10, "EXCEPTION"). `zOrder`/`byZ` below are UNCHANGED and still return the stored z — the exception is
+ * applied AFTER the sort, by `lib/trailerOverRoads.js` (`liftTrailersOverRoads` / `sortElsForPaint`), in the canvas's `elPaintItems`,
+ * the thumbnail and the KMZ. Never write a changed z onto a saved element for it, and never widen it to another type pair. */
 // Paint order = the element's own `z` (B671 — a monotonic creation-order key; Arrange/NEW-2's
 // selection-lift adjust it, never anything else), with id as the final deterministic tiebreak for
 // the rare exact tie (two elements sharing a z — legacy data, or a batch stamped in one commit that

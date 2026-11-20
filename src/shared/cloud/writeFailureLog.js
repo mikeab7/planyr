@@ -38,6 +38,7 @@ const newId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 export const WHAT_RENAME = "The project rename";
 export const WHAT_STATUS = "The status change";
 export const WHAT_DATES = "The deal-date change"; // B1161793 (NEW-2) — feasibility/LOI/closing dates
+export const WHAT_PLAN_RENAME = "The plan rename"; // NEW-1 (B2671215 follow-up) — a plan's own name; a single-row write, recorded by `pushLoud`
 
 /* Record one failed write. `what` is a short owner-facing label ("The project rename"); `groupId`/
  * `siteId` name what to retry against (whichever the caller has); `kind` ("rename" | "status" |
@@ -48,7 +49,10 @@ export function recordCloudWriteFailure({ what, groupId = null, siteId = null, k
   const w = winOf(win);
   if (!w) return null;
   const entry = { id: newId(), what: what || "A change", groupId, siteId, kind, error: String(error || ""), at: Date.now() };
-  const list = readRaw(w);
+  /* NEW-1 (B2671215 follow-up) — A SECOND FAILED WRITE OF THE SAME THING SUPERSEDES THE FIRST. Every replay pushes the LOCAL record as it is now, so
+   * two records for one plan (or one group, one kind of change) are one fact stated twice: the boot banner then counted "3 changes" for one plan
+   * renamed three times. The newest replaces the older ones; a different plan / group / kind is a different fact and is kept. */
+  const list = readRaw(w).filter((e) => !(e && e.what === entry.what && (e.siteId || null) === (entry.siteId || null) && (e.groupId || null) === (entry.groupId || null)));
   list.push(entry);
   writeRaw(w, list);
   return entry;
@@ -63,6 +67,23 @@ export function clearCloudWriteFailure(id, win) {
   const w = winOf(win);
   if (!w) return;
   writeRaw(w, readRaw(w).filter((e) => e.id !== id));
+}
+
+/* NEW-1 (B2671215 follow-up) — the cloud now HOLDS what a record said: drop every logged failure that named it. `siteId` (a plan's own row — a whole-header
+ * push carries every field, so any "this plan" failure is settled by it) or `groupId` + `what` (a group-wide write is settled only by the same kind of
+ * write). Returns how many were dropped so the caller knows whether a banner may be about it. */
+export function clearCloudWriteFailuresFor({ siteId = null, groupId = null, what = null } = {}, win) {
+  const w = winOf(win);
+  if (!w || (!siteId && !groupId)) return 0;
+  const list = readRaw(w);
+  const keep = list.filter((e) => {
+    if (!e) return false;
+    if (siteId && e.siteId === siteId) return false;
+    if (groupId && e.groupId === groupId && (!what || e.what === what)) return false;
+    return true;
+  });
+  if (keep.length !== list.length) writeRaw(w, keep);
+  return list.length - keep.length;
 }
 
 export function clearAllCloudWriteFailures(win) {

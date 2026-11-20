@@ -57,7 +57,7 @@ page.on("pageerror", (e) => pageErrors.push(e.message));
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const PAGE_PREFIX = "planyr:notes:page:v1:local:";
 const tb = (id) => page.locator(`[data-testid="${id}"]`);
-const readTree = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), TREE_KEY);
+const readTree = () => page.evaluate((k) => JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "null"), TREE_KEY);
 
 /* The owner's own note, and his own divergence: the two copies differed by ONE WORD in about
  * forty. Kept at full length on purpose — a short fixture makes the near-duplicate question
@@ -275,7 +275,7 @@ await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
 const reloaded = await readTree();
 ok("⛔ THE RECOVERED NOTE IS STILL THERE AFTER A RELOAD", (reloaded.pages || []).some((p) => p.id === LOST_ID));
 ok("…and its body was never destroyed by the orphan sweep on the way through",
-  await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}${LOST_ID}`));
+  await page.evaluate((k) => !!(globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k), `${PAGE_PREFIX}${LOST_ID}`));
 ok("…and the banner no longer claims a lost note, because there isn't one",
   (await waitForBanner(9000)) ? (await tb("notes-integrity-banner").getAttribute("data-unreachable")) === "0" : true);
 
@@ -451,7 +451,7 @@ ok("…and it is genuinely READ-ONLY, not merely labelled so",
   await page.evaluate(() => document.querySelector('[data-testid="note-body"]')?.getAttribute("contenteditable") === "false"));
 ok("⛔ AND THE TREE IS UNTOUCHED BY READING — the entry is still in the bin, still not live",
   await page.evaluate((k) => {
-    const t = JSON.parse(localStorage.getItem(k) || "null");
+    const t = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) || "null");
     return (t.trash || []).length === 4 && (t.pages || []).length === 1;
   }, TREE_KEY));
 
@@ -516,7 +516,7 @@ async function seedLeftovers({ withRealLost }) {
   await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
   await pacedWait(page, 6000);   // the scan is deliberately late
 }
-const keyPresent = (id) => page.evaluate((k) => localStorage.getItem(k) !== null, PAGE_PREFIX + id);
+const keyPresent = (id) => page.evaluate((k) => (globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))(k) !== null, PAGE_PREFIX + id);
 await seedLeftovers({ withRealLost: false });
 const bannerLeft = await tb("notes-integrity-banner").count();
 ok("⛔ NO integrity bar for tombstoned leftovers", bannerLeft === 0, `bars=${bannerLeft}`);

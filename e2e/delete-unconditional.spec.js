@@ -24,7 +24,7 @@ import { openModule, panelPlus } from "./helpers.js";
 /* The persisted (logged-out) site model — on-disk truth, so it doubles as the reload assertion. */
 function readModel(page) {
   return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     const els = site.els || [];
     return {

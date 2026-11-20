@@ -33,7 +33,7 @@ await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 20000 })
 await page.waitForFunction(() => !!window.__plannerView && !!window.__plannerRoadNet, null, { timeout: 20000 });
 
 const roads = () => page.evaluate(() => {
-  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = Object.values(m)[0] || {};
+  const m = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}"); const s = Object.values(m)[0] || {};
   return (s.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts))
     .map((e) => ({ id: e.id, cls: e.roadClass, w: e.travelW, n: e.pts.length, pts: e.pts }));
 });

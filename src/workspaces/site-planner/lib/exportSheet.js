@@ -28,11 +28,12 @@ import L from "leaflet";
 import { visibleEls, visibleParcels } from "./contentVisibility.js";
 import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
+import { aerialWantedOnSheet } from "./aerialVisibility.js";
 import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, AREA_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -43,14 +44,16 @@ import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
-import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity } from "./exportStyle.js";
+import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity, overlayLabelFontSize, overlayLabelHalo } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriZoneLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
-import { labelAnchors, placeLabels } from "./boundaryLabels.js";
+import { declutterBoxes, titleCaseName } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId, isCityLimitsId } from "./vectorLayers.js";
-import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH, CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
+import { BOUNDARY_FALLBACK_INK, COUNTY_LINE_COLOR, COUNTY_LINE_WEIGHT, COUNTY_LINE_DASH } from "./boundaryStyle.js";
+import { placeStyle, colorFeatures } from "./boundaryPaint.js";
+import { viewAnchors, placeNames, labelFontPx } from "./placeLabelAnchors.js";
 import { countyLineLabels, countyLabelText } from "./countyLineLabels.js";
 import { siteState } from "./siteRegion.js";
 import { gisCache } from "./gisCache.js";
@@ -84,6 +87,7 @@ export function createExportSheet(ctx) {
     svgRef, stateRef, overlayRefs, geoMapRef,
     // --- map + layer state ------------------------------------------------------
     basemapOn, basemapSrc, overlays, layerStatus,
+    showAerial = true, // B2589680 — the PLAN-LEVEL aerial toggle (map View ▾ / Overlays): the sheet carries the aerial exactly when the map shows it
     // --- presentation -----------------------------------------------------------
     PAL, f0,
     // --- sheet content (built in SitePlanner so screen + sheet share one source) --
@@ -197,13 +201,13 @@ export function createExportSheet(ctx) {
   // `paper`/`orient` (the last two args) name the sheet the plan is headed for, so the label
   // tier can size itself to that paper. Omitted → the notional letter-landscape box (the PNG
   // case, and any caller that just wants the plan SVG).
-  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true) =>
+  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true, includeScaleBar = true) =>
     withFullRender(
-      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable),
+      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable, includeScaleBar),
       sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride),
     );
 
-  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true) => {
+  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true, includeScaleBar = true) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -260,8 +264,8 @@ export function createExportSheet(ctx) {
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     root.insertBefore(bg, root.firstChild);
-    // Always include the aerial (even if it's hidden on screen), placed beneath everything
-    // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
+    // Include the aerial exactly when the map is showing it (B2589680 — it used to be "always, even if hidden on screen"),
+    // placed beneath everything but the paper. Two sources (B735): when the LIVE
     // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
     // (it's a sibling of the exported <svg>, tagged data-export="skip"), so the caller passes
     // `exportAerial` — a frame-exact snapshot synthesized from the SAME source's `export`
@@ -275,7 +279,9 @@ export function createExportSheet(ctx) {
     // draw that underlay UNDERNEATH the live aerial. If the live fetch is dropped, the underlay
     // still shows real imagery instead of white; if it succeeds it fully covers the underlay.
     const aerials = [];
-    if (exportAerial) {
+    if (!aerialWantedOnSheet(showAerial)) {
+      // B2589680 — the map is NOT showing the aerial, so neither does the sheet (the exhibit follows the map; there is no print-only switch)
+    } else if (exportAerial) {
       if (underlay && typeof underlay.src === "string" && underlay.src.startsWith("data:")) aerials.push({ a: underlay, tag: false }); // reliable fallback, bottom
       aerials.push({ a: exportAerial, tag: true }); // live view, on top (the LOUD-FAILURE marker)
     } else if (underlay) {
@@ -307,6 +313,7 @@ export function createExportSheet(ctx) {
       }
     }
     // GIS overlay LAYERS (FEMA floodplain, pipelines, wetlands, utilities, ground relief) — B739.
+    // (NEW-1 second pass: the `under` band now lands OVER the default-band site-plan overlays — see `underInto`.)
     // Composited ABOVE the aerial and BELOW the drawn geometry + site-plan overlays, matching the
     // on-screen stacking (aerial tiles < GIS-overlay pane < SVG). Same feet frame + pixel grid as
     // the aerial (overlayExportPlacement shares aerialGeom), each at its layer opacity, in the
@@ -326,6 +333,16 @@ export function createExportSheet(ctx) {
      * rather than silently printing underneath the plan it was lifted out of. */
     const overRaster = [], overVector = [];
     const frontAnchor = root.querySelector(`[${FRONT_BAND_ATTR}]`);
+    /* NEW-1 second pass (B2671190 ×2) — the `under` band goes INTO the plan's own `data-gis-area-band` group, which sits right after the default-band
+     * references: on screen a fill paints over a dropped reference picture, so on paper it does too. A sheet without the anchor (a canvas without an
+     * origin never renders one — and has no GIS layers to print) keeps the old place, right above the aerial, with a warning. */
+    const areaAnchor = root.querySelector(`[${AREA_BAND_ATTR}]`);
+    let areaWarned = false;
+    const underInto = (node) => {
+      if (areaAnchor) { areaAnchor.appendChild(node); return; }
+      if (!areaWarned) { areaWarned = true; console.warn(`[export] the sheet has no ${AREA_BAND_ATTR} anchor — GIS area fills print under the reference pictures`); }
+      root.insertBefore(node, anchor.nextSibling); anchor = node;
+    };
     const bandOf = (o) => {
       const want = o.band || (o.over ? "over" : "under");
       if (want !== "front") return want;
@@ -351,7 +368,7 @@ export function createExportSheet(ctx) {
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
         if (append === "front") frontAnchor.appendChild(im);
         else if (append) root.appendChild(im);
-        else { root.insertBefore(im, anchor.nextSibling); anchor = im; }
+        else underInto(im);
       }
     };
     if (includeMapLayers && exportOverlays && exportOverlays.length) {
@@ -379,7 +396,7 @@ export function createExportSheet(ctx) {
         g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
         if (append === "front") frontAnchor.appendChild(g);
         else if (append) root.appendChild(g);
-        else { root.insertBefore(g, anchor.nextSibling); anchor = g; }
+        else underInto(g);
       }
     };
     if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
@@ -433,7 +450,7 @@ export function createExportSheet(ctx) {
     // regardless of the toggle (buildingSfRows returns an empty rows array, and furnitureLayout
     // treats that identically to omitting it — no corner spent, nothing drawn).
     const bldgTable = includeBuildingsTable ? buildingSfRows(els) : { rows: [], total: 0 };
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0 });
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0, showScaleBar: includeScaleBar !== false });
     root.appendChild(furn);
     return { clone, w, h };
   };
@@ -492,6 +509,10 @@ export function createExportSheet(ctx) {
         // dark aerial — drawn on screen, invisible on paper.
         if (typeof node.closest === "function" && node.closest("[data-export-vector]")) {
           const tag = node.tagName && node.tagName.toLowerCase();
+          if (tag === "text") { // B2589346: layer labels print at a physical size (7 pt + halo), never "11 clone units" (a zone code once printed a fifth of the sheet tall on a tight frame)
+            node.setAttribute("font-size", r6(overlayLabelFontSize(sheetScale)));
+            node.setAttribute("stroke-width", r6(overlayLabelHalo(sheetScale)));
+          }
           if (tag === "path" || tag === "circle") {
             const authored = parseFloat(node.getAttribute("stroke-width"));
             const isCase = node.hasAttribute("data-vcase");
@@ -768,7 +789,7 @@ export function createExportSheet(ctx) {
   // silent white sheet — LOUD-FAILURE). Returns null when there's no live basemap to capture (then
   // buildExportSvg falls back to any dropped/from-map underlay). Async (B839 tile fetches).
   const exportAerialForFrame = async (frame) => {
-    if (!origin || !basemapOn) return null;
+    if (!origin || !basemapOn || !aerialWantedOnSheet(showAerial)) return null; // B2589680 — no fetch/stitch for an aerial the map is not showing
     const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
     // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
     // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
@@ -871,9 +892,12 @@ export function createExportSheet(ctx) {
         features.push(...esriPrintFeatures(gj, cfg, leafStyle));
         // NEW-1 (DeSoto / Olive Branch): the pipe-size label prints exactly when it shows on screen (PDF-PARITY). The fragment writer takes labels ALREADY PLACED in sheet pixels ({x,y,text}),
         // like the terrain contour labels below — a bare {lng,lat,text} was dropped silently, so no pipe size ever reached the sheet (V1956865 step 6, 2026-10-30).
-        if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
-          if (cfg.lineLabel.polygon) zoneGj.push(gj);   // B2573312: an area row's codes are laid out together below — one per polygon, never overlapping, none where it cannot fit
-          else for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text }); }
+        if (cfg.lineLabel && cfg.lineLabel.polygon && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          zoneGj.push(gj);   // B2563410: an area row's codes are laid out together below — one per polygon, never overlapping, none where it cannot fit (the same pure layout as the screen)
+        } else if (cfg.lineLabel && ref._map && ref._map.getZoom() >= (cfg.lineLabel.minZoom ?? 17)) {
+          const bb = l.getBounds && l.getBounds();
+          const rank = bb ? Math.abs((bb.getNorth() - bb.getSouth()) * (bb.getEast() - bb.getWest())) : 0;
+          for (const lb of esriLineLabels(gj, cfg)) { const q = projLLtoPx([lb.lng, lb.lat]); labels.push({ x: q.x, y: q.y, text: lb.text, rank }); }
         }
       });
       if (zoneGj.length) {
@@ -882,7 +906,13 @@ export function createExportSheet(ctx) {
         const frame = a && b ? { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) } : { w: size.w, h: size.h };
         labels.push(...esriZoneLabels(zoneGj, cfg, ([lng, lat]) => projLLtoPx([lng, lat]), frame));
       }
-      return { features, labels };
+      /* B2589346 — a row that declutters on screen (`lineLabel.declutter`: DeSoto zoning, whose polygons are small and dense) declutters the SAME way on the sheet (PDF-PARITY): the larger polygon keeps its code, a label that
+       * would sit on top of one already kept is dropped — never a pile of overlapping codes in the PDF. Box = the on-screen label's footprint (text width ≈ 7 px a character + padding, 14 px tall) in the same map pixels. */
+      if (cfg.lineLabel && cfg.lineLabel.declutter && labels.length > 1) {
+        const keep = new Set(declutterBoxes(labels.map((lb) => ({ x: lb.x, y: lb.y, w: String(lb.text).length * 7 + 8, h: 14, rank: lb.rank || 0 }))));
+        return { features, labels: labels.filter((_lb, i) => keep.has(i)).map(({ rank: _r, ...rest }) => rest) };
+      }
+      return { features, labels: labels.map(({ rank: _r, ...rest }) => rest) };
     }
     if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
       if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it
@@ -921,29 +951,37 @@ export function createExportSheet(ctx) {
       let fc = geo ? geo.toGeoJSON() : null;
       if ((!fc || !fc.features) && typeof ref.eachFeature === "function") { const fs = []; ref.eachFeature((l) => l.feature && fs.push(l.feature)); fc = { type: "FeatureCollection", features: fs }; }
       if (!fc || !fc.features || !fc.features.length) return { features: [] };
-      // B2507065 (NEW-10) — PDF-PARITY with the screen: counties a heavier dashed grey line, city limits a bolder outline + light tint, county names along the line.
-      const style = isCountyLinesId(id)
-        ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
-        : isCityLimitsId(id)
-          ? { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: Math.max(cfg.weight || 2, CITY_LINE_MIN_WEIGHT), strokeOpacity: 1, fill: cfg.color || BOUNDARY_FALLBACK_INK, fillOpacity: CITY_TINT_OPACITY }
-          : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+      // B2507065 (NEW-10) + NEW-1 (2026-11-05) — PDF-PARITY with the screen: counties a heavier dashed grey line; each city its own hue (bold limits + tint, thinner dashed ETJ);
+      // county names along the line; every city / ETJ name in the part of its polygon that is on the sheet.
+      const srcRow = VECTOR_SOURCES[id];
+      const placeKind = isCityLimitsId(id) ? "city" : id === "jur_etj" ? "etj" : null;
+      const nameOfF = (f) => { const raw = f && f.properties && srcRow && srcRow.labelField ? f.properties[srcRow.labelField] : null; const n = raw == null ? "" : String(raw).trim(); return n && srcRow.titleCaseLabel ? titleCaseName(n) : n; };
+      if (placeKind) colorFeatures(fc, nameOfF);
       const features = [];
-      for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
+      for (const f of fc.features) {
+        const ps = placeKind ? placeStyle(placeKind, nameOfF(f), { opacity: 1, fallbackInk: cfg.color || BOUNDARY_FALLBACK_INK }) : null;
+        const style = isCountyLinesId(id)
+          ? { stroke: COUNTY_LINE_COLOR, strokeWidth: COUNTY_LINE_WEIGHT, strokeOpacity: 1, fill: "none", dash: COUNTY_LINE_DASH }
+          : ps
+            ? { stroke: ps.color, strokeWidth: ps.weight, strokeOpacity: 1, fill: ps.fillColor, fillOpacity: ps.fillOpacity, ...(ps.dashArray ? { dash: ps.dashArray } : {}) }
+            : { stroke: cfg.color || BOUNDARY_FALLBACK_INK, strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+        features.push(...esriPolygonFeatures(f.geometry, style));
+      }
       let labels = [];
-      const src = VECTOR_SOURCES[id];
+      const src = srcRow;
       if (src && isCountyLinesId(id) && src.labelField) {
         const home = siteState({ lat: origin.lat, lng: origin.lon });
-        const placedC = countyLineLabels(fc.features, {
-          textOf: (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home),
-          project: (lng, lat) => projLLtoPx([lng, lat]),
-          viewW: size.w, viewH: size.h,
-        });
+        const textOfC = (f) => countyLabelText(f.properties && f.properties[src.labelField], src.stateAbbr, home);
+        const placedC = countyLineLabels(fc.features, { textOf: textOfC, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
         labels = placedC.map((p) => ({ x: p.x, y: p.y, text: p.text, angle: p.angle }));
+        const have = new Set(placedC.map((p) => p.text));
+        const anchorsC = viewAnchors(fc.features, { nameOf: textOfC, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h, band: [0.76, 0.9] }).filter((a) => !have.has(a.name));
+        for (const a of placeNames(anchorsC, { textOf: (x) => x.name, fontPx: 11, viewW: size.w, viewH: size.h, taken: placedC.map((p) => ({ x: p.x, y: p.y, box: { w: Math.max(30, p.text.length * 7), h: 15 } })) })) labels.push({ x: a.x, y: a.y, text: a.name });
       } else if (src && src.labelField) {
-        const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
-        const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
-        const tmpl = src.nameTemplate || "{name}";
-        labels = placed.map((p) => ({ x: p.box.x, y: p.box.y, text: tmpl.replace("{name}", p.name), uppercase: isCountyLinesId(id) }));
+        const tmpl = (n) => (id === "jur_etj" ? (/^Undetermined/.test(n) ? "ETJ undetermined (disputed)" : /release area/.test(n) ? n : `${n} ETJ`) : (src.nameTemplate || "{name}").replace("{name}", n));
+        const anchors = viewAnchors(fc.features, { nameOf: nameOfF, project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
+        const placed = placeNames(anchors, { textOf: (a) => tmpl(a.name), fontPx: 11, viewW: size.w, viewH: size.h });
+        labels = placed.map((p) => ({ x: p.x, y: p.y, text: tmpl(p.name), uppercase: false }));
       }
       return { features, labels };
     }
@@ -1130,12 +1168,17 @@ export function createExportSheet(ctx) {
    * `scaleLabel`/`preparedBy` are plain strings for the title block (empty → that row omits
    * whichever half is blank); the caller (SitePlanner) computes the scale text via printScale.js.
    *
-   * NEW-2 — `includeMetricsBand` is the print menu's "Stats band" toggle (default true, so an
+   * NEW-2 — `includeMetricsBand` is the print menu's "Site summary strip" toggle (default true, so an
    * existing sheet renders unchanged unless the owner turns it off). Off: `printSheetLayout`
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
    * disclaimer note, which is part of the band, not a separate thing being evaded). */
-  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, annotate = false) => {
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, annotate = false, includeScaleBar = true) => {
+    // NEW-1 (2026-11-13) — "Scale bar" OFF removes the DRAWN scale from the sheet: the graphic bar (buildExportSvgRaw) AND the stated
+    // scale in the title block, together, so no empty title-block row is reserved either (printSheetLayout's titleBlockExtra reads this).
+    // It never touches the PDF's embedded measurement scale — that is the annotation set's /VP + /Measure (ftPerPt), computed below
+    // from the frame alone, so Bluebeam / Acrobat still calibrate with the bar off.
+    const titleScale = includeScaleBar === false ? "" : scaleLabelText;
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
@@ -1143,7 +1186,7 @@ export function createExportSheet(ctx) {
     // NEW-1 (B1783056) — `pageOverride` (Fit-to-frame page) replaces the standard paper/orient
     // page lookup everywhere below that would otherwise re-derive it, so the label tier and the
     // final page geometry can never disagree about which page this sheet is actually printing to.
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride, includeBuildingsTable); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride, includeBuildingsTable, includeScaleBar); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) return null;
     // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
     // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
@@ -1155,7 +1198,7 @@ export function createExportSheet(ctx) {
     // the SAME outer SVG coordinate system.
     const metricPairs = printMetricPairs();
     const swBars = printStormwaterBars();
-    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
+    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(titleScale || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
     // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
@@ -1222,7 +1265,7 @@ export function createExportSheet(ctx) {
       layout, planSvg,
       title: siteLabel, sub: planLabel,
       date: formatDateStamp(),
-      scale: scaleLabelText, preparedBy,
+      scale: titleScale, preparedBy,
       metrics: metricPairs,
       stormwater: swBars,
       note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
@@ -1236,13 +1279,13 @@ export function createExportSheet(ctx) {
   // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
   // exact pre-existing behaviour (markups burned into the page); the DEFAULT HERE is true so any other
   // caller is untouched — the compose screen is what passes the user's remembered choice (default OFF).
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) => {
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true, includeScaleBar = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups);
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups, includeScaleBar);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
       const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage = 0 } = composed;
       mark("composed sheet");

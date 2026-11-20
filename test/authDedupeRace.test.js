@@ -31,11 +31,11 @@ const src = readFileSync(
 );
 
 function applyUserBody() {
-  const at = src.indexOf("const applyUser = async (u, event) => {");
+  const at = src.indexOf("const applyUser = async (u, event, meta) => {");   // NEW-1: `meta` rides along (lost / pending / deliberate)
   expect(at, "applyUser was not found — has it moved or been renamed?").toBeGreaterThan(-1);
   // applyUser is a long function; grab enough of it to cover the guard, its explanatory comment,
   // and the first await (pullCloud).
-  return src.slice(at, at + 3000);
+  return src.slice(at, at + 3600);   // NEW-1 added a few lines to applyUser (the `meta` argument + the lost-session flag)
 }
 
 describe("B1594320 — applyUser's dedup marker is stamped before any await, not only at the end", () => {

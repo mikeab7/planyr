@@ -1,0 +1,41 @@
+name: Ledger record check
+
+# The LIGHT CHECK that replaces "a fix and its record merge together" (NEW-1, 2026-11-05). With the ledger on its own
+# branch nothing on main shows a missing record. This reads the subjects of merged commits, collects the B#/V# ids they
+# cite, and warns about any id with no entry on the ledger branch. It NEVER blocks: it only annotates the run, writes a
+# step summary, and exits 0 — records are not a merge gate. The scheduled run re-checks the last few days so a record
+# filed shortly after the merge clears its own warning.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 300
+      - name: Checkout the ledger branch
+        uses: actions/checkout@v7
+        with:
+          ref: ledger
+          path: .ledger
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Record check (a push)
+        if: github.event_name == 'push'
+        run: node scripts/ledger.mjs record-check --range "${{ github.event.before }}..${{ github.sha }}"
+      - name: Record check (the last 3 days)
+        if: github.event_name != 'push'
+        run: node scripts/ledger.mjs record-check --since "3 days ago"

@@ -30,6 +30,7 @@ const SHIM = `
   do $$ begin
     if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon; end if;
     if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
+    if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role; end if;
   end $$;
 `;
 
@@ -54,7 +55,10 @@ async function fresh() {
   await d.exec(read("teams.sql"));
   await d.exec(read("team_invite_guard.sql"));
   await d.exec(read("team_invite_inbox.sql"));
+  await d.exec(read("team_invite_email.sql"));
+  await d.exec(read("team_invite_link.sql"));
   await d.exec("grant usage on schema public, auth to authenticated, anon; grant all on all tables in schema public to authenticated; grant select on auth.users to authenticated;");
+  await d.exec(read("team_invite_proof.sql")); // NEW-1 (2026-11-02): joining needs a proven mailbox
   return d;
 }
 
@@ -66,6 +70,10 @@ beforeEach(async () => {
     update public.profiles set first_name = 'Chris', last_name = 'Seward' where id = '${CHRIS}';
     insert into public.teams (id, name, created_by) values ('${USEC}', 'USEC', '${CHRIS}'), ('${OTHER}', 'Other Co', '${CHRIS}');
     insert into public.team_members (team_id, user_id, role) values ('${USEC}', '${CHRIS}', 'admin'), ('${OTHER}', '${CHRIS}', 'admin');
+    -- NEW-1 (2026-11-02): this file tests the PROVEN inbox. Paul and Eve have proved their mailboxes; what an
+    -- UNPROVEN account sees and can do is test/teamInviteProof.test.js.
+    insert into public.mailbox_proofs (user_id, email, via) values
+      ('${PAUL}', 'paul.reinke@hillwood.com', 'invite_link'), ('${EVE}', 'eve@example.com', 'invite_link');
   `);
 });
 
@@ -110,9 +118,9 @@ describe("list_my_invites — the invitee sees only invitations addressed to the
     expect(ok2).toBe(false);
   });
 
-  it("does NOT widen team_invites RLS — the invitee's direct read policy is the one that already existed", async () => {
+  it("does NOT widen team_invites RLS — and since NEW-1 (2026-11-02) the invitee has NO direct read policy at all (the row carries the link's id)", async () => {
     const policies = await q("select policyname, cmd from pg_policies where schemaname='public' and tablename='team_invites' order by policyname");
-    expect(policies.map((p) => p.policyname)).toEqual(["admins create invites", "admins delete invites", "admins read invites", "invitee reads own"]);
+    expect(policies.map((p) => p.policyname)).toEqual(["admins create invites", "admins delete invites", "admins read invites"]);
   });
 });
 
@@ -195,13 +203,15 @@ describe("another user cannot read or answer someone else's invitation", () => {
   });
 });
 
-describe("a brand-new signup still lands on the team with no extra clicks", () => {
-  it("the signup trigger auto-claims invites for the new address (decision: keep auto-claim AT SIGNUP)", async () => {
+describe("a brand-new signup is NOT added to the team (REVERSES the 2026-10-28 'keep auto-claim at signup' decision)", () => {
+  it("the signup trigger joins nothing — email confirmation is off, so the address is not proof; the invite waits", async () => {
     await invite(USEC, "newhire@hillwood.com", "member");
     const NEW = "00000000-0000-0000-0000-00000000f001";
     await db.query("insert into auth.users (id, email) values ($1, 'NewHire@Hillwood.com')", [NEW]);
-    expect(await q("select team_id, role from public.team_members where user_id = $1", [NEW])).toEqual([{ team_id: USEC, role: "member" }]);
-    expect(await rpc(NEW, "select * from public.list_my_invites()")).toHaveLength(0);
+    expect(await q("select team_id, role from public.team_members where user_id = $1", [NEW])).toEqual([]);
+    const waiting = await rpc(NEW, "select * from public.list_my_invites()");
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]).toMatchObject({ proven: false, team_name: null, invite_id: null }); // told only that one is waiting
   });
 });
 

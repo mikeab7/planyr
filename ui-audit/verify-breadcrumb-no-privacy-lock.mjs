@@ -68,7 +68,8 @@ const ROUTES = [
   { label: "Review", hash: `#/project/${GID}/markup`, wait: 1200 },
   { label: "Library", hash: `#/project/${GID}/library`, wait: 1200 },
   { label: "Notes", hash: `#/project/${GID}/notes`, wait: 1200 },
-  { label: "Spreadsheet", hash: `#/project/${GID}/spreadsheet`, wait: 1200 },
+  // NEW-2: the Spreadsheet is the lazy Univer grid for every account — `waitFor` holds the measurement until it has mounted, so the crumb is read in the state a person sees (not the loading placeholder).
+  { label: "Spreadsheet", hash: `#/project/${GID}/spreadsheet`, wait: 1200, waitFor: 'canvas[id^="univer-sheet-main-canvas"]' },
 ];
 const WIDTHS = [{ label: "desktop", width: 1600, height: 900 }, { label: "phone", width: 390, height: 844 }];
 const THEMES = ["light", "dark"];
@@ -102,6 +103,7 @@ async function checkRoute(browser, route, width, theme) {
   await assertMeasurable(page, "verify-breadcrumb-no-privacy-lock");
   await page.goto(`${BASE}${route.hash}`, { waitUntil: "load" });
   await page.waitForTimeout(route.wait);
+  if (route.waitFor) await page.waitForSelector(route.waitFor, { timeout: 60000 }); // LOUD: a route whose content never mounted is not "measured"
 
   const crumb = page.locator('[data-testid="project-crumb"]:visible').first();
   await crumb.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});

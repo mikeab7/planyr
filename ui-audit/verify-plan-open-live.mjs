@@ -82,7 +82,7 @@ try {
   } else {
     const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", headless: false, args: ["--no-sandbox"] });
     const ctx = await browser.newContext({ viewport: { width: 1722, height: 700 }, deviceScaleFactor: 2.15 });
-    await ctx.addInitScript((x) => { try { localStorage.setItem("planarfit:sites:v1", JSON.stringify(x)); window.__PLANYR_LEGACY_MIRROR = "idle"; } catch (_) {} }, seedStore());
+    await ctx.addInitScript((x) => { try { localStorage.setItem("planarfit:sites:v1", JSON.stringify(x));} catch (_) {} }, seedStore());
     await ctx.addInitScript(INSTRUMENT);
     const page = await ctx.newPage(); await assertMeasurable(page, "verify-plan-open-live");
     await page.goto(`${base}/#/project/live-bo/site`, { waitUntil: "load" });

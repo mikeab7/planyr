@@ -10,7 +10,6 @@ import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
 import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
-import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
@@ -18,6 +17,7 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale } from "../../shared/telemetry/perfRecorderHandle.js";
+import { installPlannerPerf } from "./lib/plannerPerf.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
@@ -48,7 +48,7 @@ import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/
 import { markupsUnderPoint, nextMarkupSelection, boxCorners, closedMarkupSize, openMarkupLength } from "./lib/markupPick.js";
 import {
   CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
-  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
+  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt,
 } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
@@ -72,7 +72,8 @@ import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
 // GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
-import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ } from "./lib/mapStack.js";
+import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR, PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR, PARCEL_PICK_BAND_ATTR, parcelsOnTop, lineHostZ, PANE_SNAPSHOT, PANE_SNAPSHOT_Z, AREA_BAND_ATTR } from "./lib/mapStack.js";
+import { snapshotHostedInMap, snapshotDrawnInCanvas, snapshotBounds } from "./lib/aerialSnapshot.js"; // NEW-1 (2026-11-05): the pinned map snapshot is the aerial, so it is hosted UNDER the GIS fills, never over them
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import GisIdentifyCard from "./components/GisIdentifyCard.jsx";
 import { setHighlight, releaseHighlight } from "./lib/featureHighlight.js";
@@ -105,10 +106,8 @@ import { elHidden, isHidden, refHidden, parcelAcreageHidden, normalizeRetiredTog
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
-import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, patchEasementRule, subscribeEasementRules, resolveEasementJur } from "./lib/easementRules.js";
 import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
-import { sampleProfile, ditchStats } from "./lib/elevation.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
  * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
  * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
@@ -130,17 +129,24 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 const GradingController = lazy(() => import("./components/GradingController.jsx"));
 const GradingPanel = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
+// NEW-1 (2026-11-11): the owner-only 3D grading viewer — its own lazy chunk, and the ONLY one that loads three.js (lib/grading3d/threeScene.js).
+const Grading3DViewer = lazy(() => import("./components/Grading3DViewer.jsx"));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
-import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX, LEFT_RAIL_W, LEFT_RAIL_W_TOUCH } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
+import RegradeBanner from "./components/RegradeBanner.jsx";
+import View3dMount from "./components/View3dMount.jsx";   // NEW-1 (2026-11-11): the 3D viewer's three.js-free door (loading / failure screens, event seal)
+import View3dButton from "./components/View3dButton.jsx";   // NEW-2 (2026-11-11): the map's "3D" button — three-free, rendered only while `grOn`
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
 import { propsPanelTitle } from "./lib/propsPanelTitle.js";
-import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import { UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
+import PlanMenu from "./components/PlanMenu.jsx";
+import { GRADING_GLYPH } from "./components/railGlyphs.js";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
@@ -202,7 +208,10 @@ import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/feature
 import ColorField from "../../shared/ui/ColorField.jsx";
 import ParcelPage from "./components/ParcelPage.jsx";
 import SetbackSections, { sectionPath, sectionColor } from "./components/SetbackSections.jsx";
-import { boundarySections, setSectionSetback, toggleBreak, shiftBreaksOnInsert, shiftBreaksOnDelete } from "./lib/boundarySections.js";
+// NEW-1 (2026-11-09) — the PAVING setback: a second per-edge array (`pc.pavingSetbacks`, absent = not added) over the SAME sections. Off until the owner adds it; never derived from the building setback.
+import { parcelAfterInsert, parcelAfterDelete } from "./lib/parcelReshape.js";
+import { hasPaving, pavingValues, newPaving, pavingAll, setPavingSection, sectionValue as pavingSectionValue, pavingRing, pavingConflicts, conflictSig as pavingConflictSig } from "./lib/pavingSetback.js";
+import { boundarySections, setSectionSetback, toggleBreak } from "./lib/boundarySections.js";
 import { cadNameOf, parcelOrigin } from "./lib/parcelOrigin.js";
 import { taxTableFor, taxTableForCombined } from "./lib/taxRates.js";
 import { ownerName as apprOwnerName } from "./lib/appraisal.js";
@@ -244,11 +253,11 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
-import { lookupParcels } from "./lib/parcelQuery.js";
+import { lookupParcels, situsFor } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
   largestRingLngLat,
@@ -260,9 +269,10 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
-import { apprRows, apprVal, situsAddress } from "./lib/appraisal.js";
+import { apprRows, apprVal } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
+import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, WALL_PIECE_TEXT, WALL_PIECE_EDGE, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
@@ -271,6 +281,7 @@ import { createTrailingWriter } from "./lib/trailingWrite.js";
 import { persistLookBatch } from "./lib/parcelLookPersist.js";
 import ParcelStylePanel from "./components/ParcelStylePanel.jsx";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
+import { liftTrailersOverRoads, arrangeRuleNote } from "./lib/trailerOverRoads.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
@@ -333,7 +344,7 @@ import { offsetPolygon, outsetPolygon, lineIntersect, setbackEnvelope } from "./
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
 // `pc.setbacks` array the yield engine reads is untouched by anything in here.
-import { resolveRoles, shiftOverridesOnInsert, shiftOverridesOnDelete } from "./lib/setbackRoles.js";
+import { resolveRoles } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
 // NEW-1 — the ONE model behind the right rail's "Parcel tools" menu: the full inventory of what a
@@ -348,7 +359,7 @@ import { ParcelToolsMenu, MeasureMenu, MenuIcon } from "./components/RailMenus.j
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
 // helpers stay on the critical path.
 import { getKey, setKey } from "./lib/titleKey.js";
-import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
+import { identifyJurisdiction, identifyRoadAuthority, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 /* NEW-2 — the STRUCTURED accessor for "which city governs here". Never recover this by parsing the
  * badge label: that coupling silently downgraded the floodplain rule on 16 of the owner's 28 sites
  * the moment the wording changed. See jurisdictionLabel.js's header. */
@@ -372,24 +383,28 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
-import { regionPathD, polylinesPathD } from "./lib/roadNetwork.js";
+import { regionPathD, polylinesPathD, roadSurfaceRing } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
 import { followDrives } from "./lib/driveFollow.js";
+import { RAMP_DEFAULTS, RAMP_MAX_GRADE_PCT, RAMP_LAYOUTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampWidthFt, rampGradePct, rampLayout, rampDir, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, gradeText, rampGeometry, fitAlongTheWall, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
+import { TAPER_MAX_FT } from "./lib/roadTaper.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, layerAlignOf, wallExtentAfter, flushKidBoxFor, sideParkStack } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, flushKidBoxFor, sideParkStack } from "./lib/dogEar.js";
 import { costRollup } from "./lib/costTakeoff.js";
 import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth } from "./lib/roadCrossSection.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, showAreaOn, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
+import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
+import { layoutBuildingButtons, buildingButtonWalls, BUTTON_WALL_MIN_PX, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
@@ -399,7 +414,7 @@ import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerial
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull, DOCK_STEPS } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields, resolveLayerExtent, layerExtentPatch } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, orderedAddOptions, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, ADD_GROUP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -429,14 +444,6 @@ import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea } from "./lib/pondOffset.js";
 import { gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
-/* Storage on this device (NEW-3/B1429) — the two-tier census + the safe clear-map-data action.
- * It lives on the SITE ROUTE, not in the shared account panel or the header gear: both of those
- * land in the entry chunk that EVERY route downloads, and even a lazy stub there measured +0.5 KB
- * on all four routes and pushed `bundle.notesRouteJsBytes` past its ceiling in CI. Here it costs
- * the other three routes nothing, it is reachable SIGNED OUT (which the account panel is not, and
- * a signed-out user shares the same ~5 MB ceiling with no cloud copy to fall back on), and it sits
- * next to Save now and Version history — the two things it explains when a save fails. */
-const StoragePanel = lazy(() => import("../../shared/storage/StoragePanel.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -471,13 +478,15 @@ import { resolveSoils } from "./lib/soils.js";
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { noteReadoutDash, noteReadoutNoSurface, readoutDashFacts } from "./lib/readoutDash.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
-import { useGradingBase, hostIdMap } from "./lib/gradingBase.js";
+import { useGradingBase, hostIdMap, gradingCfg } from "./lib/gradingBase.js";
+import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
-import { useGradeSurface } from "./lib/useGradeSurface.js";
+import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, ruleSignature, patchFloodplainRule, subscribeFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
@@ -524,6 +533,7 @@ import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printS
 import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
 import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+import { carryKeyOf, graftOverlaySrc, stashMemory, takeMemory, persistDisk, loadDisk } from "./lib/historyCarry.js"; // NEW-1 (2026-11-13) — undo history survives leaving a plan
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
@@ -543,6 +553,7 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
+import { stackNote } from "./lib/parcelStack.js";
 import { snapPanelWidth, panelFlowWidth } from "./lib/panelWidth.js";
 import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
@@ -561,7 +572,7 @@ import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/u
 import { BORDER_1, PondSection, ROWB6, SURF_RAISED } from "./lib/plannerShared.js";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
-import { ElNode, dimSlideFor, dockDoorRun, resolveElNeighbors } from "./components/elementRender.jsx";
+import { ElNode, dimSlideFor, dockDoorRun, rampDoorRunOf, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
 import { CostDisclosure, DesignChangeSummaryCard, DrainagePanel, ProvenanceLegend, YieldPanel } from "./components/YieldDrainagePanels.jsx";
 
 /* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
@@ -626,7 +637,7 @@ const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to se
 // armed with the whole site in the viewport, at full size, over the two largest objects on the
 // drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
 // feet per pixel. Both must pass; read that module's header before changing either.
-const FEAT_BTN_MIN_PX = 72;
+const FEAT_BTN_MIN_PX = BUTTON_WALL_MIN_PX;   // one number, in lib/buildingButtons.js (the grading label placer reads the same wall filter)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
@@ -697,12 +708,6 @@ const ICON_PATHS = {
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
   deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
-  // B2391216 ×2 — the Utility Evidence rail section (same 16-box stroke style as every glyph above).
-  evTrace: <><path d="M3 2.5v11M13 2.5v11M1.6 5h2.8M11.6 5h2.8" /><path d="M3 6.6Q8 11 13 6.6" /></>,
-  evElec: <path d="M9.2 1.8 4.4 8.8h3.4L6.8 14.2l4.8-7H8.2z" />,
-  evWater: <path d="M8 2c2.7 3.1 4.1 5.1 4.1 7.1a4.1 4.1 0 0 1-8.2 0C3.9 7.1 5.3 5.1 8 2Z" />,
-  evMain: <><circle cx="3.4" cy="11.4" r="1.6" /><circle cx="8" cy="4.8" r="1.6" /><circle cx="12.6" cy="11.4" r="1.6" /><path d="M4.4 10 7.1 6.2M8.9 6.2 11.6 10" /></>,
-  evXsec: <><path d="M1.5 3.8h3.6l1.5 7h2.8l1.5-7h3.6" /><path d="M1.5 13.4h13" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg className="rbtn-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -721,8 +726,8 @@ const RAIL_ICONS = {
   analysis: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.2 15.2 4.8 4.8" /></>,
   // Drainage
   drainage: <path d="M3 7.5c3-6 6 6 9 0s6 6 9 0M3 16.5c3-6 6 6 9 0s6 6 9 0" />,
-  // Grading (owner-only) — a hill drawn as nested contour lines on a ground line
-  grading: <><path d="M3 20h18" /><path d="M6 20c0-6 3-10 6-10s6 4 6 10" /><path d="M9.5 20c0-3 1.2-5 2.5-5s2.5 2 2.5 5" /></>,
+  // Grading (owner-only) — three nested contour lines of a knoll + a filled spot-elevation triangle (artwork: components/railGlyphs.js)
+  grading: <>{GRADING_GLYPH.contours.map((d) => <path key={d} d={d} />)}<path d={GRADING_GLYPH.spot} fill="currentColor" strokeWidth={GRADING_GLYPH.spotStrokeWidth} /></>,
   // Yield
   yield: <path d="M19 4H5l7 8-7 8h14" />,
   // Properties
@@ -909,7 +914,7 @@ const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
 // Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
 // (line/polyline/polygon/cloud) expose draggable control points; box shapes (rect/ellipse)
-// resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
+// resize + rotate via grips. Semantic markups (encumbrance/easement) stay
 // move-only — they carry derived geometry that hand-editing would desync.
 // A cloud is ALWAYS stored as a vertex ring (`pts`), whichever of its three draw modes made it
 // (polygon click-path, rectangle drag, or freehand) — never a centre-box — so it reshapes via the
@@ -958,7 +963,6 @@ const INK_HALO = { paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 };
  * gate and the render cannot drift, and so a new one cannot be added without choosing a base. */
 const EASE_LABEL_BASE_PX = 10.5;      // easement — the reported case (B435536)
 const ENCUMBER_LABEL_BASE_PX = 11;    // deed encumbrance boundary
-const TRACED_LABEL_BASE_PX = 9.5;     // traced overlay line
 /* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
  * Standards default and as a per-object override, plus the markup/easement pickers). */
 const PARCEL_FILL_DEFAULT = "#5b6650"; // the fill colour a parcel takes when its Fill opacity is first raised above 0
@@ -1041,19 +1045,12 @@ function expandPolygon(pts, d) {
  * solver can share it. Same signature/return; imported above. */
 
 /* ------------------- utility service routing (elec/water) ------------------ */
-const _hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function nearestOnSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
 }
-function nearestOnPolylines(p, polys) {
-  let best = null, bd = Infinity;
-  polys.forEach((pl) => { for (let i = 0; i < pl.length - 1; i++) { const q = nearestOnSeg(p, pl[i], pl[i + 1]); const d = _hyp(p, q); if (d < bd) { bd = d; best = q; } } });
-  return best ? { pt: best, d: bd } : null;
-}
-const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
 
 /* B707/B712 — which drawn elements count as FILL for the mitigation screen: the
  * same set the yield math treats as impervious (buildings incl. bump-outs, paving,
@@ -1128,28 +1125,6 @@ function pondFloodFacts(ring, zones, rule, { bfeFt, bfeSrc, existGradeFt, derive
   if (_pondFactsMemo.size > MIT_MEMO_MAX) _pondFactsMemo.delete(_pondFactsMemo.keys().next().value);
   return val;
 }
-// A building's walls (with midpoints + lengths), its centre and area.
-function buildingWalls(b) {
-  const corners = ringOf(b), ctr = centroid(corners), n = corners.length, walls = [];
-  for (let i = 0; i < n; i++) { const a = corners[i], d = corners[(i + 1) % n]; walls.push({ a, b: d, mid: { x: (a.x + d.x) / 2, y: (a.y + d.y) / 2 }, len: Math.hypot(d.x - a.x, d.y - a.y) }); }
-  return { walls, ctr, area: polyArea(corners) };
-}
-const LARGE_BLDG_SF = 100000; // ≥ this → snap service to the (long) dock wall
-// Build a service route from `source` (a point) to a building: pick the entry
-// wall (nearest; for big buildings restrict to the long/dock walls), a fitting
-// pad just outside it, and a buffered easement corridor along the route.
-function buildUtilRoute(source, b, opts, uid) {
-  const { walls, ctr, area } = buildingWalls(b);
-  let cands = walls;
-  if (area >= LARGE_BLDG_SF) { const mx = Math.max(...walls.map((w) => w.len)); cands = walls.filter((w) => w.len >= mx - 1); }
-  let ew = cands[0]; cands.forEach((w) => { if (_hyp(source, w.mid) < _hyp(source, ew.mid)) ew = w; });
-  const entry = ew.mid;
-  let nx = entry.x - ctr.x, ny = entry.y - ctr.y; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
-  const padC = { x: entry.x + nx * (opts.padSize / 2 + 3), y: entry.y + ny * (opts.padSize / 2 + 3) };
-  const pts = [source, entry, padC]; // reach the fitting pad just outside the wall, not just the wall midpoint (B62)
-  return { id: uid(), kind: "utilRoute", util: opts.util, pts, corridor: bufferPolyline(pts, opts.width), pad: rectRing(padC, opts.padSize, opts.padSize), width: opts.width, fitting: opts.fitting, label: opts.label, stroke: opts.color };
-}
-
 /* --------------------------- parking math -------------------------- */
 // carStalls / trailerStalls / estStalls / estTrailers moved to ./lib/siteGeometry.js
 // (site-metrics-extraction) — pure, shared with lib/siteMetrics.js.
@@ -1353,7 +1328,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const PAL = useMemo(() => ({
     paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
     ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
-    setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    setback: themePal.canvasSetback, paving: themePal.canvasPaving, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
     // NEW-1 — the scale bar / north arrow "plate" background (sheetFurniture.js). These are map
     // CHROME sitting over the aerial, like the Layers/View panels — not drawn site content — so
     // the plate must follow the theme the way its neighbouring status chips already do. Only the
@@ -1414,10 +1389,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *   · a way OUT — whole-canvas replacements (undo / redo, a remote row, a plan load, a version restore, a seed adoption) call `setElsRaw`, because those
    *     RESTORE exact geometry and must never be re-interpreted. Because the road's follow is written into the same state as the field's move, ONE undo frame
    *     (pushHistory before the gesture) reverses both and redo replays both. */
+  // NEW-1 (2026-10-30) — a drive-in ramp's box is a cache derived from its host (lib/driveInRamp.js); the plan's dock height (the ramp's default
+  // rise) is read through this ref so the seam below never closes over `settings`, which is declared further down.
+  const rampDockInRef = useRef(48);
+  /* NEW-1 (2026-11-06) — a ramp stays ON its wall: `reseatRamps` (lib/driveInRamp.js) runs at this same seam, before the box refit, so a building shortened or
+   * lengthened at either end carries its end ramps with it (and the on-open heal below re-seats one already stranded). It needs the plan settings (the door grid
+   * its end spot is picked from) through a ref, like the dock height; a ramp it drops is queued here and tombstoned by the effect below (TOMBSTONE-DELETES). */
+  const rampSettingsRef = useRef(null);
+  const rampDropQueue = useRef(new Set());
+  const rampSeatCtx = () => ({ dockSidesOf: (h) => dockSidesFor(h).dockSides, dockHeightIn: rampDockInRef.current, onDrop: (id) => rampDropQueue.current.add(id),
+    runOf: (h, side, arr) => rampDoorRunOf(h, side, arr, rampSettingsRef.current) });
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
-    setElsRaw((prev) => followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad }));
+    setElsRaw((prev) => {
+      const next = followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad });
+      return refitRamps(reseatRamps(gestureBase || prev, prev, next, rampSeatCtx()), (h) => dockSidesFor(h).dockSides, rampDockInRef.current);
+    });
   };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
@@ -1474,9 +1462,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Landscape/Portrait control so that explicit choice sticks for the rest of THIS compose.
   const orientTouchedRef = useRef(false);
   const composePreviewUrlRef = useRef(null);
-  const preCanvasDisplayRef = useRef(null); // showDims/showAreas/showAerial as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
+  const preCanvasDisplayRef = useRef(null); // showDims/showAreas as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
-  const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   /* B1469872 — this project's own "Recently deleted" plans: siblings soft-deleted from THIS group
    * while it still has a live plan (this menu is only reachable while that's true), which the
    * account-wide bin deliberately never lists (see storage.js's listDeletedProjects /
@@ -1485,9 +1472,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deletedPlansBusy, setDeletedPlansBusy] = useState(null);   // id currently being restored/purged
   /* NEW-1 (2026-10-20) — the same project's deleted SITE-PLAN FILES (uploaded drawings, `site_plan_overlays`),
    * moved here from the Site page's All comps list. Listed in the same "Recently deleted" group, below the
-   * plans; `deletedPlansBusy` / `planPurgeArm` carry their ids too (overlay ids and plan ids never collide). */
+   * plans; `deletedPlansBusy` carries their ids too (overlay ids and plan ids never collide). The inline confirm arms live in `components/PlanMenu.jsx`. */
   const [deletedFilesHere, setDeletedFilesHere] = useState([]);
-  const [planPurgeArm, setPlanPurgeArm] = useState(null);           // id whose "Delete forever" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
@@ -2065,6 +2051,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)
     : null;
   const cullRect = cullRectRef.current;
+  // NEW-1 (2026-11-04): the canvas's own box in px, one stable object per size — the grading labels stay inside it (lib/spotLabelPlacement)
+  const canvasBoxPx = useMemo(() => ({ w: size.w, h: size.h }), [size.w, size.h]);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -2450,7 +2438,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       window.removeEventListener("drop", onDrop);
     };
   }, []);
-  const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
 
   /* Geographic basemap + shared overlay layers under the canvas (Phase 1). Only meaningful for a
@@ -2630,6 +2617,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * a Leaflet pane inside it must not be translated twice). */
   const geoFrontWrapRef = useRef(null);
   const geoFrontPaneRef = useRef(null);
+  // NEW-1 second pass (B2671190 ×2) — the DEFAULT area band's host, inside the plan SVG right after the default-band references (mapStack AREA_BAND_ATTR).
+  const geoAreaWrapRef = useRef(null);
+  const geoAreaPaneRef = useRef(null);
   /* NEW-1 — the PARCELS-IN-FRONT HOST: the county lots on offer ("Pick county lots") live in a Leaflet pane hosted
    * INSIDE the plan SVG (a foreignObject under the moved parcel group), exactly the front band's shape and for the
    * same reason — a pane inside the backdrop map can never clear the SVG. Same two mirrored transforms. */
@@ -2658,11 +2648,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the generic clientErrors dedup can't help here because dx/dy/ppf float noise makes every
   // message text unique.
   const geoRegOutOfRangeRef = useRef({ bucket: null, at: 0 });
-  // Utility-evidence drawing: manual power-line trace + inferred water main.
-  const [traceMode, setTraceMode] = useState(false);
-  const [tracePts, setTracePts] = useState([]);
-  const [evidenceBusy, setEvidenceBusy] = useState(false);
-  const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
   const [easeRules, setEaseRules] = useState(loadEasementRules); // stale-ok: re-synced by subscribeEasementRules on the next line (B1953793)
   useEffect(() => subscribeEasementRules(() => setEaseRules(loadEasementRules())), []);
   // B707/B709/B710 — the floodplain-suite rule files (editable, verified-flagged,
@@ -2702,9 +2687,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
   };
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [xsecMode, setXsecMode] = useState(false);   // ditch cross-section: click two points
-  const [xsecPts, setXsecPts] = useState([]);
-  const [xsec, setXsec] = useState(null);            // { p0, p1, lenFt, busy, stats } result
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -2733,8 +2715,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      *                                 above the elements and still under the labels + handles
      *   LINE (strokes/points)       → a pane in the map-top host, over the planner SVG
      * Everything after this just names a pane; nothing anywhere picks a z-order. */
-    const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
-    const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    /* NEW-1 second pass (B2671190 ×2, 2026-11-06) — the AREA band is no longer a pane of the backdrop map: there it sat UNDER the whole plan SVG, so an
+     * opaque reference picture (the owner's dropped PNG, ~3,800 ft east of his Academy site) cut a rectangular hole in Zoning / Future Land Use with the
+     * Map Base on or off. It is mounted (below, with the other bands) in the plan SVG's `data-gis-area-band` anchor: over the default-band references,
+     * still under the parcel, setback and elements. */
     /* Both external hosts mirror Leaflet's own map-pane translate. Zoom + fade animation are off
      * on this map (it is a slaved backdrop), so the transform only ever changes on a commit — one
      * assignment per commit, no interpolation to chase. ONE mirror function for both, so a host
@@ -2752,6 +2736,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * silently BELOW the plan, which is the exact bug this feature exists to fix. Say so. */
     if (!geoFrontPaneRef.current) console.error("[planyr] the lifted GIS band host (data-gis-front-band) is not mounted — a layer set to 'Show above plan' would draw under the plan instead");
     if (!geoTopPaneRef.current) console.error("[planyr] the map-top GIS band host is not mounted — line layers would draw under the plan instead");
+    if (geoAreaPaneRef.current) mountBand(geoAreaPaneRef.current, PANE_AREA, PANE_AREA_LABEL, 350);
+    else { // LOUD-FAILURE: fall back to the old place (under the plan SVG) rather than lose the fills, and say a reference picture will cover them
+      console.error("[planyr] the GIS area band host (data-gis-area-band) is not mounted — area fills will draw under any reference picture instead");
+      const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
+      const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    }
     mountBand(geoFrontPaneRef.current, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, 380);
     mountBand(geoTopPaneRef.current, PANE_LINE, PANE_LINE_LABEL, 400);
     if (!geoPickPaneRef.current) console.error("[planyr] the Parcels-in-front host (data-parcel-pick-band) is not mounted — the county lots on offer would draw under the plan instead");
@@ -2761,7 +2751,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const mp = map._mapPane;
         if (!mp) return;
         const t = mp.style.transform || "";
-        for (const el of [geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]) if (el) el.style.transform = t;
+        for (const el of [geoAreaPaneRef.current, geoFrontPaneRef.current, geoTopPaneRef.current, geoPickPaneRef.current]) if (el) el.style.transform = t;
       };
       map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
       mirrorPane();
@@ -2926,6 +2916,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // would rebuild the tile layer and refetch the whole aerial mid-gesture.
   }, [basemapSrc, basemapOn, origin, showAerial]);
 
+  /* NEW-1 (2026-11-05, owner: "Zoning and Future Land Use fills are cut out around the site") — THE STORED MAP SNAPSHOT IS THE AERIAL, SO IT LIVES AT THE BOTTOM OF THE BACKDROP MAP.
+   * With the live basemap Off a located plan used to draw its pinned "Aerial backdrop" capture as an SVG <image> in the planner canvas — above the backdrop map, so it painted over every GIS
+   * AREA fill in a rectangle the size of the capture. Hosted here instead: an image overlay in its own pane (mapStack.PANE_SNAPSHOT, under the GIS panes), same feet → lat/lon round trip as
+   * the tiles and the print's aerial (lib/aerialSnapshot.js). The canvas stands down for it (`renderSheetOverlay`); the export already laid it under the GIS overlays. */
+  const snapOverlay = useMemo(() => (sheetOverlays || []).find((o) => snapshotHostedInMap(o, { origin, basemapOn, showAerial })) || null, [sheetOverlays, origin, basemapOn, showAerial]);
+  const snapKey = snapOverlay ? [snapOverlay.id, snapOverlay.src, snapOverlay.x, snapOverlay.y, snapOverlay.imgW, snapOverlay.imgH, snapOverlay.ftPerPx, snapOverlay.ftPerPxY, snapOverlay.opacity, origin.lat, origin.lon].join("|") : "";
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !snapOverlay) return undefined;
+    const bounds = snapshotBounds(snapOverlay, origin);
+    if (!bounds) return undefined;
+    if (!map.getPane(PANE_SNAPSHOT)) { const p = map.createPane(PANE_SNAPSHOT); p.style.zIndex = PANE_SNAPSHOT_Z; p.style.pointerEvents = "none"; }
+    const id = snapOverlay.id;
+    const lyr = L.imageOverlay(snapOverlay.src, bounds, { pane: PANE_SNAPSHOT, interactive: false, opacity: Number.isFinite(snapOverlay.opacity) ? snapOverlay.opacity : 1 });
+    lyr.on("error", () => setOverlayLoadErr((m) => ({ ...m, [id]: "remote" })));
+    lyr.on("load", () => setOverlayLoadErr((m) => (m[id] === "remote" ? Object.fromEntries(Object.entries(m).filter(([k]) => k !== id)) : m)));
+    lyr.addTo(map);
+    return () => { try { map.removeLayer(lyr); } catch (_) { /* the map is already gone */ } };
+  }, [snapKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* Road names over the aerial (NEW-1) — the SAME vector label helper and the SAME `siteStack` gate the
    * map finder uses (one implementation, no fork). The helper adds its own Leaflet pane (z 250, pointer-
    * events none) INSIDE this map's pane, so the labels ride the basemap's own transform through every
@@ -2949,7 +2959,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity,
+        /* NEW-1 (2026-11-01) — the raster road-names fallback gets the basemap layers' tile hygiene: one prune per burst, not
+         * one per tile (B854832), and a retained-tile ceiling (NEW-7). Measured: its per-tile prune was the single largest
+         * main-thread cost of a zoom step on a graded plan. */
+        decorateFallback: (layer) => {
+          throttleTilePruning(layer);
+          boundTileCache(layer, () => tileCacheLimit({
+            containerW: (geoWrapRef.current && geoWrapRef.current.clientWidth) || 1600,
+            containerH: (geoWrapRef.current && geoWrapRef.current.clientHeight) || 1000,
+            tileSizePx: (layer.getTileSize && layer.getTileSize().x) || 256,
+            keepBuffer: (layer.options && layer.options.keepBuffer) || 2,
+          }));
+        } });
       applyRoadNamesOpacity();
     }).catch((e) => console.error("SitePlanner: road names failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); };
@@ -3069,7 +3091,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — BOTH external hosts, never just the top one: the lifted-area band tracks the
       // imagery on exactly the same terms as the line band, so a lifted floodplain edge stays
       // welded to the aerial through a flick-drag instead of sliding a frame behind it.
-      const mirrors = [geoTopWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current];
+      const mirrors = [geoTopWrapRef.current, geoAreaWrapRef.current, geoFrontWrapRef.current, geoPickWrapRef.current];
       if (origin != null) { wrap.style.transformOrigin = origin; for (const m of mirrors) if (m) m.style.transformOrigin = origin; }
       wrap.style.transform = value;
       for (const m of mirrors) if (m) m.style.transform = value;
@@ -3911,7 +3933,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
-  const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
   // B672 — the doc-level cloudConflict state + its blocking "changed in another session … Take
   // over editing" banner are RETIRED BY ARCHITECTURE (the B455/B460/B558/B596 false-conflict
   // class). Elements are per-row rev-guarded in site_elements (a real collision surfaces per
@@ -4492,7 +4513,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
     // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
     if (guarded !== els) setElsRaw((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
-  }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [els]);
   /* NEW-1 (B2289936) — a lot's number is STAMPED, so deleting one never renumbers the rest (siteModel.parcelNumbers). A plan read
    * from storage arrives stamped (READ_NORMALIZE); this stamps what was created in this session. Identity-preserving once stamped,
    * so it cannot loop, and skipped where this tab may not write the plan (it would only be adopted straight back). */
@@ -5159,6 +5180,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [histTick, bumpHist] = useState(0);
   const [dockRemoved, setDockRemoved] = useState(null); // NEW-1 — { hostId, text, tick }: the "Removed. W wall has no dock layers." note + Undo; valid only at the history tick the removal produced
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
+  /* ⛔ NEW-1 (2026-11-13, owner: "do I lose the ability to do the control Z whenever I get out of the page?") —
+   * UNDO HISTORY SURVIVES LEAVING THE PLAN. Everything is in lib/historyCarry.js (read its header for the
+   * rules and caps); this block is only the wiring. The planner remounts per plan (`key=siteId:loadEpoch`),
+   * which used to throw `histRef` away: on unmount the stacks are STASHED per plan (memory, plus a short
+   * IndexedDB tail for a reload) and on mount the same plan's stack is ADOPTED. The STALE-HISTORY GUARD is
+   * `checkCarried`: carried frames are trusted only while the plan still hashes to what it was when they
+   * were saved, checked at the first undo / first new edit / any content change before then — never at boot —
+   * and DROPPED, never replayed, when it does not match (another tab, computer, teammate, a cloud pull). */
+  const carryRef = useRef(null);                       // { baseKey, pending } while carried frames are unverified
+  const carrySavedRef = useRef(null);                  // the stack the disk tail last saw (skip a no-change save)
+  const carryScope = openedUidRef.current || "local";  // frames are per ACCOUNT as well as per plan
+  const carryIo = { get: idbGet, put: idbPut, del: idbDelete };
+  const planKeyNow = () => carryKeyOf(stateRef.current, histKey);
+  const checkCarried = (commit) => {
+    const c = carryRef.current;
+    if (!c || !c.pending) return true;
+    if (planKeyNow() === c.baseKey) { if (commit) c.pending = false; return true; }
+    histRef.current.reset(); carryRef.current = null;  // the plan changed since: the steps are not ours to replay
+    return false;
+  };
+  const saveCarryToDisk = () => {
+    if (!histRef.current) return;
+    checkCarried(false);
+    const st = histRef.current.snapshotStacks();
+    const last = carrySavedRef.current, top = st.past[st.past.length - 1];
+    if (last && last.top === top && last.n === st.past.length) return;
+    carrySavedRef.current = { top, n: st.past.length };
+    persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey: planKeyNow() });
+  };
+  useEffect(() => {
+    let live = true;
+    const adopt = (e) => {
+      if (!live || !e || !histRef.current.isEmpty()) return;                // a person who already edited owns the stack
+      if (histRef.current.adopt(e.past, e.future)) { carryRef.current = { baseKey: e.baseKey, pending: true }; touchHist(); }
+    };
+    const mem = takeMemory(carryScope, siteId);
+    if (mem) adopt(mem); else loadDisk(carryIo, carryScope, siteId).then(adopt);
+    const onHide = () => { if (document.visibilityState === "hidden") saveCarryToDisk(); };
+    window.addEventListener("pagehide", saveCarryToDisk);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      live = false;
+      window.removeEventListener("pagehide", saveCarryToDisk);
+      document.removeEventListener("visibilitychange", onHide);
+      try {
+        checkCarried(false);
+        const st = histRef.current.snapshotStacks(), baseKey = planKeyNow();
+        stashMemory(carryScope, siteId, { past: st.past, future: st.future, baseKey });
+        setTimeout(() => { persistDisk(carryIo, carryScope, siteId, { past: st.past, baseKey }); }, 0);
+      } catch (_) { /* history carry-over is best effort — never an error */ }
+    };
+  }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* Quiet-time save of the disk tail; nothing runs per edit. MEASURED (Chromium, a real reload): an IndexedDB write
+   * started from `pagehide` does NOT reliably commit before the page is torn down, so the pagehide / hidden
+   * saves above are only the best-effort last word — this settled-edit save is what a reload actually relies on. */
+  useEffect(() => {
+    const t = setTimeout(saveCarryToDisk, 1500);
+    return () => clearTimeout(t);
+  }, [histTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop unverified carried steps the moment the plan stops matching what they were saved against.
+  useEffect(() => {
+    if (carryRef.current && carryRef.current.pending && !checkCarried(false)) touchHist();
+  }, [histTick, parcels, els, measures, callouts, markups, sheetOverlays, layerOverrides, layerAbove, origin]); // eslint-disable-line react-hooks/exhaustive-deps
   /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
    * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
    * "the same seam pushHistory() uses, which is already exactly one call per undoable action"
@@ -5191,7 +5275,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
-  const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  const pushHistory = (kind = "edit") => { if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -5358,7 +5442,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // item (nothing to reorder) so we don't cry "already at back" when there's no stack at all.
       const af = arrangeFlags(peers, s.id);
       const front = !(mode === "back" || mode === "backward");
-      if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
+      const ruleWhy = arrangeRuleNote(els.find((e) => e.id === s.id), mode, els); // NEW-1 (2026-11-05) — already first/last by z, but the trailer-over-road rule is the reason it can't go further
+      if (ruleWhy) flashWarn(ruleWhy, 3500);
+      else if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
       // NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
       // at all" actually looked like: the object is the only one on the plan, so there is nothing
       // to reorder it against and the op is a no-op for a reason the user cannot see. Say it.
@@ -5367,6 +5453,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     pushHistory();
     setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
+    // NEW-1 (2026-11-05) — trailer parking always draws above roads (lib/trailerOverRoads.js), so a Bring-to-Front on a road / Send-to-Back on a
+    // trailer still reorders it against everything ELSE but cannot change that pair. Say so at the moment it would otherwise look dead.
+    { const tt = els.find((e) => e.id === s.id); const why = arrangeRuleNote(tt, mode, els); if (why) flashWarn(why, 3500); }
   };
   /* NEW-2 — the peer set an Arrange op would act on, for the CURRENT selection. The menus need it
      to answer two different questions with one fact: is the object at an end of its stack (grey the
@@ -5474,6 +5563,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // before the snapshot reaches the canvas, so an undo can never REINSTATE a tear — and so the
     // flush at the bottom of this function, which commits against this exact snapshot, ships the
     // repaired geometry rather than the recorded wreckage.
+    s = graftOverlaySrc(s, stateRef.current.sheetOverlays); // NEW-1 (2026-11-13) — a frame carried over from disk holds no raster `src`; keep the live one
     {
       const guardedEls = assemblyGuard(s.els, "undo/redo");
       if (guardedEls !== s.els) s = { ...s, els: guardedEls };
@@ -5575,7 +5665,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // undo while an uncovered draft — callout/rect/ellipse — is pending) would otherwise leave stale
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
-    setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    setEaseDraft(null); setEaseEdges(null); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
     // ⛔ B712224 (round 3) — an undo/redo that brings a DELETED element back is a deliberate,
     // whole-snapshot restore, not a stale canvas the tombstone-floor guard is built to catch (see
     // elementSync.js's `pendingResurrect`). `applySnapshot` has no notion of "which of these ids
@@ -5644,8 +5734,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
     return name; // set only when undoOwnership actually called nameOf, i.e. verdict === "foreign"
   };
-  const applyUndo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
-  const applyRedo = () => { const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
+  const applyUndo = () => { if (!checkCarried(true)) { touchHist(); return; } const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
+  const applyRedo = () => { if (!checkCarried(true)) { touchHist(); return; } const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
   const undo = () => {
     const name = riskName();
     if (name) { pushToast({ text: `The next undo would reverse ${name}'s change, not yours. Undo it anyway?`, action: { label: "Undo anyway", onClick: applyUndo } }); return; }
@@ -5687,8 +5777,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRedoHover(0);
     setRedoMenuOpen(true);
   };
-  const applyUndoN = (n) => { const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
-  const applyRedoN = (n) => { const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyUndoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.undoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
+  const applyRedoN = (n) => { if (!checkCarried(true)) { touchHist(); return; } const target = histRef.current.redoN(stateRef.current, n); if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); } };
   // NEW-7/NEW-4 — the multi-step dropdown gets the SAME ownership guard as a plain Undo/Redo press;
   // a run of several steps reverts further back, so if even the top frame is at risk every deeper
   // step in the run is too (riskName()'s single-timestamp sufficiency, see its own header above).
@@ -7287,7 +7377,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -7301,7 +7391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -7631,25 +7721,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
     setMulti(refs); setSel(refs[0] || null); setDrillId(null);
   };
-  // B910 / NEW-1 — clicking a measurement used to be inert unless you'd first switched to the
-  // Select tool: the Measure tool STAYS active after you draw (so you can measure many things in a
-  // row), but the hit target + this handler both gated on tool==="select", so the measurement you
-  // just drew swallowed clicks silently. Now a click grabs a finished measurement from the Measure
-  // tool too and drops back to Select (the handles / × / highlight are all gated on Select), so the
-  // selection is immediately visible and editable — mirroring how every other drawn item becomes
-  // grabbable the instant its tool hands back to Select. A repeated click cycles the selection down
-  // through anything stacked under the cursor (smaller-area-wins so a tiny measurement on top of a
-  // big one is reachable first). Mid-draw (a new measurement in progress) we do NOT steal the click:
-  // it falls through to place the next vertex, even when that vertex lands on an existing measurement.
-  // NEW — one press both SELECTS the measurement (repeat-click cycles the stack) AND arms a
+  // B910 / NEW-1 — a click on a finished measurement SELECTS it (repeat-click cycles the stack,
+  // smaller-area-wins so a tiny measurement on top of a big one is reachable first) AND arms a
   // whole-measurement MOVE, so a drag repositions it and a plain click (no travel) just selects.
-  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail. This is what makes
-  // "click and drag a measurement" work — previously the body press only ever selected.
+  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail.
+  // ⛔ B2671280 (owner constraint #56) — SELECT TOOL ONLY. B910 also let this grab a finished measurement
+  // from the Measure tool and silently drop to Select; that EAT the first click of the next measurement
+  // whenever it landed on (or, for an Area, anywhere inside) an existing one — "the first click after
+  // switching measure tools doesn't register". While a Measure tool is armed a press is ALWAYS a point
+  // (onBgDown); a measurement is picked in Select, or by right-click (`onMeasureContext`, which still
+  // selects from any tool). The render's `canGrab` and this guard say the same thing.
   const startMoveMeasure = (e, i) => {
     if (e.button !== 0) return;
-    if (tool === "measure" && measDraft.length > 0) return; // mid-draw: let onBgDown place the next vertex
+    if (tool !== "select") return;
     e.stopPropagation();
-    if (tool !== "select") setTool("select"); // drop to Select so the grips / × / highlight render
     const fp = p2f(e.clientX, e.clientY);
     const order = measuresUnderPoint(measures, fp, 12 / view.ppf); // 12px hit buffer → feet
     const next = nextMeasureSelection(order, sel?.kind === "measure" ? sel.i : -1);
@@ -8061,31 +8146,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (identifyMode) { beginIdentifyPress(e); return; } // B383 identify→add: click adds the lot, drag pans (resolved in onUp)
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
-    if (xsecMode) { // ditch cross-section: two clicks → sample elevations
-      const sp = snapPt(fp);
-      if (xsecPts.length === 0) { setXsecPts([sp]); flashWarn("Click the far side of the ditch.", 0); }
-      else { runXSection(xsecPts[0], sp); }
-      return;
-    }
-    if (traceMode) { setTracePts((a) => [...a, snapPt(fp)]); return; } // power-line quick-trace point
-    if (routeMode) { // utility service routing: pick source, then a building
-      if (routeMode.stage === "source") {
-        let src = snapPt(fp);
-        if (routeMode.snapTo === "traced") {
-          const near = nearestOnPolylines(fp, markups.filter((m) => m.kind === "traced").map((m) => m.pts));
-          if (!near || near.d > 90) { flashWarn("Click closer to a traced power line.", 0); return; }
-          src = near.pt;
-        }
-        setRouteMode({ ...routeMode, stage: "building", source: src });
-        flashWarn("Now click the building to serve.", 0);
-        return;
-      }
-      let b = els.find((e) => e.type === "building" && pointInRing(fp, ringOf(e)));
-      if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
-      if (!b) { flashWarn("⚠ No building to serve — draw a building first.", 0); return; }
-      commitUtilRoute(routeMode, b);
-      return;
-    }
     if (tool === "marquee") { // dedicated box-select tool (B570): drag a rubber-band, no Shift needed
       drag.current = { mode: "marquee", a: fp };
       setMarquee({ a: fp, b: fp });
@@ -8560,7 +8620,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // which now carries arcFt too — a cloud's arc size is a per-object property with a remembered
   // default exactly like its stroke weight, not a separate piece of pre-draw config).
   const newCloudMarkup = (pts) => ({
-    id: uid(), kind: "cloud", pts, ...mkCloudStyle, ...cloudMetaDefaults(new Date().toISOString()),
+    id: uid(), kind: "cloud", pts, ...mkCloudStyle,
+    // NEW-1 (2026-11-06) — an untouched default arc is sized to read at the zoom it is drawn at; a size someone chose is kept.
+    arcFt: mkCloudStyle.arcFt === CLOUD_ARC_DEFAULT_FT ? cloudDefaultArcFt(view.ppf) : mkCloudStyle.arcFt,
+    ...cloudMetaDefaults(new Date().toISOString()),
   });
   // `ptsOverride` lets a caller finish a ring it has ALREADY computed (the cloud gesture's onUp,
   // which must not round-trip through setMkPoly's async state before it can close) without
@@ -8602,7 +8665,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const translateMarkup = (m, dx, dy) => {
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
-    if (m.kind === "utilRoute") return { ...m, pts: shift(m.pts), corridor: shift(m.corridor), pad: shift(m.pad) };
     if (m.kind === "encumbrance") return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), centerline: (m.centerline || []).map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.kind === "easement") return { ...m, pts: shift(m.pts), centerline: m.centerline ? shift(m.centerline) : m.centerline };
     if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
@@ -9133,7 +9195,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
     // split (both halves are still the same side). Without this the vector stops matching the ring
     // and every correction the user made is silently dropped on the next re-derive.
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnInsert(pc.sectionBreaks || [], edgeIndex), sectionJoins: shiftBreaksOnInsert(pc.sectionJoins || [], edgeIndex) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? parcelAfterInsert(pc, edgeIndex, np) : pc)); // lib/parcelReshape.js — every per-edge array follows the new corner
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
@@ -9183,7 +9245,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     // NEW-6 — deleting a vertex merges two edges into one; the merged edge keeps the first half's
     // role and the vector stays aligned to the ring (see `shiftOverridesOnDelete`).
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnDelete(pc.sectionBreaks || [], index), sectionJoins: shiftBreaksOnDelete(pc.sectionJoins || [], index) } : {}) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? parcelAfterDelete(pc, index) : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));
@@ -9349,7 +9411,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const x of els) {
           if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) continue;
           if (elHidden(hiddenGroups, x)) continue; // NEW-1 — a hidden building is not hoverable, so its +/− cluster never pops over empty ground
-          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          // NEW-5 (2026-10-30): the edit buttons sit OUTSIDE the walls, so the building already under the cursor stays hovered out to them
+          const reach = x.type === "building" && x.id === hoverElId && view.ppf > 0 ? HOVER_BUTTON_REACH_PX / view.ppf : 0;
+          const hw = Math.abs(x.w) / 2 + reach, hh = Math.abs(x.h) / 2 + reach; // unrotated footprint bbox (generous on rotation — fine for hover)
           if (!(fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh)) continue;
           if (!hovered || byZ(x, hovered) >= 0) hovered = x;
         }
@@ -10130,6 +10194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
     if (d && d.mode === "pan" && d.tapIdentify
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
+      flashLotAt(d.tapIdentify); // NEW-1 (Add parcels) — the lot's outline this frame, not after the county's round trip
       quickAddAt(d.tapIdentify, d.ack);
     } else if (d && d.ack) d.ack.cancel(); // NEW-1 — a real drag (a pan) is not a click: drop the ring
     // B416: committing a building reshape that flipped its long-side axis can leave a
@@ -10334,7 +10399,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // so "finish / auto-close" behaves identically everywhere. Each finisher guards its own minimum
   // point count, so this no-ops (rather than cancelling the draft) when there aren't enough yet.
   const finishActiveDrawing = () => {
-    if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
     if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) {
       /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second has already
@@ -10364,9 +10428,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // point is gone. Pure decision lives in lib/drafts.js (resolveDraftStepBack) so every draft
   // type's trim + the "no draft → false" fall-through contract is unit-tested; returns true iff
   // it consumed a vertex, so Ctrl-Z falls through to a global undo only when no draft is active.
-  const draftSetters = { tracePts: setTracePts, splitPath: setSplitPath, measDraft: setMeasDraft, mkPoly: setMkPoly, draftPoly: setDraftPoly, draftElPoly: setDraftElPoly, draftRoadPts: setDraftRoadPts, easeDraft: setEaseDraft, easeEdges: setEaseEdges, xsecPts: setXsecPts };
+  const draftSetters = { splitPath: setSplitPath, measDraft: setMeasDraft, mkPoly: setMkPoly, draftPoly: setDraftPoly, draftElPoly: setDraftElPoly, draftRoadPts: setDraftRoadPts, easeDraft: setEaseDraft, easeEdges: setEaseEdges };
   const removeLastVertex = () => {
-    const r = resolveDraftStepBack({ traceMode, tracePts, tool, splitPath, measDraft, mkPoly, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, xsecMode, xsecPts });
+    const r = resolveDraftStepBack({ tool, splitPath, measDraft, mkPoly, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges });
     if (!r) return false;
     draftSetters[r.target](r.next);
     return true;
@@ -11511,8 +11575,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // new corner / dock face and re-derives the host angle, while KEEPING its size — the
   // user's if it was resized (B362), else the 55′×60′ default.
   const fitDogEar = (nb, de) => dogEarGeom(nb, de);
-  // Commit a batch of building-attached elements in one history step.
-  const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
   // Remove a building feature (and anything that hangs off it — a court's trailer, a
   // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
   const removeFeature = (id) => {
@@ -11564,7 +11626,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const out = outwardUnit(b, name);
     // Side-parking rows are excluded: relayoutWallKids re-derives their distance out from the wall
     // against the just-added strip, so hand-shifting them here would push them out twice (NEW-3).
-    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && (!isWallStrip(x) || isFlushWallLayer(x)) && sideOfKid(b, x) === name).map((x) => x.id));
+    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.sideParkSide && (!isWallStrip(x) || isFlushWallLayer(x)) && sideOfKid(b, x) === name).map((x) => x.id));
     if (history) pushHistory();
     setEls((a) => relayoutWallKids([...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw], b));
     setSel({ kind: "el", id: b.id });
@@ -11645,7 +11707,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const newEls = needsAisle
       ? [place(ai, inboard, idx0, "paving", {}), place(depth, inboard + ai, idx0 + 1, "parking", rowCfg)]
       : [place(depth, inboard, idx0, "parking", rowCfg)];
-    addBuildingEls(newEls, b.id);
+    // NEW-1 (2026-11-04) — a buffer / road already beyond the stack is pushed out by the new pieces (one history frame).
+    pushHistory(); setEls((a) => repackFlushBeyond([...a, ...newEls], b, side)); setSel({ kind: "el", id: b.id });
   };
   // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
   // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
@@ -11773,7 +11836,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the court (and its trailer parking): the buffer / walk / road outside it stay, close in against the wall, and the
   // innermost of them heads the chain — a stack member stamped with this `stackSide` whose inboard neighbour is gone.
   // (Trailer parking can never head one: it opens off a court. A non-dock wall's layers carry no `noFit`.)
-  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.noFit
+  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && x.noFit
     && x.stackSide === side && !x.truckCourt && !x.forCourt && x.type !== "trailer"
     && !arr.some((y) => y.id === x.prevZone || y.id === x.forTrailer));
   // The full dock-zone chain on a side (head → outward), within `arr`.
@@ -11883,7 +11946,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const [nx, ny] = SIDE_N[side]; const isH = ny !== 0, s = isH ? ny : nx;
     let maxOut = (isH ? b.h : b.w) / 2;                       // the wall face itself
     const u = outwardUnit(b, side);
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && sideOfKid(b, x) === side).forEach((x) => {
+    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && sideOfKid(b, x) === side).forEach((x) => {
       const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
       const c = s * (isH ? l.y : l.x);                       // signed perp distance of the element centre
       const ax = rot2(x.w / 2, 0, x.rot || 0), ay = rot2(0, x.h / 2, x.rot || 0);
@@ -11897,7 +11960,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wallOutermostExtent = (arr, b, side) => {
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
     let best = null, bestOut = -Infinity;
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
+    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
       && (isWallStrip(x) || x.type === "road" || isWallTrailer(x) || x.sideParkSide || SIDE_PARK_PAD_TYPES.has(x.type))).forEach((x) => {
       const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot), out = sg * (isH ? l.y : l.x);
       if (out > bestOut) { bestOut = out; best = x; }
@@ -11914,7 +11977,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (c.sides === "dock" && !isDock && key !== "trailer") return;   // B2268801 — trailer parking is offered on rear / end walls too
     if (c.sides === "nondock" && isDock) return;
     if (key === "sidewalk") { addSidewalkSide(b, side); return; }
-    if (key === "parking") { if (!sideParkingOn(b, side)) addParkingRowSide(b, side); return; }
+    // NEW-1 (2026-11-04) — parking on a non-dock wall: the first field, else ONE MORE ROW through the same ladder as the
+    // on-map "+" (growEmployeeSide: grow a single field, or append beyond an exploded stack) — never a second implementation.
+    if (key === "parking") { if (sideParkingOn(b, side)) growEmployeeSide(b, side, +1); else addParkingRowSide(b, side); return; }
     if (isDock) {
       pushHistory();
       setEls((a) => {
@@ -12151,6 +12216,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // A resize of the parking field's RUN is user intent, so the pin rule in relayoutWallKids
       // keeps it; only its distance out from the wall is re-resolved.
       const host = next.find((x) => x.id === resized.attachedTo);
+      // NEW-1 (2026-11-03) — a rear / end wall's Walk or Buffer is DERIVED from the wall span, so a handle drag that shortens it
+      // must RECORD the length and the end it was held from (the same three keys a typed length used to write, `extentFieldsFor`):
+      // otherwise the relayout below re-derives the full wall (or re-centres it) and the dragged end snaps back. Only a user
+      // resize that really changed the run along the wall stamps anything — a depth-only drag, a host refit, a heal never do.
+      if (host && host.type === "building" && !host.dogEar && opts.userResize && ownedWallStrip(resized, host)) {
+        const wside = swSideOn(host, resized);
+        const was = wallKidAlong(host, wside, resized), now = wallKidAlong(host, wside, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h });
+        if (Math.abs(was.run - now.run) > 0.5) {
+          const keys = extentFieldsFor({ run: now.run, alongShift: now.alongShift }, sidewalkSpanForBumps(host, wside, bumpsOfHost(next, host)));
+          next = next.map((x) => (x.id === resized.id ? applyZonePatch(x, keys) : x));
+        }
+      }
       // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
       if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
     } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
@@ -12206,7 +12283,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { cross, dimBX, dimBY } = hostAxisExtents(b, sw);
     const isVert = side === "left" || side === "right";
     const depth = isVert ? dimBX : dimBY;                // thickness: perpendicular to the wall
-    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
+    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && k.type !== "driveInRamp" && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
     const off = rot2(box.lx, box.ly, b.rot);
     return { ...sw, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
   };
@@ -12356,6 +12433,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
   };
+  /* ---- Drive-in ramps (NEW-1 / NEW-2, 2026-10-30 — lib/driveInRamp.js owns every rule) -------------------------------------------------------
+   * One building-attached `driveInRamp` element per ramp. The "+" beside a purple corner "+" drops one at the end of the belt by that corner (there is no
+   * ramp button at a wall's middle — owner 2026-11-02); it then opens the ramp's Properties. A wall that is not a dock wall
+   * takes a door MARKER instead (no ramp: the floor is at grade there). The door run it reads is `dockDoorRun` WITHOUT ramps — the module grid is the
+   * building's, not the ramps'. */
+  const rampsOnHost = (arr, b) => arr.filter((x) => x.type === "driveInRamp" && x.attachedTo === b.id);
+  const rampDoorRun = (b, side) => rampDoorRunOf(b, side, els, settings);
+  const planRampAt = (b, side, where) => {
+    const isDock = dockSidesOf(b).dockSides.includes(side);
+    const W = isDock ? RAMP_DEFAULTS.widthFt : DOOR_SIZES[RAMP_DEFAULTS.door].w;
+    const taken = rampsOnHost(els, b).filter((r) => r.ramp.side === side).map((r) => rampSpan(r.ramp, { marker: !isDock, dockHeightIn: rampDockIn }));
+    return pickRampSpot({ run: isDock ? rampDoorRun(b, side) : null, L: wallFrame(b, side).L, W, where, taken });
+  };
+  const addRamp = (b, side, where) => {
+    if (!b || b.type !== "building" || b.points || b.footEdit || !SIDE_N[side]) return;
+    const at = planRampAt(b, side, where);
+    if (at == null) { flashWarn("There is no free door module on that wall for a drive-in ramp.", 4000); return; }
+    const isDock = dockSidesOf(b).dockSides.includes(side);
+    const ramp = newRampRecord(side, at);
+    const ne = { id: uid(), type: "driveInRamp", attachedTo: b.id, noLabel: true, ramp, ...rampBox(b, ramp, { marker: !isDock, dockHeightIn: rampDockIn }) };
+    pushHistory();
+    setEls((a) => [...a, ne]);
+    setSel({ kind: "el", id: ne.id });
+    openInspector();
+    if (!isDock) flashWarn("That wall is not a dock wall (the floor is at grade), so this is a drive-in door marker only — there is no ramp.", 5000);
+  };
+  // Properties edits go through the host's own geometry: the patch lands on the `ramp` record and the write seam re-derives the box.
+  const setRampPatch = (id, patch) => { pushHistory(); setEls((a) => a.map((x) => (x.id === id ? { ...x, ramp: { ...x.ramp, ...patch } } : x))); };
   // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
   // from the kid's position (so legacy / untagged strips are still recognised).
   const sideOfKid = (b, kid) => {
@@ -12494,6 +12599,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
+    if (el.type === "driveInRamp") { setSel({ kind: "el", id }); return; } // a ramp's place is derived from its wall (set in Properties), so a drag has nothing to move
     if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     /* NEW-2 — pushHistory() USED TO FIRE HERE, on pointer DOWN, before a single pixel of movement.
@@ -13273,6 +13379,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
   const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
   const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
+  const parcelAddrParts = (COUNTIES[restored?.county] || {}).addrParts || null;
   const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField, overlapPairs: parcelOverlapPairs }), [parcels, parcelCadName, parcelIdField, parcelOverlapPairs]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
@@ -13995,17 +14102,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detRegime = drainCtxData && siteSqft > 0 && drainFloodOk
     ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8, resolvedWseFt: detRegimeResolvedWseFt, resolvedWseSrc: detRegimeResolvedWseSrc })
     : null;
-  // B634 tier-2 slice: in Regime A, the outfall value-of-information line. The user's
-  // cross-section only feeds in when it actually CROSSES the named receiving channel
-  // (within ~250 ft) — otherwise a random ditch section would be misattributed to it.
-  const xsecOnChannel = (() => {
-    if (!xsec?.stats || !drainCtxData?.channel?.geometry || !origin) return false;
-    const toLL = (p) => { const [la, ln] = feetToLatLng(p, origin.lat, origin.lon); return [ln, la]; };
-    const pts = [xsec.p0, xsec.p1, { x: (xsec.p0.x + xsec.p1.x) / 2, y: (xsec.p0.y + xsec.p1.y) / 2 }].filter(Boolean).map(toLL);
-    return pts.some((ll) => polylineDistMeters(drainCtxData.channel.geometry, ll[0], ll[1]) < 76); // ~250 ft
-  })();
   const outfallNote = detRegime && detRegime.regime === "A"
-    ? screenOutfall({ channel: drainCtxData.channel, ditch: xsecOnChannel ? xsec.stats : null, siteGradeFt: drainCtxData.groundElevFt })
+    ? screenOutfall({ channel: drainCtxData.channel, ditch: null, siteGradeFt: drainCtxData.groundElevFt })
     : null;
   // Per-pond usable split (B708). usablePondVolume is the ONE shared helper for
   // this metrics loop, the pond auto-size solver, and the per-pond card — so a
@@ -14259,6 +14357,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gsFieldT = Number.isFinite(gsSettings.fieldT) ? Math.max(0, Math.min(1, gsSettings.fieldT)) : 0;
   const gsShrinkPct = Number.isFinite(gsSettings.shrinkPct) ? gsSettings.shrinkPct : null;
   const gsDockDrop = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
+  // NEW-1 (2026-10-30) — the plan's dock height (in) is a drive-in ramp's default rise. Keep the seam's ref current and re-fit the ramps' cached boxes when
+  // it changes (a derived cache, not an edit: no undo frame; identity-stable when nothing moved).
+  const rampDockIn = dockHeightInOf(settings);
+  rampDockInRef.current = rampDockIn;
+  rampSettingsRef.current = settings;
+  useEffect(() => { setElsRaw((prev) => refitRamps(prev, (h) => dockSidesFor(h).dockSides, rampDockIn)); }, [rampDockIn]);
+  /* NEW-1 (2026-11-06) — the on-open heal: a ramp whose door centre is past its wall's end (stranded when its building was shortened before ramps followed)
+   * is re-seated by the SAME rule, and one that lands on another ramp is dropped. Runs after every settled write (never mid-gesture; the seam above handles
+   * those), identity-stable on a plan with nothing stranded, and a fixed point. Then the queue of dropped ramps is tombstoned. */
+  useEffect(() => {
+    if (drag.current) return;
+    setElsRaw((prev) => { const fixed = reseatRamps(prev, prev, prev, rampSeatCtx()); return fixed === prev ? prev : refitRamps(fixed, (h) => dockSidesFor(h).dockSides, rampDockInRef.current); });
+  }, [els]);
+  useEffect(() => { const q = rampDropQueue.current; if (q.size) { const ids = [...q]; q.clear(); tombstone(ids); } }, [els]);
   const gsMedianGrade = fmElev.existGradeFt;
   // Owner-only grading layer: the gate, then the small always-loaded glue (settings, the setback polygon, a
   // ground sampler that does not need a drainage check to have run). All inert for every other account.
@@ -14266,16 +14378,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The model GradingController publishes (declared here, ahead of the surface inputs, because its SUGGESTED finish
   // elevations feed them — see `padElevFt` below).
   const [grModel, setGrModel] = useState(null);
+  const [grView3d, setGrView3d] = useState(false);   // the 3D viewer is open (owner-only; rendered only while `grOn`, so it closes itself if grading is switched off)
   // Per-plan switch (NEW-1, amends B2315856): `gradingOn` is the owner gate; grading WORKS on this plan only when the owner has
   // also switched it on in the Grading panel. While off, `grOn` is false and everything below is the non-owner planner.
   const grPlanOn = gradingOn && (settings.grading || {}).enabled === true;
   // ROUND 4 (B2349120) — the rings that join the GRADING LIMIT without being graded planes: drive aisles / roads inside
   // the site and the walks / landscape strips hosted by a building. The graded planes themselves (FM_FILL_TYPES) join
   // through gsEls. Fresh array per render; useGradingBase memoises it on its value signature.
-  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape")) : null;
+  const grHostsPre = grPlanOn ? hostIdMap(els.filter((e) => FM_FILL_TYPES.has(e.type) || e.type === "sidewalk" || e.type === "landscape" || e.type === "driveInRamp")) : null;
+  // NEW-1 (2026-11-11) — DRIVES: a centerline road that ties into the property line grades from the ROAD'S elevation there to the court / lot it
+  // serves (lib/driveGrade.js). Which roads are drives is decided from the centerlines and the property lines alone, memoised on their values.
+  const grDriveParcels = grPlanOn ? drainActive.map((p) => p.points).filter((r) => r && r.length >= 3) : null;
+  const grDriveSig = grPlanOn
+    ? `${els.filter(isCenterlineRoad).map((e) => `${e.id}:${e.pts.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}`).join("|")}#${grDriveParcels.map((r) => ringHash(r)).join(",")}`
+    : "";
+  const grDriveTies = useMemo(() => {
+    const m = new Map();
+    if (!grDriveSig) return m;
+    // the PROPERTY LINE is the outer edge of the whole site (the union of the active lots) — a lot line shared with a neighbour that is also on the site is not a line
+    const grDriveLine = propertyLineRings(grDriveParcels);
+    for (const e of els) {
+      if (!isCenterlineRoad(e)) continue;
+      let t = null;
+      try { t = driveTieOf(e.pts, grDriveLine); } catch (_) { t = null; }
+      if (t) m.set(e.id, t);
+    }
+    return m;
+  }, [grDriveSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ROUND 3 (V2115881, owner 2026-11-12) — the FENCE, known before the grading base is: the property line ± the margin (the same ring `gradingPack` hands the engine).
+  // A road's ring joins the grading limit only inside it, and a road that ties into the line is a DRIVE (a graded plane through `gsEls`) — never an extra ring — so no road,
+  // plane or not, can carry the limit (and its slope) past the property line.
+  const grFenceMarginFt = grPlanOn ? gradingCfg(settings.grading).gradingMarginFt : 0, grFenceBufferFt = grPlanOn ? gradingCfg(settings.grading).undisturbedBufferFt : 0;
+  const grFence = useMemo(() => (grDriveSig ? driveFenceFor(grDriveParcels, grFenceMarginFt, grFenceBufferFt) : []), [grDriveSig, grFenceMarginFt, grFenceBufferFt]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const grLimitExtraRings = grPlanOn ? els.flatMap((e) => {
     if (e.type === "road") {
-      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), undefined) : ringOf(e); return r && r.length >= 3 ? [r] : []; } catch (_) { return []; }
+      // ROUND 3: a road that ties into the line is a drive (a plane in gsEls), never an extra ring; any other road joins the limit only INSIDE the fence
+      if (grDriveTies.has(e.id)) return [];
+      try { const r = isCenterlineRoad(e) ? roadStripRing(e, settings, sharpFor(e), roundTrim(e)) : ringOf(e); return r && r.length >= 3 ? roadLimitRings(r, grFence) : []; } catch (_) { return []; }
     }
     if ((e.type === "sidewalk" || e.type === "landscape") && grHostsPre.has(e.id)) { const r = ringOf(e); return r && r.length >= 3 ? [r] : []; }
     return [];
@@ -14292,9 +14432,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { if (!grOn && grLimitEdit) setGrLimitEdit(null); }, [grOn, grLimitEdit]);
   const gsExistAt = fmGradeAt || (grOn && grBase.existAt) || (gsMedianGrade != null ? () => gsMedianGrade : null);
   const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : (grOn && grBase.existAt) ? grBase.existKey : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
-  const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
+  const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type) || (grOn && e.type === "driveInRamp")).map((e) => {
     const r = ringOf(e);
     if (!r || r.length < 3) return null;
+    // NEW-3 (2026-10-30) — a drive-in ramp joins the grading ONLY while grading is on (grOn), as a pad member of its host building whose surface is the plane
+    // apron → FFE (lib/driveInRamp.js `rampGeometry`; the host's finish elevation is added inside the engine). A door-marker (non-dock wall) has no ramp.
+    if (e.type === "driveInRamp") {
+      const rh = els.find((h) => h.id === e.attachedTo && h.type === "building" && !h.points);
+      const rg = rh && e.ramp && dockSidesFor(rh).dockSides.includes(e.ramp.side) ? rampGeometry(rh, e.ramp, { dockHeightIn: rampDockIn }) : null;
+      return rg ? { id: e.id, type: "driveInRamp", ring: r, dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, ramp: rg, hostId: grHosts.get(e.id) ?? rh.id } : null;
+    }
     // Dock-stack members (court + its trailer strip) grade as ONE dockApron plane
     // anchored at the dock face of their HOST building (the effectivePadElev grouping).
     const host = (e.truckCourt || e.forCourt) && e.attachedTo ? els.find((x) => x.id === e.attachedTo) : null;
@@ -14315,6 +14462,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ...(grOn && e.type === "building" && grHosts.get(e.id) ? { hostId: grHosts.get(e.id) } : {}),
     };
   }).filter(Boolean);
+  // NEW-1 (2026-11-11) — a drive joins the graded elements ONLY while grading is on. Its graded footprint is the road's strip CLIPPED to the
+  // grading fence (the property line ± the margin): past the line the only work is the tie-in itself, at the road's own elevation.
+  if (grOn && grDriveTies.size) {
+    const fence = grBase.pack && grBase.pack.setbackRings && grBase.pack.setbackRings.length ? grBase.pack.setbackRings : grDriveParcels;
+    for (const e of els) {
+      const D = grDriveTies.get(e.id);
+      if (!D) continue;
+      let ring = null;
+      try { ring = driveRingOnSite(roadStripRing(e, settings, sharpFor(e), roundTrim(e)), fence, D.far); } catch (_) { ring = null; }
+      if (ring && ring.length >= 3) gsEls.push({ id: e.id, type: "drive", ring, dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: D.tie, path: D.path } });
+    }
+  }
   // Drainage target: the largest pond's centroid (the outfall/low side when no pond is
   // drawn falls back per element to "away from the building" inside the engine — the
   // B705 flow field stays a hint only; there is no persisted site-wide flow field).
@@ -14348,7 +14507,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
     gsApronRatio, gsDaylightAsap ? 1 : 0, gsEasementRings.map((r) => ringHash(r)).join(","),
     gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
-    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}`).join("|"),
+    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}${e.ramp ? `:r${e.ramp.riseFt.toFixed(2)}/${e.ramp.lengthFt.toFixed(1)}` : ""}${e.drive ? `:dr${e.drive.path.map((q) => `${Math.round(q.x * 10)},${Math.round(q.y * 10)}`).join(";")}` : ""}`).join("|"),
     gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
     ...(grOn ? [`gr:${grBase.sig}`, gsEls.map((e) => e.hostId ?? "").join(",")] : []),
   ].join("~");
@@ -14357,9 +14516,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const grAnyFfe = grOn && gsEls.some((e) => e.type === "building" && Number.isFinite(e.padElevFt));
   // Owner-only grading layer: built OFF the render path (chunked, previous surface kept, held while a drag is in flight —
   // problem report 6cea9895); every other account keeps the render-path memo byte for byte (lib/useGradeSurface.js).
+  const gsStatsRef = useRef(null);
+  if (gsStatsRef.current === null) gsStatsRef.current = newGradeBuildStats();
+  const gsEnabled = (fmEffectivePadFt != null || grAnyFfe) && gsEls.length > 0;
   const gradeSurface = useGradeSurface({
-    inputs: gsInputs, sig: gsSig, enabled: (fmEffectivePadFt != null || grAnyFfe) && gsEls.length > 0,
-    offRender: grOn, isDragging: () => !!drag.current,
+    inputs: gsInputs, sig: gsSig, enabled: gsEnabled,
+    offRender: grOn, isDragging: () => !!drag.current, statsRef: gsStatsRef,
   });
   /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
    * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
@@ -14367,12 +14529,95 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
    * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
    * (that dirt is borrow in the excavation ledger). */
+  /* ROUND 10 (NEW-2b, owner 2026-10-30: "Exist 800.1 · Prop —" with the whole view inside the graded limit): the readout reads the LAST
+   * GOOD surface while a rebuild is in flight or has failed — the picture the owner is looking at is built from it, so the chip must
+   * agree with it. "—" is said only where the surface really has nothing (outside the limit, a pond), never because a rebuild is
+   * pending; and a "—" INSIDE the limit's own regions is reported once (telemetry `grading-readout-dash`) so a recurrence names its
+   * cause instead of waiting to be reproduced. */
+  const lastGridRef = useRef(null);
+  if (gradeSurface && gradeSurface.grid) lastGridRef.current = gradeSurface.grid; else if (!grOn) lastGridRef.current = null;
   const cursorProp = useMemo(() => {
     if (!cursor) return null;
-    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
-    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    const grid = (gradeSurface && gradeSurface.grid) || (grOn ? lastGridRef.current : null);
+    if (!grid) {
+      // NEW-1 (B2585313 ×2): the one path the round-10 instrument could not see — say it, once per page load, with the build's state
+      if (grOn) { const st = gsStatsRef.current || {}; noteReadoutNoSurface({ grOn, enabled: gsEnabled, hasBuilt: false, hasKept: !!lastGridRef.current, lastBuildOutcome: st.lastBuildOutcome || null, buildSeq: st.buildSeq || 0, isDragging: !!drag.current }, cursor); }
+      return { status: "none", reason: "nosurface" };
+    }
+    const r = sampleProposedAt(grid, cursor, gsExistAt);
+    if (r && r.status !== "value") noteReadoutDash(grid, cursor, r, !(gradeSurface && gradeSurface.grid));
+    return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, gradeSurface, gsExistKey]);
+  }, [cursor, gradeSurface, gsExistKey, grOn]);
+  /* NEW-1 (B2585313 ×2) — `window.__plannerGradeReadout()`: the chip's whole state in ONE call, so a live check answers without a
+   * reproduction. Owner-only (installed only while the grading gate is on for this planner), READ-ONLY, and armed at CALL time
+   * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the owner's tab, or the E2E flag; otherwise it returns null. */
+  const gradeReadoutRef = useRef(null);
+  gradeReadoutRef.current = { cursor, cursorProp, gradeSurface, grOn, gsEnabled };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = () => {
+      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
+      const L = gradeReadoutRef.current || {}, st = gsStatsRef.current || {};
+      const kept = lastGridRef.current, grid = (L.gradeSurface && L.gradeSurface.grid) || (L.grOn ? kept : null);
+      const f = grid && L.cursor ? readoutDashFacts(grid, L.cursor, L.cursorProp, !(L.gradeSurface && L.gradeSurface.grid)) : null;
+      const now = Date.now();
+      return {
+        enabled: !!L.gsEnabled, grOn: !!L.grOn, hasBuilt: !!(L.gradeSurface && L.gradeSurface.grid), hasKept: !!kept,
+        buildSeq: st.buildSeq || 0, lastBuildMs: st.lastBuildMs ?? null, lastBuildOutcome: st.lastBuildOutcome || null,
+        isDragging: !!drag.current, sigChangesLast10s: (st.sigChanges || []).filter((t) => now - t <= 10000).length,
+        cursor: L.cursor ? { x: Math.round(L.cursor.x * 10) / 10, y: Math.round(L.cursor.y * 10) / 10 } : null,
+        cursorStatus: L.cursorProp ? L.cursorProp.status : null, cursorReason: L.cursorProp ? L.cursorProp.reason || (L.cursorProp.undisturbed ? "undisturbed" : null) : null,
+        cursorFt: L.cursorProp && Number.isFinite(L.cursorProp.ft) ? Math.round(L.cursorProp.ft * 10) / 10 : null,
+        inLimit: f ? f.inLimit : null, limitMode: f ? f.mode : null, limitRegionCount: f ? f.limitRegionCount : 0, limitBbox: f ? f.limitBbox : null,
+        cursorBbox: L.cursor ? [L.cursor.x, L.cursor.y, L.cursor.x, L.cursor.y].map((v) => Math.round(v * 10) / 10) : null,
+      };
+    };
+    window.__plannerGradeReadout = hook;
+    return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
+  }, [grOn]);
+  /* NEW-1 (2026-11-12, V2115881 re-opened) — `window.__plannerGradeDrive()`: WHY each road is or is not graded as a drive, and who owns the grading past the property line, in ONE call
+   * — so a live check answers "is this plain Road a drive?" without a reproduction. Owner-only (installed while the grading gate is on), READ-ONLY, armed at CALL time
+   * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the tab, or the E2E flag; otherwise it returns null. */
+  const gradeDriveRef = useRef(null);
+  gradeDriveRef.current = { els, gsEls, gradeSurface, grDriveTies, grDriveParcels, grOn, settings };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = () => {
+      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
+      const L = gradeDriveRef.current || {};
+      const surf = L.gradeSurface || null, planes = surf && surf.planes ? surf.planes : new Map(), why = surf && surf.driveWhy ? surf.driveWhy : new Map();
+      const line = propertyLineRings(L.grDriveParcels || []);
+      const roads = (L.els || []).filter(isCenterlineRoad).map((e) => {
+        const tie = L.grDriveTies && L.grDriveTies.get(e.id);
+        const pl = planes.get(e.id);
+        return {
+          id: e.id, travelW: e.travelW ?? null, points: e.pts.length, ends: [e.pts[0], e.pts[e.pts.length - 1]].map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })),
+          diagnose: driveDiagnose(e.pts, line), tied: !!tie, inGraded: !!(L.gsEls || []).find((g) => g.id === e.id && g.type === "drive"),
+          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId, servedBy: pl.drive.servedBy || null, nearestElementFt: pl.drive.nearestFt != null ? Math.round(pl.drive.nearestFt) : null } : null,
+          notAPlaneBecause: why.get(e.id) || null,
+        };
+      });
+      const out = surf && surf.grid && surf.grid.outside ? surf.grid.outside : null;
+      return {
+        grOn: !!L.grOn, hasSurface: !!surf, build: surf ? surf.surfaceKey && String(surf.surfaceKey).length : null, roads,
+        pastLine: out ? { cells: out.count, beyondParcel: out.beyondParcel ?? null, perElement: Object.entries(out.perEl || {}).map(([id, p]) => ({ id, type: ((L.gsEls || []).find((g) => g.id === id) || {}).type || null, cells: p.count, maxPastFt: Math.round(p.maxPastFt * 10) / 10, at: { x: Math.round(p.centroid.x), y: Math.round(p.centroid.y) } })) } : null,
+      };
+    };
+    window.__plannerGradeDrive = hook;
+    return () => { if (window.__plannerGradeDrive === hook) window.__plannerGradeDrive = null; };
+  }, [grOn]);
+  /* NEW-1 (2026-11-01) — `window.__plannerPerf()`: the last minute of long frames WITH script attribution, the blocked-vs-waiting
+   * split, repeating timers and which grading layers were drawn — so a "the graded plan is slow" report is answered in one call,
+   * not a guess (lib/plannerPerf.js). Same gate and arming as `__plannerGradeReadout`: owner-only (installed while the grading gate
+   * is on), read-only, armed at call time by `?planyrDiag=1`. */
+  const plannerPerfRef = useRef(null);
+  plannerPerfRef.current = { ppf: view.ppf, grOn, gsEnabled, buildMs: (gsStatsRef.current || {}).lastBuildMs ?? null };
+  useEffect(() => {
+    if (typeof window === "undefined" || !grOn) return undefined;
+    const hook = installPlannerPerf(window, { extra: () => { const P = plannerPerfRef.current || {}; return { ppf: Number.isFinite(P.ppf) ? Math.round(P.ppf * 1000) / 1000 : null, gradingPlanOn: !!P.gsEnabled, lastGradeBuildMs: P.buildMs }; } });
+    return () => { if (window.__plannerPerf === hook) window.__plannerPerf = null; };
+  }, [grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
@@ -14425,6 +14670,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return e.id === id && !Number.isFinite(e.padElevFt) && Number.isFinite(freezeFfe) ? { ...m, padElevFt: freezeFfe, ffeBasis: "typed" } : m;
     }));
   };
+  /* NEW-1 ("Fit the biggest building") — what the lazy fit code reads off the plan, and the ONE way its answer goes back on it. Both are called
+   * from the grading controller (owner-only); nothing here imports the search. `source`: the building the template comes from (null = none on
+   * the plan → a default cross-dock), its attached elements, the centerline roads, the plan's standards. `apply`: ONE undoable action —
+   * the selected building is resized / moved / turned through the planner's OWN resize path (`refitChildren`: its courts, trailer rows, buffers,
+   * walks and bump-outs are re-laid exactly as a hand resize does) and takes the fitted finished floor as a typed one; with no building a
+   * cross-dock is created with its court + trailer row + buffer on each long side. */
+  const grFitSource = (buildingId) => {
+    const b = buildingId ? els.find((x) => x.id === buildingId && x.type === "building" && !x.dogEar && !x.points) : null;
+    return {
+      building: b || null,
+      kids: b ? els.filter((x) => x.attachedTo === b.id) : [],
+      roads: els.filter((e) => e.type === "road" && Array.isArray(e.pts) && e.pts.length >= 2).map((e) => e.pts),
+      settings,
+    };
+  };
+  const grApplyFit = (cand, { buildingId } = {}) => {
+    const box = cand && cand.box;
+    if (!box) return;
+    const ffe = Math.round(cand.ffe * 2) / 2;
+    const b = buildingId ? els.find((x) => x.id === buildingId && x.type === "building") : null;
+    pushHistory();
+    if (b) {
+      const kids = wallKids(b);
+      setEls((a) => refitChildren(a, b.id, { cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: box.rot }, kids, { userResize: true, dragAxis: { w: true, h: true } })
+        .map((x) => (x.id === b.id ? { ...x, padElevFt: ffe, ffeBasis: "typed" } : x)));
+      setSel({ kind: "el", id: b.id });
+      return;
+    }
+    const nb = { id: uid(), type: "building", cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: ((box.rot % 360) + 360) % 360, dock: "cross", dockAxis: "x", dockSide: "bottom", padElevFt: ffe, ffeBasis: "typed" };
+    setEls((a) => {
+      let next = [...a, nb];
+      for (const side of ["top", "bottom"]) {
+        const court = makeCourtZone(nb, side), tz = makeTrailerZone(nb, court), bz = makeBufferZone(nb, tz);
+        next = relayoutSide([...next, court, tz, bz], nb, side);
+      }
+      return next;
+    });
+    setSel({ kind: "el", id: nb.id });
+  };
+  // E2E-gated read of the two doors above (same `window.__PLANYR_E2E` gate as the other hooks; never runs in production): the owner gate keeps the Fit
+  // button off for every test account, so e2e/fit-building-apply drives the planner's real apply path through this.
+  const grFitDoorRef = useRef(null);
+  grFitDoorRef.current = { source: grFitSource, apply: grApplyFit };
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
+    const hook = { source: (...a) => grFitDoorRef.current.source(...a), apply: (...a) => grFitDoorRef.current.apply(...a) };
+    window.__plannerFit = hook;
+    return () => { if (window.__plannerFit === hook) window.__plannerFit = null; };
+  }, []);
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
   // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
   const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
@@ -14438,7 +14732,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setGrLimitEdit({ highlight: span || null });
   };
   const grDoneEditLimit = () => setGrLimitEdit(null);
-  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null }); };
+  const grResetLimit = () => { setGrLimitEdit(null); grSetCfg({ limitRing: null, limitMode: "layout" }); };   // NEW-1 (2026-11-04): "Reset to auto" is the automatic outline around what the layout needs
   const grSetLimitMode = (m) => { if (m !== "layout") setGrLimitEdit(null); grSetCfg({ limitMode: m }); };
   const grStartLimitVertex = (e, index) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -14742,6 +15036,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dockDropFt: gsDockDrop, groundBasis: fmGradeAt || grBase.existAt ? "grid" : gsMedianGrade != null ? "median" : "none",
     accent: PAL.accent, isDragging: () => !!drag.current,
     limitEditing: !!grLimitEdit, limitHighlight: grLimitEdit ? grLimitEdit.highlight : null,
+    fit: { source: grFitSource, apply: grApplyFit },
     actions: { patchBuilding: grPatchBuilding, moveAssembly: grMoveAssembly, setLimitMode: grSetLimitMode, editLimit: grEditLimit, doneEditLimit: grDoneEditLimit, resetLimit: grResetLimit },
   } : null;
 
@@ -16567,6 +16862,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
     // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
     etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
+    // NEW-1 — a city's own detention policy (Baytown, Mont Belvieu): additive, no rate behind it.
+    cityNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "city-note"),
     // B861 (chat NEW-2) — drainage-district membership (additive to the county). BKDD is the
     // first; districtFailed distinguishes a boundary-source outage ("membership unverified")
     // from a clean "not in a district".
@@ -16723,7 +17020,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * be clicked on, existing objects included: the canvas root carries `data-cursor-mode` and ONE stylesheet rule (lib/plannerCursors.js)
    * turns every descendant's cursor into that mode's, so a new object type can never forget to ask. Space-held = pan. */
   const cursorMode = spacePan ? "pan" : identifyMode ? "identify"
-    : (tool !== "select" || attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
+    : (tool !== "select" || attachFor || alignFor || pobMode || ovCalib || addLeaderFor || ovAlignBase || mergePick) ? "armed"
     : null;
   /* NEW-1 — PARCELS IN FRONT. While the Parcels tool is the thing being worked (the Land panel open — docked or floating —
    * Pick county lots, Draw / Split / Combine / Edit corners) the parcel geometry is the TOP of the drawing. One boolean, one
@@ -16746,6 +17043,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
   const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
+  const [outlineRefused, setOutlineRefused] = useState(false); // NEW-1 (Add parcels): a county server REFUSED part of the larger-lots band — said, never a silent blank patch
+  const lotFlashRef = useRef(null);             // NEW-1 (Add parcels): the clicked lot's outline, drawn the instant the click lands (before the county answers)
   const outlineLayersRef = useRef(null);        // the outline set (lib/parcelOutlineSet.js) while identify mode is on — also read by the E2E hook below
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
   // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
@@ -16806,12 +17105,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
   // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
-  const parcelGisKey = (attrs, rings) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}` });
+  const parcelGisKey = (attrs, rings, county) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}`, stack: county ? stackRuleForCounty(county) : null }); // NEW-1 — a layer that stacks rows on a lot (Bartow) keys the LOT (counties.js dedupeBy)
   // rings (4326) → planner parcels in the site frame, each carrying its gisKey + attrs.
   // Every outer part of a multipart parcel ("TRS 3 & 5") becomes its own parcel (B36c),
   // locked by default like every county-pulled lot (B99).
-  const parcelsFromRings = (rings, addr, attrs) => {
-    const key = parcelGisKey(attrs, rings);
+  const parcelsFromRings = (rings, addr, attrs, county) => {
+    const key = parcelGisKey(attrs, rings, county);
     return rings
       .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
       .filter((pc) => pc.points.length >= 3);
@@ -16943,6 +17242,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
   // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
+  /* NEW-1 (Add parcels, 2026-11-16 — Goose Creek: "I tried to click lots … no outline showed up"). The outline of the lot a click lands on is
+   * drawn the same frame, from the lot lines the map already holds (the outline set's `featureAt`), in the plan's own parcel colour and in the
+   * Parcels-in-front pane (so it is above everything). The county's point query is still the authority (B137): the flash is removed the moment
+   * it answers — by the real parcel, or by the honest "no lot". Skipped over a lot the plan already has (that one is outlined already, and a
+   * re-click removes it — a flash there would promise the opposite). */
+  const clearLotFlash = () => { const f = lotFlashRef.current; lotFlashRef.current = null; if (f) { try { f.remove(); } catch (_) { /* map gone */ } } };
+  const flashLotAt = (fp) => {
+    clearLotFlash();
+    const set = outlineLayersRef.current, m = geoMapRef.current;
+    if (!set || !m || !origin || !fp) return;
+    if (parcelAtPoint(stateRef.current.parcels || [], fp)) return;
+    const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+    const feat = set.featureAt(lat, lng);
+    const geom = feat && feat.geometry;
+    if (!geom || !geom.coordinates) return;
+    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+    const latlngs = polys.map((rings) => rings.map((r) => r.map(([x, y]) => [y, x])));
+    if (!latlngs.length) return;
+    try {
+      lotFlashRef.current = L.polygon(latlngs, { pane: m.getPane(PANE_PARCEL_PICK) ? PANE_PARCEL_PICK : "overlayPane", interactive: false, color: PAL.parcel, weight: 2.5, opacity: 1, fillColor: PAL.parcel, fillOpacity: 0.16, className: "lot-click-flash" }).addTo(m);
+    } catch (_) { lotFlashRef.current = null; }
+  };
   const quickAddAt = async (fp, ack = null) => {
     if (!origin) { ack?.cancel(); setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later click supersedes this one (B53)
@@ -16952,6 +17273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let settled = false;
     const setRes = (r) => {
       settled = true;
+      if (tok === identifyTok.current) clearLotFlash(); // the real parcel (or the honest "no lot") takes over from the instant outline
       if (tok === identifyTok.current) {
         if (r && r.error) ack?.empty(r.noLot ? "No lot here" : "Couldn't get that lot"); else ack?.done();
       }
@@ -16995,8 +17317,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
       if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
-      const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
-      const key = parcelGisKey(attrs, rings);
+      const addr = situsFor(hit.county, attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder); a county that declares split situs columns is composed (addrParts)
+      const key = parcelGisKey(attrs, rings, hit.county);
       // Re-click a lot added THIS session → toggle it back off.
       if (identifyAddedRef.current.has(key)) {
         const ids = identifyAddedRef.current.get(key);
@@ -17009,13 +17331,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       // Already in the plan from before → select + inform, never add a duplicate.
-      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key); // recomputed from attrs — legacy geo: gisKeys still match
+      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key || p.gisKey === key); // recomputed from attrs — legacy geo: gisKeys still match; a lot keyed by its stack field (pid:) matches its own stored gisKey
       if (dupe.length) {
         setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
         setRes({ already: true, addr });
         return;
       }
-      const pcs = parcelsFromRings(rings, addr, attrs);
+      const pcs = parcelsFromRings(rings, addr, attrs, hit.county);
       if (!pcs.length) { setRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
       pushHistory();
       setParcels((a) => [...a, ...pcs]);
@@ -17023,7 +17345,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, stackNote: stackNote(feat), ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
     } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
@@ -17057,7 +17379,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); return; }
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); setOutlineRefused(false); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
      * to mount every county source in the country (36+ full-viewport images) and the statewide
@@ -17076,6 +17398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!hosted) console.error("[planyr] the Parcels-in-front panes are missing — county lots would draw under the plan");
         return makeParcelDisplayLayer(url, {
           getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current,
+          wide: true, // NEW-1 (click-a-lot) — the larger lots from two zoom steps further out, exactly like the Map's picker (parcelWideLayer.js); a source with no verified size column keeps its own floor
           ...(hosted ? { pane: PANE_PARCEL_PICK, labelPane: PANE_PARCEL_PICK_LABEL } : null),
         });
       },
@@ -17085,12 +17408,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       isStatewideUrl: isStatewideLayerUrl,
       scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
       coversCounty: stateLayerCoversCounty, // NEW-2 — a state layer that declares the failed county missing is never pulled in for it
-      onChange: () => setOutlinePhase(set.status().phase),
+      onChange: () => { const st = set.status(); setOutlinePhase(st.phase); setOutlineRefused(!!st.refused); },
     });
     outlineLayersRef.current = set;
     setOutlinePhase("loading"); // the tool is armed: outlines are on their way until the set says otherwise
     let map = null, poll = null, tries = 0;
     const onMoved = () => set.sync();
+    let gone = false;
     // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
     const attach = () => {
       poll = null;
@@ -17098,10 +17422,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); else setOutlinePhase("none"); return; }
       map = m; m.on("moveend", onMoved); set.sync();
     };
-    attach();
+    /* NEW-1 (Add parcels) — the larger-lots module + the verified size-column table load BEFORE the first layer is built (`makeParcelLayer` reads
+     * them once, at build): a layer built first would never get its band. A failed load is reported by the loader and leaves today's floor. */
+    const ready = Promise.resolve(wideViewReady()).catch(() => null);
+    ready.then(() => { if (!gone) attach(); });
     // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
-    Promise.resolve(loadCountyPolygons()).then(() => set.sync(), () => {});
+    Promise.all([ready, Promise.resolve(loadCountyPolygons()).catch(() => null)]).then(() => { if (!gone) set.sync(); });
     return () => {
+      gone = true;
+      clearLotFlash();
       if (poll) clearTimeout(poll);
       if (map) map.off("moveend", onMoved);
       set.dispose();
@@ -17124,11 +17453,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const siteLabel = useProjectName(groupId, restored?.site || restored?.name || "Untitled site");
   // A brand-new blank site is the first plan of its own group → "Concept A" (lettered default).
   const planLabel = usePlanName(siteId, restored?.name || "Concept A");
-  // In-flight typing buffer for the plan-name field ONLY (null = not editing → show the store's name).
-  const [planDraft, setPlanDraft] = useState(null);
   // Validation + visible rejection live in the shared rename functions; an empty name is refused
   // with a notice and the old name stays (it used to be silently saved as "Untitled site").
-  const commitPlanLabel = (v) => { setPlanDraft(null); renamePlanChecked(siteId, v, async (id, n) => onRenamePlan?.(id, n)); };
+  // NEW-1 (2026-11-04) — the ONE plan rename the plan menu calls, for the current plan AND for any other plan in the site (it always went through renamePlanChecked).
+  const renamePlanFromMenu = (id, v) => renamePlanChecked(id, v, async (pid, n) => onRenamePlan?.(pid, n));
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   /* Keep the save metadata current (so the first non-blank save is fully formed).
    * NEW-1 — assigned during RENDER, not in a passive effect, and `origin` reads the live STATE
@@ -17229,7 +17557,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
-  const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
+  const closeHdrMenus = () => { setPlanMenu(false); };
   /* NEW-3(b)/B1429 — every storage-failure report carries the storage FACTS: usage vs quota for
    * BOTH tiers, kept separate and labelled (`local_*` / `idb_*`), plus the per-class byte
    * breakdown. So the next occurrence answers "which store was full, and what was in it" instead
@@ -17412,7 +17740,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
-  const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
+  // NEW-1 (2026-11-04) — Duplicate for ANY plan of the site: the footer's button passes the current plan, a plan's ⋯ / right-click passes that plan.
+  // Both end in the one `duplicatePlan` (SitePlannerApp), which keeps its loud refusal (planMint.js, B2639168).
+  const handleDuplicatePlan = (id) => { closeHdrMenus(); flushSite(); onDuplicateSite?.(id || siteId); };
   const handleNewPlan = () => { closeHdrMenus(); flushSite(); onNewPlanSameParcel?.(siteId); };
   // Delete a single plan (B264). Never the last plan in a site (that's the whole-site delete
   // from the map). If we're deleting the current plan, suppress its flush so the delete sticks.
@@ -17426,6 +17756,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * listDeletedPlansInGroup header): siblings soft-deleted from THIS still-live group, which the
    * account-wide bin deliberately never lists. Fetched fresh whenever the plan menu opens. */
   const refreshDeletedPlansHere = () => {
+    /* E2E seam (NEW-1, 2026-11-04) — the same CALL-TIME `window.__PLANYR_E2E` gate as the hooks above; production never sets it. A signed-out run has no cloud bin, so
+     * the plan-menu spec seeds what the bin would list; Restore / Delete forever then run the REAL handlers (which refuse loudly when not signed in). */
+    const seeded = typeof window !== "undefined" && window.__PLANYR_E2E ? window.__planyrE2eBin : null;
+    if (seeded) { setDeletedPlansHere(seeded.plans || []); setDeletedFilesHere(seeded.files || []); return; }
     Promise.resolve(listDeletedPlansInGroup(groupId)).then((r) => setDeletedPlansHere((r && r.ok && r.plans) || []));
     // Site-plan FILES: dynamic import — the overlay store must not ride the Site route's critical path.
     import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
@@ -17447,7 +17781,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .finally(() => { refreshDeletedPlansHere(); setDeletedPlansBusy(null); });
   };
   const handlePurgeDeletedFile = (f) => {
-    setDeletedPlansBusy(f.id); setPlanPurgeArm(null);
+    setDeletedPlansBusy(f.id);
     import("../../shared/sitePlans/lib/deletedSitePlanFiles.js")
       .then((m) => m.purgeSitePlanFile(f))
       .then((res) => { if (!res.ok) flashWarn(`“${f.name}” couldn't be permanently deleted — ${res.error}`); })
@@ -17457,7 +17791,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const handleRestoreDeletedPlan = (p) => {
     setDeletedPlansBusy(p.id);
     Promise.resolve(restoreDeletedProject(p.id)).then((res) => {
-      if (!res || res.ok === false) flashWarn((res && res.error) || `“${p.name}” couldn't be restored — check your connection and try again.`);
+      if (!res || res.ok === false) flashWarn(`“${p.name}” couldn't be restored — ${(res && res.error) || "check your connection and try again."}`);   // NEW-1: always names the plan, like the files path does
       refreshDeletedPlansHere();
       onSiteSaved?.(); // the sites list is device-cached elsewhere; this is the same "something changed server-side" refresh the plan-lock toggle above already uses
     }).catch(() => flashWarn(`“${p.name}” couldn't be restored — check your connection and try again.`))
@@ -17471,9 +17805,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * unlike `purgeDeletedProject`, it must NEVER run the whole-project folder/Drive/Doc-Review
    * cleanup, because the project it belongs to isn't gone. */
   const handlePurgeDeletedPlan = (p) => {
-    setDeletedPlansBusy(p.id); setPlanPurgeArm(null);
+    setDeletedPlansBusy(p.id);
     Promise.resolve(purgeOnePlanFromLiveGroup(p.id)).then((res) => {
-      if (!res || res.ok === false) flashWarn((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
+      if (!res || res.ok === false) flashWarn(`“${p.name}” couldn't be permanently deleted — ${(res && res.error) || "check your connection and try again."}`);
       refreshDeletedPlansHere();
     }).catch(() => flashWarn(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
       .finally(() => setDeletedPlansBusy(null));
@@ -17502,6 +17836,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
     hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
+    showAerial, // B2589680 — the sheet carries the aerial exactly when the map shows it
     basemapOn, basemapSrc, overlays: overlaysDrawn, layerStatus, // NEW-1 (Imagery & Layers) — the sheet carries what the map shows (PDF-PARITY)
     PAL, f0,
     siteName, siteLabel, planLabel, printFrame,
@@ -17524,8 +17859,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true, includeScaleBar = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups, includeScaleBar));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -17695,7 +18030,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
     setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
     setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
-    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false, showAerial };
+    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false };
     setPrintMode(true); setComposeMode(false); setExportMenu(false); setSel(null);
     import("./components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
   };
@@ -17703,7 +18038,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
   const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
-  const aerialAvailable = !!(origin && basemapOn) || !!mapRef; // B765985 — gates the compose screen's "Aerial imagery" toggle
   const buildingsTablePrintable = els.some(isBuilding); // B1934529 — no dead "Buildings table" control on a plan with nothing to list
   const startPrintMove = (e) => {
     e.stopPropagation();
@@ -17773,7 +18107,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const composeKey = composeMode && printFrame
     ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
       settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false,
-      settings.printBuildingsTable !== false,
+      settings.printBuildingsTable !== false, settings.printScaleBar !== false,
       composePageOverride ? `${composePageOverride.w}x${composePageOverride.h}` : ""].join("|")
     : null;
   useEffect(() => {
@@ -17784,7 +18118,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const scaleText = printScale ? scaleLabel(printScale) : "";
         const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false));
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, false, settings.printScaleBar !== false));
         if (cancelled) return;
         if (!composed) { setComposePreviewUrl(null); return; }
         const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
@@ -17833,7 +18167,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pre = preCanvasDisplayRef.current;
     if (pre) {
       setSettings((s) => (s.showDims === pre.showDims && s.showAreas === pre.showAreas) ? s : { ...s, showDims: pre.showDims, showAreas: pre.showAreas });
-      if (showAerial !== pre.showAerial) setShowAerial(pre.showAerial);
       preCanvasDisplayRef.current = null;
     }
   };
@@ -17845,7 +18178,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
       // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref(), settings.printScaleBar !== false);
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -18126,6 +18459,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }
       }
     } else {
+      // NEW-1 (2026-10-30) — a GRADED plan's building label carries its FFE (typed or suggested, read live from the one grading
+      // model; null with grading off, for a bump-out and before the suggestion lands). lib/buildingFfeLabel.js.
+      const ffeText = ffeLineText(buildingFfeFt(el, { grOn, autoFfe: grModel && grModel.autoFfe }));
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
       const name = bn ? `Building ${bn}` : (TYPE[el.type]?.label || "Element").split(" / ")[0];
       if (el.type === "building" && !poly && !el.dogEar) {
@@ -18135,7 +18471,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // "(incl. N bump-outs)" wording from the label (it is not shown anywhere on the canvas).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′`, ffe: ffeText });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -18153,6 +18489,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // (an AREA line — dropped with areas off, leaving just the name).
         if (!poly) lines.push(`${f0(el.w)}′ × ${f0(el.h)}′`);
         else if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} AC`);
+        if (ffeText) lines.push(ffeText); // NEW-1 (2026-10-30): an irregular building's FFE rides under its size line, same as a rectangle's
       }
     }
     // Shape's on-screen bounding half-extents (rotation-aware for rects). halfH drives the
@@ -18640,6 +18977,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      may fill, so a laptop does not have to give up half its canvas to reach the controls. Still
      site-size independent — nothing here reads the plan. */
   const featEditOpacity = featureEditOpacity(rppf, size.w);
+  /* NEW-2 (2026-10-30) — the small "drive-in ramp" button that sits beside each purple dock-wall corner "+" (none at a wall's middle — owner 2026-11-02): a wedge with an
+     arrow, smaller than they are, slate (not purple / amber) so it reads as its own thing. Same press discipline as every on-building control
+     (`data-el-action`, stop the press, swallow the double-click — CHROME-NEVER-EATS-A-PRESS). It is offset ALONG the wall from its neighbours so the
+     two never overlap; the grading spot tags move out of the way of these buttons, never the reverse. */
+  const rampGlyph = (key, cx, cy, title, onClick) => {
+    const r = RAMP_BTN_R;
+    return (
+      <g key={key} data-el-action="1" data-ramp-add="1" style={{ cursor: "pointer" }}
+        onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}
+        onDoubleClick={(e) => e.stopPropagation()}>
+        <title>{title}</title>
+        <circle cx={cx} cy={cy} r={r} fill="#475569" stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+        <path d={`M ${cx - r * 0.55} ${cy + r * 0.45} L ${cx + r * 0.55} ${cy + r * 0.45} L ${cx + r * 0.55} ${cy - r * 0.05} Z`} fill="#ffffff" />
+        <path d={`M ${cx - r * 0.5} ${cy - r * 0.2} L ${cx + r * 0.3} ${cy - r * 0.55} M ${cx + r * 0.05} ${cy - r * 0.6} L ${cx + r * 0.3} ${cy - r * 0.55} L ${cx + r * 0.28} ${cy - r * 0.28}`} fill="none" stroke="#ffffff" strokeWidth={Math.max(1, FEAT_CTRL_STROKE * 0.7)} strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    );
+  };
   const sideAddNodes = (() => {
     if (tool !== "select" || editingCorners || !featActiveId || !featEditOpacity) return null; // NEW-1 (B1264944): the mode's own crosshair, not a "+" button
     const el = els.find((x) => x.id === featActiveId);
@@ -18650,38 +19004,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const wpx = Math.abs(el.w) * rppf, hpx = Math.abs(el.h) * rppf; // rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
-    const cpx = f2p({ x: el.cx, y: el.cy });
-    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     const depths = zoneDepthDefaults(settings);
+    /* NEW-5 (2026-10-30) — EVERY button sits OUTSIDE the footprint, in one row along its wall, offset into the court; the grading corner tags sit INSIDE
+       it (lib/padCornerTag), so the two can never meet at any zoom. `layoutBuildingButtons` (lib/buildingButtons.js) decides every position — the pair on
+       each wall's middle, the purple "+" at each end of a dock wall, one grey ramp "+" beside each purple "+" (none at a wall's middle), none on a short end
+       wall — and drops (never moves) a button that would touch one already placed. This function only draws what it is handed. */
+    const corner = (lx, ly) => { const o = rot2(lx, ly, el.rot); return f2p({ x: el.cx + o.x, y: el.cy + o.y }); };
+    const quad = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
+    const walls = buildingButtonWalls(quad, dockSides, { wpx, hpx, footEdit: !!el.footEdit });   // the filter the grading label placer reads too
+    const layout = layoutBuildingButtons(walls);
     return (
       /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
          clickable the whole time they are on screen, because a half-faded control that ignored a
          press would be its own bug. */
       <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
-        {sides.map(([name, nx, ny]) => {
-          // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
-          // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
-          // its long-side controls and drops only the cramped short ends.
-          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
-          const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
-          const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
-          let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-          const pos = { x: ms.x - ux * 24, y: ms.y - uy * 24 }; // just inside the wall, on the building
-          const tan = { x: -uy, y: ux };                        // along the wall (side-by-side +/−)
+        {walls.map((w) => {
+          const name = w.name, pl = layout.get(`pair:${name}`);
+          if (!pl) return null;
+          const { pos, tan } = pl;                                  // outside the wall, in the court; `tan` runs along it (side-by-side +/−)
           if (dockSides.includes(name)) {
             // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
             const n = stackCountIn(els, el, name);
             const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
-            return featPair(`dock${name}`, pos, tan, {
-              canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
-              addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
-              onAdd: () => addZoneOnSide(el, name),
-              canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
-              onRemove: () => removeOuterZoneOnSide(el, name),
-            });
+            return (
+              <g key={`dockw${name}`}>
+                {featPair(`dock${name}`, pos, tan, {
+                  canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
+                  addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
+                  onAdd: () => addZoneOnSide(el, name),
+                  canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
+                  onRemove: () => removeOuterZoneOnSide(el, name),
+                })}
+              </g>
+            );
           }
           // non-dock side (a short end, or the long side opposite single-load docks) → the
-          // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses.
+          // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses. No ramp button: a ramp is a dock-wall feature.
           const sw = empSideSidewalk(el, name), park = empSidePark(el, name);
           return featPair(`end${name}`, pos, tan, {
             canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
@@ -18692,19 +19050,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         })}
         {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
             one thing there, per the owner); needs room on BOTH axes (B225) */}
-        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
-          const [nx, ny] = SIDE_N[name];
-          const alongIsX = ny !== 0;
-          return [1, -1].map((sign) => {
-            const cl = alongIsX ? { x: sign * el.w / 2, y: ny * el.h / 2 } : { x: nx * el.w / 2, y: sign * el.h / 2 };
-            const co = rot2(cl.x, cl.y, el.rot);
-            const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
-            let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-            const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
-            const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
-            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null);
-          });
-        })}
+        {walls.flatMap((w) => w.corners.map((c) => {
+          const name = w.name, sign = c.sign, cb = layout.get(`corner:${name}:${sign}`);
+          if (!cb) return null;
+          const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
+          const rc = layout.get(`ramp:${name}:${sign}`);   // the ramp "+" for this corner: beside the purple one, toward the wall's middle
+          return (
+            <g key={`dogc${name}${sign}`}>
+              {featNode(`dog${name}${sign}`, cb, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null)}
+              {rc && rampGlyph(`rampc${name}${sign}`, rc.x, rc.y, "Add drive-in ramp", () => addRamp(el, name, sign < 0 ? "start" : "end"))}
+            </g>
+          );
+        }))}
       </g>
     );
   })();
@@ -18783,7 +19140,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+    // A wall-bonded field grows OUTWARD, so a buffer / road beyond it is repacked in the same step (it stays outermost, no overlap).
+    const side = host && el.sideParkSide;
+    setEls((a) => { const grown = a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x); return side ? repackFlushBeyond(grown, host, side) : grown; });
   };
   // Per-field stall depth / drive-aisle override. Resizes the field's depth to
   // keep its rows consistent, growing on the outward (non-host) edge.
@@ -18885,6 +19244,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
+    if (el.type === "driveInRamp") return null;       // a ramp's size and place come from its numbers in Properties (its grips would be undone by the wall fit)
     const cpx0 = f2p({ x: el.cx, y: el.cy });
     // A CENTERLINE road (B596/B597): a draggable handle at each clicked vertex. Drag to reshape
     // the alignment (Shift = 45° lock); click a handle to SELECT that vertex, then flip it
@@ -18939,7 +19299,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cpx = f2p({ x: el.cx, y: el.cy });
     let ux = topMid.x - cpx.x, uy = topMid.y - cpx.y;
     const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-    const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
+    // a building's edit buttons ride just outside its top wall (lib/buildingButtons.js), so its rotate grip rides out past them
+    const rotOff = el.type === "building" && !el.dogEar ? ROTATE_GRIP_OFFSET_PX : 26;
+    const rotPos = { x: topMid.x + ux * rotOff, y: topMid.y + uy * rotOff };
     return (
       <g data-export="skip">
         {/* B619 — the thin blue bounding outline is drawn by elSelOutline (one place, so it also
@@ -19199,7 +19561,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //  • rect / ellipse → 4 corner + 4 edge resize grips + a rotate handle above the top edge
   //  • line / polyline / polygon → draggable vertex dots; ＋ on edges (poly) to add a point,
   //    Shift-click a dot to delete one
-  // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
+  // Semantic markups (encumbrance/easement) get no grips (move-only, as before).
   const markupHandles = (() => {
     if (selHiddenNow || sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
@@ -19314,7 +19676,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B848736 — the pinned map reference keeps the old aerial's exact suppression: hidden via the
     // plan-level `showAerial` toggle, and standing down on a georeferenced plan while the live
     // basemap tiles are on (they ARE the aerial there — item 4, B688864).
-    if (o.fromMap && (!showAerial || (origin && basemapOn))) return null;
+    if (o.fromMap && !snapshotDrawnInCanvas(o, { origin, showAerial })) return null; // NEW-1 (2026-11-05): on a located plan the snapshot is drawn by the backdrop MAP, under the GIS fills — never here, over them
     const tl = f2p({ x: o.x, y: o.y });
     const sy = o.ftPerPxY || o.ftPerPx; // B848736 — a map capture's vertical scale can differ (Web Mercator)
     const w = o.imgW * o.ftPerPx * rppf;
@@ -19620,6 +19982,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ATTRIBUTES & SETTINGS (what a parcel HAS — its acreage, county record, taxes, setbacks,
   // active/locked state). The panel id stays `parcel` — it keys persisted panel state and the
   // `setLeftPanel("parcel")` call sites, and renaming it would orphan them for no user gain.
+  // NEW-1 — the rail is 54 of label room + a reserved thin-scrollbar gutter (`.left-rail`, index.css). A classic scrollbar (Windows
+  // Chrome) takes real width, so 54 alone left ~43 and the labels spilled under it and sideways; a phone's overlay scrollbar takes none,
+  // so a touch device keeps 54. Every place that sits beside the rail reads THIS number, never a literal.
+  const leftRailW = narrow && coarsePointer ? LEFT_RAIL_W_TOUCH : LEFT_RAIL_W;
   const leftTabs = withGradingTab([
     { id: "parcel", label: PARCEL_SURFACES.panel.name },
     { id: "analysis", label: "Analysis" },
@@ -19810,7 +20176,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
-    padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
+    padding: "10px 0", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`, whiteSpace: "nowrap", minWidth: 0,
     background: on ? PAL.accentSoft : "transparent", color: on ? PAL.chromeInk : PAL.chromeMuted,
     cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.01em",
   });
@@ -20469,108 +20835,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : x));
   };
 
-  // Manual quick-trace of an overhead power line on the aerial: click points,
-  // double-click / Enter to finish. Commits a labeled polyline markup.
-  const commitTrace = () => {
-    if (tracePts.length >= 2) {
-      pushHistory();
-      const mk = { id: uid(), kind: "traced", pts: tracePts, label: "Overhead electric (traced)", stroke: "#b45309", weight: 2.6, dash: "solid" };
-      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-    }
-    setTracePts([]); setTraceMode(false);
-  };
-
-  // Inferred water main: connect the fire hydrants currently in view (OSM) into a
-  // nearest-neighbour path, drawn dashed and labeled screening-only.
-  const inferWaterMain = async () => {
-    if (!origin || evidenceBusy) return;
-    setEvidenceBusy(true); flashWarn("Fetching hydrants in view…", 0);
-    try {
-      const corners = [[0, 0], [size.w, 0], [0, size.h], [size.w, size.h]].map(([px, py]) =>
-        feetToLatLng({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf }, origin.lat, origin.lon));
-      const lats = corners.map((c) => c[0]), lngs = corners.map((c) => c[1]);
-      const bb = { s: Math.min(...lats), n: Math.max(...lats), w: Math.min(...lngs), e: Math.max(...lngs) };
-      const els = await fetchOverpass(bb, { hydrants: true });
-      const feet = els.filter((e) => e.type === "node" && e.lat != null)
-        .map((e) => lngLatRingToFeet([[e.lon, e.lat]], origin.lon, origin.lat)[0]);
-      if (feet.length < 2) { flashWarn(`Only ${feet.length} hydrant${feet.length === 1 ? "" : "s"} in view — need ≥ 2 to infer a main. Zoom/pan to include a run of hydrants.`, 7000); return; }
-      // nearest-neighbour order starting from the westmost hydrant
-      const remaining = feet.slice();
-      let cur = remaining.reduce((a, b) => (b.x < a.x ? b : a), remaining[0]);
-      remaining.splice(remaining.indexOf(cur), 1);
-      const ordered = [cur];
-      while (remaining.length) {
-        let bi = 0, bd = Infinity;
-        remaining.forEach((p, i) => { const d = Math.hypot(p.x - cur.x, p.y - cur.y); if (d < bd) { bd = d; bi = i; } });
-        cur = remaining.splice(bi, 1)[0]; ordered.push(cur);
-      }
-      pushHistory();
-      const mk = { id: uid(), kind: "infwater", pts: ordered, label: "Inferred water main (screening only)", stroke: "#0891b2", weight: 2, dash: "dashed" };
-      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-      flashWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`, 8000);
-    } catch (_) {
-      flashWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.", 6000);
-    } finally { setEvidenceBusy(false); }
-  };
-
-  // --- utility service routing (electric / water) ---
-  const startRoute = (util, extra = {}) => {
-    if (util === "elec" && !markups.some((m) => m.kind === "traced")) {
-      flashWarn("⚠ Trace an overhead pole line first (✏ Trace overhead electric), then route from it.", 6000); return;
-    }
-    setSel(null); setTool("select"); setTraceMode(false);
-    setRouteMode({ util, snapTo: util === "elec" ? "traced" : "free", stage: "source", ...extra });
-    flashWarn(util === "elec" ? "Click the connection point on a traced power line." : "Click the tap point on the water main (turn on the water layer to see it).", 0);
-  };
-  const commitUtilRoute = (mode, b) => {
-    const opts = mode.util === "elec"
-      ? { util: "elec", width: 10, color: "#b45309", padSize: 10, fitting: "XFMR", label: "Electric service · 10′ easement" }
-      : { util: "water", width: mode.width || 15, color: "#0891b2", padSize: 6, fitting: "TAP", label: `Water service · ${mode.width || 15}′ easement${mode.ruleNote ? ` — ${mode.ruleNote}` : ""}` };
-    const mk = buildUtilRoute(mode.source, b, opts, uid);
-    pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
-    setRouteMode(null);
-    const hits = els.filter((e) => e.id !== b.id && ["building", "paving", "parking", "trailer", "pond"].includes(e.type) && ringsOverlap(mk.corridor, ringOf(e)));
-    const what = mode.util === "elec" ? "Electric" : "Water";
-    flashWarn(hits.length ? `⚠ ${what} easement overlaps ${hits.length} element${hits.length > 1 ? "s" : ""} — reroute or relocate.` : `${what} service routed to the ${(b.w * b.h >= LARGE_BLDG_SF) ? "dock/long wall" : "nearest wall"} — no conflicts.`, 8000);
-  };
-
-  // Ditch cross-section: sample the 3DEP DEM along the drawn line (screening only).
-  const runXSection = async (p0, p1) => {
-    if (xsecBusyRef.current) return; // in-flight guard: ignore a second run while one samples (B56b)
-    if (!origin) { flashWarn("Cross-section needs a located site (a real-world origin).", 6000); return; }
-    const lenFt = _hyp(p0, p1);
-    if (!(lenFt > 1)) { flashWarn("Cross-section line is too short — draw a longer line.", 5000); setXsecMode(false); setXsecPts([]); return; }
-    xsecBusyRef.current = true;
-    setXsec({ p0, p1, lenFt, busy: true, stats: null });
-    setXsecMode(false); setXsecPts([]);
-    try {
-      const a = feetToLatLng(p0, origin.lat, origin.lon), b = feetToLatLng(p1, origin.lat, origin.lon);
-      const elev = await sampleProfile([[a[1], a[0]], [b[1], b[0]]], 48); // [lng,lat]
-      const stats = ditchStats(elev, lenFt);
-      if (!stats) throw new Error("no samples");
-      setXsec({ p0, p1, lenFt, busy: false, stats });
-    } catch (_) {
-      setXsec(null);
-      flashWarn("Couldn't sample USGS 3DEP elevation there (service/coverage). Try again or a different line.", 7000);
-    } finally {
-      xsecBusyRef.current = false;
-    }
-  };
-
   const setRule = (key, patch) => setEaseRules(patchEasementRule(key, patch));
-  // B2391216 ×2 — the per-jurisdiction rules editor lives in the Easement tool's ▾ menu (it left the layers card).
-  // Every path that wants the rules opens THIS: the menu AND its Easement rules disclosure.
-  const openEaseRules = () => { setRulesOpen(true); setEaseMenu(true); };
-  const startWaterRoute = () => {
-    // ⛔ B877440 — `jurKey` is null when no easement criteria are on file (no auto-detect match,
-    // no manual pick). Never fabricate a width off `easeRules.generic`'s Houston-style placeholder
-    // — the tool declines and points at the Easement rules panel, where the user can either pick a
-    // jurisdiction by hand (still fully functional) or file a request.
-    const rule = easeRules[jurKey];
-    if (!rule) { openEaseRules(); flashWarn("No easement width on file for this jurisdiction — pick one in the Easement ▾ menu (Easement rules), or request criteria.", 6000); return; }
-    startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
-  };
-
+  // B2391216 ×2 — the per-jurisdiction rules editor lives in the Easement tool's ▾ menu (it left the layers card);
+  // its "Easement rules" disclosure (`easement-rules-toggle`) is the one way in. (The route tools' path in was removed 2026-11-14.)
   // Upload + extract a title-commitment PDF via the Claude API.
   const runTitleExtract = async (file) => {
     if (!file) return;
@@ -20749,9 +21016,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dockSidesOf(b).dockSides.includes(side)) {
       return dockChainOnSide(els, b, side).map((z, i) => {
         const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
-        const ext = i > 0 ? (() => { const cx = wallExtentCtx(els, b, side), r = resolveLayerExtent(z, false, cx), an = Number(z.alongAnchor), full = !(z.alongLen > 0);
-          return { len: Math.round(r.along), max: Math.round(cx.fullAlong), full, start: !full && an === -1, end: !full && an === 1, centre: !full && an !== -1 && an !== 1 && Math.abs(r.shift - cx.chainShift) < 0.5 }; })() : null;
-        const base = { id: z.id, ids: [z.id], kind, index: i, extent: ext, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
+        const base = { id: z.id, ids: [z.id], kind, index: i, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
         if (kind !== "trailer") return base;
         const sp = trailerSpec(z, settings.trailerAisle);
         return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), rowDepths: sp.rowDepths.map((d) => Math.round(d)), depth: Math.round(sp.total) };
@@ -20763,19 +21028,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pads = sideParkPadsOn(b, side);
     const padIds = new Set(pads.map((p) => p.id));
     const out = [];
-    // B2268801 — what the edit box shows for a layer's length / position: read off its GEOMETRY against the wall's span
-    // (one answer for a strip, road, trailer and a parking field alike).
-    const wallSpan = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
-    const extentOf = (x) => { const a = layerAlignOf(wallKidAlong(b, side, x), wallSpan); return { len: Math.round(a.len), max: Math.round(a.max), full: a.full, start: a.start, end: a.end, centre: a.centre }; };
-    els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
+    els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
       const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : isWallTrailer(x) ? "trailer" : null;
       if (!kind) return;
       const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
-      out.push({ id: x.id, ids: [x.id], kind, wallKid: kind === "trailer" || undefined, fill: elStyle(x, settings).fill, depth: Math.round(depth), extent: extentOf(x), perp: perpOf(x) });
+      out.push({ id: x.id, ids: [x.id], kind, wallKid: kind === "trailer" || undefined, fill: elStyle(x, settings).fill, depth: Math.round(depth), perp: perpOf(x) });
     });
     if (pads.length) {
       out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", fill: elStyle(pads[0], settings).fill, split: pads.length > 1,
-        extent: pads.length === 1 ? extentOf(pads[0]) : null,
         rows: pads.reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0),
         depth: Math.round(pads.reduce((t, p) => t + depthOfKid(p), 0)), perp: Math.min(...pads.map(perpOf)) });
     }
@@ -20787,7 +21047,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Returns the SAME array when nothing moves (no dirty churn).
   const repackFlushBeyond = (arr, b, side) => {
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
-    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
+    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
     const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
     const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
     const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
@@ -20847,48 +21107,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
-  };
-  // A dock-wall layer's LENGTH / POSITION along the wall (edit box): `{ len }` types a length (the layer keeps the end it
-  // was held from), `{ align }` pins its start / centre / end to the court's span, `{ full: true }` hands it back to
-  // tracking the court. Touches ONLY that layer — its neighbours keep their own extents.
-  const setWallLayerExtent = (b, sides, layer, change) => {
-    if (!sidesAreDock(b, sides)) {
-      // B2268801 — a rear / end wall (one wall per row, never linked): the layer's length / position along the wall.
-      const side = sides[0];
-      const kidsOf = layer.ids.map((id) => els.find((x) => x.id === id)).filter(Boolean);
-      if (kidsOf.length !== 1) return;                                   // a split parking stack keeps its own per-piece runs
-      const el = kidsOf[0];
-      const span = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
-      const want = wallExtentAfter(wallKidAlong(b, side, el), change, span);
-      pushHistory();
-      setEls((a) => {
-        const cur = a.find((x) => x.id === el.id); if (!cur) return a;
-        const isVert = side === "left" || side === "right";
-        const { cross, dimBX, dimBY } = hostAxisExtents(b, cur);
-        const l = rot2(cur.cx - b.cx, cur.cy - b.cy, -b.rot);
-        const depth = isVert ? dimBX : dimBY;
-        const box = isVert ? { lx: l.x, ly: want.alongShift, dimBX: depth, dimBY: want.run } : { lx: want.alongShift, ly: l.y, dimBX: want.run, dimBY: depth };
-        const off = rot2(box.lx, box.ly, b.rot);
-        const placed = { ...cur, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
-        // A parking field keeps its own stored run (the refit below records the pin); every other layer stores the extent keys.
-        const moved = (cur.sideParkSide || SIDE_PARK_PAD_TYPES.has(cur.type)) ? placed : applyZonePatch(placed, extentFieldsFor(want, span));
-        return relayoutWallKids(a.map((x) => (x.id === el.id ? moved : x)), b, b, { pinFrom: el.id });
-      });
-      return;
-    }
-    if (layer.index < 1) return;
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      sides.forEach((side) => {
-        const z = dockChainOnSide(next, b, side)[layer.index];
-        if (!z) return;
-        const patch = layerExtentPatch(z, change, wallExtentCtx(next, b, side));
-        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
-        next = relayoutSide(next, b, side);
-      });
-      return next;
-    });
   };
   // Rows of trailer parking (1–4) on a dock wall. Adding a row copies the last row's depth; removing drops the last.
   const setTrailerRows = (b, sides, layer, rowsRaw) => {
@@ -21054,8 +21272,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const grd = resolveGridSettings(b, settings);
     const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
     const lenOffsets = gg.lengthLines.map((l) => l.at);
-    const doors = dockSidesFor(b).dockSides.reduce((sum, s) => sum + dockDoorRun(b, s, bumps, lenOffsets, grd).doors.length, 0);
-    return { ...area, bumpN: bumps.length, doors, grd, gg };
+    const rampsH = rampsOnHost(els, b), sidesB = dockSidesFor(b).dockSides;
+    const doors = sidesB.reduce((sum, s) => sum + dockDoorRun(b, s, bumps, lenOffsets, grd, rampSpansOnSide(rampsH, s, sidesB, settings)).doors.length, 0);
+    return { ...area, bumpN: bumps.length, doors, rampN: rampsH.length, grd, gg };
   };
   // NEW-7 — does this building carry any per-building column-grid override? (The panel no longer
   // edits them, but a plan saved with one must not hide it.) `resetBuildingGridOverrides` clears them.
@@ -21295,6 +21514,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const next = { ...x.xsection };
       if (Number.isFinite(+ft) && +ft > 0) next.rowDesignFt = +ft; else delete next.rowDesignFt;
       return { ...x, xsection: next };
+    }));
+  };
+  /* NEW-1 (2026-11-10) — the owner's own length for the taper at one end of a road that meets a narrower (or wider) one end to end
+     (lib/roadTaper.js). `end` is "s" | "e"; a blank/zero clears it back to the automatic length. The ONLY stored fact about a taper —
+     whether a road tapers at all is derived from the roads, never saved. */
+  const setRoadTaper = (el, end, ft) => {
+    const want = Number.isFinite(+ft) && +ft > 0;
+    const cur = el.taper && Number.isFinite(+el.taper[end]) ? +el.taper[end] : null;
+    if (!want && cur == null) return;                     // nothing to clear — no history frame for a no-op
+    if (want && cur === +ft) return;
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id) return x;
+      const next = { ...(x.taper || {}) };
+      if (want) next[end] = Math.min(+ft, TAPER_MAX_FT); else delete next[end];
+      const { taper: _drop, ...rest } = x;
+      return Object.keys(next).length ? { ...rest, taper: next } : rest;
     }));
   };
   const setRoadLength = (el, len) => {
@@ -22141,177 +22377,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       >
         <span title={planLabel} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
-        <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
-          <input value={planDraft ?? planLabel} onChange={(e) => setPlanDraft(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" />
-          {/* ⛔ NEW-3 (B385042) — THE CURRENT PLAN'S NAME APPEARED THREE TIMES AT ONCE.
-              Owner: *"it says Concept A three times here. Let's fix that. That seems like a waste."*
-              The crumb button, the PLAN NAME field, and a row in this list all carried it — and on a
-              single-plan site (his case) this list is a ONE-ROW list whose only row is the plan being
-              renamed in the field directly above it. It carries no information at all.
-
-              The three are NOT equivalent, so two were not simply deleted. The crumb is the TRIGGER
-              and must stay. The PLAN NAME input is the EDITOR — it is the rename affordance, not a
-              label. The list is a SWITCHER, and a switcher with nowhere to switch to is the one that
-              earns nothing. Rule enforced: the current plan's name may appear as the crumb and as the
-              editable field; it may NOT additionally appear as a read-only label.
-
-              THE MULTI-PLAN CALL, argued rather than picked silently: the current plan STAYS in the
-              list at ≥2 plans. Dropping it would make the list a switcher only — but this list is
-              also where a plan is DELETED, and the current plan is the one most likely to be deleted
-              right after you look at it; and among five siblings the `current` marker is what tells
-              you where you are. It is also the shape the sibling project switcher already uses (its
-              row list includes the current project, highlighted), so the two breadcrumbs stay
-              consistent. At ≥2 the row is informative; at 1 it is an echo. Only the echo goes. */}
-          {plansHere.length > 1 && <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>}
-          {plansHere.length > 1 && plansHere.map((s) => {
-            const cur = s.id === siteId;
-            if (planDelArm === s.id) return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
-                {/* B1469872 — this used to say nothing about recoverability at all. It moves to this
-                    project's own "Recently deleted" below (never the whole-site 30-day bin, which
-                    only ever lists a project once EVERY plan in it is gone) and is never auto-purged
-                    while a sibling plan here stays live — restore it any time, or delete it forever
-                    from that same list. */}
-                <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Delete “${s.name || "Untitled plan"}”? It moves to this project's Recently deleted below — restore it any time.`}>→ Recently deleted “{s.name || "Untitled plan"}”?</span>
-                <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} onClick={() => { setPlanDelArm(null); handleDeletePlan(s.id); }}>Delete</button>
-                <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanDelArm(null)}>Cancel</button>
-              </div>
-            );
-            return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
-                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4, display: "inline-flex", verticalAlign: "-2px" }}><PadlockIcon size={11} /></span>}
-                      {s.name || "Untitled plan"}
-                    </span>
-                    {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                  </span>
-                </button>
-                {plansHere.length > 1 && (
-                  <button title="Delete this plan" aria-label={`Delete plan ${s.name || "Untitled plan"}`} onClick={(e) => { e.stopPropagation(); setPlanDelArm(s.id); }}
-                    style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                )}
-              </div>
-            );
-          })}
-          {/* B1469872 — this PROJECT's own plan trash: siblings soft-deleted from this still-live
-              group, which the whole-site "Recently deleted" bin (ProjectBreadcrumb) never lists —
-              that one only shows a project once EVERY plan in it is gone. Before this section
-              existed a plan deleted from here was invisible everywhere and, past 30 days, silently
-              hard-deleted with no restore ever having been offered (see storage.js's
-              purgeExpiredDeletedProjects header) — it is now exempt from that auto-purge for as
-              long as this group stays live, and restorable/purgeable only from right here. */}
-          {(deletedPlansHere.length > 0 || deletedFilesHere.length > 0) && (
-            <>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Recently deleted</div>
-              {deletedPlansHere.map((p) => {
-                if (planPurgeArm === p.id) return (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
-                    {/* B1767168 — this is a permanent, no-restore removal of the plan AND its elements
-                        (site_elements cascades) — say so plainly, never just "forever". */}
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete “${p.name}” and everything drawn on it? This can't be undone — there's no restoring it after this.`}>Permanently delete “{p.name}” and everything on it? No restore after this.</span>
-                    <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === p.id} onClick={() => handlePurgeDeletedPlan(p)}>Delete</button>
-                    <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
-                  </div>
-                );
-                return (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                    {/* B1482000 (follow-on to B1469872) — the name alone can't always tell two rows
-                        apart (two plans in one project can share a name, e.g. "Concept A PRINT"
-                        duplicated then both discarded), so every row also carries when it was
-                        deleted — same layout + relative-time phrasing ProjectBreadcrumb's own
-                        account-wide bin already uses ("4w ago") — and the list is already sorted
-                        newest-deleted-first. */}
-                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
-                    <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(p.deletedAt)}</span>
-                    <button title="Restore this plan" aria-label={`Restore plan ${p.name}`} disabled={deletedPlansBusy === p.id} onClick={() => handleRestoreDeletedPlan(p)}
-                      style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
-                    <button title="Delete this plan forever" aria-label={`Delete plan ${p.name} forever`} disabled={deletedPlansBusy === p.id} onClick={() => setPlanPurgeArm(p.id)}
-                      style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                  </div>
-                );
-              })}
-              {/* NEW-1 — deleted site-plan FILES for this project (the uploaded drawings), same row shape as the
-                  plans above; moved here from the Site page's All comps list, whose "Recently deleted site plans"
-                  section is gone. Restore puts the drawing back on the site exactly as the old list did. */}
-              {deletedFilesHere.map((f) => {
-                if (planPurgeArm === f.id) return (
-                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: `color-mix(in srgb, ${PAL.danger} 8%, transparent)` }}>
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete the site plan “${f.name}”? This can't be undone — there's no restoring it after this.`}>Permanently delete site plan “{f.name}”? No restore after this.</span>
-                    <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === f.id} onClick={() => handlePurgeDeletedFile(f)}>Delete</button>
-                    <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
-                  </div>
-                );
-                return (
-                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 2 }} data-testid="deleted-site-plan-file">
-                    <span style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, color: PAL.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${f.fileName || f.name}${f.page ? ` — page ${f.page}` : ""}`}>{f.name}</span>
-                    {/* The kind tag never shrinks: in the narrow menu the name truncates first, so a deleted FILE can never read as a deleted plan. */}
-                    <span style={{ flex: "none", fontSize: 11, color: PAL.disabled }}>site plan</span>
-                    {f.deletedAt ? <span style={{ flex: "none", color: PAL.disabled, fontSize: 11 }}>{relTime(f.deletedAt)}</span> : null}
-                    <button title="Restore this site plan" aria-label={`Restore site plan ${f.name}`} disabled={deletedPlansBusy === f.id} onClick={() => handleRestoreDeletedFile(f)}
-                      style={{ ...chip, padding: "2px 9px", flex: "none" }}>Restore</button>
-                    <button title="Delete this site plan forever" aria-label={`Delete site plan ${f.name} forever`} disabled={deletedPlansBusy === f.id} onClick={() => setPlanPurgeArm(f.id)}
-                      style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = PAL.danger; e.currentTarget.style.background = `color-mix(in srgb, ${PAL.danger} 10%, transparent)`; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
-                  </div>
-                );
-              })}
-            </>
-          )}
-          <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button>
-            <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DuplicateIcon size={12} />Duplicate</span></button>
-          </div>
-          <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={saveNow}
-            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><SaveIcon /></span><span>Save now</span>
-          </button>
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
-            title="Restore an earlier automatically-saved version of this plan">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><HistoryIcon /></span><span>Version history…</span>
-          </button>
-          {/* B326417 — the per-plan view-only lock. Plan-scoped, so it belongs in the plan menu
-              (everything above this line is plan-scoped too; see the B286000 caption below).
-              Shown only for a SHARED plan you OWN: on a private plan there is nobody to lock out,
-              and on a teammate's plan the control would be a lie — RLS and the guard trigger both
-              refuse it. The row also states the current state rather than only offering the verb,
-              so a locked plan is visibly locked without opening anything. */}
-          {planShareState.canLock && (
-            <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
-              disabled={lockBusy} onClick={togglePlanLock}
-              title={planShareState.locked
-                ? "Teammates can view this plan but not change it. Click to let them edit again."
-                : "Teammates can edit this plan. Click to make it view-only for them."}>
-              <span aria-hidden style={{ flex: "none", display: "flex" }}><PadlockIcon open={!planShareState.locked} /></span>
-              <span>{planShareState.locked ? "Locked — teammates can view only" : "Lock to view-only for teammates"}</span>
-            </button>
-          )}
-          {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
-              is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
-              (plan name, plans in this site, New plan, Duplicate, Save now, Version history);
-              Storage is device-scoped, which is the same structural defect that made Smooth zoom
-              unfindable in here. Smooth zoom MOVED (it is a rendering preference, and the canvas
-              View menu already owns those — B286000). Storage did NOT, and the reason is measured
-              and on the record in `src/shared/CLAUDE.md`: `StoragePanel` is mounted from THIS menu
-              precisely because the header gear and `AuthPanel` land in the entry chunk every route
-              downloads — even a lazy stub there cost +0.8 KB on all four routes and breached the
-              Notes route's bundle ceiling in CI. So the honest fix for a device-scoped row inside a
-              plan-scoped menu is to SAY it is device-scoped, which costs one muted caption instead
-              of a bundle breach. If the gear ever stops being on the entry chunk, move it. */}
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 3px" }}>This device</div>
-          <button style={{ ...menuItem(false), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
-            title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
-            <span aria-hidden style={{ flex: "none", display: "flex" }}><StorageIcon /></span><span>Storage on this device…</span>
-          </button>
-        </AnchoredMenu>
+        {/* NEW-1 (2026-11-04) — the plan menu, redrawn to the owner-approved mockup: see components/PlanMenu.jsx's header for the shape and
+            the rule that replaces B385042 / NEW-3 (the name appears as the crumb and as the current row — which is also the rename control). */}
+        <PlanMenu
+          open={planMenu}
+          onClose={() => setPlanMenu(false)}
+          anchorRef={planAnchor}
+          plans={plansHere}
+          currentId={siteId}
+          currentName={planLabel}
+          onOpenPlan={handleOpenSite}
+          onNewPlan={handleNewPlan}
+          onDuplicate={handleDuplicatePlan}
+          onVersionHistory={openVersionHistory}
+          onRename={renamePlanFromMenu}
+          onDeletePlan={handleDeletePlan}
+          lock={{ canLock: planShareState.canLock, locked: planShareState.locked, busy: lockBusy, onToggle: togglePlanLock }}
+          bin={{
+            plans: deletedPlansHere, files: deletedFilesHere, busyId: deletedPlansBusy,
+            onRestorePlan: handleRestoreDeletedPlan, onPurgePlan: handlePurgeDeletedPlan,
+            onRestoreFile: handleRestoreDeletedFile, onPurgeFile: handlePurgeDeletedFile,
+          }}
+        />
     </div>
   );
 
@@ -22514,7 +22601,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // every project (current or not) renames through the shared checked rename, so the header
   // label updates live off the names store. Both ultimately call renameSiteGroup. (header consolidation)
   const renameProjectFromHeader = (id, name) => {
-    renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
+    return renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
   };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
@@ -22596,6 +22683,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, sectionBreaks: r.breaks, sectionJoins: r.joins } : p)));
   };
+  /* NEW-1 (2026-11-09) — the PAVING setback handlers. All write the one `pc.pavingSetbacks` array through a fresh
+   * read-modify-write of this parcel only; adding starts at 0 on every edge (never the building value), removing deletes
+   * the KEY (so an untouched parcel and a parcel that added-then-removed are byte-identical). One undo frame each. */
+  const pavingAdd = () => {
+    const pc = selParcel; if (!pc || hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: newPaving(p.points.length) } : p)));
+    setSettings((st) => (st.showPaving === false ? { ...st, showPaving: true } : st)); // a fresh add shows its line
+  };
+  const pavingRemove = () => {
+    const pc = selParcel; if (!pc || !hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => { if (p.id !== pc.id) return p; const { pavingSetbacks: _gone, ...rest } = p; return rest; }));
+    pushToast({ text: "Paving setback removed", action: { label: "Undo", onClick: undo } }); // the building setback is untouched; Undo brings the paving back
+  };
+  const pavingSectionValue2 = (sec, v) => {
+    const pc = selParcel; if (!pc || !hasPaving(pc)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: setPavingSection(pavingValues(p), sec, v, p.points.length) } : p)));
+  };
+  const pavingAllValue = (v) => {
+    const pc = selParcel; if (!pc || !hasPaving(pc) || !Number.isFinite(+v)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, pavingSetbacks: pavingAll(p.points.length, v) } : p)));
+  };
   const renderParcelPage = () => {
     const pc = selParcel;
     if (!pc) return null;
@@ -22628,8 +22740,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
           collapsed={setbackEnvelope(pc.points, parcelSetbacks(pc)).collapsed}
-          resetLabel={`Reset to default (${settings.setback}′)`}
-          onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
+          resetLabel={hasPaving(pc) ? "Reset all" : `Reset to default (${settings.setback}′)`}
+          onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0), ...(hasPaving(p) ? { pavingSetbacks: newPaving(p.points.length) } : {}) } : p)); }}
+          onAddPaving={pavingAdd}
+          paving={hasPaving(pc) ? { valueOf: (sec) => pavingSectionValue(pavingValues(pc), sec), onSetValue: pavingSectionValue2, onSetAll: pavingAllValue, showLine: settings.showPaving !== false, onShowLine: (v) => setSettings((st) => ({ ...st, showPaving: v })), onRemove: pavingRemove } : null}
           renderNum={(value, onCommit, ariaLabel) => <NumInput style={{ ...numInput, width: 54 }} value={value} min={0} ariaLabel={ariaLabel} onCommit={onCommit} />} />
       </section>
     ) : null;
@@ -22638,7 +22752,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} countyState={(COUNTIES[restored?.county] || {}).state || null} />
     );
   };
   /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is
@@ -22917,9 +23031,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
                     </button>
                     {/* NEW-1 (select-parcel first paint) — one short status line, from the outline set's own state; it replaces the old zoom-only hint. */}
-                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom") && (
-                      <div data-testid="parcel-outline-status" data-phase={outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
-                        {outlinePhase === "loading" ? "Loading parcels…" : outlinePhase === "empty" ? "No parcels here" : "Zoom in to see the county lot lines (a click still adds the lot)."}
+                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom" || outlineRefused) && (
+                      <div data-testid="parcel-outline-status" data-phase={outlineRefused && outlinePhase !== "zoom" && outlinePhase !== "empty" ? "refused" : outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" || outlineRefused ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
+                        {outlinePhase === "zoom" ? "Zoom in to see the county lot lines (a click still adds the lot)."
+                          : outlineRefused ? "The county server wouldn't send some of the lot lines here — zoom in, or click a lot anyway."
+                          : outlinePhase === "loading" ? "Loading parcels…" : "No parcels here"}
                       </div>
                     )}
                   </>
@@ -22936,6 +23052,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
                           </div>
                           {identifyRes.fromFallback && <div data-testid="identify-from-fallback" style={{ color: PAL.warn, marginBottom: 5 }}>{identifyRes.fromFallback}</div>}
+                          {identifyRes.stackNote && <div data-testid="identify-stack" style={{ color: PAL.muted, marginBottom: 4 }}>{identifyRes.stackNote}</div>}
                           {identifyRes.county && <Suspense fallback={null}><ParcelCopyNote county={identifyRes.county} point={{ lat: identifyRes.lat, lng: identifyRes.lng }} testId="identify-copy" style={{ marginTop: 6, marginBottom: 4 }} /></Suspense>}
                           {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
                             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
@@ -23264,6 +23381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
                 showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
                 showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
+                showSpots={(settings.grading || {}).layers?.spots !== false} onShowSpots={(v) => grSetLayer("spots", v)} PAL={PAL}
                 onPullLimit={(id, span) => grEditLimit(span)}
                 buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
                 dockDropFt={gsDockDrop} onCfg={grSetCfg}
@@ -23935,9 +24053,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       lifted: r.ids.some((id) => liftedElIds.has(id)),
     }));
     const merged = [...elItems, ...roadItems];
+    /* NEW-1 (2026-11-05, owner-ordered exception to constraint 10) — TRAILER PARKING ALWAYS DRAWS ABOVE ROADS. One linear pass over the
+       already-sorted lists (lib/trailerOverRoads.js): a render-order rule only, no z written, no extra sort. Applied to each list so a
+       selected trailer + selected road keep trailer-over-road inside the lift too. The DOM order this produces is also the hit-test
+       order, the print clone's order and the editable PDF's annotation order. */
     return {
-      normal: merged.filter((it) => !it.lifted).sort((a, b) => a.z - b.z),
-      lifted: merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z),
+      normal: liftTrailersOverRoads(merged.filter((it) => !it.lifted).sort((a, b) => a.z - b.z)),
+      lifted: liftTrailersOverRoads(merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z)),
     };
   }, [drawEls, roadRegionPaths, roadNet, liftedElIds]);
   /* One item of the unified stack. A road cluster paints its dissolved fill, THEN its member roads'
@@ -23960,6 +24082,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // class requires was drawing at 11 — a compliance problem, and the visible cause of "that shape is
   // wrong". The geometry still can't lie, so the app says so instead: a flag on the offending vertex,
   // on the canvas, without having to select the road first. Review chrome — never exported.
+  /* NEW-1 (2026-11-09) — PAVING SETBACK CONFLICTS: which car parking / trailer parking / truck court & paving / road crosses a parcel's
+   * paving line (rules + the driveway exemption: lib/pavingSetback.js). Review chrome — `data-export="skip"`, like the road-radius flags.
+   * ⛔ NO-PER-MOVE-WORK: it costs NOTHING unless some active parcel has added paving, and even then it is a TRAILING 120 ms debounce — a drag
+   * restarts the timer instead of running the polygon maths, so the marks settle when the gesture does. Hidden elements raise none. */
+  const [pavingFlags, setPavingFlags] = useState([]);
+  const pavingFlagSigRef = useRef("");
+  useEffect(() => {
+    const live = parcels.some((pc) => pc.active !== false && hasPaving(pc));
+    if (!live) { if (pavingFlagSigRef.current !== "") { pavingFlagSigRef.current = ""; setPavingFlags([]); } return undefined; }
+    const t = setTimeout(() => {
+      const visible = (els || []).filter((el) => !elHidden(hiddenGroups, el));
+      const found = pavingConflicts({
+        parcels, els: visible, ringOf,
+        roadCentreline: (el) => (isCenterlineRoad(el) ? roadDenseCenterline(el, settings, sharpFor(el)) : null),
+        roadRingOf: (el, line) => roadSurfaceRing(line, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [],
+      });
+      const sig = pavingConflictSig(found);
+      if (sig !== pavingFlagSigRef.current) { pavingFlagSigRef.current = sig; setPavingFlags(found); }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [els, parcels, hiddenGroups, settings, sharpFor]);
+  // The flag GEOMETRY in feet (view-independent — VIEW-INDEPENDENT-ONCE): a pan/zoom only re-projects these few rings, it never rebuilds a road strip.
+  const pavingFlagGeoms = useMemo(() => {
+    if (!pavingFlags.length) return [];
+    const out = [];
+    pavingFlags.forEach((f, i) => {
+      const el = (els || []).find((x) => x.id === f.id);
+      if (!el || elHidden(hiddenGroups, el)) return;
+      const ring = isCenterlineRoad(el) ? roadStripRing(el, settings, sharpFor(el), roundTrim(el)) : ringOf(el);
+      if (!ring || ring.length < 3) return;
+      out.push({ key: `pvf${f.id}-${f.parcelId}-${i}`, id: f.id, sf: Math.round(f.areaSf), ring, at: polylabel(ring) });
+    });
+    return out;
+  }, [pavingFlags, els, hiddenGroups, settings, sharpFor, roundTrim]);
   const roadRadiusFlags = useMemo(() => {
     const out = [];
     if (!radiusReviewOn) return out; // NEW-3 — the min-radius review is hidden (one flag, default OFF): no corner dot, no pill
@@ -24037,8 +24193,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        page picture. Read-only; same gate. */
     const composedHook = async (o = {}) => {
       const { createExportSheet } = await loadExportSheet();
-      // `o` (E2E only): { paper, orient, buildingsTable, annotate } — the sheet shape under test; defaults are the editable-PDF Letter sheet
-      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false);
+      // `o` (E2E only): { paper, orient, buildingsTable, annotate, scaleBar, scaleText } — the sheet shape under test; defaults are the editable-PDF Letter sheet
+      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, o.scaleText || "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false, o.scaleBar !== false);
       if (!c) return null;
       return {
         sheetSvg: c.sheetSvg,
@@ -24048,6 +24204,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pins: c.annotationPins || [],
         annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
         degraded: c.annotationSet?.degraded || [],
+        hasViewport: !!c.annotationSet?.viewport, // the PDF's embedded measurement scale (/VP + /Measure) — independent of the drawn scale bar
       };
     };
     window.__plannerExportComposed = composedHook;
@@ -24084,16 +24241,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
-                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
-                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
-                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
-                // arms a whole-measurement drag on the same press).
-                // NEW-1 (B1253248) — but NOT mid-draft: startMoveMeasure already lets a click through
-                // to place the new measurement's next vertex while `measDraft.length > 0` (see the
-                // guard at its top), so the "move" cursor this drove was pure misdirection — it
-                // promised a grab that would not happen, over the exact vertex the user was aiming
-                // past to place their next point.
-                const canGrab = tool === "select" || (tool === "measure" && !measDraft.length);
+                // A finished measurement is grabbable from the SELECT tool only (B2671280, owner constraint
+                // #56). B910 also offered it from the Measure tool, which ate the first click of the next
+                // measurement whenever it landed on (or inside, for an Area) an existing one — the band, the
+                // "move" cursor and the press handler all stay out of the way while a Measure tool is armed,
+                // draft or no draft. `canGrab` is the PRESS (and the "move" cursor): Select only. The shapes stay
+                // hit-testable (`hitLive`) in Measure with no draft open so a RIGHT-click still reaches the
+                // object's menu (`onMeasureContext`); a LEFT press on them has no handler, so it bubbles to
+                // `onBgDown` and places a point.
+                const canGrab = tool === "select";
+                const hitLive = canGrab || (tool === "measure" && !measDraft.length);
                 // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
                 // every mode. The uncalibrated amber still overrides the user's colour there,
                 // because that is a correctness signal rather than decoration.
@@ -24155,7 +24312,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
@@ -24218,9 +24375,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                          pointerEvents={hitLive ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
                         it was unreachable: every press over the chip landed on the grab layer and
@@ -24249,7 +24406,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
                 // (so a live color-picker change shows instantly instead of hiding under an accent tint);
                 // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
-                // B567 neutral-markup choice to the semantic markups too — utilRoute/traced/encumbrance.)
+                // B567 neutral-markup choice to the semantic markups too — encumbrance/easement.)
                 const stroke = m.stroke;
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
@@ -24282,7 +24439,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const mkLockAnchor = () => {
                   const pts = m.kind === "line" ? [m.a, m.b]
                     : MK_BOX_KINDS.includes(m.kind) ? boxCorners(m)
-                    : m.kind === "utilRoute" ? (m.corridor || m.pts)
                     : (mkPts(m).length ? mkPts(m) : (m.pts || []));
                   if (!pts || !pts.length) return null;
                   let minX = Infinity, maxX = -Infinity, minY = Infinity;
@@ -24295,49 +24451,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // that decide a click), the pre-click hover glow always matches what a click grabs;
                 // there is no second, separate hit-test that could disagree with the selection.
                 const node = (() => {
-                if (m.kind === "utilRoute") {
-                  const col = m.stroke; // B619: keep the route's own color when selected
-                  const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const cl = m.pts.map((p) => f2p(p));
-                  const clStr = cl.map((q) => `${q.x},${q.y}`).join(" ");
-                  const clW = strokeZoom(2.2, zk); // B617
-                  const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
-                  return (
-                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
-                      {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
-                      <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
-                      <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
-                      {/* NEW-1 (the constant-screen-px audit): these ride `labelK` like every other
-                          on-canvas label, so a sheet exported from a wide zoom doesn't print them at
-                          several times their intended size. `labelK` is exactly 1 on screen. */}
-                      <text x={padC.x} y={padC.y + 3 * labelK} textAnchor="middle" fontSize={8 * labelK} fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5 * labelK} textAnchor="middle" fontSize={9.5 * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
-                    </g>
-                  );
-                }
-                if (m.kind === "traced" || m.kind === "infwater") {
-                  const pp = m.pts.map((p) => f2p(p));
-                  const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
-                  const mid = pp[Math.floor((pp.length - 1) / 2)];
-                  const col = m.stroke; // B619: keep the traced line's own color when selected
-                  const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
-                  return (
-                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
-                      {/* NEW-1 (the constant-screen-px audit): vertex marks and the label ride `labelK`
-                          so they hold their intended size on a sheet instead of scaling with the zoom. */}
-                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3 * labelK} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
-                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2 * labelK} y={q.y - 2 * labelK} width={4 * labelK} height={4 * labelK} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {/* NEW-6 — same rule as the easement label below: this was the identical
-                          constant-screen-px shape, found by the same audit and fixed in the same pass. */}
-                      {mid && featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, TRACED_LABEL_BASE_PX) && <text x={mid.x} y={mid.y - 6 * labelK} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, TRACED_LABEL_BASE_PX) * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
-                    </g>
-                  );
-                }
                 if (m.kind === "encumbrance") {
                   // As written (deedGap.js): the ring keeps the last course's true endpoint and any misclosure
                   // draws as its own red dashed segment instead of being absorbed into the closing edge.
@@ -24486,7 +24599,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "cloud") {
                   const screenPts = m.pts.map(f2p);
                   const s = screenPts.map((q) => `${q.x},${q.y}`).join(" ");
-                  const scallopD = cloudScallopPath(screenPts, clampCloudArcFt(m.arcFt) * rppf);
+                  const scallopD = cloudScallopPath(screenPts, cloudArcPx(m.arcFt, rppf, labelK)); // NEW-1 (2026-11-06): never drawn smaller than a readable scallop
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                       <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
@@ -24610,6 +24723,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onPointerDown={(e) => startMoveParcel(e, pc.id)}
                       onContextMenu={(e) => onParcelContext(e, pc.id)} />
                   )}
+                </g>;
+              })}
+              {/* NEW-1 (2026-11-09) — the PAVING setback line, beside the building one. DOTTED and its own colour (the building
+                  line is dashed) so the two read apart at a glance; same sub-pixel gate, casing and screen-pixel weight rules as the
+                  building ring, no grab band (the building ring is the lot's second grab target). Drawn only for a parcel that ADDED
+                  paving and only while this plan's paving Show line is on; a parcel that never added it draws nothing new. It is in
+                  the plan SVG, so the export clone carries it (PDF-PARITY). */}
+              {settings.showPaving !== false && !isHidden(hiddenGroups, "parcels") && parcels.filter((pc) => pc.active !== false && hasPaving(pc)).map((pc) => {
+                const pv = pavingValues(pc);
+                const posPv = pv.filter((v) => v > 0);
+                if (!posPv.length || !insetRingVisible(Math.min(...posPv), labelPpf)) return null;
+                const o = pavingRing(pc);
+                if (!o) return null;
+                const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                const w = lookOf(pc).setback.weightPx;
+                const dots = `0.1 ${Math.max(3.5, w * 2.5)}`;
+                return <g key={`pv${pc.id}`} data-testid="paving-ring-group" data-paving-edges={pv.join(",")}>
+                  <polygon data-testid="paving-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={w + PARCEL_CASING_W} strokeDasharray={dots} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+                  <polygon data-testid="paving-ring" points={ring} fill="none" stroke={PAL.paving} strokeWidth={w + 0.5} strokeDasharray={dots} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={pc.sbOpacity ?? 1} pointerEvents="none" />
                 </g>;
               })}
               {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
@@ -24954,7 +25086,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
               if (draftRoadPts) { setDraftRoadPts(null); branchSeedRef.current = null; return; } // cancel an in-progress road draw
               // during a placement/draw mode a right-click just eats the native menu (each mode has its own Esc/exit)
-              if (tool !== "select" || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
+              if (tool !== "select" || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
               setParcelMenu(null); setOvMenu(null);
               setMapMenu({ x: e.clientX, y: e.clientY, kind: "empty" });
             }}>
@@ -25051,6 +25183,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the scale/rotate handles and the calibration marks are no longer drawn here —
                   every manipulation handle lives in the one always-on-top handle layer (NEW-1). */}
               {overlayBands.below.map(renderSheetOverlay)}
+              {/* NEW-1 second pass (B2671190 ×2, 2026-11-06) — THE GIS AREA BAND (Zoning, Future Land Use, flood zones, districts …), HERE: over the default-band
+                  references, under the parcel / setback / elements. It used to be a pane of the backdrop map, i.e. under this whole SVG, so an opaque reference
+                  picture cut a crisp rectangular hole in every fill (the owner's Academy plan). Hosted exactly like the lifted band below (same overscan, same
+                  gesture transform mirror, same counter-transform); `data-export="skip"` because the sheet composites its own copy INTO this group (PDF-PARITY);
+                  nothing in it takes a press (the stylesheet pins `pointer-events: none` on every descendant). */}
+              {origin && (
+                <g {...{ [AREA_BAND_ATTR]: "1" }}>
+                  <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", transformOrigin: "0 0",
+                      transform: anchorInverseCss(viewT, regShift.dx, regShift.dy) }}>
+                      <div ref={geoAreaWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
+                        <div ref={geoAreaPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
+              )}
 
 
               {/* NEW-1 — PARCELS IN FRONT (mapStack.js). The plan's own setback rings + parcels live in `parcelTierNodes`
@@ -25100,6 +25249,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
+              {pavingFlagGeoms.length > 0 && (
+                <g data-testid="paving-conflicts" data-export="skip">
+                  {pavingFlagGeoms.map((g) => { const at = f2p(g.at); return (
+                    <g key={g.key} data-paving-flag={g.id} data-paving-flag-sf={g.sf}>
+                      <polygon points={g.ring.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke="var(--danger)" strokeWidth={2.25} strokeLinejoin="round" pointerEvents="none" />
+                      <text x={at.x} y={at.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
+                        style={{ fontSize: 11, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Crosses paving setback</text>
+                    </g>); })}
+                </g>
+              )}
               {roadRadiusFlags.length > 0 && (
                 // NEW-4, owner rule 2026-07-25: "they shouldn't just throw up an exclamation mark.
                 // I don't even know how to fix it." So the mark is replaced by the two things he
@@ -25289,26 +25448,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </foreignObject>
                 </g>
               )}
-              {/* ditch cross-section line (in-progress + last result) */}
-              {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
-              {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
-              {/* in-progress utility route (source → cursor) */}
-              {routeMode?.stage === "building" && routeMode.source && cursor && (() => {
-                const a = f2p(routeMode.source), b = f2p(cursor);
-                return <g data-export="skip" pointerEvents="none">
-                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={routeMode.util === "elec" ? "#b45309" : "#0891b2"} strokeWidth={2} strokeDasharray="6 4" />
-                  <circle cx={a.x} cy={a.y} r={4} fill={routeMode.util === "elec" ? "#b45309" : "#0891b2"} stroke="#fff" strokeWidth={1.2} />
-                </g>;
-              })()}
-              {/* in-progress power-line trace */}
-              {traceMode && tracePts.length > 0 && (() => {
-                const pp = tracePts.map((p) => f2p(p));
-                const s = [...pp, cursor ? f2p(cursor) : pp[pp.length - 1]].map((q) => `${q.x},${q.y}`).join(" ");
-                return <g data-export="skip" pointerEvents="none">
-                  <polyline points={s} fill="none" stroke="#b45309" strokeWidth={2.4} strokeDasharray="6 4" />
-                  {pp.map((q, i) => <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} fill="#b45309" stroke="#fff" strokeWidth={1} />)}
-                </g>;
-              })()}
               {/* multi-select outlines — neutral hue-free chrome (B569): a light casing under a dark
                   line, legible on aerial imagery, never colliding with a status/accent hue. B740: a
                   per-member outline that HUGS each element's real footprint (rotation-aware — an
@@ -25516,8 +25655,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* Owner-only grading layers ("Level-pad limit at 2:1", "Cut & Fill") + the spot elevations, fall arrows and
                   setback-breach dot of the selected building. One lazy group of single <image>s and non-scaling
                   paths — it rides the live SVG, so print/PDF carries it by construction (PDF-PARITY). */}
-              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit) && (
-                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} /></Suspense>
+              {grOn && grModel && (grModel.buildable || grModel.cutfill || grModel.contours || grLimitEdit || (grModel.fit && grModel.fit.ghost)) && (
+                <Suspense fallback={null}><GradingCanvas model={grModel} f2p={f2p} rppf={rppf} PAL={PAL} viewRect={cullRect} viewPx={canvasBoxPx} /></Suspense>
               )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
@@ -25689,6 +25828,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     // NEW-1 — a HALF-DRAWN measurement is never document content, and every mark in
                     // here is constant screen px. Stripped from the sheet.
+                    <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                     <g data-export="skip" pointerEvents="none">
                       {measDraft.map((p, k) => { const c = f2p(p); return (
                         <g key={k}>
@@ -25701,11 +25841,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           quiet bottom-center live-draft strip below the <svg> (liveDraftReadout),
                           so it never sits over the point the user is about to click next. */}
                     </g>
+                    </g>
                   );
                 }
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 const isArea = measureMode === "area";
                 return (
+                  <g data-export="skip" data-testid="measure-draft" data-points={measDraft.length}>
                   <g data-export="skip" pointerEvents="none">
                     {isArea && all.length >= 3
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
@@ -25714,6 +25856,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* NEW-1 (B850240) — the live SF/feet readout moved to the quiet bottom-center
                         live-draft strip below the <svg> (liveDraftReadout), so it never sits over
                         the user's next click. */}
+                  </g>
                   </g>
                 );
               })()}
@@ -26178,6 +26321,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               screen, so the card's left edge ran 28px off the screen (under the Panels tab) and the View chip was entirely off it. On
               narrow they stack — the chip above, the card below it, right-aligned inside the two edge tabs' columns. Desktop is untouched. */}
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0, ...(narrow ? { flexDirection: "column", alignItems: "flex-end" } : null) }}>
+          {/* NEW-2 (B2671227) — the owner-only "3D" button, leftmost in the row so View and Imagery & Layers keep their places. Present only while `grOn`
+              (the owner gate AND this plan's "Grade this plan"), whether or not the Grading panel is open. */}
+          {grOn && (
+            <div style={{ pointerEvents: "auto", display: "flex", ...(narrow ? { flex: "none" } : null) }}>
+              <View3dButton ready={!!(gradeSurface && gradeSurface.grid)} onOpen={() => setGrView3d(true)} pal={PAL} />
+            </div>
+          )}
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0, ...(narrow ? { flex: "none" } : null) }}>
             {/* NEW-1 — counts come from the MODEL (`els`, `parcels`, …), never from the draw sets:
                 a hidden group must still report how much it is hiding, or the menu becomes a mirror
@@ -26550,11 +26700,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 preparedBy={settings.printPreparedBy || ""} onPreparedBy={(v) => setSettings((s) => ({ ...s, printPreparedBy: v }))}
                 showDims={settings.showDims !== false} onToggleDims={(v) => setSettings((s) => ({ ...s, showDims: v }))}
                 showAreas={settings.showAreas !== false} onToggleAreas={(v) => setSettings((s) => ({ ...s, showAreas: v }))}
-                aerialAvailable={aerialAvailable} showAerial={showAerial} onToggleAerial={setShowAerial}
                 overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                showScaleBar={settings.printScaleBar !== false} onToggleScaleBar={(v) => setSettings((s) => ({ ...s, printScaleBar: v }))}
                 flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
@@ -26671,6 +26821,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
               style={{ bottom: MAP_CORNER_PX, left: paneInset + MAP_CORNER_PX, maxWidth: cursorFit.maxWidth }} />
           )}
+          {/* NEW-1 (owner 2026-11-04) — the "Regrading…" banner: a small pill centred at the bottom of the VISIBLE map (left edge =
+              the docked panel's painted edge), clear of the cursor chip / north arrow row and the bottom-right scale-bar group.
+              Owner-only: it exists only while the grading gate is on, so no other account ever mounts it. It takes no presses and
+              draws nothing over the land. Rules: components/RegradeBanner.jsx, lib/regradeProgress.js. */}
+          {grOn && <RegradeBanner left={paneInset} bottom={FURNITURE_ROW + (narrow ? 56 : 12)} />}
         </div>
 
         {/* ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — phone-only EDGE TAB to summon the
@@ -27037,35 +27192,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span className="rbtn-hint" style={railHint(tool === "callout")}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span className="rbtn-hint" style={railHint(tool === "text")}>T</span></button>
 
-          {/* B2391216 ×2 — Utility Evidence: the five street-imagery / utility drawing tools that used to ride under the
-              layers card (they are DRAWING tools, not layers). Same handlers, same active states, same row style as every
-              other tool here; located plans only (they read the aerial and the GIS around the site). */}
-          {origin && (<>
-            {railHdr("Utility Evidence")}
-            <button className={`rbtn${traceMode ? " on" : ""}`} style={rbtn(traceMode)} data-testid="rail-ev-trace" aria-pressed={traceMode}
-              onClick={() => { setTracePts([]); setTraceMode((m) => !m); }}
-              title="Click along a visible pole line on the aerial; double-click or Enter to finish (Esc to cancel)">
-              <ToolIcon id="evTrace" /> {traceMode ? "Tracing…" : "Trace overhead electric"}
-            </button>
-            <button className={`rbtn${routeMode?.util === "elec" ? " on" : ""}`} style={rbtn(routeMode?.util === "elec")} data-testid="rail-ev-route-elec" aria-pressed={routeMode?.util === "elec"}
-              onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)">
-              <ToolIcon id="evElec" /> Route electric service
-            </button>
-            <button className={`rbtn${routeMode?.util === "water" ? " on" : ""}`} style={rbtn(routeMode?.util === "water")} data-testid="rail-ev-route-water" aria-pressed={routeMode?.util === "water"}
-              onClick={startWaterRoute} title="Route water service from a main to a building; the easement width comes from the jurisdiction rule in the Easement ▾ menu">
-              <ToolIcon id="evWater" /> Route water service
-            </button>
-            <button className="rbtn" style={{ ...rbtn(false), opacity: evidenceBusy ? 0.6 : 1 }} data-testid="rail-ev-infer-main" disabled={evidenceBusy}
-              onClick={inferWaterMain} title="Connect the fire hydrants in view into a screening-only water main">
-              <ToolIcon id="evMain" /> {evidenceBusy ? "Inferring…" : "Infer water main"}
-            </button>
-            <button className={`rbtn${xsecMode ? " on" : ""}`} style={rbtn(xsecMode)} data-testid="rail-ev-xsec" aria-pressed={xsecMode}
-              onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
-              title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert (Esc to cancel)">
-              <ToolIcon id="evXsec" /> Cross-section (ditch)
-            </button>
-          </>)}
-
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
             <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Aerial isn't calibrated — distances may be wrong.</div>
@@ -27116,8 +27242,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               than the canvas row has to give it, and a rail with no scroll affordance clips its
               last entries with no way to reach them. Harmless on a normal desktop window, where
               the rail already fits and no scrollbar appears. */}
-          <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
-            overflowY: "auto", minHeight: 0,
+          <div className="left-rail" data-testid="left-module-rail" style={{ width: leftRailW, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
+            overflowY: "auto", overflowX: "hidden", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 0, top: 0, bottom: 0, zIndex: 1105,
               // B1215682 — the phone Properties BOTTOM SHEET stays solo: the icon rail is a
               // left-side drawer affordance that has nothing to do with a sheet rising from the
@@ -27197,12 +27323,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
               transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
             } : {
-              width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
+              width: narrow ? `min(320px, calc(100vw - ${leftRailW + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
               flex: "none", background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
               // NEW-2 (lib/panelWidth.js) — the panel paints at `leftWidth` but reserves only `leftFlowWidth` (whole
               // notches), so the canvas edge never lands between pixel grids; the < one-notch leftover overlaps it.
               ...(!narrow && leftOverlap > 0 ? { marginRight: -leftOverlap, position: "relative", zIndex: 3 } : null),
-              ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
+              ...(narrow ? { position: "absolute", left: leftRailW, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
             {/* B1215682/NEW-1 — CONTROL_H caps at 30 (lg), below the 44px touch floor, so every
@@ -28003,7 +28129,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (renderElAppearance is the ONE body; the two call sites differ only by `roadPanel`).
               Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6), so the standalone section is suppressed for them.
               Car parking renders its own "Appearance" group inside the spec sheet (B1790016 NEW-1), so it is suppressed here too. */}
+          {!multiStyleable && selEl && selEl.type === "driveInRamp" && (() => {
+            // NEW-3 (2026-10-30) — the drive-in ramp's own panel. Everything it quotes is read from lib/driveInRamp.js off the HOST, so the panel, the
+            // canvas, the door belt and the grading plane cannot disagree; every edit is one history frame and the write seam re-derives the box.
+            const host = els.find((x) => x.id === selEl.attachedTo && x.type === "building" && !x.points) || null;
+            const rec = selEl.ramp || null;
+            if (!host || !rec) return <Section title={null}><div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>This ramp is no longer attached to a building.</div><button type="button" style={chip} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete</button></Section>;
+            const dockSides = dockSidesFor(host).dockSides, marker = !dockSides.includes(rec.side);
+            const court = els.find((x) => x.attachedTo === host.id && x.truckCourt && x.truckCourt.side === rec.side && !x.points);
+            const courtDepth = court ? (rec.side === "top" || rec.side === "bottom" ? hostAxisExtents(host, court).dimBY : hostAxisExtents(host, court).dimBX) : null;
+            const stackIds = new Set(els.filter((x) => x.attachedTo === host.id && (x.truckCourt || x.forCourt || x.forTrailer || x.prevZone || x.stackSide)).map((x) => x.id));
+            const flagRing = (x) => { try { return isCenterlineRoad(x) ? roadStripRing(x, settings, sharpFor(x), roundTrim(x)) : ringOf(x); } catch (_) { return null; } };
+            const others = els.filter((x) => x.id !== selEl.id && x.id !== host.id && !stackIds.has(x.id))
+              .map((x) => ({ id: x.id, name: x.dogEar ? "the corner bump-out" : `the ${(TYPE[x.type]?.label || "another element").split(" / ")[0].toLowerCase()}`, ring: flagRing(x) }));
+            const allowedRings = parcels.filter((pc) => pc.active !== false && pc.points && pc.points.length >= 3).map((pc) => { const sb = parcelSetbacks(pc); return (sb.some((v) => v > 0) ? offsetPolygon(pc.points, sb) : null) || pc.points; });
+            const flags = rampFlags(host, rec, { dockSides, dockHeightIn: rampDockIn, courtDepthFt: courtDepth, others, allowedRings });
+            const sp = rampSpan(rec, { marker, dockHeightIn: rampDockIn });
+            const doorsNow = rampDoorRun(host, rec.side).doors, leaf = resolveGridSettings(host, settings).doorWidth;
+            const doorsTaken = marker ? 0 : doorsNow.filter((c) => Math.min(c + leaf / 2, sp.u1) - Math.max(c - leaf / 2, sp.u0) > 1).length;
+            return (
+              <Section title={null}>
+                <DriveInRampPanel ramp={rec} marker={marker} lengthFt={rampLengthFt(rec, rampDockIn)} riseIn={rampRiseFt(rec, rampDockIn) * 12} dockHeightIn={rampDockIn}
+                  doorsTaken={doorsTaken} flags={flags}
+                  onPatch={(patch) => {
+                    // turning it ALONG the wall, or flipping which way it runs, keeps the footprint on the wall (a door position that would overrun it slides in)
+                    const turning = patch.layout === "along" || (rampLayout(rec) === "along" && patch.dir != null);
+                    const fit = turning ? fitAlongTheWall({ ...rec, ...patch }, { L: wallFrame(host, rec.side).L, stops: moduleStops(doorsNow), dockHeightIn: rampDockIn, keepDir: patch.dir != null ? patch.dir : null }) : null;
+                    setRampPatch(selEl.id, fit ? { ...patch, ...fit } : patch);
+                  }}
+                  onAt={(n) => { const stops = moduleStops(doorsNow); const want = Number.isFinite(n) ? n : rec.at; setRampPatch(selEl.id, { at: Math.round((stops.length ? stops.reduce((b, v) => (Math.abs(v - want) < Math.abs(b - want) ? v : b), stops[0]) : want) * 100) / 100 }); }}
+                  onRise={(n) => setRampPatch(selEl.id, { riseIn: Number.isFinite(n) ? n : null })}
+                  onDelete={() => deleteSel(null, { entry: "panel:element" })} />
+              </Section>
+            );
+          })()}
           {!roadPanel && elAppearanceOn && renderElAppearance()}
+          {/* NEW-3 (2026-10-30) — a drive-in ramp has its own panel (above); the generic element card below is for everything else. */}
+          {selEl && selEl.type === "driveInRamp" ? null : (<>
           {!multiStyleable && selEl && (
             <Section title={null}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
@@ -28281,6 +28443,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           })}
                         </Collapse>
                       )}
+                      {/* NEW-1 (2026-11-10) — TAPER: only on a road that actually has a tapered joint (it meets a road of a different width end to
+                          end). One line per tapered end; blank = the automatic length (10 ft per foot each edge steps in); the value drawn is
+                          shortened to the road's last straight stretch. Its own section, so nothing crowds the cross-section button above. */}
+                      {cl && (() => {
+                        const tp = roundTrim(selEl) && roundTrim(selEl).taper;
+                        const ends = tp ? ["s", "e"].filter((k) => tp[k]) : [];
+                        if (!ends.length) return null;
+                        return (
+                          <Collapse sectionId="road-taper" title="Taper" defaultOpen summary={ends.map((k) => `${Math.round(tp[k].lenFt)} ft`).join(" · ")}>
+                            {ends.map((k) => (
+                              <Field key={k} gutter={ROAD_GUTTER_W} oneLine label={ends.length > 1 ? (k === "s" ? "Start length" : "End length") : "Length"} title="How far back from the joint this road narrows (or widens) to meet the road it joins. Blank = automatic.">
+                                {stepBox({ ariaLabel: ends.length > 1 ? (k === "s" ? "Taper length at the start" : "Taper length at the end") : "Taper length", testid: `road-taper-${k}`, placeholder: String(Math.round(tp[k].lenFt)), value: tp[k].auto ? null : Math.round(tp[k].reqFt), seed: Math.round(tp[k].lenFt), min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadTaper(selEl, k, n) })}
+                              </Field>
+                            ))}
+                          </Collapse>
+                        );
+                      })()}
                       {/* NEW-3 (road-panel redesign) — HIDDEN, NOT DELETED: the min-radius review (the warning + Fix radius,
                           and "Curve at vertex") renders only behind `roadRadiusReviewOn()`, default OFF. Owner: "it should
                           just let me be wrong; it's not good enough yet, keep it in the background". */}
@@ -28503,7 +28682,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const wallOps = {
                       footEdit: !!b.footEdit,
                       depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
-                      extent: (row, layer, change) => setWallLayerExtent(b, row.sides, layer, change),
                       trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
                       trailerRowDepth: (row, layer, i, n) => setTrailerRowDepth(b, row.sides, layer, i, n),
                       trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
@@ -28520,11 +28698,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <LoadingWallPicker b={b} bumps={bumpSpecs} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} onCorner={(side, sign) => toggleBumpCorner(b, side, sign)} />
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div data-testid="loading-type" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 600, color: txtPrimary }}>{loadingTypeLabel(b)}</div>
-                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}</div>
+                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}{hm.rampN ? ` · ${hm.rampN} drive-in` : ""}</div>
                             <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
                           </div>
                         </div>
-                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} />
+                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} kindFills={Object.fromEntries(Object.keys(KIND_LABEL).map((k) => [k, elStyle({ type: (ZONE_CATALOG[k] || {}).elType }, settings).fill]))} />
                       </Collapse>
                     );
                     // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
@@ -28727,11 +28905,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const gg = computeBuildingGrid({ length: footprintLength(selEl), depth: footprintDepth(selEl), dock, grid: grd });
                       const lenOffsets = gg.lengthLines.map((l) => l.at);
                       const dogEars = els.filter((x) => x.attachedTo === selEl.id && x.dogEar);
-                      const total = dockSidesFor(selEl).dockSides.reduce((sum, s) => sum + dockDoorRun(selEl, s, dogEars, lenOffsets, grd).doors.length, 0);
+                      const rampsH = rampsOnHost(els, selEl), sidesB = dockSidesFor(selEl).dockSides;
+                      const total = sidesB.reduce((sum, s) => sum + dockDoorRun(selEl, s, dogEars, lenOffsets, grd, rampSpansOnSide(rampsH, s, sidesB, settings)).doors.length, 0);
                       return (
                         <>
                           {settings.showGrid && gg.summary && <>Column grid: <b style={{ color: PAL.ink }}>{gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′</b> typ{gg.summary.speedBay ? <> · speed bay {gg.summary.speedBay}′</> : ""} · {gg.summary.lengthCount} × {gg.summary.depthCount} bays<br /></>}
-                          Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ {grd.doorOC}′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}
+                          Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ {grd.doorOC}′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}{rampsH.length ? <span data-testid="drive-in-count"> · {rampsH.length} drive-in</span> : null}
                         </>
                       );
                     })()}
@@ -30321,6 +30500,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
             </Section>
           )}
+          </>)}
 
           {roadPanel && elAppearanceOn && renderElAppearance()}
 
@@ -30437,19 +30617,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           moved into the app-wide Keyboard Shortcuts page (shared/keyboard/shortcutsData.js's
           "site" section), reachable via "?" from anywhere, not just this workspace. */}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
-      {storageOpen && (
-        <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 420, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
-              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Storage</h2>
-              <button className="gbtn" onClick={() => setStorageOpen(false)} style={{ ...chip }}>Close ✕</button>
-            </div>
-            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted, padding: "18px 0" }}>Checking storage…</div>}>
-              <StoragePanel />
-            </Suspense>
-          </div>
-        </div>
-      )}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
@@ -30768,39 +30935,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       })()}
 
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
-      {/* ditch cross-section result */}
-      {xsec && (
-        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
-            <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
-          </div>
-          {xsec.busy ? (
-            <div style={{ fontSize: 12, color: PAL.muted, padding: "10px 0" }}>Sampling USGS 3DEP elevation…</div>
-          ) : xsec.stats && (() => {
-            const s = xsec.stats, W = 258, H = 64, span = Math.max(0.5, s.maxFt - s.minFt);
-            const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
-            return (
-              <div>
-                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: RADIUS.sm }}>
-                  <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
-                </svg>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: MONO_FONT }}>
-                  <span>Depth ≈ <b>{f1(s.depthFt)}′</b></span>
-                  <span>Invert {f1(s.invertFt)}′</span>
-                  <span>Bank {f1(s.bankFt)}′</span>
-                </div>
-                <div style={{ fontSize: 9.5, color: PAL.warn, lineHeight: 1.4, margin: "6px 0 8px" }}>Screening only — LiDAR bare-earth, verify with survey.</div>
-                <button onClick={() => {
-                  if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); flashWarn("Available depth applied to the selected pond.", 4000); }
-                  else { flashWarn("⚠ Select a pond first, then apply the available depth.", 5000); }
-                }} style={{ ...chip, width: "100%", fontWeight: 600 }}>→ Use as detention available depth{selEl?.type === "pond" ? "" : " (select a pond)"}</button>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
       {(() => {
         /* ⛔ NEW-1/B754752 — `toastPill` is built HERE, inside this IIFE, not as a top-level
          * `const` above. `hiddenContentReads.js`'s sweep treats "the last top-level `const`
@@ -30823,14 +30957,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
         const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
         return (<>
-          {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
+          {(pobMode || overlapWarn || deedAlignHint) && (
             /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
                3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
                success-green with its own warning invisible to the color. `.includes` catches both. */
-            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode ? PAL.accent : "#15803d") }}>
               <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-              {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
-              {deedAlignHint && !pobMode && !routeMode && <>
+              {pobMode && <button onClick={() => { setPobMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
+              {deedAlignHint && !pobMode && <>
                 <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
                 <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
               </>}
@@ -31155,7 +31289,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
               const arrRow = (icon, text, mode, dis, hint) => miRow({
                 icon, text, hint, dis,
-                title: dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : "",
+                title: dis ? (arrWhy || arrangeRuleNote(t, mode, els) || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : "", // NEW-1 (2026-11-05) — a road already first by z next to a trailer: the real reason is the trailer-over-road rule
                 onClick: () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); },
               });
               return (
@@ -31372,6 +31506,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </ContextMenu>
         );
       })()}
+
+      {/* NEW-1 (2026-11-11) — the owner-only 3D cut-and-fill viewer. Mounted only while grading is ON for this plan (`grOn` = the owner gate AND the
+          per-plan switch), so it closes itself if grading is switched off and a non-owner can never reach it. Portalled to <body> (a fixed overlay
+          must not live inside a transformed ancestor); View3dMount seals React's event bubbling and holds the loading / failure screens. */}
+      {grOn && grView3d && createPortal(
+        <View3dMount onClose={() => setGrView3d(false)}>
+          <Grading3DViewer grid={gradeSurface ? gradeSurface.grid : null} existAt={gsExistAt} parcelRings={gsParcelRings} els={gsEls} onClose={() => setGrView3d(false)} />
+        </View3dMount>, document.body)}
 
       {/* NEW-2 (B845585) — Alt+hover stack picker. A portal (never clipped, same reasoning as
           ContextMenu) but deliberately NOT that shared component: this is hover-driven, not
@@ -31650,6 +31792,69 @@ function AutoPill({ on, onClick, label }) {
         border: `1px solid ${on ? "var(--accent-site)" : "var(--border-strong)"}`, background: on ? "var(--accent-site)" : "transparent", color: on ? "var(--on-accent-site)" : "var(--text-secondary)" }}>
       <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 5.2 4 7.6 8.5 2.6" /></svg>Auto
     </button>
+  );
+}
+/* Drive-in ramp Properties (NEW-3, 2026-10-30) — layout "A": a Ramp section (the choices), a Size & position section (what follows from them) and the
+ * shared Appearance section the generic inspector renders beside it. Presentational: every rule and number is lib/driveInRamp.js, passed in. */
+function DriveInRampPanel({ ramp, marker, lengthFt, riseIn, dockHeightIn, doorsTaken, flags, atMax, onPatch, onAt, onRise, onDelete }) {
+  const lay = rampLayout(ramp), horizWall = ramp.side === "top" || ramp.side === "bottom";
+  const note = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
+  const check = (key, label, on, tid) => (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm, fontSize: FONT_SIZE.control, color: "var(--text-primary)", cursor: "pointer" }}>
+      <input type="checkbox" data-testid={tid} checked={on} onChange={(e) => onPatch({ [key]: e.target.checked })} /> {label}
+    </label>
+  );
+  return (
+    <div data-testid="ramp-panel">
+      <StdSubLabel section="appearance">{marker ? "Door" : "Ramp"}</StdSubLabel>
+      {!marker && (
+        <Field label="Layout">
+          <SegmentedControl aria-label="Ramp layout" data-testid="ramp-layout" value={lay} onChange={(k) => onPatch({ layout: k })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+            options={[{ key: "straight", label: "Straight-in", testid: "ramp-layout-straight", title: "Perpendicular to the wall, out into the court" }, { key: "along", label: "Along the wall", testid: "ramp-layout-along", title: "Runs parallel to the dock face and turns into the door at the top" }]} />
+        </Field>
+      )}
+      {!marker && lay === "along" && (
+        <Field label="Runs">
+          <SegmentedControl aria-label="Ramp direction" data-testid="ramp-dir" value={rampDir(ramp) > 0 ? "end" : "start"} onChange={(k) => onPatch({ dir: k === "end" ? 1 : -1 })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+            options={[{ key: "start", label: horizWall ? "Left" : "Up", testid: "ramp-dir-start" }, { key: "end", label: horizWall ? "Right" : "Down", testid: "ramp-dir-end" }]} />
+        </Field>
+      )}
+      <Field label="Position" title="Feet from the start of the wall to the centre of the drive-in door; it snaps to the door spacing">
+        <NumInput boxed unit="ft" testid="ramp-at" ariaLabel="Ramp position along the wall" value={Math.round((ramp.at ?? 0) * 100) / 100} min={0} step={6} coarse={12} onCommit={onAt} />
+      </Field>
+      {!marker && (
+        <>
+          <Field label="Width"><NumInput boxed unit="ft" testid="ramp-width" ariaLabel="Ramp width" value={rampWidthFt(ramp)} min={14} max={40} step={2} coarse={4} onCommit={(n) => onPatch({ width: Math.max(14, Math.min(40, n)) })} /></Field>
+          <Field label="Grade"><NumInput boxed unit="%" testid="ramp-grade" ariaLabel="Ramp grade" value={rampGradePct(ramp)} min={2} max={20} step={0.5} coarse={1} onCommit={(n) => onPatch({ gradePct: Math.max(2, Math.min(20, n)) })} /></Field>
+          <Field label="Rise" title={`Defaults to the plan's dock height (${Math.round(dockHeightIn)} in)`}>
+            <span style={ROW6}>
+              <NumInput boxed unit="in" testid="ramp-rise" ariaLabel="Ramp rise in inches" value={Math.round(riseIn * 10) / 10} min={6} max={120} step={2} coarse={6} onCommit={onRise} />
+              {ramp.riseIn != null && <button type="button" data-testid="ramp-rise-auto" onClick={() => onRise(null)} style={{ ...note, padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>dock height</button>}
+            </span>
+          </Field>
+        </>
+      )}
+      <Field label="Door">
+        <SegmentedControl aria-label="Door size" data-testid="ramp-door" value={ramp.door === "14x16" ? "14x16" : "12x14"} onChange={(k) => onPatch({ door: k })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
+          options={[{ key: "12x14", label: "12×14", testid: "ramp-door-12x14" }, { key: "14x16", label: "14×16", testid: "ramp-door-14x16" }]} />
+      </Field>
+      {!marker && <Field label="Details"><span style={{ display: "inline-flex", gap: SPACE.xl, flexWrap: "wrap" }}>{check("wings", "Wing walls", ramp.wings !== false, "ramp-wings")}{check("bollards", "Bollards", ramp.bollards !== false, "ramp-bollards")}</span></Field>}
+      {!marker && (
+        <>
+          <StdSubLabel section="size">Size & position</StdSubLabel>
+          <Field label="Length"><span data-testid="ramp-length" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", fontVariantNumeric: TABULAR_NUMS }}>{f0(lengthFt)} ft</span></Field>
+          <Field label="Takes"><span data-testid="ramp-takes" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{doorsTaken === 0 ? "no dock doors" : `${doorsTaken} dock ${doorsTaken === 1 ? "door" : "doors"}`}</span></Field>
+        </>
+      )}
+      {flags.map((f) => (
+        <div key={f.code} data-testid={`ramp-flag-${f.code}`} role="status" style={{ display: "flex", alignItems: "flex-start", gap: SPACE.sm, margin: `${SPACE.xs}px 0 ${SPACE.md}px`, fontSize: FONT_SIZE.label, color: "var(--warn-text)", lineHeight: 1.4 }}>
+          <span aria-hidden="true" style={{ flex: "none" }}>⚠</span><span>{f.text}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: SPACE.md, marginTop: SPACE.md }}>
+        <button type="button" data-testid="ramp-delete" onClick={onDelete} style={{ height: CONTROL_H.md, padding: "0 12px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, border: "1px solid var(--danger-text)", background: "transparent", color: "var(--danger-text)" }}>{marker ? "Delete door" : "Delete ramp"}</button>
+      </div>
+    </div>
   );
 }
 function DockLayerPanel({ kind, size, grade, style, pinned, onPin, removal, onRemove, removeNoun }) {
@@ -32056,17 +32261,46 @@ function WallBinGlyph() {
     </svg>
   );
 }
-function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
+/* WallAddControl — the end of a wall row (NEW-1 amendment of B2651024, owner 2026-11-04: "Put every option on the row as its own
+   icon, no ▾."): a small plus glyph (NOT a button) followed by ONE icon button per entry of `opts` (`orderedAddOptions`, exactly the
+   set `addOptions` allows, in that order, so the likely next layer is the leftmost icon). Each button is the layer's legend swatch —
+   the SAME fill as the strip piece (`fillFor`) — with `WallKindIcon` inside; no word on it, the full name is in its aria-label and
+   title ("Add car parking to the End wall (N)" / "Add car parking to this wall"). One press adds that layer through `onAdd` (the same
+   `addWallLayer` / `addLayerOnSide` path as before). Nothing at all when `opts` is empty (after a Road). No menu, no open state, so
+   it is a plain module-scope component (MODULE-SCOPE-COMPONENTS) and its buttons stay usable after every press. */
+function WallAddControl({ row, opts, onAdd, fillFor }) {
+  if (!opts.length) return null;
+  const wallName = `${{ dock: "Dock", rear: "Rear", ends: "End", sides: "Side" }[row.role] || "Wall"} wall (${row.badge})`;
+  return (
+    <span data-testid="wall-add-group" data-wall-add="1" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: ADD_GROUP.GAP }}>
+      <span aria-hidden="true" data-testid="wall-add-plus" style={{ flex: "none", width: ADD_GROUP.PLUS_W, textAlign: "center", fontSize: FONT_SIZE.control, fontWeight: 700, lineHeight: 1, color: "var(--accent-text, var(--accent))" }}>+</span>
+      {opts.map((o) => (
+        <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} data-kind={o.key} data-wall-add="1"
+          aria-label={`Add ${o.label.toLowerCase()} to the ${wallName}`} title={`Add ${o.label.toLowerCase()} to this wall`}
+          style={{ flex: "none", boxSizing: "border-box", width: ADD_GROUP.ICON, height: ADD_GROUP.ICON, padding: 0, display: "grid", placeItems: "center", cursor: "pointer",
+            border: "1px solid var(--accent)", borderRadius: RADIUS.sm, background: fillFor(o.key),
+            boxShadow: o.key === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}
+          onClick={() => onAdd(o.key)}>
+          <WallKindIcon kind={o.key} size={14} />
+        </button>
+      ))}
+    </span>
+  );
+}
+function WallRows({ rows, ops, numInput: _numInput, canEditBumps, kindFills }) {
   const [open, setOpen] = useState(null);          // { rowKey, id } — the one piece whose edit box is open
-  const [menu, setMenu] = useState(null);          // rowKey whose "+" catalog is open
-  const [pending, setPending] = useState(null);    // { rowKey, kind } — open the layer a just-pressed "+" created
+  const [pending, setPending] = useState(null);    // { rowKey, kind, before } — open the layer a just-pressed add created
   const [bumpOpen, setBumpOpen] = useState(false); // the bump-outs editor under the "Bump-outs" line
   const boxRef = useRef(null);
   useEffect(() => {
     if (!pending) return;
     const row = rows.find((r) => r.key === pending.rowKey);
-    const layer = row && row.layers.find((l) => l.kind === pending.kind);
-    if (layer) { setOpen({ rowKey: row.key, id: layer.id }); setPending(null); }
+    // The NEW layer is the outermost of its kind (a second trailer piece must not reopen the first one).
+    const ofKind = row ? row.layers.filter((l) => l.kind === pending.kind) : [];
+    if (row && ofKind.length > pending.before) { setOpen({ rowKey: row.key, id: ofKind[ofKind.length - 1].id }); setPending(null); return; }
+    // NEW-1 (2026-11-04) — "+ parking" on a wall that already has parking adds ROWS, not a layer: the count of parking layers
+    // does not rise, the layer's row count does. Open its box (Rows ready) once the rows rise.
+    if (row && pending.kind === "parking" && pending.beforeRows != null && ofKind[0] && (ofKind[0].rows || 0) > pending.beforeRows) { setOpen({ rowKey: row.key, id: ofKind[0].id }); setPending(null); }
   }, [pending, rows]);
   // The open piece may vanish (removed, undone): close its box rather than leave it pointing at nothing.
   useEffect(() => {
@@ -32084,7 +32318,7 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
     if (!open) return undefined;
     const onDown = (e) => {
       const t = e.target;
-      if (t && t.closest && (t.closest('[data-testid="wall-edit-box"]') || t.closest('[data-testid="wall-piece"]') || t.closest('[data-testid="wall-add"]'))) return;
+      if (t && t.closest && (t.closest('[data-testid="wall-edit-box"]') || t.closest('[data-testid="wall-piece"]') || t.closest('[data-wall-add]'))) return;
       commitAndClose();
     };
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(null); } };
@@ -32096,7 +32330,6 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
   const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
   const toggleBtn = (on) => ({ minWidth: 30, height: CONTROL_H.md, padding: "0 8px", fontSize: FONT_SIZE.control, fontWeight: 700, borderRadius: RADIUS.sm, border: on ? "1px solid var(--accent)" : BORDER_1, background: on ? "var(--accent)" : SURF_RAISED, color: on ? "var(--on-accent)" : "var(--text-primary)", fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap" });
   const link = { padding: 0, border: "none", background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const addCatalogBtn = { fontSize: FONT_SIZE.label, lineHeight: 1.2, padding: "3px 7px", borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: SURF_RAISED, color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
   const badgeStyle = (row) => row.role === "dock"
     ? { background: "var(--accent)", color: "var(--on-accent)", border: "1px solid var(--accent)" }
     : row.role === "rear"
@@ -32146,43 +32379,28 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
       const en = !layer.split && !ops.footEdit;
       body = head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Parking rows" testid="wall-parking-rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => { if (en) ops.parkingRows(row, n); }} />));
     } else if (layer.kind === "trailer" && !layer.wallKid) {
+      // NEW-1 (2026-11-03): one row ⇒ ONE line — Rows and Depth. Two or more ⇒ Rows on the first line, then Row 1, Row 2 … and
+      // the Aisle together on a second. (The single row's depth is still stored as row 1 — `trailerRowDepth(…, 0, …)`.)
+      const rowsField = numField("Rows", <NumInput boxed boxWidth={56} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />);
+      // The Rows field keeps ONE position in both shapes (so changing 1 ↔ 2 rows never remounts it and drops focus).
       body = (
         <>
-          {head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />))}
-          <span style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
-            {layer.rowDepths.map((d, i) => numField(`Row ${i + 1}`, <NumInput key={i} boxed unit="ft" boxWidth={92} ariaLabel={`Trailer row ${i + 1} depth`} testid={`wall-trailer-row-${i + 1}`} value={d} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, i, n)} />))}
-          </span>
+          {head(<>{rowsField}{layer.rows < 2 && numField("Depth", <NumInput boxed unit="ft" boxWidth={84} ariaLabel="Trailer depth" testid="wall-trailer-row-1" value={layer.rowDepths[0]} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, 0, n)} />)}</>)}
           {layer.rows >= 2 && (
-            <span style={{ display: "flex", justifyContent: "flex-end" }}>
-              {numField("Aisle", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Aisle between trailer rows" testid="wall-trailer-aisle" value={layer.aisle} min={0} step={1} coarse={5} onCommit={(n) => ops.trailerAisle(row, layer, n)} />)}
+            <span data-testid="wall-trailer-rowline" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.sm, rowGap: SPACE.md }}>
+              {layer.rowDepths.map((d, i) => numField(`Row ${i + 1}`, <NumInput key={i} boxed boxWidth={46} ariaLabel={`Trailer row ${i + 1} depth`} testid={`wall-trailer-row-${i + 1}`} value={d} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, i, n)} />))}
+              {numField("Aisle", <NumInput boxed boxWidth={46} ariaLabel="Aisle between trailer rows" testid="wall-trailer-aisle" value={layer.aisle} min={0} step={1} coarse={5} onCommit={(n) => ops.trailerAisle(row, layer, n)} />)}
             </span>
           )}
         </>
       );
     } else {
-      body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
+      body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={84} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
     }
-    const ex = layer.extent;
-    const alignOn = (a) => !!ex && (a < 0 ? ex.start : a > 0 ? ex.end : ex.centre);
-    const alignBtn = (a, label) => (
-      <button key={a} type="button" data-testid={`wall-align-${a < 0 ? "start" : a > 0 ? "end" : "centre"}`} aria-pressed={alignOn(a)} style={toggleBtn(alignOn(a))}
-        title={a < 0 ? "Run from the start of the wall" : a > 0 ? "Run from the end of the wall" : "Centre on the wall"} onClick={() => ops.extent(row, layer, { align: a })}>{label}</button>
-    );
-    const extentRow = ex ? (
-      <span data-testid="wall-extent" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
-        {numField("Length", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Length along the wall" testid="wall-extent-len" value={ex.len} min={1} max={ex.max} step={1} coarse={10} onCommit={(n) => ops.extent(row, layer, { len: n })} />)}
-        <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}>
-          <span style={muted}>Align</span>
-          {alignBtn(-1, "Start")}{alignBtn(0, "Centre")}{alignBtn(1, "End")}
-        </span>
-        <button type="button" data-testid="wall-extent-full" style={{ ...link, opacity: ex.full ? 0.5 : 1 }} disabled={ex.full} title={row.isDock ? "Run the full length of the truck court" : "Run the full length of the wall"} onClick={() => ops.extent(row, layer, { full: true })}>Full length</button>
-      </span>
-    ) : null;
     return (
       <div ref={boxRef} data-testid="wall-edit-box" data-kind={layer.kind} style={boxStyle}>
         <span aria-hidden="true" data-testid="wall-edit-caret" style={{ position: "absolute", top: -5, left: caretX - 5, width: 8, height: 8, transform: "rotate(45deg)", background: "var(--surface-field)", borderTop: BORDER_1, borderLeft: BORDER_1 }} />
         {body}
-        {extentRow}
       </div>
     );
   };
@@ -32216,14 +32434,14 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
         <div data-testid="bump-line">
           <span style={{ display: "flex", alignItems: "baseline", gap: SPACE.md }}>
             <span data-testid="bump-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", fontVariantNumeric: TABULAR_NUMS }}>{bumpSummary(bumpN, bumpRef.bump.along, bumpRef.bump.proj)}</span>
-            <button type="button" data-testid="bump-edit" style={link} aria-expanded={bumpOpen} onClick={() => { setOpen(null); setMenu(null); setBumpOpen((o) => !o); }}>{bumpOpen ? "done" : "edit"}</button>
+            <button type="button" data-testid="bump-edit" style={link} aria-expanded={bumpOpen} onClick={() => { setOpen(null); setBumpOpen((o) => !o); }}>{bumpOpen ? "done" : "edit"}</button>
           </span>
           {bumpOpen && bumpEditor()}
         </div>
       )}
       {rows.map((row) => {
-        const opts = addOptions(row.isDock, row.layers);
-        const menuOpen = menu === row.key;
+        const opts = orderedAddOptions(row.isDock, row.layers);
+        const fillFor = (kind) => { const have = rows.flatMap((r) => r.layers).find((l) => l.kind === kind); return have ? have.fill : (kindFills || {})[kind]; };
         const shown = openLayer && openRow && openRow.key === row.key ? openLayer : null;
         const geo = plan.rows[row.key];
         const total = geo.total;
@@ -32235,15 +32453,15 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
                 <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
               {row.layers.length > 0 && (
-                <span data-testid="wall-strip" data-total={total} style={{ flex: "none", width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
+                <span data-testid="wall-strip" data-total={total} data-bar-w={geo.barW} data-grown={geo.barW > STRIP.FULL + 0.01 ? "1" : undefined} style={{ flex: "0 1 auto", minWidth: 0, width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
                   {row.layers.map((l, i) => {
                     const label = pieceLabel(l);
                     const w = geo.pieces[i].w;
                     const sel = !!shown && shown.id === l.id;
                     return (
                       <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
-                        onClick={() => { if (sel) commitAndClose(); else { setMenu(null); setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
-                        style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
+                        onClick={() => { if (sel) commitAndClose(); else { setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
+                        style={{ flex: "0 1 auto", minWidth: 0, width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
                           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
                           fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
                           boxShadow: sel ? "inset 0 0 0 2px var(--accent)" : (l.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>
@@ -32254,20 +32472,8 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
                   })}
                 </span>
               )}
-              {opts.length > 0 && (
-                <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall"
-                  style={{ flex: "none", width: CONTROL_H.sm, height: CONTROL_H.sm, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.emphasis, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit" }}
-                  onClick={() => { setOpen(null); setBumpOpen(false); setMenu(menuOpen ? null : row.key); }}>＋</button>
-              )}
+              <WallAddControl row={row} opts={opts} fillFor={fillFor} onAdd={(key) => { setOpen(null); setBumpOpen(false); ops.add(row, key); setPending({ rowKey: row.key, kind: key, before: row.layers.filter((l) => l.kind === key).length, beforeRows: key === "parking" ? ((row.layers.find((l) => l.kind === "parking") || {}).rows || 0) : null }); }} />
             </div>
-            {menuOpen && (
-              <div data-testid="wall-add-menu" style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `${SPACE.sm}px 0 ${SPACE.sm}px ${WALL_LEFT_W + SPACE.sm}px` }}>
-                {opts.map((o) => (
-                  <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} style={addCatalogBtn}
-                    onClick={() => { setMenu(null); ops.add(row, o.key); setPending({ rowKey: row.key, kind: o.key }); }}>＋ {o.label}</button>
-                ))}
-              </div>
-            )}
             {shown && editBox(row, shown, WALL_LEFT_W + SPACE.sm + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].x + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].w / 2)}
           </div>
         );

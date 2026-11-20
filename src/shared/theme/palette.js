@@ -41,7 +41,7 @@ const LIGHT = {
      stroke / sbStroke keeps it — this is only the fallback, so an explicit choice is never
      stomped. `canvasLineCasing` is the dark under-stroke that keeps the line readable on green
      crop, asphalt and topo; SVG attributes can't read a CSS var, hence the mirror. */
-  canvasParcel: "#34E802", canvasSetback: "#34E802", canvasSelection: "#C2410C",
+  canvasParcel: "#34E802", canvasSetback: "#34E802", canvasPaving: "#2F7DF0", canvasSelection: "#C2410C",
   canvasLineCasing: "rgba(0,0,0,0.55)",
   canvasChipInk: "#15171C",   /* border + numerals on the white setback chip plate */
   canvasAccentSoft: "#f0d9cc", canvasMat: "#DCE1E8",
@@ -79,7 +79,7 @@ const DARK = {
   canvasPlateFill: "rgb(24, 27, 33)",
   // NEW-2 — the same property-line green on dark: it is read against aerial imagery, not against
   // the app surface, and its contrast comes from the casing rather than from a per-theme tint.
-  canvasParcel: "#34E802", canvasSetback: "#34E802", canvasSelection: "#F26B3A",
+  canvasParcel: "#34E802", canvasSetback: "#34E802", canvasPaving: "#5AA2FF", canvasSelection: "#F26B3A",
   canvasLineCasing: "rgba(0,0,0,0.55)",
   canvasChipInk: "#15171C",
   canvasAccentSoft: "rgba(242,107,58,0.18)", canvasMat: "#0E1014",

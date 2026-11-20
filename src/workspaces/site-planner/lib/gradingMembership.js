@@ -29,3 +29,8 @@ export function assemblyIds(els, buildingId) {
   for (const e of els) if (e.hostId === buildingId) ids.add(e.id);
   return ids;
 }
+
+/* A drive-in ramp (type "driveInRamp", attachedTo its building — NEW-1, 2026-10-30) is a pad member of its host like a bump-out: `hostBuildingIdOf`
+ * already resolves it (the climb passes through `attachedTo` to the building), so it joins the host's assembly and its cut/fill and contours.
+ * Unlike a bump-out it is NOT a building and never flat — its own plane runs apron → FFE (lib/driveInRamp.js `rampPlane`). */
+export const isDriveInRamp = (el) => !!el && el.type === "driveInRamp";

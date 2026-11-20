@@ -257,20 +257,84 @@ export function autoGradingLimit({ rings, shoulderFt = LIMIT_DEFAULTS.shoulderFt
 export const PROPERTY_LIMIT_DEFAULTS = Object.freeze({ marginFt: 10, bufferFt: 0 });
 const plCache = new Map();
 export function propertyLimit({ parcelRings = [], holes = [], marginFt = PROPERTY_LIMIT_DEFAULTS.marginFt, bufferFt = PROPERTY_LIMIT_DEFAULTS.bufferFt } = {}) {
-  const m = Number.isFinite(marginFt) && marginFt > 0 ? marginFt : 0, b = Number.isFinite(bufferFt) && bufferFt > 0 ? bufferFt : 0;
+  // NEW-1 (Grading panel layout): the margin is SIGNED — positive = inside the property line (today's meaning, unchanged for every
+  // stored plan), negative = PAST the line (a limit of disturbance beyond it, e.g. with an easement). The buffer is never negative.
+  const m = Number.isFinite(marginFt) ? marginFt : 0, b = Number.isFinite(bufferFt) && bufferFt > 0 ? bufferFt : 0;
   const d = m + b;
   const rings = (parcelRings || []).filter(isRing), hs = (holes || []).filter(isRing);
   const key = [d, rings.map(ringHash).join(","), hs.map(ringHash).join(",")].join("~");
   const hit = plCache.get(key);
   if (hit) return hit;
   let regions = unionRings(rings);
-  if (d > 0 && regions.length) regions = regionsOf(offsetPaths(regionsToPaths(regions), -d, "miter"));
+  if (d !== 0 && regions.length) regions = regionsOf(offsetPaths(regionsToPaths(regions), -d, "miter"));
   let holeRings = hs;
-  if (d > 0 && hs.length) holeRings = bufferRings(hs, d).map((r) => r.outer);
+  if (d !== 0 && hs.length) holeRings = bufferRings(hs, d).map((r) => r.outer);
   const out = { rings: regions.map((r) => r.outer), holes: regions.flatMap((r) => r.holes).concat(holeRings), marginFt: m, bufferFt: b, insetFt: d };
   plCache.set(key, out);
   if (plCache.size > CACHE_MAX) plCache.delete(plCache.keys().next().value);
   return out;
+}
+
+/* ---- ROUND 10 (NEW-1) — the THROW EDGE: the limit with its convex corners rounded ----
+ * The slope is thrown inward at a constant ratio, so its level sets are the inward offsets of the throw edge, and the inward
+ * offset of a SHARP convex corner is a sharp nest of chevrons (a hip ridge) — the owner's "polygon" band. A civil rounds that
+ * corner; so does the surface: every vertex that is convex for the region (an outer ring's corner, or the reflex corner of a
+ * hole) is replaced by the arc of radius `R` tangent to both edges (capped so the arc never takes more than 45% of either
+ * edge), and the surface is bounded by cones from the arcs as well as from the limit, so the offsets inside it are concentric
+ * arcs of radius R − depth. THE LIMIT ITSELF IS UNTOUCHED (the graded area, the panel's acres, the clip, the probe's inside
+ * test): the arcs are only extra constraints, and the real corner still ties the ground on the line. Local to the vertex —
+ * nothing is erased, straight runs stay straight, the arcs lie inside the limit. Pure. Rings are arrays of {x,y}.
+ * `filletRingArcs` returns { ring, arcs } (`arcs`: the points of each arc, for sampling); `filletRing` just the ring. */
+export function filletRing(ring, R, opts) { return filletRingArcs(ring, R, opts).ring; }
+export function filletRingArcs(ring, R, { hole = false, minTurnDeg = 8, sagFt = 0.1 } = {}) {
+  const n = ring ? ring.length : 0;
+  const arcs = [];
+  if (!(R > 0) || n < 3) return { ring, arcs };
+  let area2 = 0;
+  for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; area2 += a.x * b.y - b.x * a.y; }
+  const s = (area2 >= 0 ? 1 : -1) * (hole ? -1 : 1);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const p = ring[(i + n - 1) % n], v = ring[i], q = ring[(i + 1) % n];
+    const e1x = v.x - p.x, e1y = v.y - p.y, e2x = q.x - v.x, e2y = q.y - v.y;
+    const l1 = Math.hypot(e1x, e1y), l2 = Math.hypot(e2x, e2y);
+    if (!(l1 > 1e-6) || !(l2 > 1e-6)) { out.push(v); continue; }
+    const cross = e1x * e2y - e1y * e2x, dot = e1x * e2x + e1y * e2y;
+    const turn = Math.atan2(Math.abs(cross), dot);             // how far the boundary turns at v (0 = straight)
+    if (s * cross <= 0 || turn < (minTurnDeg * Math.PI) / 180 || turn > Math.PI - 0.05) { out.push(v); continue; }
+    const theta = Math.PI - turn;                              // the interior angle at v
+    let t = R / Math.tan(theta / 2);                           // tangent length for the full radius
+    const cap = 0.45 * Math.min(l1, l2);
+    const Re = t > cap ? (cap * Math.tan(theta / 2)) : R;
+    t = Math.min(t, cap);
+    if (!(Re > 0.5)) { out.push(v); continue; }
+    const u1x = -e1x / l1, u1y = -e1y / l1, u2x = e2x / l2, u2y = e2y / l2;     // from v toward p / toward q
+    const t1 = { x: v.x + u1x * t, y: v.y + u1y * t }, t2 = { x: v.x + u2x * t, y: v.y + u2y * t };
+    let bx = u1x + u2x, by = u1y + u2y; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+    const cd = Re / Math.sin(theta / 2);
+    const c = { x: v.x + bx * cd, y: v.y + by * cd };
+    const a1 = Math.atan2(t1.y - c.y, t1.x - c.x);
+    let sweep = Math.atan2(t2.y - c.y, t2.x - c.x) - a1;
+    while (sweep > Math.PI) sweep -= 2 * Math.PI;
+    while (sweep < -Math.PI) sweep += 2 * Math.PI;
+    const steps = Math.max(2, Math.ceil(Math.abs(sweep) / (2 * Math.acos(Math.max(0, 1 - sagFt / Re)) || 0.2)));
+    const arc = [];
+    for (let k = 0; k <= steps; k++) { const a = a1 + (sweep * k) / steps; arc.push({ x: c.x + Re * Math.cos(a), y: c.y + Re * Math.sin(a) }); }
+    arcs.push(arc);
+    out.push(...arc);
+  }
+  return { ring: out, arcs };
+}
+/* The regions' throw edge: { regions (rounded copy), arcs: every fillet's points }. R ≤ 0 → the regions themselves, no arcs. */
+export function throwEdge(regions, R) {
+  if (!(R > 0)) return { regions, arcs: [] };
+  const arcs = [];
+  const out = regions.map((r) => {
+    const o = filletRingArcs(r.outer, R), hs = (r.holes || []).map((h) => filletRingArcs(h, R, { hole: true }));
+    arcs.push(...o.arcs, ...hs.flatMap((h) => h.arcs));
+    return { ...r, outer: o.ring, holes: hs.map((h) => h.ring) };
+  });
+  return { regions: out, arcs };
 }
 
 /* ---- the boundary limit ("Grade to the boundary") ---- */
@@ -307,6 +371,13 @@ export function resolveGradingLimit({ els = [], extraRings = [], spec = {} } = {
     setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(","), pondRings.map(ringHash).join(","), bufferRings.map(ringHash).join(",")].join("~");
   const hit = cache.get(sig);
   if (hit) return hit;
+  // ROUND 9 (B2500224 ×2): the limit's DEFINITION — what changes it as a limit, not as geometry. Boundary mode: the property limit
+  // and its carve-outs (the elements never move it). Layout mode: auto vs the owner's edited ring + the rules it is grown by (an
+  // element move re-grows the same definition). A picture traced against one definition is never painted under another
+  // (gradingPicture.js); within one definition the previous picture may stay up while the next is traced.
+  const defSig = (mode === "boundary"
+    ? ["boundary", setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(","), pondRings.map(ringHash).join(","), bufferRings.map(ringHash).join(",")]
+    : ["layout", edited ? ringHash(edited) : "auto", sh, R, aisle, setbackRings.map(ringHash).join(","), setbackHoles.map(ringHash).join(",")]).join("~");
   let regions = [], grewIds = [], source = "auto";
   if (mode === "boundary") {
     regions = boundaryGradingLimit({ setbackRings, setbackHoles, pondRings, bufferRings });
@@ -330,7 +401,7 @@ export function resolveGradingLimit({ els = [], extraRings = [], spec = {} } = {
     }
   }
   const areaSf = regionsAreaSf(regions);
-  const out = { mode, source, regions, areaSf, areaAc: areaSf / SQFT_PER_ACRE, grewIds, sig, shoulderFt: sh, cornerRadiusFt: R };
+  const out = { mode, source, regions, areaSf, areaAc: areaSf / SQFT_PER_ACRE, grewIds, sig, defSig, shoulderFt: sh, cornerRadiusFt: R };
   cache.set(sig, out);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return out;

@@ -138,3 +138,34 @@ describe("presets", () => {
     }
   });
 });
+
+// NEW-1 (2026-11-06) — a cloud must READ at whole-site zoom: the drawn scallop never goes below a readable size.
+import { cloudArcPx, cloudDefaultArcFt, CLOUD_ARC_MIN_PX, CLOUD_ARC_TARGET_PX } from "../src/workspaces/site-planner/lib/cloudGeometry.js";
+describe("cloudArcPx — the drawn radius has a readable floor", () => {
+  it("whole-site zoom: 3 ft at 0.35 px/ft would be ~1 px; it is drawn at the floor instead", () => {
+    expect(3 * 0.35).toBeLessThan(CLOUD_ARC_MIN_PX);
+    expect(cloudArcPx(3, 0.35)).toBe(CLOUD_ARC_MIN_PX);
+  });
+  it("zoomed in past the floor the stored FEET size rules exactly as before", () => {
+    expect(cloudArcPx(3, 4)).toBeCloseTo(12, 9);
+    expect(cloudArcPx(6, 2)).toBeCloseTo(12, 9);
+  });
+  it("on a printed sheet the floor scales with the export frame's labelK", () => {
+    expect(cloudArcPx(3, 0.1, 2)).toBe(CLOUD_ARC_MIN_PX * 2);
+  });
+  it("garbage in → still a drawable radius", () => {
+    expect(cloudArcPx(NaN, 0)).toBe(CLOUD_ARC_MIN_PX);
+  });
+});
+describe("cloudDefaultArcFt — a new cloud is born readable at its zoom", () => {
+  it("whole-site zoom gives a bigger default; working zoom keeps the 3 ft default", () => {
+    expect(cloudDefaultArcFt(0.35)).toBeGreaterThan(CLOUD_ARC_DEFAULT_FT);
+    expect(cloudDefaultArcFt(0.35) * 0.35).toBeGreaterThanOrEqual(CLOUD_ARC_TARGET_PX - 0.5);
+    expect(cloudDefaultArcFt(8)).toBe(CLOUD_ARC_DEFAULT_FT);
+  });
+  it("never leaves the clamp range, even at a tiny zoom or garbage", () => {
+    expect(cloudDefaultArcFt(0.001)).toBe(CLOUD_ARC_MAX_FT);
+    expect(cloudDefaultArcFt(0)).toBe(CLOUD_ARC_DEFAULT_FT);
+    expect(cloudDefaultArcFt(undefined)).toBe(CLOUD_ARC_DEFAULT_FT);
+  });
+});

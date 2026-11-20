@@ -4,11 +4,11 @@
  * default colours — in light AND dark. Measured on the canvas model, not just the panel.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-v3.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, addWallLayer } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const plan = (page) => page.evaluate(() => {
-  const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const map = JSON.parse((globalThis.__planyrSitesRaw||((k)=>localStorage.getItem(k)))("planarfit:sites:v1") || "{}");
   const site = map[Object.keys(map)[0]] || {};
   return site.els || [];
 });
@@ -35,7 +35,7 @@ const rotate = async (page, deg) => {
   await f.fill(String(deg)); await f.press("Enter");
 };
 const rowByRole = (page, role) => page.locator(`[data-testid="wall-row"][data-role="${role}"]`);
-const addLayer = async (r, key) => { await r.getByTestId("wall-add").click(); await r.page().getByTestId(`wall-add-${key}`).click(); };
+const addLayer = addWallLayer;
 async function boot(page, deg = 315) {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
@@ -159,8 +159,11 @@ for (const scheme of ["light", "dark"]) {
       const legend = page.getByTestId("wall-legend");
       expect(await legend.getByTestId("wall-legend-item").evaluateAll((n) => n.map((x) => x.getAttribute("data-kind")))).toEqual(["court", "trailer", "buffer", "sidewalk", "road"]);
       await expect(legend).not.toContainText("Parking");
-      // an icon is drawn in a wide-enough piece
-      expect(await dock.getByTestId("wall-piece").first().locator("svg").count()).toBe(1);
+      // a piece draws its icon exactly when it is wide enough for icon + label (pieceShowsIcon: 16 + 6 per label character). The strip is
+      // 66 wide at its deepest (NEW-1, 2026-11-04: every add option became its own icon on the row), so on a five-layer stack the narrow
+      // pieces show their label only — the legend and the hover title still name every layer.
+      const iconRule = await dock.getByTestId("wall-piece").evaluateAll((n) => n.map((x) => ({ w: x.getBoundingClientRect().width, label: x.querySelector("span").textContent.length, svg: x.querySelectorAll("svg").length })));
+      for (const p of iconRule) expect(p.svg, JSON.stringify(p)).toBe(p.w >= 16 + 6 * p.label ? 1 : 0);
       // tooltip names the layer and the wall total
       expect(await dock.getByTestId("wall-piece").first().getAttribute("title")).toMatch(/^Truck court 135′ · wall total \d+′$/);
       // open the trailer piece: a one-line box under the row — no wall name, no long title, no total, no ✕, no note
@@ -311,10 +314,11 @@ for (const scheme of ["light", "dark"]) {
       await d.evaluate((el) => el.blur());
       // the Add menu offers the court back at the head, buffer / walk / road — never trailer parking
       await page.keyboard.press("Escape");
-      await dock.getByTestId("wall-add").click();
-      await expect(page.getByTestId("wall-add-court")).toBeVisible();
-      await expect(page.getByTestId("wall-add-trailer")).toHaveCount(0);
-      await page.getByTestId("wall-add-court").click();
+      // NEW-1 (2026-11-03): the wall ends in a Road, so the court (inboard of everything) is the ONLY thing on offer: it is the named
+      // icon on the row, and trailer parking is never offered.
+      await expect(dock.getByTestId("wall-add-group").locator("button")).toHaveCount(1);
+      await expect(dock.getByTestId("wall-add-court")).toHaveAttribute("data-kind", "court");
+      await dock.getByTestId("wall-add-court").click();
       await expect(dock.getByTestId("wall-piece").first()).toHaveAttribute("data-kind", "court");
       // …and a reload keeps every layer in place (the load-time heal finds nothing to repair)
       const snap = async () => (await kidsOf(page, b.id)).map((k) => [k.id, Math.round(k.cx), Math.round(k.cy)]).sort();
@@ -361,7 +365,7 @@ for (const scheme of ["light", "dark"]) {
       await page.locator('[data-testid="loading-wall-picker"] [data-wall]').evaluateAll((n) => n.length);
       const rear = rowByRole(page, "rear");
       await expect(rear.getByTestId("wall-strip")).toHaveCount(0);
-      await expect(rear.getByTestId("wall-add")).toHaveCount(1);
+      await expect(rear.getByTestId("wall-add-group")).toHaveCount(1);
     });
   });
 }

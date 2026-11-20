@@ -7,11 +7,33 @@ import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { maxId, computeNextIds, findDuplicateIdsIn, maxAgainstMain, readRefFile, GIT_MAX_BUFFER, B_FILES, V_FILES } from "../scripts/next-id.mjs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { afterAll } from "vitest";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/* NEW-1 (2026-11-05): the ledger no longer lives in this repo's tree (it is its own branch), so these reader tests
+ * build a THROWAWAY git repo with the legacy two-file layout and a multi-megabyte archive — they test the git
+ * reader, which never needed the real data, only a big file at a real ref. */
+const tmpRoots = [];
+afterAll(() => { for (const d of tmpRoots) rmSync(d, { recursive: true, force: true }); });
+function bigRepo() {
+  const d = mkdtempSync(join(tmpdir(), "nextid-"));
+  tmpRoots.push(d);
+  mkdirSync(join(d, "docs", "archive"), { recursive: true });
+  const heads = [];
+  for (let i = 1; i <= 24000; i++) heads.push(`### B${i} — archived item ${i} ${"x".repeat(60)}\nbody line\n`);
+  writeFileSync(join(d, "docs", "archive", "BACKLOG-DONE.md"), "# Archive\n\n" + heads.join("\n")); // > 2 MB
+  writeFileSync(join(d, "BACKLOG.md"), "# Backlog\n\n### B30000 — open item\n");
+  writeFileSync(join(d, "VERIFICATION.md"), "# Verification\n\n### V70 — open check\n");
+  const run = (c) => execSync(c, { cwd: d, stdio: "ignore" });
+  run("git init -q -b main"); run("git add -A");
+  run("git -c user.name=t -c user.email=t@t commit -qm seed");
+  run("git update-ref refs/remotes/origin/main HEAD");
+  return d;
+}
+const REPO = bigRepo();
 
 describe("maxId — parses only the authoritative id forms", () => {
   it("reads a plain `### B123` heading", () => {
@@ -59,17 +81,13 @@ describe("maxId — parses only the authoritative id forms", () => {
   });
 });
 
-describe("computeNextIds — real repo files", () => {
-  it("returns nextB = maxB + 1 and nextV = maxV + 1", () => {
-    const { maxB, maxV, nextB, nextV } = computeNextIds();
+describe("computeNextIds — the fixture ledger (the live ledger is its own branch since NEW-1; its sanity floor is in test/ledger-data/nextIdLive.test.js)", () => {
+  const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures", "ledger-mini");
+  it("returns nextB = maxB + 1 and nextV = maxV + 1, scanning done entries too", () => {
+    const { maxB, maxV, nextB, nextV } = computeNextIds(FIXTURE);
+    expect([maxB, maxV]).toEqual([100, 50]);   // B100 open, B90 verify, B80 done · V50 pending, V40 done
     expect(nextB).toBe(maxB + 1);
     expect(nextV).toBe(maxV + 1);
-  });
-
-  it("finds real, plausibly-large maxes (the archive is scanned, not just the open file)", () => {
-    const { maxB, maxV } = computeNextIds();
-    expect(maxB).toBeGreaterThan(700); // sanity floor as of B755
-    expect(maxV).toBeGreaterThan(200);
   });
 });
 
@@ -96,10 +114,10 @@ describe("findDuplicateIdsIn — the concurrent-mint collision detector (B779)",
 describe("maxAgainstMain — folds in origin/main (B779)", () => {
   it("is never LESS than the local-only max (origin/main only adds ids), and never throws", () => {
     // In CI origin/main may or may not be fetched; either way this must be safe + monotone.
-    const local = computeNextIds().maxB;
+    const local = computeNextIds(REPO).maxB;
     const withMain = maxAgainstMain(REPO, B_FILES, "B");
     expect(withMain).toBeGreaterThanOrEqual(local);
-    expect(maxAgainstMain(REPO, V_FILES, "V")).toBeGreaterThanOrEqual(computeNextIds().maxV);
+    expect(maxAgainstMain(REPO, V_FILES, "V")).toBeGreaterThanOrEqual(computeNextIds(REPO).maxV);
   });
 });
 
