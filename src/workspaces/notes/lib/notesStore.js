@@ -584,7 +584,9 @@ function commitPageWrite(pageId, clean, { auto }) {
     const prev = sync.pages[pageId] || {};
     // A deliberate write clears the device-level tombstone: only a real body write can, and
     // it keeps the revision it was based on so the push stays a guarded update.
-    sync.pages[pageId] = { rev: Number.isFinite(prev.rev) ? prev.rev : null, dirty: true, purged: false, auto };
+    sync.pages[pageId] = { rev: Number.isFinite(prev.rev) ? prev.rev : null, dirty: true, purged: false,
+      // Sticky: a housekeeping write never downgrades a page that already owes a REAL edit.
+      auto: auto && (!prev.dirty || !!prev.auto) };
     saveSyncState();
     schedulePush();
   }
@@ -1979,7 +1981,8 @@ async function pushOnce() {
        * that is actually now on the server (this call's own `doc`), which is correct either
        * way; only the dirty flag and whether another push is owed depend on the comparison. */
       const stillCurrent = c.sameDoc(doc, readPage(id));
-      sync.pages[id] = { rev: r.rev, dirty: !stillCurrent, purged: false, auto: stillCurrent ? false : wasAuto };
+      // Live flag, not the pre-await `wasAuto`: an edit that landed mid-flight already set auto:false and must keep it.
+      sync.pages[id] = { rev: r.rev, dirty: !stillCurrent, purged: false, auto: stillCurrent ? false : (wasAuto && !!sync.pages[id]?.auto) };
       await recordMergeBase(id, doc, r.rev);   // NEW-1: this device and the server just agreed on `doc`
       if (!stillCurrent) schedulePush();       // more local content is owed — make sure it lands
       continue;
@@ -2000,7 +2003,11 @@ async function pushOnce() {
        * landing. Same rule, same reason: nothing here is a real user edit to defend, so the
        * server's row simply wins and the local cleanup is dropped (harmless — idempotent, and
        * the sweep runs again next load against the freshly adopted row). */
-      if (row && wasAuto) {
+      /* ⛔ IN-FLIGHT EDIT GUARD (audit finding #3): `wasAuto` was read BEFORE the network await. If the
+       * person typed while this push was on the wire the page now holds a REAL edit, and "the server's
+       * row wins, the cleanup is dropped" would silently overwrite their words. Only drop the local
+       * copy when it is still byte-for-byte what this housekeeping push sent AND still marked auto. */
+      if (row && wasAuto && sync.pages[id]?.auto && c.sameDoc(doc, readPage(id))) {
         if (writePageLocal(id, row.doc)) {
           sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false };
           emitPagesChanged([id]);
