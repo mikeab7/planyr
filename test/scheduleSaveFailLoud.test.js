@@ -2,7 +2,8 @@
 // must tell the user (a 403/42501 used to reach only the console while the grid showed the edit as saved).
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-const html = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+import { sequencePageSource } from "./helpers/sequenceSource.js";
+const html = sequencePageSource();
 describe("scheduler cloud-write failures are loud", () => {
   const lines = html.split("\n").filter((l) => l.includes('console.error("Supabase set error'));
   it("finds the three write paths", () => expect(lines.length).toBe(3));

@@ -119,7 +119,7 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("parses without refusing, and every step is a plain run: gate (no uses:)", () => {
     const res = jobSteps(readGates(), "build");
     expect(res.ok, res.unparsed.join("; ")).toBe(true);
-    expect(res.steps.length).toBe(42);
+    expect(res.steps.length).toBe(41);
     expect(res.steps.every((s) => s.run != null && s.uses == null)).toBe(true);
   });
 
@@ -183,10 +183,10 @@ describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 42 gates + 0 infra (build.yml's lane jobs hold only runner plumbing)", () => {
+  it("ci-gates.yml's real steps split into 41 gates + 0 infra (build.yml's lane jobs hold only runner plumbing)", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(42);
+    expect(gates.length).toBe(41);
     expect(infra.length).toBe(0);
   });
 
@@ -291,9 +291,9 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports all 42 gates from ci-gates.yml, and the lane jobs' runner plumbing from build.yml", () => {
+  it("reports all 41 gates from ci-gates.yml, and the lane jobs' runner plumbing from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("Gates (42), in order, read from .github/ci-gates.yml:");
+    expect(out).toContain("Gates (41), in order, read from .github/ci-gates.yml:");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("(actions/upload-artifact)");
     expect(out).toContain("Download the built app (actions/download-artifact)");
@@ -303,7 +303,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
 
   it("--docs-only --list reports only the DOCS_ONLY_GATE_NAMES subset, and names the total it's drawn from", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list", "--docs-only"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 42, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 41, docs-only mode)`);
     for (const name of DOCS_ONLY_GATE_NAMES) expect(out).toContain(name);
     // a full-build-only gate must NOT show up in the docs-only listing
     expect(out).not.toContain("Lint (fails the build");
@@ -314,7 +314,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], {
       cwd: REPO, encoding: "utf8", env: { ...process.env, CI_DOCS_ONLY: "true" },
     });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 42, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 41, docs-only mode)`);
   });
 });
 
@@ -359,7 +359,7 @@ describe("LANES — which parallel job runs which gate (Batch C, 2026-11-23)", (
     expect(idx("vitest", "Test (")).toBe(true);
     for (const p of ["Build", "Base-ref bundle snapshot", "Performance budget"]) expect(idx("build-app", p), p).toBe(true);
     for (const p of ["Install Playwright chromium", "Serve the built app", "Wait for the preview server", "Signature-budget gate", "Visual regression baselines", "Notes placement surface", "Notes clipboard regression bank", "App-shell width sweep", "Parcels list layout", "Planner per-pointer-move rule", "Critical interaction lane"]) expect(idx("browser", p), p).toBe(true);
-    for (const p of ["Lint", "Scheduler syntax guard", "Required-check contract guard", "Generated-index touch guard", "Doc pointer freshness guard"]) expect(idx("static", p), p).toBe(true);
+    for (const p of ["Lint", "Schedule page bundle", "Required-check contract guard", "Generated-index touch guard", "Doc pointer freshness guard"]) expect(idx("static", p), p).toBe(true);
   });
 
   it("Notes gates: exactly the five owner-kept ones stay in the REQUIRED lanes; the other 13 run only in notes-extra", () => {
@@ -435,7 +435,7 @@ describe("LANES — which parallel job runs which gate (Batch C, 2026-11-23)", (
     expect(selectLane(gates(), "nope").ok).toBe(false);
   });
 
-  it("ci-parity --lane / --shard reads the same manifest: the lanes together cover all 42 gates", () => {
+  it("ci-parity --lane / --shard reads the same manifest: the lanes together cover all 41 gates", () => {
     const seen = new Set();
     for (const [lane, shards] of [["static", 1], ["vitest", 3], ["build-app", 1], ["browser", 4], ["notes-extra", 3]]) {
       for (let i = 1; i <= shards; i++) {
@@ -444,6 +444,6 @@ describe("LANES — which parallel job runs which gate (Batch C, 2026-11-23)", (
         for (const m of out.matchAll(/^\s+\d+\. (.+)$/gm)) seen.add(m[1]);
       }
     }
-    expect(seen.size).toBe(42);
+    expect(seen.size).toBe(41);
   });
 });

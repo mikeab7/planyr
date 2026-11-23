@@ -27,7 +27,7 @@ export default [
   // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
   // Audit batch D (2026-11-23): dead `eslint-disable` comments are reported, and .mjs (scripts/, ui-audit/) is linted.
   { linterOptions: { reportUnusedDisableDirectives: "warn" } },
-  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**", "public/sequence/vendor/**"] },
+  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**", "public/sequence/vendor/**", "public/sequence/page.js"] },
   {
     files: ["**/*.{js,jsx,mjs}"],
     plugins: { "react-hooks": reactHooks },
@@ -62,5 +62,11 @@ export default [
   {
     files: ["test/**/*.js", "**/*.config.js", "server/**/*.js", "e2e/**/*.js", "**/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
+  },
+  // The Schedule page (audit batch J3): real ES modules bundled into public/sequence/page.js. React, ReactDOM,
+  // the Supabase client and the task-icon library still arrive as classic <script> globals ahead of the bundle.
+  {
+    files: ["src/workspaces/scheduler/page/**/*.{js,jsx}"],
+    languageOptions: { globals: { React: "readonly", ReactDOM: "readonly", supabase: "readonly", PlanyrTaskIcons: "readonly" } },
   },
 ];

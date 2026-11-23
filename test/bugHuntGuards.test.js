@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { plannerSource } from "./helpers/plannerSource.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 /* Anti-drift guards for the 2026-06-27 bug-hunt fixes (B505–B509). These files are edited
  * by many concurrent sessions; a string-level check fails loudly if a merge silently reverts
  * a fix. Each guard points at the exact defect the bug-hunt confirmed. */
@@ -869,7 +870,7 @@ describe("B850 (2026-07-15, owner: \"i dont need this large pop up\" then \"shou
   });
 
   it("the embedded scheduler's own live-refresh + version guard actually exist (the safety B850's suppression relies on)", () => {
-    const src = read("../public/sequence/index.html");
+    const src = sequencePageSource();
     // poll every 20s + on focus/reconnect/tab-switch for a newer cloud version
     const checkRemote = src.match(/const check = async \(\) => \{[\s\S]{0,1800}/)[0];
     expect(checkRemote).toMatch(/window\.storage\.checkRemote\("hs-v1"\)/);

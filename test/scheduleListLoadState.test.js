@@ -2,6 +2,7 @@
  * Pure rules (navState.js) + a source guard that the iframe's write path and shell gate stay wired. */
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 import {
   scheduleListState, parseLoadState, shouldShowLinkPanel, SCHEDULE_SLOW_MS, SCHEDULE_FAIL_MS,
 } from "../src/workspaces/scheduler/lib/navState.js";
@@ -43,7 +44,7 @@ describe("parseLoadState", () => {
 });
 
 describe("source guards (the write path is refused while unread/failed)", () => {
-  const html = fs.readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+  const html = sequencePageSource();
   it("_rawSet refuses an hs-v1 write unless the document was read", () => {
     const i = html.indexOf("_rawSet: async (k, v, opts = {}) => {");
     expect(i).toBeGreaterThan(0);

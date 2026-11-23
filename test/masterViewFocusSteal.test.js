@@ -19,8 +19,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 const masterViewSrc = (() => {
   const start = seq.indexOf("function MasterView(");

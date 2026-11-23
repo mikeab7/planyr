@@ -13,12 +13,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 import { NO_AUTOFILL, autofillToken, isIosLike, contactField, CONTACT_TOKENS } from "../src/shared/ui/noAutofill.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SEQ = resolve(here, "../public/sequence/index.html");
 const AUTH = resolve(here, "../src/workspaces/site-planner/components/AuthPanel.jsx");
-const seq = readFileSync(SEQ, "utf8");
+const seq = sequencePageSource();
 const auth = readFileSync(AUTH, "utf8");
 
 describe("NO_AUTOFILL shared attribute bag", () => {

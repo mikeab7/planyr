@@ -3,7 +3,7 @@
 // Meeting bodies (the governmental meeting calendars a task can be bound to): recurrence, agenda deadlines, bound-date resolution, pins and pin conflicts, importing bodies between schedules.
 //
 // Pure functions only (no React, no DOM). The Schedule page (public/sequence/index.html) gets this code
-// through the generated script public/sequence/engine.js (npm run build:sequence-engine), and the unit
+// through the generated script public/sequence/page.js (npm run build:sequence-page), and the unit
 // tests import it directly — ONE copy, no paste-in. Moved here verbatim from the page (audit batch J1);
 // behaviour is unchanged.
 import { addD, dif, difBD, fdLocal, pd, subBD } from "./calendar.js";

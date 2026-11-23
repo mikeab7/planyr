@@ -75,7 +75,11 @@ describe("schedules — the linked project's name is a read-time lookup", () => 
   it("no host code reads linkedSiteName for DISPLAY outside the ownership module", () => {
     const allowed = ["scheduleOwnership.js", "scheduleSource.js", "scheduleLinkHints.js", "navState.js", "scheduleSiteNames.js", "merge.js"];
     const bad = [];
-    const scan = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) scan(p); else if (/\.(jsx?|mjs)$/.test(f) && !allowed.includes(f)) {
+    // The Schedule page's modules (audit batch J3, moved here from public/sequence/index.html) carry the schedule's
+    // own storage mapping: copying linkedSiteName between the document, the undo history and the cloud rows. They
+    // never render it; every on-screen label goes through crossScheduleLabel / liveSiteName.
+    const pageDir = join("src", "workspaces", "scheduler", "page");
+    const scan = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) { if (p !== pageDir) scan(p); } else if (/\.(jsx?|mjs)$/.test(f) && !allowed.includes(f)) {
       readFileSync(p, "utf8").split("\n").forEach((l, i) => { if (/\.linkedSiteName\b/.test(l) && !/^\s*(\/\/|\*)/.test(l) && !/liveSiteName/.test(l)) bad.push(`${p}:${i + 1}: ${l.trim()}`); });
     } } };
     scan("src");

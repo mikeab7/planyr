@@ -22,10 +22,9 @@ import { join } from "node:path";
 const DIR = new URL("../.vendor/", import.meta.url).pathname;
 
 // url → local basename. Matched against the page source as a literal substring.
-export const CDN_ASSETS = {
-  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2": "supabase.js",
-  "https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js": "babel.js",
-};
+// Empty since audit batches A and J3: supabase-js is vendored (public/sequence/vendor/supabase.js) and the page no
+// longer loads Babel, so the page pulls nothing from a CDN. Kept (with its callers) so a future CDN asset has a home.
+export const CDN_ASSETS = {};
 // The icon webfont stylesheet is decorative — dropped rather than vendored, so a font CDN outage can
 // never fail a scheduling assertion.
 const DROP = ["https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css"];

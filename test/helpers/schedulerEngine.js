@@ -1,5 +1,5 @@
 // The Schedule engine as the tests see it: every real export of src/shared/schedule/engine (the same code the
-// page runs, via the generated public/sequence/engine.js) plus a few small helpers that are NOT module-level
+// page runs, via the generated public/sequence/page.js) plus a few small helpers that are NOT module-level
 // in the page. Those helpers (below) are labelled copies of logic that lives inside React components and
 // so can't be imported; they are exactly what ui-audit/stress/scheduler-engine.mjs used to carry for them.
 import { computeDisplayHealth } from "../../src/shared/schedule/engine/health.js";
