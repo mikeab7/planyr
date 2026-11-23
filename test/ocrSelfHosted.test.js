@@ -1,3 +1,4 @@
+// source-scan: guards that the built-in engine paths and production wiring in src/ match the files the build copies; the engine cannot run in node.
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { OCR_FILES } from "../scripts/build-ocr-assets.mjs";
