@@ -58,3 +58,6 @@ Three module-scope `memo` components moved verbatim out of SitePlanner's main re
 
 ## The left panel body is `components/LeftPanelBody.jsx` (audit batch G6a)
 `renderPanelBody` (about 880 lines: the docked and floating panels' contents) is now the module-scope `memo` component `LeftPanelBody`; SitePlanner keeps `const renderPanelBody = (_pid) => <LeftPanelBody … />`, so both call sites are unchanged. The four lazy panel imports it used (`OverlaysPanel`, `SiteAnalysis`, `ParcelCopyNote`, `GradingPanel`) moved with it. Props are the same-named planner values (about 160 of them, mostly handlers rebuilt each render, so `memo` will rarely skip: this is the seam, not a speed-up).
+
+## The right-click menus are `components/PlannerContextMenus.jsx` (audit batch G6b)
+`MapContextMenu` (the element/markup/measure/callout menu, about 190 lines), `OverlayContextMenu` and `ParcelMenuHost` (which hosts `ParcelContextMenu`) are module-scope `memo` components moved verbatim out of SitePlanner's main return; their open/close guards stay there. The vertex menu and the type menu are still inline.

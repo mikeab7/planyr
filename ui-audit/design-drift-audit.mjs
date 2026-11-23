@@ -98,6 +98,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/components/InspectorHeaders.jsx", // audit batch G5
   "src/workspaces/site-planner/components/ElementInspectors.jsx", // audit batch G5
   "src/workspaces/site-planner/components/LeftPanelBody.jsx", // audit batch G6
+  "src/workspaces/site-planner/components/PlannerContextMenus.jsx", // audit batch G6
   "src/workspaces/site-planner/lib/plannerConstants.js",
   "src/workspaces/site-planner/lib/floodFootprintMemo.js",
   "src/workspaces/site-planner/lib/plannerShared.js",
