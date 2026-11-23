@@ -13,7 +13,8 @@
  * NOT flattened; there is exactly one rule ("active control fill = the surface's interactive
  * accent, --accent unless the host overrides").
  */
-import { forwardRef, useCallback, useEffect, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import { stepListIndex, listboxKeyAction, listboxOptionId } from "./listboxNav.js";
 // B2499520 — the typeahead-list behaviour is a control primitive like the rest, and it is DEFINED here on purpose (not in a module of its
@@ -593,4 +594,64 @@ export function useListboxNav({ count, open, setOpen, onCommit, listboxId }) {
   });
 
   return { activeIndex, setActiveIndex: setRawIndex, reset, onKeyDown, inputProps, optionProps };
+}
+
+
+/* ── Dialog (audit I4) ─────────────────────────────────────────────────────────────────────────────────────────
+ * ONE modal shell: portaled to <body>, a dimmed backdrop, role="dialog" aria-modal, Escape closes (and stops there, so
+ * the host's own Escape handlers — deselect, close a panel — never also fire), Tab is TRAPPED inside, and focus
+ * returns to whatever had it when the dialog opened.
+ * ⛔ The backdrop closes the dialog ONLY when the press AND the release both land on it (owner constraint #54: a drag that
+ * starts in a field and ends outside, or an injected click, must never throw away a half-filled form). Pure rules below
+ * are exported so they are unit-tested in node (this repo has no component-render environment).
+ * Props: onClose · label (aria-label) · z (default 3000) · testId · width · padding · dismissOnBackdrop (default true) ·
+ * dismissOnEscape (default true) · style (the card). Children render inside the card. */
+export const DIALOG_FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+// The backdrop closes only for a press that began on the backdrop AND a release that ended on it.
+export function dialogBackdropShouldClose(pressStartedOnBackdrop, releaseOnBackdrop) { return !!pressStartedOnBackdrop && !!releaseOnBackdrop; }
+// Where Tab / Shift+Tab goes among `count` focusable items when `index` (−1 = focus is not on one) is active; null = let the browser move it.
+export function dialogTabTarget(count, index, shift) {
+  if (count <= 0) return -1;                       // nothing focusable: keep focus on the card
+  if (index < 0) return shift ? count - 1 : 0;     // focus outside the list: pull it in
+  if (shift && index === 0) return count - 1;
+  if (!shift && index === count - 1) return 0;
+  return null;
+}
+export function Dialog({ onClose, label, z = 3000, testId, width = "min(560px, 100%)", padding = 16, dismissOnBackdrop = true, dismissOnEscape = true, style, children }) {
+  const cardRef = useRef(null);
+  const pressOnBackdrop = useRef(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const prev = typeof document !== "undefined" ? document.activeElement : null;
+    const card = cardRef.current;
+    if (card && !card.contains(document.activeElement)) card.focus();
+    return () => { if (prev && prev.focus && document.contains(prev)) { try { prev.focus(); } catch (_) { /* focus is best effort */ } } };
+  }, []);
+  const onKeyDown = (e) => {
+    if (e.key === "Escape" && dismissOnEscape && !e.defaultPrevented) { e.stopPropagation(); closeRef.current?.(); return; }
+    if (e.key !== "Tab") return;
+    const card = cardRef.current;
+    if (!card) return;
+    const items = Array.from(card.querySelectorAll(DIALOG_FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    const to = dialogTabTarget(items.length, items.indexOf(document.activeElement), e.shiftKey);
+    if (to === null) return;
+    e.preventDefault();
+    if (to === -1) card.focus(); else items[to].focus();
+  };
+  return createPortal(
+    <div
+      data-testid={testId ? testId + "-backdrop" : undefined}
+      style={{ position: "fixed", inset: 0, zIndex: z, background: "rgba(20,18,15,0.42)", display: "grid", placeItems: "center", padding: 16 }} // design-exempt: modal scrim — no backdrop-color token yet
+      onPointerDown={(e) => { pressOnBackdrop.current = e.target === e.currentTarget; }}
+      onPointerUp={(e) => { if (dismissOnBackdrop && dialogBackdropShouldClose(pressOnBackdrop.current, e.target === e.currentTarget)) closeRef.current?.(); pressOnBackdrop.current = false; }}
+      onKeyDown={onKeyDown}
+    >
+      <div ref={cardRef} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} data-testid={testId}
+        style={{ width, maxHeight: "calc(100vh - 32px)", overflowY: "auto", background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.panel, boxShadow: "0 18px 50px rgba(0,0,0,0.32)", padding, outline: "none", ...style }}>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
 }
