@@ -75,7 +75,8 @@ describe("every pair the user could care about is REVERSIBLE, and the table says
       else expect(SRC, `menu label missing: ${label}`).toContain(label);
     }
     expect(labels.size).toBeGreaterThan(0); // a vacuous pass is not a pass
-    expect(SRC).toContain('from "./lib/paintOrder.js"');
+    // G6b: the menus that import it now live in components/PlannerContextMenus.jsx
+    expect(SRC).toContain('from "../lib/paintOrder.js"');
   });
 });
 

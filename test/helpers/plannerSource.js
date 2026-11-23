@@ -25,7 +25,7 @@ export const PLANNER_MAIN = "SitePlanner.jsx";
 
 /* Extracted modules, split by where their code used to sit relative to the component: ABOVE it, or AFTER it. */
 export const PLANNER_EXTRACTED_ABOVE = ["lib/plannerConstants.js", "lib/floodFootprintMemo.js", "lib/plannerShared.js", "lib/planRenderHelpers.jsx"];
-export const PLANNER_EXTRACTED_BELOW = ["components/elementRender.jsx", "components/NumInput.jsx", "components/YieldDrainagePanels.jsx", "components/PropFields.jsx", "components/PondInspector.jsx", "components/MarkupInspector.jsx", "components/InspectorHeaders.jsx", "components/ElementInspectors.jsx", "components/LeftPanelBody.jsx", "lib/assemblyOps.js", "lib/usePlannerDiagnostics.js", "lib/useVersionHistory.js", "components/WallRows.jsx", "components/PlannerIcons.jsx"];
+export const PLANNER_EXTRACTED_BELOW = ["components/elementRender.jsx", "components/NumInput.jsx", "components/YieldDrainagePanels.jsx", "components/PropFields.jsx", "components/PondInspector.jsx", "components/MarkupInspector.jsx", "components/InspectorHeaders.jsx", "components/ElementInspectors.jsx", "components/LeftPanelBody.jsx", "components/PlannerContextMenus.jsx", "lib/assemblyOps.js", "lib/usePlannerDiagnostics.js", "lib/useVersionHistory.js", "components/WallRows.jsx", "components/PlannerIcons.jsx"];
 export const PLANNER_EXTRACTED = [...PLANNER_EXTRACTED_ABOVE, ...PLANNER_EXTRACTED_BELOW];
 
 const read = (rel) => readFileSync(PLANNER_DIR + rel, "utf8");
