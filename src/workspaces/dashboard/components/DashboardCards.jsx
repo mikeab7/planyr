@@ -5,19 +5,12 @@
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { STATUS_TOKENS } from "../../../shared/ui/statusTokens.js";
 import { IconButton } from "../../../shared/ui/controls.jsx";
+import { daysAgoWords } from "../../../shared/units/dateFormat.js";
 
 const STATUS_LABEL = { pursuit: "Pursuit", active: "Active", onhold: "On hold", complete: "Complete", dead: "Dead" };
 const STATUS_VAR = { pursuit: "var(--status-pursuit)", active: "var(--status-active)", onhold: "var(--status-onhold)", complete: "var(--status-complete)", dead: "var(--status-dead)" };
 
-function relativeDays(iso) {
-  if (!iso) return null;
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.round(days / 30);
-  return months === 1 ? "1 month ago" : `${months} months ago`;
-}
+const relativeDays = daysAgoWords;
 
 function StatusDot({ status, size = 8 }) {
   return <span style={{ width: size, height: size, borderRadius: RADIUS.pill, background: STATUS_VAR[status] || "var(--text-secondary)", flex: "none", display: "inline-block" }} />;

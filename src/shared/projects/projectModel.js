@@ -1,3 +1,4 @@
+import { relCompact } from "../units/dateFormat.js";
 /* Project model — pure helpers shared by the header breadcrumb / project switcher.
  *
  * A "project" in Planyr is a Site Planner *site group* (one location, possibly many
@@ -423,20 +424,7 @@ export function reorderWithCurrentAndPinned(list = [], currentId = null, pinnedI
 // parse (LOUD-FAILURE: it degraded quietly instead of failing), and deleting the space would have
 // hidden it for good. The bin LIST was never affected — `listDeletedProjects` converts with
 // `toMs()` first — which is exactly why this survived: one of the two callers was already correct.
-export function relTime(ts, now = Date.now()) {
-  const t = typeof ts === "string" ? (Date.parse(ts) || Number(ts) || 0) : (Number(ts) || 0);
-  if (!t) return "";
-  const sec = Math.max(0, Math.floor((now - t) / 1000));
-  if (sec < 45) return "just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  if (day < 30) return `${Math.floor(day / 7)}w ago`;
-  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+export const relTime = relCompact;
 
 /* B1953794 - pure answers shared by the Site Planner AND the Dashboard. They live HERE (a module
  * both already load, with no imports) rather than in site-planner/lib: a module imported by both

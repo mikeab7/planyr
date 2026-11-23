@@ -22,6 +22,7 @@ import { toGrid, screenProximity, planeForRings } from "./proximityScreen.js";
 import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
+import { ageWordsLong } from "../../../shared/units/dateFormat.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -501,14 +502,7 @@ export function rowFromMeasurement(id, measurement, thresholds = CHECK_THRESHOLD
 /* ── freshness ───────────────────────────────────────────────────────────────────────────────── */
 const HOUR = 3600 * 1000, DAYMS = 24 * HOUR;
 /* "just now" / "3 hours ago" / "2 days ago" — plain words, deliberately coarse. */
-export function ageWords(ms) {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
-  if (ms < 45 * 1000) return "just now";
-  if (ms < HOUR) { const m = Math.max(1, Math.round(ms / 60000)); return `${m} minute${m === 1 ? "" : "s"} ago`; }
-  if (ms < DAYMS) { const h = Math.round(ms / HOUR); return `${h} hour${h === 1 ? "" : "s"} ago`; }
-  const d = Math.round(ms / DAYMS);
-  return `${d} day${d === 1 ? "" : "s"} ago`;
-}
+export const ageWords = ageWordsLong;
 /* ONE freshness line for the panel (the median row age) and the rows that are MATERIALLY staler than the
  * rest (at least a day older than the median AND over twice it) — only those get an age of their own. */
 export function freshnessOf(rows) {
