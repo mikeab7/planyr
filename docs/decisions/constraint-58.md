@@ -1,0 +1,7 @@
+# Owner product constraint #58
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+58. **(2026-11-15) In Notes, copying a BOX and copying TEXT are two different things and it must be obvious which one he is doing — Excel's way.** Michael: "it must be obvious when he is copying a BOX as opposed to TEXT, the way Excel shows a copied cell." Click a box's outline (the box itself is selected), Ctrl+C: the box wears a moving dashed outline until Esc, a new copy or an edit (a paste is not an edit), and Ctrl+V makes a NEW box with all its text and formatting — wherever the caret is; with the caret inside another box's text the paste-options tab offers the text-only version. Any text selection (a drag, Shift+arrows, **Ctrl+A**) copies TEXT ONLY: no outline, no box on the clipboard, a paste inserts text — the box frame is taken out of every copied slice (`copyScopePlugin`). The box rides the clipboard in a `data-planyr-boxes` attribute of the HTML; its content is still ordinary HTML + plain text for other apps. Ctrl+X on a selected box cuts it (one Ctrl+Z restores it). Do not make a text copy carry a box, do not draw the outline on a text copy, and do not pour a copied box's words into another box unless he picks Keep Text Only. Guards: repo-root `test/` **notesBoxClipboard**; **verify-notes-box-copy** (a required `build` step). (B2671288.)

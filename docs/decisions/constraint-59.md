@@ -1,0 +1,7 @@
+# Owner product constraint #59
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+59. **(2026-11-15) In Notes, Ctrl+A belongs to the thing you are in — PowerPoint's rule, approved by Michael.** With the caret inside a box, Ctrl+A selects that box's text ONLY; Ctrl+C then copies TEXT (constraint 58: no box, no outline), typing replaces only that box's text, one Ctrl+Z restores it. In a table cell it steps outward — the cell's text, then the whole table, then the box's text — and never escapes into another box. With NO caret in a box (a box selected by its outline, or blank paper) Ctrl+A selects EVERY box on the page as boxes, and Ctrl+C then copies them as boxes with the moving outline; Delete / arrows / Ctrl+Z act on all of them. A page with no box and a form field (the title, search) keep the browser's own Ctrl+A. Do not bring back the whole-page text selection, and do not let a second Ctrl+A handler grow beside `selectAllScope`. Code: `lib/notesSelectAll.js` (keymap, priority 200, above the engine's own Mod-a) + the window handler in `NoteEditor.jsx`; guards: repo-root `test/` **notesSelectAll**; **verify-notes-select-all** (a required `build` step; red on the pre-change build, 19 x). (NEW-1, B2671293.)

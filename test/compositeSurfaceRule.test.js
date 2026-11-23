@@ -18,7 +18,11 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const RULES = readFileSync(resolve(ROOT, "CLAUDE.md"), "utf8");
+const CLAUDE = readFileSync(resolve(ROOT, "CLAUDE.md"), "utf8");
+// Slimmed 2026-11-23 (audit batch H): CLAUDE.md keeps a short rule + the stable anchor; the full rule text
+// (definition, obligation, three instances) lives verbatim in the linked decision doc this suite reads.
+const RULE_DOC = "docs/decisions/no-one-owns-a-composite.md";
+const RULES = readFileSync(resolve(ROOT, RULE_DOC), "utf8");
 
 /** The rule's own block, from its heading to the start of the next named rule. */
 const ruleBlock = () => {
@@ -29,6 +33,12 @@ const ruleBlock = () => {
 };
 
 describe("NO-ONE-OWNS-A-COMPOSITE is still stated, with the parts that make it usable", () => {
+  it("CLAUDE.md carries the rule's anchor and links its decision doc", () => {
+    expect(CLAUDE).toContain("<!--rule:NO-ONE-OWNS-A-COMPOSITE-->");
+    expect(CLAUDE).toMatch(/THE GUARD IS INK OR PIXELS, NEVER REGISTRATIONS/);
+    expect(existsSync(resolve(ROOT, RULE_DOC)), "decision doc missing").toBe(true);
+  });
+
   it("the rule exists as a named entry", () => {
     expect(ruleBlock(), "the named rule is gone from CLAUDE.md").toBeTruthy();
   });

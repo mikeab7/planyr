@@ -70,7 +70,9 @@ describe("Food / Ambiance rating = one slider, 1 to 10, quarter-point steps", ()
 
   it("the decision is written down where every session reads it (CLAUDE.md, Owner product constraints)", () => {
     const claude = read("CLAUDE.md");
+    expect(claude).toContain("<!--constraint:16-->");
     expect(claude).toMatch(/Food ratings are one slider each, 1 to 10 in quarter steps/);
     expect(claude).toMatch(/lib\/ratingScale\.js/);
+    expect(read("docs/decisions/constraint-16.md")).toMatch(/Food ratings are one slider each, 1 to 10 in quarter steps/);
   });
 });

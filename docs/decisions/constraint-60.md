@@ -1,0 +1,7 @@
+# Owner product constraint #60
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+60. **(2026-10-19 / 2026-10-22 directions, captured 2026-11-16 from the Goose Creek brief — B2331664 ×2) Adding lots from the county NEVER auto-zooms, and the county's lot lines draw from FURTHER OUT, hiding only house-size lots.** Michael (2026-10-19): arming Add parcels / Select parcels must not move the view; (2026-10-22): outlines "need too much zoom — I need to see parcels from further out", fine to hide only tiny (house-size) lots at wide views, the concern being load on county servers. So both click-a-lot surfaces (the planner's Add parcels › click lots and the Map's Select parcels) draw the SAME larger-lots band (`parcelWideLayer.js`: lots ≥ 0.2 ac one zoom step under a source's own vector floor, ≥ 0.5 ac two steps under, via a size filter the county never sees past) and the short "Zoom in to see the county lot lines" line shows ONLY where the view is genuinely under that band. A click shows its lot's outline the same frame. Do not add an auto-zoom, do not lower the thresholds by downloading every lot and hiding them on the client, and do not let the planner's click-a-lot layers be built without `wide: true` (repo-root `test/` **addLotsOutlineZoom** fails). Parcels on top stays #27.
