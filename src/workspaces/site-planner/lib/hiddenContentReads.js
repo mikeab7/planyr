@@ -78,8 +78,10 @@ export const DECLARATIONS = Object.freeze([
     why: "Hosts the ambient flush-snap's neighbour set (B494049). Everything else it reads is the element being dragged, which cannot be hidden — hiding clears the selection into it." },
 
   /* ── CORRECT-UNFILTERED: judged, and filtering any of these would be the worse bug ─────────── */
-  { name: "hexA", verdict: U,
-    why: "A colour helper (alpha-blend of a theme hex). Its body is swept only because it is the LAST module-scope const before the component and the sweep reads a whole top-level span; it produces no picture." },
+  { name: "loadPlaceCmds", verdict: U,
+    why: "A lazy-import helper. Its body is swept only because it is the LAST module-scope binding before the component (since the G1 split moved hexA out) and the sweep reads a whole top-level span; it produces no picture." },
+  { name: "ParcelCopyNote", verdict: U,
+    why: "A lazy-import line. Its swept body runs to the next module-scope binding (since the G1 split moved the module constants out) and so spans module-scope glue only; it produces no picture." },
   { name: "probeRef", verdict: U, why: "The E2E read-only probe store. It reports what the app holds, so it must report ALL of it." },
   { name: "onUp", verdict: U, why: "Release handler; the marquee pick it hosts is already visibility-filtered (B442688)." },
   { name: "calloutDblAction", verdict: U, why: "Acts on the callout that was double-clicked; a hidden one cannot be." },

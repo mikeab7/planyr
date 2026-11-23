@@ -6,6 +6,7 @@ import { FREEZE_VIA_VOCAB, CAPTURE_NUMERIC_KEYS } from "../src/shared/telemetry/
 import { addVectorLabels } from "../src/shared/basemaps/vectorLabelLayer.js";
 import { throttleTilePruning } from "../src/workspaces/site-planner/lib/tileLifecycle.js";
 import { loafRecord, longFrameVerdict, topScripts, busyTimers, installPlannerPerf, LONG_FRAME_MS } from "../src/workspaces/site-planner/lib/plannerPerf.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 (2026-11-01) — "graded plans are slower than they should be on the owner's machine".
  *
@@ -97,7 +98,7 @@ describe("(2) the raster road-names fallback gets coalesced tile pruning", () =>
   });
 
   it("RED ON MAIN: both planner hosts pass decorateFallback with the coalescing; the planner also caps the layer", () => {
-    const planner = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const planner = plannerSource();
     const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
     const call = (src) => { const i = src.indexOf("addVectorLabels(L, map"); return i < 0 ? "" : src.slice(i, i + 1200); };
     expect(call(planner)).toMatch(/decorateFallback:[\s\S]*throttleTilePruning\(layer\)[\s\S]*boundTileCache\(layer/);

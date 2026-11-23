@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import { parcelAfterInsert, parcelAfterDelete } from "../src/workspaces/site-planner/lib/parcelReshape.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const sq = () => [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 400, y: 300 }, { x: 0, y: 300 }];
 const lot = (extra = {}) => ({ id: "L", active: true, points: sq(), ...extra });
@@ -62,7 +63,7 @@ describe("delete corner i", () => {
 });
 
 describe("the corner tool really calls it", () => {
-  const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  const src = plannerSource();
   it("insertVtx and deleteVtx hand the parcel layer to the one reshape (no second inline copy)", () => {
     expect(src).toMatch(/layer === "parcel"\) setParcels\(\(a\) => a\.map\(\(pc\) => pc\.id === id \? parcelAfterInsert\(pc, edgeIndex, np\) : pc\)\)/);
     expect(src).toMatch(/layer === "parcel"\) setParcels\(\(a\) => a\.map\(\(pc\) => pc\.id === id \? parcelAfterDelete\(pc, index\) : pc\)\)/);

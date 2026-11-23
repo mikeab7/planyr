@@ -25,7 +25,7 @@ describe("Grading dock icon is a contour-lines glyph (NEW-1)", () => {
     const s = plannerSource();
     const table = s.match(/const RAIL_ICONS = \{([\s\S]*?)\n\};/)[1];
     expect(table).toMatch(/\n  grading: <>\{GRADING_GLYPH\.contours\.map\(\(d\) => <path key=\{d\} d=\{d\} \/>\)\}<path d=\{GRADING_GLYPH\.spot\} fill="currentColor"/);
-    expect(s).toMatch(/import \{ GRADING_GLYPH \} from "\.\/components\/railGlyphs\.js";/);
+    expect(s).toMatch(/import \{ GRADING_GLYPH \} from "\.\/(components\/)?railGlyphs\.js";/); // G1: the table moved into components/PlannerIcons.jsx
     // one registration: the key appears once, and every Grading surface (dock, panel header, floating panel) reaches it through RailIcon by id
     expect(table.match(/\n  grading:/g)).toHaveLength(1);
     expect(s).toMatch(/<RailIcon id=\{tb\.id\} \/>/);
