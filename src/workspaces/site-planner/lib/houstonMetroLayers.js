@@ -21,7 +21,7 @@
  * PURE: no network, no React — the style / card / legend rules unit-test standalone (test/houstonMetroLayers.test.js). */
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { HOUSTON, HOUSTON_ROW_STANDARDS } from "../../../shared/thoroughfare/houston.js";
-import { niceCase } from "./floridaLayers.js";
+import { niceCase } from "./niceCase.js";
 
 const srcOf = (k) => {
   const s = GIS_SOURCES[k];

@@ -35,8 +35,7 @@ const TYPES = { county: "county", cities: "city", isds: "school-district", speci
 const PROBE_YEARS_BACK = 3; // this year, then up to 3 prior — well past any normal publication lag
 const CACHE_TTL_S = 24 * 3600;
 
-const json = (obj, status = 200, extra = {}) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
+import { json } from "./lib/http.js";
 
 function sameOriginOk(origin, host) {
   if (!origin) return true;

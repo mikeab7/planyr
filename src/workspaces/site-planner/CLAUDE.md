@@ -809,7 +809,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   mislabels were produced UPSTREAM of it, by what the identify asked and how it read the answer, and 96
   green formatter tests passed through both.
 - **⛔ `jurisdiction.js` share pass is WINDOWED, DISSOLVED ONCE, AND TIME-SLICED (B2208416, slow report 55807aa9).** `cityAreasFromFeatures` ran clipper over each city's WHOLE published boundary (Baytown = 335 KB) for the site and again per parcel, inside the continuation of the response that carried it — ~1 s per plan open, charged to `Response.json.then:jurisdiction-…` (that label's `:5638` is a char offset cut to 48 chars, and names what RESUMED, not what ran). Now: `jurisdictionShare.siteWindow` / `clipPolysToWindow` cut each jurisdiction to 3 km around the site (areas unchanged — measured max |Δshare| 0 vs the original), `clipNorm` dissolves it once, no per-parcel distance (whole-site `distanceM` stays exact via an exact fallback), `cityAreasSteps` is a generator and `cityAreasFromFeaturesAsync` drives it in 12 ms slices through `yieldToMain.js` (`identifyCityShares` must `await` the async one — source-guarded), concurrent identical share requests join one promise. Account + rulings: `/docs/perf/PERF-JURISDICTION-SWITCH.md`. Guards: repo-root `test/` **jurisdictionShareWindow** (replays the verbatim original; three mutants) + **jurisdictionSwitchVerdict**; instrument ui-audit **perf-jurisdiction-switch** (`npm run perf:jurisdictionswitch`, replays GIS payloads recorded off the live services).
-- `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
+- `supabase.js` / `teams.js` / `geocode.js` — one-line re-exports; the real files moved to `src/shared/supabase/` and `src/shared/geocode.js` (audit batch I1). `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
   a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
@@ -2065,3 +2065,6 @@ never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
+
+## Lazy per-state layer files (batch K stage 1, B2671306)
+The 14 per-state layer files (state/county `…Layers` modules) load ON DEMAND (`lib/lazyLayerFiles.js`, loader in `lib/layers.js`, React hooks `lib/useLayerRegistry.js`). An unloaded layer is still a known id (`isLayerId`, generated `lazyLayerIndex.generated.js`) so saved settings are never pruned; new layer in one of those files → `npm run layer-index`. Never import one statically from eager code (guarded by the lazyLayerRegistry test).

@@ -11,7 +11,7 @@
  * coverage parameter here by construction; test/coverage.test.js locks it down.
  */
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
-import { pipeSizeLabel } from "./desotoLayers.js"; // NEW-1 (DeSoto / Olive Branch) — the default formatter for a `lineLabel` row
+import { pipeSizeLabel } from "./pipeSizeLabel.js"; // NEW-1 (DeSoto / Olive Branch) — the default formatter for a `lineLabel` row
 
 // Route a service URL through the same-origin Drive-backed cache proxy (B445) when asked. This
 // is a pure TRANSPORT swap — the layer still requests its full pinned sublayer set for the whole

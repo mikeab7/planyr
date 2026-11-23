@@ -40,7 +40,7 @@ describe("vitest must never configure a real Supabase client (B1843888)", () => 
     vi.restoreAllMocks();
   });
 
-  it("the site-planner Supabase client stays unconfigured even with production-looking env vars", async () => {
+  it("the shared Supabase client (via the site-planner path) stays unconfigured even with production-looking env vars", async () => {
     const mod = await freshModule("../src/workspaces/site-planner/lib/supabase.js");
     expect(mod.supabaseConfigured()).toBe(false);
     expect(mod.supabase).toBeNull();
@@ -51,7 +51,7 @@ describe("vitest must never configure a real Supabase client (B1843888)", () => 
     expect(mod.supabaseRest()).toEqual({ url: "", anon: "" });
   });
 
-  it("the food workspace's own duplicate Supabase client stays unconfigured too", async () => {
+  it("the food workspace Supabase client stays unconfigured too", async () => {
     const mod = await freshModule("../src/workspaces/food/lib/supabaseClient.js");
     expect(mod.supabaseConfigured()).toBe(false);
     expect(mod.supabase).toBeNull();

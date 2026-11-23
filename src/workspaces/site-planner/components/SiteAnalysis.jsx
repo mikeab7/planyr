@@ -3,7 +3,8 @@ import { runSiteScreen } from "../lib/siteScreen.js";
 import { freshnessOf } from "../lib/siteChecks.js";
 import { ringsHash } from "../lib/siteChecksRun.js";
 import { pillsFor, pillOn, togglePill, PILLS_NOTE } from "../lib/siteLayerPills.js";
-import { ALL_LAYERS } from "../lib/layers.js";
+import { ALL_LAYERS, lazyFilesForStates, lazyFilesForIds } from "../lib/layers.js";
+import { useLayerRegistryVersion, useEnsureLayerFiles } from "../lib/useLayerRegistry.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -107,7 +108,12 @@ export default function SiteAnalysis({
   useEffect(() => { if (result && onFindings) { try { onFindings(result.findings || []); } catch (_) { /* a listener error must not break the panel */ } } }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => result?.rows || [], [result]);
   const fresh = useMemo(() => freshnessOf(rows), [rows]);
-  const pills = useMemo(() => (result && !result.partial ? pillsFor({ regions: result.regions || [], untrusted: result.untrusted || [], layers }) : []), [result, layers]);
+  // Batch K stage 1 — the pills and rows name layers of per-state files; load the ones this site's regions (and its rows' own map layers) need.
+  const registryVersion = useLayerRegistryVersion();
+  useEnsureLayerFiles([...new Set([...(result && (result.regions || []).length ? lazyFilesForStates(result.regions) : []), ...lazyFilesForIds((result?.rows || []).map((r) => r.mapLayer).filter(Boolean))])].sort());
+  // registryVersion is a RE-EVALUATION trigger: `layers` is a mutated-in-place registry, so its identity never changes when a file lands.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pills = useMemo(() => (result && !result.partial ? pillsFor({ regions: result.regions || [], untrusted: result.untrusted || [], layers }) : []), [result, layers, registryVersion]);
 
   // A layer switched off anywhere else (Layers panel, undo, Hide lines) forgets its rows' open flags, so a later switch-on
   // by another route can never make an old detail pop open by itself. (Above the early return: hooks keep their order.)

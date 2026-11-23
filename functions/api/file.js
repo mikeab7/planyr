@@ -16,9 +16,7 @@
  * Supabase session (same check as /api/files).
  */
 import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
-
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+import { json } from "./lib/http.js";
 
 export async function onRequestPost(context) {
   const { env, request } = context;
