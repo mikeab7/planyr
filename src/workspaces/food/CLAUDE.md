@@ -6,7 +6,7 @@ rate it, note the cost. Internal id `food`, route `#/food`, chili-red accent `--
 
 **⛔ BUNDLE ISOLATION is this module's one hard rule.** Nothing under `src/workspaces/food/`
 may import from `src/workspaces/site-planner/` — not the Supabase client, not a util, nothing.
-That's why `lib/supabaseClient.js` reaches the ONE shared client (`src/shared/supabase/client.js`, which imports only supabase-js — audit batch I1) and never the site-planner one: an edge into site-planner would hoist this module's bytes onto the Site route, and the owner was
+That's why `lib/supabaseClient.js` reaches the ONE shared client (the shared Supabase client module, which imports only supabase-js — audit batch I1) and never the site-planner one: an edge into site-planner would hoist this module's bytes onto the Site route, and the owner was
 explicit that a restaurant tracker may not cost that route a single byte. `FoodApp.jsx` is its
 own `React.lazy` entry in the app Shell's workspace registry, measured separately forever as
 `foodRouteJsBytes` (the bundle-metrics module's `ROUTE_KEYS`).
