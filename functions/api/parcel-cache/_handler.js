@@ -27,8 +27,8 @@ export const SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // counties.js SNAPSHOT_COUNTIES.
 export const SNAPSHOT_COUNTIES = new Set(["chambers", "waller", "fortbend"]);
 
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+import { json as baseJson } from "../lib/http.js";
+const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 const notFound = () => new Response(null, { status: 404, headers: { "cache-control": "no-store" } });
 /* B1164656 (NEW-1) — decompress the stored gzip bytes HERE, server-side, rather than shipping them
  * raw with a manually-set `content-encoding: gzip` and trusting the browser to gunzip transparently.

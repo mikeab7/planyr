@@ -30,7 +30,7 @@ import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
 import { aerialWantedOnSheet } from "./aerialVisibility.js";
 import { releaseCanvas } from "./releaseCanvas.js";
-import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
+import { ALL_LAYERS, gisProxyEnabled, ensureLayersForOverlays } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
 import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR, AREA_BAND_ATTR, PARCEL_TIER_ATTR, PARCEL_TIER_SLOT_ATTR } from "./mapStack.js";
@@ -1100,6 +1100,7 @@ export function createExportSheet(ctx) {
   };
 
   const exportPNG = async () => {
+    await ensureLayersForOverlays(overlays); // batch K stage 1 — a layer that is ON but whose per-state file has not loaded yet must be in the registry before the export enumerates it (a failed load REJECTS: the export stops loudly rather than printing without the layer)
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback)
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
@@ -1179,6 +1180,7 @@ export function createExportSheet(ctx) {
     // It never touches the PDF's embedded measurement scale — that is the annotation set's /VP + /Measure (ftPerPt), computed below
     // from the frame alone, so Bluebeam / Acrobat still calibrate with the bar off.
     const titleScale = includeScaleBar === false ? "" : scaleLabelText;
+    await ensureLayersForOverlays(overlays); // batch K stage 1 — a layer that is ON but whose per-state file has not loaded yet must be in the registry before the export enumerates it (a failed load REJECTS: the export stops loudly rather than printing without the layer)
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below

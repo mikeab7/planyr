@@ -28,8 +28,7 @@
  * key self-prunes), absent field = nothing lifted = today's behaviour, and only layers the lift
  * can actually MOVE are stored (an already-over-the-plan line layer has nothing to remember).
  */
-import { ALL_LAYERS, defaultOverlayState } from "./layers.js";
-import { configCanLift } from "./mapStack.js";
+import { isLayerId, layerIdCanLift, defaultOverlayState } from "./layers.js";
 import { applyLayerOpacity } from "./layerOpacity.js";
 
 // Coerce any persisted / candidate value into a clean `{ [key]: boolean }` map: keep only boolean
@@ -39,7 +38,7 @@ export function sanitizeLayerOverrides(raw) {
   const out = {};
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     for (const [k, v] of Object.entries(raw)) {
-      if (typeof v === "boolean" && ALL_LAYERS[k]) out[k] = v;
+      if (typeof v === "boolean" && isLayerId(k)) out[k] = v;
     }
   }
   return out;
@@ -62,7 +61,7 @@ export function overridesFromOverlays(overlays) {
 // NEW-1 — the "Show above plan" twin of sanitizeLayerOverrides. Additionally drops any key whose
 // layer CANNOT be lifted (a line/point source is over the plan already), so a stale or nonsensical
 // flag can never reach the renderer and ask for a band that doesn't apply to it.
-const liftable = (k) => !!(ALL_LAYERS[k] && configCanLift(ALL_LAYERS[k]));
+const liftable = (k) => isLayerId(k) && layerIdCanLift(k);
 
 export function sanitizeLayerAbove(raw) {
   const out = {};

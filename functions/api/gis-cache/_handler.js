@@ -39,8 +39,8 @@ async function fetchUpstream(fetchImpl, url, timeoutMs = UPSTREAM_TIMEOUT_MS, se
   }
 }
 
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+import { json as baseJson } from "../lib/http.js";
+const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 // Manual 302 (not Response.redirect) so the shape is identical across Node/Workers and testable.
 const redirectTo = (url) => new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store" } });
 const bytesResponse = (bytes, contentType) =>

@@ -74,7 +74,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2963409,
+      "baseline": 2419680,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -1002,6 +1002,17 @@
           "commit": "62eadb785d47a490cfef3abe65f7c4b5c2fa3ee8",
           "sourceHash": "b5d03e1455eda1fd",
           "reason": "Univer's 77 unused hyphenation-language chunks (4.4 MB raw) are no longer emitted; the new formula worker adds 2.9 MB raw. Net deploy size down 1.6 MB. largestChunkBytes unchanged (the single 6.8 MB Univer chunk is not split - house rule)."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2963409,
+          "to": 2419680,
+          "direction": "ratchet",
+          "item": "B2671306",
+          "date": "2026-11-23",
+          "commit": "13972fb0688162c76743322ecae8285629ff3693",
+          "sourceHash": "c659ca69f7b82369",
+          "reason": "Batch K stage 1: the 14 per-state layer files (Colorado, Georgia, Oklahoma, Florida, Tennessee, Mississippi, Texas city/Houston/Chambers/Fort Bend/Sugar Land, Nashville, DeSoto) load on demand instead of in the Site route first download"
         }
       ]
     }

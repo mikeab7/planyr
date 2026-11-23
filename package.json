@@ -67,6 +67,7 @@
     "verify:ctrlzoomlive": "node ui-audit/verify-schedule-ctrl-zoom-live.mjs",
     "verify:gridrowhold": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-grid-row-hold.mjs",
     "verify:jurbadge": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-jurisdiction-badge-shapes.mjs",
+    "layer-index": "vite-node scripts/build-lazy-layer-index.mjs",
     "build:floodtiles": "node scripts/build-flood-tiles.mjs",
     "mark-shared-ids": "node scripts/mark-shared-ids.mjs",
     "verify:widthsweep": "node ui-audit/verify-width-sweep.mjs",

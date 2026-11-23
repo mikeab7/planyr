@@ -32,8 +32,9 @@ import {
   buildGroupSlots, mergeSlotAnyOn, mergeSlotOpacity, mergeGroupInfoSections,
 } from "../lib/layerPanelInfo.js";
 import {
-  ALL_LAYERS, MERGE_GROUPS, layerVintage, jurisdictionFor,
+  ALL_LAYERS, MERGE_GROUPS, layerVintage, jurisdictionFor, lazyFilesForStates,
 } from "../lib/layers.js";
+import { useLayerRegistryVersion, useEnsureLayerFiles } from "../lib/useLayerRegistry.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "../lib/pipelineCorridor.js";
 // NEW-1 — which layers the "Draw above plan" lift can actually move (only an AREA role). The model, never a local guess.
 import { configCanLift } from "../lib/mapStack.js";
@@ -426,6 +427,9 @@ export default function LayerPanel({
   const viewLegends = useViewLegends(); // B2507063: legends that depend on what is in view (Zoning lists the zone codes on screen)
   useServiceAreas(!!siteLocation); // a row scoped to a service area (HCFCD, City of Houston, BKDD) is judged once its geometry loads — the state change re-renders the rows
   const scope = useMemo(() => ({ state: siteState || null, loc: siteLocation || null }), [siteState, siteLocation]);
+  // Batch K stage 1 — the per-state layer files this site's state can use load when the panel opens (the panel lists them); a re-render follows.
+  useLayerRegistryVersion();
+  useEnsureLayerFiles(lazyFilesForStates(siteState ? [siteState] : []));
   const jur = jurisdictionFor(county);
 
   /* B1091(×2) — WHICH county the flood group reasons about: the site IDENTIFY county, never the registry selector (`county`). */

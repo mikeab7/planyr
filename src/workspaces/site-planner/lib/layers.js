@@ -17,20 +17,9 @@ import * as EL from "esri-leaflet";
 import { guardRasterErrors } from "./parcelOpacityGuard.js"; // NEW-1 (2026-11-12): an /export image failing after its row was switched off must not throw "removeLayer of null"
 import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { CHAMBERS_LAYERS, CHAMBERS_VINTAGE, CHAMBERS_MERGE_GROUPS } from "./chambersLayers.js"; // NEW-1 (Chambers County: Mont Belvieu + Baytown zoning, utilities, Master Drainage Plan, B2671240, 2026-11-12)
-import { OK_LAYERS, OK_MERGE_GROUPS, OK_VINTAGE } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening, 2026-10-29)
-import { DESOTO_LAYERS, DESOTO_VINTAGE } from "./desotoLayers.js"; // NEW-1 (DeSoto County MS / Olive Branch, B2507056–B2507059)
-import { TX_CITY_ZONING_LAYERS, TX_CITY_ZONING_VINTAGE } from "./txCityZoningLayers.js"; // NEW-1 (Texas city zoning: Richmond, Fulshear, Stafford, Webster, 2026-11-12)
-import { SUGARLAND_LAYERS, SUGARLAND_VINTAGE, SUGARLAND_MERGE_GROUPS } from "./sugarLandLayers.js"; // NEW-1 (City of Sugar Land layers, 2026-11-02)
-import { FORTBEND_LAYERS, FORTBEND_VINTAGE, FORTBEND_MERGE_GROUPS } from "./fortBendLayers.js"; // NEW-1 (Fort Bend County layers, 2026-11-12)
-import { NASHVILLE_BUFFER_LAYERS, NASHVILLE_BUFFER_MERGE_GROUPS } from "./nashvilleBufferLayers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps, 2026-11-12)
-import { NASHVILLE_LAYERS, NASHVILLE_VINTAGE } from "./nashvilleLayers.js"; // NEW-1/NEW-3 (Metro Nashville zoning, overlays, DTC, PUD, NashvilleNext policy, 2026-11-12)
-import { HOUSTON_METRO_LAYERS, HOUSTON_METRO_VINTAGE } from "./houstonMetroLayers.js"; // NEW-1/2/3 (Houston-metro sweep, 2026-11-12: MTFP, airport tiers, evacuation Zip-Zones)
-import { FLORIDA_LAYERS, FLORIDA_VINTAGE } from "./floridaLayers.js"; // NEW-1 (Florida due-diligence layers, B2452976)
-import { MISSISSIPPI_LAYERS, MISSISSIPPI_VINTAGE } from "./mississippiLayers.js"; // NEW-1 (Mississippi due-diligence layers: MDEQ, State Oil & Gas Board, NRCS, EPA, BIA, DeSoto flood/drainage)
-import { COLORADO_LAYERS, COLORADO_VINTAGE } from "./coloradoLayers.js"; // NEW-1 (Colorado due-diligence layers, B2528688)
-import { GEORGIA_LAYERS, GEORGIA_MERGE_GROUPS, GEORGIA_VINTAGE } from "./georgiaLayers.js"; // NEW-1 (Georgia due-diligence gaps, 2026-10-29)
-import { TN_LAYERS, TN_MERGE_GROUPS } from "./tennesseeLayers.js"; // B2521584 (Tennessee industrial due-diligence layers)
+import { LAZY_LAYER_FILES } from "./lazyLayerFiles.js"; // batch K stage 1 — the per-state layer files that load on demand
+import { LAZY_LAYER_INDEX } from "./lazyLayerIndex.generated.js";
+import { PRELOADED } from "./lazyLayerPreload.js"; // null in production; every file, statically, under vitest
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
@@ -137,12 +126,6 @@ export const MERGE_GROUPS = {
     label: "Fire Hydrants",
     note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
   },
-  ...OK_MERGE_GROUPS, // NEW-1 (Oklahoma screening) — oklahomaLayers.js
-  ...SUGARLAND_MERGE_GROUPS, // NEW-1 (City of Sugar Land): the Zoning Cases row of three
-  ...FORTBEND_MERGE_GROUPS, // NEW-1 (Fort Bend County): the Brazos River Studies row of two
-  ...NASHVILLE_BUFFER_MERGE_GROUPS, // B2671266 / B2671267 (Metro Nashville): the water-quality buffers row of four, the pending / preliminary flood maps row of two
-  ...GEORGIA_MERGE_GROUPS, // NEW-1 (Georgia): the Chattahoochee River Corridor and Water Supply Watersheds rows
-  ...TN_MERGE_GROUPS, // NEW-1 (Rutherford County TN): the Zoning row of four governments
 };
 
 /* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
@@ -1335,19 +1318,10 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   // list itself on a Georgia view just because nobody tagged it.
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS, ...DESOTO_LAYERS, ...SUGARLAND_LAYERS, ...FORTBEND_LAYERS, ...NASHVILLE_LAYERS, ...NASHVILLE_BUFFER_LAYERS, ...GEORGIA_LAYERS, ...COLORADO_LAYERS, ...TN_LAYERS, ...MISSISSIPPI_LAYERS, ...FLORIDA_LAYERS, ...OK_LAYERS };
-
-/* B2671240 (Chambers County: Mont Belvieu + Baytown) — joined here, in lines of its own, not spread into the one-line registry / merge-group / vintage
- * lists above: those are edited by nearly every layer PR and this branch lost four 45-minute builds in a row to the resulting merge conflicts. */
-Object.assign(ALL_LAYERS, CHAMBERS_LAYERS);
-Object.assign(MERGE_GROUPS, CHAMBERS_MERGE_GROUPS);
-
-/* Houston-metro sweep (NEW-1/2/3, 2026-11-12) — the three Houston layers join the registry HERE, not inside the one long `ALL_LAYERS` line above: every session that adds a layer file edits that line, and
- * this branch lost three 45-minute builds in a row to the resulting merge conflict. Added before the default-opacity / canvas-identify passes below, so they apply to these rows like any other. */
-Object.assign(ALL_LAYERS, HOUSTON_METRO_LAYERS);
-
-/* NEW-1 (Texas city zoning): joined here, not spread into the one-line registry above — that line is edited by nearly every layer PR, and a shared line is a guaranteed merge conflict. */
-Object.assign(ALL_LAYERS, TX_CITY_ZONING_LAYERS);
+/* BATCH K stage 1 — the registry is the EAGER rows only at first; the 14 per-state layer files (lazyLayerFiles.js) are folded in, IN THEIR OLD ORDER, as each
+ * one loads (`applyLazyLayerFile` below). One object, mutated in place, so every importer's reference stays valid. */
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS };
+const EAGER_LAYER_IDS = Object.keys(ALL_LAYERS);
 
 /* B2507060 (owner 2026-10-29, constraint #42) — EVERY overlay layer starts at FULL opacity when it is first turned on. Owner: "at lower
  * defaults it isn't clear the layer is even there." This is the ONE place a default is decided: every reader (defaultOverlayState, the
@@ -1355,6 +1329,11 @@ Object.assign(ALL_LAYERS, TX_CITY_ZONING_LAYERS);
  * together. A value somebody already set is untouched (layerOpacity.js stores only values that differ from the default). The per-row
  * numbers above survive as comments of intent only; the old tier CEILINGS (layerWeight.js) no longer bound a default. */
 export const DEFAULT_LAYER_OPACITY = 1;
+const normaliseLayerRow = (cfg) => { // the two registry-wide passes, applied to the eager rows now and to each lazy file's rows as it loads
+  if (!cfg) return;
+  cfg.opacity = DEFAULT_LAYER_OPACITY;
+  if (cfg.kind === "vector" && cfg.mergeGroup === "counties_cities" && cfg.canvasIdentify == null) cfg.canvasIdentify = true; // NEW-1 (see the note below)
+};
 Object.values(ALL_LAYERS).forEach((cfg) => { if (cfg) cfg.opacity = DEFAULT_LAYER_OPACITY; });
 /* NEW-1 (owner 2026-11-05) — every vector member of the Counties & Cities merged row answers a CLICK on the planner canvas too (it used to answer only on the Map view); the members'
  * answers are folded into ONE card by `jurisdictionCard.foldBoundaryItems` in `identifyOverlaysAt`. Click only — never hover (constraint #43). */
@@ -1440,19 +1419,104 @@ export const LAYER_VINTAGE = {
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
-  ...DESOTO_VINTAGE,
-  ...TX_CITY_ZONING_VINTAGE,
-  ...SUGARLAND_VINTAGE,
-  ...FORTBEND_VINTAGE,
-  ...NASHVILLE_VINTAGE,
-  ...MISSISSIPPI_VINTAGE,
-  ...COLORADO_VINTAGE,
-  ...GEORGIA_VINTAGE,
-  ...HOUSTON_METRO_VINTAGE,
-  ...FLORIDA_VINTAGE,
-  ...OK_VINTAGE, // NEW-1 (Oklahoma screening)
 };
-Object.assign(LAYER_VINTAGE, CHAMBERS_VINTAGE); // B2671240 (Chambers County) — its own line, see the note by CHAMBERS_LAYERS above
+
+
+/* =============================================================================================================================================
+ * LAZY PER-STATE LAYER FILES (batch K stage 1, 2026-11-23). See lazyLayerFiles.js for the why; this is the machinery.
+ *
+ * THE TWO RULES THAT MAKE IT SAFE:
+ *  1. An UNLOADED layer is still a KNOWN layer. `isLayerId` answers from the generated index, so a saved on/off, opacity or "above plan"
+ *     for a Colorado layer is never pruned as "not in the registry" just because Colorado's file has not loaded on this site (that would
+ *     erase the user's saved settings on the first save — test/lazyLayerRegistry.test.js "preserves …" is the guard).
+ *  2. The registry's KEY ORDER is the paint order. After every load the object is re-sorted into the canonical order, in place.
+ * ============================================================================================================================================= */
+const LAZY_BY_KEY = Object.fromEntries(LAZY_LAYER_FILES.map((f) => [f.key, f]));
+const LAZY_ID_SET = new Set();
+const LAZY_LIFT = new Set();
+const LAZY_CORRIDOR = new Set();
+for (const f of LAZY_LAYER_FILES) {
+  const ix = LAZY_LAYER_INDEX[f.key];
+  if (!ix) throw new Error(`layers.js: lazy layer file "${f.key}" has no entry in lazyLayerIndex.generated.js — run \`npm run layer-index\``);
+  ix.ids.forEach((id) => LAZY_ID_SET.add(id));
+  ix.lift.forEach((id) => LAZY_LIFT.add(id));
+  ix.corridor.forEach((id) => LAZY_CORRIDOR.add(id));
+}
+const BASE_MERGE_KEYS = Object.keys(MERGE_GROUPS);
+const loadedLazy = new Map(); // key → picked { layers, vintage, merge }
+const loading = new Map();    // key → Promise
+const registryListeners = new Set();
+let registryVersion = 0;
+
+/** Is this id a layer Planyr knows — loaded or not? The ONE answer every saved-settings sanitiser asks. */
+export const isLayerId = (id) => !!ALL_LAYERS[id] || LAZY_ID_SET.has(id);
+/** Can a "Show above plan" lift move this layer? Answers for an unloaded layer from the index. */
+export const layerIdCanLift = (id) => (ALL_LAYERS[id] ? configCanLift(ALL_LAYERS[id]) : LAZY_LIFT.has(id));
+/** The default opacity of a known layer (every registry row is normalised to full opacity — constraint #42). */
+export const layerDefaultOpacity = (id) => (isLayerId(id) ? DEFAULT_LAYER_OPACITY : null);
+/** The lazy file key a layer id belongs to, or null (eager layer / unknown id). */
+export const lazyFileOf = (id) => { for (const f of LAZY_LAYER_FILES) if (LAZY_LAYER_INDEX[f.key].ids.includes(id)) return f.key; return null; };
+export const lazyFilesForIds = (ids) => {
+  const out = new Set();
+  for (const id of ids || []) { if (ALL_LAYERS[id] || !LAZY_ID_SET.has(id)) continue; const k = lazyFileOf(id); if (k && !loadedLazy.has(k)) out.add(k); }
+  return [...out];
+};
+/** Lazy files that can serve a state (a file whose rows name no state serves every state). `state` null/unknown → every file. */
+export const lazyFilesForStates = (states) => {
+  const list = (Array.isArray(states) ? states : [states]).filter(Boolean).map((s) => String(s).toUpperCase());
+  return LAZY_LAYER_FILES.filter((f) => {
+    if (loadedLazy.has(f.key)) return false;
+    const st = LAZY_LAYER_INDEX[f.key].states;
+    return !list.length || !st || list.some((s) => s === "?" || st.includes(s));
+  }).map((f) => f.key);
+};
+export const layerRegistryVersion = () => registryVersion;
+export const subscribeLayerRegistry = (fn) => { registryListeners.add(fn); return () => registryListeners.delete(fn); };
+
+function applyLazyLayerFile(key, picked) {
+  if (loadedLazy.has(key)) return false;
+  loadedLazy.set(key, picked);
+  Object.values(picked.layers).forEach(normaliseLayerRow);
+  // Re-sort ALL_LAYERS into the canonical order IN PLACE: eager rows, then each loaded file's rows in lazyLayerFiles.js order.
+  const entries = EAGER_LAYER_IDS.map((id) => [id, ALL_LAYERS[id]]);
+  for (const f of LAZY_LAYER_FILES) { const p = loadedLazy.get(f.key); if (p) entries.push(...Object.entries(p.layers)); }
+  for (const id of Object.keys(ALL_LAYERS)) delete ALL_LAYERS[id];
+  for (const [id, cfg] of entries) ALL_LAYERS[id] = cfg;
+  if (picked.vintage) Object.assign(LAYER_VINTAGE, picked.vintage);
+  // MERGE_GROUPS: the base groups, then each loaded file's groups in the order the static spreads had (mergeRank).
+  const extra = [];
+  for (const f of LAZY_LAYER_FILES) { const p = loadedLazy.get(f.key); if (p && p.merge) extra.push([f.mergeRank ?? 99, p.merge]); }
+  extra.sort((a, b) => a[0] - b[0]);
+  const base = BASE_MERGE_KEYS.map((k) => [k, MERGE_GROUPS[k]]);
+  for (const k of Object.keys(MERGE_GROUPS)) delete MERGE_GROUPS[k];
+  for (const [k, v] of base) MERGE_GROUPS[k] = v;
+  for (const [, grp] of extra) Object.assign(MERGE_GROUPS, grp);
+  return true;
+}
+const announce = () => { registryVersion += 1; registryListeners.forEach((fn) => { try { fn(registryVersion); } catch (_) { /* a listener must not break the loader */ } }); };
+
+if (PRELOADED) { // vitest only — see lazyLayerPreload.js
+  for (const f of LAZY_LAYER_FILES) if (PRELOADED[f.key]) applyLazyLayerFile(f.key, f.pick(PRELOADED[f.key]));
+}
+
+/** Load the named lazy layer files (idempotent; concurrent calls share the work). LOUD on failure: the promise REJECTS and the files stay
+ *  "not loaded" so the next call retries — a failed chunk fetch never reads as "that state has no layers". */
+export function ensureLayerFiles(keys) {
+  const todo = (keys || []).filter((k) => LAZY_BY_KEY[k] && !loadedLazy.has(k));
+  if (!todo.length) return Promise.resolve(false);
+  return Promise.all(todo.map((k) => {
+    if (!loading.has(k)) {
+      const f = LAZY_BY_KEY[k];
+      loading.set(k, f.load().then((m) => { loading.delete(k); return applyLazyLayerFile(k, f.pick(m)); }, (e) => { loading.delete(k); throw e; }));
+    }
+    return loading.get(k);
+  })).then((r) => { if (r.some(Boolean)) announce(); return r.some(Boolean); });
+}
+/** Load whatever the given overlays state has switched ON that is not loaded yet (the map surfaces + export call this). */
+export const ensureLayersForOverlays = (overlays) =>
+  ensureLayerFiles(lazyFilesForIds(Object.entries(overlays || {}).filter(([, st]) => st && st.on).map(([id]) => id)));
+/** Every lazy file (an unscoped caller: tests, tools). */
+export const ensureAllLayerFiles = () => ensureLayerFiles(LAZY_LAYER_FILES.map((f) => f.key));
 
 // A layer's vintage: an explicit per-config override wins; else the central map;
 // else null → the UI shows the honest "vintage unknown".
@@ -1468,15 +1532,19 @@ export const layerAbout = (id, cfg) => {
 
 // Fresh per-layer UI state (all off, each at its default opacity). A corridor layer (B752)
 // also carries an editable `widthFt` (total assumed corridor width, feet).
+const CANONICAL_LAYER_IDS = [...EAGER_LAYER_IDS, ...LAZY_LAYER_FILES.flatMap((f) => LAZY_LAYER_INDEX[f.key].ids)];
 export const defaultOverlayState = () => {
   const o = {};
-  Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
-    o[k] = { on: false, opacity: cfg.opacity ?? 0.8 };
+  // Canonical order, loaded or not: an unloaded lazy layer gets the SAME default row its loaded self would (index flags), so the
+  // overlays state — and everything saved from it — is identical before and after a file loads.
+  CANONICAL_LAYER_IDS.forEach((k) => {
+    const cfg = ALL_LAYERS[k];
+    o[k] = { on: false, opacity: cfg ? (cfg.opacity ?? 0.8) : DEFAULT_LAYER_OPACITY };
     // NEW-1 — "Show above plan", DEFAULT OFF, and only on a layer the lift can actually move (a
     // line/point source is over the plan already). The default staying off is the point: the
     // automatic order answers the owner's contours case with zero clicks.
-    if (configCanLift(cfg)) o[k].above = false;
-    if (cfg.corridorWidth) o[k].widthFt = DEFAULT_CORRIDOR_WIDTH_FT;
+    if (layerIdCanLift(k)) o[k].above = false;
+    if (cfg ? cfg.corridorWidth : LAZY_CORRIDOR.has(k)) o[k].widthFt = DEFAULT_CORRIDOR_WIDTH_FT;
   });
   return o;
 };

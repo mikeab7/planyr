@@ -16,8 +16,7 @@
  */
 import { buildUpstreamUrl, isAllowedOrigin } from "./_proxy.js";
 
-const json = (obj, status = 200, extra = {}) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
+import { json } from "../lib/http.js";
 
 export async function onRequestGet(context) {
   const { env, request, params } = context;
