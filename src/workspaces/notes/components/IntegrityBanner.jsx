@@ -10,8 +10,8 @@
  */
 import { duplicateNotice, joinMentions, keepCopyLabel, numberWord, pageMention, sentenceCase } from "../lib/notesDuplicates.js";
 import { absoluteStamp } from "../lib/notesTime.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 };
 /** The recovered-notes list never grows past this (about four rows) — see the note on the list below. */
 export const LIST_MAX_PX = 112;
 

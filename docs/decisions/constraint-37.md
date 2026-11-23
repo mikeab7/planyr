@@ -1,0 +1,7 @@
+# Owner product constraint #37
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+37. **(2026-10-27) A Notes box is moved by its BORDER (PowerPoint / Word / Bluebeam), and the striped grip is retired — do not bring it back, do not add a second affordance.** Michael picked option "A" of four mockups: *"I like it that it only interacts by the edges"*, and called the grip *"pretty ugly and honestly just annoying to look at"*. The box's outline is a four-sided grab band (a few px outside the line, the line, a few px inside it — never over the text) with the four-arrow `move` cursor, pinned for the whole drag; over it the outline thickens in the accent colour, off hover the box draws nothing extra. It moves the box (or the whole selection) whether or not the box has the caret, a plain click on it only selects, and the resize handles keep priority at their own spots. **Unchanged, his standing rule:** a drag that starts in the MIDDLE of a box still pans the page (B2156912), two-stage select/enter, text selection once a box has the caret, multi-selection drag, resize handles and the phone/touch halos. Applies to text, table and picture boxes alike. Guards: `ui-audit/verify-notes-box-edge.mjs` (+ `-touch`), `test/cursorConventionNotes.test.js`. (B2426788; settles the question #35 left open.)

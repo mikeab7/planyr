@@ -13,8 +13,8 @@
  * keymap; this surface is the mouse's way in, not the only way in.
  */
 import { useEffect, useRef } from "react";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
 export default function NoteSlashMenu({ open, items = [], index = 0, at, onPick, onHover }) {
   const listRef = useRef(null);

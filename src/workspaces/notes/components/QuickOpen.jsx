@@ -20,8 +20,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { stepIndex } from "../lib/notesQuickOpen.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
 export default function QuickOpen({ open, results = [], query, onQuery, onPick, onClose }) {
   const [index, setIndex] = useState(0);

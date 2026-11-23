@@ -20,6 +20,7 @@
  */
 import { setMapCursor, installPlannerCursorStyle } from "../lib/plannerCursors.js";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Dialog } from "../../../shared/ui/controls.jsx";
 import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { contactField } from "../../../shared/ui/noAutofill.js";
 import L from "leaflet";
@@ -103,12 +104,8 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
   });
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Set this plan's location" data-testid="set-location-dialog"
-      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}
-      style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.42)", display: "grid", placeItems: "center", padding: 16 }}
-      onPointerDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div onPointerDown={(e) => e.stopPropagation()}
-        style={{ width: "min(560px, 100%)", maxHeight: "calc(100vh - 32px)", overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.32)", padding: 16 }}>
+    <Dialog label="Set this plan's location" testId="set-location-dialog" z={5000} onClose={onCancel}
+      style={{ border: `1px solid ${PAL.panelLine}`, borderRadius: 12 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink }}>{origin ? "Move this plan's location" : "Set this plan's location"}</div>
         <div style={{ ...line, marginTop: 4 }}>
           Nothing you've drawn moves — this only says where the plan sits on the earth. Once it's set the aerial,
@@ -147,7 +144,6 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
             {origin ? "Move it here" : "Set location"}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

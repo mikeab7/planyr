@@ -1,0 +1,7 @@
+# Owner product constraint #54
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+54. **(2026-11-08) The sign-in panel closes ONLY when the person asked — Close, an Escape that nothing else took, a press AND release on the dark backdrop, or a successful sign-in.** Owner (sign-in must be hassle-free; a lost half-filled form is a dead end), after the panel "disappeared on its own" in desktop Chrome with 1Password. Escape is handled on the card itself (focus inside the panel, not already handled by a password-manager menu / autofill list / open dropdown), never by a document-level capture listener; the backdrop closes only when the press began on it (a drag that starts in a field and ends outside, or an injected click, never closes it); a forced page reload (the stale-build chunk rescue) brings the panel back with the typed email + tab (sessionStorage, never a password, five-minute freshness, forgotten the moment the person closes it). Every path that can close or unmount it is listed in `src/shared/auth/panelDismiss.js` and pinned by `test/authPanelClosePaths.test.js`; an unasked unmount is reported (`auth-panel-vanished`). **Unchanged:** the set-new-password view stays non-dismissable. Guards: repo-root `test/` **authPanelClosePaths**; e2e **auth-panel-stays-open** (Chromium + mobile WebKit; red on e282104). (NEW-1.)

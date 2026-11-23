@@ -84,13 +84,13 @@ import { resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js
 import { nextAnchorSpot, selectionInsideAnchor } from "../lib/notesAnchorNode.js";
 import { isMultiCell, refuseMultiCell } from "../lib/notesTableMultiSelect.js";
 import { BOLD_TITLE, BOLD_TITLE_IN_HEADER, TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
+import { RADIUS } from "../lib/notesControls.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
  * controls.jsx from here makes the bundler hoist a THIRD shared chunk onto the Site route,
  * which breaks that route's four-chunk allowlist and turns the perf audit red. Two numbers
  * duplicated with a guard beats a cross-route regression. */
-const RADIUS = { control: 8, pill: 999 };
 /* Shared by every popover/sheet on this bar (ColorPopover, TableGridPicker, LinkControl,
  * CalloutControl, SizeMenu, SpacingPopover, InsertFlyout) — one named constant rather than
  * the same literal repeated. */

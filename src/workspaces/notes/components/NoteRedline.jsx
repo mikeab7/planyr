@@ -1,3 +1,4 @@
+import { RADIUS } from "../lib/notesControls.js";
 /* NoteRedline — renders `lib/notesRedline.js`'s output as ONE document with the changes marked
  *  in place (NEW-2 of the conflict-comparison follow-up). See that file's header for the whole
  *  argument; this file only draws what it computed.
@@ -23,7 +24,6 @@
  *  is already in `block.label`, so `OpaqueContent` returns nothing extra for either rather than
  *  padding the panel with the same fact twice.
  */
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
 const HEADING_SIZE = { 1: 14, 2: 13, 3: 12, 4: 12 };
 

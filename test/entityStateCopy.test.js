@@ -95,7 +95,10 @@ describe("no component copies shared entity data into state", () => {
   });
 
   it("CLAUDE.md states the rule for ALL shared data, not just names", () => {
-    expect(readFileSync("CLAUDE.md", "utf8")).toMatch(/never copy shared data into component state/i);
+    const claude = readFileSync("CLAUDE.md", "utf8");
+    expect(claude).toContain("<!--rule:SHARED-DATA-ONE-SOURCE-->");
+    expect(claude).toMatch(/never copy shared data into component state/i);
+    expect(readFileSync("docs/decisions/shared-data-one-source-of-truth.md", "utf8")).toMatch(/never copy shared data into component state/i);
   });
 });
 
