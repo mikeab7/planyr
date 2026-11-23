@@ -225,14 +225,13 @@ describe("wiring guards", () => {
     expect(src).toMatch(/pushUndoRedo/);
     expect(src).not.toMatch(/fetch\(|XMLHttpRequest|localStorage/);               // the colour pref goes through sheetColorMode.js, the one owner of that key
   });
-  it("Ctrl+K stays THE palette on the Univer grid, and the old grid's CommandPalette is the one component", () => {
+  it("Ctrl+K is THE palette on the Univer grid, through the one CommandPalette component", () => {
     const src = read("src/workspaces/model/lib/univerTools/index.js");
     expect(src).toMatch(/toLowerCase\(\) === "k"/);
     expect(read("src/workspaces/model/components/UniverTools.jsx")).toMatch(/import CommandPalette from "\.\/CommandPalette\.jsx"/);
     expect(read("src/workspaces/model/components/CommandPalette.jsx")).toMatch(/commands = COMMANDS/);
   });
-  it("the saved workbook format is untouched: sheetModel.js / SheetView.jsx never learn about the tools", () => {
+  it("the saved workbook format is untouched: sheetModel.js never learns about the tools", () => {
     expect(read("src/workspaces/model/lib/sheetModel.js")).not.toMatch(/univerTools/);
-    expect(read("src/workspaces/model/components/SheetView.jsx")).not.toMatch(/univerTools/);
   });
 });

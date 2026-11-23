@@ -264,10 +264,8 @@ describe("wiring in ModelApp.jsx (source guards)", () => {
     expect(SRC).toMatch(/workbookRef\.current \|\| migrateWorkbook\(local\)/);
     expect(SRC).not.toMatch(/JSON\.stringify\(.*\)\s*!==\s*JSON\.stringify/);
   });
-  it("only a person's edit (commit/undo/redo) marks the stored copy dirty — a load's reset never does", () => {
+  it("only a person's edit (commit) marks the stored copy dirty — a load's reset never does", () => {
     expect(SRC).toMatch(/const commit = useCallback\(\(u\) => \{ userEditRef\.current = true; commitRaw\(u\); \}/);
-    expect(SRC).toMatch(/const undo = useCallback\(\(\) => \{ userEditRef\.current = true; undoRaw\(\); \}/);
-    expect(SRC).toMatch(/const redo = useCallback\(\(\) => \{ userEditRef\.current = true; redoRaw\(\); \}/);
     expect(SRC).toMatch(/adoptWorkbook = \(wb, \{ base, dirty \}\) => \{\s*userEditRef\.current = false;\s*reset\(wb\);/);
   });
   it("the push waits for the cloud's answer and for real unsynced work, and records the base it landed on", () => {
@@ -275,7 +273,7 @@ describe("wiring in ModelApp.jsx (source guards)", () => {
     expect(SRC).toMatch(/noteSynced\(version, workbook\);/);
   });
   it("the bar's two buttons record the new base", () => {
-    const k = SRC.indexOf("const onKeepDeviceCopy"), u = SRC.indexOf("const onUseCloudCopy"), end = SRC.indexOf("Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z");
+    const k = SRC.indexOf("const onKeepDeviceCopy"), u = SRC.indexOf("const onUseCloudCopy"), end = SRC.indexOf("// Excel round-trip (NEW-1");
     expect(SRC.slice(k, u)).toMatch(/writeSyncMeta\(userId, storageKey, \{ baseVersion: baseVersionRef\.current, dirty: true \}\)/);
     expect(SRC.slice(u, end)).toMatch(/writeSyncMeta\(userId, storageKey, \{ baseVersion: baseVersionRef\.current, dirty: dirtyRef\.current \}\)/);
   });

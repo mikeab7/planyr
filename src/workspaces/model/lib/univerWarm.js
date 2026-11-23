@@ -7,26 +7,30 @@
  * This file is the second half: the same specifier ModelApp's `React.lazy` uses, so the browser makes ONE request and the module is
  * already evaluated when the grid mounts.
  *
- * THE UNIVER GRID IS NOW THE GRID FOR EVERY ACCOUNT, so every device warms it — except a device that asked for the owner's
- * regular-grid hatch (lib/gridChoice.js), which would download 1.8 MB for nothing (an owner whose answer then comes back "not admin"
- * simply loads it at mount, as before). The decision reads `gridChoice.js`, which is dependency-free: the always-loaded shell
- * must not pull the admin check (and through it the whole Supabase client) in just to read a localStorage flag.
+ * THE UNIVER GRID IS THE ONLY GRID (the old one was retired), so every device warms it. Dependency-free on purpose: the always-loaded
+ * shell reaches this file and must not pull the admin check (and through it the whole Supabase client) in.
  * Best-effort and idempotent: a failed warm is retried by the real mount. */
-import { migrateLegacyGridChoice, readRegularGrid } from "./gridChoice.js";
 import { deviceUserId } from "./deviceUser.js";
 
-/** Will THIS device show the Univer grid (as far as it can tell without asking who the user is)? */
-export const univerWantedHere = (storage = typeof localStorage === "undefined" ? null : localStorage) => !readRegularGrid(storage);
+/** The two device flags the retired "which grid" switch used to keep (the pre-cutover "Try the new grid" key and the owner's
+ *  "Use the regular grid" key). Nothing reads either any more; a device that still holds one drops it. Idempotent and silent. */
+export const RETIRED_GRID_KEYS = ["planyr:model:univerGrid", "planyr:model:regularGrid"];
+export function forgetRetiredGridKeys(storage = typeof localStorage === "undefined" ? null : localStorage) {
+  let removed = false;
+  for (const k of RETIRED_GRID_KEYS) {
+    try { if (storage && storage.getItem(k) !== null) { storage.removeItem(k); removed = true; } } catch (_) { /* a blocked store has nothing to forget */ }
+  }
+  return removed;
+}
 
 /** The project the page is on, from the URL — the Spreadsheet tab opens THIS project's workbook, whose scope key (ModelApp's `viewPrefsKey`) is the project id. */
 const projectIdFromHash = (hash = typeof location === "undefined" ? "" : location.hash) => { const m = /^#\/project\/([^/?#]+)/.exec(hash || ""); return m ? decodeURIComponent(m[1]) : null; };
 
 let warm = null;
-/** Start loading + evaluating the Univer chunk. Returns the promise (or null when this device will not use the grid). */
-export function warmUniver({ force = false, storage } = {}) {
+/** Start loading + evaluating the Univer chunk. Returns the promise. */
+export function warmUniver({ storage } = {}) {
   if (warm) return warm;
-  if (!force && !univerWantedHere(storage)) return null;
-  migrateLegacyGridChoice(storage);
+  forgetRetiredGridKeys(storage);
   // Read this project's remembered formula results from the device store NOW (lib/univerCalcCache.js), so they are in memory when the grid mounts.
   // (A dynamic import: the always-loaded shell must not take the storage layer in statically.)
   try { const id = projectIdFromHash(); if (id) import("./univerCalcCache.js").then((m) => m.primeCalcCache(id)).catch(() => { /* best-effort */ }); } catch (_) { /* best-effort */ }
