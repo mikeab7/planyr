@@ -54,22 +54,6 @@ describe("spillSpanWidth", () => {
   });
 });
 
-describe("SheetView paints both text paths from the shared inset (red-proof of the 2px jump)", () => {
-  const src = readFileSync(new URL("../src/workspaces/model/components/SheetView.jsx", import.meta.url), "utf8");
-  it("the spill span starts at padX, not a private constant", () => {
-    const span = src.split("\n").find((l) => l.includes('position: "absolute"') && l.includes("spillSpanWidth("));
-    expect(span, "spill span line").toBeTruthy();
-    expect(span).toContain("left: pad.left");
-    expect(span).not.toMatch(/left:\s*\d/);
-    expect(span).toContain("alignItems: vAlign");
-  });
-  it("the in-cell padding and the spill gate use the same helpers", () => {
-    expect(src).toContain("padding: isEditing ? 0 : `0 ${pad.right}px 0 ${pad.left}px`");
-    expect(src).toContain("canSpill({");
-    expect(src).toContain("const pad = cellPadding({");
-  });
-});
-
 describe("adjustIndent — each cell steps from its OWN level (NEW-2)", () => {
   const sheet = () => ({
     columns: [{ id: "a", name: "A" }, { id: "b", name: "B" }], rowCount: 5, cells: { "b:0": "x", "b:1": "y", "b:2": "z" },

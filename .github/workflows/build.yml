@@ -8,6 +8,13 @@ name: Build
 # no Cloudflare workflow file in this repo). The old GitHub Pages deploy job was
 # retired once Cloudflare became production — one host, one deploy.
 #
+# ⛔ PARALLEL LANES (2026-11-23, Batch C of the code audit). `build` used to be ONE serial job of 41 gates, ~42 minutes (18 of
+# them Notes browser harnesses, 25 min), and main's pushes queued behind each other. It is now an AGGREGATOR over parallel lane
+# jobs — static · vitest (3 shards) · build-app · browser (4 shards) — each of which runs `npm run ci-parity -- --lane <name>`.
+# The job named exactly `build` below only checks that every lane succeeded, so the required status-check context
+# (.github/required-checks.json, the "Protect Main" ruleset) is unchanged and still reports on every pull request, docs-only
+# ones included. Which gate runs in which lane is ui-audit/lib/ciGates.mjs LANES; the gate LIST is still only ci-gates.yml.
+#
 # ⛔ THE GATES THEMSELVES LIVE IN .github/ci-gates.yml, NOT HERE (2026-09-02, owner-approved after
 # the third CI-vs-local mismatch in a week — B927104 / the 2026-08-31 bundle night / PR #1323).
 # `npm run ci-parity` (scripts/ci-parity.mjs) reads that sibling file's ordered step list at run
@@ -36,63 +43,40 @@ on:
         description: "PR number to backfill the required 'build' status for (set by build-check-sweep.yml; leave blank for an ordinary manual run)"
         required: false
 
-# ⛔ COST CUT (2026-09-02). The repo went private on 2026-08-31; Actions minutes went from
-# unlimited-and-free to metered, and nothing about the build got slower — the same run volume
-# simply started counting. Measured 2026-09-01→09-02: ~100 runs/day at ~8.35 min average, 94% of
-# all usage, mostly PR branches pushed to repeatedly while iterating (every push re-runs the FULL
-# build even after a newer commit supersedes it). Two independent fixes below; see each for why.
+# Cancel a SUPERSEDED run so an iterating pull request only ever finishes paying for its NEWEST push (keyed on the ref).
+# MAIN IS KEYED PER COMMIT instead (2026-11-23): a push to main used to share one group with every other push to main with
+# cancel-in-progress off, which made them QUEUE (one waited 18 minutes) — and GitHub also replaces a *waiting* run with the
+# newest one, so a middle commit could silently lose its verdict. One group per sha means every merged commit runs
+# immediately, in parallel, and gets its own verdict; nothing is ever cancelled on main.
 concurrency:
-  # Cancel a SUPERSEDED run so an iterating branch only ever finishes paying for its NEWEST push —
-  # keyed on the ref, so every push to the same PR/branch shares one group and a later push cancels
-  # whatever of an earlier one is still in flight for that same group.
-  #
-  # ⛔ MAIN IS EXCLUDED ON PURPOSE, not merely narrowed. `github.ref` for a push to main is always
-  # `refs/heads/main`, so every main push shares this SAME group too — but cancel-in-progress is
-  # false for it, which makes a second push QUEUE behind an in-flight one rather than cancel it.
-  # Main's build is the absolute-ceiling gate (as opposed to the PR job's base-branch comparison —
-  # stabilised deliberately in B927105/#1305) and every merged commit needs its own reported
-  # verdict; cancelling it to save minutes would let a broken commit sit on main with nothing red
-  # to say so.
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
-  # Lets the backfill-status step (bottom of this job) post a classic commit status directly —
-  # needed only when `inputs.pr_number` is set (build-check-sweep.yml's repair dispatch); inert
-  # otherwise. `statuses: write` is a plain, same-repo, non-elevated grant on the default
-  # GITHUB_TOKEN — unlike `markPullRequestReadyForReview`/`enablePullRequestAutoMerge` (both
-  # confirmed FORBIDDEN for this token, B793696), the classic Statuses API has no such block.
+  # Lets the aggregator's backfill step post a classic commit status directly — needed only when `inputs.pr_number` is set
+  # (build-check-sweep.yml's repair dispatch); inert otherwise. `statuses: write` is a plain, same-repo, non-elevated grant on
+  # the default GITHUB_TOKEN (unlike markPullRequestReadyForReview / enablePullRequestAutoMerge, FORBIDDEN for it — B793696).
   statuses: write
 
 jobs:
-  build:
+  # ---- detect: is this pull request Markdown-only? -------------------------------------------------------------------------
+  # Cost cut (2026-09-02): a Markdown-only PR has no code to lint, test or build, so only the cheap docs guards run (see
+  # ui-audit/lib/ciGates.mjs DOCS_ONLY_GATE_NAMES). THIS DELIBERATELY DOES NOT SKIP THE REQUIRED CHECK — no `paths-ignore`
+  # on the triggers: a required check a path filter can skip is exactly the 2026-08-06 outage ui-audit/required-check-audit.mjs
+  # guards. Every job below always reports; only whether the heavy lanes do real work varies. The merge ref's first parent is
+  # the base branch tip, so `HEAD^1..HEAD` is exactly what the pull request changes (a depth-2 fetch, not the 190 MB history).
+  detect:
+    name: detect
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.docs_only.outputs.docs_only }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Full history, for two independent reasons that both need it:
-          #  • the mint gate computes this branch's merge base with main — the shallow default
-          #    hides it, and "added ids" measured against main's tip is strictly weaker (it
-          #    cannot see a number main took while this branch was in flight);
-          #  • the byte-attribution step below resolves that same base and BUILDS it, so a
-          #    breach can name which modules moved. With depth 1 there is no base to compare
-          #    against and that step degrades to "unavailable" — honestly reported, but the
-          #    diagnosis is the point, so pay for the history.
-          fetch-depth: 0
-      # ⛔ COST CUT, part 2 (2026-09-02). A large share of recent merges changed only Markdown, and
-      # every one still ran the FULL build — lint, the whole app test suite, a Vite build, a
-      # Playwright install, visual regression — none of which can find anything wrong when no
-      # source file changed. THIS DELIBERATELY DOES NOT SKIP THE JOB (no `paths-ignore` on the
-      # triggers above): a required status check that a path filter can skip is exactly the outage
-      # ui-audit/required-check-audit.mjs exists to catch (2026-08-06 — seven PRs stuck at
-      # "Expected — Waiting for status to be reported", no merge control available to anyone). The
-      # `build` job here ALWAYS runs and ALWAYS reports; only which STEPS inside it do real work
-      # varies. See ui-audit/lib/ciGates.mjs's DOCS_ONLY_GATE_NAMES for exactly what still runs and
-      # why each one earns its place — the Generated-index touch guard, the BACKLOG.md tag-legend
-      # guard, the per-folder CLAUDE.md pointer guard, and the backlog/verification id checks all
-      # read content a docs-only push can actually touch; nothing else can.
+          fetch-depth: 2
       - name: Detect docs-only change (a pull_request whose diff is Markdown only)
         id: docs_only
         run: |
@@ -101,11 +85,8 @@ jobs:
             echo "Not a pull_request event (push to main / workflow_dispatch) — every merged commit gets its own full verdict, unconditionally."
             exit 0
           fi
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
           set +e
-          git fetch --no-tags --quiet origin "$BASE" "$HEAD" 2>/dev/null
-          CHANGED="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null)"
+          CHANGED="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"
           DIFF_STATUS=$?
           set -e
           if [ $DIFF_STATUS -ne 0 ]; then
@@ -115,92 +96,199 @@ jobs:
           fi
           echo "Changed files:"
           echo "$CHANGED"
-          # docs/UI-INVENTORY.md USED TO be carved out here — it's Markdown by EXTENSION but not by
-          # CONTENT, generated from a live Playwright crawl, and a change confined to just this file
-          # used to force the full (expensive) build because only the browser-based Signature-budget
-          # gate could tell whether it was still accurate. That's no longer this fast path's job
-          # (NEW-1, B<PENDING>, 2026-09-08): a branch is never supposed to touch this file at all —
-          # the Generated-index touch guard fails it cheaply and immediately if it does — so there is
-          # nothing left here for the full crawl to verify, and docs/UI-INVENTORY.md is treated like
-          # any other Markdown file for this test.
           NON_DOCS="$(echo "$CHANGED" | grep -Ev '\.md$' || true)"
           if [ -n "$CHANGED" ] && [ -z "$NON_DOCS" ]; then
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
             echo "Every changed file is Markdown (.md) — running the docs-only gate subset."
           else
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "A non-Markdown file changed, or docs/UI-INVENTORY.md changed, or nothing changed — running the full build."
+            echo "A non-Markdown file changed, or nothing changed — running the full build."
           fi
+
+  # ---- static: lint + the cheap guards (also the whole docs-only run) ------------------------------------------------------
+  static:
+    name: static
+    needs: detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history: the Generated-index touch guard diffs `origin/main...HEAD`, which needs a merge base. This is the
+          # ONLY lane that pays for it; every other lane is a shallow, depth-1 checkout.
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-      # Visual regression baselines (further down the gate list, inside npm run ci-parity) need the exact
-      # Chromium revision `npx playwright install --with-deps chromium` resolves to. Restoring this
-      # cache BEFORE the gates run is what makes that install a ~10s cache hit instead of a ~290 MB
-      # download on every push; only the (much cheaper) OS package install still runs every time,
-      # since GitHub-hosted runners don't persist apt state. Skipped outright on the docs-only path —
-      # that path never reaches the Playwright install gate, so there's nothing to warm the cache for.
+      - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
+        run: npm run ci-parity -- --lane static
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          CI_DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
+
+  # ---- vitest: `npm test`, split three ways ---------------------------------------------------------------------------------
+  vitest:
+    name: vitest (${{ matrix.shard }}/3)
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
+        run: npm run ci-parity -- --lane vitest --shard ${{ matrix.shard }}/3
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+  # ---- build-app: the Vite build + the bundle budget; hands dist/ to the browser lanes -------------------------------------
+  build-app:
+    name: build-app
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      # The base ref's bundle numbers (for the budget gate's "which modules moved" attribution) used to come from BUILDING the
+      # base ref a second time (~45 s) off a full-history checkout. Main's own build now saves its stats under its commit's sha
+      # (the last step of this job), so a pull request — or the next push to main — just restores them. A miss falls back to the
+      # old behaviour, never fatal: scripts/perf-base-stats.mjs fetches that one commit (depth 1) and builds it.
+      - name: Restore the base commit's bundle stats
+        id: base_stats
+        uses: actions/cache/restore@v4
+        with:
+          path: .perf/cached-stats.json
+          key: perf-stats-${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
+        run: npm run ci-parity -- --lane build-app
+        env:
+          # The SAME truthy-or-not value on every gate that builds (B927104: two different truthy-nesses on the two sides of
+          # a byte comparison is a permanent phantom delta) — one place, one step.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          PERF_BASE_STATS_HIT: ${{ steps.base_stats.outputs.cache-hit }}
+          PERF_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Upload the built app for the browser lanes
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+      - name: Save this commit's bundle stats for the next base comparison (main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .perf/cached-stats.json
+          key: perf-stats-${{ github.sha }}
+
+  # ---- browser: every gate that drives Chromium against the built app, split across four machines -------------------------
+  browser:
+    name: browser (${{ matrix.shard }}/4)
+    needs: [detect, build-app]
+    if: needs.detect.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      # The exact bytes build-app measured — the browser gates test what the bundle budget saw, with no second build.
+      - name: Download the built app
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      # Needs the exact Chromium revision `npx playwright install --with-deps chromium` resolves to; restoring this BEFORE the
+      # gates run makes that install a ~10 s cache hit instead of a ~290 MB download (only the apt package install still runs).
       - name: Cache Playwright browsers
-        id: pw-cache
-        if: steps.docs_only.outputs.docs_only != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
-        id: ci_gates
-        run: npm run ci-parity
+        run: npm run ci-parity -- --lane browser --shard ${{ matrix.shard }}/4
         env:
-          # Supabase connection (Phase 1). Set these as repository secrets:
-          # Settings → Secrets and variables → Actions. Safe to be absent — the app runs fine
-          # un-configured (the cloud chip just shows "Cloud off") — but ci-parity.mjs's own build
-          # and its base-ref/visual-regression comparisons need the SAME truthy-or-not value on
-          # every gate that touches it, which is why there is exactly one place these are set now
-          # (B927104: two different truthy-nesses on the two sides of a byte comparison is a
-          # permanent phantom delta) — see scripts/ci-parity.mjs / ui-audit/lib/ciGates.mjs.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          # Told apart from a --docs-only CLI flag only by how it's set — this env is what a
-          # developer's own local `npm run ci-parity` (no env, no flag) can't reach by accident,
-          # keeping the default full-parity run the default. See ci-parity.mjs's own USAGE block.
-          CI_DOCS_ONLY: ${{ steps.docs_only.outputs.docs_only }}
-      # Visual regression diffs (NEW-1). ci-parity.mjs's own visual-regression.mjs gate writes its
-      # failure diffs to .perf/visual-regression/ (gitignored) — this is the one thing about a
-      # failure a local run doesn't need (the files are already on disk) that CI does: a
-      # downloadable copy for whoever is looking at the failed run in the GitHub UI. Skipped on the
-      # docs-only path — that gate never runs there, so there's never a diff to upload.
+      # Visual regression diffs (NEW-1): the gate writes its failure diffs to .perf/visual-regression/ (gitignored) — a
+      # downloadable copy is the one thing about a failure a local run doesn't need and CI does.
       - name: Upload visual regression diffs
-        if: failure() && steps.docs_only.outputs.docs_only != 'true'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: visual-regression-diffs
+          name: visual-regression-diffs-${{ matrix.shard }}
           path: .perf/visual-regression/
           if-no-files-found: ignore
           retention-days: 14
-      # Backfill the required "build" status (NEW-3, 2026-09-05). Inert on every ordinary run —
-      # only fires when build-check-sweep.yml dispatched THIS run to repair a PR whose required
-      # "build" check never reported at all (measured live on PRs #1455/#1456: both sat at
-      # "Expected — Waiting for status to be reported" with zero workflow runs behind them, no
-      # `pull_request` event ever having fired for those branches).
-      #
-      # ⛔ CORRECTED 2026-09-08 (NEW-1, B<PENDING>): the diagnosis originally recorded here — "a
-      # GitHub-side event-delivery gap, not the docs-only fast path or a path filter" — was WRONG.
-      # Both PRs were CONFLICTED on the generated indexes (MAP.md/BACKLOG_OPEN.md/docs/UI-INVENTORY.md)
-      # at the time, which is exactly why no `pull_request` run ever existed: GitHub cannot compute a
-      # test-merge ref for a conflicted PR, so it never fires the event that would create one. See
-      # scripts/generated-doc-touch-guard.mjs and .github/workflows/regen-derived-docs.yml for the
-      # actual fix — branches no longer touch those files, so this class of stuck PR should stop
-      # recurring. This backfill step stays as a safety net regardless (a genuine GitHub-side
-      # delivery gap remains possible even without this cause), it just no longer needs to be its
-      # only imagined trigger.
-      #
-      # `ui-audit/required-check-audit.mjs` already proves no `paths:` filter can hide this job, and
-      # it still reports OK. A `workflow_dispatch` run's own auto-generated check does NOT satisfy a
-      # PR's required status (CLAUDE.md's "Nudge CI" note — a real push is what has always been
-      # needed instead), so this posts a CLASSIC commit status directly via the Statuses API, which
-      # required-status matching honors regardless of which event produced it. `always()` so a
+
+  # ---- build: THE required check. Passes only if every lane passed. -------------------------------------------------------
+  # The job id AND check name stay exactly `build` (.github/required-checks.json; ui-audit/required-check-audit.mjs proves it is
+  # produced on pull_request → main and still reports on a docs-only change). `if: always()` so a failed or cancelled lane
+  # turns THIS check red instead of leaving it "skipped"/"Expected"; a lane may be skipped only on a docs-only run, where the
+  # heavy lanes are skipped on purpose and `static` ran the docs-only subset.
+  build:
+    name: build
+    needs: [detect, static, vitest, build-app, browser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every lane must have passed
+        id: verdict
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
+        run: |
+          node -e '
+            const needs = JSON.parse(process.env.NEEDS);
+            const docsOnly = process.env.DOCS_ONLY === "true";
+            const must = ["detect", "static"];
+            const heavy = ["vitest", "build-app", "browser"];
+            const bad = [];
+            for (const [name, n] of Object.entries(needs)) {
+              const ok = n.result === "success" || (docsOnly && heavy.includes(name) && n.result === "skipped");
+              console.log((ok ? "ok   " : "FAIL ") + name + ": " + n.result);
+              if (!ok) bad.push(name + " (" + n.result + ")");
+            }
+            for (const name of [...must, ...heavy]) if (!(name in needs)) bad.push(name + " (missing from needs)");
+            if (bad.length) { console.error("\nbuild FAILS — lane(s) not green: " + bad.join(", ")); process.exit(1); }
+            console.log("\nbuild passes — every lane green" + (docsOnly ? " (docs-only run: the heavy lanes were skipped on purpose)" : "") + ".");
+          '
+      # Backfill the required "build" status (NEW-3, 2026-09-05). Inert on every ordinary run — only fires when
+      # build-check-sweep.yml dispatched THIS run to repair a PR whose required "build" check never reported at all. A
+      # `workflow_dispatch` run's own check does NOT satisfy a PR's required status, so this posts a CLASSIC commit status
+      # directly via the Statuses API, which required-status matching honors regardless of the event. `always()` so a
       # failing build still reports "failure" rather than leaving the PR stuck a second way.
       - name: Backfill required status for a sweep-repaired PR
         if: always() && github.event.inputs.pr_number != ''
@@ -209,7 +297,7 @@ jobs:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;
             const prNumber = Number('${{ github.event.inputs.pr_number }}');
-            const outcome = '${{ steps.ci_gates.outcome }}'; // success | failure | cancelled | skipped
+            const outcome = '${{ steps.verdict.outcome }}'; // success | failure | cancelled | skipped
             const state = outcome === 'success' ? 'success' : 'failure';
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             const sha = pr.head.sha;

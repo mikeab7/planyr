@@ -1,14 +1,10 @@
 /* Model — the underwriting spreadsheet workspace root.
  *
- * A vertical slice, deliberately: a real 2D sheet (virtualised rows, rectangular selection,
- * keyboard nav, an inline editor and a formula bar) whose formulas evaluate through the
- * SAME shared engine every other module in this repo will eventually share
- * (src/shared/formula/formula.js), imported directly — no mirror, no copy. See
- * lib/sheetModel.js and lib/sheetEngine.js for the two decisions that shape everything else:
- * cell addressing lives in the data layer (not this component), and — ⛔ B891184-FOLLOWUP,
- * corrected after live production testing — a formula belongs to the ONE CELL it was typed
- * into, never a whole column; sheetEngine.js evaluates a dependency graph across cells, using
- * a concurrent session's A1-reference addition to the shared engine (grid[row][col]).
+ * The grid is Univer (components/UniverSheet.jsx, loaded lazily with this tab); this file is the host around it: which workbook is open
+ * (a project's own, an Organization workbook, or a Library file), loading and saving it, the File menu's Excel / CSV round trip, and the
+ * live project data (Site.* / Plan.* / Comp.*) its formulas read. The stored workbook format is lib/sheetModel.js; the numbers on screen,
+ * in the Excel file and in the CSV are Univer's engine's (lib/univerEval.js). The old hand-built grid was retired — see
+ * docs/SPREADSHEET-UNIVER-SPIKE.md ("Retired").
  *
  * PERSISTENCE (lib/modelStore.js): local storage is the write-through save that works today,
  * signed in or not, migration or not. The cloud push rides the SAME guarded save path every
@@ -40,76 +36,33 @@
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
-import SheetView from "./components/SheetView.jsx";
-import FormulaBar from "./components/FormulaBar.jsx";
-import FindReplaceBar from "./components/FindReplaceBar.jsx";
-import NameManager from "./components/NameManager.jsx";
-import InconsistencyPanel from "./components/InconsistencyPanel.jsx";
-import CommandPalette from "./components/CommandPalette.jsx";
-import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
-import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
-import { undoKeyKind, undoKeyOwner, CELL_EDITING_ATTR } from "./lib/undoKeyScope.js";
-import { isTextControl } from "../../shared/keyboard/keyScope.js";
 import {
-  createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet, setActiveSheet,
-  addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
-  workbookInsertRowAt, workbookDeleteRowAt, workbookInsertColumnAt, workbookDeleteColumn,
-  commitCellText, blankRange, setNumberFormat, addColumn,
-  formatAt, padRowCount, sheetsDiverge, rawAt,
-  setColumnWidth, setRowHeight, setFreeze,
-  styleAt, setCellStyle, adjustIndent, applyBorder, clearFormatting,
-  paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
-  isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
-  setRowsHidden, setColumnsHidden, clearCellRange, DEFAULT_ROW_H,
+  createWorkbook, migrateWorkbook, activeSheetEntry, sheetsDiverge, workbookHasContent,
 } from "./lib/sheetModel.js";
-import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
-import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { evalFromPlain, circularNotice } from "./lib/evalValues.js";
 import { planyrSyntaxNote } from "./lib/planyrSyntax.js";
-import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
-import { findInconsistencies } from "./lib/formulaConsistency.js";
-import { fillDown, fillTextToCells, replaceAll, replaceInCellText, fillRight, autoSumPlan } from "./lib/sheetOps.js";
-import { rangesOf, applyToRanges, isMulti, collapse, MULTI_SELECTION_MESSAGE } from "./lib/selectionModel.js";
-// Excel keyboard shortcuts (2026-10-29): the key tables, the Alt key-tip machine, the selection model and
-// the real clipboard — all pure modules; this file only wires them to state.
-import { chordCommand } from "./lib/keymap.js";
-import { START as KEYTIP_START, beginKeyTips, stepKeyTips } from "./lib/keyTips.js";
-import { runCommandById } from "./lib/commandRegistry.js";
-import { selectionKind, clampSelection, wholeSelectionLabel } from "./lib/selection.js";
-import { autofitColumnWidth, autofitRowHeight, canvasMeasure } from "./lib/autofit.js";
-import { todayIso, timeText } from "./lib/editShortcuts.js";
-import { buildClip, clipToText, clipToHtml, parseClipboard, applyClip, pasteMoveSameSheet, clipIsEmpty } from "./lib/clipboardIO.js";
-import { NUMBER_FORMATS } from "./lib/numberFormats.js";
-import ShortcutDialog from "./components/ShortcutDialog.jsx";
-import KeyTipOverlay from "./components/KeyTipOverlay.jsx";
-import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
 import { orgCloudOutcome, mergeOrgWorkbookLists } from "./lib/orgWorkbookOps.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
-import { readZoom, writeZoom } from "./lib/sheetZoom.js";
-import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import {
   readLocalSheet, writeLocalSheet, readSyncMeta, writeSyncMeta, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
   readLocalOrgIndex, writeLocalOrgIndex, touchLocalOrgIndex, removeLocalOrgIndexEntry,
   listOrgWorkbooksCloud, loadOrgWorkbookCloud, saveOrgWorkbookCloud, renameOrgWorkbookCloud, deleteOrgWorkbookCloud,
 } from "./lib/modelStore.js";
-import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
+import { reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
-// The Univer grid is THE grid for every account (cutover steps 8–9a, docs/SPREADSHEET-UNIVER-SPIKE.md); lib/univerSwitch.js only decides
-// whether the OWNER's safety hatch (the regular grid, per device) is in force. The grid itself is a lazy chunk, loaded with the
-// Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
-import { useUniverSwitch } from "./lib/univerSwitch.js";
+// The Univer grid is THE grid (the only one since the old grid was retired — docs/SPREADSHEET-UNIVER-SPIKE.md). It is a lazy chunk, loaded
+// with the Spreadsheet tab (src/app/modulePrefetch.js + the warm below), so none of @univerjs/* rides any other workspace's bundle.
 import { warmUniver } from "./lib/univerWarm.js";
 import { primeCalcCache, calcCacheSettled } from "./lib/univerCalcCache.js";
 const UniverSheet = lazy(() => import("./components/UniverSheet.jsx"));
 const CALC_WAIT_MS = 150;                      // the most the grid waits for the device-local calculation cache to be read
 // NEW-1 (B2587264) — every device starts fetching the grid's chunk the moment THIS chunk runs, in parallel with the
 // admin check and the workbook load, instead of after them (measured live: the chunk request began ~250 ms after ModelApp arrived).
-// A no-op only on a device that asked for the owner's regular-grid hatch (lib/univerWarm.js); the real mount below still decides.
 warmUniver();
 import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
@@ -195,9 +148,6 @@ function EmptyProjectState({ onGoDashboard }) {
   );
 }
 
-/** What `workbookEval` is while the Univer grid is showing: no values, no trace graph (the regular grid's trace arrows do not run then). */
-const NO_OLD_EVAL = { get: () => ({ get: () => null }), graph: { hopsFor: () => null, dependentsOf: () => new Set() } };
-
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
   projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
@@ -208,37 +158,18 @@ export default function ModelApp({
   // File-menu UI (unchanged, reused verbatim) has anything to show.
   org = false,
 }) {
-  const { value: workbook, commit: commitRaw, undo: undoRaw, redo: redoRaw, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  const { value: workbook, commit: commitRaw, reset } = useUndoableState(createWorkbook());
   // B2450528 — "the person changed it" vs "a load adopted it". Only commit/undo/redo raise this flag
   // (reset never does), and the local write-through effect consumes it to mark the stored copy DIRTY
   // (edited since it was last confirmed against the cloud — see lib/modelSyncBase.js).
   const userEditRef = useRef(false);
   const commit = useCallback((u) => { userEditRef.current = true; commitRaw(u); }, [commitRaw]);
-  const undo = useCallback(() => { userEditRef.current = true; undoRaw(); }, [undoRaw]);
-  const redo = useCallback(() => { userEditRef.current = true; redoRaw(); }, [redoRaw]);
-  // The Univer grid is the grid for every account. `univer.active` is false ONLY for the owner's hatch: a CONFIRMED is_admin() user on
-  // a device that chose "Use the regular grid" (lib/gridChoice.js). While Univer shows it owns the keyboard and the clipboard, so
-  // the regular grid's window listeners below stand down (`gridKeysOn`). `univer.deciding` = that device's admin answer is still
-  // coming: neither grid is mounted yet (a placeholder shows).
-  const univer = useUniverSwitch(userId);
-  const univerOn = univer.active;
-  const gridKeysOn = isActive && !univerOn;
-  // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
-  // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
-  // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
-  // frame. `workbook.activeSheetId` itself still exists (sheetModel.js's pure functions need
-  // SOME notion of "active" and it's what a fresh load seeds this from) and IS updated by real
-  // content operations that also pick a new active sheet (add/duplicate/delete) — see those
-  // handlers below, each of which syncs this state explicitly right after committing. A plain
-  // tab click never touches `workbook` at all. If an undo/redo ever lands on a workbook whose
-  // stored `activeSheetId` no longer matches this sheet id (e.g. undoing past an "Add Sheet"),
-  // the render below falls back defensively and a small effect resyncs this state to match.
+  // Which sheet TAB is currently being VIEWED (the one a CSV export writes). Kept outside the undo-tracked `workbook` value: a plain tab
+  // click is navigation, not a content edit. Seeded from `workbook.activeSheetId` on every load and updated from the grid's own changes;
+  // if the stored id ever names a sheet that no longer exists, the effect below resyncs it.
   const [activeSheetId, setActiveSheetId] = useState(() => workbook.activeSheetId);
   const activeEntry = workbook.sheets.find((s) => s.id === activeSheetId) || activeSheetEntry(workbook);
   useEffect(() => { if (activeEntry.id !== activeSheetId) setActiveSheetId(activeEntry.id); }, [activeEntry.id, activeSheetId]);
-  const sheet = activeEntry.sheet;
-  const sheetName = activeEntry.name;
-  const [selRange, setSelRange] = useState({ r1: 0, r2: 0, c1: 0, c2: 0 });
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState("idle"); // idle | saving | saved | error | conflict | not-provisioned | diverged
   // Whether a REAL cloud round trip (a successful load or a successful save) has happened this
@@ -387,15 +318,6 @@ export default function ModelApp({
     setStatus("diverged");
   }, []);
   const loadTokenRef = useRef(0);
-  // ⛔ CLIPBOARD (2026-10-29) — Ctrl+C / Ctrl+X / Ctrl+V use the REAL system clipboard through the browser's native
-  // copy / cut / paste events (lib/clipboardIO.js; the listeners are below the ctx bag). `internalClipRef` is only the
-  // FALLBACK for a browser that hands the event no clipboardData. `clipMark` is the dashed "marching" outline around the
-  // copied / cut range ({ sheetId, rect, mode, id }); `pendingCutRef` is the cut still waiting for its paste.
-  const internalClipRef = useRef(null);
-  const [clipMark, setClipMark] = useState(null);
-  const pendingCutRef = useRef(null);
-  const consumedCutsRef = useRef(new Set());
-  const clearClipMark = useCallback(() => { setClipMark(null); pendingCutRef.current = null; }, []);
   // A one-line, auto-dismissing message for anything a shortcut could not do — LOUD-FAILURE: no silent no-op.
   const [notice, setNotice] = useState(null);
   const noticeTimer = useRef(null);
@@ -405,61 +327,7 @@ export default function ModelApp({
     noticeTimer.current = setTimeout(() => setNotice(null), 7000);
   }, []);
   useEffect(() => () => clearTimeout(noticeTimer.current), []);
-  const [dialog, setDialog] = useState(null);       // ShortcutDialog spec | null
-  const [keyTip, setKeyTip] = useState(KEYTIP_START); // the Alt key-tip sequence in progress
-  const keyTipRef = useRef(KEYTIP_START);
-  const ctxRef = useRef(null);                      // the latest ctx bag — key handlers run commands against THIS
-  const liveRef = useRef(null);                     // the latest sheet / selection / eval for window-level listeners
-  const lastActionRef = useRef(null);               // F4 "repeat last action": { name, args } of a ctx handler
-  const clipFnsRef = useRef(null);                  // this render's copy / paste functions (the document listeners call THROUGH it)
-  const pushImmediateRef = useRef(false);           // Ctrl+S: the next cloud push fires with no debounce wait
-  const nextPushDelay = () => { const d = pushImmediateRef.current ? 0 : CLOUD_PUSH_DEBOUNCE_MS; pushImmediateRef.current = false; return d; };
-  // ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): the toolbar overflowed a 729px
-  // window — measured, the number-format picker's own box sat 22.7px past the viewport edge,
-  // reachable to a script but not to a real click. Every formatting control (incl. Undo/Redo,
-  // since the ICONOGRAPHY pass) now lives in the Ribbon below, which does its own width-aware
-  // collapsing (lib/ribbonLayout.js) — row 1 (AppHeader) carries no toolbarContent for this
-  // workspace at all any more.
-  // Stage 1 — Name Box (Ctrl+G focuses it) and Find/Replace (Ctrl+F / Ctrl+H).
-  const nameBoxRef = useRef(null);
-  const [findOpen, setFindOpen] = useState(false);
-  const [findShowReplace, setFindShowReplace] = useState(false);
-  // Stage 3 pt 2 (NEW-1) — the Name Manager panel's own open/closed state, the same "plain view
-  // state, not sheet data" convention findOpen already uses one line above.
-  const [nameManagerOpen, setNameManagerOpen] = useState(false);
-  // NEW-1 (command palette, owner chat block) — the palette's own open/closed state, same
-  // convention. `tabStripRef`/`fileMenuRef` let a palette command ("Rename Sheet", "Import
-  // Excel File") drive the SAME imperative entry points (`startRename`/`openImportXlsx`/
-  // `openImportCsv`) those components' own UI already uses — see their own headers.
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const tabStripRef = useRef(null);
   const fileMenuRef = useRef(null);
-  // B1290496 — `sheetViewRef` lets the Name Box (FormulaBar.jsx) hand DOM focus back to the grid
-  // once a typed jump lands. Navigating from the Name Box calls `onGoTo` (below) same as a mouse
-  // click does, but a mouse click also focuses the grid container as a side effect of the click
-  // itself (SheetView's own `cellClick`) — the Name Box has no such side effect, so without this
-  // the grid's `selRange` moves but DOM focus is left on nothing (the box blurs to `document.body`)
-  // and every keystroke typed right after is silently discarded.
-  const sheetViewRef = useRef(null);
-  const formulaBarRef = useRef(null); // NEW-1 — its pending text is committed before a sheet change
-  const focusGrid = useCallback(() => sheetViewRef.current?.focusGrid(), []);
-  // STAGE 3 (NEW-1) — trace precedents/dependents. Plain view state, like `zoom`/`painter` below
-  // — never through the undo stack, never synced to the cloud. `null` = no trace active; see
-  // lib/traceAudit.js's own header for the shape. Cleared on ANY real workbook edit (the effect
-  // below, keyed on `workbook`) since a trace's captured cell keys can be invalidated by a
-  // structural change (a row/column insert/delete moving or deleting the very cells it named).
-  const [trace, setTrace] = useState(null);
-  useEffect(() => { setTrace(null); }, [workbook]);
-  // STAGE 3 (NEW-2) — the Inconsistencies panel's own open/closed state, same convention as
-  // `nameManagerOpen` — mutually exclusive with Find/Replace and the Name Manager (see
-  // `onToggleInconsistencyPanel` below and the two other panels' own toggles).
-  const [inconsistencyPanelOpen, setInconsistencyPanelOpen] = useState(false);
-  // Stage 1's Ctrl+F / Ctrl+H opened Find/Replace inline in the keydown handler below; pulled
-  // out into named callbacks (NEW-1, command palette) so the palette's "Find"/"Replace" commands
-  // open the exact SAME bar the same way — one definition of "what opening Find means," not a
-  // second copy of these four lines.
-  const onOpenFind = useCallback(() => { setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
-  const onOpenReplace = useCallback(() => { setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
   // ORG SCOPE (NEW-1) — hoisted above the view-preference hooks below so they can key on the
   // right thing (a project id, or an org workbook id) without reordering any hook relative to
   // the rest of this component. `orgMode` requires `projectId` to be null BY CONSTRUCTION
@@ -480,60 +348,22 @@ export default function ModelApp({
   const fileMode = !!activeFileId;
   const viewPrefsKey = fileMode ? `file:${activeFileId}` : (orgMode ? orgWorkbookId : projectId);
 
-  // B1007280 — sheet zoom is a per-workbook VIEW preference (like a browser's own zoom level),
-  // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
-  // people (or two tabs) looking at the same model have no reason to share a zoom level.
-  const [zoom, setZoom] = useState(() => readZoom(viewPrefsKey));
-  useEffect(() => { setZoom(readZoom(viewPrefsKey)); }, [viewPrefsKey]);
   // The grid's calculation cache (lib/univerCalcCache.js) is read from this device's large store, and the grid is mounted only once that read
   // has settled (or after CALC_WAIT_MS, whichever is first): its first `load()` is synchronous and cannot wait for a read, and a read still in
   // flight at that moment is a silent miss. When the Univer chunk is still downloading the read is long finished, so this costs nothing then;
   // on a warm tab click it is a few milliseconds, repaid many times over by a first paint that is already complete.
   const [calcReadyKey, setCalcReadyKey] = useState(null);
   useEffect(() => {
-    if (!univerOn) return undefined;
     let live = true; const done = () => { if (live) setCalcReadyKey(viewPrefsKey); };
     Promise.resolve(primeCalcCache(viewPrefsKey)).then(done, done); // B2671203 — primeCalcCache(null) returns null (no scope): a bare `.then` crashed the whole workspace
     const t = setTimeout(done, CALC_WAIT_MS);
     return () => { live = false; clearTimeout(t); };
-  }, [univerOn, viewPrefsKey]);
-  const calcReady = !univerOn || calcCacheSettled(viewPrefsKey) || calcReadyKey === viewPrefsKey;
+  }, [viewPrefsKey]);
+  const calcReady = calcCacheSettled(viewPrefsKey) || calcReadyKey === viewPrefsKey;
   // The grid mounts with the workbook that is LOADED, never with ModelApp's blank first-render placeholder: the load effect that reads the device copy
   // runs just after the first render, and a grid that mounted in between built a blank unit, then threw it away for the real one (and could not adopt a
   // unit pre-built for the real workbook — B2607857). A Library file (`fileMode`) has its own loading phase and never sets `ready`.
   const gridWorkbookReady = fileMode || ready;
-  const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(viewPrefsKey, z); }, [viewPrefsKey]);
-
-  // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
-  // not sheet data" treatment as zoom: never through undo/redo, never synced to the cloud (a
-  // colleague looking at the same cloud model has no reason to share this device's toggle), but
-  // — UNLIKE painter/filterOn — persisted across a reload, because it's a standing display
-  // choice ("I turned this off because I use my own font colours") rather than a mid-task
-  // gesture that would be confusing to find still armed after a reload.
-  const [autoColor, setAutoColorState] = useState(() => readAutoColor(viewPrefsKey));
-  useEffect(() => { setAutoColorState(readAutoColor(viewPrefsKey)); }, [viewPrefsKey]);
-  const onAutoColorToggle = useCallback(() => {
-    setAutoColorState((v) => { const next = !v; writeAutoColor(viewPrefsKey, next); return next; });
-  }, [viewPrefsKey]);
-
-  // STAGE 2 — THE RIBBON (B1007281). Format Painter's captured source ({format, style} — see
-  // sheetModel.js's paintedStyleAt) while armed, or null. AutoFilter's on/off switch and its
-  // per-column choices (colIndex -> Set of allowed display values; a column absent from the map
-  // is unfiltered). All THREE are plain view state — like zoom, never through undo/redo, never
-  // synced — but UNLIKE zoom, deliberately NOT persisted across a reload either: a stray armed
-  // painter or an active filter surviving a reload would be confusing ("why did my cells just
-  // repaint themselves") in a way an unchanged zoom level never is, so both simply reset with
-  // the workbook.
-  const [painter, setPainter] = useState(null); // { source: {format, style} } | null
-  const [filterOn, setFilterOn] = useState(false);
-  const [columnFilters, setColumnFilters] = useState(() => new Map());
-  useEffect(() => { setPainter(null); setFilterOn(false); setColumnFilters(new Map()); }, [viewPrefsKey]);
-  // Format Painter needs the CURRENT selection at the moment a click/drag settles (SheetView's
-  // onSelectionSettled), not the value selRange held when the painter was armed — a ref mirror,
-  // the same pattern zoomRef (SheetView.jsx) already uses for exactly this reason.
-  const selRangeRef = useRef(selRange);
-  useEffect(() => { selRangeRef.current = selRange; }, [selRange]);
-
   const openProject = !crossProject && !!projectId;
 
   // ORG SCOPE (NEW-1), continued from `orgMode`/`orgWorkbookId` above (hoisted for the view-
@@ -627,14 +457,6 @@ export default function ModelApp({
   // hook's "start uploading what I'm leaving" step — both then see the newest edit.
   useLayoutEffect(() => () => { flushUniver(); }, [univerScope, activeFileId, flushUniver]);
   useEffect(() => { if (!isActive) flushUniver(); }, [isActive, flushUniver]);
-  const setRegularGrid = useCallback(async (regular) => {
-    const h = univerHandleRef.current;
-    if (h) {
-      await Promise.race([h.commitEditing ? h.commitEditing() : null, new Promise((r) => setTimeout(r, 400))]);
-      flushUniver();
-    } else { sheetViewRef.current?.commitPending?.(); formulaBarRef.current?.commitPending?.(); }
-    univer.setRegular(regular);
-  }, [flushUniver, univer]);
   const closeFile = useCallback(async () => {
     flushUniver();
     const ok = await fw.flush();
@@ -874,7 +696,7 @@ export default function ModelApp({
           if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
         },
       });
-    }, nextPushDelay());
+    }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce, fileMode, cloudSettled]);
@@ -909,159 +731,6 @@ export default function ModelApp({
     releaseDivergence();
   }, [commit, releaseDivergence, userId, storageKey]);
 
-  // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
-  // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
-  // `isActive` the same way Notes gates its own window shortcut: workspaces stay
-  // mounted-but-hidden, so an ungated listener fires from a tab nobody is looking at.
-  useEffect(() => {
-    if (!gridKeysOn) return undefined;
-    const onKey = (e) => {
-      // STAGE 3 (NEW-1) — Esc clears an active trace, the "way to clear" the build brief asks
-      // for, alongside the ribbon's own Remove Arrows button. A no-op when no trace is active.
-      // ⛔ MEASURED LIVE: a ribbon control collapsed into the "More ▾" overflow (Ribbon.jsx's
-      // MoreMenu — common even at an ordinary desktop width, since this module's own ribbon is
-      // already dense) leaves that popover open after a click (pre-existing behavior — closed
-      // only by Escape, its own outside-click, or the trigger). Escape is the natural way to
-      // dismiss it, but this listener is a bare `window` one and would fire on the SAME
-      // keypress — clearing a trace the very click that opened More was reaching for. So: a
-      // floating menu/panel with current focus gets Escape FIRST (its own handler closes it);
-      // this only clears the trace when nothing else is already claiming the key.
-      if (e.key === "Escape" && !e.ctrlKey && !e.metaKey) {
-        if (e.target instanceof Element && e.target.closest('.menu, [role="dialog"]')) return;
-        setTrace((t) => (t ? null : t));
-        clearClipMark(); // Escape also drops the copied / cut range outline (and cancels a pending cut)
-        return;
-      }
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      // NEW-1 (2026-10-29) — undo/redo belong to the TEXT being typed (cell editor, formula bar,
-      // Name Box, column rename, Find bar…): leave the key to the field's own native undo, or to
-      // SheetView's editor history. Only with no text control owning the keyboard does the sheet's
-      // undo stack fire. See lib/undoKeyScope.js.
-      if (undoKeyKind(e) && undoKeyOwner({
-        textControl: isTextControl(e.target),
-        cellEditorOpen: !!(e.target instanceof Element && e.target.closest(`[${CELL_EDITING_ATTR}]`)),
-      }) === "text") return;
-      if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
-      else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
-      else if (k === "f") { e.preventDefault(); onOpenFind(); }
-      else if (k === "h") { e.preventDefault(); onOpenReplace(); }
-      // NEW-1 (command palette, owner chat block) — Ctrl/Cmd+K. Notes' own QuickOpen already
-      // claims this chord for that (separate, mounted-but-hidden when this workspace is active)
-      // workspace, so there's no live collision to guard against.
-      else if (k === "k") { e.preventDefault(); setPaletteOpen(true); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [gridKeysOn, undo, redo, onOpenFind, onOpenReplace, clearClipMark]);
-
-  // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
-  // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
-  // own formulas included) to be live inputs, not just the one tab the user happens to be
-  // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
-  // SheetView/displayFor/etc, which stay unaware anything changed.
-  // NEW-1 — with the Univer grid showing, Univer's engine is the only evaluator on screen (and for every export), so the older
-  // evaluator is NOT run at all: nothing the Univer path reads comes from it. It still feeds the regular grid until that grid is retired.
-  const workbookEval = useMemo(() => (univerOn ? NO_OLD_EVAL : evaluateWorkbook(workbook, { projectNames })), [workbook, projectNames, univerOn]);
-  const evalResult = workbookEval.get(activeEntry.id);
-  const totalRows = sheet.rowCount + padRowCount(sheet, 20);
-
-  // ⛔ B1117408 (owner brief 2026-09-03) — every write below must land on the sheet CURRENTLY
-  // BEING VIEWED (`activeSheetId`, the plain-navigation state declared above `sheet`/`sheetName`),
-  // never on `workbook.activeSheetId`'s OWN stored copy. A bare tab click deliberately never
-  // touches that field (see `activeSheetId`'s own header a few lines up) — a plain tab is
-  // navigation, not a content edit, and must never mint an undo frame — so `workbook.activeSheetId`
-  // is free to sit stale after a tab switch with nothing wrong having happened YET. The bug this
-  // fixes: every handler below used to call `applyToActiveSheet(wb, …)` / `workbookInsertRowAt(wb,
-  // …)` directly, which resolve the target sheet from that same stale `workbook.activeSheetId` —
-  // so typing into the tab you just switched TO silently committed into the tab you were just ON.
-  // Composing `setActiveSheet(wb, activeSheetId)` into the SAME `commit` call as the real edit
-  // (rather than syncing it as a separate, un-history'd write) means "which sheet is on screen"
-  // and "which sheet this edit lands on" are the same value by construction, on EVERY commit,
-  // however far undo/redo has wandered in between — there is no second stored copy left to drift.
-  const applyActive = useCallback(
-    (fn, ...args) => commit((wb) => applyToActiveSheet(setActiveSheet(wb, activeSheetId), fn, ...args)),
-    [commit, activeSheetId],
-  );
-  const applyStructuralActive = useCallback(
-    (fn, ...args) => {
-      // NEW-2 — insert/delete of rows or columns shifts every address, so the extra ranges (stored by index)
-      // would point at the wrong cells: keep the active range only.
-      setSelRange((s) => collapse(s));
-      commit((wb) => fn(setActiveSheet(wb, activeSheetId), ...args));
-    },
-    [commit, activeSheetId],
-  );
-
-  const onCommitCell = useCallback((r, c, text) => {
-    clearClipMark(); // typing into a cell cancels a pending cut and drops the copy outline (Excel)
-    if (String(text).includes("\n")) {
-      // Alt+Enter new lines: Excel turns Wrap Text on for the cell and grows the row to show every line.
-      applyActive((s) => {
-        let n = setCellStyle(commitCellText(s, r, c, text), r, r, c, c, { wrap: true });
-        if (!n.rowHeights[r]) n = setRowHeight(n, r, Math.ceil(String(text).split("\n").length * 12.5 * 1.25 + 6));
-        return n;
-      });
-    } else applyActive(commitCellText, r, c, text);
-  }, [applyActive, clearClipMark]);
-  // NEW-2 — a command on a multi-range selection is ONE commit (one undo step) that threads the sheet through
-  // every selected range; `sel` is a selection ({r1..c2, extra?}) or an explicit list of ranges.
-  const applyActiveRanges = useCallback((sel, fn, ...args) => {
-    const rs = Array.isArray(sel) ? sel : rangesOf(sel);
-    commit((wb) => applyToActiveSheet(setActiveSheet(wb, activeSheetId), (s) => applyToRanges(s, rs, fn, ...args)));
-  }, [commit, activeSheetId]);
-  const onBlankRanges = useCallback((ranges) => { clearClipMark(); applyActiveRanges(ranges, blankRange); }, [applyActiveRanges, clearClipMark]);
-  const onFillDownRanges = useCallback((ranges) => applyActiveRanges(ranges, fillDown), [applyActiveRanges]);
-  const onFillText = useCallback((cells, text, fromR, fromC) => { clearClipMark(); applyActive(fillTextToCells, cells, text, fromR, fromC); }, [applyActive, clearClipMark]);
-  const onAddColumn = useCallback(() => applyActive(addColumn), [applyActive]);
-
-  // STAGE 3 (NEW-1) — the sheet tab strip. `onSelectSheetTab` is pure navigation (see the
-  // `activeSheetId` state's own header above — never through `commit`); the other four are real
-  // content edits and go through the undo stack like everything else, syncing the view's
-  // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
-  // NEW-1 (2026-10-29) — every way of changing which sheet is showing first COMMITS whatever is
-  // half-typed (cell editor, formula bar) to the sheet being left, exactly like Excel. Without it
-  // the editor state outlived the tab change and the next Enter wrote the text into the NEW sheet.
-  // The commit goes through `applyActive`'s CURRENT `activeSheetId`, so this must run before any
-  // `setActiveSheetId` below; it is queued as an ordinary functional commit, so the sheet-changing
-  // commits after it compose on top of it (they build from the latest workbook, not `workbook`).
-  const commitPendingEntry = useCallback(() => {
-    sheetViewRef.current?.commitPending?.();
-    formulaBarRef.current?.commitPending?.();
-  }, []);
-  // (NEW-2: a multi-range selection belongs to the sheet it was made on — switching tabs keeps the active cell only.)
-  const onSelectSheetTab = useCallback((id) => { commitPendingEntry(); setActiveSheetId(id); setSelRange((s) => collapse(s)); }, [commitPendingEntry]);
-  const onAddSheetTab = useCallback(() => {
-    commitPendingEntry();
-    const id = addSheet(workbook).activeSheetId; // ids come from `nextSheetId`, which a cell edit never moves
-    commit((wb) => addSheet(wb));
-    setActiveSheetId(id);
-  }, [commit, workbook, commitPendingEntry]);
-  const onDuplicateSheetTab = useCallback((sheetId) => {
-    if (duplicateSheet(workbook, sheetId) === workbook) return;
-    commitPendingEntry();
-    const id = duplicateSheet(workbook, sheetId).activeSheetId;
-    commit((wb) => duplicateSheet(wb, sheetId));
-    setActiveSheetId(id);
-  }, [commit, workbook, commitPendingEntry]);
-  const onRenameSheetTab = useCallback((id, name) => commit((wb) => renameSheet(wb, id, name)), [commit]);
-  const onDeleteSheetTab = useCallback((sheetId) => {
-    const next = deleteSheet(workbook, sheetId);
-    if (next === workbook) return;
-    commitPendingEntry();
-    commit((wb) => deleteSheet(wb, sheetId));
-    setActiveSheetId(next.activeSheetId);
-  }, [commit, workbook, commitPendingEntry]);
-  const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
-  // NEW-1 (command palette) — "add/rename/duplicate/delete sheet" from the palette acts on the
-  // CURRENTLY VIEWED sheet, calling the exact same onXSheetTab handlers TabStrip's own UI does
-  // (a click, the right-click menu, a double-click-to-rename). `onRenameSheetCurrent` opens the
-  // SAME inline editor a double-click does, via TabStrip's own imperative handle — never a second
-  // rename mechanism.
-  const onDuplicateSheetCurrent = useCallback(() => onDuplicateSheetTab(activeSheetId), [onDuplicateSheetTab, activeSheetId]);
-  const onRenameSheetCurrent = useCallback(() => tabStripRef.current?.startRename(activeSheetId), [activeSheetId]);
-  const onDeleteSheetCurrent = useCallback(() => onDeleteSheetTab(activeSheetId), [onDeleteSheetTab, activeSheetId]);
 
   // Excel round-trip (NEW-1, owner chat block) — FileMenu.jsx's four actions. `fileBusy` disables
   // the File button for the duration of an export/import (both are async — ExcelJS's own parse/
@@ -1076,8 +745,6 @@ export default function ModelApp({
     const t = setTimeout(() => setFileNotice(null), 9000);
     return () => clearTimeout(t);
   }, [fileNotice]);
-  // NEW-2 — a short, visible message from the grid (Excel's "This action won't work on multiple selections").
-  const onNotice = useCallback((text) => setFileNotice({ kind: "warn", text }), []);
   // NEW-1 (owner chat block, 2026-09-05) — Import Excel replaces the WHOLE workbook, and used to
   // do it unconditionally: importing a two-sheet file into a workbook that already had a real
   // Sheet1 silently discarded it, with nothing in the label or the flow saying so (Ctrl+Z recovers
@@ -1233,666 +900,6 @@ export default function ModelApp({
       setFileNotice({ kind: "error", text: `Could not read "${file.name}" as CSV: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [workbook, commit]);
-
-  // NEW-1 (command palette) — "Import Excel File"/"Import CSV File" click the SAME hidden file
-  // input FileMenu's own "Import Excel…"/"Import CSV…" menu items click, via its imperative
-  // handle — never a second file-picker trigger.
-  const onOpenImportXlsx = useCallback(() => fileMenuRef.current?.openImportXlsx(), []);
-  const onOpenImportCsv = useCallback(() => fileMenuRef.current?.openImportCsv(), []);
-
-  // Copy/paste/fill-down (items 6/7) — the internal clipboard round-trips a snapshot of raw
-  // cell text (see lib/sheetOps.js); paste and fill-down both shift a formula's relative A1
-  // references by the destination delta, exactly like dragging Excel's fill handle. All three
-  // operate on the ACTIVE sheet only — pasting a cross-sheet formula's qualifier rides through
-  // untouched (rewriteFormulaForCopy preserves it — see formula.js's own header).
-  const onFillDown = useCallback((r1, r2, c1, c2) => applyActive(fillDown, r1, r2, c1, c2), [applyActive]);
-
-  // Stage 1 structural editing (context-menu driven — see SheetView.jsx's ContextMenu). Every
-  // one of these shifts formula references sheet-wide on the ACTIVE sheet AND sweeps every
-  // OTHER sheet for a cross-sheet reference into it (Stage 3, NEW-1 — see the `workbook*`
-  // wrappers in sheetModel.js for why this needs a workbook-level function, not a plain
-  // per-sheet mutator).
-  const onInsertRowAt = useCallback((rowIndex) => applyStructuralActive(workbookInsertRowAt, rowIndex), [applyStructuralActive]);
-  const onDeleteRowAt = useCallback((rowIndex) => applyStructuralActive(workbookDeleteRowAt, rowIndex), [applyStructuralActive]);
-  const onInsertColumnAt = useCallback((colIndex) => applyStructuralActive(workbookInsertColumnAt, colIndex), [applyStructuralActive]);
-  const onDeleteColumnAt = useCallback((colIndex) => {
-    if (sheet.columns.length <= 1) return;
-    applyStructuralActive(workbookDeleteColumn, colIndex);
-  }, [applyStructuralActive, sheet.columns.length]);
-  const onSetColumnWidth = useCallback((colIndex, width) => applyActive(setColumnWidth, colIndex, width), [applyActive]);
-  const onSetRowHeight = useCallback((rowIndex, height) => applyActive(setRowHeight, rowIndex, height), [applyActive]);
-  // Freeze panes goes through the normal commit/undo path like every other edit here — NOT
-  // `reset` (that primitive wipes the whole undo history, meant only for adopting a load/sync
-  // result, never a user action taken mid-session).
-  const onSetFreeze = useCallback((rows, cols) => applyActive(setFreeze, rows, cols), [applyActive]);
-
-  // Name Box / Find navigation — a plain jump, not an edit, so it never mints an undo frame.
-  // r2/c2 default to r1/c1 so Find's own single-cell `onGoTo(r, c)` call needs no change;
-  // the Name Box (B1007280 — "C50:E60" range support) passes all four for a real range.
-  const onGoTo = useCallback((r1, c1, r2 = r1, c2 = c1) => setSelRange({ r1, r2, c1, c2 }), [setSelRange]);
-  // "Replace" (singular) touches only the ONE cell the Find bar is currently sitting on — every
-  // occurrence within that cell's own text, the same substring rule replaceAll uses everywhere
-  // else, so "one cell = one match" stays consistent between the counter and the action.
-  const onReplaceOne = useCallback((match, find, replace) => {
-    const current = rawAt(sheet, match.r, match.c);
-    applyActive(commitCellText, match.r, match.c, replaceInCellText(current, find, replace));
-  }, [applyActive, sheet]);
-  const onReplaceAll = useCallback((find, replace) => applyActive(replaceAll, find, replace), [applyActive]);
-
-  // Stage 3 pt 2 (NEW-1) — named ranges. Every one of these commits (one undo frame each, like
-  // every other edit here); validation itself happens in the Name Manager UI (validateNameText)
-  // BEFORE it ever calls onDefineName/onRenameName, matching sheetModel.js's own "mutators are
-  // pure setters, validation lives at the UI boundary" convention.
-  const onDefineName = useCallback((name, rect) => applyActive(defineName, name, rect), [applyActive]);
-  const onRenameName = useCallback((oldName, newName) => applyActive(renameName, oldName, newName), [applyActive]);
-  const onRetargetName = useCallback((name, rect) => applyActive(retargetName, name, rect), [applyActive]);
-  const onDeleteName = useCallback((name) => applyActive(deleteName, name), [applyActive]);
-  // Both this panel and Find/Replace float at the same fixed screen position (top-right — see
-  // each component's own header), so they never coexist: opening one closes the other, rather
-  // than reserving a second screen position that would crowd the owner's real 729px-wide window.
-  const onToggleNameManager = useCallback(() => {
-    setNameManagerOpen((o) => { if (!o) { setFindOpen(false); setInconsistencyPanelOpen(false); } return !o; });
-  }, []);
-
-  // STAGE 3 (NEW-1) — trace precedents/dependents. Clicking the SAME button again on the SAME
-  // selection extends the trace one level further (lib/traceAudit.js's `beginOrStepTrace`
-  // decides that from the existing `trace` vs. the new click); clicking the OTHER trace button,
-  // or a different cell, starts fresh. `graph` is sheetEngine.js's own read-only walk of the
-  // ALREADY-COMPUTED dependency graph (workbookEval, below) — tracing costs nothing beyond the
-  // recalc that already ran this render.
-  const graph = workbookEval.graph;
-  const onTracePrecedents = useCallback(() => {
-    setTrace((t) => beginOrStepTrace(t, "precedents", activeEntry.id, selRange.r1, selRange.c1, graph));
-  }, [activeEntry.id, selRange, graph]);
-  const onTraceDependents = useCallback(() => {
-    setTrace((t) => beginOrStepTrace(t, "dependents", activeEntry.id, selRange.r1, selRange.c1, graph));
-  }, [activeEntry.id, selRange, graph]);
-  const onClearTrace = useCallback(() => setTrace(null), []);
-  // A cross-sheet marker click (SheetView.jsx) — pure navigation, the same "plain tab click,
-  // never through commit" convention `onSelectSheetTab` above already uses.
-  const onNavigateTrace = useCallback((sheetId, row, col) => {
-    commitPendingEntry(); // NEW-1 — leaving a sheet commits what was typed on it
-    setActiveSheetId(sheetId);
-    setSelRange({ r1: row, r2: row, c1: col, c2: col });
-  }, [commitPendingEntry]);
-  const renderedTrace = useMemo(() => renderableTrace(trace, graph, activeEntry.id), [trace, graph, activeEntry.id]);
-
-  // STAGE 3 (NEW-2) — inconsistent-formula flags for the ACTIVE sheet, recomputed fresh on every
-  // sheet change (pure, no persisted state of its own — see lib/formulaConsistency.js's header).
-  // `activeFlags` is what's actually drawn/listed — everything the FULL list holds minus what's
-  // been explicitly dismissed (`sheet.dismissedInconsistencies`, the one piece of state about
-  // these flags that DOES persist).
-  const allInconsistencies = useMemo(() => findInconsistencies(sheet), [sheet]);
-  const activeInconsistencies = useMemo(
-    () => allInconsistencies.filter((f) => !isInconsistencyDismissed(sheet, f.row, f.col)),
-    [allInconsistencies, sheet],
-  );
-  const onDismissInconsistency = useCallback((row, col) => {
-    applyActive(setInconsistencyDismissed, row, col, true);
-  }, [applyActive]);
-  const onToggleInconsistencyPanel = useCallback(() => {
-    setInconsistencyPanelOpen((o) => { if (!o) { setFindOpen(false); setNameManagerOpen(false); } return !o; });
-  }, []);
-
-  const activeCol = selRange.c1;
-  // Per-cell format (item 4/pro-forma finding): the picker reflects and edits the ACTIVE
-  // cell's own format, and applying a preset touches only the currently selected RANGE of
-  // cells — never the whole column, which is what let one percent-formatted cell repaint
-  // every dollar amount above it in the same column.
-  const activeFormat = formatAt(sheet, selRange.r1, selRange.c1);
-  const onApplyFormat = useCallback((token) => {
-    applyActiveRanges(selRange, setNumberFormat, token);
-  }, [applyActiveRanges, selRange]);
-  const onDeleteColumn = useCallback(() => {
-    if (sheet.columns.length <= 1) return;
-    applyStructuralActive(workbookDeleteColumn, activeCol);
-    setSelRange({ r1: 0, r2: 0, c1: 0, c2: 0 });
-  }, [applyStructuralActive, activeCol, sheet.columns.length]);
-
-  // ---- STAGE 2 — THE RIBBON (B1007281) — every handler below acts on the current SELECTION
-  // RANGE, not just the active cell (select B2:D40, hit currency, all of them change), the same
-  // contract onApplyFormat above already established.
-  const activeStyle = styleAt(sheet, selRange.r1, selRange.c1);
-  const mergedHere = !!mergeAt(sheet, selRange.r1, selRange.c1);
-
-  const onSetCellStyle = useCallback((patch) => {
-    applyActiveRanges(selRange, setCellStyle, patch);
-  }, [applyActiveRanges, selRange]);
-  const onAdjustIndent = useCallback((delta) => {
-    applyActiveRanges(selRange, adjustIndent, delta);
-  }, [applyActiveRanges, selRange]);
-  const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
-    applyActiveRanges(selRange, applyBorder, { edges, style, mode });
-  }, [applyActiveRanges, selRange]);
-  const onClearFormattingCmd = useCallback(() => {
-    applyActiveRanges(selRange, clearFormatting);
-  }, [applyActiveRanges, selRange]);
-  const onNumberFormatOp = useCallback((op) => {
-    const fn = op === "increaseDecimals" ? increaseDecimals : op === "decreaseDecimals" ? decreaseDecimals : toggleThousands;
-    applyActiveRanges(selRange, setNumberFormat, fn(activeFormat));
-  }, [applyActiveRanges, selRange, activeFormat]);
-
-  // Format Painter — arm/disarm on click (capturing the CURRENT active cell's format+style);
-  // applying happens in onSelectionSettled below, fired by SheetView the moment the user's next
-  // click or drag actually settles on a target — see that prop's own header note for why.
-  const onFormatPainterToggle = useCallback(() => {
-    setPainter((p) => (p ? null : { source: paintedStyleAt(sheet, selRange.r1, selRange.c1) }));
-  }, [sheet, selRange]);
-  const onSelectionSettled = useCallback(() => {
-    setPainter((p) => {
-      if (!p) return p;
-      applyActiveRanges(selRangeRef.current, applyPaintedStyle, p.source);
-      return null;
-    });
-  }, [applyActiveRanges]);
-
-  const onMergeToggle = useCallback(() => {
-    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
-    applyActive((s) => {
-      const m = mergeAt(s, selRange.r1, selRange.c1);
-      return m ? unmergeAt(s, selRange.r1, selRange.c1) : mergeRange(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
-    });
-  }, [applyActive, selRange, onNotice]);
-
-  // Insert/Delete (Cells group) act on the single active row/column — the right-click context
-  // menu (SheetView.jsx) is the multi-row/column-aware path; the ribbon mirrors Excel's own
-  // ribbon behavior for a plain cell selection.
-  // (NEW-2: these act on ONE row/column, so a multi-range selection gets Excel's message instead of a guess.)
-  const onRibbonInsertRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertRowAt(selRange.r1); }, [onInsertRowAt, selRange, onNotice]);
-  const onRibbonInsertColumn = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onInsertColumnAt(selRange.c1); }, [onInsertColumnAt, selRange, onNotice]);
-  const onRibbonDeleteRow = useCallback(() => { if (isMulti(selRange)) onNotice(MULTI_SELECTION_MESSAGE); else onDeleteRowAt(selRange.r1); }, [onDeleteRowAt, selRange, onNotice]);
-
-  const onSetFreezeTopRow = useCallback(() => onSetFreeze(1, sheet.freezeCols), [onSetFreeze, sheet.freezeCols]);
-  const onSetFreezeFirstColumn = useCallback(() => onSetFreeze(sheet.freezeRows, 1), [onSetFreeze, sheet.freezeRows]);
-  const onSetFreezeAtSelection = useCallback(() => onSetFreeze(selRange.r1, selRange.c1), [onSetFreeze, selRange]);
-  const onUnfreeze = useCallback(() => onSetFreeze(0, 0), [onSetFreeze]);
-
-  // Sort (Sort & Filter). A one-row/one-cell selection sorts the WHOLE contiguous used range of
-  // the active column instead of no-op'ing — Excel's own "select one cell, hit Sort" behavior,
-  // and far more useful on a real pro-forma than requiring an exact range be dragged first.
-  const onSort = useCallback((direction) => {
-    if (isMulti(selRange)) { onNotice(MULTI_SELECTION_MESSAGE); return; }
-    let r1 = selRange.r1, r2 = selRange.r2;
-    if (r1 === r2) { const used = usedRangeEnd(sheet); r1 = 0; r2 = used ? used.row : 0; }
-    applyActive(sortRange, r1, r2, selRange.c1, direction);
-  }, [applyActive, selRange, sheet, onNotice]);
-
-  const onFilterToggle = useCallback(() => setFilterOn((v) => !v), []);
-  const onSetColumnFilter = useCallback((colIndex, allowedOrNull) => {
-    setColumnFilters((prev) => {
-      const next = new Map(prev);
-      if (allowedOrNull) next.set(colIndex, allowedOrNull); else next.delete(colIndex);
-      return next;
-    });
-  }, []);
-  // The WHOLE AutoFilter mechanism on the reading side is "which rows does the active filter set
-  // hide" — SheetView/rowLayout.js do the rest (a hidden row renders at zero height, see
-  // rowLayout.js's own header). Skipped entirely (null) the moment no column has an active
-  // filter, so a sheet that never uses AutoFilter pays nothing for it.
-  const hiddenRows = useMemo(() => {
-    const manual = sheet.hiddenRows && Object.keys(sheet.hiddenRows).length > 0 ? sheet.hiddenRows : null; // Ctrl+9
-    if (columnFilters.size === 0 && !manual) return null;
-    const hidden = new Set(manual ? Object.keys(manual).map(Number) : []);
-    if (columnFilters.size === 0) return hidden;
-    for (let r = 0; r < sheet.rowCount; r++) {
-      for (const [colIndex, allowed] of columnFilters) {
-        if (!allowed.has(displayFor(sheet, evalResult, r, colIndex))) { hidden.add(r); break; }
-      }
-    }
-    return hidden;
-  }, [sheet, evalResult, columnFilters]);
-
-  // ═══════════════════════════════════════════════════════════════════════════════════════════════
-  // ⛔ EXCEL SHORTCUTS (owner, 2026-10-29: "muscle memory is the spec") — every handler below is a ctx entry the
-  // command registry runs; the key tables (lib/keymap.js, lib/keyTips.js) only pick WHICH one. Plain closures over
-  // this render's state: `ctxRef` (below) is re-pointed at every render, so a key handler always runs the latest.
-  // ═══════════════════════════════════════════════════════════════════════════════════════════════
-  const selNorm = clampSelection(sheet, selRange);
-  const selKind = selectionKind(sheet, selRange);
-  const eachIndex = (a, b, fn) => { for (let i = a; i <= b; i++) fn(i); };
-  // NEW-2 (B2530689) — Excel's answer to a command that needs ONE rectangle when several ranges are selected: say so,
-  // never a silent no-op and never "acts on the last range only".
-  const refuseMulti = () => {
-    if (!isMulti(liveRef.current.selRange)) return false;
-    onNotice(MULTI_SELECTION_MESSAGE); // the same banner the grid's own multi-range refusals use (model-file-notice)
-    return true;
-  };
-
-  // ---- clipboard -------------------------------------------------------------------------------
-  // Scope: the grid / toolbar owns the clipboard events ONLY when no text control (cell editor, formula bar, name box,
-  // find bar, a dialog's field) has focus — native text copy / paste keeps working there — and no page text is selected.
-  const clipboardScopeOk = (e) => {
-    if (!isActive) return false;
-    const el = (document.activeElement && document.activeElement !== document.body ? document.activeElement : e.target);
-    if (el && el.closest) {
-      if (el.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"]')) return false;
-      if (!el.closest('[data-testid="model-root"]')) return false;
-    }
-    const sel = window.getSelection && window.getSelection();
-    if (sel && !sel.isCollapsed && String(sel).trim() !== "" && !(el && el.closest && el.closest('[data-testid="model-sheet"]'))) return false;
-    return true;
-  };
-
-  // The used-range clamp: a whole column / row / sheet copies its USED part (Excel does the same), never 1000 blank rows.
-  const clipSelection = () => {
-    const live = liveRef.current;
-    const s = clampSelection(live.sheet, live.selRange);
-    const kind = selectionKind(live.sheet, live.selRange);
-    const used = usedRangeEnd(live.sheet);
-    if (kind === "columns" || kind === "sheet") s.r2 = Math.max(s.r1, Math.min(s.r2, used ? used.row : s.r1));
-    if (kind === "rows" || kind === "sheet") s.c2 = Math.max(s.c1, Math.min(s.c2, used ? used.col : s.c1));
-    return s;
-  };
-
-  // Copy / cut: put text/plain (TSV of the displayed values) + text/html (styled table + Planyr marker) on the clipboard.
-  // `clipboardData` is the native event's; with none (a browser that refuses it) the async API, then the internal ref.
-  const performCopy = (clipboardData, cut) => {
-    if (refuseMulti()) return false;
-    const live = liveRef.current;
-    const sel = clipSelection();
-    const clip = buildClip(live.sheet, sel, { hiddenRows: live.hiddenRows });
-    const displayAt = (r, c) => displayFor(live.sheet, live.evalResult, r, c);
-    const text = clipToText(clip, displayAt), html = clipToHtml(clip, displayAt);
-    internalClipRef.current = clip;
-    let wrote = false;
-    if (clipboardData) {
-      try { clipboardData.setData("text/plain", text); clipboardData.setData("text/html", html); wrote = true; } catch { wrote = false; }
-    }
-    if (!wrote && navigator.clipboard && window.ClipboardItem) {
-      navigator.clipboard.write([new window.ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })])
-        .catch(() => showNotice("Couldn't write to the system clipboard — pasting inside Planyr still works."));
-      wrote = true;
-    }
-    if (!wrote) showNotice("Couldn't write to the system clipboard — pasting inside Planyr still works.");
-    setClipMark({ sheetId: live.activeSheetId, rect: sel, mode: cut ? "cut" : "copy", id: clip.id });
-    pendingCutRef.current = cut ? { id: clip.id, sheetId: live.activeSheetId, rect: sel } : null;
-    return wrote;
-  };
-
-  // Paste: whatever arrived (a Planyr marker, an Excel / Docs / web table, or plain text) becomes one Clip and goes in at
-  // the selection — ONE undo step. A cut pasted in the window that cut it MOVES (source cleared, references follow).
-  const performPaste = ({ html = "", text = "", noClipboardData = false }) => {
-    if (refuseMulti()) return;
-    const live = liveRef.current;
-    let clip = parseClipboard({ html, text });
-    // The internal copy is a fallback for a browser that handed the event NO clipboardData at all — never for a clipboard
-    // that is merely empty or holds something else (that would paste a stale copy over what the user just copied elsewhere).
-    if (!clip && noClipboardData && internalClipRef.current) clip = internalClipRef.current;
-    if (!clip || clipIsEmpty(clip)) { showNotice("Nothing to paste — the clipboard holds no cells or text."); return; }
-    try {
-      const sel = clampSelection(live.sheet, live.selRange);
-      const cut = pendingCutRef.current;
-      const isMove = !!(cut && clip.id && clip.id === cut.id && !consumedCutsRef.current.has(cut.id));
-      let dest = null;
-      if (isMove && cut.sheetId === live.activeSheetId) {
-        commit((wb) => { const r = pasteMoveSameSheet(setActiveSheet(wb, live.activeSheetId), live.activeSheetId, clip, cut, sel); dest = r.dest; return r.workbook; });
-      } else if (isMove) {
-        // cut on another tab: the cells move here; formulas elsewhere that pointed at the old cells are NOT re-pointed
-        commit((wb) => {
-          const wb1 = setActiveSheet(wb, live.activeSheetId);
-          const r = applyToActiveSheet(wb1, (sh) => { const x = applyClip(sh, clip, sel); dest = x.dest; return x.sheet; });
-          return { ...r, sheets: r.sheets.map((e) => (e.id === cut.sheetId ? { ...e, sheet: clearCellRange(e.sheet, cut.rect.r1, cut.rect.r2, cut.rect.c1, cut.rect.c2) } : e)) };
-        });
-        showNotice("Moved to this sheet. Formulas that pointed at the old cells were not updated.");
-      } else {
-        applyActive((sh) => { const x = applyClip(sh, clip, sel); dest = x.dest; return x.sheet; });
-      }
-      if (isMove) { consumedCutsRef.current.add(cut.id); clearClipMark(); }
-      if (dest) setSelRange({ r1: dest.r1, r2: dest.r2, c1: dest.c1, c2: dest.c2 });
-    } catch (err) {
-      showNotice(`Paste failed: ${err && err.message ? err.message : "unknown error"}`); // LOUD-FAILURE
-    }
-  };
-
-  // Menu / palette entry points use the SAME functions: copy & cut ask the browser to run its own copy / cut (which fires the
-  // event the listener below handles); paste reads the clipboard asynchronously — if the browser refuses, say so.
-  const onClipboardCommand = (which) => {
-    sheetViewRef.current?.focusGrid();
-    if (which === "paste") {
-      if (!navigator.clipboard || !navigator.clipboard.read) { showNotice("Your browser won't let a menu read the clipboard — press Ctrl+V instead."); return; }
-      navigator.clipboard.read().then(async (items) => {
-        let html = "", text = "";
-        for (const item of items) {
-          if (item.types.includes("text/html")) html = await (await item.getType("text/html")).text();
-          if (item.types.includes("text/plain")) text = await (await item.getType("text/plain")).text();
-        }
-        performPaste({ html, text });
-      }).catch(() => showNotice("Your browser blocked reading the clipboard from the menu — press Ctrl+V instead."));
-      return;
-    }
-    let fired = false;
-    const probe = () => { fired = true; };
-    document.addEventListener(which, probe, true);
-    let ok = false;
-    try { ok = document.execCommand(which); } catch { ok = false; }
-    document.removeEventListener(which, probe, true);
-    if (!ok || !fired) performCopy(null, which === "cut"); // the browser would not run it: write through the async API
-  };
-
-  // ---- Alt+Enter wrap, Ctrl+Enter fill -----------------------------------------------------------
-  const onFillRight = () => applyActiveRanges(selRange, fillRight);
-
-  // ---- date / time / copy-from-above / autosum ------------------------------------------------------
-  const onInsertDate = () => {
-    const { r1: r, c1: c } = selNorm;
-    clearClipMark();
-    applyActive((s) => { const n = commitCellText(s, r, c, todayIso()); return formatAt(n, r, c) ? n : setNumberFormat(n, r, r, c, c, "mm/dd/yyyy"); });
-  };
-  const onInsertTime = () => { clearClipMark(); applyActive(commitCellText, selNorm.r1, selNorm.c1, timeText()); };
-  const onCopyAbove = (kind) => {
-    const { r1: r, c1: c } = selNorm;
-    if (r === 0) { showNotice("There is no cell above to copy from."); return; }
-    const raw = rawAt(sheet, r - 1, c);
-    const text = kind === "value" && raw.trim().startsWith("=") ? displayFor(sheet, evalResult, r - 1, c) : raw;
-    clearClipMark();
-    applyActive(commitCellText, r, c, text);
-  };
-  const onAutoSum = () => {
-    const plan = autoSumPlan(sheet, selNorm.r1, selNorm.r2, selNorm.c1, selNorm.c2);
-    if (plan.length === 0) { showNotice("AutoSum: no numbers above or to the left of this cell."); return; }
-    clearClipMark();
-    applyActive((s) => plan.reduce((acc, p) => commitCellText(acc, p.r, p.c, p.text), s));
-    setSelRange({ r1: plan[0].r, r2: plan[plan.length - 1].r, c1: plan[0].c, c2: plan[plan.length - 1].c });
-  };
-  const onRepeatLast = () => {
-    const last = lastActionRef.current;
-    const fn = last && ctxRef.current && ctxRef.current[last.name];
-    if (!fn) { showNotice("Nothing to repeat yet."); return; }
-    fn(...last.args);
-  };
-
-  // ---- clear -----------------------------------------------------------------------------------------
-  const onClearContents = () => onBlankRanges(rangesOf(selRange));
-  const onClearAll = () => { clearClipMark(); applyActiveRanges(selRange, clearCellRange); };
-
-  // ---- widths / heights / autofit -----------------------------------------------------------------------
-  const usedLastRow = () => { const u = usedRangeEnd(sheet); return u ? u.row : 0; };
-  const onAutofit = (axis) => {
-    if (refuseMulti()) return;
-    if (axis === "columns") {
-      const widths = [];
-      eachIndex(selNorm.c1, selNorm.c2, (c) => widths.push([c, autofitColumnWidth(sheet, evalResult, c, canvasMeasure)]));
-      applyActive((s) => widths.reduce((acc, [c, w]) => setColumnWidth(acc, c, w), s));
-    } else {
-      const last = selKind === "columns" || selKind === "sheet" ? Math.max(selNorm.r1, Math.min(selNorm.r2, usedLastRow())) : selNorm.r2;
-      const heights = [];
-      eachIndex(selNorm.r1, last, (r) => heights.push([r, autofitRowHeight(sheet, evalResult, r, (c) => (sheet.columns[c]?.width || 120), canvasMeasure)]));
-      applyActive((s) => heights.reduce((acc, [r, h]) => setRowHeight(acc, r, h), s));
-    }
-  };
-  const openDialog = (spec) => setDialog(spec);
-  const onOpenDialog = (kind) => {
-    if ((kind === "column-width" || kind === "row-height") && refuseMulti()) return;
-    if (kind === "column-width") {
-      openDialog({
-        title: "Column width", submitLabel: "OK",
-        fields: [{ key: "w", label: selNorm.c1 === selNorm.c2 ? "Width" : "Width (every selected column)", type: "number", min: 1, value: String(sheet.columns[selNorm.c1]?.width || 120) }],
-        run: ({ w }) => { const n = Number(w); if (Number.isFinite(n) && n > 0) applyActive((s) => { let acc = s; eachIndex(selNorm.c1, selNorm.c2, (c) => { acc = setColumnWidth(acc, c, n); }); return acc; }); },
-      });
-    } else if (kind === "row-height") {
-      openDialog({
-        title: "Row height", submitLabel: "OK",
-        fields: [{ key: "h", label: selNorm.r1 === selNorm.r2 ? "Height" : "Height (every selected row)", type: "number", min: 1, value: String(sheet.rowHeights[selNorm.r1] || DEFAULT_ROW_H) }],
-        run: ({ h }) => { const n = Number(h); if (Number.isFinite(n) && n > 0) applyActive((s) => { let acc = s; eachIndex(selNorm.r1, selNorm.r2, (r) => { acc = setRowHeight(acc, r, n); }); return acc; }); },
-      });
-    } else if (kind === "number-format") {
-      const cur = activeFormat || null;
-      const preset = NUMBER_FORMATS.find((f) => (f.token || null) === cur);
-      openDialog({
-        title: "Number format", submitLabel: "OK",
-        fields: [
-          { key: "preset", label: "Format", type: "select", value: preset ? preset.id : "custom", options: [...NUMBER_FORMATS.map((f) => ({ value: f.id, label: f.label })), { value: "custom", label: "Custom…" }] },
-          { key: "custom", label: "Custom format", type: "text", value: preset ? "" : (cur || ""), hint: "Used when Format is Custom — for example 0.0\"x\"" },
-        ],
-        run: ({ preset: p, custom }) => {
-          if (p === "custom") onApplyFormat(custom.trim() || null);
-          else onApplyFormat((NUMBER_FORMATS.find((f) => f.id === p) || NUMBER_FORMATS[0]).token);
-        },
-      });
-    }
-  };
-
-  // ---- hide / unhide --------------------------------------------------------------------------------------
-  const onHide = (axis) => {
-    if (refuseMulti()) return;
-    if (axis === "rows") {
-      if (selNorm.r1 === 0 && selNorm.r2 >= sheet.rowCount - 1) { showNotice("Can't hide every row."); return; }
-      applyActive(setRowsHidden, selNorm.r1, selNorm.r2, true);
-      let nr = selNorm.r2 + 1;
-      while (nr < sheet.rowCount && sheet.hiddenRows?.[nr]) nr++;
-      if (nr >= sheet.rowCount) { nr = selNorm.r1 - 1; while (nr > 0 && sheet.hiddenRows?.[nr]) nr--; }
-      nr = Math.max(0, nr);
-      setSelRange({ r1: nr, r2: nr, c1: selNorm.c1, c2: selNorm.c1 });
-    } else {
-      if (sheet.columns.every((col, i) => col.hidden || (i >= selNorm.c1 && i <= selNorm.c2))) { showNotice("Can't hide every column."); return; }
-      applyActive(setColumnsHidden, selNorm.c1, selNorm.c2, true);
-      let nc = selNorm.c2 + 1;
-      while (nc < sheet.columns.length && sheet.columns[nc].hidden) nc++;
-      if (nc >= sheet.columns.length) { nc = selNorm.c1 - 1; while (nc > 0 && sheet.columns[nc].hidden) nc--; }
-      nc = Math.max(0, nc);
-      setSelRange({ r1: selNorm.r1, r2: selNorm.r1, c1: nc, c2: nc });
-    }
-  };
-  // Unhide: the hidden rows / columns inside the selection; a single selected line also reaches the hidden run right beside it
-  // (a hidden row can't be selected, so Excel's "select around it" is offered by adjacency here).
-  const onUnhide = (axis) => {
-    if (refuseMulti()) return;
-    const isHidden = axis === "rows" ? (i) => !!sheet.hiddenRows?.[i] : (i) => !!sheet.columns[i]?.hidden;
-    const max = axis === "rows" ? sheet.rowCount - 1 : sheet.columns.length - 1;
-    let lo = axis === "rows" ? selNorm.r1 : selNorm.c1, hi = axis === "rows" ? selNorm.r2 : selNorm.c2;
-    if (lo === hi) { while (lo > 0 && isHidden(lo - 1)) lo--; while (hi < max && isHidden(hi + 1)) hi++; }
-    let any = false;
-    for (let i = lo; i <= hi; i++) if (isHidden(i)) { any = true; break; }
-    if (!any) { showNotice(`No hidden ${axis} here.`); return; }
-    if (axis === "rows") applyActive(setRowsHidden, lo, hi, false); else applyActive(setColumnsHidden, lo, hi, false);
-  };
-
-  // ---- insert / delete (Ctrl+Shift+= , Ctrl+-) ---------------------------------------------------------------
-  const insertRows = (at, n) => applyStructuralActive((wb) => { let acc = wb; for (let i = 0; i < n; i++) acc = workbookInsertRowAt(acc, at); return acc; });
-  const insertColumns = (at, n) => applyStructuralActive((wb) => { let acc = wb; for (let i = 0; i < n; i++) acc = workbookInsertColumnAt(acc, at); return acc; });
-  const deleteRows = (a, b) => applyStructuralActive((wb) => { let acc = wb; for (let i = b; i >= a; i--) acc = workbookDeleteRowAt(acc, i); return acc; });
-  const deleteColumns = (a, b) => {
-    if (sheet.columns.length - (b - a + 1) < 1) { showNotice("A sheet needs at least one column."); return; }
-    applyStructuralActive((wb) => { let acc = wb; for (let i = b; i >= a; i--) acc = workbookDeleteColumn(acc, i); return acc; });
-  };
-  const onInsertCells = () => {
-    if (refuseMulti()) return;
-    if (selKind === "rows") insertRows(selNorm.r1, selNorm.r2 - selNorm.r1 + 1);
-    else if (selKind === "columns") insertColumns(selNorm.c1, selNorm.c2 - selNorm.c1 + 1);
-    else if (selKind === "sheet") showNotice("Select a row, a column or some cells to insert at.");
-    else {
-      const s0 = { ...selNorm };
-      openDialog({
-        title: "Insert", submitLabel: "OK",
-        fields: [{ key: "what", type: "radio", value: "row", options: [{ value: "row", label: "Entire row" }, { value: "col", label: "Entire column" }] }],
-        run: ({ what }) => (what === "row" ? insertRows(s0.r1, s0.r2 - s0.r1 + 1) : insertColumns(s0.c1, s0.c2 - s0.c1 + 1)),
-      });
-    }
-  };
-  const onDeleteCells = () => {
-    if (refuseMulti()) return;
-    if (selKind === "rows") deleteRows(selNorm.r1, selNorm.r2);
-    else if (selKind === "columns") deleteColumns(selNorm.c1, selNorm.c2);
-    else if (selKind === "sheet") showNotice("Select a row, a column or some cells to delete.");
-    else {
-      const s0 = { ...selNorm };
-      openDialog({
-        title: "Delete", submitLabel: "OK",
-        fields: [{ key: "what", type: "radio", value: "row", options: [{ value: "row", label: "Entire row" }, { value: "col", label: "Entire column" }] }],
-        run: ({ what }) => (what === "row" ? deleteRows(s0.r1, s0.r2) : deleteColumns(s0.c1, s0.c2)),
-      });
-    }
-  };
-
-  // ---- sheets, save, merge & centre, colour menus ----------------------------------------------------------------
-  const onSheetStep = (dir) => {
-    const i = workbook.sheets.findIndex((e) => e.id === activeEntry.id);
-    const next = workbook.sheets[i + dir];
-    if (next) { commitPendingEntry(); setActiveSheetId(next.id); } // B2540736 — leaving a sheet commits what was typed on it
-  };
-  const onSaveNow = () => {
-    if (fileMode) { fw.flush?.(); showNotice(fw.cloudConfirmed ? "Saving the file…" : "Saving…"); return; }
-    if (userId && status !== "not-provisioned" && !divergedRef.current) {
-      // main's push effect only fires for edits not yet confirmed uploaded (dirtyRef) — say so when there are none
-      if (!dirtyRef.current) { showNotice("Everything is already saved to your account."); return; }
-      pushImmediateRef.current = true;
-      setPushNonce((n) => n + 1);
-      showNotice("Saving to your account…");
-    } else showNotice(userId ? "Saved on this device — the cloud copy is on hold (see the badge above)." : "Saved on this device — sign in to back it up to your account.");
-  };
-  const onMergeCenter = () => { if (!refuseMulti()) applyActive(mergeCenterPlan); };
-  const mergeCenterPlan = (s) => {
-    let acc = s;
-    for (let r = selNorm.r1; r <= selNorm.r2; r++) { if (!mergeAt(acc, r, selNorm.c1)) acc = mergeRange(acc, r, r, selNorm.c1, selNorm.c2); }
-    return setCellStyle(acc, selNorm.r1, selNorm.r2, selNorm.c1, selNorm.c2, { align: "center" });
-  };
-  const onOpenColorMenu = (which) => {
-    const detail = { which, claimed: false };
-    window.dispatchEvent(new CustomEvent("model-open-color-menu", { detail }));
-  };
-  // "repeat last action" (F4): the formatting / structure handlers below record themselves by NAME so the repeat runs the
-  // CURRENT version (with the current selection), not the one that was live when the action first ran.
-  const recd = (name, fn) => (...args) => { lastActionRef.current = { name, args }; return fn(...args); };
-
-  // ⛔ NEW-1 (command palette, owner chat block) — THE ONE `ctx` BAG, built once per render and
-  // handed to three consumers: the Ribbon (the reduced Home ribbon), the permanent Formula
-  // Auditing toolbar (`AuditGroup`, AppHeader row 1) and the command palette itself. Every
-  // handler below is the SAME function a UI control this session already renders calls — this
-  // object is assembly, not a second implementation of any of them (lib/commandRegistry.js's own
-  // header spells out why that's the whole point).
-  const ctx = {
-    activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
-    painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
-    canUndo, canRedo, onUndo: undo, onRedo: redo,
-    onSetCellStyle: recd("onSetCellStyle", onSetCellStyle), onAdjustIndent: recd("onAdjustIndent", onAdjustIndent), onApplyBorder: recd("onApplyBorder", onApplyBorderCmd),
-    onApplyFormat: recd("onApplyFormat", onApplyFormat), onNumberFormatOp: recd("onNumberFormatOp", onNumberFormatOp),
-    onClearFormatting: recd("onClearFormatting", onClearFormattingCmd),
-    onFormatPainterToggle, onMergeToggle: recd("onMergeToggle", onMergeToggle),
-    onInsertRow: recd("onInsertRow", onRibbonInsertRow), onInsertColumn: recd("onInsertColumn", onRibbonInsertColumn),
-    onDeleteRow: recd("onDeleteRow", onRibbonDeleteRow), onDeleteColumn: recd("onDeleteColumn", onDeleteColumn),
-    canDeleteColumn: sheet.columns.length > 1,
-    onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
-    onSort, onFilterToggle,
-    nameManagerOpen, onToggleNameManager,
-    traceMode: renderedTrace?.mode || null, traceLevel: renderedTrace?.level ?? 0,
-    traceTruncated: !!renderedTrace?.truncated, traceNoFurther: !!renderedTrace?.noFurther, traceCellCount: renderedTrace?.cellCount ?? 0,
-    onTracePrecedents, onTraceDependents, onClearTrace,
-    inconsistencyCount: activeInconsistencies.length, inconsistencyPanelOpen, onToggleInconsistencyPanel,
-    // Palette-only reach (never rendered as their own ribbon group — see ribbonLayout.js's header).
-    onOpenFind, onOpenReplace,
-    onAddSheetTab, onDuplicateSheetCurrent, onRenameSheetCurrent, onDeleteSheetCurrent, sheetCount: workbook.sheets.length,
-    onExportXlsx, onExportCsv, onOpenImportXlsx, onOpenImportCsv,
-    zoom, onZoomChange,
-    // Excel shortcuts block (2026-10-29) — see the handler block above.
-    onClipboardCommand, onFillRight, onInsertDate, onInsertTime, onCopyAbove, onAutoSum, onRepeatLast,
-    onClearAll, onClearContents, onAutofit, onOpenDialog, onHide, onUnhide, onInsertCells, onDeleteCells,
-    onSheetStep, onSaveNow, onMergeCenter, onOpenColorMenu,
-    onCancelCut: clearClipMark,
-  };
-  ctxRef.current = ctx;
-  clipFnsRef.current = { performCopy, performPaste, clipboardScopeOk };
-  liveRef.current = { sheet, workbook, activeSheetId: activeEntry.id, evalResult, selRange, hiddenRows };
-
-  /* ---- the window-level listeners (re-armed only when the workspace is shown / hidden) ---------------------------------
-   * Everything they run goes through `ctxRef` / `liveRef`, so they never close over a stale render. */
-  const runCommand = useCallback((id) => {
-    if (!ctxRef.current) return false;
-    return runCommandById(id, ctxRef.current);
-  }, []);
-
-  // (1) Excel's Ctrl / F-key / Alt+= chords -> registry commands (lib/keymap.js). Inside the in-cell editor only the four
-  // font-style chords fire; any other text control (formula bar, name box, find bar, a dialog) keeps every key.
-  useEffect(() => {
-    if (!gridKeysOn) return undefined;
-    const onKey = (e) => {
-      if (keyTipRef.current.active) return; // an Alt sequence owns the keyboard (handled in the capture listener below)
-      const t = e.target instanceof Element ? e.target : null;
-      const editing = !!(t && t.closest("[data-cell-editor]"));
-      if (!editing && t && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
-      const id = chordCommand(e, { editing });
-      if (!id) return;
-      e.preventDefault();
-      runCommand(id);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [gridKeysOn, runCommand]);
-
-  // (2) The Alt key-tip sequence. Press and release Alt ALONE -> the sequence opens; letters follow Excel's Home / View paths
-  // (lib/keyTips.js); Esc backs out a level; an unmatched key, a second Alt or any click cancels. Capture phase, so while a
-  // sequence is open NOTHING else (the grid's type-to-edit, a ribbon button) sees the letters. Alt+Enter / Alt+click / Alt+= are
-  // chords, not "Alt alone": any other key or a mouse press between Alt down and up cancels the arming.
-  useEffect(() => {
-    if (!gridKeysOn) return undefined;
-    let armed = false;
-    const setTip = (st) => { keyTipRef.current = st; setKeyTip(st); };
-    const scopeOk = (e) => {
-      const t = e.target instanceof Element ? e.target : null;
-      if (t && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return false;
-      return !t || !!t.closest('[data-testid="model-root"]') || t === document.body;
-    };
-    const down = (e) => {
-      if (e.key === "Alt") {
-        if (e.repeat) { if (keyTipRef.current.active || armed) e.preventDefault(); return; }
-        if (keyTipRef.current.active) { e.preventDefault(); e.stopPropagation(); setTip(KEYTIP_START); armed = false; return; }
-        armed = !e.ctrlKey && !e.metaKey && !e.shiftKey && scopeOk(e);
-        return;
-      }
-      armed = false;
-      if (!keyTipRef.current.active) return;
-      e.preventDefault(); e.stopPropagation();
-      const { state, run } = stepKeyTips(keyTipRef.current, e.key);
-      setTip(state);
-      if (run && !runCommand(run)) showNotice("That command isn't available right now.");
-    };
-    const up = (e) => {
-      if (e.key !== "Alt") return;
-      if (armed && !keyTipRef.current.active) {
-        // preventDefault on the Alt KEYUP is what stops Windows browsers focusing their own menu bar
-        e.preventDefault(); e.stopPropagation();
-        setTip(beginKeyTips());
-      } else if (keyTipRef.current.active) { e.preventDefault(); }
-      armed = false;
-    };
-    const cancel = () => { armed = false; if (keyTipRef.current.active) setTip(KEYTIP_START); };
-    window.addEventListener("keydown", down, true);
-    window.addEventListener("keyup", up, true);
-    window.addEventListener("mousedown", cancel, true);
-    window.addEventListener("blur", cancel);
-    return () => {
-      window.removeEventListener("keydown", down, true);
-      window.removeEventListener("keyup", up, true);
-      window.removeEventListener("mousedown", cancel, true);
-      window.removeEventListener("blur", cancel);
-      keyTipRef.current = KEYTIP_START;
-    };
-  }, [gridKeysOn, runCommand, showNotice]);
-
-  // (3) The real clipboard: native copy / cut / paste EVENTS (no permission prompt) — see lib/clipboardIO.js. The functions are
-  // reached through `clipFnsRef` (re-pointed every render) so a listener armed once never writes into a stale sheet / tab.
-  useEffect(() => {
-    if (!gridKeysOn) return undefined;
-    const onCopyEvent = (e, cut) => {
-      const F = clipFnsRef.current;
-      if (!F || !F.clipboardScopeOk(e)) return;
-      if (e.clipboardData) e.preventDefault();
-      F.performCopy(e.clipboardData, cut);
-    };
-    const onCopy = (e) => onCopyEvent(e, false);
-    const onCut = (e) => onCopyEvent(e, true);
-    const onPasteEvent = (e) => {
-      const F = clipFnsRef.current;
-      if (!F || !F.clipboardScopeOk(e)) return;
-      e.preventDefault();
-      const cd = e.clipboardData;
-      F.performPaste(cd ? { html: cd.getData("text/html"), text: cd.getData("text/plain") } : { noClipboardData: true });
-    };
-    document.addEventListener("copy", onCopy);
-    document.addEventListener("cut", onCut);
-    document.addEventListener("paste", onPasteEvent);
-    return () => { document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPasteEvent); };
-  }, [gridKeysOn]);
-
   const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
@@ -1958,14 +965,7 @@ export default function ModelApp({
               onImportXlsxFile={onImportXlsxFile}
               onImportCsvFile={onImportCsvFile}
               onOpenFile={onOpenFileFromComputer}
-              univerSwitch={univer.available ? { regular: univer.regular, setRegular: setRegularGrid } : null}
             />
-            {!univerOn && (
-              <>
-                <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
-                <AuditGroup ctx={ctx} />
-              </>
-            )}
           </>
         ) : undefined}
       />
@@ -2005,15 +1005,12 @@ export default function ModelApp({
               onUseCloud={onUseCloudCopy}
             />
           )}
-          {univer.deciding ? (
-            // The owner's device asked for the regular grid and the admin answer is still coming — mount neither grid.
-            <div role="status" data-testid="model-grid-deciding" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
-          ) : univerOn && !(calcReady && gridWorkbookReady) ? (
+          {!(calcReady && gridWorkbookReady) ? (
             <div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>
-          ) : univerOn ? (
-            // The Univer grid (every account) — Univer's own toolbar, formula bar, grid and sheet tabs replace the four
-            // pieces below. Edits come back as a whole Planyr workbook through the SAME `commit` (and so the same write-through,
-            // cloud push, file-mode save and undo frame) as every other edit — persistence is not touched.
+          ) : (
+            // The Univer grid — its own toolbar, formula bar, grid and sheet tabs. Edits come back as a whole Planyr workbook through the
+            // SAME `commit` (and so the same write-through, cloud push, file-mode save and undo frame) as every other edit — persistence is
+            // not touched.
             <Suspense fallback={<div role="status" style={{ flex: 1, display: "grid", placeItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>Loading the spreadsheet…</div>}>
               <UniverSheet
                 key={univerScope}
@@ -2026,113 +1023,7 @@ export default function ModelApp({
                 onReady={(h) => { univerHandleRef.current = h; }}
               />
             </Suspense>
-          ) : (
-          <>
-          {/* NEW-1 (2026-10-29, owner-approved mockup) — the toolbar and formula bar are FLAT, full-width strips
-              directly under the module tabs. They replace the Round 3/4 (B1087904) floating card — rounded
-              corners, drop shadow, an 8px margin on every side over the page-grey band — which the owner read as
-              wasted space ("I want it back for rows"). One wrapper only so the two strips stay one unit in this
-              flex column (find-bar / name-manager flow siblings sit below it): no margin, no radius, no shadow,
-              no outer border; each strip carries its own single hairline bottom border (Ribbon.jsx, FormulaBar.jsx).
-              `data-testid="model-toolbar-card"` is kept for the existing specs. */}
-          <div
-            data-testid="model-toolbar-card"
-            style={{ flex: "none", background: "var(--surface-raised)" }}
-          >
-          <Ribbon ctx={ctx} />
-          <FormulaBar ref={formulaBarRef} sheet={sheet} row={selRange.r1} col={selRange.c1} selRange={selRange} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} focusGrid={focusGrid} />
-          </div>
-          {/* NEW-1 (B1251888) — Find/Replace, Name Manager, and the Inconsistencies panel all
-              render IN NORMAL FLOW here, below the header row and the ribbon/formula-bar card
-              above it, never as a `position: fixed` overlay guessing a top offset. A fixed-offset
-              overlay is exactly what let all three drift over the header row's File menu +
-              Formula Auditing buttons once pull request 1487 moved Formula Auditing there — a
-              flow sibling structurally cannot cover chrome that sits earlier in the same column,
-              at any window width, so the class of bug can't recur here. The three are mutually
-              exclusive (opening one closes the others — see onOpenFind/onToggleNameManager/
-              onToggleInconsistencyPanel below), so only one ever occupies this flow slot at once. */}
-          <FindReplaceBar
-            open={findOpen}
-            showReplace={findShowReplace}
-            sheet={sheet}
-            onClose={() => setFindOpen(false)}
-            onGoTo={onGoTo}
-            onReplaceOne={onReplaceOne}
-            onReplaceAll={onReplaceAll}
-          />
-          <NameManager
-            open={nameManagerOpen}
-            sheet={sheet}
-            selRange={selRange}
-            onClose={() => setNameManagerOpen(false)}
-            onGoTo={onGoTo}
-            onDefineName={onDefineName}
-            onRenameName={onRenameName}
-            onRetargetName={onRetargetName}
-            onDeleteName={onDeleteName}
-          />
-          <InconsistencyPanel
-            open={inconsistencyPanelOpen}
-            flags={activeInconsistencies}
-            onClose={() => setInconsistencyPanelOpen(false)}
-            onGoTo={onGoTo}
-            onDismiss={onDismissInconsistency}
-          />
-          <SheetView
-            ref={sheetViewRef}
-            sheet={sheet}
-            sheetName={sheetName}
-            evalResult={evalResult}
-            totalRows={totalRows}
-            selRange={selRange}
-            setSelRange={setSelRange}
-            onCommit={onCommitCell}
-            onBlankRanges={onBlankRanges}
-            onFillDownRanges={onFillDownRanges}
-            onFillText={onFillText}
-            onNotice={onNotice}
-            onAddColumn={onAddColumn}
-            onFillDown={onFillDown}
-            onCommand={runCommand}
-            cutRange={clipMark && clipMark.sheetId === activeEntry.id ? clipMark.rect : null}
-            onInsertRowAt={onInsertRowAt}
-            onDeleteRowAt={onDeleteRowAt}
-            onInsertColumnAt={onInsertColumnAt}
-            onDeleteColumnAt={onDeleteColumnAt}
-            onSetColumnWidth={onSetColumnWidth}
-            onSetRowHeight={onSetRowHeight}
-            onSetFreeze={onSetFreeze}
-            zoom={zoom}
-            onZoomChange={onZoomChange}
-            hiddenRows={hiddenRows}
-            onSelectionSettled={onSelectionSettled}
-            filterOn={filterOn}
-            columnFilters={columnFilters}
-            onSetColumnFilter={onSetColumnFilter}
-            autoColor={autoColor}
-            trace={renderedTrace}
-            onNavigateTrace={onNavigateTrace}
-            inconsistencies={activeInconsistencies}
-            onApplyBorder={onApplyBorderCmd}
-            onSort={onSort}
-            onToggleNameManager={onToggleNameManager}
-          />
-          <TabStrip
-            ref={tabStripRef}
-            sheets={workbook.sheets}
-            activeSheetId={activeEntry.id}
-            onSelect={onSelectSheetTab}
-            onAdd={onAddSheetTab}
-            onRename={onRenameSheetTab}
-            onDuplicate={onDuplicateSheetTab}
-            onDelete={onDeleteSheetTab}
-            onReorder={onReorderSheetTab}
-          />
-          </>
           )}
-          <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
-          <KeyTipOverlay state={keyTip} />
-          {dialog && <ShortcutDialog spec={dialog} onClose={() => { setDialog(null); focusGrid(); }} />}
           {notice && (
             <div
               role="status" data-testid="model-notice"

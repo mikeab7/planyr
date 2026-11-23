@@ -34,12 +34,14 @@ describe("the workflow reader understands this repo's real files", () => {
     }
   });
 
-  it("reads build.yml's triggers and its single `build` job", () => {
+  it("reads build.yml's triggers and its `build` aggregator job (the required context) over the lane jobs", () => {
     const wf = readWf("build.yml");
     expect(Object.keys(wf.on).sort()).toEqual(["pull_request", "push", "workflow_dispatch"]);
     expect(wf.on.pull_request.branches).toEqual(["main"]);
     expect(wf.jobs.build.checkName).toBe("build");
-    expect(pullRequestCheckNames(wf)).toEqual(["build"]);
+    // Batch C (2026-11-23): `build` is the aggregator over the parallel lane jobs, which are checks of their own.
+    expect(pullRequestCheckNames(wf)).toContain("build");
+    expect(pullRequestCheckNames(wf).filter((n) => n === "build")).toHaveLength(1);
   });
 
   it("REFUSES a file it cannot read rather than reporting a pass", () => {

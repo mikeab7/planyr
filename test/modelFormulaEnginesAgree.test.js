@@ -263,7 +263,7 @@ describe("nothing else computes a value", () => {
     expect(read("src/workspaces/model/lib/spreadsheetClient.js")).toMatch(/import\("\.\/univerEval\.js"\)/);
     const app = read("src/workspaces/model/ModelApp.jsx");
     expect(app).toMatch(/import\("\.\/lib\/univerEval\.js"\)/);
-    expect(app).toMatch(/univerOn \? NO_OLD_EVAL : evaluateWorkbook/);
+    expect(app).not.toMatch(/NO_OLD_EVAL/);
     expect(app).not.toMatch(/sheetToCsv\(entry\.sheet, evaluateWorkbook/);
     expect(read("src/workspaces/model/lib/univerEval.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")).not.toMatch(/sheetEngine|evaluateFormula|evaluateWorkbook\(/);
   });

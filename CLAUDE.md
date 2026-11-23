@@ -54,7 +54,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **IDS ARE MINTED BY THE PUSH ITSELF.** `add` computes `max+1` from the tip it just fetched and the push is the
 >   compare-and-swap: if another session landed first, the push is refused, the whole write is redone from the new tip and the
 >   id recomputed — so two sessions on two containers can never hold the same id. **The old rules are RETIRED: reserved blocks
->   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (it now stands down), the `BELOW`/`TAKEN`
+>   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (deleted 2026-11-23), the `BELOW`/`TAKEN`
 >   verdicts.** `npm run next-id` is advisory only (it prints the ledger branch's next free numbers). Keep the provisional `NEW-#`
 >   label in code and tests as before; **cite the real id in the PR title/commit once `ledger add` has printed it, and file
 >   the entry no later than the moment you open the PR** (the record check below will name a merged id with no record).
@@ -112,12 +112,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > and the **clipboard regression bank** (`ui-audit/verify-notes-paste-bank.mjs`, a required build step): a paste bug becomes a fixture
 > in `test/fixtures/clipboard-bank/` first, red, then a fix.
 >
-> **🔢 MINTING (history, so a stale memory does not resurrect it).** Ids used to be minted from `max+1` of two big files, then from
-> per-branch reserved blocks with a peer scan and a push-time gate, because several PRs minting in their own ledger edits collided
-> (B779, the 2026-08-06 livelock — diagnosis in `docs/incidents/CI-REQUIRED-CHECK.md`, guard `test/mintFatality.test.js`). All of that
-> existed to solve "two un-merged branches each add a ledger entry". With the ledger on its own branch nothing is minted in a PR;
-> the compare-and-swap push does it (see the LEDGER block). `scripts/idBlocks.mjs`/`check-mint.mjs` remain only for the legacy-layout
-> tests. `test/idUniqueness.test.js` (now in `test/ledger-data/`) still fails the ledger-health run on two active items sharing an id.
+> **🔢 MINTING (history, one line so a stale memory does not resurrect it).** Ids used to be minted by hand from `max+1`, then from
+> per-branch reserved blocks with a peer scan and a push-time gate (B779); with the ledger on its own branch nothing is minted in a
+> PR — the compare-and-swap push does it, and `check-mint` and the hooks are gone. `scripts/idBlocks.mjs` survives only because
+> `next-id.mjs`'s legacy path imports it. `test/ledger-data/idUniqueness.test.js` still fails the ledger-health run on two active items sharing an id.
 > **⛔ ONE MEASURED FACT THAT STILL APPLIES (B6867): RE-RUNNING A FAILED `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A
 > re-run replays the merge commit the run was created against — it does **not** recompute `refs/pull/<n>/merge` against main's tip.
 > A stuck PR needs a NEW PUSH — prefer `git fetch origin main && git merge origin/main` over an empty `Nudge CI` commit.
@@ -709,7 +707,7 @@ were split out of this file.
     **AMENDED 2026-11-05 (owner, Academy › Concept A — "every boundary is drawn in the same blue … Sugar Land, Missouri City, Stafford, Houston, Richmond and Rosenberg are indistinguishable"; NEW-1):** the 10-29 build shipped the line styles, county names along the line and one set of names, but a city's name sat at its polygon's centre and switched off above zoom 13 (county above 14) — at working zoom the layer named NOTHING — and every city was one blue at a faint tint. Now: **(a) every city / ETJ / county name is on screen at every zoom** (`lib/placeLabelAnchors.js`: in the visible part of its polygon; a polygon that fills the view parks its name in a band near the top, clear of the site; the whole box is kept inside the view; one name per place; a county with no line in view names itself near the bottom); **(b) each city has its OWN hue** (`lib/boundaryPaint.js` `createColorBook`; a city and its ETJ share one; two neighbours never share one while a free hue exists; a place keeps its hue for the whole session) — limits the bold solid line with a light tint, ETJ the same hue thinner, dashed, fainter; the name sits on a pill in that hue (dashed pill for ETJ); the PDF mirrors it; **(c) a CLICK on any shape — on the planner canvas AND the Map, inside the shape as well as on its outline — opens ONE card: city, "inside the city limits" or ETJ ("outside its limits"), county** (`lib/jurisdictionCard.js`); limits outrank ETJ, nothing is said about a layer that did not answer; never hover; **(d) a site that crosses or touches a city-limits / ETJ line shows the ⚑ on the header chip with one plain sentence per line** (`lib/limitLineFlags.js`, `jurisdiction.js` `limitLines` — the chip used to flag only a split city). Do not shorten the label zoom range, give cities one shared colour, or split the card back into one per layer. Guards: repo-root `test/` **countiesCitiesNaming**; live ui-audit **verify-counties-cities-live**.
 
 48. **(2026-10-29) A road connected to a parking field or truck court FOLLOWS it on a small move and LETS GO on a big one.** Michael, verbatim: "The road should move with the parking, like, slightly, though. Like, if I move the building 200 feet, then you can forget the road. But if I move the building and the parking, you know, 50 feet, then, yeah, keep it attached." Whatever moves the field (the load-time heal, dragging it or its building, a nudge, rotate / resize, a re-laid row) carries the road's connected END by the same offset — only its last control point; past `DRIVE_FOLLOW_MAX_FT` (100 ft) the road stays as drawn and its connection is cleared; it also lets go where following would fold the last leg back or leave it shorter than the road is wide. A locked road never follows. The live drag shows both, and one undo reverses move and follow together. Do not add a "keep attached" prompt, a toggle, or a second follow path. Rule + seams: `lib/driveFollow.js`, `SitePlanner.jsx` `setEls`; guards repo-root `test/` **driveFollow**, **driveParkingRealPlans**; e2e **drive-follows-parking**. (B2498961.)
-49. **(2026-10-29) The Spreadsheet follows Excel for Windows, and its headers are LABELS.** Michael: "The keyboard shortcuts that work in Excel should work on the spreadsheet … muscle memory is the spec"; column letters and row numbers are "fixed labels, like Excel" — never editable (no rename route, no stored header text; the letter is the position and recomputes after every insert/delete) while the sheet TAB stays renamable; clicking a header selects the whole row/column, dragging / Shift+click select a run, the corner box selects everything. **Ctrl+C / Ctrl+X / Ctrl+V use the REAL system clipboard** (native copy/cut/paste events, text/html + text/plain, formatting, cut = move) — never an internal-only copy again; an unusable paste or a refused clipboard says so, never a silent no-op. Ctrl+K stays the command palette; Ctrl+P stays the browser's; Ctrl+click on a header adds that whole row/column as another range (the multi-range model, `lib/selectionModel.js`); copy, paste, insert/delete, hide, autofit and merge on several ranges say Excel's "won't work on multiple selections", never act on one range silently. Do not reintroduce a header rename or a ref-only clipboard. (B2455072–B2455075; `lib/keymap.js`, `lib/selection.js`, `lib/clipboardIO.js`.)
+49. **(2026-10-29) The Spreadsheet follows Excel for Windows, and its headers are LABELS.** Michael: "The keyboard shortcuts that work in Excel should work on the spreadsheet … muscle memory is the spec"; column letters and row numbers are "fixed labels, like Excel" — never editable (no rename route, no stored header text; the letter is the position and recomputes after every insert/delete) while the sheet TAB stays renamable; clicking a header selects the whole row/column, dragging / Shift+click select a run, the corner box selects everything. **Ctrl+C / Ctrl+X / Ctrl+V use the REAL system clipboard** (native copy/cut/paste events, text/html + text/plain, formatting, cut = move) — never an internal-only copy again; an unusable paste or a refused clipboard says so, never a silent no-op. Ctrl+K stays the command palette; Ctrl+P stays the browser's; Ctrl+click on a header adds that whole row/column as another range (the multi-range model, now Univer's own with the refusals in `lib/univerExcelKeys/`); copy, paste, insert/delete, hide, autofit and merge on several ranges say Excel's "won't work on multiple selections", never act on one range silently. Do not reintroduce a header rename or a ref-only clipboard. (B2455072–B2455075; `lib/keymap.js`, `lib/univerExcelKeys/`; the old `lib/selection.js` and `lib/clipboardIO.js` went with the old grid, 2026-11-23.)
 
 50. **(2026-11-02) A ZONING layer prints its district code on every polygon, and its legend is HEADED by the jurisdiction with ONE code per row.** Michael, on the City of Sugar Land zoning layer (brief NEW-1): "codes labeled on the polygons in the map, legend headed by the jurisdiction ('Sugar Land') not a suffix, one code per legend row, and a clean way to see what a code means." The legend is a single heading naming the government, then one row per district in view — "R-1Z · Zero Lot Line Single-Family Residential" — in the layer's colour; the name comes from the jurisdiction's own source (the layer's legend or the ordinance), never from memory, and a code with no sourced name shows bare. The legend form is `viewLegend` returning `{ heading: true, label }` then `{ label, color, row: true }` entries (rendered by `LayerPanel`'s `Legend`). **Sugar Land's zoning layer (`sugarLandZoning.js`) follows it, and so does DeSoto County's (`desotoZoningNames.zoningLegend`, converted 2026-11-03, B2507063 ×2): a heading per government in view (Olive Branch, Southaven, Horn Lake, Hernando, Walls, Unincorporated DeSoto County), then its codes, one per row; the click card names the place once, in its title. The old "(Olive Branch)" suffix is gone — never copy it into a layer.** Guard: repo-root `test/` **sugarLandZoning**. (B2638208.)
 
@@ -943,44 +941,12 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
   fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
   case at the same time.
-  **(HISTORY — since 2026-11-05 `BACKLOG.md`/`VERIFICATION.md` are not on main at all, so this conflict class is gone; `safe-merge`
-  and `resolve-ledgers.mjs` remain for `MAP.md`/`BACKLOG_OPEN.md` and for branches that predate the move.)
-  **⛔ USE `npm run safe-merge -- origin/main`, NOT a bare `git merge origin/main`, whenever the merge
-  might touch `BACKLOG.md`/`VERIFICATION.md` (B1592848, 2026-09-12) — which was nearly always, since
-  main moved fast on exactly these two files.** The manual remedy below (`node
-  scripts/resolve-ledgers.mjs`) already existed and was already safe, and sessions kept not running
-  it anyway: within one hour, PR #1673 and PR #1675 both went `mergeable_state: dirty` on this exact
-  file pair and were hand-rebased instead of resolved, and PR #1656 hit the identical shape earlier
-  the same evening. `scripts/merge-ledgers-safe.mjs` is the fix — ONE command that runs `git merge`,
-  and if (and only if) the ONLY conflicts left are ones `resolve-ledgers.mjs` itself judges safe to
-  union, finishes the merge commit automatically; a real disagreement (two sessions editing the same
-  item) is left exactly as a raw `git merge` would leave it — real conflict markers, nothing
-  committed, resolve by hand. It is composition, not a new mechanism: it does not weaken
-  `resolve-ledgers.mjs`'s guarantees in any way, it just removes the separate step nobody was
-  remembering to run.
-  **`MAP.md` / `BACKLOG_OPEN.md` conflicts now self-resolve automatically on `git merge` (B904992)** —
-  a committed `.gitattributes` hands both paths to a custom merge driver
-  (`scripts/merge-driver-ledgers.mjs`), backed by a `post-merge` hook
-  (`scripts/post-merge-regen.mjs`) that corrects the driver's necessarily-partial mid-merge view once
-  the working tree is complete (see that pair's own headers for why a merge driver alone cannot always
-  be correct, and why the fix is two layers). Both are wired by `npm install` /
-  `npm run hooks:install` alongside the mint-gate hook; if a conflict on either file DOES still show
-  markers, the local config is missing — run `npm run hooks:install` (or `node
-  scripts/install-hooks.mjs --check` to confirm) rather than resolving by hand. **The manual path is
-  not gone** — it is still the only route for `BACKLOG.md` / `docs/archive/BACKLOG-DONE.md` / `VERIFICATION.md` /
-  `docs/archive/VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
-  duplicate-id rollback — considered and deliberately ruled out for these four files, see
-  `scripts/merge-driver-ledgers.mjs`'s own header; `npm run safe-merge` above is the answer that
-  doesn't need one), and it is still the correct fallback if the driver itself ever refuses
-  (LOUD-FAILURE — it leaves ordinary conflict markers rather than guess): `node
-  scripts/resolve-ledgers.mjs` regenerates all four hand-merged files AND both generated ones in one
-  pass. **⛔ B1592848 (2026-09-12) closed a real gap in that resolver's own safety check:** an
-  in-place edit to a NON-heading line inside an existing item (e.g. two branches each rewriting the
-  same item's `- Verify:` line differently) never puts a `### B#`/`### V#` heading inside the
-  conflict hunk, so the old id-overlap check saw two empty sets and called it safe — reproduced
-  directly, it silently unioned both edits into one item's body. The precondition now also refuses
-  whenever either non-empty side of a hunk is not a clean, complete new-item insertion; see that
-  script's header and `test/resolveLedgers.test.js` for the reproduction.
+  **(Retired 2026-11-23, audit Batch C: `npm run safe-merge`, `resolve-ledgers.mjs`, the `planyr-ledger` merge driver, the
+  post-merge regen hook, `install-hooks.mjs`/`npm run hooks:install` and the pre-push mint gate are all deleted — the ledger lives on
+  its own branch, so `BACKLOG.md`/`VERIFICATION.md` are not on main and a branch never touches the generated indexes.)** To bring a
+  branch up to date use a plain `git fetch origin main && git merge origin/main`; `MAP.md` / `BACKLOG_OPEN.md` /
+  `docs/UI-INVENTORY.md` carry git's built-in `merge=union` in `.gitattributes` (no install step), and the touch guard stops a PR
+  from carrying them anyway.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
@@ -1006,6 +972,12 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   and if a real secret (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) is absent locally it says so
   LOUDLY and substitutes the documented dummy rather than silently measuring something CI doesn't.
   `--list` shows the gate order with nothing run; `--skip-install` skips `npm ci` (loud, deviates).
+  **THE REQUIRED `build` CHECK IS NOW PARALLEL LANES (2026-11-23, audit Batch C).** `build` is a small aggregator job over
+  `detect` · `static` · `vitest` (3 shards) · `build-app` (uploads `dist/`) · `browser` (4 shards, downloads `dist/`); each lane runs
+  `npm run ci-parity -- --lane <name> [--shard i/n]` against the SAME `.github/ci-gates.yml`, and `ui-audit/lib/ciGates.mjs` `LANES`
+  says which gate runs where (an unlisted gate lands in `static`). A bare `npm run ci-parity` still runs every gate serially.
+  The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
+  Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
   See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs

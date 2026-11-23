@@ -260,16 +260,12 @@ describe("wiring — every way out of the grid goes through the controller", () 
     expect(csv).toMatch(/workbookForExport\(\)/);
   });
 
-  it("the grid toggle, a hidden module tab and every pending-edit consumer flush first", () => {
-    const toggle = app.slice(app.indexOf("const setRegularGrid"), app.indexOf("const closeFile"));
-    expect(toggle).toMatch(/commitEditing/);
-    expect(toggle.indexOf("flushUniver()")).toBeGreaterThan(-1);
-    expect(toggle.indexOf("flushUniver()")).toBeLessThan(toggle.indexOf("univer.setRegular(regular)"));
+  it("a hidden module tab, a file close and every pending-edit consumer flush first", () => {
     expect(app).toMatch(/useLayoutEffect\(\(\) => \(\) => \{ flushUniver\(\); \}, \[univerScope, activeFileId/);
     const close = app.slice(app.indexOf("const closeFile"), app.indexOf("useEffect(() => { if (!orgMode)"));
     expect(close.indexOf("flushUniver()")).toBeLessThan(close.indexOf("fw.flush()"));
-    expect(app).toMatch(/univerSwitch=\{univer\.available \? \{ regular: univer\.regular, setRegular: setRegularGrid \} : null\}/);
     expect(app).toMatch(/if \(!isActive\) flushUniver\(\)/);
+    expect(app).not.toMatch(/setRegularGrid|univerSwitch/);
   });
 
   it("an urgent save is persisted SYNCHRONOUSLY (React will not render before a page dies) and a save that fails raises the status badge", () => {

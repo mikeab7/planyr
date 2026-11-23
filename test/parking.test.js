@@ -368,3 +368,14 @@ describe("relayoutFreeStack — re-lay a freestanding split stack after one piec
     expect(relayoutFreeStack(null)).toBe(null);
   });
 });
+
+describe("per-field stall width (stallW override)", () => {
+  it("a wider stall fits fewer stalls per row, at the same depth and aisle", () => {
+    const base = { parkAngle: 90, stallDepth: 20, aisle: 24 };
+    const w10 = carStalls(1000, 64, { ...base, stallW: 10 });
+    const w9 = carStalls(1000, 64, { ...base, stallW: 9 });
+    expect(w10.count).toBe(200);
+    expect(w9.count).toBe(222);
+    expect(w10.pitch).toBe(10);
+  });
+});

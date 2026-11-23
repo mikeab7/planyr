@@ -1,13 +1,13 @@
-/* The Univer grid is THE grid for every account (NEW-1, 2026-10-31 — cutover steps 8–9a; docs/SPREADSHEET-UNIVER-SPIKE.md).
+/* The Univer grid is THE grid (NEW-1, 2026-10-31 — cutover steps 8–9a; the old grid and its owner-only switch were deleted in step 9b,
+ * docs/SPREADSHEET-UNIVER-SPIKE.md).
  *
- * What this proves, signed OUT (a visitor who is by definition not the owner — the signed-in non-admin test account and the owner
- * hatch from both sides are in ui-audit/verify-univer-live.mjs, which needs the real is_admin() RPC):
- *   1. the Spreadsheet tab shows the Univer canvas with NO switch anywhere ("Try the new grid" / "Use the regular grid" do not exist
- *      for this person) and none of the old grid's DOM;
- *   2. a device that carried the OLD switch ("on" or "off") lands on Univer too, and the retired key is removed;
- *   3. a stored regular-grid flag never reaches a visitor who is not a confirmed admin;
- *   4. an edit made in it is saved and survives a reload (the same ONE persistence path the old grid used);
- *   5. File ▾ still exports (the menu is the same menu, minus the owner-only row).
+ * What this proves, signed OUT:
+ *   1. the Spreadsheet tab shows the Univer canvas with NO switch anywhere ("Try the new grid" / "Use the regular grid" do not exist)
+ *      and none of the old grid's DOM;
+ *   2. a device that still carries a flag from either retired switch ("on", "off", or the owner's regular-grid flag) lands on Univer
+ *      and the retired keys are removed;
+ *   3. an edit made in it is saved and survives a reload;
+ *   4. File ▾ still exports.
  *
  * Run: npx playwright test e2e/model-univer-default.spec.js */
 import { test, expect } from "@playwright/test";
@@ -24,20 +24,20 @@ async function open(page, id, init) {
   await waitForGrid(page);
 }
 
-test.describe("Spreadsheet — the Univer grid is the default for everyone", () => {
+test.describe("Spreadsheet — the Univer grid is the only grid", () => {
   test("a visitor gets the Univer canvas, no grid switch anywhere, and none of the old grid's DOM", async ({ page }) => {
     await open(page, "ug-default-1");
     await expect(page.locator(CANVAS)).toBeVisible();
     await expect(page.getByTestId("model-sheet"), "the old grid must not be in the page").toHaveCount(0);
     await page.getByTestId("model-file-menu-btn").click();
     await expect(page.getByTestId("model-export-xlsx")).toBeVisible();   // the File menu is there …
-    await expect(page.getByTestId("model-univer-switch"), "… without the owner-only grid row").toHaveCount(0);
+    await expect(page.getByTestId("model-univer-switch"), "… and no grid row").toHaveCount(0);
     const text = await page.evaluate(() => document.body.innerText);
     expect(text).not.toMatch(/Try the new grid|Use the regular grid|Use the new grid/);
   });
 
   for (const legacy of ["1", "0"]) {
-    test(`a device that had the OLD switch set to "${legacy}" lands on Univer, and the retired key is dropped`, async ({ page }) => {
+    test(`a device that had the pre-cutover switch set to "${legacy}" lands on Univer, and the retired key is dropped`, async ({ page }) => {
       await open(page, `ug-legacy-${legacy}`, { fn: ([k, v]) => { if (!sessionStorage.getItem("ug-seeded")) { sessionStorage.setItem("ug-seeded", "1"); localStorage.setItem(k, v); } }, arg: [LEGACY_KEY, legacy] });
       await expect(page.locator(CANVAS)).toBeVisible();
       await expect(page.getByTestId("model-sheet")).toHaveCount(0);
@@ -45,10 +45,11 @@ test.describe("Spreadsheet — the Univer grid is the default for everyone", () 
     });
   }
 
-  test("a stored 'use the regular grid' flag never reaches a visitor who is not a confirmed admin", async ({ page }) => {
+  test("a stored 'use the regular grid' flag from the retired owner switch changes nothing, and the key is dropped", async ({ page }) => {
     await open(page, "ug-regular-flag", { fn: ([k]) => localStorage.setItem(k, "1"), arg: [REGULAR_KEY] });
     await expect(page.locator(CANVAS)).toBeVisible();
     await expect(page.getByTestId("model-sheet")).toHaveCount(0);
+    await expect.poll(() => page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY), { message: "the retired key is removed" }).toBeNull();
   });
 
   test("an edit is saved and survives a reload", async ({ page }) => {

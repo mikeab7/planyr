@@ -2,41 +2,34 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { REGULAR_GRID_KEY, LEGACY_UNIVER_KEY } from "../src/workspaces/model/lib/gridChoice.js";
-import { univerWantedHere } from "../src/workspaces/model/lib/univerWarm.js";
+import { forgetRetiredGridKeys, RETIRED_GRID_KEYS } from "../src/workspaces/model/lib/univerWarm.js";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const store = (obj) => ({ getItem: (k) => (k in obj ? obj[k] : null), removeItem: (k) => { delete obj[k]; } });
 
 describe("univerWarm", () => {
-  it("is wanted on EVERY device — the Univer grid is the Spreadsheet tab now — except one that asked for the owner's regular-grid hatch", () => {
-    expect(univerWantedHere(store({}))).toBe(true);
-    expect(univerWantedHere(store({ [REGULAR_GRID_KEY]: "1" }))).toBe(false);
-    // the pre-cutover switch no longer decides anything, on or off
-    expect(univerWantedHere(store({ [LEGACY_UNIVER_KEY]: "1" }))).toBe(true);
-    expect(univerWantedHere(store({ [LEGACY_UNIVER_KEY]: "0" }))).toBe(true);
-    // a blocked store reads as 'not asked for the hatch', i.e. warm
-    expect(univerWantedHere({ getItem: () => { throw new Error("blocked"); } })).toBe(true);
-    expect(univerWantedHere(null)).toBe(true);
+  it("drops the two retired grid-switch keys (and nothing else), silently, on any device", () => {
+    const obj = { "planyr:model:univerGrid": "1", "planyr:model:regularGrid": "1", "planyr:other": "keep" };
+    expect(forgetRetiredGridKeys(store(obj))).toBe(true);
+    for (const k of RETIRED_GRID_KEYS) expect(k in obj).toBe(false);
+    expect(obj["planyr:other"]).toBe("keep");
+    expect(forgetRetiredGridKeys(store(obj))).toBe(false);
+    // a blocked or missing store has nothing to forget and never throws
+    expect(forgetRetiredGridKeys({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
+    expect(forgetRetiredGridKeys(null)).toBe(false);
   });
-  it("warmUniver does nothing (returns null, imports nothing) on a device that asked for the regular grid", async () => {
+  it("warmUniver starts the load on every device, and drops the retired switch keys as it goes", async () => {
     vi.resetModules();
     const m = await import("../src/workspaces/model/lib/univerWarm.js");
-    expect(m.warmUniver({ storage: store({ [REGULAR_GRID_KEY]: "1" }) })).toBeNull();
-  });
-  it("warmUniver on an ordinary device starts the load, and drops the retired switch key as it goes", async () => {
-    vi.resetModules();
-    const m = await import("../src/workspaces/model/lib/univerWarm.js");
-    const obj = { [LEGACY_UNIVER_KEY]: "0" };
+    const obj = { "planyr:model:univerGrid": "0", "planyr:model:regularGrid": "1" };
     const p = m.warmUniver({ storage: store(obj) });
     expect(p).not.toBeNull();
-    expect(LEGACY_UNIVER_KEY in obj).toBe(false);
+    expect(Object.keys(obj)).toEqual([]);
     p.catch(() => {});
   });
   it("never imports the admin check (the always-loaded shell reaches this file)", () => {
-    expect(read("src/workspaces/model/lib/univerWarm.js")).not.toMatch(/univerSwitch|useIsAdmin|supabase/);
-    expect(read("src/workspaces/model/lib/gridChoice.js")).not.toMatch(/^import /m);
+    expect(read("src/workspaces/model/lib/univerWarm.js")).not.toMatch(/useIsAdmin|supabase/);
   });
   it("imports the SAME specifier ModelApp's React.lazy uses, so the browser makes one request", () => {
     expect(read("src/workspaces/model/lib/univerWarm.js")).toMatch(/import\("\.\.\/components\/UniverSheet\.jsx"\)/);
