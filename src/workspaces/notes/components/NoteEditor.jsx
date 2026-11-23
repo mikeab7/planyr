@@ -107,6 +107,8 @@ import NoteHistory from "./NoteHistory.jsx";
 /* The ONE shared drag-cursor pin (owner convention 2026-10-20). Importing it here, in the lazy editor chunk, adds no
  * shared chunk to the Site route — verified by ui-audit/perf-bundle-audit.mjs. */
 import { pinDragCursor } from "../../../shared/ui/controls.jsx";
+import { placeAtPoint } from "../../../shared/ui/anchoredMenuPlacement.js";
+import { RADIUS } from "../lib/notesControls.js";
 
 const SAVE_DEBOUNCE_MS = 600;
 /* Outcomes of the undo-history carry that are ordinary, not worth a telemetry row. */
@@ -114,7 +116,6 @@ const QUIET_CARRY_REASONS = new Set(["none-parked", "page-changed", "nothing-to-
 /* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const SHEET_RADIUS = 12; // RADIUS.lg (shared/ui/radius.js) — a surface that CONTAINS other things (DESIGN.md's shape rule); not folded into the local RADIUS const above because test/notesModule.test.js regex-pins that object's exact two-key shape against controls.jsx's own scale.
 
 /* ⛔ THE SHEET'S OWN LAYOUT NUMBERS, NAMED ONCE (NOTES-PAGE-GROWTH). They already governed the
@@ -1524,30 +1525,9 @@ function MenuRow({ item, onClose }) {
  *  ⛔ `visualViewport` IS PREFERRED OVER `innerHeight`, deliberately: on a maximised window it
  *  already excludes the taskbar, which is the exact case he is hitting. It also follows a pinch
  *  zoom and an on-screen keyboard, neither of which `innerHeight` knows about. */
-const MENU_MARGIN = 8;
-
-export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
-  const vw = Number.isFinite(viewW) ? viewW : 1200;
-  const vh = Number.isFinite(viewH) ? viewH : 800;
-  const width = Number.isFinite(w) ? w : 0;
-  const height = Number.isFinite(h) ? h : 0;
-
-  // Below the pointer if it fits; otherwise ABOVE it — a flip, not a nudge, so the pointer is
-  // never left sitting on top of the first row.
-  let top = y;
-  const fitsBelow = y + height + margin <= vh;
-  const fitsAbove = y - height - margin >= 0;
-  if (!fitsBelow && fitsAbove) top = y - height;
-  // Whichever branch ran, the result is clamped: a menu taller than the whole viewport still has
-  // to start on screen, and `max` is what keeps the TOP visible rather than the bottom.
-  top = Math.max(margin, Math.min(top, vh - height - margin));
-  if (height + margin * 2 > vh) top = margin;
-
-  let left = x;
-  if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
-  left = Math.max(margin, left);
-  return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
-}
+/* The math moved to shared/ui/anchoredMenuPlacement.js `placeAtPoint` (audit I8) — this alias keeps the
+ * Notes name and test seam. */
+export const placeMenu = placeAtPoint;
 
 /** The table section of the right-click menu: "Header row" (shown as on/off) and "Fill ▸" with No fill first. */
 function tableMenuItems(editor) {

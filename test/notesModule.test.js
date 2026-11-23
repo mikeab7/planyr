@@ -559,14 +559,14 @@ describe("the mirrored control scale still matches the shared one", () => {
     expect(m, "controls.jsx no longer declares CONTROL_RADIUS in the expected shape").toBeTruthy();
     const [, control, pill] = m;
 
-    const copies = ALL_NOTES_FILES.filter((f) => code(f).includes("const RADIUS ="));
-    expect(copies.length, "no file mirrors the scale — did the copies get removed?").toBeGreaterThan(0);
-    for (const f of copies) {
-      const c = code(f).match(/const RADIUS = \{\s*control:\s*(\d+),\s*pill:\s*(\d+)\s*\}/);
-      expect(c, `${f} mirrors RADIUS in an unrecognised shape`).toBeTruthy();
-      expect(c[1], `${f} control radius drifted from controls.jsx`).toBe(control);
-      expect(c[2], `${f} pill radius drifted from controls.jsx`).toBe(pill);
-    }
+    // I8: the 14 per-component copies are gone — ONE mirror, lib/notesControls.js, and no component re-declares it.
+    const mirror = read(REPO, "src/workspaces/notes/lib/notesControls.js");
+    const c = mirror.match(/export const RADIUS = \{\s*control:\s*(\d+),\s*pill:\s*(\d+)\s*\}/);
+    expect(c, "notesControls.js mirrors RADIUS in an unrecognised shape").toBeTruthy();
+    expect(c[1], "control radius drifted from controls.jsx").toBe(control);
+    expect(c[2], "pill radius drifted from controls.jsx").toBe(pill);
+    const stray = ALL_NOTES_FILES.filter((f) => /const RADIUS\s*=/.test(code(f)));
+    expect(stray, "a Notes file re-declares RADIUS instead of importing lib/notesControls.js").toEqual([]);
   });
 
   it("no notes file imports controls.jsx — that hoists a THIRD shared chunk onto the Site route", () => {

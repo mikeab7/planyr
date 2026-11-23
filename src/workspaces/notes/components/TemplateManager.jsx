@@ -20,8 +20,8 @@
 import { useEffect, useState } from "react";
 import NoteEditor from "./NoteEditor.jsx";
 import { displayTemplateLabel } from "../lib/notesTemplates.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar / ConflictReview
 const PAD = { sm: "5px 10px", lg: "9px 14px" }; // mirrored, same reason
 const FONT = { sm: 10.5 };
 const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // design-exempt: neutral rest-shadow mirrored verbatim, token-independent by design

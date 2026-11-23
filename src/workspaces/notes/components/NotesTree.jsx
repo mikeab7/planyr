@@ -54,6 +54,7 @@ import {
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
 import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
+import { RADIUS } from "../lib/notesControls.js";
 
 // ORG SCOPE (NEW-1) — the "file under" panel's destination for Organization. A UI-local
 // sentinel, never written into the model: `onBind` below translates it into a call to
@@ -61,7 +62,6 @@ import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
 // a projectId.
 const ORG_DEST = " org-dest";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const INDENT = 13;
 
 const rowBase = {

@@ -29,8 +29,8 @@
  */
 import { useMemo } from "react";
 import { outlineHasChildren, visibleOutline } from "../lib/notesOutline.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const FONT = { micro: 10, control: 12 }; // mirrored from shared/ui/designTokens.js FONT_SIZE — see NoteToolbar
 
 export default function NoteOutline({

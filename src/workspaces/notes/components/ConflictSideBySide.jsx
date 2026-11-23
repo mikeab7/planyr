@@ -29,8 +29,8 @@
 import NoteRedline from "./NoteRedline.jsx";
 import { notesConflictKeptLine } from "../lib/notesStore.js";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 // ⛔ B842947/NEW-4 (owner redlines, 2026-09-03) — the choose button below is a filled button
 // matching `shared/ui/controls.jsx`'s `Button variant="primary"` shape-for-shape (Notes' own
 // accent) instead of the old hand-rolled outline pill. MIRRORED rather than imported — the
