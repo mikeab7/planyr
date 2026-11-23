@@ -937,7 +937,7 @@ const NEST_FIXTURE = {
     task({ id: 10, name: "Exxon", parentId: 1, start: "2026-01-14", end: "2026-01-14" }),
     task({ id: 11, name: "Air Liquide", parentId: 1, start: "2026-01-15", end: "2026-01-15", predecessors: [{ id: 10, type: "FS", lag: 0 }] }),
     task({ id: 12, name: "Plan A", start: "2026-02-02", end: "2026-02-02", duration: 0, durValue: 0 }),
-    task({ id: 13, name: "Plan C", start: "2026-02-03", end: "2026-02-03", duration: 5, durValue: 5, end: "2026-02-09" }),
+    task({ id: 13, name: "Plan C", start: "2026-02-03", duration: 5, durValue: 5, end: "2026-02-09" }),
   ]}},
 };
 const nestSnap = async (pg) => (await rowsWithLevel(pg)).map(r => `${r.name}:${r.level}:${r.expanded}`).join("|");

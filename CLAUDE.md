@@ -360,7 +360,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **⛔ A SESSION DOES NOT END ITS TURN WHILE ITS OWN CHANGE IS MERGED-BUT-UNVERIFIED.** Merge → wait for the
 > deploy to serve your build → run the signed-in check → record the result. If the route answers 503/404
 > (`not configured`), say so in one line as a needs-Michael item (Retry deployment in Cloudflare Pages).
-> (Everything about `verification-inbox/` and Cowork below is HISTORY for the checks already queued; the
+> (Everything about `verification-inbox/` (now `docs/history/verification-inbox/`) and Cowork below is HISTORY for the checks already queued; the
 > Cowork chat may still verify, it is no longer the only actor that can.)
 >
 
@@ -370,7 +370,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > commits the result straight into the ledger (since 2026-11-05 the `ledger` BRANCH — see the LEDGER block for how a chat with a
 > shell, a chat with only the GitHub connector, and a chat with no push access each do it) itself, instead of
 > relaying it to a Claude Code session to type in. This **supersedes the inbox-then-drain path above for
-> new checks** — `verification-inbox/` stays only for whatever is already queued in it. Claude Code still
+> new checks** — `verification-inbox/` (archived 2026-11-23 to `docs/history/verification-inbox/`, four stale August files) is history only. Claude Code still
 > owns every line of product code; this is recording, never building. **Why:** a session spun up purely
 > to transcribe one paragraph is the most expensive possible way to write it, and the hand-off fails
 > open — 79 completed live checks once piled up unrecorded because the courier didn't always get sent.

@@ -120,7 +120,7 @@ async function dropImages(clientX, clientY, count = 1) {
       const g = c.getContext("2d");
       g.fillStyle = ["#B8418C", "#0E7490", "#EF9F27"][i % 3];
       g.fillRect(0, 0, 800, 400);
-      // eslint-disable-next-line no-await-in-loop
+       
       const blob = await new Promise((r) => c.toBlob(r, "image/png"));
       transfer.items.add(new File([blob], `dropped-${i + 1}.png`, { type: "image/png" }));
     }

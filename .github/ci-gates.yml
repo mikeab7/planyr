@@ -37,6 +37,8 @@ jobs:
       # before "Install dependencies" (needs no node_modules) so it fails fast either way.
       - name: Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)
         run: node scripts/generated-doc-touch-guard.mjs
+      - name: Repo-weight guard (no new image/PDF over ~200 KB outside the allowlist — audit batch D)
+        run: node scripts/repo-weight-guard.mjs
       # NEW-1 (2026-11-05): the ledger lives on its OWN branch (`ledger`) with no required checks, so none of its
       # data checks gate this build any more — a malformed record must never be able to fail an unrelated code PR.
       # They moved, unchanged, to .github/workflows/ledger-health.yml (scheduled; `npm run test:ledger` + `node

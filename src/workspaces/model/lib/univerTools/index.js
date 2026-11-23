@@ -104,7 +104,7 @@ export function installUniverTools(deps) {
       }
       if (r.mainComponent && r.mainComponent.makeForceDirty) r.mainComponent.makeForceDirty(true);
       if (r.scene && r.scene.makeDirty) r.scene.makeDirty(true);
-    } catch (err) { console.error("UniverTools: repaint failed", err); }   // eslint-disable-line no-console
+    } catch (err) { console.error("UniverTools: repaint failed", err); }    
   };
 
   // ---- recompute from the bridge --------------------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ export function installUniverTools(deps) {
   const scheduleRefresh = () => {
     if (disposed) return;
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { try { recompute(); } catch (err) { console.error("UniverTools: refresh failed", err); } }, 250);   // eslint-disable-line no-console
+    refreshTimer = setTimeout(() => { try { recompute(); } catch (err) { console.error("UniverTools: refresh failed", err); } }, 250);    
   };
 
   // ---- 1. canvas: corner markers + input / link colours --------------------------------------------------------------------
@@ -211,11 +211,11 @@ export function installUniverTools(deps) {
     const main = r && r.mainComponent;
     if (!main || !main.register) {
       if (tries < 200) setTimeout(() => attachUnit(unitId, tries + 1), 50);
-      else console.error("UniverTools: could not attach the trace layer");   // eslint-disable-line no-console
+      else console.error("UniverTools: could not attach the trace layer");    
       return;
     }
     if (extensionOn === main) return;
-    try { if (!extension) extension = makeExtension(); main.register(extension); extensionOn = main; } catch (err) { console.error("UniverTools: could not register the trace layer", err); }   // eslint-disable-line no-console
+    try { if (!extension) extension = makeExtension(); main.register(extension); extensionOn = main; } catch (err) { console.error("UniverTools: could not register the trace layer", err); }    
     // NOT synchronously: the first recompute converts the whole sheet back to a Planyr workbook and scans it for inconsistent formulas (~50 ms on
     // 12,000 cells), right on the path to the first paint, and nothing on screen needs the answer yet (the corner markers appear a beat later).
     scheduleRefresh();
@@ -337,7 +337,7 @@ export function installUniverTools(deps) {
   });
   const goTo = (r1, c1, r2 = r1, c2 = c1) => {
     const s = sheetNow(); if (!s) return;
-    try { s.ws.getRange(r1, c1, Math.abs(r2 - r1) + 1, Math.abs(c2 - c1) + 1).activate(); } catch (err) { console.error("UniverTools: could not move the selection", err); }   // eslint-disable-line no-console
+    try { s.ws.getRange(r1, c1, Math.abs(r2 - r1) + 1, Math.abs(c2 - c1) + 1).activate(); } catch (err) { console.error("UniverTools: could not move the selection", err); }    
   };
 
   // ---- 5. the palette --------------------------------------------------------------------------------------------------------
@@ -409,7 +409,7 @@ export function installUniverTools(deps) {
   for (const [key, id, title, tooltip, where, order] of buttons) {
     const name = `PlanyrTool${key[0].toUpperCase()}${key.slice(1)}Icon`;
     disposers.push(icons.register(name, makeIcon(ICONS[key])));
-    try { univerAPI.createMenu({ id, action: id, icon: name, title, tooltip, order }).appendTo(where); } catch (err) { console.error(`UniverTools: could not add the "${title}" button`, err); }   // eslint-disable-line no-console
+    try { univerAPI.createMenu({ id, action: id, icon: name, title, tooltip, order }).appendTo(where); } catch (err) { console.error(`UniverTools: could not add the "${title}" button`, err); }    
   }
 
   // first sight of the grid

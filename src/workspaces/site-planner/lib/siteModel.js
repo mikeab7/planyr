@@ -164,7 +164,7 @@ export function withLockSemantics(parcels) {
   const out = (parcels || []).map((pc) => {
     if (!pc || pc.locked !== true || pc.lockSem === 2) return pc;
     changed = true;
-    const { locked: _drop, ...rest } = pc; // eslint-disable-line no-unused-vars
+    const { locked: _drop, ...rest } = pc;  
     return rest;
   });
   return changed ? out : parcels;

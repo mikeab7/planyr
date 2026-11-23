@@ -50,7 +50,7 @@ const canvasAbove = (page) => page.evaluate(`(${trailerAboveRoads.toString()})(d
 const sheetAbove = (page) => page.evaluate(async (fnSrc) => {
   const markup = await window.__plannerExportSvg();
   const doc = new DOMParser().parseFromString(markup, "image/svg+xml");
-  // eslint-disable-next-line no-eval
+   
   return (0, eval)(`(${fnSrc})`)(doc);
 }, trailerAboveRoads.toString());
 const annotAbove = (page) => page.evaluate(async () => {

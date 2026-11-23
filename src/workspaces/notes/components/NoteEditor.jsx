@@ -3356,7 +3356,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed || readOnly) return;
     editor.commands.normalizeTableColumnWidths();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [editor, readOnly]);
 
   /* ⛔ THE SELECTION IS VISIBLE, and it is painted onto the real elements rather than mirrored

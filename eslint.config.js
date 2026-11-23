@@ -25,9 +25,11 @@ export default [
   // build left on disk after running one of those tools got linted as source: hundreds of
   // false `no-undef`/`no-unreachable` errors ('Deno', 'process', 'global', 'L', a minifier's
   // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
+  // Audit batch D (2026-11-23): dead `eslint-disable` comments are reported, and .mjs (scripts/, ui-audit/) is linted.
+  { linterOptions: { reportUnusedDisableDirectives: "warn" } },
   { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**"] },
   {
-    files: ["**/*.{js,jsx}"],
+    files: ["**/*.{js,jsx,mjs}"],
     plugins: { "react-hooks": reactHooks },
     languageOptions: {
       ecmaVersion: "latest",
@@ -52,13 +54,13 @@ export default [
       // exhaustive-deps, so register the plugin (otherwise those directives error on
       // an unknown rule). Kept as warnings — visible, non-blocking; only no-undef &
       // the correctness rules above fail the build.
-      "react-hooks/rules-of-hooks": "warn",
+      "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
     },
   },
   // Tooling / test files run in Node and use Node globals.
   {
-    files: ["test/**/*.js", "**/*.config.js", "server/**/*.js", "e2e/**/*.js"],
+    files: ["test/**/*.js", "**/*.config.js", "server/**/*.js", "e2e/**/*.js", "**/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
   },
 ];

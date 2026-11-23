@@ -2975,9 +2975,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       applyRoadNamesOpacity();
     }).catch((e) => console.error("SitePlanner: road names failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [roadsOn, origin]);
-  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]);  
   useEffect(() => { saveRoadNamesPref(roadNamesPref); }, [roadNamesPref]);
 
   /* City names over the aerial (B2391216 ×2) — Map Base › Labels carries City Names beside Road Names, as the map
@@ -3605,7 +3605,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (layerGateReady || !origin || !viewFramed || geoZoom == null) return;
     if (Math.abs(geoZoom - ppfToZoom(view.ppf, origin.lat)) < 0.01) setLayerGateReady(true);
-  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]);  
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
@@ -4521,7 +4521,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (readOnlyRef.current || !normalizeOnSeedRef.current) return;
     const stamped = stampParcelNumbers(parcels);
     if (stamped !== parcels) setParcels((cur) => (cur === parcels ? stamped : stampParcelNumbers(cur)));
-  }, [parcels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [parcels]);  
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
   // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).
@@ -6421,7 +6421,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * another workspace) HAS no box, so the rect refuses it directly; a merely-backgrounded tab has a
    * perfectly real box, so the rect admits it and the framing commits while hidden, which is exactly
    * what B1600353 established and what the last attempt got backwards. */
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately dep-array-free: it re-asks
+   
   // on every render until it can answer, then the first line returns. It cannot loop — `setSize`
   // bails functionally on an unchanged box, and the only path that dispatches anything else also
   // sets the reveal.
@@ -17167,7 +17167,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lint caught as 'setJurBadge is not defined'. Leave the declaration here. */
   const [jurBadge, setJurBadge] = useState(null);
   const jurBadgeCache = useRef(new Map()); // signature → badge (cache by parcel geometry hash)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!jurBadgeSig) { setJurBadge(null); return; }
     const cached = jurBadgeCache.current.get(jurBadgeSig);

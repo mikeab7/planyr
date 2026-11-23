@@ -298,7 +298,7 @@ export function createActions(env) {
     const fn = A[id];
     if (!fn) return false;
     try { await fn(); } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.error(`Excel key "${id}" failed`, err);
       notice(`That command didn't work in the new grid (${id}).`);
     }

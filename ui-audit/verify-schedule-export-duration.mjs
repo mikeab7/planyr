@@ -1,3 +1,4 @@
+/* global buildPDFHtml -- defined inside the page under test (code runs in page.evaluate / the Schedule iframe) */
 // V258016 / B463072 — drive the REAL PDF export and read the duration off the PRODUCED ARTIFACT.
 //
 // B463072 fixed three reads of a group header's stale leftover duration. The verification item asked
