@@ -1,27 +1,12 @@
-/* Food's own Supabase client — deliberately NOT imported from site-planner/lib/supabase.js.
+/* Food's Supabase client — now the ONE shared client (audit batch I1, 2026-11-23).
  *
- * Every other workspace (Notes, Doc Review) reaches Supabase through the site-planner copy of
- * this file, which works but means a change to this module is one import edge away from
- * dragging site-planner's chunk graph onto every route. /food is a clean-room module — the
- * owner's explicit ask was that a restaurant tracker cannot cost the Site route a single byte
- * — so it gets its own three-line client instead. Same env contract, same project, so signing
- * in from any other workspace signs you in here too: supabase-js persists the session under a
- * URL-derived localStorage key, and both clients resolve to the identical key because they
- * point at the identical VITE_SUPABASE_URL.
+ * Food used to carry its own three-line copy so a restaurant tracker could never drag site-planner's chunk
+ * graph onto the /food route. The shared client (`src/shared/supabase/client.js`) imports nothing but
+ * supabase-js, so that isolation intent still holds: Food depends on `shared/`, never on `site-planner/`
+ * (guard: test/foodModule.test.js). One client also means one auth session object instead of two competing
+ * GoTrue instances on the same storage key. `SUPABASE_ORIGIN` keeps its old name for Food's callers.
  */
-import { createClient } from "@supabase/supabase-js";
+import { supabaseRest } from "../../../shared/supabase/client.js";
 
-// B1843888 — same vitest-must-never-configure-a-real-client guard as the site-planner copy of
-// this file (see that file's header for why); duplicated rather than imported, per this
-// module's own BUNDLE ISOLATION rule above.
-const UNDER_VITEST = !!(import.meta.env && import.meta.env.VITEST);
-
-const RAW_URL = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
-let SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
-try { if (RAW_URL) SUPABASE_URL = new URL(RAW_URL).origin; } catch (_) {}
-const SUPABASE_ANON = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
-
-export const SUPABASE_ORIGIN = SUPABASE_URL;
-export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
-
-export const supabase = supabaseConfigured() ? createClient(SUPABASE_URL, SUPABASE_ANON) : null;
+export { supabase, supabaseConfigured } from "../../../shared/supabase/client.js";
+export const SUPABASE_ORIGIN = supabaseRest().url;
