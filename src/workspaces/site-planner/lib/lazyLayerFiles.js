@@ -12,19 +12,24 @@
  * ⛔ Adding a file: add it HERE, run `npm run layer-index` (regenerates lazyLayerIndex.generated.js — test/lazyLayerRegistry.test.js fails
  * until you do), and never import the file statically from an eager module (test/lazyLayerRegistry.test.js sweeps for that too). A
  * constant an eager module needs lives in a small side file the layer file re-exports (oklahomaStatic.js, niceCase.js, pipeSizeLabel.js). */
+import { ensureSourcePacks } from "../../../shared/gis/sourcePacks.js";
+
+/* Batch K stage 3: a layer file reads GIS_SOURCES rows at module load, so the source packs it needs are awaited FIRST (sourcePacks.js; a failed pack rejects the load, which layers.js already reports and retries). */
+const withPacks = (packs, load) => (packs.length ? ensureSourcePacks(packs).then(load) : load());
+
 export const LAZY_LAYER_FILES = [
-  { key: "desoto", load: () => import("./desotoLayers.js"), pick: (m) => ({ layers: m.DESOTO_LAYERS, vintage: m.DESOTO_VINTAGE }) },
-  { key: "sugarland", mergeRank: 2, load: () => import("./sugarLandLayers.js"), pick: (m) => ({ layers: m.SUGARLAND_LAYERS, vintage: m.SUGARLAND_VINTAGE, merge: m.SUGARLAND_MERGE_GROUPS }) },
-  { key: "fortbend", mergeRank: 3, load: () => import("./fortBendLayers.js"), pick: (m) => ({ layers: m.FORTBEND_LAYERS, vintage: m.FORTBEND_VINTAGE, merge: m.FORTBEND_MERGE_GROUPS }) },
-  { key: "nashville", load: () => import("./nashvilleLayers.js"), pick: (m) => ({ layers: m.NASHVILLE_LAYERS, vintage: m.NASHVILLE_VINTAGE }) },
-  { key: "nashvilleBuffers", mergeRank: 4, load: () => import("./nashvilleBufferLayers.js"), pick: (m) => ({ layers: m.NASHVILLE_BUFFER_LAYERS, merge: m.NASHVILLE_BUFFER_MERGE_GROUPS }) },
-  { key: "georgia", mergeRank: 5, load: () => import("./georgiaLayers.js"), pick: (m) => ({ layers: m.GEORGIA_LAYERS, vintage: m.GEORGIA_VINTAGE, merge: m.GEORGIA_MERGE_GROUPS }) },
-  { key: "colorado", load: () => import("./coloradoLayers.js"), pick: (m) => ({ layers: m.COLORADO_LAYERS, vintage: m.COLORADO_VINTAGE }) },
-  { key: "tennessee", mergeRank: 6, load: () => import("./tennesseeLayers.js"), pick: (m) => ({ layers: m.TN_LAYERS, merge: m.TN_MERGE_GROUPS }) },
-  { key: "mississippi", load: () => import("./mississippiLayers.js"), pick: (m) => ({ layers: m.MISSISSIPPI_LAYERS, vintage: m.MISSISSIPPI_VINTAGE }) },
-  { key: "florida", load: () => import("./floridaLayers.js"), pick: (m) => ({ layers: m.FLORIDA_LAYERS, vintage: m.FLORIDA_VINTAGE }) },
-  { key: "oklahoma", mergeRank: 1, load: () => import("./oklahomaLayers.js"), pick: (m) => ({ layers: m.OK_LAYERS, vintage: m.OK_VINTAGE, merge: m.OK_MERGE_GROUPS }) },
-  { key: "chambers", mergeRank: 7, load: () => import("./chambersLayers.js"), pick: (m) => ({ layers: m.CHAMBERS_LAYERS, vintage: m.CHAMBERS_VINTAGE, merge: m.CHAMBERS_MERGE_GROUPS }) },
-  { key: "houstonMetro", load: () => import("./houstonMetroLayers.js"), pick: (m) => ({ layers: m.HOUSTON_METRO_LAYERS, vintage: m.HOUSTON_METRO_VINTAGE }) },
-  { key: "txCityZoning", load: () => import("./txCityZoningLayers.js"), pick: (m) => ({ layers: m.TX_CITY_ZONING_LAYERS, vintage: m.TX_CITY_ZONING_VINTAGE }) },
+  { key: "desoto", packs: [], load: () => withPacks([], () => import("./desotoLayers.js")), pick: (m) => ({ layers: m.DESOTO_LAYERS, vintage: m.DESOTO_VINTAGE }) },
+  { key: "sugarland", mergeRank: 2, packs: ["sugarland"], load: () => withPacks(["sugarland"], () => import("./sugarLandLayers.js")), pick: (m) => ({ layers: m.SUGARLAND_LAYERS, vintage: m.SUGARLAND_VINTAGE, merge: m.SUGARLAND_MERGE_GROUPS }) },
+  { key: "fortbend", mergeRank: 3, packs: ["fortbend"], load: () => withPacks(["fortbend"], () => import("./fortBendLayers.js")), pick: (m) => ({ layers: m.FORTBEND_LAYERS, vintage: m.FORTBEND_VINTAGE, merge: m.FORTBEND_MERGE_GROUPS }) },
+  { key: "nashville", packs: ["nashville"], load: () => withPacks(["nashville"], () => import("./nashvilleLayers.js")), pick: (m) => ({ layers: m.NASHVILLE_LAYERS, vintage: m.NASHVILLE_VINTAGE }) },
+  { key: "nashvilleBuffers", mergeRank: 4, packs: ["nashvilleBuffers"], load: () => withPacks(["nashvilleBuffers"], () => import("./nashvilleBufferLayers.js")), pick: (m) => ({ layers: m.NASHVILLE_BUFFER_LAYERS, merge: m.NASHVILLE_BUFFER_MERGE_GROUPS }) },
+  { key: "georgia", mergeRank: 5, packs: ["georgia"], load: () => withPacks(["georgia"], () => import("./georgiaLayers.js")), pick: (m) => ({ layers: m.GEORGIA_LAYERS, vintage: m.GEORGIA_VINTAGE, merge: m.GEORGIA_MERGE_GROUPS }) },
+  { key: "colorado", packs: ["colorado"], load: () => withPacks(["colorado"], () => import("./coloradoLayers.js")), pick: (m) => ({ layers: m.COLORADO_LAYERS, vintage: m.COLORADO_VINTAGE }) },
+  { key: "tennessee", mergeRank: 6, packs: ["tennessee"], load: () => withPacks(["tennessee"], () => import("./tennesseeLayers.js")), pick: (m) => ({ layers: m.TN_LAYERS, merge: m.TN_MERGE_GROUPS }) },
+  { key: "mississippi", packs: ["mississippi"], load: () => withPacks(["mississippi"], () => import("./mississippiLayers.js")), pick: (m) => ({ layers: m.MISSISSIPPI_LAYERS, vintage: m.MISSISSIPPI_VINTAGE }) },
+  { key: "florida", packs: ["florida"], load: () => withPacks(["florida"], () => import("./floridaLayers.js")), pick: (m) => ({ layers: m.FLORIDA_LAYERS, vintage: m.FLORIDA_VINTAGE }) },
+  { key: "oklahoma", mergeRank: 1, packs: ["oklahoma"], load: () => withPacks(["oklahoma"], () => import("./oklahomaLayers.js")), pick: (m) => ({ layers: m.OK_LAYERS, vintage: m.OK_VINTAGE, merge: m.OK_MERGE_GROUPS }) },
+  { key: "chambers", mergeRank: 7, packs: [], load: () => withPacks([], () => import("./chambersLayers.js")), pick: (m) => ({ layers: m.CHAMBERS_LAYERS, vintage: m.CHAMBERS_VINTAGE, merge: m.CHAMBERS_MERGE_GROUPS }) },
+  { key: "houstonMetro", packs: ["houstonMetro"], load: () => withPacks(["houstonMetro"], () => import("./houstonMetroLayers.js")), pick: (m) => ({ layers: m.HOUSTON_METRO_LAYERS, vintage: m.HOUSTON_METRO_VINTAGE }) },
+  { key: "txCityZoning", packs: ["txCityZoning"], load: () => withPacks(["txCityZoning"], () => import("./txCityZoningLayers.js")), pick: (m) => ({ layers: m.TX_CITY_ZONING_LAYERS, vintage: m.TX_CITY_ZONING_VINTAGE }) },
 ];

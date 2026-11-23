@@ -30,7 +30,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const J = await import(path.join(ROOT, "src/workspaces/site-planner/lib/jurisdiction.js"));
 const { createGisCache } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/gisCache.js"));
 const { etjNamesOf } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/etjNames.js"));
-const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sources.js"));
+const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sourcesAll.js"));
 
 // Written down after the first live run (2026-09-30): see the PR body for the raw counts.
 // First live run 2026-09-30: 205 city limits + 65 ETJ cities touch the circle → 208 distinct. The floor
