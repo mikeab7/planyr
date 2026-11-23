@@ -18,6 +18,7 @@ import { buildAnnotations } from "../src/workspaces/site-planner/lib/pdfAnnotati
 import { extractMarkupAnnotations, domToTree } from "../src/workspaces/site-planner/lib/annotationExtract.js";
 import { buildingSfRows } from "../src/workspaces/site-planner/lib/buildingSfTable.js";
 import { svgToFake } from "./fixtures/svgToFake.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const FX = JSON.parse(read("./fixtures/realisticSiteClone.json"));
@@ -181,7 +182,7 @@ describe("(d) the panel row and its wiring", () => {
     expect(render({ scaleFtPerIn: 100, showScaleBar: false })).not.toContain("scale bar will agree");
   });
   it("SitePlanner reads the saved setting as ON unless it is exactly false (a plan saved before this existed prints as before), in every consumer", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     // preview key, preview build, download, panel prop — one consumer each
     expect(src.match(/settings\.printScaleBar !== false/g)).toHaveLength(4);
     expect(src.match(/printScaleBar/g)).toHaveLength(5); // + the single writer
@@ -189,7 +190,7 @@ describe("(d) the panel row and its wiring", () => {
     expect(({}).printScaleBar !== false).toBe(true);
   });
   it("the download and the preview pass the flag to the SAME builder (PDF-PARITY by construction)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    const src = plannerSource();
     expect(src).toMatch(/composePageOverride, settings\.printBuildingsTable !== false, false, settings\.printScaleBar !== false\)\)/);
     expect(src).toMatch(/flattenMarkupsPref\(\), settings\.printScaleBar !== false\)/);
     const sheet = read("../src/workspaces/site-planner/lib/exportSheet.js");

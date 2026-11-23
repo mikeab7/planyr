@@ -15,6 +15,7 @@ import { gradingCfg, gradingPack, GRADING_DEFAULTS } from "../src/workspaces/sit
 import { driveFlags } from "../src/workspaces/site-planner/lib/gradingPanelModel.js";
 import { layoutLabelSet } from "../src/workspaces/site-planner/lib/spotLabelPlacement.js";
 import { chehawInputs } from "../ui-audit/lib/chehawSurfaceNode.mjs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
 
@@ -232,7 +233,7 @@ describe("labels — the tie-in spot and the fall tag", () => {
     expect(Math.abs(tie.x - 400)).toBeLessThan(120);
   });
   it("wiring: the planner builds drive elements only while grading is on; the controller labels and flags them; the gear edits the three values", () => {
-    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/if \(grOn && grDriveTies\.size\)/);
     expect(sp).toMatch(/type: "drive", ring, dockStack: null/);
     const gc = readFileSync("src/workspaces/site-planner/components/GradingController.jsx", "utf8");
@@ -458,7 +459,7 @@ describe("ROUND 3 — a road never carries the grading limit past the property l
     expect(pastClip).toBeLessThanOrEqual(pastRaw);
   });
   it("source scan — the planner drops a tie road from the extra rings, clips every other road to the fence, and labels ground-served drives", () => {
-    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/if \(grDriveTies\.has\(e\.id\)\) return \[\];/);
     expect(sp).toMatch(/roadLimitRings\(r, grFence\)/);
     expect(sp.indexOf("const grDriveTies = useMemo")).toBeLessThan(sp.indexOf("const grLimitExtraRings"));

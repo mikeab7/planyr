@@ -12,9 +12,10 @@
  * and it fails (the old body calls frameToActiveParcels). */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const SRC_PATH = process.env.ACTIVATE_SRC || new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url);
-const src = readFileSync(SRC_PATH, "utf8");
+const src = process.env.ACTIVATE_SRC ? readFileSync(SRC_PATH, "utf8") : plannerSource();
 
 function liftHandler() {
   const m = src.match(/const toggleAnalysisLayer = useCallback\(\((layerId, wantOn)\) => \{([\s\S]*?)\n  \}, \[/);
