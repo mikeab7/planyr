@@ -979,6 +979,10 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
   Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
   See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
+  **NOTES GATES SPLIT (owner decision 2026-11-23):** only five `verify-notes-*` gates stay in the required check (placement surface,
+  clipboard regression bank, box copy vs text copy, overlap rule, Ctrl+A scope — `REQUIRED_NOTES_GATES` in `ciGates.mjs`); the other 13
+  run as lane `notes-extra` in `.github/workflows/notes-gates.yml` (nightly, on demand, and on PRs touching `src/workspaces/notes/**`) —
+  NOT required, so a red nightly there is a "go look". A bare `npm run ci-parity` still runs all 18. Do not call a moved gate "a required build step".
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages

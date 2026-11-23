@@ -1,0 +1,58 @@
+name: Notes extra gates
+
+# The 13 Notes browser harnesses that are NOT in the required `build` check (owner decision 2026-11-23, code audit Batch C #3:
+# "keep five Notes gates required, move the rest to a nightly + a Notes-paths PR job"). The five that stay required are named in
+# ui-audit/lib/ciGates.mjs REQUIRED_NOTES_GATES (placement surface, clipboard regression bank, box copy vs text copy, overlap
+# rule, Ctrl+A scope — the last three are owner constraints #57–#59).
+#
+# Runs: nightly · on demand · on a pull request that touches Notes code or these harnesses. It is deliberately NOT a required
+# check (it is not in .github/required-checks.json), so a Notes PR waits for it only if a person chooses to; a red nightly run
+# is a "go look" signal, like ledger-health.
+#
+# Each shard builds the app itself (no build-app lane in front of it) and runs `npm run ci-parity -- --lane notes-extra
+# --shard i/3`, i.e. the SAME gates from .github/ci-gates.yml — never a second copy of the harness commands.
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/workspaces/notes/**"
+      - "ui-audit/verify-notes-*.mjs"
+      - "ui-audit/lib/notes*.mjs"
+      - "test/fixtures/clipboard-bank/**"
+      - ".github/workflows/notes-gates.yml"
+
+concurrency:
+  group: notes-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notes-extra:
+    name: notes-extra (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Run the extra Notes gates (scripts/ci-parity.mjs --lane notes-extra)
+        run: npm run ci-parity -- --lane notes-extra --shard ${{ matrix.shard }}/3
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
