@@ -2,7 +2,7 @@
  * authoritative GIS endpoint from silently shipping again.
  *
  * Two checks, both fail CI (via test/gisSources.test.js) and the script's exit code:
- *   1) REGISTRY TIER INTEGRITY — every row in src/shared/gis/sources.js must be
+ *   1) REGISTRY TIER INTEGRITY — every row in src/shared/gis/sources.js (and its packs) must be
  *      `tier: "production"`, OR an explicitly-acknowledged `monitored-exception` with a
  *      reason. A serviceUrl that looks like a `/Test/` / `/staging/` / geogimstest URL
  *      without that acknowledgement fails. (Catches the NWI-on-/Test/ + old geogimstest
@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { auditRegistry, GIS_SOURCES, looksNonProduction } from "../src/shared/gis/sources.js";
+import { auditRegistry, GIS_SOURCES, looksNonProduction } from "../src/shared/gis/sourcesAll.js";
 // NEW-4 — the coverage fixtures live in their own module now (off the app bundle).
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
@@ -55,7 +55,7 @@ export function scanInlineUrls() {
     const code = stripComments(src);
     const hits = code.match(INLINE_URL_RE) || [];
     for (const hit of hits) {
-      problems.push(`${rel}: inline GIS service URL ${hit} — move it to src/shared/gis/sources.js and reference the registry row.`);
+      problems.push(`${rel}: inline GIS service URL ${hit} — move it to src/shared/gis/sourcesAll.js and reference the registry row.`);
     }
   }
   return problems;

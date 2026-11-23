@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const J = await import(path.join(ROOT, "src/workspaces/site-planner/lib/jurisdiction.js"));
 const { createGisCache } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/gisCache.js"));
-const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sources.js"));
+const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sourcesAll.js"));
 const { SOURCE_FIXTURES } = await import(path.join(ROOT, "src/shared/gis/sourceFixtures.js"));
 const { DFW_ETJ_COUNTIES, DFW_ETJ_COUNTIES_OUTSIDE_CIRCLE } = await import(path.join(ROOT, "ui-audit/lib/dfwEtjCounties.mjs"));
 
