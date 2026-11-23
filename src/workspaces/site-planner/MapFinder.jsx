@@ -171,6 +171,7 @@ import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePin
 import { holdNewZoomLevels } from "../../shared/map/steadyZoomLevels.js";
 import { lockstepZoomAnimation } from "../../shared/map/lockstepZoom.js";
 import { SQFT_PER_ACRE } from "../../shared/units/areaUnits.js";
+import { ringArea } from "./lib/ringMath.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -439,15 +440,7 @@ function pointInPoly(lat, lng, ring) {
 // "objectid" and so showed the layer's own row number instead of the real parcel number on
 // several GA WinGAP counties, disagreeing with what an ID search already queried. `idAttrFor`
 // (lib/parcelQuery.js) resolves the SAME column a search runs on — never a second copy.
-const shoelace = (pts) => {
-  // B690 — a stored parcel can lack `points` (attr-only / legacy / a malformed row round-tripped
-  // verbatim through site_elements). The map layer skips those (p.points?.length below); the
-  // acreage sums must too, or ONE bad record crashes the whole finder into the error boundary.
-  if (!Array.isArray(pts) || !pts.length) return 0;
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
-  return Math.abs(a) / 2;
-};
+const shoelace = ringArea; // the one {x,y} shoelace (B690 guard included) — audit I2
 
 // Build the planner hand-off: all selected parcels in one shared feet frame,
 // plus an aerial export covering them.
