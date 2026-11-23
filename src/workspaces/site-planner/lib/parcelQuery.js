@@ -10,6 +10,7 @@
  */
 import { resolveLayerUrl, getLayerInfo, queryFeatures, queryDistinctValues } from "./arcgis.js";
 import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER, pointOrderByForUrl, stackRuleForUrl } from "./counties.js";
+import { ensureParcelStatesForKeys } from "./parcelStateTables.js";
 import { collapseStacked } from "./parcelStack.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue, countyRecord, composeSitus, situsAddress } from "./appraisal.js";
@@ -203,6 +204,9 @@ async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, addrParts,
  * Returns { feats, layerUrl, idField, addrField, backup, backupCounty }. A config
  * error (no id field, bad field name) is rethrown as-is — it isn't an outage. */
 export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs }) {
+  /* Batch K stage 2 — a saved county key's state table loads on demand; the lookup waits for it so `COUNTIES[county]` below is the row, not a miss. A failed load is already
+   * loud (parcelStateTables.js) and the lookup then proceeds exactly as an unknown county always did. */
+  try { await ensureParcelStatesForKeys([county]); } catch (_e) { /* reported by parcelStateTables */ }
   /* NEW-2 (TN, 2026-10-21) — an id typed with spaces / dots / dashes in any mix is rebuilt into the form the county stores it in, so
    * "156 027.00 000" finds `156-027.00-000`. Only a county that declares an `idNormalizer` is touched, and only an id search. */
   if (mode === "id" && COUNTIES[county]?.idNormalizer) value = normalizeIdFor(COUNTIES[county].idNormalizer, value);

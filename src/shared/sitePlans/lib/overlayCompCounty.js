@@ -1,15 +1,15 @@
 /* B1953796 (R9) — best-effort county for each comp pinned to a moved site-plan overlay.
  * Same derivation MapFinder's `resolveCompCounty` uses (jurisdiction boundary lookup, resolved
- * WITH its state so an out-of-state name can't map to a Texas key), on the same 3s race. The heavy
+ * WITH its state so an out-of-state name can't map to a Texas key, and only once that state's county table has loaded — batch K stage 2), on the same 3s race. The heavy
  * county modules are imported lazily — only a placement commit that actually carries comps pays. */
 export async function resolveCountyForPoint(lat, lon, { timeoutMs = 3000 } = {}) {
   try {
-    const [{ countyAtPoint }, { countyKeyForName }] = await Promise.all([
+    const [{ countyAtPoint }, { countyKeyForNameLoaded }] = await Promise.all([
       import("../../../workspaces/site-planner/lib/jurisdiction.js"),
       import("../../../workspaces/site-planner/lib/counties.js"),
     ]);
     const ans = await Promise.race([countyAtPoint(lon, lat), new Promise((res) => setTimeout(() => res(null), timeoutMs))]);
-    return ans && ans.name ? (countyKeyForName(ans.name, ans.state) || null) : null;
+    return ans && ans.name ? ((await countyKeyForNameLoaded(ans.name, ans.state)) || null) : null;
   } catch (_) { return null; }
 }
 

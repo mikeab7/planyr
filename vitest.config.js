@@ -23,7 +23,9 @@ process.env.TZ = "UTC";
 export default defineConfig({
   // Batch K stage 1: production loads the per-state layer files on demand; the unit suites keep the full registry synchronously by
   // aliasing the (null-in-production) preload seam to a module that imports every file statically. See lazyLayerPreload.js.
-  resolve: { alias: [{ find: /^(.*)\/lazyLayerPreload\.js$/, replacement: path.resolve("test/helpers/lazyLayerPreloadAll.js") }] },
+  resolve: { alias: [{ find: /^(.*)\/lazyLayerPreload\.js$/, replacement: path.resolve("test/helpers/lazyLayerPreloadAll.js") },
+    // Batch K stage 2: same seam for the per-state county parcel tables (parcelTablesPreload.js).
+    { find: /^(.*)\/parcelTablesPreload\.js$/, replacement: path.resolve("test/helpers/parcelTablesPreloadAll.js") }] },
   // JSX, automatic runtime. A handful of suites render a small, DOM-free component to
   // static markup with `react-dom/server` (test/parcelCard.test.js) — that needs the JSX
   // transform, but NOT jsdom: renderToStaticMarkup produces a string, so the environment

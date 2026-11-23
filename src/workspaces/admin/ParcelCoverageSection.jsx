@@ -46,6 +46,7 @@ async function loadRegistry() {
     import("../site-planner/lib/countyPolygons.js"),
     import("../site-planner/lib/countiesProvenance.js"),
   ]);
+  await c.loadAllParcelStates(); // batch K stage 2 — the coverage map reads EVERY county row; the per-state tables load on demand otherwise
   return {
     setCountyPolygons: poly.setCountyPolygons,
     registry: {

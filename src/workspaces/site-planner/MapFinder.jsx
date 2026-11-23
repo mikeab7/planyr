@@ -4,7 +4,8 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, sourceDisplayName, countyForView, countyKeyForName, countyKeyForNameLoaded, onParcelTablesLoaded, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView, displayMinZoomOf } from "./lib/counties.js";
+import { useParcelTablesVersion } from "./lib/useParcelTablesVersion.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 import { wideSupportedForUrl } from "./lib/parcelWideRequest.js";
@@ -552,6 +553,7 @@ function RailTab({ label, count, active, onClick, title }) {
 
 function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, focusCompReveal = false, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
+  useParcelTablesVersion((allSites || sites || []).map((x) => x && x.county)); // Batch K stage 2 — every saved site's county table loads; re-render when one lands
   // B1310209 (NEW-2) — the map's own relatively-positioned host box (below), the same one every
   // other floating map panel (the Comps rail, the Layers panel) is already a position:absolute
   // child of. SitePlansSection portals its docked Adjust panel into this element directly, so it
@@ -1934,6 +1936,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      * whole session. Guarded on `cancelled` because a fast unmount must not set state. */
     let cancelled = false;
     loadCountyPolygons().then(() => { if (!cancelled && mapRef.current) onMove(); });
+    /* Batch K stage 2 — and again when a state's county table lands (the heading county for a Kentucky view is only right once Kentucky's rows are in). */
+    const offTablesMove = onParcelTablesLoaded(() => { if (!cancelled && mapRef.current) onMove(); });
     // NEW-1 — the moment the user drives the map themselves, the derived landing view is done
     // for the session. Deliberately keyed on real INPUT (a press, a wheel, a drag) rather than
     // Leaflet's `movestart`/`zoomstart`, which our own programmatic `setView` also fires.
@@ -2014,7 +2018,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); detachLockstep(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; offTablesMove(); detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); detachLockstep(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2815,12 +2819,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      skipped — its siblings still work. */
   useEffect(() => {
     let cancelled = false;
-    Object.entries(COUNTIES_MAP).forEach(([key, cfg]) => {
+    const asked = new Set();
+    /* Batch K stage 2 — a state's county table arrives on demand; each time one lands its rows are resolved too (a key already asked is never asked twice). */
+    const resolveNew = () => Object.entries(COUNTIES_MAP).forEach(([key, cfg]) => {
+      if (asked.has(key)) return;
+      asked.add(key);
       resolveLayerUrl(cfg.layerUrl || cfg.mapServer)
         .then((url) => { if (!cancelled) { layerUrlsRef.current[key] = url; if (selectModeRef.current) syncDisplaysToView(); } })
         .catch(() => {}); // a single county being down must not break the others
     });
-    return () => { cancelled = true; };
+    resolveNew();
+    const offTables = onParcelTablesLoaded(() => { if (!cancelled) { resolveNew(); if (selectModeRef.current) syncDisplaysToView(); } });
+    return () => { cancelled = true; offTables(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3895,7 +3905,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
        * state makes an out-of-state answer a null (the honest "no county" this flag already
        * handles) and, at the same time, lets a COLORADO pin reach its `co_` key instead of the
        * null every Colorado comp used to get. */
-      const county = ans?.name ? countyKeyForName(ans.name, ans.state) : null;
+      const county = ans?.name ? (await countyKeyForNameLoaded(ans.name, ans.state)) : null;
       if (!county) console.warn(`[comps] county lookup found no match for a ${what}`, { lat, lon }, ans?.error || "(timed out or unresolved)");
       return county;
     } catch (e) { console.warn(`[comps] county lookup failed for a ${what}`, { lat, lon }, e); return null; }
@@ -3984,7 +3994,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           new Promise((res) => setTimeout(() => res(null), 3000)),
         ]);
         // NEW-1 — state-qualified; see `resolveCompCounty` above for why an unqualified name is a defect.
-        county = ans?.name ? countyKeyForName(ans.name, ans.state) : null;
+        county = ans?.name ? (await countyKeyForNameLoaded(ans.name, ans.state)) : null;
       } catch (_) { /* the planner resolves it from the origin on load */ }
       // NEW-1 — `parcelInfo?.label`/`addr` can be a raw geocoder or county label carrying an
       // upstream comma-joined defect (an empty city/state/zip whose separator still made it into
@@ -4015,7 +4025,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         new Promise((res) => setTimeout(() => res(null), 3000)),
       ]);
       // NEW-1 — state-qualified; see `resolveCompCounty` above for why an unqualified name is a defect.
-      const key = ans?.name ? countyKeyForName(ans.name, ans.state) : null;
+      const key = ans?.name ? (await countyKeyForNameLoaded(ans.name, ans.state)) : null;
       if (key && key !== county) county = key;
     } catch (_) { /* keep the click-time key */ }
     /* NEW-2 — the plan's NAME is the parcel's SITUS, then what the user actually searched, then its

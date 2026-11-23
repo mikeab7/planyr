@@ -49,27 +49,17 @@ import { cityScopeAnswer, CITY_SCOPE_COUNTIES } from "./cityScopes.js";
 // dynamic import of cityScopes.js from the admin chunk becomes its own shared chunk and breaches the Site-route allowlist.
 export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
-import { alRaw, alMap } from "./alabamaParcels.js"; // NEW-1 (B2302784) — the Alabama county rows
-import { sdRaw, sdMap } from "./sdParcels.js"; // NEW-1 (B2343936) — the South Dakota county rows beyond sd_pennington/minnehaha/siouxfalls
-import { idRaw, idMap } from "./idParcels.js"; // NEW-1 (B2317920) — the Idaho county rows beyond the 13 OITS counties
-import { nmRaw, nmMap } from "./nmParcels.js"; // NEW-1 (B2345888) — the New Mexico county rows beyond nm_bernalillo
-import { gaRaw, gaMap } from "./gaParcels.js"; // NEW-1 (B2316720) — the Georgia county rows added after the 2026-09 passes
-import { laRaw, laMap } from "./laParcels.js"; // NEW-1 (Louisiana, 2026-10-19) — parish rows wired after the original 34
-import { moRaw, moMap } from "./moParcels.js"; // NEW-1 (B2317680) — the Missouri county rows
-import { miRaw, miMap } from "./miParcels.js"; // NEW-1 (Michigan, 2026-10-20) — the Michigan county rows (mi_oakland / mi_macomb / mi_detroit stay hand-written)
-import { scRaw, scMap } from "./scParcels.js"; // NEW-1 (South Carolina 2026-10-19) — the South Carolina county rows (sc_greenville stays hand-written)
-import { paRaw, paMap } from "./paParcels.js"; // NEW-1 (Pennsylvania, 2026-10-19) — the Pennsylvania county rows beyond the six hand-written ones
-import { ilRaw, ilMap } from "./ilParcels.js"; // NEW-1 (B2372624) — the Illinois county rows (il_cook / il_dupage / il_will / il_kane stay hand-written below)
-import { waRaw, waMap } from "./waParcels.js"; // NEW-1 (B2349360) — the Washington county rows
-import { orRaw, orMap } from "./orParcels.js"; // NEW-1 (B2347696) — the Oregon county rows beyond Multnomah + Clackamas
-import { okRaw, okMap } from "./okParcels.js"; // NEW-1 (Oklahoma) — the Oklahoma county rows beyond ok_oklahoma / ok_tulsa
-import { azRaw, azMap } from "./azParcels.js"; // NEW-1 (Arizona, 2026-10-19) — the Arizona county rows beyond az_pinal / az_maricopa
-import { ksRaw, ksMap } from "./ksParcels.js"; // NEW-1 (B2348000) — the Kansas county rows
-import { nyRaw, nyMap, NY_UNCOVERED } from "./nyParcels.js"; // NEW-1 (New York, 2026-10-20) — the New York county rows beyond the statewide public layer
-import { iaRaw, iaMap, iaCopyRaw, iaCopyMap } from "./iaParcels.js"; // NEW-1 (Iowa, 2026-10-19) — the Iowa county rows (ia_polk is the one hand-written row)
-import { kyRaw, kyMap } from "./kyParcels.js"; // NEW-1 (Kentucky) — the Kentucky county rows
+import { NY_UNCOVERED } from "./nyUncovered.js"; // the 24 NY counties the statewide layer lacks (small eager file; nyParcels.js itself loads on demand)
+/* BATCH K STAGE 2 (2026-11-23, B2671306) — the 19 per-state county tables (alabamaParcels.js … kyParcels.js) are NOT imported here any more: they load on
+ * demand through parcelStateTables.js and merge into COUNTIES_RAW / COUNTIES_MAP_RAW via `registerParcelState` below. Until a state's rows have landed,
+ * `countyIdentity` answers `pending` and a missed lookup kicks the load — see parcelStateTables.js for the contract ("not loaded yet" is never "no data"). */
+import {
+  LAZY_ROWS_AFTER_KEY, LAZY_ROW_ORDER, isLazyParcelState, lazyStateOfKey, kickParcelState, ensureParcelState, ensureParcelStatesForView, ensureParcelStatesForPoint, parcelStateLoaded,
+  parcelTablesReadyForView, setParcelTableSink, onParcelTablesLoaded, parcelTablesVersion, ensureParcelStatesForKeys, loadAllParcelStates, lazyStatesForView,
+} from "./parcelStateTables.js";
 
 export { loadCountyPolygons, countyPolygonsReady };
+export { onParcelTablesLoaded, parcelTablesVersion, ensureParcelStatesForKeys, loadAllParcelStates, ensureParcelStatesForView, parcelStateLoaded, isLazyParcelState };
 
 export const FEET_WKID = 2278;
 
@@ -1009,26 +999,6 @@ const COUNTIES_RAW = {
     help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
   },
   ...msMarisRaw(),
-  ...laRaw(), // NEW-1 (Louisiana 2026-10-19) — la_claiborne/richland/westcarroll/ouachita
-  ...alRaw(), // NEW-1 (B2302784) — Alabama (al_jefferson below is the one hand-written row)
-  ...miRaw(), // NEW-1 (Michigan, 2026-10-20) — 52 Michigan counties (see miParcels.js)
-  ...paRaw(), // NEW-1 (Pennsylvania 2026-10-19) — pa_allegheny/northampton/cumberland/lehigh/luzerne/lackawanna are the hand-written rows
-  ...okRaw(), // NEW-1 (Oklahoma)
-  ...ksRaw(), // NEW-1 (B2348000) — Kansas (ks_wyandotte is the hand-written row)
-  ...nyRaw(), // NEW-1 (New York 2026-10-20) — ny_* county rows (the statewide public layer holds the other 38 counties)
-  ...iaRaw(), // NEW-1 (Iowa 2026-10-19) — Iowa (ia_polk below is the hand-written row)
-  ...iaCopyRaw(), // NEW-1 (Iowa second pass, B2499376) — the 2017 statewide COPY for the Iowa counties with no source of their own
-  ...moRaw(), // NEW-1 (B2317680) — Missouri (mo_clay / mo_platte / the two city scopes below are the hand-written rows)
-  ...scRaw(), // NEW-1 (South Carolina 2026-10-19) — the other 45 counties (sc_greenville is the hand-written row)
-  ...ilRaw(), // NEW-1 (B2372624) — Illinois (il_cook / il_dupage / il_will / il_kane are the hand-written rows)
-  ...waRaw(), // NEW-1 (B2349360) — Washington (county rows; the statewide mosaic is licence-restricted and unused)
-  ...orRaw(), // NEW-1 (B2347696) — Oregon counties beyond the hand-written or_multnomah / or_clackamas rows
-  ...sdRaw(), // NEW-1 (B2343936) — South Dakota counties (sd_beadle … sd_roberts)
-  ...azRaw(), // NEW-1 (Arizona 2026-10-19) — az_* rows beyond the hand-written az_pinal / az_maricopa
-  ...idRaw(), // NEW-1 (B2317920) — Idaho counties beyond the 13 hand-written OITS rows (id_ada … id_washington)
-  ...nmRaw(), // NEW-1 (B2345888) — New Mexico counties beyond nm_bernalillo
-  ...gaRaw(), // NEW-1 (B2316720) — Georgia rows beyond the hand-written ga_* ones
-  ...kyRaw(), // NEW-1 (Kentucky) — Kentucky (ky_jefferson below is the one hand-written row)
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -2516,6 +2486,10 @@ function withStatewideDerivation(literalProxy, pick) {
     get(target, prop, recv) {
       const v = Reflect.get(target, prop, recv);
       if (v !== undefined || typeof prop !== "string") return v;
+      /* A key of a state whose table has not landed is a MISS BECAUSE IT IS LOADING, not because it is unknown: start the load (listeners re-run the callers when it
+       * lands). The answer to THIS read is still undefined — synchronous code cannot wait — but nothing stored is touched. */
+      const lazySt = lazyStateOfKey(prop);
+      if (lazySt && !parcelStateLoaded(lazySt)) kickParcelState(lazySt);
       const derived = derivedTxCounties();
       const rec = derived && derived.get(normCountyKey(prop));
       return rec ? pick(rec) : undefined;
@@ -3157,26 +3131,6 @@ const COUNTIES_MAP_RAW = {
   ky_jefferson: { state: "KY", center: [38.2527, -85.7585], zoom: 10, bbox: [38.05, -85.95, 38.40, -85.45], mapServer: null, layerUrl: COUNTIES.ky_jefferson.layerUrl },
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
   ...msMarisMap(),
-  ...alMap(),
-  ...orMap(), // NEW-1 (B2347696)
-  ...sdMap(), // NEW-1 (B2343936)
-  ...azMap(), // NEW-1 (Arizona 2026-10-19)
-  ...idMap(), // NEW-1 (B2317920)
-  ...nmMap(), // NEW-1 (B2345888)
-  ...gaMap(), // NEW-1 (B2316720)
-  ...laMap(),
-  ...miMap(),
-  ...ksMap(), // NEW-1 (B2348000)
-  ...nyMap(), // NEW-1 (New York 2026-10-20)
-  ...moMap(),
-  ...scMap(),
-  ...paMap(),
-  ...ilMap(),
-  ...waMap(), // NEW-1 (B2349360)
-  ...okMap(), // NEW-1 (Oklahoma)
-  ...iaMap(),
-  ...iaCopyMap(), // NEW-1 (Iowa second pass, B2499376)
-  ...kyMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
@@ -3568,7 +3522,11 @@ export function displaySourcesForView(bounds) {
    * the polygons are not resident), so it is asked ONCE. It used to be a full point-in-polygon + distance-to-edge
    * resolve per sample point, on top of the one `candidateCountiesForPoint` already makes — half of this sweep's
    * cost (~35 ms of one task at Katy's three-county corner on the first Select-on). */
-  const pending = !countyPolygonsReady();
+  /* BATCH K STAGE 2 — a view over a state whose rows are still downloading is as `pending` as one before the geometry lands: kick the loads, take the bbox
+   * fallback this frame, and do NOT memoize (the listeners re-run the map once the rows are in). */
+  const tablesPending = !parcelTablesReadyForView(bounds);
+  if (tablesPending) lazyStatesForView(bounds).forEach((st) => kickParcelState(st));
+  const pending = !countyPolygonsReady() || tablesPending;
   for (let i = 0; i <= N; i++) {
     for (let j = 0; j <= N; j++) {
       const lat = bounds.south + ((bounds.north - bounds.south) * i) / N;
@@ -3934,6 +3892,7 @@ export function countyForView(lat, lng) {
    * out-argue containment. Everything below stays as the pre-asset / unconfigured-county path. */
   const truth = geometryCountyKey(lat, lng);
   if (truth && COUNTIES_MAP[truth] && !COUNTIES_MAP[truth].statewide) return truth;
+  kickParcelState(stateForPoint(lat, lng)); // BATCH K STAGE 2 — a view in a lazy state whose rows are not in yet: load them (the map re-asks when they land)
   const within = entries.filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; });
   let search = within;
   if (!search.length) {
@@ -3997,6 +3956,10 @@ export function countyIdentity(lat, lng) {
   const ans = resolveCounty(lat, lng);
   if (!ans || ans.status === "pending") return { status: "pending" };
   if (ans.status !== "ok") return { status: "outside" };
+  /* BATCH K STAGE 2 — this state's county rows are still downloading: that is NOT "no parcel source here" (the answer below would be exactly that, silently).
+   * `pending` is the existing "not resident yet" answer every lot-picking flow awaits via `ensureCountyGeometryAt` (which now also awaits the state), and the
+   * kick below makes a sync caller self-heal: listeners (`onParcelTablesLoaded`) re-run the map and the planner when the rows land. */
+  if (isLazyParcelState(ans.state) && !parcelStateLoaded(ans.state)) { kickParcelState(ans.state); return { status: "pending", reason: "parcel-tables", state: ans.state }; }
   const key = countyKeyForName(ans.name, ans.state);
   if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].statewide) {
     return { status: "ok", key, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
@@ -4025,8 +3988,20 @@ export function countyIdentity(lat, lng) {
  * awaits this first; it is a cached promise (instant once loaded) and never throws — a failed load leaves the old
  * behaviour, which is already LOUD inside `loadCountyPolygons`. */
 export async function ensureCountyGeometryAt(lat, lng) {
-  if (countyIdentity(lat, lng).status !== "pending") return;
-  try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
+  if (countyIdentity(lat, lng).status === "pending") {
+    try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
+  }
+  /* BATCH K STAGE 2 — and the point's state table (Kentucky's county rows load when something is in Kentucky). A failed load is already LOUD inside
+   * parcelStateTables.js; the caller then sees `pending`, which is the honest "not loaded" answer, never a silent "no parcels". */
+  const ans = resolveCounty(lat, lng);
+  const st = ans && ans.status === "ok" && ans.state ? ans.state : stateForPoint(lat, lng);
+  if (isLazyParcelState(st) && !parcelStateLoaded(st)) { try { await ensureParcelState(st); } catch (_e) { /* reported by parcelStateTables */ } }
+}
+/* The same, for a county NAME → key lookup (`countyKeyForName` answers null while the state's rows load — a null there would be written onto a new pin as "no county").
+ * Every caller that turns a polygon answer into a stored county key awaits this first. */
+export async function countyKeyForNameLoaded(name, state = null) {
+  if (state && isLazyParcelState(state)) { try { await ensureParcelState(state); } catch (_e) { /* reported by parcelStateTables */ } }
+  return countyKeyForName(name, state);
 }
 
 /* ⛔ NEW-1 (Memphis line band, B2289168 ×3) — THE COUNTY ACROSS THE LINE, asked when a lot click comes back empty.
@@ -4101,6 +4076,41 @@ export function noParcelSourceNote(identity) {
 export const COUNTIES_MAP = withStatewideDerivation(byCountyKey(COUNTIES_MAP_RAW), (rec) => rec.mapEntry);
 export const JURISDICTION_LAYERS = byCountyKey(JURISDICTION_LAYERS_RAW);
 
+/* BATCH K STAGE 2 — the sink parcelStateTables.js calls when a state's rows arrive. The RAW literals are plain objects the Proxies read THROUGH (`byCountyKey`
+ * reads the live target), so adding keys here is visible to every `COUNTIES[...]` / `COUNTIES_MAP[...]` / Object.entries read at once. A key a hand-written row
+ * already holds is never replaced (a later literal key always won over the old spread, and still does). Every memo built from the row set is dropped. */
+const _lazyRows = { raw: {}, map: {} }; // state → rows, as they arrive
+let _eagerRows = null; // { raw, map }: the hand-written rows in their literal order, captured the first time a state lands
+function placeLazyRows(target, kind) {
+  const eager = _eagerRows[kind];
+  const rebuilt = {};
+  const emitLazy = () => {
+    for (const st of LAZY_ROW_ORDER[kind]) {
+      const rows = _lazyRows[kind][st];
+      if (rows) for (const [k, v] of Object.entries(rows)) if (!Object.prototype.hasOwnProperty.call(eager, k)) rebuilt[k] = v; // a hand-written row of the same key always wins
+    }
+  };
+  let placed = false;
+  for (const [k, v] of Object.entries(eager)) {
+    rebuilt[k] = v;
+    if (k === LAZY_ROWS_AFTER_KEY) { emitLazy(); placed = true; }
+  }
+  if (!placed) emitLazy();
+  // the Proxies hold `target` itself, so it is rewritten IN PLACE (a new object would orphan every reader)
+  for (const k of Object.keys(target)) delete target[k];
+  Object.assign(target, rebuilt);
+}
+function registerParcelState(state, rows) {
+  if (!_eagerRows) _eagerRows = { raw: { ...COUNTIES_RAW }, map: { ...COUNTIES_MAP_RAW } };
+  _lazyRows.raw[state] = rows.raw || {};
+  _lazyRows.map[state] = rows.map || {};
+  placeLazyRows(COUNTIES_RAW, "raw");
+  placeLazyRows(COUNTIES_MAP_RAW, "map");
+  _countyEntriesMemo = null;
+  _viewSourcesMemo = null;
+  refreshLazyDerived();
+}
+
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
 /* NEW-2 — ONE URL MUST NOT CARRY TWO HEALTH POLICIES.
@@ -4151,9 +4161,15 @@ export const isPointViaEnvelopeLayerUrl = (url) => POINT_VIA_ENVELOPE_LAYER_URLS
 /* NEW-1 (Iowa second pass, B2499376) — a layer that stacks SEVERAL ROWS ON ONE LOT (Monroe County IA's published "Parcels_Join" carries each parcel twice: the original export, rows 1–16,599, with the previous owner,
  * and the re-import, rows 16,600+, with the current one) must hand back the NEWEST row, not whichever the server lists first (a bare query returns them in OBJECTID order — the old owner). Declared once on the
  * config entry as `pointOrderBy` (an ArcGIS `orderByFields` clause) and keyed by URL exactly like pointViaEnvelope, so `queryAtPoint` and the id/address search (which are handed a URL, not a county key) can ask it. */
-export const POINT_ORDER_BY_LAYERS = Object.freeze(
-  Object.fromEntries(Object.values(COUNTIES_MAP).filter((c) => c.pointOrderBy).map((c) => [trimLayerUrl(c.layerUrl), c.pointOrderBy])),
-);
+/* NOT frozen: a lazily-loaded state's row (Iowa's Monroe) declares `pointOrderBy`, so `refreshLazyDerived` refills this object in place when a state lands. It is the ONLY
+ * URL-keyed registry a lazy row feeds — test/parcelStateTables.test.js fails if a lazy row carries any other registry flag (statewide / identifyOnly / pointViaEnvelope /
+ * dedupeBy / pointWhere / cityScoped), so adding one means extending `refreshLazyDerived` first. */
+export const POINT_ORDER_BY_LAYERS = {};
+function refreshLazyDerived() {
+  for (const k of Object.keys(POINT_ORDER_BY_LAYERS)) delete POINT_ORDER_BY_LAYERS[k];
+  for (const c of Object.values(COUNTIES_MAP)) if (c.pointOrderBy) POINT_ORDER_BY_LAYERS[trimLayerUrl(c.layerUrl)] = c.pointOrderBy;
+}
+refreshLazyDerived();
 export const pointOrderByForUrl = (url) => POINT_ORDER_BY_LAYERS[trimLayerUrl(url)] || null;
 
 /* NEW-1/2/3 (stacked rows, 2026-11-12) — a layer that returns SEVERAL ROWS FOR ONE LOT declares how they collapse, once, on its map entry, and keyed by URL exactly like pointOrderBy above (the search, the point query
@@ -4327,8 +4343,7 @@ export function countyKeyForName(name, state = null) {
 }
 
 /* The configured county keys for one state, in config order. */
-export const countyKeysForState = (state) =>
-  Object.entries(COUNTIES_MAP)
+export const countyKeysForState = (state) => (kickParcelState(state), Object.entries(COUNTIES_MAP))
     .filter(([, c]) => c.state === String(state || "").toUpperCase() && !c.statewide)
     .map(([k]) => k);
 
@@ -4401,3 +4416,6 @@ export function statewideFallbackFor(county) {
 /* (A `STATEWIDE_LAYER_BY_STATE` map was dropped before shipping: no app code read it, and
  * speculative API has no business on the Site route's critical-path bundle. `statewideFallbackFor`
  * already NAMES the tier it returns via its `label`, which is what a surface actually needs.) */
+
+/* LAST in the module on purpose: registering the sink may merge preloaded rows at once (unit suites), which touches memos and registries declared above. */
+setParcelTableSink(registerParcelState);
