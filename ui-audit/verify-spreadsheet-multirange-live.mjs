@@ -1,3 +1,4 @@
+// one-off: live Univer multi-range check; its guarding unit test was removed with the old grid (audit batch F2), kept as a manual harness.
 /* verify-spreadsheet-multirange-live — B2530689 / V1971825 (Ctrl+click multi-range selection; the drag-select autoscroll half is B2452528's
  * verify-spreadsheet-drag-autoscroll-live.mjs). SIGNED IN as the throwaway test account on a THROWAWAY project (never a real one); removes
  * everything it makes and re-asks the database. Real mouse + real Control key only. PORTED to the Univer grid (NEW-2, 2026-10-31): the
