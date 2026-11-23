@@ -1,3 +1,4 @@
+import { agoMinHr } from "../../../shared/units/dateFormat.js";
 /* Admin panels — RPC wrappers + row shaping for Usage / Issues / Support / Ops
  * (B711905–B711908). Pure: every function takes the Supabase client or the raw RPC result, so
  * the whole read path is unit-tested against mocked responses. Every wrapper returns
@@ -159,14 +160,4 @@ export function parseStillOpen(text) {
 }
 
 /* ── Shared formatting ──────────────────────────────────────────────────────────────────────── */
-export function ago(iso, now = Date.now()) {
-  if (!iso) return "never";
-  const ms = now - new Date(iso).getTime();
-  if (!Number.isFinite(ms)) return "—";
-  if (ms < 60_000) return "just now";
-  const m = Math.floor(ms / 60_000);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h} hr ago`;
-  return `${Math.floor(h / 24)} days ago`;
-}
+export const ago = agoMinHr;
