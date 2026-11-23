@@ -50,6 +50,18 @@ export function shortenRenderDelay(code, delay = RENDER_DELAY_MS) {
   return { code: out };
 }
 
+/* ── franc-min (audit batch E) ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * engine-render's LanguageDetector calls franc() ONLY to pick a hyphenation pattern file (see the prune above); a spreadsheet cell never
+ * turns hyphenation on, and every non-English pattern loader is already removed, so the ~100 KB language-trigram tables (data.js) buy nothing.
+ * Replaced by a one-line stand-in with the same observable result for what is left: Latin text → "eng" (en-us, still present), anything else
+ * → "und" (unknown → Univer's loader returns quietly). LOUD-FAILURE: the build fails if the import line is gone (Univer upgrade). */
+const FRANC_IMPORT = 'import { franc } from "franc-min";';
+export const FRANC_STANDIN = 'const franc = (text) => (/^[\\u0000-\\u024f\\s\\u2000-\\u206f]*$/.test(text) ? "eng" : "und");';
+export function stubFranc(code) {
+  if (!code.includes(FRANC_IMPORT)) throw new Error("vite-plugin-univer-prune: @univerjs/engine-render no longer imports franc-min the expected way — the Univer upgrade changed it; update scripts/vite-plugin-univer-prune.mjs (or drop the franc stand-in)");
+  return { code: code.replace(FRANC_IMPORT, FRANC_STANDIN) };
+}
+
 export default function univerPrune() {
   return {
     name: "planyr-univer-prune",
@@ -57,7 +69,7 @@ export default function univerPrune() {
     enforce: "pre",
     transform(code, id) {
       const file = id.split("?")[0];
-      if (ENGINE_FILE.test(file)) return { code: pruneHyphenationLoaders(code).code, map: null };
+      if (ENGINE_FILE.test(file)) return { code: stubFranc(pruneHyphenationLoaders(code).code).code, map: null };
       if (UI_FILE.test(file)) return { code: shortenRenderDelay(code).code, map: null };
       return null;
     },

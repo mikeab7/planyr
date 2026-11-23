@@ -108,6 +108,14 @@ async function installZoneLocator() {
   catch (err) { if (typeof console !== "undefined") console.error("[countyPolygons] state-plane point locator unavailable — bare points use the coarse boxes:", err); }
 }
 
+/** URL of the county-outline asset. A `?v=<content hash>` (injected at build time) makes it safe for /geo/* to be cached
+ *  for a long time: a changed file is a new URL. Absent in dev/test (no define), where the plain path is used. */
+export function countyPolygonsUrl() {
+  const base = typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL;
+  const v = typeof __COUNTY_POLYGONS_V__ !== "undefined" ? __COUNTY_POLYGONS_V__ : "";
+  return `${base || "/"}geo/county-polygons.json${v ? `?v=${v}` : ""}`.replace(/([^:])\/\/+/g, "$1/");
+}
+
 /**
  * Fetch the asset, load the engine, decode. Idempotent and cached: concurrent callers share one
  * request, and a failure is NOT latched (a later call retries) — a transient boot-time blip must
@@ -118,8 +126,7 @@ export function loadCountyPolygons(fetchImpl) {
   if (loading) return loading;
   const f = fetchImpl || (typeof fetch === "function" ? fetch : null);
   if (!f) return Promise.resolve(null);
-  const base = typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL;
-  const url = `${base || "/"}geo/county-polygons.json`.replace(/([^:])\/\/+/g, "$1/");
+  const url = countyPolygonsUrl();
   loading = Promise.all([
     Promise.resolve(f(url)).then((r) => (r && r.ok ? r.json() : Promise.reject(new Error(`county-polygons ${r && r.status}`)))),
     import("./countyPolygonsCore.js"),

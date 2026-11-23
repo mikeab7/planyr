@@ -43,7 +43,8 @@ describe("build-sequence-compiled (B1167200)", () => {
   it("leaves every other script block untouched (the seeded window.__PLANAR_DATA__, the save-queue IIFE)", () => {
     const out = compileSequenceHtml(REAL_HTML);
     expect(out).toContain("window.__PLANAR_DATA__");
-    expect(out).toContain("window.storage.set = (k, v, opts = {})");
+    // The compiled blocks are minified (audit batch E), so match the shape, not the original spacing/parameter names.
+    expect(out).toMatch(/window\.storage\.set=\(\w+,\w+,\w+=\{\}\)=>new Promise/);
   });
 
   it("the compiled blocks contain real React.createElement output, not the raw JSX source", () => {

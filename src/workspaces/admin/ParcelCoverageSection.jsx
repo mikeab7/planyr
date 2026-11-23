@@ -57,8 +57,7 @@ async function loadRegistry() {
 }
 
 async function fetchPayload() {
-  const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/";
-  const res = await fetch(`${base}geo/county-polygons.json`.replace(/([^:])\/\/+/g, "$1/"));
+  const res = await fetch((await import("../site-planner/lib/countyPolygons.js")).countyPolygonsUrl());
   if (!res.ok) throw new Error(`county outlines unavailable (HTTP ${res.status})`);
   return res.json();
 }
