@@ -44,6 +44,7 @@
 import {
   landPricePerSf, buildingPricePerSf, leaseRateForPeriod, landPricePerAreaUnit, landSizeSf,
 } from "../../../shared/comps/lib/comps.js";
+import { daysAgoWords } from "../../../shared/units/dateFormat.js";
 
 export const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
 
@@ -365,15 +366,7 @@ export function countyEntry(countyKey) {
 /** "today" / "1 day ago" / "N days ago" / "N months ago" — the same convention this Dashboard's
  * other cards already use (DashboardCards.jsx's own `relativeDays`), reproduced here so this pure
  * model has no dependency on a component file. */
-export function relativeTimeLabel(iso) {
-  if (!iso) return null;
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.round(days / 30);
-  return months === 1 ? "1 month ago" : `${months} months ago`;
-}
+export const relativeTimeLabel = daysAgoWords;
 
 /** The most recently ADDED comp — `createdAt` ("Date entered," immutable), never `compDate` (the
  * deal's own Executed date, which can be backdated or left blank) — this card is about what's NEW

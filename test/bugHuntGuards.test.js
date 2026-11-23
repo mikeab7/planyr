@@ -118,7 +118,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B539: currentAccessToken parses each auth-token entry inside its own try (a corrupt one doesn't abort the scan)", () => {
-    const src = read("../src/workspaces/site-planner/lib/supabase.js");
+    const src = read("../src/shared/supabase/client.js");
     // the JSON.parse now lives inside a nested try whose catch continues the loop
     expect(src).toMatch(/corrupt entry — skip and keep scanning/);
   });
@@ -159,7 +159,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B540: geocodeAddress distinguishes 'unreachable' from 'not found' (returns { error } vs null)", () => {
-    const src = read("../src/workspaces/site-planner/lib/geocode.js");
+    const src = read("../src/shared/geocode.js");
     expect(src).toMatch(/reachedAny/);
     expect(src).toMatch(/return reachedAny \? null : \{ error:/);
     // both callers handle the { error } shape

@@ -16,7 +16,7 @@ const h = vi.hoisted(() => ({
   refreshCalls: 0,
 }));
 
-vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => {
+vi.mock("../src/shared/supabase/client.js", () => {
   const builder = () => { const b = { then(res) { res({ count: 3, data: null, error: null }); } }; for (const m of ["select", "eq"]) b[m] = () => b; return b; };
   return {
     supabase: {

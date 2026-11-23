@@ -4,6 +4,7 @@ Code used by more than one workspace. Keep edits here small and additive — a c
 into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE.md`.
 
 **Subfolders**
+- `supabase/` — the ONE Supabase client (`client.js`, imports only supabase-js; Food reaches it through its own thin re-export, never through site-planner) and `teams.js`. `geocode.js` (one level up) is the shared address geocoder. The old `site-planner/lib/{supabase,teams,geocode}.js` paths are one-line re-exports.
 - `markup/` — the ONE shared markup/measure/selection engine. `tools.matrix.js` is the
   machine-checkable spec (**never edit it to make a test green** — fix the code). Pure modules:
   `geometry.js`, `markupModel.js`, `measure.js`, `hitTest.js`, `propertySchema.js`, `selection.js`,
