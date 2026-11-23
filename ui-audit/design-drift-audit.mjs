@@ -93,6 +93,7 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/components/PropFields.jsx",
   "src/workspaces/site-planner/components/WallRows.jsx",
   "src/workspaces/site-planner/components/PlannerIcons.jsx",
+  "src/workspaces/site-planner/components/PondInspector.jsx", // audit batch G5
   "src/workspaces/site-planner/lib/plannerConstants.js",
   "src/workspaces/site-planner/lib/floodFootprintMemo.js",
   "src/workspaces/site-planner/lib/plannerShared.js",
