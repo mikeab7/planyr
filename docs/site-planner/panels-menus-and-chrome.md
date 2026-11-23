@@ -49,3 +49,6 @@ The planner's `window.__planner*` read-only diagnostic / E2E hooks (view changes
 
 ## The pond block of the Properties inspector is `components/PondInspector.jsx` (audit batch G5)
 Was a 1,500-line IIFE inside SitePlanner's main return; now a module-scope `memo` component (`@planner-extract`, listed in `test/helpers/plannerSource.js`, exempt in `DRAWING_SURFACE_FILES` like the other moved pieces). Every planner value it reads arrives as a prop, named exactly as it was in the component, so the body is byte-for-byte the old one. Note: `memo` only skips a re-render when props are referentially stable; most handlers are still rebuilt each render, so this step is a seam, not yet a speed-up (the profile step decides what is next).
+
+## The markup blocks of the Properties inspector are `components/MarkupInspector.jsx` (audit batch G5b)
+Three module-scope `memo` components moved verbatim out of SitePlanner's main return: `EasementInspector`, `NeutralMarkupInspector` (line, polyline, rectangle, ellipse, polygon, cloud) and `MarkupStyleInspector` (the remaining deed-encumbrance kind). The `!multiStyleable && selMarkup && kind…` guards stay in SitePlanner; every other value arrives as a same-named prop. Source-scan tests that sliced the old inline text now slice on the `export const …Inspector` markers (`calloutPanelLayoutA`).
