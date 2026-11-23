@@ -14,6 +14,7 @@ const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuf
 const bad = [];
 for (const f of files) {
   let size; try { size = statSync(f).size; } catch { continue; }
+  if (f.startsWith("ui-audit/visual-baselines/")) continue; // approved visual-regression baselines are test inputs
   if (size > LIMIT_BYTES && !ALLOW.has(f)) bad.push(`${f} (${Math.round(size / 1024)} KB)`);
 }
 if (bad.length) {
