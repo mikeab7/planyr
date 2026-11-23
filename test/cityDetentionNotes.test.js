@@ -12,6 +12,7 @@ import {
   slimDrainageContext,
   hydrateDrainageContext,
 } from "../src/workspaces/site-planner/lib/detentionRules.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const note = (a) => a.overlays.filter((o) => o.kind === "city-note");
 
@@ -118,7 +119,7 @@ describe("the readout draws it in place of the generic line", () => {
     expect(panels).toMatch(/city-criteria-unverified"\) && !\(d\.cityNotes \|\| \[\]\)\.length/);
   });
   it("SitePlanner hands the notes down", () => {
-    const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const sp = plannerSource();
     expect(sp).toMatch(/cityNotes: \(drainCtxData\?\.authority\?\.overlays \|\| \[\]\)\.filter\(\(o\) => o\.kind === "city-note"\)/);
   });
 });

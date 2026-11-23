@@ -16,6 +16,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep, reconcile, bindingsIn, rawReadsOf, asksPredicate, artefactsOf } from "../ui-audit/audit-hidden-content-reads.mjs";
 import { DECLARATIONS, VERDICT } from "../src/workspaces/site-planner/lib/hiddenContentReads.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -71,8 +72,7 @@ describe("⛔ MUTATION CHECK — the sweep really does catch the defect it was b
   });
 
   it("…and the CURRENT roadNet does ask it", () => {
-    const now = bindingsIn(execFileSync("git", ["show", "HEAD:src/workspaces/site-planner/SitePlanner.jsx"],
-      { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })).find((b) => b.name === "roadNet");
+    const now = bindingsIn(plannerSource()).find((b) => b.name === "roadNet");
     expect(asksPredicate(now.body)).toBe(true);
   });
 

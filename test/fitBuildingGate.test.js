@@ -7,12 +7,13 @@ import { join, relative } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { GradingPanel, FitBuildingRow, fitNetWords } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const SRC = new URL("../src", import.meta.url).pathname;
 const walk = (d) => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(jsx?|mjs)$/.test(n) ? [p] : []; });
 const files = walk(SRC), rel = (p) => relative(SRC, p), read = (p) => readFileSync(p, "utf8");
 const importersOf = (re) => files.filter((p) => re.test(read(p))).map(rel).sort();
-const planner = read(join(SRC, "workspaces/site-planner/SitePlanner.jsx"));
+const planner = plannerSource();
 const panels = read(join(SRC, "workspaces/site-planner/components/GradingPanels.jsx"));
 
 describe("the search code stays out of the always-loaded planner", () => {
