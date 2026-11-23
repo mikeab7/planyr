@@ -24,6 +24,7 @@
  * Logic lives in handleInviteSignup(request, env, deps) so it is unit-tested with a fake fetch.
  */
 import { callUpstream, safeUpstreamMessage } from "../auth/e2e-session.js";
+import { serviceHeaders } from "./http.js";
 
 export const MIN_PASSWORD = 6;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,7 +64,7 @@ export async function handleInviteSignup(request, env, deps = {}) {
   if (!firstName || !lastName) return reply(400, { ok: false, reason: "name_required", error: "First and last name are required." });
   if (password.length < MIN_PASSWORD) return reply(400, { ok: false, reason: "weak_password", error: `Choose a password of at least ${MIN_PASSWORD} characters.` });
 
-  const svcHeaders = { apikey: service, authorization: `Bearer ${service}`, "content-type": "application/json" };
+  const svcHeaders = serviceHeaders(service, { "content-type": "application/json" });
   const rpc = (name, args) => callUpstream(doFetch, `${base}/rest/v1/rpc/${name}`, { method: "POST", headers: svcHeaders, body: JSON.stringify(args) }, deps);
 
   try {

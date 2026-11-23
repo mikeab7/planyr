@@ -12,14 +12,14 @@
  * lib/inflateResume.js. Run once per year after HCAD publishes it (the B2158065 ledger entry says how).
  */
 import { safeEqual } from "./lib/safeEqual.js";
+import { serviceHeaders, json } from "./lib/http.js";
 import { remoteZipEntries, readZipEntryText, zipEntryDataStart, readRange } from "./lib/zipRange.js";
 import { hcadZipUrl, parseRateTable } from "./lib/hcadUnits.js";
 import { resumeStep, ratesToJson } from "./lib/hcadIndex.js";
 
-const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const b64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); };
 const unb64 = (s) => { const t = atob(s), u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
-const hdrs = (env, extra = {}) => ({ apikey: env.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, ...extra });
+const hdrs = (env, extra = {}) => serviceHeaders(env.SUPABASE_SERVICE_ROLE_KEY, extra);
 
 async function upsert(env, rows) {
   for (let i = 0; i < rows.length; i += 400) {

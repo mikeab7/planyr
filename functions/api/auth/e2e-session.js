@@ -18,6 +18,7 @@
  * Logic lives in handleE2eSession(request, env, deps) so it is unit-tested with a fake fetch.
  */
 import { safeEqual } from "../lib/safeEqual.js";
+import { serviceHeaders } from "../lib/http.js";
 
 export const E2E_EMAIL = "e2e@planyr.test";
 export const E2E_USER_ID = "a96e544f-8537-45cf-81a2-007965fbc04c";
@@ -109,7 +110,7 @@ export async function handleE2eSession(request, env, deps = {}) {
     // 1) Admin generate_link for the FIXED email. Never sends an email. The body is a constant.
     const gen = await callUpstream(doFetch, `${base}/auth/v1/admin/generate_link`, {
       method: "POST",
-      headers: { apikey: service, authorization: `Bearer ${service}`, "content-type": "application/json" },
+      headers: serviceHeaders(service, { "content-type": "application/json" }),
       body: JSON.stringify({ type: "magiclink", email: acct.email }),
     }, deps);
     const g = gen.body;

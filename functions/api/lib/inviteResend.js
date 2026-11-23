@@ -20,8 +20,8 @@ import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
 import { sendViaGmail } from "./gmailSend.js";
 import { buildInviteEmail, INVITE_FROM_DEFAULT, INVITE_REPLY_TO_DEFAULT } from "./inviteEmail.js";
 
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+import { json as baseJson } from "./http.js";
+const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 
 async function serviceRpc(env, name, args, fetchImpl) {
   const key = env.SUPABASE_SERVICE_ROLE_KEY;

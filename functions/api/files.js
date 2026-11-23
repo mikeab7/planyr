@@ -24,12 +24,10 @@
  * Needs deploy env: SUPABASE_URL, SUPABASE_ANON_KEY + the Google creds +
  * PLANYR_STORAGE_BACKEND=drive.
  */
-import { buildStorageAdapter, storageConfig } from "../../server/storage/index.js";
-import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
+import { buildStorageAdapter } from "../../server/storage/index.js";
+import { json, authedContext } from "./lib/http.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
 
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 
 // A filename safe inside a quoted Content-Disposition value: printable ASCII only, no
 // quotes/backslashes (a raw name could otherwise break out of the header).
@@ -37,13 +35,10 @@ const dispositionName = (s) => String(s || "document").replace(/[^\x20-\x7E]/g, 
 
 // Auth + adapter wired to the durable (Supabase-backed) id map, all scoped to the caller.
 async function context_(env, request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const v = await verifySupabaseUser({ token, supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY });
-  if (!v.ok) return { error: json({ ok: false, error: v.error }, 401) };
-  const cfg = storageConfig(env);
-  if (cfg.backend !== "drive") return { error: json({ ok: false, error: 'Storage backend is not "drive".' }, 503) };
-  const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
-  return { user: v.user, adapter: buildStorageAdapter(cfg, { idStore }) };
+  const a = await authedContext(env, request);
+  if (a.error) return a;
+  const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: a.token });
+  return { user: a.user, adapter: buildStorageAdapter(a.cfg, { idStore }) };
 }
 
 export async function onRequestGet(context) {

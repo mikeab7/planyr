@@ -31,7 +31,7 @@ async function indexedLookup(county, acct, env, fetchImpl = fetch) {
   const url = `${env.SUPABASE_URL}/rest/v1/cad_taxunit_shards?county=eq.${county}&prefix=in.(${pre},_meta,_rates)&select=roll_year,prefix,data`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const r = await fetchImpl(url, { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}` } });
+      const r = await fetchImpl(url, { headers: serviceHeaders(env.SUPABASE_ANON_KEY) });
       if (r.ok) {
         const result = answerFromIndex(acct, await r.json(), SOURCE);
         return result ? { kind: "ok", result } : { kind: "noindex" };
@@ -56,8 +56,7 @@ const COUNTIES = {
   harris: { acct: /^\d{13}$/, lookup: lookupHarris, norm: (a) => String(a).replace(/\D/g, ""), indexed: true },
   fortbend: { acct: /^R\d{1,9}$/, lookup: (acct) => lookupFortBend(acct, edgeGet(caches.default)), norm: (a) => { const m = /R\s*0*(\d+)/i.exec(String(a)); return m ? `R${m[1]}` : ""; }, indexed: false },
 };
-const json = (obj, status = 200, extra = {}) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
+import { json, serviceHeaders } from "./lib/http.js";
 
 /** NEW-3: is the indexed Harris answer behind a newer roll — FOR THIS ACCOUNT's units? Reads only the small rate file of each
  * newer year (HCAD publishes the zip tail + that entry) and caches a compact per-year summary (adopted / never-levied codes) for

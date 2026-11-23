@@ -19,12 +19,13 @@
  * "not-configured"; the workflow turns anything but the first two into a second, mail-independent alert.
  * The store, the verifier, the sender and the clock are injected so test/signinHealthRoute.test.js runs the whole flow. */
 import { verifyGithubOidc } from "./githubOidc.js";
+import { serviceHeaders, json as baseJson } from "./http.js";
 import { sendViaGmail } from "./gmailSend.js";
 import { INVITE_FROM_DEFAULT } from "./inviteEmail.js";
 import { STATUSES, SOURCES, THRESHOLDS, overallOf, summariseEvents, decide, buildSnapshot, effectiveHistory, mergeLatestChecks, evaluateStops, staleLimitMin, unknownStreak } from "../../../src/shared/auth/signinHealth.js";
 import { ALARM_TO, buildAlertEmail, buildRecoveryEmail, buildStoppedEmail } from "./signinHealthEmail.js";
 
-const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 
 /* ── Validation ───────────────────────────────────────────────────────────────────────────────────────────────── */
 export function normaliseAttempts(body) {
@@ -50,7 +51,7 @@ export function normaliseAttempts(body) {
 export function createPostgrestStore(env, fetchImpl = fetch) {
   const base = String(env.SUPABASE_URL || "").replace(/\/+$/, "");
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
-  const headers = (extra) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json", ...extra });
+  const headers = (extra) => serviceHeaders(key, { "content-type": "application/json", ...extra });
   async function call(stage, path, init = {}) {
     const res = await fetchImpl(`${base}/rest/v1/${path}`, { ...init, headers: headers(init.headers) });
     if (!res.ok) {

@@ -21,6 +21,7 @@
  * Logic lives in handleMailboxProof(request, env, deps) so it is unit-tested with a fake fetch. */
 import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
 import { originAllowed } from "./email-link.js";
+import { serviceHeaders } from "../lib/http.js";
 
 export const EMAILED_TOKEN_METHODS = Object.freeze(["otp", "magiclink", "recovery"]);
 export const MAX_REDEMPTION_AGE_S = 10 * 60;
@@ -69,7 +70,7 @@ export async function handleMailboxProof(request, env, deps = {}) {
   try {
     res = await doFetch(`${base}/rest/v1/rpc/prove_mailbox`, {
       method: "POST",
-      headers: { apikey: e.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${e.SUPABASE_SERVICE_ROLE_KEY}`, "content-type": "application/json" },
+      headers: serviceHeaders(e.SUPABASE_SERVICE_ROLE_KEY, { "content-type": "application/json" }),
       body: JSON.stringify({ p_user: v.user.id, p_email: v.user.email, p_via: PROOF_VIA }),
       signal: AbortSignal.timeout(10000),
     });

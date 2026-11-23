@@ -9,21 +9,16 @@
  * read out of, someone else's upload. The Drive session URI stays in that row and is
  * never included in any response.
  */
-import { storageConfig } from "../../../server/storage/index.js";
-import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
+import { json, authedContext } from "../lib/http.js";
 import { uploadSessionStore } from "../../../server/storage/uploadSessionStore.js";
 
-export const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+export { json };
 
 export async function uploadContext(env, request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const v = await verifySupabaseUser({ token, supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY });
-  if (!v.ok) return { error: json({ ok: false, error: v.error }, 401) };
-  const cfg = storageConfig(env);
-  if (cfg.backend !== "drive") return { error: json({ ok: false, error: 'Storage backend is not "drive".' }, 503) };
-  const store = uploadSessionStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
-  return { user: v.user, token, cfg, store };
+  const a = await authedContext(env, request);
+  if (a.error) return a;
+  const store = uploadSessionStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: a.token });
+  return { user: a.user, token: a.token, cfg: a.cfg, store };
 }
 
 /* Load the caller's session row for an /api/uploads/<id>/* endpoint, or the honest error

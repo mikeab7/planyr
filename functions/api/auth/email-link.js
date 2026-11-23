@@ -31,6 +31,7 @@
  * Logic lives in handleEmailLink(request, env, deps) so it is unit-tested with a fake fetch and a fake mailer. */
 import { buildAuthLinkUrl, LINK_VALID_MINUTES } from "../../../src/shared/auth/authLink.js";
 import { buildAuthEmail } from "../lib/authEmail.js";
+import { serviceHeaders } from "../lib/http.js";
 import { sendViaGmail } from "../lib/gmailSend.js";
 
 export const FROM_DEFAULT = "no-reply@planyr.io";
@@ -96,7 +97,7 @@ export async function handleEmailLink(request, env, deps = {}) {
   const base = String(e.SUPABASE_URL || "").replace(/\/+$/, "");
   const service = e.SUPABASE_SERVICE_ROLE_KEY;
   if (!base || !service || !e.GMAIL_SERVICE_ACCOUNT_JSON || !e.INVITE_SENDER) { log({ ok: false, reason: "not-configured" }, request); return reply(503, { ok: false, reason: "not_configured" }); }
-  const svc = { apikey: service, authorization: `Bearer ${service}` };
+  const svc = serviceHeaders(service);
 
   // 1) CLAIM: caps checked and recorded, and the account looked up, in one locked database function.
   let claim;
