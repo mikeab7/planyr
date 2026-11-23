@@ -139,7 +139,9 @@ describe("NEW-2 — the over-provision (over-dug) state", () => {
 
 describe("NEW-1/NEW-2 — the panel and the print sheet read ONE source (PDF-PARITY)", () => {
   it("the status card is built by the pure module, not by inline strings", () => {
-    expect(src).toContain('import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";');
+    // G5: the pond block (PondInspector) imports the two verdict builders; SitePlanner keeps the other two.
+    expect(src).toContain('import { detentionVerdict, mitigationVerdict } from "../lib/pondVerdict.js";');
+    expect(src).toContain('import { overdugAcFt, overProvision } from "./lib/pondVerdict.js";');
     expect(src).toContain("const dv = detentionVerdict({");
     expect(src).toContain("out.push({ ...dv, body });");
     expect(src).toContain("out.push({ ...mitigationVerdict({ providedAcFt: provMitAcFt, requiredAcFt: mitReqAcFt }), body: \"\" });");
