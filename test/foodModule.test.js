@@ -86,10 +86,10 @@ describe("bundle isolation — zero site-planner imports", () => {
     });
   }
 
-  it("has its own Supabase client rather than importing site-planner's", () => {
+  it("reaches Supabase through the shared client, never site-planner's", () => {
     expect(existsSync(join(FOOD, "lib", "supabaseClient.js"))).toBe(true);
     const client = src("lib/supabaseClient.js");
-    expect(client).toContain("createClient");
+    expect(client).toContain("shared/supabase/client.js");
     expect(client).not.toMatch(/from\s+["'][^"']*site-planner[^"']*["']/);
   });
 });

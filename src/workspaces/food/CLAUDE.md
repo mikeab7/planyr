@@ -6,8 +6,7 @@ rate it, note the cost. Internal id `food`, route `#/food`, chili-red accent `--
 
 **⛔ BUNDLE ISOLATION is this module's one hard rule.** Nothing under `src/workspaces/food/`
 may import from `src/workspaces/site-planner/` — not the Supabase client, not a util, nothing.
-That's why `lib/supabaseClient.js` is a three-line duplicate of the site-planner one instead of
-an import: a shared edge would hoist this module's bytes onto the Site route, and the owner was
+That's why `lib/supabaseClient.js` reaches the ONE shared client (the shared Supabase client module, which imports only supabase-js — audit batch I1) and never the site-planner one: an edge into site-planner would hoist this module's bytes onto the Site route, and the owner was
 explicit that a restaurant tracker may not cost that route a single byte. `FoodApp.jsx` is its
 own `React.lazy` entry in the app Shell's workspace registry, measured separately forever as
 `foodRouteJsBytes` (the bundle-metrics module's `ROUTE_KEYS`).
@@ -136,8 +135,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `lib/searchSession.js` (B2069808) — the search box's request side: cancels the in-flight RPC on a newer query (AbortController), drops out-of-order answers, caches per query + map centre; `carryOverRows` keeps already-loaded rows on screen while the next answer is pending. Pure JS. The RPC body is `food_places_search_by_name_fast` (distance only on rows that can make the cut — see db/food.sql).
 - `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first (B2070432: his saved places that really match LEAD, wherever the map looks): text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS. B2155616: also a typo-tolerant name score (`fuzzyNameScore`) so a misspelled query still ranks the nearby real place first; the RPC pool also carries the 40 nearest candidates. B2155616 ×2 (2026-10-11): `nameEquivalent` — rows whose WHOLE name is the query up to punctuation/doubled letters (or one edit for 7+ letter queries, or a branded chain location starting with it) form ONE top group where in-view/distance decide, so a far stray spelled like the typo can't lead; city-only/registry rows sort last inside it. Live check: the repo-root ui-audit typo-search harness (verify-food-typo-search, 22 cases incl. far-exact controls).
 - `lib/warmSearch.js` (B2021648) — once per page load: preconnect to Supabase, resolve the auth session, one throwaway search, so the FIRST real search isn't the slow one. Fire-and-forget.
-- `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
-  isn't the site-planner's.
+- `lib/supabaseClient.js` — a thin re-export of the shared client. See BUNDLE ISOLATION above.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.
 
 **Explicitly out of scope** — do not build, do not scaffold: photo upload, sharing/social,
