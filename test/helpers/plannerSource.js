@@ -24,8 +24,8 @@ export const PLANNER_DIR = fileURLToPath(new URL("../../src/workspaces/site-plan
 export const PLANNER_MAIN = "SitePlanner.jsx";
 
 /* Extracted modules, split by where their code used to sit relative to the component: ABOVE it, or AFTER it. */
-export const PLANNER_EXTRACTED_ABOVE = ["lib/plannerShared.js", "lib/planRenderHelpers.jsx"];
-export const PLANNER_EXTRACTED_BELOW = ["components/elementRender.jsx", "components/NumInput.jsx", "components/YieldDrainagePanels.jsx"];
+export const PLANNER_EXTRACTED_ABOVE = ["lib/plannerConstants.js", "lib/floodFootprintMemo.js", "lib/plannerShared.js", "lib/planRenderHelpers.jsx"];
+export const PLANNER_EXTRACTED_BELOW = ["components/elementRender.jsx", "components/NumInput.jsx", "components/YieldDrainagePanels.jsx", "components/PropFields.jsx", "components/WallRows.jsx", "components/PlannerIcons.jsx"];
 export const PLANNER_EXTRACTED = [...PLANNER_EXTRACTED_ABOVE, ...PLANNER_EXTRACTED_BELOW];
 
 const read = (rel) => readFileSync(PLANNER_DIR + rel, "utf8");

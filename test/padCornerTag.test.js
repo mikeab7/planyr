@@ -9,6 +9,7 @@ import { placeCornerTag, boxInsideQuad, pillWidth, CORNER_TAG_PILL_H } from "../
 import { layoutBuildingButtons, layoutDiscs, wallsFromQuad, discTouchesQuad, BTN_OUT_PX, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX, ROTATE_GRIP_R_PX } from "../src/workspaces/site-planner/lib/buildingButtons.js";
 import { padCornerSpots } from "../src/workspaces/site-planner/lib/buildingGrade.js";
 import { FEAT_CTRL_R, featureEditOpacity } from "../src/workspaces/site-planner/lib/featureEditZoom.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -176,7 +177,7 @@ describe("the tag keeps a leader to its exact corner when it sits away from it",
 });
 
 describe("the planner draws what the layout hands it", () => {
-  const src = code(read("../src/workspaces/site-planner/SitePlanner.jsx"));
+  const src = code(plannerSource());
   it("sideAddNodes places every button THROUGH layoutBuildingButtons / buildingButtonWalls (no inline offsets)", () => {
     expect(src).toMatch(/const layout = layoutBuildingButtons\(walls\)/);
     expect(src).toMatch(/buildingButtonWalls\(quad, dockSides,/);   // NEW-1 (2026-11-04): the wall filter moved into lib/buildingButtons so the grading label placer reads the same one

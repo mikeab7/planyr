@@ -11,6 +11,7 @@ import * as R from "../src/workspaces/site-planner/lib/regradeProgress.js";
 import { buildSurfaceOffRender } from "../src/workspaces/site-planner/lib/useGradeSurface.js";
 import { runChunked } from "../src/workspaces/site-planner/lib/runChunked.js";
 import { surfaceGrid, surfaceGridSteps, buildProposedSurface, buildProposedSurfaceSteps, drainSteps } from "../src/workspaces/site-planner/lib/proposedSurface.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 let T = 0;
 const at = (ms) => { T = ms; vi.setSystemTime(ms); };
@@ -210,7 +211,7 @@ describe("REAL progress — the engine's own column fractions drive the bar (not
 });
 
 describe("wiring — owner-only, and every stage reports", () => {
-  const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+  const sp = plannerSource();
   const gc = readFileSync("src/workspaces/site-planner/components/GradingController.jsx", "utf8");
   const ug = readFileSync("src/workspaces/site-planner/lib/useGradeSurface.js", "utf8");
   it("the banner is mounted only behind the grading gate, and takes no presses", () => {
