@@ -1014,7 +1014,7 @@ _1284 source files mapped._
   - _exports_: _(none)_
 - **`src/shared/schedule/scheduleSource.js`** — resolves which storage the Schedule module's data should be read FROM: the per-schedule `public.schedules` / `public.schedule_account_index` rows once an account is flipped (see…
   - _exports_: `fetchScheduleLastWriteAtFromRows`, `fetchScheduleProjectsFromRows`, `isScheduleRowsAuthoritative`
-- **`src/shared/selection/edgeScroll.js`** — Edge-scroll speed for a held drag-select (B2452528; shared by the Spreadsheet, the Schedule grid — bundled by scripts/sync-sequence-selection.mjs — and the Notes tables, B2530690).
+- **`src/shared/selection/edgeScroll.js`** — Edge-scroll speed for a held drag-select (B2452528; shared by the Spreadsheet, the Schedule grid — inlined by scripts/sync-sequence-selection.mjs — and the Notes tables, B2530690).
   - _exports_: `axisVelocity`, `EDGE_SLOP`, `MAX_SPEED`, `MIN_SPEED`, `SPEED_PER_PX`
 - **`src/shared/selection/rangeSelection.js`** — Model workspace — the sheet's SELECTION MODEL (NEW-2, 2026-10-29): a list of rectangular ranges plus an active cell, replacing "one rectangle".
   - _exports_: `activeRect`, `addRange`, `applyToRanges`, `cellsOf`, `collapse`, `isMulti`, `makeSelection`, `MULTI_SELECTION_MESSAGE`, `normRect`, `rangesOf`, `selContains`, `selEdgesAt`, `selIsRange`, `selRowsOf`, `selTouchesCol`, `selTouchesRow`, `subtractCell`, `toggleCellOut`, `withActive`
