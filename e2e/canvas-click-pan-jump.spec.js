@@ -111,7 +111,7 @@ test.describe("a click on empty canvas never pans the map (NEW-3, logged out)", 
 
     const after = await feetScreenX(page, FX);
     // Diagnostic trail — makes a failure legible instead of "two numbers differ".
-    // eslint-disable-next-line no-console
+     
     console.log(`[NEW-3] canvas left ${openLeft} → (down) ${leftDuringDown} → ${closedLeft} · offX ${offBefore} → (down) ${offDuringDown} → ${await rawOffX(page)}`);
 
     // The invariant. 2px of tolerance for sub-pixel layout rounding; the bug is a ~320px jump.

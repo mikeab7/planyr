@@ -339,7 +339,7 @@ export default function GradingController({ input, onModel }) {
     const half = cs ? { x: Math.hypot(cs[1].x - cs[0].x, cs[1].y - cs[0].y) / 2, y: Math.hypot(cs[2].x - cs[1].x, cs[2].y - cs[1].y) / 2 } : { x: 100, y: 100 };
     const whereOf = (d, scope) => (scope === "pad" ? padSpotWord(d, F.centre, half) : fourWay(d.x - F.centre.x, d.y - F.centre.y, 30));
     return { pad, flags: depthFlags({ pad, anywhere: anyDepth, maxCutFillFt: cfg.maxCutFillFt, terraceDepthFt: cfg.terraceDepthFt, whereOf }) };
-  }, [focusId, facts, grid, anyDepth, cfg.maxCutFillFt, cfg.terraceDepthFt, buildings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusId, facts, grid, anyDepth, cfg.maxCutFillFt, cfg.terraceDepthFt, buildings]);  
 
   /* ---------------- the flag's two fixes (background search, superseded by token) ---------------- */
   const [fixes, setFixes] = useState({ id: null, status: "idle", ffe: null, move: null });

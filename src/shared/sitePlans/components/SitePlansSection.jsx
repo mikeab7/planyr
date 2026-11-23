@@ -942,7 +942,7 @@ export default function SitePlansSection({
     if (!startUploadRef) return undefined;
     startUploadRef.current = (presetProjectId) => { setAdjustOpen(false); startNewUpload(presetProjectId); };
     return () => { if (startUploadRef) startUploadRef.current = null; };
-  }, [startUploadRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startUploadRef]);  
 
   // `extra` carries what a DROP already knows that a file-picker pick doesn't: where on the
   // map it landed (dropPlacement) and any sibling files still waiting their turn (queue) —

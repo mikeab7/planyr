@@ -1006,7 +1006,7 @@ export default function App({
    * zoom step), so a device with many saved plans paid that parse each time. Memoised on what can change the
    * answer: the open plan, the mode, and `sites` (re-read by `refreshSites` after every store mutation). */
   const effGroup = useMemo(() => groupForPlan(activeSiteId, mode), [activeSiteId, mode, sites]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!isActive || !mayReconcileUrl(bootResolved)) return;
     // B881664 (×3) — a route change and a reactivation can land in the SAME commit (the
@@ -1037,7 +1037,7 @@ export default function App({
 
   // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a
   // project created/renamed from another module while we were hidden shows without a reload.
-  useEffect(() => { if (isActive) refreshSites(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isActive) refreshSites();  
   }, [isActive]);
 
   // 3) "New project" from any workspace → start a blank site here (a side effect, not a

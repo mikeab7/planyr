@@ -235,7 +235,7 @@ describe("OWNER'S REAL GROUND — Chehaw Rd (Georgia Test Site › Concept A), 2
     expect(r.best.sf).toBeGreaterThan(300000);
     expect(r.best.ffe).toBeGreaterThanOrEqual(792); expect(r.best.ffe).toBeLessThanOrEqual(798);
     expect(r.stats.ms).toBeLessThan(10000);
-    // eslint-disable-next-line no-console
+     
     console.log(`[fit-building] Chehaw Concept A: ${r.best.sfRounded.toLocaleString()} SF (${r.best.lengthFt} × ${r.best.depthFt}) FFE ${r.best.ffe}, ${r.stats.ms} ms; alt ${r.alt ? `${r.alt.sfRounded.toLocaleString()} SF FFE ${r.alt.ffe}` : "none"}`);
   });
   it("the alternative is balanced and smaller", () => {

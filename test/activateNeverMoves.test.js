@@ -44,7 +44,7 @@ function run(layerId, wantOn, view) {
       return (...a) => { touched.push(`${String(k)}()`); };
     },
   });
-  // eslint-disable-next-line no-new-func
+   
   new Function("scope", `with (scope) { ${body} }`)(scope);
   return { touched, overlays, basemapCalls, view };
 }

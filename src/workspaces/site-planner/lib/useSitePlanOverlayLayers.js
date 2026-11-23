@@ -97,7 +97,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
       handlesRef.current?.destroy();
       handlesRef.current = null;
     };
-  }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map]);  
 
   useEffect(() => {
     if (!map) return undefined;
@@ -134,7 +134,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
 
     syncHandles();
     return undefined;
-  }, [map, overlays, activeId, pinTargetId, calibrating, blockSelect]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, overlays, activeId, pinTargetId, calibrating, blockSelect]);  
 
   // Full teardown when the map itself goes away (route switch).
   useEffect(() => () => { for (const handle of layersRef.current.values()) handle.destroy(); layersRef.current.clear(); }, [map]);

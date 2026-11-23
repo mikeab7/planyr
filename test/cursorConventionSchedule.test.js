@@ -66,7 +66,7 @@ describe("the pin helper (the iframe's own pinDragCursor — it cannot import sr
       createElement: () => ({ setAttribute() {}, remove() { this.isConnected = false; styles.splice(styles.indexOf(this), 1); } }),
       documentElement: { setAttribute() {}, removeAttribute() {} },
     };
-    // eslint-disable-next-line no-new-func
+     
     new Function("window", "document", src)(win, doc);
     expect(typeof win.pinSchedCursor).toBe("function");
     const rel = win.pinSchedCursor("grabbing");

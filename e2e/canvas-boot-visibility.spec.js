@@ -32,13 +32,13 @@ async function sampleCanvasVisibility(page, ms = 2500, everyMs = 100) {
   const seen = [];
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    // eslint-disable-next-line no-await-in-loop -- deliberate poll, not a batch of parallel reads
+     
     const v = await page.evaluate(() => {
       const el = document.querySelector('[data-testid="planner-canvas"]');
       return el ? getComputedStyle(el).visibility : "missing";
     });
     seen.push(v);
-    // eslint-disable-next-line no-await-in-loop
+     
     await page.waitForTimeout(everyMs);
   }
   return seen;

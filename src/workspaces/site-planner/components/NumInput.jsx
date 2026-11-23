@@ -98,7 +98,7 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
     const sent = committedRef.current;
     committedRef.current = null;
     if (Math.abs(value - sent) > 1e-9) setAltered(`Showing ${fmtNum(value)}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [value]);
 
   // B618 — stepper / arrow-key nudge (opt-in via `step`). Nudges about the COMMITTED value

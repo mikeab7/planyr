@@ -456,7 +456,7 @@ export default function Scheduler({
   useEffect(() => {
     if (!ready && !navConfirmed) return;
     post({ type: "planar:site-names", names: allProjectNames() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [ready, navConfirmed, siteProjects]);
 
   // NEW-1 (2026-10-08, amends B2210992) — the Task Report's project groups follow the SAME saved order the

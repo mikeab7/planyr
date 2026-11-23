@@ -880,7 +880,7 @@ export default function CompsPanel({
       setActiveComp((c) => (c && c.id === compId ? data : c));
     };
     return () => { if (repinCompAnchorRef) repinCompAnchorRef.current = null; };
-  }, [repinCompAnchorRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [repinCompAnchorRef]);  
 
   // B1167712-B1167714 (NEW-1/2/3) — tell MapFinder which comp's SITE plan should surface right
   // now (SitePlansSection renders it, not this component — see that module's own header). Only
