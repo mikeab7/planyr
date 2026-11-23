@@ -19,6 +19,7 @@ import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "./mete
 import { roadSurfaceRing } from "./roadNetwork.js";
 import { roadTapersOf, taperedStripRing, taperedOffset } from "./roadTaper.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
+import { ringArea } from "./ringMath.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 export { SQFT_PER_ACRE };
 
@@ -35,18 +36,7 @@ export const elCorners = (el) => {
     return { x: el.cx + p.x, y: el.cy + p.y };
   });
 };
-export const polyArea = (pts) => {
-  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
-  // contributes 0 area instead of crashing the canvas (points can be absent on a
-  // malformed/legacy record that round-tripped verbatim through storage or element rows).
-  if (!Array.isArray(pts) || !pts.length) return 0;
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const j = (i + 1) % pts.length;
-    a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-  }
-  return Math.abs(a) / 2;
-};
+export const polyArea = ringArea; // the one {x,y} shoelace (ringMath) — same arithmetic, same guard answer (audit I2)
 export const ringOf = (e) => (e.points ? e.points : elCorners(e));
 
 /* --------------------------- parking math -------------------------- */

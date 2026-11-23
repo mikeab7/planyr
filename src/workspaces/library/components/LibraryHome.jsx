@@ -23,7 +23,7 @@ import { listPins, removePin, subscribePins, pinnedFolderLabel } from "../../../
 import { listFolders } from "../lib/folders.js";
 import { listRecents } from "../../../shared/recents/recentDocs.js";
 import { listReviews, listDeletedReviews } from "../../doc-review/lib/reviewStore.js";
-import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton } from "./ReviewTrash.jsx";
+import { useReviewTrash, useUndoToast, TrashNotice, RecentlyDeletedList, DeleteButton } from "./ReviewTrash.jsx";
 import { listProjects as listLocalProjects, listTrackedProjects } from "../../../shared/projects/projects.js";
 import { useProjectNames } from "../../../shared/names/names.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
@@ -209,6 +209,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
     try { const dead = await listDeletedReviews(); if (dead !== null) setDeletedRows(dead); } catch (_) { /* keep last bin */ }
   };
   const trash = useReviewTrash({ titleOf: (id) => { const d = byId.get(id); return d && (d.title || d.sfile || d.item); }, refresh: reloadAll });
+  useUndoToast(trash.undoDel, trash.undoDelete, () => trash.setUndoDel(null));
   const rowTrash = (id) => ({ armed: trash.pendingDel === id, onArm: trash.setPendingDel, onCancel: () => trash.setPendingDel(null), onConfirm: trash.del });
   const docProject = (doc, fallback) => (doc && (doc.project_id || doc.projectId)) || fallback || null;
   const openHistory = (id) => { const doc = byId.get(id); onOpenHistory?.(doc || { id, project_id: null }); }; // B2034128
@@ -431,7 +432,6 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
         </>)}
       </div>
     </div>
-    <UndoToast undo={trash.undoDel} onUndo={trash.undoDelete} onDismiss={() => trash.setUndoDel(null)} />
     </div>
   );
 }

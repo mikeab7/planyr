@@ -13,7 +13,7 @@
  * Pure helpers (pushToast/visibleToasts) are exported for unit tests; the host component is
  * MODULE-SCOPE (never define components inside a render body — the remount/focus-loss class).
  */
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 
@@ -83,6 +83,30 @@ export function useToasts() {
   return { toasts, pushToast: push, dismissToast: dismiss, dismissByKey };
 }
 
+/* The APP-LEVEL toast store (audit I6). One list, mounted once by the shell through `AppToastHost`;
+ * any workspace raises a notice with `useToast().show({...})` instead of mounting its own floating
+ * box. Same rules as the per-surface `useToasts` (dedupeKey replaces in place, TTL + hover-hold, cap).
+ * A toast may carry `testId` (replaces the default "sync-toast" hook so a surface's own checks keep
+ * finding it) and `onClose` (called when the person presses the ✕, so the owner of the state clears it). */
+let appToasts = [];
+const appListeners = new Set();
+const emitApp = () => { for (const l of appListeners) l(); };
+const appSubscribe = (l) => { appListeners.add(l); return () => appListeners.delete(l); };
+const appSnapshot = () => appToasts;
+const appApi = {
+  show(t) { appToasts = pushToastPure(appToasts, t); emitApp(); },
+  dismiss(id) { const n = appToasts.filter((t) => t.id !== id); if (n.length !== appToasts.length) { appToasts = n; emitApp(); } },
+  dismissByKey(key) { const n = appToasts.filter((t) => !t || t.dedupeKey !== key); if (n.length !== appToasts.length) { appToasts = n; emitApp(); } },
+};
+export function useToast() { return appApi; }
+export function AppToastHost() {
+  const list = useSyncExternalStore(appSubscribe, appSnapshot, appSnapshot);
+  const close = useCallback((id) => appApi.dismiss(id), []);
+  return <ToastHost toasts={list} onDismiss={close} />;
+}
+// Test seam: empty the app-level list.
+export function resetAppToasts() { appToasts = []; emitApp(); }
+
 // One toast row. Its lifetime timer PAUSES while hovered (hover-hold) and resumes with the
 // remaining time on leave.
 function ToastItem({ toast, onDismiss }) {
@@ -101,7 +125,7 @@ function ToastItem({ toast, onDismiss }) {
   return (
     <div
       role="status"
-      data-testid="sync-toast"
+      data-testid={toast.testId || "sync-toast"}
       onMouseEnter={hold}
       onMouseLeave={arm}
       style={{
@@ -122,7 +146,7 @@ function ToastItem({ toast, onDismiss }) {
       )}
       <button
         aria-label="Dismiss"
-        onClick={() => onDismiss(toast.id)}
+        onClick={() => { toast.onClose?.(); onDismiss(toast.id); }}
         style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--text-secondary)",
           border: "none", fontSize: 14, fontWeight: 800, padding: "0 2px", lineHeight: 1 }}
       >✕</button>

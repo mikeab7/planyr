@@ -32,6 +32,7 @@ import { installBuildSkewWatch, shouldOfferReload, shouldEscalate, fetchServedBu
 import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
+import { AppToastHost } from "../shared/ui/Toast.jsx";
 import NameNoticeHost from "../shared/names/NameNoticeHost.jsx";
 import "../shared/schedule/scheduleSiteNames.js"; // registers the live project-name resolver for schedule labels
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
@@ -858,6 +859,8 @@ export default function Shell() {
 
   return (
     <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
+      {/* The one app-level toast host (audit I6): any workspace raises a notice with useToast(). */}
+      <AppToastHost />
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />

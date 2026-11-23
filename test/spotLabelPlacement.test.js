@@ -12,6 +12,7 @@ import { layoutLabelSet, placeLabels, buildingControlObstacles, boxHitsDisc, box
 import { layoutBuildingButtons, layoutDiscs, buildingButtonWalls, ROTATE_GRIP_OFFSET_PX, ROTATE_GRIP_R_PX, BUTTON_WALL_MIN_PX } from "../src/workspaces/site-planner/lib/buildingButtons.js";
 import { dockSidesFor } from "../src/workspaces/site-planner/lib/dockZones.js";
 import { pillWidth, CORNER_TAG_PILL_H } from "../src/workspaces/site-planner/lib/padCornerTag.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const rot2 = (x, y, deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return { x: x * c - y * s, y: x * s + y * c }; };
@@ -173,7 +174,7 @@ describe("the obstacle set is the planner's own", () => {
   });
   it("the wall filter is ONE function: SitePlanner's sideAddNodes and the label placer both call buildingButtonWalls", () => {
     expect(BUTTON_WALL_MIN_PX).toBe(72);
-    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx"), lib = read("../src/workspaces/site-planner/lib/spotLabelPlacement.js");
+    const sp = plannerSource(), lib = read("../src/workspaces/site-planner/lib/spotLabelPlacement.js");
     expect(sp).toMatch(/buildingButtonWalls\(quad, dockSides, \{ wpx, hpx, footEdit: !!el\.footEdit \}\)/);
     expect(lib).toMatch(/buildingButtonWalls\(quad,/);
     expect(sp).not.toMatch(/wallsFromQuad\(/);
@@ -189,7 +190,7 @@ describe("wiring", () => {
     expect(panels).toMatch(/data-spot-label=\{kind\}/);
   });
   it("the planner hands the canvas its box, the controller hands the placer the real building element", () => {
-    expect(read("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/viewPx=\{canvasBoxPx\}/);
+    expect(plannerSource()).toMatch(/viewPx=\{canvasBoxPx\}/);
     expect(read("../src/workspaces/site-planner/components/GradingController.jsx")).toMatch(/ctrl: \(inRef\.current\.rawBuildings/);
   });
   it("pill size is the one the canvas draws (so the placer's boxes are the painted boxes)", () => {

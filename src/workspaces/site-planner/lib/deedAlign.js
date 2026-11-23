@@ -1,3 +1,4 @@
+import { ringArea } from "./ringMath.js";
 /* Deed ↔ parcel alignment — the basis-of-bearings correction (B-align).
  *
  * WHY a plotted deed doesn't sit on the county parcel:
@@ -71,14 +72,6 @@ export function ringCentroid(ring) {
 }
 
 /* Shoelace area magnitude (sign-independent) — used only for a characteristic size. */
-function ringArea(ring) {
-  let a = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const p = ring[i], q = ring[(i + 1) % ring.length];
-    a += p.x * q.y - q.x * p.y;
-  }
-  return Math.abs(a) / 2;
-}
 
 /* Evenly subsample a ring down to at most `max` points, so the O(n·m) angle search
  * stays cheap even against a finely-digitized county outline (hundreds of vertices). */

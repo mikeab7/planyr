@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { PLANNER_EXTRACTED } from "./helpers/plannerSource.js";
+import { PLANNER_EXTRACTED, plannerSource } from "./helpers/plannerSource.js";
 
 /* NEW-1 — ONE implementation of each overlay concern, with both surfaces importing it. This sweeps
  * src/ for a second copy creeping back: no module at the old paths, no private Procrustes /
@@ -61,7 +61,7 @@ describe("overlay engine — single source of truth", () => {
     expect(text(SRC + "workspaces/site-planner/lib/image.js")).toMatch(/cappedRasterDims/);
   });
   it("both surfaces import the engine", () => {
-    const sp = text(SRC + "workspaces/site-planner/SitePlanner.jsx");
+    const sp = plannerSource();
     const comps = text(SRC + "shared/sitePlans/components/SitePlansSection.jsx");
     for (const t of [sp, comps]) { expect(t).toMatch(/shared\/overlay\/overlayCrop\.js|\.\.\/\.\.\/overlay\/overlayCrop\.js/); expect(t).toMatch(/overlay\/overlayPlacement\.js/); }
   });

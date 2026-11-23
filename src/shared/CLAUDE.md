@@ -73,6 +73,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   misclosure) rather than silently plotting a wrong boundary — which is the whole point of never
   auto-plotting OCR output.
 - **`ui/controls.jsx` `Dialog` (audit I4) — the ONE modal shell:** portaled, Escape closes and stops, Tab trapped, focus restored, and the backdrop closes only when the press AND release land on it (owner constraint #54). Pure rules `dialogBackdropShouldClose` / `dialogTabTarget` in the same file (a separate module would become a Site-route chunk). First user: the planner's Set-location dialog; other hand-rolled dialogs migrate onto it as they are touched. Guard: repo-root `test/` **dialogRules**.
+- **`ui/Toast.jsx` — ONE app-level toast host (audit I6).** The shell mounts `AppToastHost` once; any workspace raises a notice with `useToast().show({ text, action?, dedupeKey?, testId?, onClose?, ttlMs? })` instead of mounting its own floating box (Library's delete-undo uses it through `useUndoToast`). The per-surface `useToasts` + `ToastHost` stay for the planner's own stack. Guard: repo-root `test/` **appToastStore**.
 - **⛔ `ui/AppHeader.jsx` + `ui/ProjectBreadcrumb.jsx` — NAVIGATION WINS, and it is the ROW-1 ZONE
   FLEXES that decide it (NEW-2). Read this before changing any of the three.** The owner could not
   switch plans on a laptop: *"the unincorporated / city of Houston / ETJ / Harris County chip is too

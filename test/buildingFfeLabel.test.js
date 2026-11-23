@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ffeLineText, buildingFfeFt } from "../src/workspaces/site-planner/lib/buildingFfeLabel.js";
 import { buildingLabelLines } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const bldg = { id: "b1", type: "building", w: 1566, h: 650 };
@@ -53,7 +54,7 @@ describe("the building label's FFE line", () => {
 });
 
 describe("wiring: one label path carries it (and so both PDF modes)", () => {
-  const src = read("../src/workspaces/site-planner/SitePlanner.jsx").replace(/\/\*[\s\S]*?\*\//g, "");
+  const src = plannerSource().replace(/\/\*[\s\S]*?\*\//g, "");
   it("SitePlanner reads the FFE from the one helper over the live grading model — never a stored copy", () => {
     expect(src).toMatch(/const ffeText = ffeLineText\(buildingFfeFt\(el, \{ grOn, autoFfe: grModel && grModel\.autoFfe \}\)\)/);
     expect(src).toMatch(/buildingLabelLines\(\{ name, sqft:[^\n]*ffe: ffeText \}\)/);

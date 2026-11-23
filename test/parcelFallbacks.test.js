@@ -228,7 +228,7 @@ describe("the click with a county forced to fail", () => {
 describe("wiring: every lot-click flow hands the identify its fallbacks", () => {
   it("each identifyWithLineFallback({ … }) call in the Map and the planner carries `fallbacks:` (a dead adapter would ship this green — B1120's lesson)", () => {
     for (const f of ["MapFinder.jsx", "SitePlanner.jsx"]) {
-      const src = readFileSync(new URL(`../src/workspaces/site-planner/${f}`, import.meta.url), "utf8");
+      const src = f === "SitePlanner.jsx" ? plannerSource() : readFileSync(new URL(`../src/workspaces/site-planner/${f}`, import.meta.url), "utf8");
       const calls = [...src.matchAll(/identifyWithLineFallback\(\{([\s\S]*?)\n\s*\}\);/g)].map((m) => m[1]);
       expect(calls.length, f).toBeGreaterThan(0);
       for (const body of calls) expect(body, f).toMatch(/fallbacks:/);
