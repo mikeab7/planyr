@@ -54,7 +54,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **IDS ARE MINTED BY THE PUSH ITSELF.** `add` computes `max+1` from the tip it just fetched and the push is the
 >   compare-and-swap: if another session landed first, the push is refused, the whole write is redone from the new tip and the
 >   id recomputed — so two sessions on two containers can never hold the same id. **The old rules are RETIRED: reserved blocks
->   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (it now stands down), the `BELOW`/`TAKEN`
+>   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (deleted 2026-11-23), the `BELOW`/`TAKEN`
 >   verdicts.** `npm run next-id` is advisory only (it prints the ledger branch's next free numbers). Keep the provisional `NEW-#`
 >   label in code and tests as before; **cite the real id in the PR title/commit once `ledger add` has printed it, and file
 >   the entry no later than the moment you open the PR** (the record check below will name a merged id with no record).
@@ -112,12 +112,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > and the **clipboard regression bank** (`ui-audit/verify-notes-paste-bank.mjs`, a required build step): a paste bug becomes a fixture
 > in `test/fixtures/clipboard-bank/` first, red, then a fix.
 >
-> **🔢 MINTING (history, so a stale memory does not resurrect it).** Ids used to be minted from `max+1` of two big files, then from
-> per-branch reserved blocks with a peer scan and a push-time gate, because several PRs minting in their own ledger edits collided
-> (B779, the 2026-08-06 livelock — diagnosis in `docs/incidents/CI-REQUIRED-CHECK.md`, guard `test/mintFatality.test.js`). All of that
-> existed to solve "two un-merged branches each add a ledger entry". With the ledger on its own branch nothing is minted in a PR;
-> the compare-and-swap push does it (see the LEDGER block). `scripts/idBlocks.mjs`/`check-mint.mjs` remain only for the legacy-layout
-> tests. `test/idUniqueness.test.js` (now in `test/ledger-data/`) still fails the ledger-health run on two active items sharing an id.
+> **🔢 MINTING (history, one line so a stale memory does not resurrect it).** Ids used to be minted by hand from `max+1`, then from
+> per-branch reserved blocks with a peer scan and a push-time gate (B779); with the ledger on its own branch nothing is minted in a
+> PR — the compare-and-swap push does it, and `check-mint` and the hooks are gone. `scripts/idBlocks.mjs` survives only because
+> `next-id.mjs`'s legacy path imports it. `test/ledger-data/idUniqueness.test.js` still fails the ledger-health run on two active items sharing an id.
 > **⛔ ONE MEASURED FACT THAT STILL APPLIES (B6867): RE-RUNNING A FAILED `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A
 > re-run replays the merge commit the run was created against — it does **not** recompute `refs/pull/<n>/merge` against main's tip.
 > A stuck PR needs a NEW PUSH — prefer `git fetch origin main && git merge origin/main` over an empty `Nudge CI` commit.
@@ -943,44 +941,12 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
   fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
   case at the same time.
-  **(HISTORY — since 2026-11-05 `BACKLOG.md`/`VERIFICATION.md` are not on main at all, so this conflict class is gone; `safe-merge`
-  and `resolve-ledgers.mjs` remain for `MAP.md`/`BACKLOG_OPEN.md` and for branches that predate the move.)
-  **⛔ USE `npm run safe-merge -- origin/main`, NOT a bare `git merge origin/main`, whenever the merge
-  might touch `BACKLOG.md`/`VERIFICATION.md` (B1592848, 2026-09-12) — which was nearly always, since
-  main moved fast on exactly these two files.** The manual remedy below (`node
-  scripts/resolve-ledgers.mjs`) already existed and was already safe, and sessions kept not running
-  it anyway: within one hour, PR #1673 and PR #1675 both went `mergeable_state: dirty` on this exact
-  file pair and were hand-rebased instead of resolved, and PR #1656 hit the identical shape earlier
-  the same evening. `scripts/merge-ledgers-safe.mjs` is the fix — ONE command that runs `git merge`,
-  and if (and only if) the ONLY conflicts left are ones `resolve-ledgers.mjs` itself judges safe to
-  union, finishes the merge commit automatically; a real disagreement (two sessions editing the same
-  item) is left exactly as a raw `git merge` would leave it — real conflict markers, nothing
-  committed, resolve by hand. It is composition, not a new mechanism: it does not weaken
-  `resolve-ledgers.mjs`'s guarantees in any way, it just removes the separate step nobody was
-  remembering to run.
-  **`MAP.md` / `BACKLOG_OPEN.md` conflicts now self-resolve automatically on `git merge` (B904992)** —
-  a committed `.gitattributes` hands both paths to a custom merge driver
-  (`scripts/merge-driver-ledgers.mjs`), backed by a `post-merge` hook
-  (`scripts/post-merge-regen.mjs`) that corrects the driver's necessarily-partial mid-merge view once
-  the working tree is complete (see that pair's own headers for why a merge driver alone cannot always
-  be correct, and why the fix is two layers). Both are wired by `npm install` /
-  `npm run hooks:install` alongside the mint-gate hook; if a conflict on either file DOES still show
-  markers, the local config is missing — run `npm run hooks:install` (or `node
-  scripts/install-hooks.mjs --check` to confirm) rather than resolving by hand. **The manual path is
-  not gone** — it is still the only route for `BACKLOG.md` / `docs/archive/BACKLOG-DONE.md` / `VERIFICATION.md` /
-  `docs/archive/VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
-  duplicate-id rollback — considered and deliberately ruled out for these four files, see
-  `scripts/merge-driver-ledgers.mjs`'s own header; `npm run safe-merge` above is the answer that
-  doesn't need one), and it is still the correct fallback if the driver itself ever refuses
-  (LOUD-FAILURE — it leaves ordinary conflict markers rather than guess): `node
-  scripts/resolve-ledgers.mjs` regenerates all four hand-merged files AND both generated ones in one
-  pass. **⛔ B1592848 (2026-09-12) closed a real gap in that resolver's own safety check:** an
-  in-place edit to a NON-heading line inside an existing item (e.g. two branches each rewriting the
-  same item's `- Verify:` line differently) never puts a `### B#`/`### V#` heading inside the
-  conflict hunk, so the old id-overlap check saw two empty sets and called it safe — reproduced
-  directly, it silently unioned both edits into one item's body. The precondition now also refuses
-  whenever either non-empty side of a hunk is not a clean, complete new-item insertion; see that
-  script's header and `test/resolveLedgers.test.js` for the reproduction.
+  **(Retired 2026-11-23, audit Batch C: `npm run safe-merge`, `resolve-ledgers.mjs`, the `planyr-ledger` merge driver, the
+  post-merge regen hook, `install-hooks.mjs`/`npm run hooks:install` and the pre-push mint gate are all deleted — the ledger lives on
+  its own branch, so `BACKLOG.md`/`VERIFICATION.md` are not on main and a branch never touches the generated indexes.)** To bring a
+  branch up to date use a plain `git fetch origin main && git merge origin/main`; `MAP.md` / `BACKLOG_OPEN.md` /
+  `docs/UI-INVENTORY.md` carry git's built-in `merge=union` in `.gitattributes` (no install step), and the touch guard stops a PR
+  from carrying them anyway.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
@@ -1006,6 +972,12 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   and if a real secret (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) is absent locally it says so
   LOUDLY and substitutes the documented dummy rather than silently measuring something CI doesn't.
   `--list` shows the gate order with nothing run; `--skip-install` skips `npm ci` (loud, deviates).
+  **THE REQUIRED `build` CHECK IS NOW PARALLEL LANES (2026-11-23, audit Batch C).** `build` is a small aggregator job over
+  `detect` · `static` · `vitest` (3 shards) · `build-app` (uploads `dist/`) · `browser` (4 shards, downloads `dist/`); each lane runs
+  `npm run ci-parity -- --lane <name> [--shard i/n]` against the SAME `.github/ci-gates.yml`, and `ui-audit/lib/ciGates.mjs` `LANES`
+  says which gate runs where (an unlisted gate lands in `static`). A bare `npm run ci-parity` still runs every gate serially.
+  The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
+  Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
   See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
