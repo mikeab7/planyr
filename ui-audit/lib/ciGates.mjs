@@ -45,7 +45,7 @@ export const KNOWN_DUMMY_SECRETS = {
  *  plumbing — no secret, no gate, nothing a local script can meaningfully re-run — with the one
  *  line of reasoning for each, surfaced verbatim in the "not covered" report. */
 export const KNOWN_INFRA_USES = {
-  "actions/checkout": "you already have a checkout — this script instead fetches origin/main so the gates that need it (the mint gate, the base-ref bundle snapshot) can resolve a merge base.",
+  "actions/checkout": "you already have a checkout — this script instead fetches origin/main so the gates that need it (the generated-doc touch guard, the base-ref bundle snapshot) can resolve a merge base.",
   "actions/setup-node": "installs a pinned Node runtime on the runner; this script checks your Node version against the same pin and warns (never silently substitutes a different Node) rather than installing one.",
   "actions/cache": "restores/saves the Playwright browser cache between CI runs — a speed optimization with no correctness effect and no local equivalent (your machine keeps its own browsers on disk).",
   "actions/upload-artifact": "uploads .perf/visual-regression/ as a downloadable CI artifact on failure — the same files are already on your disk, so there's nothing to upload to.",
@@ -79,11 +79,9 @@ export function isUnsupportedExpression(value) {
  * actually touch: whether the PR touches a GENERATED doc it never should (NEW-1, B1358128,
  * 2026-09-08 — a touch to any of MAP.md/BACKLOG_OPEN.md/docs/UI-INVENTORY.md is exactly the kind
  * of change this fast path would otherwise wave through, since they're all Markdown-extension
- * files), the BACKLOG.md tag-legend rule, the per-folder CLAUDE.md pointers, the backlog/
- * verification id space (a docs-only push is exactly how a BACKLOG.md/VERIFICATION.md hand-edit
- * ships), and the required-check contract itself — which is also the guard that would catch THIS
+ * files), the BACKLOG.md tag-legend rule, the per-folder CLAUDE.md pointers, and the required-check contract itself — which is also the guard that would catch THIS
  * list ever drifting into unreachability (see ui-audit/required-check-audit.mjs). Every one of the
- * six runs on nothing but Node built-ins and the `git` CLI — no `npm ci` needed — which is why the
+ * three runs on nothing but Node built-ins and the `git` CLI — no `npm ci` needed — which is why the
  * docs-only path in scripts/ci-parity.mjs skips dependency install entirely rather than merely
  * skipping the heavy gates.
  *
@@ -96,7 +94,6 @@ export const DOCS_ONLY_GATE_NAMES = [
   "Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)",
   "Required-check contract guard (a required check must always be able to report — NEW-2)",
   "Doc pointer freshness guard (per-folder CLAUDE.md references — ui-audit/doc-pointer-audit.mjs)",
-  "Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)",
 ];
 
 /**

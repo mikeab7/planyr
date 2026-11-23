@@ -60,21 +60,6 @@ describe("branch mode", () => {
     expect(o2.text).toMatch(/Next free → B101 · V51/);
     expect(o2.text).toMatch(/npm run ledger -- add backlog/);
   });
-
-  it("check-mint stands down in branch mode (exit 0, says why) and still runs for a legacy repo", () => {
-    const { code } = world();
-    const run = (repo) => spawnSync(process.execPath, [join(REPO, "scripts", "check-mint.mjs"), `--repo=${repo}`, "--ci"], { encoding: "utf8" });
-    const a = run(code);
-    expect(a.status).toBe(0);
-    expect(a.stdout).toMatch(/retired.*ledger.*branch/i);
-    const legacy = join(root, "legacy");
-    mkdirSync(legacy);
-    git(legacy, ["init", "-q", "-b", "main"]);
-    writeFileSync(join(legacy, "BACKLOG.md"), "# B\n\n### B1 — x\n");
-    git(legacy, ["add", "-A"]); git(legacy, ["commit", "-qm", "x"], { env: ID });
-    const b = run(legacy);
-    expect(b.stdout + b.stderr).not.toMatch(/retired/i);   // the legacy gate still engages (no origin → it reports unverifiable)
-  });
 });
 
 describe("record check — the light replacement for 'a fix and its record merge together'", () => {
