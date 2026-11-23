@@ -174,17 +174,17 @@ describe("open a Library .xlsx and save edits back to the SAME file", () => {
 });
 
 describe("a file that cannot be saved in place gets an .xlsx copy; the original is never touched", () => {
-  it(".xls: first save files 'legacy.xlsx' beside it, links it, and every later open lands on the copy", async () => {
+  it(".xlsm: first save files 'legacy.xlsx' beside it, links it, and every later open lands on the copy", async () => {
     const lib = makeLibrary();
-    const xls = fixture("legacy.xls");
-    const id = await lib.upload("legacy.xls", xls);
+    const xls = fixture("legacy.xlsx"); // macro-free bytes under an .xlsm name: a kind that cannot save in place
+    const id = await lib.upload("legacy.xlsm", xls);
     const opened = await openFileWorkbook(id, lib.io);
     expect(opened.inPlace).toBe(false);
     expect(openingNotes(opened).map((n) => n.key)).toContain("copy-on-save");
 
     const saved = await saveFileWorkbook(opened, edit(opened.workbook, 0, 1, 1, "42"), lib.io);
     expect(saved.ok).toBe(true);
-    expect(saved.switchedTo).toMatchObject({ name: "legacy.xlsx", fromName: "legacy.xls" });
+    expect(saved.switchedTo).toMatchObject({ name: "legacy.xlsx", fromName: "legacy.xlsm" });
     const orig = lib.records.get(id);
     expect(orig.spreadsheetCopyId).toBe(saved.switchedTo.id);
     expect(orig.sources).toHaveLength(1);
@@ -196,7 +196,7 @@ describe("a file that cannot be saved in place gets an .xlsx copy; the original 
 
     // second open of the ORIGINAL shows the edits (it lands on the copy) and says so
     const again = await openFileWorkbook(id, lib.io);
-    expect(again.openedFromCopy).toMatchObject({ id, name: "legacy.xls" });
+    expect(again.openedFromCopy).toMatchObject({ id, name: "legacy.xlsm" });
     expect(again.id).toBe(saved.switchedTo.id);
     expect(raw(again.workbook, 0, 1, 1)).toBe("42");
     expect(openingNotes(again)[0].key).toBe("copy");
@@ -222,7 +222,7 @@ describe("a file that cannot be saved in place gets an .xlsx copy; the original 
 
   it("if the copy was deleted, the original opens again rather than failing", async () => {
     const lib = makeLibrary();
-    const id = await lib.upload("legacy.xls", fixture("legacy.xls"));
+    const id = await lib.upload("legacy.xlsm", fixture("legacy.xlsx"));
     const s = await openFileWorkbook(id, lib.io);
     const saved = await saveFileWorkbook(s, edit(s.workbook, 0, 1, 1, "1"), lib.io);
     lib.records.delete(saved.switchedTo.id);

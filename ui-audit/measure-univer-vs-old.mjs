@@ -45,7 +45,7 @@ function rowsWorkbook(rows, cols, formulas = false) {   // built in ONE pass: se
 }
 async function largestFixture() {
   let best = null;
-  for (const name of ["chart.xlsx", "legacy.xls"]) {
+  for (const name of ["chart.xlsx", "legacy.xlsx"]) {
     const bytes = new Uint8Array(readFileSync(new URL(`../test/fixtures/spreadsheet/${name}`, import.meta.url)));
     try { const { workbook } = await parseSpreadsheetFile(bytes, name); const n = workbook.sheets.reduce((s, x) => s + Object.keys(x.sheet.cells).length, 0); if (!best || n > best.cells) best = { name, cells: n, workbook }; } catch (_) { /* a fixture that does not parse is not the largest */ }
   }

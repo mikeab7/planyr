@@ -6,10 +6,9 @@
  * (`spreadsheetWorker.js`) so the main thread never freezes on a big file, and falls back to the
  * main thread only where no Worker exists. It owns NO parser of its own:
  *   · .xlsx / .xlsm → lib/xlsxIO.js (ExcelJS) — the parser the Spreadsheet's File ▸ Import already uses
- *   · .xls (old BIFF)  → SheetJS (`xlsx`, already a dependency) converts it to .xlsx bytes, then the
- *                        SAME xlsxIO path reads it. SheetJS Community Edition does not read cell
- *                        styles out of .xls, so bold/fills are not carried for that one format — the
- *                        banner says so.
+ *   · .xls (old BIFF)  → NOT opened: the only reader (SheetJS 0.18.5) has an unfixed HIGH advisory and its
+ *                        patched build is not on npm, so it was removed (2026-11-23). The person is told,
+ *                        loudly and by file name, to re-save it as .xlsx in Excel and upload that.
  *   · .csv             → lib/csvIO.js (the module's own reader) as a one-sheet workbook
  *
  * Every failure is a `SpreadsheetFileError` whose message names the FILE and says what to do — a
@@ -20,10 +19,6 @@ import { importXlsxToWorkbook } from "./xlsxIO.js";
 import { parseCsv, csvRowsToSheet } from "./csvIO.js";
 import { migrateWorkbook } from "./sheetModel.js";
 import { SpreadsheetFileError, spreadsheetKindOf, isSpreadsheetName, savesInPlace, xlsxNameFor } from "./spreadsheetKind.js";
-// Static (not a dynamic import): this module runs inside a Vite IIFE worker, which cannot
-// code-split. SheetJS therefore lives in the worker's own bundle — fetched only when a file is
-// actually parsed, never by the Spreadsheet's eager chunk.
-import * as XLSX from "xlsx";
 
 /** Same ceiling the Word/text editor and the Library's "large file" flag use (reviewStore.MAX_BYTES,
  *  50 MB) — no new limit is invented; a test pins the two together. Uploading is NOT capped (the
@@ -40,19 +35,6 @@ function decodeCsv(u8) {
   const body = start ? u8.subarray(start) : u8;
   try { return new TextDecoder("utf-8", { fatal: true }).decode(body); }
   catch (_) { return new TextDecoder("windows-1252").decode(body); } // an Excel "CSV (Comma delimited)" save
-}
-
-function xlsToXlsxBytes(u8, fileName) {
-  try {
-    const wb = XLSX.read(u8, { type: "array", cellDates: true, cellNF: true, cellFormula: true });
-    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) // no cellDates: it would write ISO t="d" cells, which ExcelJS misreads as the number 2024;
-    return out instanceof Uint8Array ? out : new Uint8Array(out);
-  } catch (e) {
-    const msg = String((e && e.message) || e);
-    if (/password|encrypt/i.test(msg)) throw passwordError(fileName);
-    console.error("spreadsheetFile: .xls conversion failed", e);
-    throw new SpreadsheetFileError("corrupt", `${q(fileName)} couldn’t be read as an Excel file. It may be damaged — try opening it in Excel and saving it as .xlsx, then upload that.`);
-  }
 }
 
 const passwordError = (fileName) => new SpreadsheetFileError(
@@ -89,9 +71,8 @@ export async function parseSpreadsheetFile(bytes, fileName) {
   let xlsxBytes = u8;
   const notes = [];
   if (info.kind === "cfb") {
-    // A real old-format workbook (whatever its extension says).
-    xlsxBytes = xlsToXlsxBytes(u8, fileName);
-    notes.push({ key: "xls", text: "This is an old-format Excel (.xls) file. Values, formulas, number formats and merged cells came across; cell colours and bold/italic did not." });
+    // A real old-format workbook (whatever its extension says). No reader is bundled for it any more.
+    throw new SpreadsheetFileError("legacy-xls", `${q(fileName)} is an old-format Excel (.xls) file, which Planyr can no longer open. In Excel choose File ▸ Save As ▸ Excel Workbook (.xlsx), then upload that file. The original is safe in your Library.`);
   } else if (info.kind !== "zip") {
     throw new SpreadsheetFileError("corrupt", `${q(fileName)} doesn’t look like a valid Excel file. Make sure it opens correctly in Excel, then upload it again.`);
   } else {

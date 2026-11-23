@@ -112,13 +112,14 @@ function withAbort(promise, signal, onAbort) {
 export async function ocrScannedDeedPdf(file, opts = {}) {
   const { pdfPageCount, renderPdfPageToImageData } = await import("./pdfRaster.js");
   const { createWorker } = await import("tesseract.js");
+  const { selfHostedEngine } = await import("./ocrAssets.js");
   // opts.tesseractOptions is a plain passthrough (workerPath/corePath/langPath/…) — undefined in
   // production, so Tesseract's own default (fetch its worker/WASM core/English language data from
   // the jsdelivr CDN) is untouched. It exists so a test harness can point these at same-origin
   // fixtures instead of a real CDN (ui-audit/verify-ocr-scanned-deed.mjs — the sandbox this repo's
   // tests run in intercepts external TLS in a way that breaks a Worker's `importScripts` load of a
   // remote script specifically; same-origin/loopback traffic isn't intercepted at all).
-  const tesseractOptions = opts.tesseractOptions || {};
+  const tesseractOptions = opts.tesseractOptions || selfHostedEngine(); // prod: worker + engine from /ocr (language data stays Tesseract's default)
 
   const pageCount = await pdfPageCount(file);
   const pageList = (opts.pages && opts.pages.length)

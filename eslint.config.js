@@ -25,7 +25,7 @@ export default [
   // build left on disk after running one of those tools got linted as source: hundreds of
   // false `no-undef`/`no-unreachable` errors ('Deno', 'process', 'global', 'L', a minifier's
   // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
-  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**"] },
+  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**", "public/sequence/vendor/**"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },

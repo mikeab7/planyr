@@ -167,7 +167,7 @@ export async function allComparisons({ evaluateWorkbookUniver, parseSpreadsheetF
   out.corpus = await compareEngines(buildCorpusWorkbook(formulas), { evaluateWorkbookUniver });
   out.proForma = await compareEngines(acquisitionProForma(), { projectNames: PROJECT_NAMES, evaluateWorkbookUniver });
   out.columnRefTable = await compareEngines(columnRefTable(), { evaluateWorkbookUniver });
-  for (const name of ["chart.xlsx", "legacy.xls"]) {
+  for (const name of ["chart.xlsx", "legacy.xlsx"]) {
     const bytes = fs.readFileSync(path.join(root, "test/fixtures/spreadsheet", name));
     const parsed = await parseSpreadsheetFile(new Uint8Array(bytes).buffer, name);
     out[name] = await compareEngines(parsed.workbook, { evaluateWorkbookUniver });

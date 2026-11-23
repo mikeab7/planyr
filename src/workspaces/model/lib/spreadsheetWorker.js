@@ -1,5 +1,5 @@
 /* Spreadsheet-file Web Worker (NEW-1, "open an uploaded Excel in Spreadsheet"). ALL the heavy xlsx
- * work runs here — unzipping, ExcelJS's XML parse and write, SheetJS's .xls conversion — so a big
+ * work runs here — unzipping, ExcelJS's XML parse and write — so a big
  * workbook never freezes the tab (the standing "heavy parsing off the main thread" rule), and so
  * ExcelJS lives in exactly ONE lazy bundle (this one) instead of one for the worker and another for
  * the File menu.

@@ -7,7 +7,6 @@
  * concrete value a broken reader could not produce by accident. */
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
-import * as XLSX from "xlsx";
 import { zipSync, unzipSync, strToU8 } from "fflate";
 import { readFileSync } from "node:fs";
 import { evaluateWorkbook, displayFor } from "../src/workspaces/model/lib/sheetEngine.js";
@@ -174,31 +173,9 @@ describe(".csv", () => {
 });
 
 describe(".xls (old Excel format)", () => {
-  it("a REAL .xls (written by LibreOffice) opens with its formulas, dates and second sheet", async () => {
-    const r = await parseSpreadsheetFile(fixture("legacy.xls"), "legacy.xls");
-    expect(r.workbook.sheets.map((s) => s.name)).toEqual(["Data", "Second"]);
-    expect(raw(r.workbook, 0, 1, 3)).toBe("=B2*C2");
-    expect(shown(r.workbook, 0, 1, 3)).toBe("2.5");
-    expect(shown(r.workbook, 0, 1, 4)).toBe("1/1/2024"); // a date, not 45292
-    expect(raw(r.workbook, 1, 0, 0)).toBe("=Data!D2+1"); // a formula that reads another sheet
-    expect(shown(r.workbook, 1, 0, 0)).toBe("3.5");
-    expect(r.notes.map((n) => n.key)).toContain("xls");
-  });
-  it("values and a merge come across from a generated .xls, and the banner says styles did not", async () => {
-    const ws = XLSX.utils.aoa_to_sheet([["Item", "Qty", "Price"], ["Pipe", 3, 4.5], ["Total", null, null]]);
-    ws.D1 = { t: "d", v: new Date(Date.UTC(2024, 0, 1)), z: "m/d/yyyy" };
-    ws["!merges"] = [{ s: { r: 4, c: 0 }, e: { r: 4, c: 2 } }];
-    ws["!ref"] = "A1:D5";
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, ws, "Takeoff");
-    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([["second"]]), "Second");
-    const bytes = u8(XLSX.write(book, { bookType: "biff8", type: "array" }));
-    expect(inspectSpreadsheetBytes(bytes).kind).toBe("cfb");
-    const r = await parseSpreadsheetFile(bytes, "old takeoff.xls");
-    expect(r.workbook.sheets.map((s) => s.name)).toEqual(["Takeoff", "Second"]);
-    expect(raw(r.workbook, 0, 1, 0)).toBe("Pipe");
-    expect(r.workbook.sheets[0].sheet.merges.length).toBeGreaterThan(0);
-    expect(r.notes.map((n) => n.key)).toContain("xls");
+  it("a REAL .xls (written by LibreOffice) is refused loudly, by name, with how to re-save it as .xlsx", async () => {
+    const err = await expectRejects(parseSpreadsheetFile(fixture("legacy.xls"), "legacy.xls"), "legacy-xls", "legacy.xls");
+    expect(err.message).toMatch(/\.xlsx/);
   });
 });
 
@@ -218,9 +195,7 @@ describe("password-protected files", () => {
     expect(err.message).toMatch(/Encrypt with Password/);
   });
   it("a plain old .xls is NOT mistaken for an encrypted file", () => {
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([[1]]), "S");
-    const info = inspectSpreadsheetBytes(u8(XLSX.write(book, { bookType: "biff8", type: "array" })));
+    const info = inspectSpreadsheetBytes(fixture("legacy.xls"));
     expect(info.kind).toBe("cfb");
     expect(info.encrypted).toBe(false);
   });

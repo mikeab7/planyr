@@ -17,6 +17,7 @@
  *      returned or logged. Only the test account's own tokens leave this function.
  * Logic lives in handleE2eSession(request, env, deps) so it is unit-tested with a fake fetch.
  */
+import { safeEqual } from "../lib/safeEqual.js";
 
 export const E2E_EMAIL = "e2e@planyr.test";
 export const E2E_USER_ID = "a96e544f-8537-45cf-81a2-007965fbc04c";
@@ -37,19 +38,7 @@ const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-cont
 const reply = (status, obj) => new Response(obj === undefined ? null : JSON.stringify(obj), { status, headers: HEADERS });
 const notFound = () => new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
 
-/* Constant-time equality: hash both sides to a fixed 32 bytes first (so length never leaks), then
- * XOR-accumulate over every byte with no early exit. */
-export async function safeEqual(a, b) {
-  const enc = new TextEncoder();
-  const [da, db] = await Promise.all([
-    crypto.subtle.digest("SHA-256", enc.encode(String(a))),
-    crypto.subtle.digest("SHA-256", enc.encode(String(b))),
-  ]);
-  const x = new Uint8Array(da), y = new Uint8Array(db);
-  let diff = x.length ^ y.length;
-  for (let i = 0; i < x.length; i++) diff |= x[i] ^ (y[i] || 0);
-  return diff === 0;
-}
+export { safeEqual };
 
 /* Upstream calls (B2154049). A bare 502 hid WHY a sign-in failed, and one transient blip failed the whole
  * sign-in. So: retry network errors / timeouts / 429 / 5xx with a short backoff (3 attempts), and on final

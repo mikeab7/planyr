@@ -82,7 +82,8 @@
  *
  * ⛔ VERIFICATION NOTE: this repo's own interactive sandbox cannot load `/sequence/`'s real
  * content to observe this fix against the owner's actual grid — that page loads
- * `@supabase/supabase-js`/`@tabler/icons-webfont` synchronously from `cdn.jsdelivr.net`, and this
+ * `@supabase/supabase-js`/`@tabler/icons-webfont` synchronously from `cdn.jsdelivr.net` (HISTORY: both are vendored under
+ * `public/sequence/vendor/` since 2026-11-23, so this limit no longer applies to them), and this
  * sandbox's headless Chromium cannot reach any external host (confirmed live: the CONNECT tunnel
  * to jsdelivr closes after ~6s; curl through the same proxy succeeds, browsers do not — a
  * pre-existing, previously-documented environment limit, not new to this fix). The mechanism is

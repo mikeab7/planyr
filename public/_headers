@@ -22,8 +22,8 @@
 # unchanged), so a new deploy's asset hashes propagate on the next load.
 # The app shell (which mounts the sign-in / sign-up / reset modal) and the landing must
 # never be framed by another origin — block clickjacking / UI-redress on the login.
-# Anti-framing is scoped to these TOP-LEVEL documents only; /sequence/ deliberately has
-# no framing header so the app can keep embedding it in a same-origin iframe.
+# Anti-framing is scoped to these TOP-LEVEL documents only; /sequence/ gets the
+# weaker `frame-ancestors 'self'` below so the app can keep embedding it in a same-origin iframe.
 /
   Cache-Control: no-cache
   X-Frame-Options: DENY
@@ -61,10 +61,16 @@
 
 # The standalone Sequence page is a self-contained HTML document (no hashed chunks),
 # but it's still HTML — keep it revalidated so a redeploy propagates immediately.
+# frame-ancestors 'self': only the app's own shell may embed the Schedule (audit batch A, 2026-11-23) —
+# the shell embeds it same-origin, so this blocks every other site from framing it.
 /sequence/
   Cache-Control: no-cache
+  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self'
 /sequence/index.html
   Cache-Control: no-cache
+  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self'
 
 # The standalone marketing landing page (public/landing/) is the same kind of
 # self-contained HTML document — revalidate the HTML on every load so a redeploy

@@ -6,10 +6,12 @@
  *                                                    compressed stream in JS from a saved block boundary, writes the
  *                                                    shards that are complete, saves a checkpoint ('_ckpt'), and on
  *                                                    the last step writes '_meta' (marks the year complete).
- * Header `x-index-key` must equal env.E2E_LOGIN_KEY (the one server-side secret already provisioned for owner-run
- * tooling). Writes with the service role; `dry=1` computes and writes nothing. Why resumable: see
+ * Header `x-index-key` must equal env.TAXUNITS_INDEX_KEY (its OWN secret — it used to borrow E2E_LOGIN_KEY, which is only meant
+ * to mint a test-account session; compared in constant time). Until TAXUNITS_INDEX_KEY is set the route answers 503
+ * "not configured". Writes with the service role; `dry=1` computes and writes nothing. Why resumable: see
  * lib/inflateResume.js. Run once per year after HCAD publishes it (the B2158065 ledger entry says how).
  */
+import { safeEqual } from "./lib/safeEqual.js";
 import { remoteZipEntries, readZipEntryText, zipEntryDataStart, readRange } from "./lib/zipRange.js";
 import { hcadZipUrl, parseRateTable } from "./lib/hcadUnits.js";
 import { resumeStep, ratesToJson } from "./lib/hcadIndex.js";
@@ -39,7 +41,8 @@ async function delRow(env, county, year, prefix) {
 
 export async function onRequestPost({ request, env }) {
   try {
-    if (!env.E2E_LOGIN_KEY || request.headers.get("x-index-key") !== env.E2E_LOGIN_KEY) return json({ error: "forbidden" }, 403);
+    if (!env.TAXUNITS_INDEX_KEY) return json({ error: "not configured: set TAXUNITS_INDEX_KEY in Cloudflare Pages" }, 503);
+    if (!(await safeEqual(request.headers.get("x-index-key") || "", env.TAXUNITS_INDEX_KEY))) return json({ error: "forbidden" }, 403);
     const q = new URL(request.url).searchParams;
     const county = q.get("county"), year = Number(q.get("year"));
     if (county !== "harris" || !year) return json({ error: "county=harris and year required" }, 400);

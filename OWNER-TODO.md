@@ -7,6 +7,9 @@
 
 _Last updated: 2026-11-12._
 
+## 🔐 One secret to add in Cloudflare Pages: `TAXUNITS_INDEX_KEY` (audit batch A, 2026-11-23)
+- [ ] **In Cloudflare Pages → Settings → Variables and Secrets (Production), add an encrypted secret named `TAXUNITS_INDEX_KEY` with any long random value (32+ characters).** The owner-run tax-unit index builder (`/api/taxunits-index`) used to borrow the test-account login key as its password; it now has its own. Until you add it, that route answers "not configured" (nothing else is affected — it only runs when the index is rebuilt once a year after the appraisal district publishes). Don't paste the value into any chat.
+
 ## 🗺 One file to run: switch on the "plans with no county" nightly alarm (B2671251)
 - [ ] **Open the Supabase SQL editor for the production database and run `src/workspaces/admin/db/admin_ops_county_watch.sql` once** (it is a small read-only counter; it needs the same digest token you already set up). Until you do, the nightly step just says "not set up yet" and stays green. Today it would already count **3** plans that have drawn lots but no county — they drop out of every county feature, and I did not touch them.
 

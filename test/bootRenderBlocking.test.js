@@ -142,18 +142,13 @@ describe("the sequence page no longer depends on a third-party font host", () =>
     expect(fontLinks.map((l) => l.href)).toEqual([]);
   });
 
-  /* HONEST EXCEPTION, recorded rather than hidden. This page still pulls two OTHER render-blocking
-   * third-party resources: the jsdelivr icon webfont stylesheet and a synchronous supabase-js
-   * script. They are a functional-dependency question, not a font question, and were deliberately
-   * left alone by B276576 — but they are ASSERTED here so the file's real state is visible and a
-   * future reader is not misled into thinking this page is third-party-free the way index.html is.
-   * If someone fixes them, this test fails and should be tightened, not deleted. */
-  it("has exactly the two known non-font third-party blockers, and no more", () => {
+  /* Tightened 2026-11-23 (audit batch A): the icon webfont and supabase-js are vendored under
+   * /sequence/vendor/, so the Schedule's head has NO third-party render blockers any more. */
+  it("has no third-party render blockers (icon font and supabase-js are vendored)", () => {
     const blockers = [
       ...stylesheetLinks(head).filter((l) => l.blocking && isCrossOrigin(l.href)).map((l) => l.href),
       ...syncScripts(head).filter((s) => isCrossOrigin(s.src)).map((s) => s.src),
     ];
-    expect(blockers.every((b) => /jsdelivr\.net/.test(b)), `unexpected third-party blocker: ${blockers}`).toBe(true);
-    expect(blockers.length).toBe(2);
+    expect(blockers).toEqual([]);
   });
 });
