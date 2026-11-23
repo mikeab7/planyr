@@ -122,12 +122,6 @@ describe("workspace registration — all EIGHT places", () => {
 describe("theme tokens, not raw hex, in the module's own chrome", () => {
   const FILES = [
     "src/workspaces/model/ModelApp.jsx",
-    "src/workspaces/model/components/SheetView.jsx",
-    "src/workspaces/model/components/FormulaBar.jsx",
-    // Ribbon.jsx (Stage 2) is deliberately NOT in this list — its TEXT_PALETTE/FILL_PALETTE are
-    // CONTENT colours a user picks for their own cells, not app chrome, the same distinction
-    // design-drift-audit.mjs's own `// design-exempt:` escape hatch draws (and where those two
-    // lines are actually guarded — this file's plain regex has no exemption mechanism).
   ];
   const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 

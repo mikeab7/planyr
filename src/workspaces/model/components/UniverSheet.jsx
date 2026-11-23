@@ -1,8 +1,8 @@
-/* Model workspace — the Univer grid: THE grid on the Spreadsheet tab for every account (docs/SPREADSHEET-UNIVER-SPIKE.md). Lazy
+/* Model workspace — the Univer grid: THE grid on the Spreadsheet tab (docs/SPREADSHEET-UNIVER-SPIKE.md). Lazy
  * chunk: nothing in this file, and none of @univerjs/*, is imported by any eagerly loaded module.
  *
- * ModelApp mounts it instead of the Ribbon / FormulaBar / SheetView / TabStrip, everywhere except the owner's per-device
- * regular-grid hatch (lib/gridChoice.js, lib/univerSwitch.js). The regular grid is deprecated, pending deletion.
+ * ModelApp mounts it for every account and every workbook (the hand-built grid it replaced — Ribbon / FormulaBar / SheetView /
+ * TabStrip — was deleted).
  *
  * DATA FLOW (one direction each way, through the bridge — lib/univerBridge.js):
  *   Planyr workbook ──workbookToUniver──▶ Univer          (mount, and again only if the workbook changes from
@@ -480,7 +480,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
   if (error) {
     return (
       <div role="alert" data-testid="univer-error" style={{ padding: 16, color: "var(--danger)", fontSize: 13 }}>
-        The new grid could not start: {String(error && error.message || error)}. Turn it off from the File menu to go back to the regular grid.
+        The spreadsheet could not start: {String(error && error.message || error)}. Reload the page to try again.
       </div>
     );
   }

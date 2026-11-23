@@ -1,5 +1,5 @@
 /* NEW-1 (B2607857) — the REAL workbook's unit is built before the click and adopted at mount. Pure halves + source pins; the behaviour itself runs in a
- * real browser (ui-audit/verify-univer-adopt-real-unit.mjs, verify-univer-parity with PARITY_PREWARM=1, verify-univer-load-live). */
+ * real browser (ui-audit/verify-univer-adopt-real-unit.mjs, verify-univer-parity with PARITY_PREWARM=1, verify-univer-live). */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createWorkbook, setRaw, canonicalJson, migrateWorkbook } from "../src/workspaces/model/lib/sheetModel.js";

@@ -80,8 +80,6 @@ describe("shared cursor vocabulary", () => {
       "src/shared/ui/FloatingPanel.jsx": 'pinDragCursor("move")',
       "src/workspaces/dashboard/components/PursuitsCard.jsx": 'pinDragCursor("grabbing")',
       "src/workspaces/dashboard/Dashboard.jsx": 'pinDragCursor("grabbing")',
-      "src/workspaces/model/components/TabStrip.jsx": 'pinDragCursor("grabbing")',
-      "src/workspaces/model/components/SheetView.jsx": 'pinDragCursor("col-resize")',
       "src/shared/comps/components/CompEntryGrid.jsx": 'pinDragCursor("row-resize")',
       "src/shared/sitePlans/components/ImageCropTool.jsx": "pinDragCursor(HANDLE_CURSOR",
     };

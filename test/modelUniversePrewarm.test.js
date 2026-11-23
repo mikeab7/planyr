@@ -1,5 +1,5 @@
 /* NEW-1 (B2607856) — the pre-built grid: hovering the Spreadsheet tab builds a Univer instance off-screen, the grid mount ADOPTS it. Source-level
- * guards (the behaviour itself is run end to end by ui-audit/verify-univer-parity.mjs with PARITY_PREWARM=1 and by verify-univer-load-live). */
+ * guards (the behaviour itself is run end to end by ui-audit/verify-univer-parity.mjs with PARITY_PREWARM=1 and by verify-univer-live). */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,7 +65,7 @@ describe("ModelApp holds the grid back for the cache read — and cannot be held
   it("mounts the grid only once the read settled, with a hard cap", () => {
     expect(src).toMatch(/const CALC_WAIT_MS = 150;/);
     expect(src).toMatch(/setTimeout\(done, CALC_WAIT_MS\)/);
-    expect(src).toMatch(/univerOn && !\(calcReady && gridWorkbookReady\) \?/);
+    expect(src).toMatch(/!\(calcReady && gridWorkbookReady\) \?/);
     expect(src).toMatch(/const gridWorkbookReady = fileMode \|\| ready;/);
   });
 });
