@@ -42,14 +42,14 @@
 # accept-ranges, on every asset including a plain JS bundle (the control: the same request through
 # the same egress proxy returns 206 from raw.githubusercontent.com). So the reader fetches each
 # archive WHOLE, once (see lib/floodArchiveSource.js), and the cache policy is what stops that being
-# once per page load. One hour hard, then a day of stale-while-revalidate: the archive is served
+# once per page load. One day hard (audit batch E, was one hour — these are the biggest files we serve and change on the order of years), then a week of stale-while-revalidate: the archive is served
 # instantly from cache while a background revalidation collects a cheap 304.
 #
 # The manifest carries the SAME policy on purpose. It supplies the "NFHL as of <date>" stamp, and a
 # manifest that could refresh while the tiles it describes stayed cached would put a new date over an
 # old map — the exact dishonesty the stamp exists to prevent.
 /flood/*
-  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
 # The deploy stamp (B1373). This file is how a tab that has been open across a deploy finds
 # out it is running yesterday's build — so it is the ONE file that must never be answered
@@ -98,3 +98,19 @@
   Cache-Control: no-cache
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
+
+# Audit batch E — long caching for the big static files whose filenames are not content-hashed but whose bytes change
+# only on a deliberate update (a font bump, a pdfjs upgrade, a map-glyph change). A week hard, then a month of
+# stale-while-revalidate: returning visits stop re-downloading/revalidating them.
+/fonts/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+/map-assets/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+/pdfjs/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+
+# /geo/* (county outlines, place names, admin boundaries). The app requests county-polygons.json as
+# /geo/county-polygons.json?v=<content hash> (vite.config.js __COUNTY_POLYGONS_V__), so a changed file is a NEW url and the
+# long lifetime is safe; the other files here change only on a deliberate rebuild.
+/geo/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000

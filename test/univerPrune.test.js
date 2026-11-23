@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { pruneHyphenationLoaders, shortenRenderDelay, RENDER_DELAY_MS, MIN_ENTRIES } from "../scripts/vite-plugin-univer-prune.mjs";
+import { stubFranc, FRANC_STANDIN, pruneHyphenationLoaders, shortenRenderDelay, RENDER_DELAY_MS, MIN_ENTRIES } from "../scripts/vite-plugin-univer-prune.mjs";
 import { isLangFile } from "../ui-audit/lib/univerLangFiles.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -84,5 +84,20 @@ describe("shortenRenderDelay — Univer's fixed 300 ms before it paints", () => 
   });
   it("is applied to @univerjs/ui in the build (the plugin dispatches on the file)", () => {
     expect(readFileSync(join(ROOT, "scripts/vite-plugin-univer-prune.mjs"), "utf8")).toMatch(/UI_FILE\.test\(file\)\) return \{ code: shortenRenderDelay\(code\)\.code/);
+  });
+});
+
+describe("stubFranc (audit batch E)", () => {
+  it("replaces the franc-min import, keeps English, and fails loudly when the import moves", () => {
+    const { code } = stubFranc('import { franc } from "franc-min";\nconst a = 1;');
+    expect(code).not.toContain("franc-min");
+    const franc = new Function(`${FRANC_STANDIN}; return franc;`)();
+    expect(franc("Total rentable area")).toBe("eng");
+    expect(franc("Gesamtfläche")).toBe("eng");
+    expect(franc("面积")).toBe("und");
+    expect(() => stubFranc("const nothing = 1;")).toThrow(/franc-min/);
+  });
+  it("the real engine file still has the import line", () => {
+    if (existsSync(ENGINE)) expect(() => stubFranc(readFileSync(ENGINE, "utf8"))).not.toThrow();
   });
 });
