@@ -1,0 +1,7 @@
+# Owner product constraint #26
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+26. **(2026-10-20) The Food restaurant panel is the approved mockup — the DISH LIST IS THE ORDER.** Michael approved it verbatim ("i like it all as is, send it") after rejecting a first draft. Keep: name + plain ✕ on one line; "<cuisine> · <city> · $…$$$$" (the word "Restaurant" dropped; the price level is one tappable value per restaurant, tapping the current one clears it); the address in neutral grey ending "· Directions"; score pills "8.25 Food" · "8.0 Ambiance" + a "+ List" pill; dishes grouped WHAT TO ORDER (yes) · MAYBE (maybe / unanswered) · "Skip · N dishes ▾" (no, collapsed), each by score, neutral badges (never red); a row opens the DISH SHEET (back / Done, editable name, the one slider, Yes · Maybe · No, note "How to order it next time", history only with 2+ ratings, Rate again + Delete at the bottom); visits as one compact line each, two shown + "Show N more"; "Log a visit" pinned to the bottom. **Do not bring back:** the "THE ORDER" card and its Copy button, the "Best dish:" line, the VISITS / COST tiles, the Sort control, the per-row ⋮ menu or eat-again circle. **One number, one precision everywhere** (8.25 / 8.0 / 9.5 — `restaurantPanel.formatRating`). (B2365312 / B2365313.)

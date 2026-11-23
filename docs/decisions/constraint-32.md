@@ -1,0 +1,7 @@
+# Owner product constraint #32
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+32. **(2026-10-22) Google Earth (KMZ) export of a SITE PLAN lives in the Site Planner's File ▾ ONLY — there is NO right-click KMZ export on the planner canvas and NONE on the empty Map view.** Michael, amending his own request the same day he asked for the File rows: he does NOT want it on a right-click. File ▾ carries "Export to Google Earth (KMZ)" + "Export with 3D buildings" (and the same two rows in its More-menu overflow, `menuRows`), calling the one lazy `exportKmz`; the empty-canvas "Map" context menu is just Zoom to fit · Paste. Then he answered the open question about the Map view: REMOVE it there too — the empty-map right-click menu (B684 `exportSitesKmz`, "Export to Google Earth (KMZ)" / "Export with 3D buildings") and its handler are gone, so a right-click on the empty map is the browser's own; he accepts that the Map view has no export of all sites. Do not put either right-click export back, and do not add a Google Earth export to the Map view without his say-so. **Not part of this decision, untouched:** the right-click on a site (status menu) and on a comp marker, whose "Export KMZ" is a different feature (a comp's owning site RECORD, B711329). Guards: repo-root `test/` **fileMenuKmz**; e2e **file-menu-kmz**. (B2380112.)

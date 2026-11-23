@@ -1,385 +1,57 @@
 # CLAUDE.md — Planyr Project Handoff
 
-Complete handoff for any future session. Read this file top to bottom to orient — it's
-the always-loaded core. This merges two tracks of work: the mature **Site Planner**
-(basemap, GIS layers, Supabase backend) and the **Document Review** module. Last updated
-2026-07-02.
+The always-loaded core: standing rules, how to talk to Michael, owner constraints, named engineering rules,
+workflow. Covers the mature **Site Planner** and the **Document Review** module. Last updated 2026-11-23.
 
-> **🗂 How this handoff is organized (keep it token-lean — owner rule, 2026-07-02).**
-> `CLAUDE.md` holds only what EVERY session needs to orient: the standing rules, how to
-> talk to Michael, the architecture spine, the KEY DECISIONS, and the workflow. The bulky
-> reference material moved to on-demand docs — **read one only when the task touches it:**
-> - **`docs/SHIPPED.md`** — the full catalog of shipped-and-verified features (history).
-> - **`docs/ROADMAP.md`** — what's not built yet (read when planning new work).
-> - **`docs/REFERENCE.md`** — deep implementation detail (Site Model schema, layer/GIS
->   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
-> - **`docs/VERIFICATION-TRIAGE-2026-11-11.md`** (+ `.json`) — the 2026-11-11 sort of every pending `V#` into A (a session can do it: harness named) / B (only Michael: deduplicated sittings) / C (dead paper). **Start here when working the pending verification queue**; re-read each item's live text first — it is a snapshot.
-> - **`docs/ACTIVE-AREAS.md`** — the weekly "where people are working" sweep's ledger: one section per `sites.county` key (counts + parcels/tax/zoning/water/site-killers checklist + open `B#`s), REPLACED each sweep. Read it when choosing which county to harden next.
-> - **`docs/DATA.md`** — the data bible: entity ownership, invariants, one-answer functions,
->   causal units, the failure contract, the destructive-action contract (read below).
-> - **`docs/AGENT-RULES.md`** — the verification, measurement, and merge rules already paid for
->   by real incidents on this repo (a false bug filed, a working feature reported broken, a
->   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
->   before judging whether any change works.**
->
-> **🧾 THE LEDGER LIVES ON ITS OWN GIT BRANCH, `ledger` — RECORDS NEED NO PULL REQUEST AND NO BUILD (NEW-1, owner
-> decision 2026-11-05). This section overrides every older sentence in this file or in `docs/` that says to file,
-> edit, move or mint a `B#`/`V#` in a PR, to append to `BACKLOG.md`/`VERIFICATION.md`, or to use the `docs/archive/*-DONE.md`
-> files (which no longer exist). NO SESSION OPENS A LEDGER-ONLY PR AGAIN.**
-> **WHY:** after every live check a session opened a ledger-only PR and waited a full build — burning session and watcher
-> tokens and delaying the close of a task — for a change that cannot break anything. Product code, workflows and this file
-> stay on `main` behind the required `build` exactly as before; this changes WHERE records live, not WHAT is recorded.
-> **MEASURED before it was built (2026-11-05, this environment):** a plain `git push` of a non-`claude/` branch lands; the only
-> ruleset ("Protect Main") includes just `~DEFAULT_BRANCH`, so `ledger` is unprotected; a second fresh clone fetched and pushed
-> it; a stale clone's push was refused "fetch first" and landed after fetch+retry; **two sessions racing the same instant on
-> the real remote both landed with different ids.** (The sandbox proxy lets you create/push branches but NOT delete them.)
-> - **Layout (unchanged, just elsewhere):** ONE file per entry — `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md`,
->   `ledger/verification/<pending|checklist|done>/V<id>.md`, each exactly the old `### B<id> — title …` block, plus
->   `ledger/<kind>/_frame.md` (the prose, legend and section markers). The branch is parented on main's history, so
->   `git log -- ledger/backlog/done/B123.md` shows an entry's FULL history. **`main` has no `ledger/`, no `BACKLOG.md`, no
->   `VERIFICATION.md`** (both are gitignored local views: `npm run ledger -- render`). `.github/ledger-branch.json` on main is the
->   marker that tells the tools (`isBranchMode`, `scripts/lib/ledger.mjs`) the ledger is on a branch. **Never delete an entry.**
-> - **READ — cold start, ONE command:** `npm run ledger -- list open` (every Open + Verify heading; ~3 s on the full ledger).
->   It checks the branch out (shallow) into `.ledger/` — gitignored; never commit it, never hand-edit and force-push — and
->   re-fetches when the copy is over 10 minutes old (`--fresh` forces it). Also: `list verify|pending|done [--b|--v]`,
->   `show B123`, `status`. **Grep `^### B` in `.ledger/ledger/backlog/open` / `…/verify`, or read `BACKLOG_OPEN.md` on main
->   (a nightly-refreshed index; may lag a day — the branch is the truth).** The `done` folders are write-only: look up ONE id
->   (`show B123`), never read a folder wholesale. **⛔ Never slurp a whole tracking folder to find one thing.**
-> - **WRITE — straight to the branch, no PR (each command fetches, writes, commits, pushes; a lost race is REDONE from the new tip):**
->   `npm run ledger -- add backlog --file entry.md` (or `--stdin`; heading `### B? — title` or `### NEW-1 — title`; add
->   `--state verify|…`) · `add verification --file …` · `put B123 --file …` (replace text) · `move B123 verify|done|open …
->   [--file new-text.md]` (a rename; edit the text in the same step) · `mint --b 1 --v 1` (reserve ids as stub entries when you must
->   cite a number before the entry is written) · `inbox` · `push -m "…"` (land hand-edits you made inside `.ledger/`). Output is the
->   assigned id; commit-message-style `-m` is optional.
-> - **IDS ARE MINTED BY THE PUSH ITSELF.** `add` computes `max+1` from the tip it just fetched and the push is the
->   compare-and-swap: if another session landed first, the push is refused, the whole write is redone from the new tip and the
->   id recomputed — so two sessions on two containers can never hold the same id. **The old rules are RETIRED: reserved blocks
->   by branch name, `--against-main`/peer scans, late-binding the number, `check-mint` (deleted 2026-11-23), the `BELOW`/`TAKEN`
->   verdicts.** `npm run next-id` is advisory only (it prints the ledger branch's next free numbers). Keep the provisional `NEW-#`
->   label in code and tests as before; **cite the real id in the PR title/commit once `ledger add` has printed it, and file
->   the entry no later than the moment you open the PR** (the record check below will name a merged id with no record).
-> - **LIFECYCLE is unchanged** (🔲 Open → ⏳ Verify → ✅ Done; `Verify: live` items park in `verify` with a `V###`; a recurrence
->   re-opens the original `B#`; DEDUPE-FIRST) — only the mechanism: `npm run ledger -- move B<id> <state>` instead of a block move
->   inside a PR. The record is finished the moment `ledger` has it; **you do not wait for a build to close a task.**
-> - **A CHAT RECORDS ITS OWN LIVE VERIFY DIRECTLY (the 2026-09-01 rule, now pointed at the branch).** A Cowork/claude.ai chat
->   with a shell runs the commands above. A chat with only the GitHub connector commits straight to branch `ledger`
->   (`create_or_update_file` / `push_files` with `branch: "ledger"`): to update or move an EXISTING entry, write its new text at
->   the new path and delete the old path (one commit via `push_files` where possible); to file a NEW entry, create
->   `ledger/inbox/backlog-<slug>.md` or `ledger/inbox/verification-<slug>.md` (a free-form name can never collide — the next
->   session that writes the ledger, or `npm run ledger -- inbox`, gives it its real id and files it; a first line `state: done`
->   picks a non-default state). **A chat with NO push access at all hands the entry text to a Claude Code session in the dispatch brief, which
->   files it with `ledger add`.** Never to `main`; the commit message names the chat and the `V#`/`B#` it closes; record only what was observed.
-> - **STRAGGLERS:** a PR opened before the move may still edit `ledger/` on main. The touch guard LETS IT MERGE (failing it would
->   strand its records) and `.github/workflows/ledger-forward.yml` copies those edits onto the branch (adds, edits, moves; a
->   colliding new id is renumbered and reported; a diverged edit is reported, never overwritten; a bare deletion is never
->   forwarded). A straggler that conflicts with main's deletion of `ledger/` is resolved by dropping its `ledger/` files and re-filing
->   them with the commands above (`npm run ledger -- import-delta <base> <tip>` replays a branch's `ledger/` edits for you).
-> - **WHAT REPLACED "the fix and its record merge together":** `.github/workflows/ledger-record-check.yml` (every push to main + nightly)
->   reads merged commit subjects and WARNS about any `B#`/`V#` they cite that has no entry on the branch
->   (`npm run ledger -- record-check --since "3 days ago"` locally). It never blocks a merge. **A record check warning is an
->   instruction: file the record.**
-> - **DATA CHECKS moved off the required build** (a bad record must never fail an unrelated code PR): `ledger check`, the tag-legend
->   guard, the verification-queue ceiling and the id-uniqueness / conflict-marker / closability tests run in
->   `.github/workflows/ledger-health.yml` (scheduled; red = go look at the ledger) and on demand with `npm run test:ledger`.
->   `ledger add|put|move` themselves refuse an entry whose heading disagrees with its filename or whose path is invalid.
-> - **Acceptance tests:** `test/ledgerBranch.test.js` (two parallel writers both land with unique ids — real child processes AND a
->   deterministic lost race; red-proofed by disabling the retry), `test/ledgerBranchMode.test.js`. Code: `scripts/lib/ledgerBranch.mjs`
->   (transactions, retry, inbox, import), `scripts/lib/ledger.mjs` (`ledgerRoot` — the one seam every reader goes through).
->   Never reintroduce a shared append point on `main`.
->
-> **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
-> place that answers who owns a fact and how it may change — the entity table, the numbered
-> invariants (each with the test that proves it), the short list of "one-answer" functions
-> (`isOwnWrite`, `assemblyIntegrity`, `nameAuthority`, …) that must never grow a second
-> implementation, and why. Written 2026-09-01 after a multi-round false-conflict/data-ownership bug
-> family; §7 of that file names exactly what was already fixed by prior sessions so it is not
-> re-diagnosed a ninth time.
->
-> **⛔ WORKING ON NOTES? READ `docs/NOTES-CARRY-FORWARD.md` FIRST — before the module pointer, before
-> the code.** It is the one file that makes starting a FRESH session on this module cheap: the eight
-> instrument traps that have each produced a confident FALSE finding about working code, the one
-> fixture that finds real bugs (simplifying it hides them — measured), the storage keys and the
-> standing SQL health check, the verification bar, and the three recurring bug families to suspect
-> first. **It exists because the alternative was tried and failed:** everything a fresh session
-> needed lived only in one long-running session's memory, so continuing always looked cheaper than
-> starting — until that session was re-reading ~500k tokens of history on every dispatch. A
-> carry-forward filed anywhere a session does not automatically read is the same mistake.
-> **When a new instrument trap or bug family turns up, it goes in that file in the SAME commit** —
-> never left in a session.
-> **Touching the Notes editor ENGINE, its Tiptap version, or the paste pipeline (owner decision 2026-11-05, B2671191 — the BlockNote
-> swap is REJECTED, Notes stays on Tiptap)? READ `docs/notes-editor.md` FIRST** — the closing decision, the free-OSS-only rule (no Tiptap
-> Pro/Cloud), how to upgrade the `@tiptap/*` set (one exact version, 3.33.0), the audit of every Planyr-owned editor piece vs upstream,
-> and the **clipboard regression bank** (`ui-audit/verify-notes-paste-bank.mjs`, a required build step): a paste bug becomes a fixture
-> in `test/fixtures/clipboard-bank/` first, red, then a fix.
->
-> **🔢 MINTING (history, one line so a stale memory does not resurrect it).** Ids used to be minted by hand from `max+1`, then from
-> per-branch reserved blocks with a peer scan and a push-time gate (B779); with the ledger on its own branch nothing is minted in a
-> PR — the compare-and-swap push does it, and `check-mint` and the hooks are gone. `scripts/idBlocks.mjs` survives only because
-> `next-id.mjs`'s legacy path imports it. `test/ledger-data/idUniqueness.test.js` still fails the ledger-health run on two active items sharing an id.
-> **⛔ ONE MEASURED FACT THAT STILL APPLIES (B6867): RE-RUNNING A FAILED `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A
-> re-run replays the merge commit the run was created against — it does **not** recompute `refs/pull/<n>/merge` against main's tip.
-> A stuck PR needs a NEW PUSH — prefer `git fetch origin main && git merge origin/main` over an empty `Nudge CI` commit.
->
-> **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
-> pointer (what's here + key files) that auto-loads only when you work in that folder. **When
-> you rename, move, or delete a key file, update that folder's pointer in the SAME commit.**
-> This is machine-enforced: `node ui-audit/doc-pointer-audit.mjs` (in the `/improve` gate +
-> `test/docPointers.test.js`) fails CI if a pointer names a code file that no longer exists.
-> Keep pointers short — signposts, never duplicated detail — so they don't drift.
->
-> **🎨 ADDING OR CHANGING ANY UI? READ `docs/DESIGN.md` FIRST — before writing the first line of
-> markup.** It's the design bible: the real color tokens, the radius/spacing/type scales, and the
-> `Button`/`ToggleChip`/`IconButton`/`Field`/`Section`/`MenuItem` primitives in
-> `src/shared/ui/controls.jsx`, plus the two hard rules (components consume tokens and primitives;
-> a new control is never invented at the call site — the primitive set is extended instead). A raw
-> hex, a raw `borderRadius`, or a raw `fontSize` in a component is a defect, not a style choice, and
-> `ui-audit/design-drift-audit.mjs` fails CI on new instances of it. Preview every primitive live at
-> the `#/design` gallery route before drawing a new one.
->
-> **📱 TESTING ON A PHONE? READ `docs/PHONE-TESTING.md` FIRST — before saying "nobody here can test
-> an iPhone."** That claim is false as stated: WebKit (not a Chromium stand-in — see
-> `VERIFICATION.md`'s own "WEBKIT INSTALLS ON DEMAND HERE" note for the engine-level detail) runs
-> from a Claude Code session with normal network access via `npx playwright install webkit` +
-> `npx playwright install-deps webkit`, at real iPhone screen sizes in both orientations, against
-> real `planyr.io`. The harness is `ui-audit/verify-phone-orientations.mjs`. The doc names exactly
-> what this still cannot prove (the collapsing Mobile Safari toolbar, `env(safe-area-inset-*)`
-> resolving to zero with no override on WebKit, no real touch-drag primitive, no real finger on real
-> glass) — read it before either overclaiming or underclaiming what a run proved. Per house style:
-> say "WebKit," never "Safari" or "iPhone," when reporting what a run actually verified.
->
-> **🗺 Two generated, committed indexes save you from cold-searching — but a BRANCH NEVER TOUCHES
-> THEM (SUPERSEDED 2026-09-08, NEW-1, B<PENDING>).** Reading this section as "regenerate each in
-> the same commit that changes its inputs" is now WRONG and will fail your PR — that used to be
-> the rule, and it meant every PR that touched a source file (nearly all of them) or `BACKLOG.md`
-> also had to regenerate and commit the same generated file, so any two such PRs open at once
-> conflicted on it by construction; GitHub can't compute a test-merge ref for a conflicted PR, so
-> the required `build` check never ran at all ("Expected — waiting for status to be reported"
-> forever — measured live 2026-09-08, PR #1529 re-conflicted on these files three times in one
-> hour). **`scripts/generated-doc-touch-guard.mjs` now fails a PR that modifies either file — leave
-> them exactly as they are in your diff, however stale they look.** They are kept fresh
-> automatically instead, by `.github/workflows/regen-derived-docs.yml` (a nightly scheduled job
-> that opens its own small PR when either has drifted — that PR needs a human or a Claude Code
-> session to merge it, since the workflow's own token can't arm auto-merge). **⚠ AS OF 2026-11-05 THE JOB CANNOT OPEN ITS PR** (GitHub: "Actions is not permitted to create or approve pull requests" — every run since at least Nov 1, B2671188): it pushes `chore/regen-derived-docs-<stamp>` and stops, so until the owner flips that setting a session opens the PR from the newest such branch (the touch guard exempts that branch name) and arms auto-merge. Being briefly stale
-> between refreshes is fine — neither is a runtime source of truth.
-> - **`MAP.md`** (repo root) — every source file → its module owner, one-line responsibility, and
->   exported symbols. **Grep `MAP.md` to find a path or symbol** instead of sweeping `src/`, but
->   expect it to lag a recent rename/add by up to a day. `node scripts/build-map.mjs --check` still
->   exists for the scheduled job and for local curiosity — it is no longer a required CI gate.
-> - **`BACKLOG_OPEN.md`** (repo root, STAYS on main — the claude.ai Project syncs it from main) — one line per Open / ⏳ Verify
->   item (B#, title, module, `#tags`, Verify status) + a by-tag rollup. It is generated FROM THE LEDGER BRANCH by the nightly
->   `regen-derived-docs.yml` (so it can lag the branch by up to a day — the branch is the truth). The **tag-legend rule stays
->   enforced** on the ledger (`node scripts/build-backlog-index.mjs --tags-only`, run by `ledger-health.yml`).
-> - The same rule covers **`docs/UI-INVENTORY.md`** (the generated control-signature inventory — see
->   `docs/DESIGN.md`): never touch it either. Its real design-quality gate (the per-surface
->   signature BUDGET) stays required via `node ui-audit/ui-inventory.mjs --budget-only`; only the
->   requirement that the committed file match a fresh crawl moved to the scheduled job.
+> **🗂 SLIMMED 2026-11-23 (audit batch H, owner-approved). NO RULE WAS REMOVED OR WEAKENED.** Every rule, constraint and
+> named rule below is still in force, in one to three sentences with the owner's own words where they define it. The
+> long backstory (the incident each rule came from, the measurements, the history) moved **verbatim, nothing deleted**
+> into `docs/decisions/<slug>.md` (Site Planner folder notes into `docs/site-planner/`); each entry links its file.
+> Each rule carries a stable anchor comment (`<!-- rule:NAME -->`, `<!-- constraint:N -->`) that tests check. **Constraint
+> numbers are unchanged** (two duplicated numbers are kept and suffixed: 35a/35b, 41a/41b). **When a rule's text changes,
+> change the rule here AND its decision file in the same commit; when you add a rule, add its anchor and its decision file.**
+> Mapping of every old section to its new home: `docs/decisions/README.md`.
 
-> **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT this session. Never log-and-defer.**
-> A bug report or change request = **fix it, verify it, and merge it live this same session.** Parking it in
-> `BACKLOG.md` for "a future session" turns his one request into homework he has to chase — the opposite of
-> what he wants. The backlog is ONLY for what genuinely can't be done now (blocked on a decision, an external
-> dependency, or too large to finish this run) — never a parking lot for his requests. Even if he says "add it
-> to the backlog," read the intent: he wants it **handled** — file it for the record **and fix it the same
-> session.** Default to action. The one acceptable reason to leave something merely filed is a hard blocker —
-> then say so plainly, don't go quiet. Several at once → fix them all; if one is genuinely too big, fix the
-> rest and flag that one with its specific blocker. (Owner rule, 2026-06-19.)
->
-> **Finish the WHOLE job — no diagnosis-only, no band-aid, no half.** "Fix it" means implement **every** part,
-> including the harder/real one: go through the code, make the actual change, and verify it (build green + the
-> right self-test/headless check). A diagnosis or a backlog note is never a substitute for the work. If Michael
-> picks a multi-part option ("do both"), do **every** part before reporting — don't ship part 1 and describe
-> part 2. "Bigger/riskier" is NOT a reason to defer — it's a reason to do it carefully (own branch, verify,
-> merge). Stop early ONLY for a true blocker: a hard technical blocker, a destructive/irreversible action
-> needing confirmation, or a genuine either/or product decision only Michael can make; a fix too large for one
-> session is itself a blocker — raise it with a plan, never a silent stop after the easy half. (Owner rule,
-> 2026-06-19, after a session shipped only the quick half.)
->
-> **📥 Owner CHAT BLOCKS are SHIP ORDERS, not filing requests (owner rule, 2026-07-15 — after the 7/14
-> multiwriter-cascade handoff was diagnosed, filed nowhere, and fixed by no one).** Three binding intake rules:
-> **(a)** every item in an owner chat block — bug, feature, or task — is **implement-in-THIS-session work**:
-> file it, ship it, then park it per the lifecycle (⏳ Verify + V### for a live-verify class). Filing alone is
-> an INCOMPLETE response, whatever the block's header says. **(b)** an item that genuinely can't ship in one
-> session (a hard unshipped dependency, a true blocker per STANDING RULE #1) must be **flagged LOUDLY** — in
-> the session reply AND on the filed item — never silently filed and left. **(c)** a **diagnosis/handoff doc**
-> reaching the repo or the project **without a corresponding B# is itself a protocol violation — mint the B#
-> on sight** (DEDUPE-FIRST still applies), so no diagnosis can go un-owned again. (Protocol doc:
-> `claude/protocol-2026-07-15-bug-blocks-are-fix-orders.md` in the owner's project.)
->
-> **⛔ STANDING RULE #2 — NEVER-PARK: AN OWNER-REPORTED SYMPTOM IS NEVER CLOSED ON A NULL (owner rule,
-> 2026-08-08, instructed verbatim after a session broke it: *"Make a rule so that that never happened
-> again … there is, like, good information to act on and you just skipped over it. That should never
-> happen. Make a hard rule … I just can't believe you were gonna archive that."*).**
-> **THE FAILURE IT COMES FROM, recorded so the rule is not read as an abstraction.** B1121 — his *"reload
-> is quick then a minute later it's lagging"* — had been reported unchanged for weeks. A battery returned an
-> honest null. The session wrote it up, archived it with *"the honest position is that it is not currently
-> reproducible"*, and dispatched the next item on a list. The in-app recorder that finally addressed it
-> (B255200) exists ONLY because he asked whether anything was going to be done with it. **The mechanism of
-> the mistake:** a null READS like a closed item — it has a number, a document and a conclusion — but
-> *"we could not reproduce it"* and *"it is not happening"* are different statements, and the first was
-> filed as though it were the second.
-> **THE RULE, five clauses:**
-> **(1) A first-hand owner report is EVIDENCE; a failed reproduction is not a refutation of it. When the
-> instrument and the owner disagree, THE INSTRUMENT IS THE THING ON TRIAL.** This repo has proved that three
-> separate times: three harnesses silently contaminated by an undisposed `ElementHandle` (B1439), a fixture
-> seeder that made B749's whole cost path unreachable, and a growth harness whose "plan B" was plan A
-> truncated in half. **A clean number from an instrument that could not have seen the effect is not evidence
-> of absence.**
-> **(2) An owner-reported symptom may NEVER be closed, archived or de-prioritised on the strength of a null.**
-> There are exactly THREE admissible dispositions: **reproduce it and fix it** · **instrument it so it
-> captures itself when he hits it** · **ask him whether it is gone and take his answer as the verdict**.
-> *"Not currently reproducible"* is a **FINDING**. It is never a **DISPOSITION**.
-> **(3) SILENT DE-PRIORITISATION IS THE OFFENCE.** Judging that something else is more urgent is legitimate;
-> doing it without telling him is not. If a tractable item is picked over an owner-reported one, that choice
-> is stated to him in plain words at the moment it is made.
-> **(4) "The remaining work is large, dangerous or vague" is not a reason to pick a smaller item.** (See
-> DANGEROUS-MEANS-UNOBSERVABLE in the named rules — "dangerous" is a missing instrument, and building it is
-> the work.)
-> **(5) Every such item carries a STOPPING RULE when it is opened** — a stated condition under which it
-> closes. An item with no stopping rule rots, and rotting is how this failed.
-> **ENFORCEMENT: any session archiving a shipped record for an owner-reported symptom must state which of the
-> three dispositions it took, BY NAME**, on the item and in the session reply.
->
-> **⛔ STANDING RULE #3 — ONE TASK PER SESSION; COST PER TASK, NOT MODEL TIER (owner rule, 2026-08-15, after a
-> review found unrelated work being grafted onto long-running sessions because a container happened to be
-> warm).** **WHY, stated plainly:** every turn re-sends the whole accumulated conversation, so a long session
-> pays for its entire history on every subsequent tool call. Unrelated work grafted onto it is therefore
-> charged at the long session's context price while sharing none of its context — pure waste, and it's the
-> dispatcher's doing, not the session's.
-> **(A) ONE TASK PER SESSION.** A session takes one item, ships it, and stops (clause B). If new work
-> arrives that doesn't depend on what this session has already learned, do **not** accept it — say so plainly
-> and tell the dispatcher to open a new session. **THE TEST, verbatim: would a fresh session have to
-> REDISCOVER something this session already knows?** If yes — it built a fixture, a harness, a reproduction,
-> a measurement rig the new work needs — continuing is correct and cheaper. If no, it is a new session. A
-> warm container is NOT a reason. Convenience is never a reason.
-> **(B) STOP WHEN DONE.** Don't idle on new work once the PR merges and the follow-ups are filed — an open
-> session invites exactly the grafting (A) forbids. **ARCHIVING IS NOT YOURS.** A Claude Code session cannot
-> archive any claude.ai/code session, itself included — no tool reaches the sidebar. Never write that you
-> archived, will archive, or that the session "can now be archived", and never ask Michael to archive. End at
-> merged + verified; the dispatching chat archives. (This is STANDING RULE #2's never-park discipline turned
-> on the session itself; it doesn't restate that rule, it cross-references it.)
-> **(C) MODEL SELECTION — Sonnet is the default.** Use Sonnet for implementation work: a well-specified item
-> with a known defect and a stated expected result. Reserve Opus for a root-cause hunt that has **already
-> defeated one attempt**, or where the session must reconcile contradictory evidence rather than execute a
-> plan. Worked example: the B1121 memory hunt earned Opus because it had to reconcile the owner's own
-> recording against its own harness and catch its instrument lying twice; a parcel-naming fix, an aerial
-> reword, and a layering fix did not, because each had a measured defect and a stated expected result.
-> **(D) THE BRIEF IS THE CHEAPEST PART.** Everything already measured belongs in the brief, including the
-> approaches already ruled out and WHY. A few hundred tokens of specification routinely saves a session from
-> rediscovering a dead end at full price. A brief that says what to do without saying what has already been
-> tried is an incomplete brief.
->
-> **⛔ STANDING RULE — NAMES HAVE ONE SOURCE OF TRUTH; NEVER COPY A NAME INTO COMPONENT STATE
-> (owner rule, 2026-09-29, after B1934528: the exhibit kept the old project name because
-> SitePlanner seeded `siteLabel` once at mount).** A project's name is the group's authoritative
-> `site` and a plan's is its record's `name`; every display reads them through
-> `src/shared/names/names.js` (`useProjectName` / `usePlanName`), which re-reads on the app's one
-> `onProjectsChanged` signal, and every rename goes through `renameProjectChecked` /
-> `renamePlanChecked` (validate → the one storage write → a visible notice on rejection or failure;
-> an empty name is refused, never defaulted). Derived strings (PDF filename, exhibit title, tab
-> title) are computed from the selector at render/export time, never cached. Guards:
-> `test/namesSingleSource.test.js` (fails on `useState` seeded from a name) and
-> `e2e/names-matrix.spec.js` (every entry point × every display, red-proofed).
-> **THE RULE ALSO COVERS OTHER TABLES (B1991040, 2026-09-30):** a stored copy of a project's name
-> (`schedules.linked_site_name`, `doc_reviews.project`, a title composed from it) is only ever the
-> FALLBACK for a link that cannot be resolved — every display resolves it by id at read time
-> (`scheduleOwnership.liveSiteName`, `reviewNaming.liveReviewProject`), an auto-composed title follows
-> the rename and a typed one never moves. `test/nameCopiesGuard.test.js` fails on any new
-> project/plan-name-like SQL column that isn't declared with its read-time rule.
->
-> **⛔ STANDING RULE — ALL SHARED DATA HAS ONE SOURCE OF TRUTH; NEVER COPY SHARED DATA INTO COMPONENT STATE
-> (owner rule, 2026-09-29, generalising the names rule above after the B1953792 audit found ~27 more
-> stale-copy sites).** Any value more than one surface can change — acreage, counts, status, owner,
-> jurisdiction, dates, account prefs, rule tables, filing facts — lives in ONE home; every reader reads it
-> through one selector/subscribe (never a `useState`/`useRef`/module cache seeded once from it); every
-> writer goes through one function that does a fresh read-modify-write of only the keys it changed; a
-> derived value is computed at read time, never persisted next to its source; a snapshot that is
-> intentional (issued revision, history, export) is labelled as such in code. Inventory + verdicts:
-> `docs/audit-single-source-of-truth.md`. Guard: `test/entityStateCopy.test.js` (fails on a new seeded
-> copy; escape is an inline `// stale-ok: <reason>`).
-> **Copies in OTHER TABLES / jsonb blobs (B2064896, 2026-10-04):** every migration column that could hold a copy
-> must be declared in `scripts/denormalisedCopies.json` (COPY with verdict + how it stays right + cited code, or
-> OWNED) or `test/denormalisedCopies.test.js` fails; `npm run drift-report` (`scripts/drift-report.sql`, read-only)
-> lists rows where a stored copy disagrees with its source in production — run it after any change that adds or
-> moves a copy. A project's STATUS is read only through `projectModel.groupStatusOf`.
->
-> **📋 The BACKLOG (`ledger/backlog/` on the `ledger` branch) = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
-> work the **🔲 Open** items (`npm run ledger -- list open --b`). **The moment an item ships, MOVE it that same
-> session: `npm run ledger -- move B<id> done`** (or `verify` for a `Verify: live` item) — never mark it done in place, and no PR is involved.
-> A new B# is assigned by `npm run ledger -- add backlog …` (see the LEDGER block).
-> (Product backlog; distinct from the "Deferred / maintenance backlog" near the end of this file.)
->
-> **⏳ THREE-STATE LIFECYCLE (B645): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
-> `Verify: sandbox` item (green build + the right unit/headless self-test proves it) goes straight to Done. A
-> **`Verify: live`** item — the **LIVE-VERIFY** classes: timing/race, concurrency / multi-writer, GIS endpoint
-> behavior, zoom-/data-density-dependent rendering, PDF/export parity, or a real-project-data repro — is
-> implemented this session but then **parks in the new `## ⏳ Verify` section** (with a matching `V###` in
-> `VERIFICATION.md`) until a live check confirms it; moving it straight to Done is a protocol violation. A
-> **recurring** report re-opens the ORIGINAL `B#` (`Recurrence:` line + `(×N)` in the title) — never a new
-> number (**DEDUPE-FIRST**). Every item carries a `Verify:` field and one or more `#tags` from the legend at
-> the top of `BACKLOG.md`.
->
-> **⛔ MERGED ≠ LIVE — a reconciliation/audit may call a `Verify: live` item "live" ONLY when it has a PASSED
-> `V###` on record (B877, 2026-07-17, after the B873 pre-pass audit blessed B867/B868/B869/B875 as
-> "shipped-and-live" off their MERGE presence, and the Cowork pass then found them dead on the page).** No
-> static audit can see runtime behavior: checking that code merged to `main` and that Cloudflare deployed a
-> build proves the bytes are *served*, NOT that the feature *works* — a real ambient bug (B874's stuck
-> flood-refresh) can starve or freeze features that merged clean. So a reconciliation report has THREE
-> distinct states per item, never two, and never conflates the middle one with the last:
-> **`🔲 Open/unshipped` · `⏳ merged — V### PENDING` · `✅ live (V### PASSED, dated)`.** "Merged" is only ever
-> reported as **`merged — live-verify pending`**; the word **"live"** (or "confirmed", "working") requires the
-> dated PASS note in `VERIFICATION.md`. When an audit can't run the live check itself (sandbox / signed-in /
-> real-project-data), it says so and reports the item as `merged — V### pending`, never green.
->
-> **🔍 The VERIFICATION ledger (`ledger/verification/` on the `ledger` branch) = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it
-> (`npm run ledger -- list pending --v`) and **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the
-> environment — see "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
-> pending, MOVE it: `npm run ledger -- move V<id> done --file <text-with-the-dated-PASS>`** (same discipline as the backlog; no PR, no build). The session that
-> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
-> on him or hand him a test to-do.**
->
-> **⛔ SESSIONS SIGN IN AND VERIFY THEIR OWN WORK — `Blocker: auth` NO LONGER PARKS A CHECK (owner decision,
-> 2026-10-04, Michael: a session's own live signed-in check on the test account COUNTS as verified; the Cowork
-> chat must not be the only verifier).** Proven the same day: `node ui-audit/verify-signed-in-session.mjs
-> https://planyr.io` signs in headlessly as `e2e@planyr.test` and proves it with something only a signed-in
-> user sees (the account email + its `e2e-fixture-site` row). **THE ONE SHARED HELPER is
-> `ui-audit/lib/signedInSession.mjs` (`openSignedIn({ base })`) — never write a second sign-in.** It uses the
-> `E2E_LOGIN_KEY` env var (set in this environment; never print it) against `POST /api/auth/e2e-session`, a
-> route that can only ever mint a session for the test account. The app's own sign-in
-> panel sends a real Turnstile token (sign in, sign up and forgot password all do — B2619760), but a headless browser is not expected
-> to pass Cloudflare's check, so sessions use this route; **turning captcha off is ruled out**. **Trust:** the environment setup
-> script imports the sandbox proxy's CA into Chromium's NSS store, so HTTPS just works — **NEVER reach for
-> `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out). The test account is `authenticated`
-> only: no admin row, no team memberships, owns two fixture sites.
-> **THE RULE:** a session that ships a UI change verifies it **signed in as the test account on planyr.io after
-> the deploy** (read `/version.json` and match it to your merge commit IN THE SAME CALL as the assertion), and
-> on the PR preview first where that works. **Only `real-data` (Michael's own saved projects — and first try a
-> fixture on the test account) and genuinely external-GIS (`live-GIS`) checks may park.** A `V###` carrying
-> `Blocker: auth` is a mis-classification now: drive it and record ✅/❌ this session.
-> **⛔ A SESSION DOES NOT END ITS TURN WHILE ITS OWN CHANGE IS MERGED-BUT-UNVERIFIED.** Merge → wait for the
-> deploy to serve your build → run the signed-in check → record the result. If the route answers 503/404
-> (`not configured`), say so in one line as a needs-Michael item (Retry deployment in Cloudflare Pages).
-> (Everything about `verification-inbox/` (now `docs/history/verification-inbox/`) and Cowork below is HISTORY for the checks already queued; the
-> Cowork chat may still verify, it is no longer the only actor that can.)
->
+> **Read on demand (only when the task touches it):** `docs/SHIPPED.md` (shipped-feature history) · `docs/ROADMAP.md` (not built yet) ·
+> `docs/REFERENCE.md` (Site Model, layer/GIS plumbing, Supabase DDL/RLS, sandbox Playwright quirk) ·
+> `docs/VERIFICATION-TRIAGE-2026-11-11.md` (+ `.json`; sort of every pending `V#`: start here for the verification queue, re-read each item's live text) ·
+> `docs/ACTIVE-AREAS.md` (weekly per-county sweep ledger) · **`docs/DATA.md`** (data bible) · **`docs/AGENT-RULES.md`** (verification, measurement and merge rules paid for by real incidents: **read before judging whether any change works**) ·
+> `docs/decisions/` (full text behind every rule here) · `docs/site-planner/` (Site Planner folder notes).
 
-> **⛔ STANDING RULE — A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (owner decision, 2026-09-01:
-> "I'm okay with the chat writing to the repo … implement the new rule so you can write that yourself").**
-> When a Cowork session verifies something live — on Michael's own browser, against production — it
-> commits the result straight into the ledger (since 2026-11-05 the `ledger` BRANCH — see the LEDGER block for how a chat with a
-> shell, a chat with only the GitHub connector, and a chat with no push access each do it) itself, instead of
-> relaying it to a Claude Code session to type in. This **supersedes the inbox-then-drain path above for
-> new checks** — `verification-inbox/` (archived 2026-11-23 to `docs/history/verification-inbox/`, four stale August files) is history only. Claude Code still
-> owns every line of product code; this is recording, never building. **Why:** a session spun up purely
-> to transcribe one paragraph is the most expensive possible way to write it, and the hand-off fails
-> open — 79 completed live checks once piled up unrecorded because the courier didn't always get sent.
-> **Guardrails:** ledgers and docs only, never product code or a workflow file · never hand-edit a
-> script-generated, drift-checked file (`MAP.md`, `BACKLOG_OPEN.md`) · records go to the `ledger` branch, which has no
-> required checks and no bundle base to disturb (committing to `main` is for code/docs only, and never while
-> another session is mid-measurement against it — moving the base mid-flight caused the 2026-08-31 double revert) · the commit message names the Cowork session and the
-> `V#`/`B#` it closes · record only what was observed, never what a session reported.
+## Where to read first (pointers; the full text is in `docs/decisions/`)
+- **Ledger (`B#` backlog, `V#` verification) lives on its own git branch `ledger`: records need NO PR and NO build.** Never put a `ledger/` file, `BACKLOG.md` or `VERIFICATION.md` in a PR. Read: `npm run ledger -- list open` (checks the branch out to `.ledger/`, gitignored). Write: `npm run ledger -- add backlog --file entry.md` · `add verification` · `put B123 --file …` · `move B123 verify|done|open` · `mint` · `inbox` · `push`; ids are minted by the push itself (compare-and-swap). Never delete an entry; `done` folders are write-only (`show B123`, never read wholesale). A connector-only chat commits to branch `ledger` (new entries as `ledger/inbox/*.md`); a no-push chat hands the text to a Claude Code session. `ledger-record-check.yml` warnings are an instruction: file the record. Guards `test/ledgerBranch.test.js`, `test/ledgerBranchMode.test.js`. <!--rule:LEDGER-BRANCH--> [full](docs/decisions/ledger-branch.md)
+- **⛔ Persistence, sync, undo or delete → read `docs/DATA.md` FIRST** (who owns a fact, the numbered invariants and their tests, the "one-answer" functions such as `isOwnWrite`, `assemblyIntegrity`, `nameAuthority` that must never grow a second implementation). [why](docs/decisions/data-bible-pointer.md)
+- **⛔ Notes → read `docs/NOTES-CARRY-FORWARD.md` FIRST** (instrument traps that produced false findings, the one fixture that finds real bugs, storage keys, the standing SQL health check, the bug families to suspect first); a new Notes trap goes in that file in the SAME commit. **Notes editor engine / Tiptap version / paste pipeline → read `docs/notes-editor.md`** (BlockNote swap REJECTED 2026-11-05, B2671191; free-OSS only, one exact `@tiptap/*` version 3.33.0; the clipboard regression bank `ui-audit/verify-notes-paste-bank.mjs` is required: a paste bug becomes a fixture first). [carry-forward](docs/decisions/notes-carry-forward-pointer.md) · [engine](docs/decisions/notes-editor-engine.md)
+- **🎨 UI work → read `docs/DESIGN.md` FIRST.** Components consume tokens and the `src/shared/ui/controls.jsx` primitives; a raw hex, `borderRadius` or `fontSize` in a component is a defect (`ui-audit/design-drift-audit.mjs` fails CI); a new control extends the primitive set, it is never invented at the call site; preview at `#/design`. [why](docs/decisions/design-bible-pointer.md)
+- **📱 Phone testing → read `docs/PHONE-TESTING.md` FIRST** before ever saying a phone cannot be tested: WebKit runs here (`npx playwright install webkit`, harness `ui-audit/verify-phone-orientations.mjs`). Say "WebKit", never "Safari" or "iPhone", for what a run verified. [why](docs/decisions/phone-testing-pointer.md)
+- **🔄 Per-folder `CLAUDE.md` pointers:** rename/move/delete a key file → update that folder's pointer in the SAME commit (`node ui-audit/doc-pointer-audit.mjs`, `test/docPointers.test.js`). Keep pointers short signposts. [why](docs/decisions/folder-pointers.md)
+- **🗺 Generated indexes: a branch NEVER touches `MAP.md`, `BACKLOG_OPEN.md`, `docs/UI-INVENTORY.md`** (`scripts/generated-doc-touch-guard.mjs` fails the PR); `regen-derived-docs.yml` refreshes them nightly (as of 2026-11-05 it cannot open its own PR: a session opens one from the newest `chore/regen-derived-docs-*` branch and arms auto-merge). Grep `MAP.md` to find a path or symbol; it may lag a day. The tag-legend rule stays enforced on the ledger. [why](docs/decisions/generated-indexes.md)
+- **⛔ Re-running a failed `build` does nothing for a PR that is stale against main (B6867): push a new commit, preferably `git fetch origin main && git merge origin/main`.** [why](docs/decisions/stale-pr-rerun.md) (Id minting history, now retired: [minting-history](docs/decisions/minting-history.md).)
 
-> **📦 The `done` folders of the ledger (`ledger/backlog/done`, `ledger/verification/done`) are write-only archives — do NOT read them wholesale** unless looking
-> up a specific past item (`npm run ledger -- show B123`); the old `docs/archive/*-DONE.md` files no longer exist.
+## Standing rules (owner rules; each is binding)
+<!--rule:STANDING-RULE-1-->
+- **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT this session. Never log-and-defer (2026-06-19).** A bug report or change request = fix, verify and merge it live this session; the backlog is only for what genuinely cannot be done now (a hard blocker, said plainly). Even "add it to the backlog" means: file it AND fix it. **Finish the WHOLE job**: no diagnosis-only, no band-aid, no half; "bigger/riskier" is a reason to do it carefully, not to defer; a multi-part pick means every part before reporting; several at once → fix them all and flag only a genuinely too-big one with its specific blocker. [full text](docs/decisions/standing-rule-1-fix-and-ship.md)
+<!--rule:OWNER-CHAT-BLOCKS-ARE-SHIP-ORDERS-->
+- **📥 Owner CHAT BLOCKS are SHIP ORDERS, not filing requests (2026-07-15).** (a) Every item in a chat block (bug, feature, task) is implement-in-THIS-session work: file it, ship it, then park per lifecycle (⏳ Verify + `V###` for a live-verify class); filing alone is an incomplete response. (b) An item that truly cannot ship in one session is flagged LOUDLY in the reply and on the item, never silently filed. (c) A diagnosis/handoff doc with no corresponding `B#` is a protocol violation: mint the `B#` on sight (DEDUPE-FIRST applies). [full text](docs/decisions/owner-chat-blocks-are-ship-orders.md)
+<!--rule:STANDING-RULE-2-->
+- **⛔ STANDING RULE #2 — NEVER-PARK: AN OWNER-REPORTED SYMPTOM IS NEVER CLOSED ON A NULL (2026-08-08).** A first-hand owner report is evidence; a failed reproduction is not a refutation, and **when instrument and owner disagree the INSTRUMENT is on trial.** Only three dispositions are allowed: **reproduce it and fix it · instrument it so it captures itself · ask him whether it is gone and take his answer**; "not currently reproducible" is a finding, never a disposition. Silent de-prioritisation is the offence (say so in plain words if a tractable item is picked over his); "large, dangerous or vague" is no reason to pick a smaller item; every such item carries a STOPPING RULE when opened; archiving one must name the disposition taken. [full](docs/decisions/standing-rule-2-never-park.md)
+<!--rule:STANDING-RULE-3-->
+- **⛔ STANDING RULE #3 — ONE TASK PER SESSION; COST PER TASK, NOT MODEL TIER (2026-08-15).** (A) One task per session; take new work only if a fresh session would have to REDISCOVER something this one already knows (a built fixture, harness, repro or rig); a warm container or convenience is never a reason; otherwise tell the dispatcher to open a new session. (B) Stop when done: merged and verified; a session cannot archive itself or any session and never says it did or asks Michael to. (C) Sonnet is the default for implementation; Opus only for a root-cause hunt that already defeated one attempt or contradictory evidence. (D) The brief is the cheapest part: put everything measured, and every approach already ruled out and why, in it. [full text](docs/decisions/standing-rule-3-one-task-per-session.md)
+<!--rule:NAMES-ONE-SOURCE-->
+- **⛔ NAMES HAVE ONE SOURCE OF TRUTH; NEVER COPY A NAME INTO COMPONENT STATE (2026-09-29, B1934528).** A project's name is its group's authoritative `site`, a plan's is its record's `name`; read them only through `src/shared/names/names.js` (`useProjectName` / `usePlanName`), rename only through `renameProjectChecked` / `renamePlanChecked` (empty name refused, failure shown); derived strings (PDF filename, exhibit title, tab title) are computed at render/export time. Stored copies in other tables (`schedules.linked_site_name`, `doc_reviews.project`) are only the fallback for an unresolvable link; resolve by id at read time (B1991040). Guards: `test/namesSingleSource.test.js`, `test/nameCopiesGuard.test.js`, e2e `names-matrix`. [full text](docs/decisions/names-one-source-of-truth.md)
+<!--rule:SHARED-DATA-ONE-SOURCE-->
+- **⛔ ALL SHARED DATA HAS ONE SOURCE OF TRUTH; NEVER COPY SHARED DATA INTO COMPONENT STATE (2026-09-29).** Any value more than one surface can change lives in ONE home; readers read it through one selector/subscribe (never a `useState`/`useRef`/module cache seeded once); writers use one function doing a fresh read-modify-write of only the keys changed; a derived value is computed at read time, never persisted beside its source; an intentional snapshot (issued revision, history, export) is labelled. A migration column that could hold a copy must be declared in `scripts/denormalisedCopies.json` (B2064896; `npm run drift-report` after adding or moving a copy); a project's STATUS is read only through `projectModel.groupStatusOf`. Guards: `test/entityStateCopy.test.js` (escape: inline `// stale-ok: <reason>`), `test/denormalisedCopies.test.js`. Inventory: `docs/audit-single-source-of-truth.md`. [full text](docs/decisions/shared-data-one-source-of-truth.md)
+- **📋 The BACKLOG (`ledger/backlog/` on the `ledger` branch) is the single source for open bugs and feature requests: keep it lean.** Work the 🔲 Open items; the moment an item ships, `npm run ledger -- move B<id> done` (or `verify`) that same session; new ids come from `ledger add`. [why](docs/decisions/backlog-ledger.md)
+<!--rule:THREE-STATE-LIFECYCLE-->
+- **⏳ THREE-STATE LIFECYCLE (B645): 🔲 Open → ⏳ Verify → ✅ Done.** `Verify: sandbox` (green build + the right unit/headless test) goes straight to Done. `Verify: live` (timing/race, concurrency/multi-writer, GIS endpoint behaviour, zoom/data-density rendering, PDF/export parity, real-project-data repro) parks in `verify` with a `V###` until a live check confirms it; moving it straight to Done is a protocol violation. A recurrence re-opens the ORIGINAL `B#` (`Recurrence:` line, `(×N)` in the title), never a new number. Every item carries a `Verify:` field and `#tags` from the legend. [full text](docs/decisions/three-state-lifecycle.md)
+<!--rule:MERGED-IS-NOT-LIVE-->
+- **⛔ MERGED ≠ LIVE (B877, 2026-07-17).** An audit may call a `Verify: live` item "live" ONLY with a PASSED `V###` on record. Report three states, never two: **`🔲 Open/unshipped` · `⏳ merged — V### PENDING` · `✅ live (V### PASSED, dated)`**; "merged" is only ever "merged — live-verify pending". A checker that cannot run the live check says so and reports "merged — V### pending", never green. [full text](docs/decisions/merged-is-not-live.md)
+- **🔍 The VERIFICATION ledger (`ledger/verification/`) is the live-browser test checklist: keep it lean.** Scan it every run (`npm run ledger -- list pending --v`), verify due items yourself in a headless browser, and the moment one fully passes `npm run ledger -- move V<id> done --file <text-with-the-dated-PASS>`. The session that ships a UI change drives the live app itself; **Michael does NOT self-test: never wait on him or hand him a test to-do.** [full text](docs/decisions/verification-ledger.md)
+<!--rule:SESSIONS-VERIFY-OWN-WORK-->
+- **⛔ SESSIONS SIGN IN AND VERIFY THEIR OWN WORK; `Blocker: auth` no longer parks a check (2026-10-04).** A session's own live signed-in check on the test account COUNTS. Use `ui-audit/lib/signedInSession.mjs` (`openSignedIn`; `E2E_LOGIN_KEY`, never printed); **NEVER `--ignore-certificate-errors`**; captcha stays on. Verify a UI change signed in as `e2e@planyr.test` on planyr.io after the deploy, reading `/version.json` and matching your merge commit IN THE SAME CALL. Only `real-data` and external `live-GIS` checks may park. **A session does not end its turn while its own change is merged-but-unverified.** [full](docs/decisions/sessions-verify-their-own-work.md)
+<!--rule:COWORK-RECORDS-ITS-OWN-VERIFY-->
+- **⛔ A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (2026-09-01).** A chat that verifies live on Michael's browser commits the result itself to the ledger branch (see ledger bullet above), not via a relay session. Guardrails: ledgers and docs only, never product code or a workflow file; never hand-edit a generated file (`MAP.md`, `BACKLOG_OPEN.md`); never to `main`; the commit message names the chat and the `V#`/`B#`; record only what was observed. [full text](docs/decisions/cowork-records-its-own-verify.md)
+- **📦 The ledger `done` folders are write-only archives:** look up one id with `npm run ledger -- show B123`; never read a folder wholesale. [why](docs/decisions/done-folders-write-only.md)
 
 ## How to talk to me (Michael) — IMPORTANT, applies to every reply
 Michael is an industrial real-estate developer, not a software engineer. In chat,
@@ -442,320 +114,135 @@ pointer from its entry. If this list passes roughly 40 entries, split the oldest
 into a `docs/` file and leave pointers, the same way `SHIPPED.md`/`ROADMAP.md`/`REFERENCE.md`
 were split out of this file.
 
-1. **(2026-09-05) Tasks do not need an owner.** Michael does not assign a responsible party to
-   every task, and a high count of unassigned tasks is normal usage, not a defect. Never build a
-   prompt, nag, required field, default value, or validation that pushes an owner onto a task,
-   and never present an unassigned count as a number that should come down. Setting an owner
-   only has to be reachable and round-trip correctly.
-2. **(2026-07-18) Never quote measurements, units, pixels, thresholds, or zoom factors in
-   chat** — describe what he will SEE. Full text is in "How to talk to me" above; this entry is
-   a cross-reference, not a duplicate.
-3. **(2026-08-04) A Colorado site may never render a Texas-derived number** — not a fallback,
-   not a blank that reads as zero, not a plausible band. Where a capability is unwired for
-   Colorado, the surface shows a named "not available in Colorado yet" state instead. Enforced in
-   `coloradoRegions.js` (see B1422 and the B290240–B290250 missing-data audit).
-4. **(2026-07-29) No rate, volume, or elevation is ever displayed without the rule record behind
-   it.** A malformed or missing rule record is a LOUD failure that shows nothing, never a naked
-   number. (RULES-AS-DATA; see B1074.)
-5. **(2026-09-05) Project creation is deliberately LAZY.** Never create a `sites` row for every
-   abandoned "New project" click — the row is materialized only by a module's first real write.
-   (See B1160480, B1202176.)
-6. **(2026-09-02) On the cloud-write failure banner, the ✕ means "I have dealt with it" and
-   forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
-   them into one dismissal. (See B1037952, B1048400.)
-7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
-   Michael's real plans** — and the session says exactly what was touched. The duplicate is
-   deleted when the check finishes, without asking (entry 15).
-8. **(2026-09-11 · SUSPENDED 2026-09-12 · RE-LANDED 2026-09-15, live-verify still PENDING) The
-   canvas commits ONE framing per load.** The GOAL was never in doubt; what has changed twice is
-   whether a mechanism enforces it.
-   **The history, because it is the whole reason this entry is long.** B1574432's original
-   `framingCommitted` gate (hide the canvas until a real framing is computed, a 1.5s watchdog as the
-   fallback) shipped with its own real-signed-in-boot path explicitly unverified (parked
-   `Blocker: auth` — the untested path was exactly the one the sandbox could not sign in to
-   exercise) and went on to make the Site Planner canvas **permanently invisible and unclickable on
-   planyr.io** for every project, for every signed-in user — a P0 outage, not the two-frame flash it
-   was fixing. See **B1594320** for the incident and the revert.
-   **⛔ WHAT IS TRUE NOW, so a session does not act on the suspended text above.** The gate is BACK
-   as of PR #1696 (2026-09-15), under the same item B1574432. `data-planner-reveal` on the canvas
-   says WHY it revealed — `"framed"` (a real framing caused it, the only healthy answer) or
-   `"ceiling"` (the wall-clock rescue fired, telemetered as `boot-framing-stalled`). The three
-   conditions `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md` sets were addressed by name: the
-   sandbox can now drive the real signed-in `loadEpoch` remount (`ui-audit/lib/authRemount.mjs`), the
-   reveal ceiling is absolute and per-plan so a repeating remount cannot postpone it
-   (`lib/bootFramingDeadline.js`), and the live pass is logged as **V1145488**.
-   **⛔ THE LIVE-PASS REQUIREMENT IS UNCHANGED AND IS STILL OUTSTANDING — do not read "re-landed" as
-   "verified".** A genuine signed-in live pass on a real browser (not the sandbox's harness, however
-   faithful) is still owed before this is treated as a settled requirement, and the incident doc
-   states it more strictly still — *before merging* — which this re-land did not meet: it shipped
-   first and parked the pass, at the dispatcher's explicit direction. That deviation is recorded
-   here rather than smoothed over, because reading a shipped gate as a verified one is the exact
-   mistake that caused the outage. Until V1145488 records a dated PASS: MERGED ≠ LIVE.
-   `ui-audit/verify-boot-framing.mjs` (plus `-auth` and `-cases`) exists, works, and now has a
-   shipped mechanism to check — but it is deliberately **still not a required CI gate**, and making
-   it one is gated on that same live pass.
-9. **(2026-09-07) Split stays a phone-width Schedule option — do not remove it, do not re-ask.**
-   Michael, verbatim: "Yes make split an option on the phone." Separately, a one-pane-at-a-time
-   Split (any variant, however its highlight is drawn) is a rejected shape, not an open design
-   question — three real-device rejections of exactly that mechanism, the last verbatim: "Nothing
-   happens, it stays or goes to gantt or grid." Phone Split must show the grid and the Gantt at
-   once (stacked); never ship a phone Split that collapses to one pane. (See B1241745 (×3), V930736.)
-10. **(2026-09-19) Site elements stack in CREATION ORDER, newest on top — Bluebeam-style — and this
-    REVERSES the 2026-08-09 type-layer default recorded in `planStyle.js` (entry retired below,
-    kept as history, not deleted). Michael, verbatim, asking for it:** "I mean I feel like whatever
-    I draw should be at the top so I can never lose anything when I draw it, I'm assuming that's
-    how bluebeam works." **He was told plainly, in chat, the exact consequence — that newest-on-top
-    means a parking field drawn after a building paints over the building, and a road drawn last
-    puts pavement over everything — and chose it anyway, verbatim:** "Selection should lift and I'm
-    good with bluebeams order with new items on top, you can disregard my previous rule." Two
-    things travel with this reversal: **(a) a selected element always lifts above every other
-    element while selected**, dropping back to its normal creation-order position the moment it is
-    deselected; **(b)** he was told, and accepted, that **every existing plan re-stacks** the first
-    time it opens under this rule — an element's position in the new stack is no longer decided by
-    its type (road under paving under pond under parking under building) but by when it was drawn,
-    so a plan's on-screen layering can visibly change on its next open even though nothing on it was
-    edited. Do not relitigate either half and do not ask him again. See B1788912 (site-planner
-    `lib/planStyle.js` `zOrder`/`byZ`, `SitePlanner.jsx`'s element render pass) for the
-    implementation and the road-network composite's own stated ordering rule.
-    **EXCEPTION, ORDERED BY THE OWNER 2026-11-05 (NEW-1): TRAILER PARKING ALWAYS DRAWS ABOVE ROADS.** Michael, verbatim: "showing
-    trailer parking above the roads" and "I'm trying to fix the visual." (Academy › Concept A: a road drawn after the building covered
-    the outer edge of a trailer row while the buffer beyond it, added later, stayed on top — the buffer looked detached with a sliver of
-    road between.) He knows the overlap is a layout conflict and will move the road himself: this is purely how it DRAWS — no warning,
-    snap, nudge or geometry change. It is a RENDER-ORDER rule only (`lib/trailerOverRoads.js` `liftTrailersOverRoads`, applied in
-    `SitePlanner.jsx` `elPaintItems`, `planThumbnail.js`, `kmzExport.js`; the print clone, editable-PDF annotation order and hit-test all
-    follow the canvas DOM): a trailer row paints just above the highest road / road cluster that painted above it, whatever their z;
-    nothing is written to a saved element, the selection lift still lifts a selected road above everything while selected, and Arrange's
-    Bring to Front on a road / Send to Back on a trailer still reorders against everything else but says plainly that it can't change
-    this pair. **Do not widen it to any other type pair** — paving, parking, buffers, sidewalks and the dock court keep plain creation
-    order — and do not undo it as a violation of this constraint. One stated trade-off: an item drawn after the trailer but before the
-    road ends up under the trailer (the trailer is the only thing that moves; roads never change their place against anything).
-    Guard: repo-root `test/` **trailerOverRoads**; e2e **trailer-over-roads**; live V2035648.
-11. **(2026-09-23) The two overlay systems converge in CODE ONLY — never in storage.** The Site
-    tab's `sheetOverlays` (in the site model) and the Map/Comps `site_plan_overlays` table stay
-    exactly as they are: do NOT merge the stores, and do NOT propose or build any data migration,
-    ownership or sharing change. Michael does not care where the data lives; what he does not
-    want is the same FEATURE written twice. So crop, georeference, scale and rasterising each have
-    ONE shared engine used by both surfaces — no second copy of the logic, no forked crop model.
-    Crop is already shared (`overlayCrop.js` + `ImageCropTool`); the rest is B1838705. Also
-    measured the same day, so nobody re-hunts it: nothing is double-saved (the Goose Creek master
-    site plan on four plans points at ONE stored object), and canvas overlays with a null
-    `storageKey` naming a real PDF are the old local-only-overlay problem, NOT duplication — keep
-    them out of this work.
-    **AMENDED 2026-10-08 (owner-authorised exception, NEW-1) — sibling plans of ONE site share
-    overlays as OPTIONS, not as stored data.** Michael, verbatim: "overlays should go to each
-    individual plan or like should flow through each individual plan. Like if I've got a project or
-    a site and I put an overlay on one like concept A, it should also show up on concept B as an
-    option. It shouldn't automatically overlay, but if I go to show it, it should, I should be able
-    to show it if that makes sense." He approved the design and said ship it. What this does NOT
-    change: the Site tab / Map-Comps split above is untouched (no store merge, Map/Comps surface out
-    of scope), there is still NO site-level overlay store and NO migration — every plan keeps its own
-    `sheetOverlays` exactly as stored. What it ADDS: the Overlays panel lists an overlay held by a
-    sibling plan on the same site (and not by this plan) as a hidden "added on <that plan>" row; its
-    eye COPIES the record into THIS plan only (new id, re-framed through `resolveClipFrame`, a
-    `sharedFrom` stamp), after which it is this plan's own record and edits never propagate.
-    Remove is this-plan-only. Pure rules: `lib/siblingOverlays.js`. The null-`storageKey` carve-out
-    above and #12 (crop is keep-inside only) stand.
-12. **(2026-09-22) Overlay crop is KEEP-INSIDE only.** No keep-outside / hole-punch inverse, on
-    either overlay surface. (B1783328.)
-13. **(2026-10-04) Review opens files in TABS, is BLANK when none are open, and the open tabs FOLLOW HIS ACCOUNT between
-    devices.** Michael, verbatim: "it should just be blank, and act like bluebeam with multiple tabs left open if I left
-    tabs open" — this REPLACES the #1920 sheet-index empty state (no heading, buttons, "Pick a project" or sheet index in the
-    blank state) and the #1926 Close (×) (closing is the tab's ×). Then, the same day, superseding his first answer of "per
-    device, like Bluebeam": open tabs (files, order, active tab, page and zoom) are saved to his account so the phone shows what
-    the desktop left open. Last change wins; a Word/txt tab with unsaved edits on a device is never removed by another
-    device; signed out/offline falls back to the local copy. Stored in the existing `profiles.prefs` (`reviewTabs`) — never a
-    new table. Do not reintroduce a landing screen or per-device-only tabs. (See B2058144.)
+**The full text and history of constraint N is `docs/decisions/constraint-N.md`** (35a, 41b, …); each entry below carries `<!--constraint:N-->` for the tests.
 
-14. **(2026-10-04) On a phone, the page keeps its THINNER grey margin around the sheet — do not widen it to match
-    desktop, do not re-ask.** Michael, in answer to whether the phone's paper margin (16 vs 40 per side) should be
-    made identical to desktop's after the B2078593 full-width work: "keep the thinner grey margin around the page on
-    phones as you have it. No change needed there." Box widths, tables and line breaks must still be identical on
-    every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
-    B2078593.)
+<!--constraint:1-->
+1. **(2026-09-05) Tasks do not need an owner.** No prompt, nag, required field, default or validation pushes an owner onto a task; an unassigned count is never a number that should come down; setting an owner only has to be reachable and round-trip.
+<!--constraint:2-->
+2. **(2026-07-18) Never quote measurements, units, pixels, thresholds or zoom factors in chat;** describe what he will SEE (see "How to talk to me").
+<!--constraint:3-->
+3. **(2026-08-04) A Colorado site may never render a Texas-derived number** (no fallback, no blank reading as zero, no plausible band); an unwired capability shows a named "not available in Colorado yet" state. `coloradoRegions.js`, B1422.
+<!--constraint:4-->
+4. **(2026-07-29) No rate, volume or elevation is displayed without the rule record behind it;** a missing/malformed record fails LOUDLY and shows nothing (RULES-AS-DATA, B1074).
+<!--constraint:5-->
+5. **(2026-09-05) Project creation is deliberately LAZY:** never create a `sites` row per abandoned "New project" click; a module's first real write materializes it (B1160480).
+<!--constraint:6-->
+6. **(2026-09-02) On the cloud-write failure banner ✕ means "I have dealt with it" and forgets the durable log; Retry does not.** Never collapse them (B1037952).
+<!--constraint:7-->
+7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never a real one;** say exactly what was touched; delete the duplicate when done, without asking (#15).
+<!--constraint:8-->
+8. **(2026-09-11, re-landed 2026-09-15, live-verify still PENDING) The canvas commits ONE framing per load.** The `framingCommitted` gate once made the canvas invisible on planyr.io for everyone (B1594320 P0); re-landed in PR #1696 (B1574432); `data-planner-reveal` = `"framed"` healthy / `"ceiling"` rescue. **V1145488's signed-in live pass is still owed: re-landed is not verified.** `verify-boot-framing.mjs` is deliberately NOT a required gate yet.
+<!--constraint:9-->
+9. **(2026-09-07) Split stays a phone-width Schedule option; do not remove it, do not re-ask.** Phone Split shows grid and Gantt at once, stacked; a one-pane Split was rejected three times (B1241745, V930736).
+<!--constraint:10-->
+10. **(2026-09-19) Site elements stack in CREATION ORDER, newest on top (Bluebeam-style),** reversing the 2026-08-09 type-layer default: "whatever I draw should be at the top so I can never lose anything … you can disregard my previous rule." A selected element lifts above all while selected; existing plans re-stack on first open (accepted). **EXCEPTION (2026-11-05): TRAILER PARKING ALWAYS DRAWS ABOVE ROADS,** render order only (`lib/trailerOverRoads.js`; nothing stored; never widened to other pairs). **trailerOverRoads**, e2e trailer-over-roads, B1788912.
+<!--constraint:11-->
+11. **(2026-09-23) The two overlay systems converge in CODE ONLY, never in storage:** `sheetOverlays` and `site_plan_overlays` stay separate (no store merge, no migration); crop/georeference/scale/raster have ONE shared engine. **AMENDED 2026-10-08:** a sibling plan's overlay is an OPTION whose eye COPIES it into THIS plan only (`lib/siblingOverlays.js`). B1838705.
+<!--constraint:12-->
+12. **(2026-09-22) Overlay crop is KEEP-INSIDE only;** no keep-outside/hole-punch, on either surface (B1783328).
+<!--constraint:13-->
+13. **(2026-10-04) Review opens files in TABS, is BLANK when none are open, and the open tabs FOLLOW HIS ACCOUNT between devices** ("just be blank, and act like bluebeam"); stored in `profiles.prefs` (`reviewTabs`), last change wins; no landing screen, no per-device-only tabs (B2058144).
+<!--constraint:14-->
+14. **(2026-10-04) On a phone the page keeps its THINNER grey margin;** do not widen it to desktop's; box widths/tables/breaks stay identical (`verify-notes-box-width-parity.mjs`, B2078593).
+<!--constraint:15-->
+15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about** ("stop asking to clear test files, always clr"); verify the delete; never touch his real work; keep the `e2e@planyr.test` fixtures (B2103600).
+<!--constraint:16-->
+16. **(2026-10-11) Food ratings are one slider each, 1 to 10 in quarter steps;** no tap buttons, steppers or whole numbers without his say-so. One component `components/RatingSlider.jsx`, scale `food/lib/ratingScale.js`, `test/foodRatingSlider.test.js` (B626576).
+<!--constraint:17-->
+17. **(2026-10-05) In Food on a phone held SIDEWAYS the place card docks RIGHT as a side panel, never the bottom sheet,** and the map keeps the pin in view; `LANDSCAPE_PHONE_QUERY`, `verify-food-landscape.mjs` (B2046224).
+<!--constraint:18-->
+18. **(2026-10-05) Combine and Split on parcels NEVER ask for a name** ("never block on a name"): auto "Tract A", "<name> · A"; rename is an optional pencil; Undo toast, originals restorable. **The map toolbar and the Parcels panel are ONE action** (`lib/parcelOps.js`, `test/parcelOpsParity.test.js`); the table checkbox only SELECTS, the eye includes/excludes (B2134368).
+<!--constraint:19-->
+19. **(2026-10-08) Unnamed lots stay unnamed** ("Do not derive a name from street address, owner or legal description"). **AMENDED 2026-10-16:** the LIST shows a stable "Parcel 4" number (`siteModel.parcelNumbers`) or "Acct …"; the name FIELD stays empty (B2194745, B2289936).
+<!--constraint:20-->
+20. **(2026-10-11) The Parcels list is LAYOUT C and stays calm:** grouped by source with active acres; ONE body-size summary line; names wrap, never ellipsised; a real table with one heading row; padlock and eye on every row all the time, only ⋯ waits for hover; fixed icon seats; the total stays the TRUE dissolved area with overlaps disclosed. Judged on real-shaped data at every width in both themes: `verify-parcel-list-layout.mjs` (required) (B2243424).
+<!--constraint:21-->
+21. **(2026-10-11) A project's OVERLAYS and COMPS follow the project's sharing; REVIEWS do not (undecided).** Derived by additive SELECT policies (`db/project_follow_sharing.sql`), never by rewriting `team_id` or migrating; unshared stays private; a failed overlay download may never erase the pointer (`lib/overlayHeal.js`) (B2244016).
+<!--constraint:22-->
+22. **(2026-10-11) The Parcel tools ▾ menu has NO "Remove parcels — click to delete" row.** **AMENDED 2026-10-22 (#31): click-to-delete is retired everywhere** (B2243168).
+<!--constraint:23-->
+23. **(2026-10-11) Parcel & setback styling is three objects (boundary, setback line, dimension labels), one default + one override, weight in SCREEN PIXELS** (never a zoom factor); resolution override → `profiles.prefs.parcelLook` → built-in; a failed write reverts and says so. **Do not build:** presets, a no-build band, envelope styling, swatch palette, dash picker (B2254144).
+<!--constraint:24-->
+24. **(2026-10-12) Overlay Lock blocks ONLY a direct map drag/resize/rotate;** everything typed or clicked in a panel works when locked, on BOTH surfaces; a panel control is never gated on `locked`. `test/overlayLockPanelControls.test.js` (B2262864).
+<!--constraint:25-->
+25. **(2026-10-16) The grading layer is OWNER-ONLY** ("only for me to use for now"): renders only when `is_admin()` through the ONE gate `lib/gradingGate.js`; no flag, env var or second gate; nobody added to `admin_users`; everyone else byte-for-byte unchanged. `test/gradingGate.test.js`; rules in [grading-model](docs/site-planner/grading-model.md) (B2312464).
+<!--constraint:26-->
+26. **(2026-10-20) The Food restaurant panel is the approved mockup: the DISH LIST IS THE ORDER** ("i like it all as is, send it"). **Do not bring back** the "THE ORDER" card + Copy, "Best dish:", VISITS/COST tiles, Sort, per-row ⋮ or eat-again circle; one rating precision (`restaurantPanel.formatRating`) (B2365312).
+<!--constraint:27-->
+27. **(2026-10-20) While the Parcels tool is up the parcels are the TOP of the drawing** ("show above anything"): `mapStack.parcelsOnTop`, RENDER ORDER only, nothing stored, no toggle, the PDF/PNG sheet keeps normal order (B2370480).
+<!--constraint:28-->
+28. **(2026-10-20) In the editable PDF ("Flatten markups" OFF) every drawn site element is an editable annotation** (roads, ponds, paving, parking, trailer parking, sidewalks…) with plain-word Subjects; page content (aerial, parcels, GIS layers, overlays, title block, scale bar, north arrow) stays; anything left printed says why (B2384528).
+<!--constraint:29-->
+29. **(2026-10-20, amended 2026-10-21) The markup/text-box/callout Properties panel is layout "A": three sections (Text · Appearance · Size & position), same names on every kind,** and it covers measurements and EVERY drawn element's panel. No unit on line weight, opacity is a typed % box never a slider, right-aligned pattern selects, FIXED compact Outline|Fill columns (in the shared primitives). Separately approved panels keep their structure. **calloutPanelLayoutA**, e2e markup-panel-layout-a (B2386752).
+<!--constraint:30-->
+30. **(2026-10-21) The Overlays panel's ROTATION and CROP are the approved layouts:** round DIAL + typed box + ▲▼ and "Turn 90° counterclockwise/clockwise" in ONE compact row (never "left/right", never − / +); crop is a switch in the CROP heading (off keeps the shape; one reset = clear the polygon). Work on a locked overlay (#24). **rotationDial**, **overlayCropOff** (B2400416).
+<!--constraint:31-->
+31. **(2026-10-22) Parcel delete is ONE path, ONE menu, with Undo, and a locked parcel deletes like any other:** every door ends in `deleteParcels` (`lib/parcelDelete.js`), deletes AT ONCE with an Undo toast and tombstone, no confirm step, Lock never blocks Delete; one menu `lib/parcelMenu.js`; a map right-click never ticks the checkbox. `test/parcelDeleteOnePath.test.js` (B2416672).
+<!--constraint:32-->
+32. **(2026-10-22) Google Earth (KMZ) export of a SITE PLAN lives in the Site Planner's File ▾ ONLY;** no right-click KMZ on the canvas and none on the empty Map view (a site/comp "Export KMZ", B711329, is a different feature). **fileMenuKmz** (B2380112).
+<!--constraint:33-->
+33. **(2026-10-21) The editable PDF raises NO hover note box:** no `/Contents` unless a person typed it, no annotation titled "Planyr", no `/Popup`; a translucent measurement fill is never `/IC`. `test/pdfHoverAndRegen.test.js` (B2431296).
+<!--constraint:35a-->
+35a. **(2026-10-22) The Overlays panel carries NO "Non-standard sheet" note, and Set scale is a Preset | Custom switch where Custom means TYPING the scale** (one short box `1" = [ 40 ] '`; unreadable text kept and flagged; no unit dropdowns). **overlaysPanelRender**, **overlayScale** (B2382049).
+<!--constraint:34-->
+34. **(2026-10-21) A county with no parcel data says WHY and gives a one-click request,** never the bare "no parcel data wired here yet": four reasons (paywall · locked · unreachable · none) from `lib/parcelGaps.js` + "Email Michael to request it". **michael@planyr.io is public in exactly TWO places;** a third is a new decision (`test/publicContactAddresses.test.js`) (B2428112).
+<!--constraint:35b-->
+35b. **(2026-10-20) A Notes box shows the MOVE cursor wherever a press really moves it** (a cursor must never lie); open hand only for panning. **AMENDED 2026-10-27 (#37):** the grip is retired, the border is the handle. `move` shows only on a multi-selection member. `test/cursorConventionNotes.test.js` (B2426784).
+<!--constraint:36-->
+36. **(2026-10-23) A Schedule row-drag has THREE zones and the centre one NESTS** (amends B763472). **The centre zone stays the SMALLEST (30% vs 35/35), never the default;** a dragged row's own centre says "Not allowed"; a new parent is toasted and Ctrl+Z restores it. `rowDropIntent`, `test/scheduleDropNest.test.js` (B2445008).
+<!--constraint:37-->
+37. **(2026-10-27) A Notes box is moved by its BORDER; the striped grip is retired, do not bring it back or add a second affordance** ("only interacts by the edges"); a middle drag still pans (B2156912). `verify-notes-box-edge.mjs` (B2426788).
+<!--constraint:38-->
+38. **(2026-10-28) CITY LIMITS OUTRANK ANY ETJ HIT** everywhere (header, Site Analysis, floodplain administrator, ETJ layer): never a city AND another city's ETJ for the same ground ("it can't be both"); a genuine straddle shows the split (B2472944).
+<!--constraint:39-->
+39. **(2026-10-28) A county's own parcel server is the PRIMARY; when it does not answer DEFAULT TO THE STATE'S LAYER, and never say "No lot here" for a silent county.** Re-check a "down" county for a MOVED server first; `lib/parcelFallbacks.js`; say where the lot came from; a county that answered "no lot" is never second-guessed; measure a new source (B2475216).
+<!--constraint:40-->
+40. **(2026-10-29) A county row that is a COPY someone else published is KEPT, and the parcel card SAYS so** (publisher + data date, "not the county's own", the one mailto; never guess a date). `test/parcelCopies.test.js` (B2487152).
+<!--constraint:41a-->
+41a. **(2026-10-29) Every county sits in the state-plane zone its STATE'S STATUTE assigns, no legacy exceptions** (Montgomery County TX = Texas Central, EPSG:2277); `decided:true` only where the statute is silent, with a `decisionNote`; statute beats the EPSG table. `test/statePlaneStatute.test.js` (B2478961).
+<!--constraint:41b-->
+41b. **(2026-10-29) DeSoto County zoning is real polygons, Olive Branch included, labelled by the jurisdiction the SITE falls in;** never a PDF link, never labelled by layer; do not build an Olive Branch PDF fallback (B2507058).
+<!--constraint:42-->
+42. **(2026-10-29) EVERY overlay layer starts at 100% opacity when first turned on** (`layers.js`; tier ceilings in `layerWeight.js` are all 1); a user-set opacity is kept; no lower default without a new decision. `test/layerHierarchy.test.js` (B2507060).
+<!--constraint:43-->
+43. **(2026-10-29) Map layers show their information ONLY ON CLICK: no hover popups on any overlay layer,** on both surfaces; permanent labels, pin name tooltips and the elevation chip stay (B2507061).
+<!--constraint:44-->
+44. **(2026-10-29) The "Discover DeSoto — I-269 Corridor Study Areas" layer is REMOVED and not to be re-added.** Every esri feature layer passes a DRAW BUDGET (`layerRequest.FEATURE_VERTEX_BUDGET`); `test/layerDrawBudget.test.js` (B2507064).
+<!--constraint:45-->
+45. **(2026-10-29) A layer's click card is CLEAN:** plain labels, no raw field names, no empty rows, short labelled links never raw URLs, source behind the (i), on every layer (B2507062).
+<!--constraint:46-->
+46. **(2026-10-29) A zoning code shows its district NAME wherever shown to a user, sourced per jurisdiction from its own ordinance, NEVER from memory;** unsourced shows bare; on-map labels stay codes (B2507063).
+<!--constraint:47-->
+47. **(2026-10-29, amended 2026-11-05) Counties & Cities is ONE clean display everywhere wired:** every city/ETJ/county name on screen at every zoom, each city its OWN hue (`lib/boundaryPaint.js`), a CLICK anywhere in a shape opens ONE card (`lib/jurisdictionCard.js`), never hover, ⚑ on a site crossing a limit line. Do not shorten the label zoom range, share a colour, or split the card. **countiesCitiesNaming** (B2507065).
+<!--constraint:48-->
+48. **(2026-10-29) A road connected to a parking field or truck court FOLLOWS it on a small move and LETS GO on a big one** ("200 feet, forget the road … 50 feet, keep it attached"): last control point only, `DRIVE_FOLLOW_MAX_FT` (100 ft), a locked road never follows, one undo; no prompt or toggle (`lib/driveFollow.js`; **driveFollow**; B2498961).
+<!--constraint:49-->
+49. **(2026-10-29) The Spreadsheet follows Excel for Windows, and its headers are LABELS** ("muscle memory is the spec"): never editable; **Ctrl+C/X/V use the REAL system clipboard**; refused/unusable paste says so; Ctrl+K stays the palette; multi-range ops say Excel's "won't work on multiple selections" (`lib/keymap.js`; B2455072).
+<!--constraint:50-->
+50. **(2026-11-02) A ZONING layer prints its district code on every polygon, and its legend is HEADED by the jurisdiction with ONE code per row** (`viewLegend` `{ heading: true }` then `{ row: true }`; sourced names; no "(Olive Branch)" suffix). **sugarLandZoning** (B2638208).
+<!--constraint:51-->
+51. **(2026-11-03) The Task Report toolbar is Filter · Group by · Show · Columns and the Status segmented control is RETIRED;** no Apply button, no second status classification. **taskReportStatusFilter** (B2639169).
+<!--constraint:52-->
+52. **(2026-11-04) The plan menu is the approved mockup: the current plan is ONE row and IS the rename control; no Storage dialog, no Save now row, no Plan name field, no per-row ✕.** One ⋯/right-click menu; Recently deleted is a bin view. **planMenuChrome**, **planMenuModel** (B2660320).
+<!--constraint:53-->
+53. **(2026-11-06) Ctrl/Cmd+wheel over the Schedule ZOOMS THE SCHEDULE, never the browser page** ("always work if im hovering over the schedule"), with NO permanent blocking wheel listener (measured +15 ms per notch, B2671192); modifier learned from keys/pointer events/shell forwarding. `test/scheduleCtrlZoomHover.test.js` (B2671192).
+<!--constraint:54-->
+54. **(2026-11-08) The sign-in panel closes ONLY when the person asked** (Close, an unhandled Escape on the card, press AND release on the backdrop, successful sign-in); every close/unmount path is in `src/shared/auth/panelDismiss.js`; the set-new-password view stays non-dismissable. `test/authPanelClosePaths.test.js` (NEW-1).
+<!--constraint:55-->
+55. **(2026-11-10) Where two roads of DIFFERENT widths meet, the WIDER road tapers into the narrower one, and that is the whole feature;** curb returns, snap-and-merge and per-end widths were NOT chosen. Derived (`lib/roadTaper.js`), stored only as `road.taper`; no bend warning. **roadTaper** (NEW-1).
+<!--constraint:56-->
+56. **(2026-11-13) While a Measure tool is armed a left press is ALWAYS a point; an existing measurement never eats it** (amends B910); pick a measurement in Select or by right-click. e2e **measure-first-click** (B2671280).
+<!--constraint:57-->
+57. **(2026-11-15) Notes boxes the person PLACES may overlap, like PowerPoint; only growth from a box's OWN WORDS pushes the box below clear** (`notesBoxClearPlugin.js` `placedBetween`); no snap or warning. **notesBoxClear** (B2671289).
+<!--constraint:58-->
+58. **(2026-11-15) In Notes, copying a BOX and copying TEXT are different and must be obvious, Excel's way:** box selected + Ctrl+C = moving dashed outline and a NEW box on paste; any text selection (incl. Ctrl+A in a box) copies TEXT ONLY. **notesBoxClipboard**, `verify-notes-box-copy` (required) (B2671288).
+<!--constraint:59-->
+59. **(2026-11-15) In Notes Ctrl+A belongs to the thing you are in:** caret in a box = that box's text; table cell steps outward; no caret = EVERY box; one handler (`lib/notesSelectAll.js`). **notesSelectAll**, `verify-notes-select-all` (required) (B2671293).
+<!--constraint:60-->
+60. **(2026-10-19/22, B2331664) Adding lots from the county NEVER auto-zooms, and county lot lines draw from FURTHER OUT, hiding only house-size lots** (`parcelWideLayer.js`, both surfaces, never a click-a-lot layer without `wide: true`; **addLotsOutlineZoom**).
 
-15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about.** Michael, verbatim: "stop
-    asking to clear test files, always clr." Anything a session (or the Cowork chat) created for a test
-    or live check — throwaway duplicate plans, projects, schedules or reviews, test rows, uploaded test
-    files in Library/Drive, scratch files, temporary fixtures — is deleted as soon as the check is
-    done, WITHOUT asking and with no "needs you" line or report about it. Delete-must-verify still
-    applies (confirm the item is actually gone). Boundaries: never touches Michael's real projects or
-    anything he made himself; the standing `e2e@planyr.test` fixtures the signed-in helper depends on
-    (`e2e-fixture-site` and its sibling fixture) are NOT throwaway and stay. (See B2103600.)
-
-16. **(2026-10-11, supersedes the 2026-10-05 half-step wording) Food ratings are one slider each, 1 to 10 in quarter steps, and
-    must not be replaced with tap buttons, steppers, +/- nudges or whole numbers without Michael's say-so.** EVERY rating in /food
-    — a visit's Food, its Ambiance and each dish's score — is the SAME component (`components/RatingSlider.jsx`: min 1, max 10,
-    step 0.25, "Not rated" until touched, one readout pill, Clear to its right, whole-number ticks 1-10 centred under the thumb,
-    the whole row a grab target). The scale lives in `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js`
-    fails if the range or step changes or a tap grid/stepper returns. Ratings saved in halves or whole numbers still display as
-    saved. (History: quarter steps shipped 2026-08-28; PR #2001 re-locked only the restaurant slider to halves; B626576 / NEW-1.)
-
-17. **(2026-10-05) In Food, on a phone held SIDEWAYS, the place card docks to the RIGHT as a side panel
-    (like desktop) — never the bottom sheet — and the map keeps the pin in view.** Michael, approved fix
-    ("dock the card to the side, and improve on it"): the header collapses to one row, a pick centres its
-    pin in the map to the LEFT of the card, the "Search live for more here" chip is centred in that visible
-    part, "Log a visit" stays at the card's bottom, and the notch/home-bar safe areas are respected.
-    Upright phones keep the bottom sheet; desktop keeps the rail. "Landscape phone" is one query
-    (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
-    `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
-
-18. **(2026-10-05) Combine and Split on parcels NEVER ask for a name, and the map toolbar and the Parcels panel are ONE
-    action.** Michael, verbatim: "Owner is on the fly; never block on a name" — a combine auto-names the tract
-    ("Tract A", "Tract B", …) and a split names its pieces "<name> · A", "· B"; renaming is an optional pencil afterwards,
-    never a prompt. Both operations show an Undo toast, keep the originals reachable (Restore) and never alter county data.
-    And: "if I do the split without ever coming into the left-hand menu, just from the right-hand menu, it'll still work,
-    same thing with merge" — the map's Split tool / Merge banner and the panel call the same single functions
-    (`site-planner/lib/parcelOps.js`; `test/parcelOpsParity.test.js` fails if a second implementation grows back). In the
-    Parcels table the checkbox only SELECTS rows; the eye includes/excludes a parcel from the site total. (B2134368–B2134370.)
-
-19. **(2026-10-08) Unnamed lots stay unnamed.** Michael: "Do not derive a name from street address, owner or legal description." A parcel with no name the owner typed shows a grey "Unnamed" in the list and on its page (source line unchanged) and its name field stays empty. Never re-add a derived name (`parcelFallbackName`, `addr`) to `parcelDisplayInfo` or the Parcels UI. Combine's "Tract A" and split's "<name> · A" (entry 18) still count as named. (B2194745.)
-    **AMENDED 2026-10-16 (owner, Cowork chat) — the LIST no longer says "Unnamed".** A drawn / other / no-source parcel with no typed name reads by its STABLE NUMBER in the list ("Parcel 4", "Parcel 5" — `siteModel.parcelNumbers`, the stamped `parcelNo`; a number stays with its lot when an earlier one is deleted, never renumbered), instead of a row of identical "Unnamed" labels; an unnamed COUNTY lot still reads "Acct …". The number is a handle, not a derived name: nothing is taken from address, owner or legal description, the name FIELD on the parcel's page stays empty with its grey "Unnamed" placeholder, and a typed name still wins. (B2289936.)
-
-20. **(2026-10-11) The Parcels list is LAYOUT C and stays calm.** Michael chose it from a mockup, after saying the list "keeps
-    showing up like shit when it gets to the real thing": grouped by source (County lots · Combined · Drawn · Other), each
-    group header carrying its ACTIVE acres; ONE summary line at body size ("174.28 AC in site · 10 of 11 active" — never a
-    display-size figure, "this is a professional software"; the figure is the SAME WEIGHT as the words around it, so the line reads as one sentence); names and source lines wrap and are NEVER ellipsised; acres in one
-    fixed column with a shared right edge; **it is a real TABLE (2026-10-16, replacing "no column-heading row"): ONE heading row above the whole list — "Acres" over the figures, a lock icon over the lock column, an eye icon over the visibility column, the overlap icon over its column only while one exists — and every row shows its padlock (closed / open) and eye (open / struck) ALL THE TIME, each a click with Undo; only ⋯ waits for hover**; the icons live in the right-hand icon slot (never in the name block); rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted overlap ICON in the icon slot per row — never a pill, never in the name block; the slot has FIXED seats overlap | padlock | eye | ⋯, so each icon kind has one x on every row, and a heading icon sits centred over it — and a second short muted summary line "N AC overlaps, counted once"; neither summary line wraps), never silent. A change to this list
-    is judged on real-shaped data at every panel width in both themes — `ui-audit/verify-parcel-list-layout.mjs` (a required
-    CI gate) — not on tidy fixtures. (B2243424.)
-
-21. **(2026-10-11, decided 2026-10-05) A project's OVERLAYS and COMPS follow the project's sharing; REVIEWS do not (still undecided).**
-    Michael, 2026-10-11: "if I share a site with someone, they should have access to all the overlays that I have as a default."
-    And 2026-10-05: "if I have a project, like an individual site, and there's like comps attached to it or overlays, those should
-    all be visible." Anyone who can open a shared, live plan can see and load every overlay on it (Site tab `sheetOverlays` files
-    included), and anyone who can read a project can read its Map/Comps overlays, their rasters and its comps. Visibility is
-    DERIVED by additive SELECT policies (`site-planner/db/project_follow_sharing.sql`) — never by rewriting `team_id` columns, never
-    a data migration. This AMENDS the 2026-08-09 "sharing is decided per item, site plans only" rule for overlays and comps only.
-    Review visibility stays exactly as it is. Unshared stays private; the `guard_team_share` trigger is untouched. And: a failed
-    overlay download outside the reader's own storage folder may never erase the record's pointer (`lib/overlayHeal.js`). (B2244016, B2244017.)
-
-22. **(2026-10-11) The Parcel tools ▾ menu has NO "Remove parcels — click to delete" row.** Michael approved "A · Sorted list"
-    with exactly two changes: the second heading reads EDIT, and the "Delete by clicking" line is removed. Removing a parcel from
-    the menu is the red "Delete parcel" row on a SELECTED parcel; the click-to-delete mode stays reachable only from the Parcel
-    tool's own ✕ Remove banner button. Do not put a click-to-delete row back. (B2243168.) **AMENDED 2026-10-22 (#31): the banner's Remove mode is RETIRED too — there is no click-to-delete anywhere.**
-
-23. **(2026-10-11) Parcel & setback styling is three objects, one default + one override, and weight is SCREEN PIXELS.** Only the
-    parcel boundary, the setback line and the dimension labels are styleable (colour via the full native picker — any hex; weight
-    1–6; dashed on/off; labels show · colour · size 8–16 pt). **Weight is screen pixels, constant across zoom** — a 2 px line stays
-    2 px at any zoom; the boundary and setback ring never take a zoom factor. Resolution is parcel override → the user's workspace
-    default (`profiles.prefs.parcelLook`, private) → built-in; "reset to workspace default" clears the override. A failed write
-    reverts and says so — never a change that looks applied but isn't saved. **Out, do not build:** style presets, a no-build band,
-    buildable-envelope styling, a swatch palette, a dash-pattern picker. The per-side label toggle waits on edge grouping (B2254145).
-    (B2254144.)
-
-24. **(2026-10-12) Overlay Lock blocks ONLY a direct drag/resize/rotate on the map itself.** Michael: typing a rotation must work on a
-    locked overlay, and "anything typed or clicked in a panel works when locked, only direct map drags are blocked." Rotation (typed,
-    ±1°, ±90°), Set scale / Trace a length / Match 2 points, Size to view, Align to parcel edge, Edit crop and Move & resize all work on a
-    locked overlay, on BOTH overlay surfaces (Site-tab Overlays panel and Map/Comps "Adjust site plan"). This supersedes B1154369's old
-    "locked rotation is read-only — do NOT undo" note. A new panel control must not be gated on `locked`; a direct-drag starter must.
-    Guard: `test/overlayLockPanelControls.test.js`. (B2262864.)
-
-25. **(2026-10-16) The grading layer is OWNER-ONLY until he says otherwise.** Michael, verbatim: "add it in, but only for me to use for now." Everything in "Grading model" below renders only when `is_admin()` is true, through the ONE selector `lib/gradingGate.js` (`gradingEnabled()` / `useGradingEnabled()`); no URL flag, env var, localStorage switch or second gate, and nobody is added to `admin_users`. For every other account the Site Planner is byte-for-byte unchanged. Guard: `test/gradingGate.test.js`. (B2312464–B2312466.)
-
-26. **(2026-10-20) The Food restaurant panel is the approved mockup — the DISH LIST IS THE ORDER.** Michael approved it verbatim ("i like it all as is, send it") after rejecting a first draft. Keep: name + plain ✕ on one line; "<cuisine> · <city> · $…$$$$" (the word "Restaurant" dropped; the price level is one tappable value per restaurant, tapping the current one clears it); the address in neutral grey ending "· Directions"; score pills "8.25 Food" · "8.0 Ambiance" + a "+ List" pill; dishes grouped WHAT TO ORDER (yes) · MAYBE (maybe / unanswered) · "Skip · N dishes ▾" (no, collapsed), each by score, neutral badges (never red); a row opens the DISH SHEET (back / Done, editable name, the one slider, Yes · Maybe · No, note "How to order it next time", history only with 2+ ratings, Rate again + Delete at the bottom); visits as one compact line each, two shown + "Show N more"; "Log a visit" pinned to the bottom. **Do not bring back:** the "THE ORDER" card and its Copy button, the "Best dish:" line, the VISITS / COST tiles, the Sort control, the per-row ⋮ menu or eat-again circle. **One number, one precision everywhere** (8.25 / 8.0 / 9.5 — `restaurantPanel.formatRating`). (B2365312 / B2365313.)
-
-27. **(2026-10-20) While the Parcels tool is up, the parcels are the TOP of the drawing.** Michael, verbatim: "When I click the parcels tool, the parcels should show above anything that I've got on the screen. Like if I click add county lots, that should show above anything else." "Up" = the Land panel open (docked or floating), Pick county lots, Draw / Split / Combine / Edit corners — one function, `mapStack.parcelsOnTop`. Both the county lots on offer and the plan's own lots (fill, outline, selection weight, setback ring, chips) paint over buildings, markups, callouts, references and every GIS layer, and a press follows that order (in Pick county lots a click on a lot covered by something picks the LOT). It is RENDER ORDER only: nothing stored, no saved layer order touched, no new control, and closing the tool restores the fixed model; the PDF/PNG sheet always shows the normal order. Parcels still never move outside Edit parcels. Do not make it permanent, add a toggle, or reorder saved layers. (B2370480.)
-
-28. **(2026-10-20) In the editable PDF ("Flatten markups" OFF) every drawn site element is editable, not only markups and
-    buildings.** Michael, after his real plan exported with "buildings weren't touchable, detention wasn't touchable, roads
-    aren't editable": roads, detention ponds, paving / truck courts, parking, trailer parking, sidewalks and every other drawn
-    element are PDF annotations like buildings (one per element; a building with its bump-outs and a joined road network
-    are one each), with plain-word Subjects. **Page content stays: the aerial/basemap, parcels, GIS layers, reference
-    drawings (overlays), title block, scale bar, north arrow.** A parcel's acreage label never rides on a building. Anything
-    that must stay printed into the page says why in the export's warning list. Flatten ON is unchanged. (B2384528, B2326896 ×2.)
-
-29. **(2026-10-20) The markup / text-box / callout Properties panel is the approved layout "A" — three sections, same names on every kind.** Text (text boxes + callouts only, ✎ Edit text a PLAIN full-width button at the very top) · Appearance (closed shapes, cloud, text box, callout: the Outline | Fill table; line / polyline: one column) · Size & position. **Line weight shows NO unit** ("nobody knows what pt means") and stays an up/down stepper, never presets or a dial; **opacity is a typed % box, never a slider**; **pattern dropdowns are right-aligned** native `<select>`s; every number box fills its column so right edges line up; rotation keeps the shared stepper plus the angle glyph, two icon quarter-turn buttons and a Level button that exists only while the angle is not 0. Text size keeps "pt" (font points are understood). **AMENDED 2026-10-21 (owner, looking at an Area measurement's panel: "I don't think you apply it to any of the elements. Really, I want you to apply to anything that can get put on the map, other than maybe layers"): layout A's shell now covers measurements and EVERY drawn site element's Properties panel** (buildings, parking, paving / truck courts, trailer parking, sidewalks, roads, ponds, parcels' style rows, easements, deed / encumbrance lines, styled references) — the same three section names where they fit, no unit on weight, % box opacity, right-aligned pattern selects, and **the Outline | Fill / value columns are a FIXED compact width that does not grow with the panel (extra panel width becomes empty space, never wider controls; a number box and its ▲▼ stay touching)** — fixed in the shared primitives, not per call site. Panels Michael approved as their own layouts (road 2026-10-16, DockLayerPanel 2026-10-19, Building Properties, Parcels list, Overlays, Grading) keep their structure and take only the shared control rules. The measurement panel has no Layer section and no label-zoom block (right-click carries ordering). Text-box fields `strike`, `caps` (display only — the typed text is never rewritten), `valign` and the fixed height `boxH` are additive; absent = today's render. Guards: repo-root `test/` **calloutPanelLayoutA**; e2e **markup-panel-layout-a**. (NEW-1.)
-
-30. **(2026-10-21) The Overlays panel's ROTATION and CROP controls are the approved layouts — do not revert to − / + buttons, "left"/"right" wording, or an Edit + Reset pair.** Rotation: the "Rotation" label, a round DIAL (needle in the Site green, 0° up, clockwise positive; drag sets it live, Shift snaps 15°, one undo step per drag), the typed number box with a stacked ▲ (+1°) / ▼ (−1°) at its right edge, and under them two buttons spelled out **"Turn 90° counterclockwise"** and **"Turn 90° clockwise"** — **AMENDED 2026-10-22 (owner: "we could fit them in the same row, just side by side. They don't need to take up that much space"): always ONE compact row, left-aligned, each sized to its own text, NEVER stacked and never stretched to half the panel; at a narrow panel the visible text steps down ("90° counterclockwise" / "90° clockwise", then without the icons, then — only where even that would be cut off, the narrowest panel and a phone — the two turn arrows alone) while the full words stay in aria-label and title** (B2382048). The owner explicitly does NOT want "left"/"right". Crop: a **switch in the CROP heading** — off is the heading alone; on shows a picture of the sheet (outside the crop dimmed, kept area dashed Site green) that opens the editor, plus **Adjust**. Switching off KEEPS the shape (`crop.off`) and on brings the same shape back; **there is one reset only — clearing the polygon in the editor** (no Reset button, no "Not cropped / Polygon · N points" text). Every one of these works on a locked overlay (#24). Panel type stays at the two sizes; no instructional copy. Guards: repo-root `test/` **rotationDial**, **overlayCropOff**; e2e **overlay-dial-crop-switch**. (B2400416, B2400417.)
-
-31. **(2026-10-22) Parcel delete is ONE path, ONE menu, with Undo — and a locked parcel deletes like any other.** Owner approved the mockup ("proceed with everything except the lock thing"). Every door — the Parcels row ⋯, a right-click on a row, a right-click on the parcel on the map, the Delete key, the rail's Parcel tools → Delete parcel, the checked bar's Delete (2+ checked, ONE step, ONE toast, ONE Undo) and the parcel page — ends in `SitePlanner.jsx` `deleteParcels` (pure decision `lib/parcelDelete.js`), which deletes AT ONCE with a "Deleted …" Undo toast and a tombstone. **No "are you sure" step.** **Lock means "protect the boundary from edits" only: never grey out Delete, never add "Unlock to delete", never refuse.** The row ⋯, a row right-click and the map right-click are the SAME menu (`lib/parcelMenu.js`: Properties · Rename (combined / split) · Zoom to · Lock · Hide/Show acreage label · Reset label position (only once dragged) · rule · Un-combine (combined tracts, "Brings back the n lots") · Delete parcel, red, "Del"). **A right-click on the map selects the parcel and opens the menu and NEVER ticks its checkbox / adds it to the merge set.** The row's ⋯ is always visible (no hover-only class). The Parcel tool's Draw / Remove click-to-delete mode is retired. Do not bring back a confirm step, a second delete function, a per-surface menu list or a locked-delete block. Guard: `test/parcelDeleteOnePath.test.js`. (B2416672.)
-
-32. **(2026-10-22) Google Earth (KMZ) export of a SITE PLAN lives in the Site Planner's File ▾ ONLY — there is NO right-click KMZ export on the planner canvas and NONE on the empty Map view.** Michael, amending his own request the same day he asked for the File rows: he does NOT want it on a right-click. File ▾ carries "Export to Google Earth (KMZ)" + "Export with 3D buildings" (and the same two rows in its More-menu overflow, `menuRows`), calling the one lazy `exportKmz`; the empty-canvas "Map" context menu is just Zoom to fit · Paste. Then he answered the open question about the Map view: REMOVE it there too — the empty-map right-click menu (B684 `exportSitesKmz`, "Export to Google Earth (KMZ)" / "Export with 3D buildings") and its handler are gone, so a right-click on the empty map is the browser's own; he accepts that the Map view has no export of all sites. Do not put either right-click export back, and do not add a Google Earth export to the Map view without his say-so. **Not part of this decision, untouched:** the right-click on a site (status menu) and on a comp marker, whose "Export KMZ" is a different feature (a comp's owning site RECORD, B711329). Guards: repo-root `test/` **fileMenuKmz**; e2e **file-menu-kmz**. (B2380112.)
-
-33. **(2026-10-21) The editable PDF raises NO hover note box, and a rebuilt measurement is never an opaque block.** Michael, after hovering a building in Chrome's viewer: the huge yellow "Planyr / Building 1" box is unnecessary. No site element, parcel label or measurement annotation writes `/Contents`, no annotation is titled "Planyr" (`/T` is the author only when known), no `/Popup` is ever written (PDFium ignores them), and `/Subj` stays (Bluebeam's Markups list names items by it). Only text a person typed (a markup's Comment, a callout's own text) is `/Contents`. A translucent measurement fill is never stored as `/IC` (Bluebeam paints it solid when it rebuilds the measurement); the page carries a `/VP` scale so Bluebeam asks for none. Guards: `test/pdfHoverAndRegen.test.js`; ui-audit **verify-pdf-hover-popup** (real Chrome). (B2431296, B2431297.)
-
-35. **(2026-10-22) The Overlays panel carries NO "Non-standard sheet" note, and Set scale is a Preset | Custom switch where Custom means TYPING the scale.** Michael, verbatim: "I don't need a note for a non-standard sheet size. Let's get rid of that note" (the sheet detection data stays; only the note went), and, of Set scale: "custom is when you type it in, whereas preset would be where we should get to… this drop down." Set scale opens a two-segment **Preset | Custom** switch (the dark-neutral selected style of the Draws toggle, never the accent): **Preset** = one dropdown ("Read from the sheet" first, then Engineering, then Architectural; NO "Custom…" entry; a scale matching no preset shows a "Choose a scale" placeholder and never flips to Custom; a pick applies at once); **Custom** = ONE text box reading `1" = [ 40 ] '` — a plain number is feet per inch, and `1" = 40'`, `1:480`, `1/8" = 1'-0"` are read too (`overlayScale.parseTypedScale`); Enter or blur applies; Custom is a SHORT fixed-width box (sized for a scale value, like the rotation number box — never stretched across the panel) with the closing ' always fully visible beside it, left-aligned under the switch; the warning colour describes the TEXT IN THE BOX and nothing else — unreadable text is KEPT and flagged (it applies nothing), typing clears the flag, Escape reverts to the applied value, and a valid value is never flagged (amended 2026-10-22, B2382050 ×2, after the owner saw the clipped ' and a warning outline on a valid 40 in the screenshots). No page-unit / real-unit dropdowns, no paired page=real fields. Opens on Preset when the current scale matches a preset or there is none, else on Custom pre-filled (`overlayPanelModel.scaleEntryPlan`). The "Scale" readout line and the three equal scale buttons are unchanged. Guards: repo-root `test/` **overlaysPanelRender** + **overlayScale**; e2e **overlay-turns-scale**; live ui-audit **verify-overlay-dial-crop-live**. (B2382049, B2382050.)
-34. **(2026-10-21) A county with no parcel data says WHY and gives a one-click request — never the bare "no parcel data wired here yet".** Michael, verbatim: "for counties that arent wired up, id like it to provide info to people when it deosnt work, like either a email michael or this county has parcel data hidden behind a paywall, email michael to request". Every no-source state (map lot-picker toast, address-search card, Land › Pick county lots) reads one of four plain reasons — paywall · locked · unreachable · none — from the ONE table `site-planner/lib/parcelGaps.js` (`parcelGapNotice`) and carries "Email Michael to request it", a prefilled mailto to michael@planyr.io (subject "Parcel data request: <County>, <ST>"). **This makes michael@planyr.io public in exactly TWO places** (the landing note and this link; `test/publicContactAddresses.test.js` names the file) — a third is a new owner decision. *(2026-11-02: the sign-in alarm sends mail TO this address from a server-only Pages Function — never shipped to a browser; named in that test with a check that no `src/` file imports it. Not a public place.)* Do not parse markdown at runtime, do not show a request link on a WIRED county's missed click or on a statewide-covered county, and do not leave a gap county on the bare sentence. (B2428112.)
-
-35. **(2026-10-20) A Notes box shows the MOVE cursor (four arrows) wherever a press on it really moves it, and keeps it for the whole drag — like everything draggable in the Site Planner.** This REPLACES the earlier open-hand choice for box bodies (the "NEW-2 point 3" comment in `NoteEditor.jsx`). The open hand (`grab` / `grabbing`) stays ONLY for panning the grey margin / page; the grip keeps `grab` / `grabbing`. A box that is being edited still shows the text cursor over its typed text. **AMENDED 2026-10-27 (#37): the striped grip is RETIRED — a box's BORDER band is its move handle and shows `move`; everything below about the body and the grip is otherwise unchanged.** **MEASURED 2026-10-22 (B2426784): a body drag on a SINGLE box does not move it — a drag from a box's content pans the page (NEW-1/B2156912) and press 1 selects, press 2 enters — so `move` shows only on a member of a multi-selection (`data-movable`), where a body drag really moves the group; an unselected single box keeps the open hand because a drag there pans.** A cursor must never lie about what a press does (docs/DESIGN.md "Cursor convention"), so four arrows on every box is NOT built; making a single-box body drag real is a behaviour change that waits on Michael. Do not put the open hand on a multi-selected box body. Guard: `test/cursorConventionNotes.test.js`; `ui-audit/verify-cursors-notes.mjs`. (B2426784.)
-
-36. **(2026-10-23) A Schedule row-drag has THREE zones, and the centre one NESTS — amending the 2026-08-25 "two bands only" rule (B763472).** Michael could not drag rows under a task that has no children yet (no gap to aim at), so the centre of ANY row now means "make the dragged rows children of this row" (last child), shown as a boxed, tinted row with a "Nest inside" chip, visually distinct from the insertion line. **The centre zone must stay the SMALLEST of the three (30% vs 35% / 35%)** — the 2026-08-25 rule existed because the old "into" band was the biggest target and nested rows by accident; never widen it, never make it the default. The centre of a dragged row / its own descendants shows a red "Not allowed" box and a release there says why (never a silent no-op). A childless row that becomes a parent is announced in a toast and Ctrl+Z restores it. Logic: pure `rowDropIntent` in `public/sequence/index.html`; guards `test/scheduleDropNest.test.js` + `ui-audit/verify-schedule-row-move.mjs` (section N, NESTBAND mutation). (B2445008.)
-
-37. **(2026-10-27) A Notes box is moved by its BORDER (PowerPoint / Word / Bluebeam), and the striped grip is retired — do not bring it back, do not add a second affordance.** Michael picked option "A" of four mockups: *"I like it that it only interacts by the edges"*, and called the grip *"pretty ugly and honestly just annoying to look at"*. The box's outline is a four-sided grab band (a few px outside the line, the line, a few px inside it — never over the text) with the four-arrow `move` cursor, pinned for the whole drag; over it the outline thickens in the accent colour, off hover the box draws nothing extra. It moves the box (or the whole selection) whether or not the box has the caret, a plain click on it only selects, and the resize handles keep priority at their own spots. **Unchanged, his standing rule:** a drag that starts in the MIDDLE of a box still pans the page (B2156912), two-stage select/enter, text selection once a box has the caret, multi-selection drag, resize handles and the phone/touch halos. Applies to text, table and picture boxes alike. Guards: `ui-audit/verify-notes-box-edge.mjs` (+ `-touch`), `test/cursorConventionNotes.test.js`. (B2426788; settles the question #35 left open.)
-
-38. **(2026-10-28) CITY LIMITS OUTRANK ANY ETJ HIT — the site header, Site Analysis, the floodplain administrator AND the drawn ETJ map layer never show a city AND another city's ETJ for the same ground.** Michael, on Concept A: "it says Houston ETJ but then also says City of Sugar Land, and it can't be both." Inside a city's limits → that city only, no ETJ; outside all limits → that one city's ETJ if any; otherwise unincorporated; a site that genuinely straddles shows the split with its area share. Where the published layers disagree (36 city/ETJ pairs in the Houston metro overlap), the limits win and the overlap is disclosed in the tooltip, never printed as a governing slot or shaded on the map (B2472945). Do not re-add an "in a city AND in another's ETJ" label shape. (B2472944.)
-
-39. **(2026-10-28) A county's own parcel server is the PRIMARY; when it does not answer, DEFAULT TO THE STATE'S LAYER — and never say "No lot here" for a county that was silent.** Michael, verbatim: "wire it to the county one, but then default it to the state one", and, of a county whose parcels seemed down: "make sure that they're actually not working and that you're not just pointing to the wrong thing" — so **a county reported down is first re-checked for a MOVED server (the county's current viewer / web map config) before it is called down** (Niagara County NY was mis-pointed, not down: B2387345). A click whose county errored or timed out goes to `lib/parcelFallbacks.js` (the state's statewide layer only where it really holds the county, then a declared town layer), says on the Map notice / address card / planner result where the lot came from, keeps the failed county SILENT in the bookkeeping, and reads "couldn't reach the county server" + Try again only when nothing answered. A county that answered "no lot" is never second-guessed. Do not add a lot source without measuring that it is the right place and country (the "City of Niagara Falls" layer is Ontario). Today's fallbacks: TX (8 counties), CO (5), NY Niagara→Cambria; NY/TN county rows have no state fallback because the state layer lacks those counties. (B2475216.)
-
-40. **(2026-10-29) A county row that is a COPY someone else published is KEPT, and the parcel card SAYS so.** Michael, verbatim: "use the copy, but then just state that it's a copy and state the date that it came from. And then maybe we say something about, like, please contact X if you'd like Y." (He decided to keep them because the NY state layer holds zero parcels in Chenango and Herkimer — measured.) Every row whose publisher is neither the county nor the state (`lib/parcelCopies.js`) shows ONE plain, small, un-alarmed line under the parcel facts — publisher + the date of the data, "not the county's own" — and the existing "Email Michael to request it" button (subject names the county). Official county / statewide rows show nothing new. Do not drop a copy row to avoid the line, do not guess a date the service does not publish ("date not published"), and do not add a second mailto. Guard: `test/parcelCopies.test.js`. (B2487152.)
-
-41. **(2026-10-29) Every county sits in the state-plane zone its STATE'S STATUTE assigns — no legacy exceptions, in Texas or any other zone-split state.** Michael's decision on Montgomery County, TX ("SWITCH"): it is Texas Central (EPSG:2277) per Tex. Nat. Res. Code §21.074(c), not the South Central the app used to keep. Harris, Fort Bend, Waller and Chambers stay South Central, bit-for-bit. A `decided:true` zone row is allowed ONLY where the statute is genuinely silent (Broomfield, CO is the model) and its `decisionNote` must name the gap — never to preserve old app behaviour; where the statute and the EPSG-generated table disagree, the statute wins. A bare lat/lon resolves by the county it is in before any coarse box. Guard: `test/statePlaneStatute.test.js`. Status of the statute cross-check: `docs/incidents/STATE-PLANE-AUDIT.md` §10. (B2478961, B2494336, B2494337.)
-
-41. **(2026-10-29) DeSoto County zoning is real polygons, Olive Branch included, labelled by the jurisdiction the SITE falls in — never a PDF link, never "the county's" or "the city's" by layer.** Michael corrected the dispatch brief's premise ("the layer may cover only the unincorporated county; Olive Branch may be a PDF"): measured, `CountyWebMap/Zoning/MapServer/20` holds Olive Branch's own zoning (832 polygons inside its limits, rezoning cases to 2026-08-18, Municode ordinance links). One table holds several governments' zoning with NO jurisdiction field, so a result is labelled from the county's own Municipalities limits ("Olive Branch" / "Unincorporated DeSoto County"). Do not build the "Official Olive Branch zoning map (PDF)" fallback. (B2507058; `desotoZoning.js`, `desotoJurisdiction.js`.)
-
-42. **(2026-10-29) EVERY overlay layer starts at 100% opacity when first turned on.** Michael, after seeing DeSoto zoning live: at lower defaults "it isn't clear the layer is even there." One place decides it (`layers.js` normalises `cfg.opacity` to 1 for the whole registry; the old tier opacity ceilings in `layerWeight.js` are all 1 now — this REVERSES the NEW-4 "reference recedes" ceilings 0.85 / 0.55 / 0.4, which remain only for stroke WEIGHT). A value a user already set (per-project opacity, B2448033) is kept; only the default moved. Do not lower a default again without a new decision. Guard: `test/layerHierarchy.test.js`. (B2507060.)
-
-43. **(2026-10-29) Map layers show their information ONLY ON CLICK — no hover popups on any overlay layer.** Michael, hovering a zoning polygon: nothing should appear until he clicks. Applies to every overlay layer on both surfaces (the planner canvas and the Map view): zoning, utilities lines, parcels' layers, PSC service areas, planning layers, FEMA / raster layers, Texas layers. This REVERSES the earlier hover-identify requests (B1131 "hovering an electric line must say what it is", NEW-2 hover readout). Permanent LABELS printed on features (pipe size, zone code) are not popups and stay; site/comp pins keep their name tooltip (not an overlay layer); the cursor's ground-elevation chip is a status readout, not a layer tooltip, and stays. (B2507061.)
-
-44. **(2026-10-29) The "Discover DeSoto — I-269 Corridor Study Areas" layer is REMOVED and is not to be re-added** (owner: he cannot tell what it is from the name, and it is a transportation-model study, not site intelligence). It also froze the tab (12 polygons, 707,071 vertices, a 28 MB answer — B2507064), so every esri feature layer now passes a DRAW BUDGET (`layerRequest.FEATURE_VERTEX_BUDGET` / `FEATURE_VERTEX_TOTAL`, enforced in `layers.buildFeatureLayer`): a batch over it is declined and the layer reports "too detailed to draw at this zoom" instead of hanging. Guards: `test/layerDrawBudget.test.js`; live ui-audit `verify-layer-no-freeze`.
-
-45. **(2026-10-29) A layer's click card is CLEAN: plain labels, no raw field names (ZONE, CASE_NO, Shape.STArea, OBJECTID, CONVERSION_STATUS), no empty / null rows, normal dates, links as short labelled links ("Ordinance", "Plat", "Deed") — never a raw URL — and the source / vintage sits behind the (i).** Applies to every layer's card, DeSoto and the older ones that share the code. (B2507062.)
-
-46. **(2026-10-29) A zoning code shows its district NAME wherever the code is shown to a user (click card, legend in the Zoning dropdown) — sourced per jurisdiction from that jurisdiction's own ordinance, NEVER from memory.** Names are mapped per jurisdiction (which municipal limit the polygon falls in); a code that cannot be sourced shows the bare code, never a guess. On-map labels stay codes. (B2507063.)
-
-47. **(2026-10-29) Counties & Cities is ONE clean display everywhere it is wired (not only Mississippi).** One set of place names (with the layer on, the basemap's own place-name labels are hidden and only Planyr's show, each city once inside its limits; off brings the basemap names back); city limits bolder with a light tint inside, none outside; counties a heavier dashed grey line with a light halo and the county name along the line on each side ("DeSoto Co.", "Shelby Co., TN"); state lines heavier still; county names when zoomed out, city names as you zoom in, never piled up. (B2507065.)
-    **AMENDED 2026-11-05 (owner, Academy › Concept A — "every boundary is drawn in the same blue … Sugar Land, Missouri City, Stafford, Houston, Richmond and Rosenberg are indistinguishable"; NEW-1):** the 10-29 build shipped the line styles, county names along the line and one set of names, but a city's name sat at its polygon's centre and switched off above zoom 13 (county above 14) — at working zoom the layer named NOTHING — and every city was one blue at a faint tint. Now: **(a) every city / ETJ / county name is on screen at every zoom** (`lib/placeLabelAnchors.js`: in the visible part of its polygon; a polygon that fills the view parks its name in a band near the top, clear of the site; the whole box is kept inside the view; one name per place; a county with no line in view names itself near the bottom); **(b) each city has its OWN hue** (`lib/boundaryPaint.js` `createColorBook`; a city and its ETJ share one; two neighbours never share one while a free hue exists; a place keeps its hue for the whole session) — limits the bold solid line with a light tint, ETJ the same hue thinner, dashed, fainter; the name sits on a pill in that hue (dashed pill for ETJ); the PDF mirrors it; **(c) a CLICK on any shape — on the planner canvas AND the Map, inside the shape as well as on its outline — opens ONE card: city, "inside the city limits" or ETJ ("outside its limits"), county** (`lib/jurisdictionCard.js`); limits outrank ETJ, nothing is said about a layer that did not answer; never hover; **(d) a site that crosses or touches a city-limits / ETJ line shows the ⚑ on the header chip with one plain sentence per line** (`lib/limitLineFlags.js`, `jurisdiction.js` `limitLines` — the chip used to flag only a split city). Do not shorten the label zoom range, give cities one shared colour, or split the card back into one per layer. Guards: repo-root `test/` **countiesCitiesNaming**; live ui-audit **verify-counties-cities-live**.
-
-48. **(2026-10-29) A road connected to a parking field or truck court FOLLOWS it on a small move and LETS GO on a big one.** Michael, verbatim: "The road should move with the parking, like, slightly, though. Like, if I move the building 200 feet, then you can forget the road. But if I move the building and the parking, you know, 50 feet, then, yeah, keep it attached." Whatever moves the field (the load-time heal, dragging it or its building, a nudge, rotate / resize, a re-laid row) carries the road's connected END by the same offset — only its last control point; past `DRIVE_FOLLOW_MAX_FT` (100 ft) the road stays as drawn and its connection is cleared; it also lets go where following would fold the last leg back or leave it shorter than the road is wide. A locked road never follows. The live drag shows both, and one undo reverses move and follow together. Do not add a "keep attached" prompt, a toggle, or a second follow path. Rule + seams: `lib/driveFollow.js`, `SitePlanner.jsx` `setEls`; guards repo-root `test/` **driveFollow**, **driveParkingRealPlans**; e2e **drive-follows-parking**. (B2498961.)
-49. **(2026-10-29) The Spreadsheet follows Excel for Windows, and its headers are LABELS.** Michael: "The keyboard shortcuts that work in Excel should work on the spreadsheet … muscle memory is the spec"; column letters and row numbers are "fixed labels, like Excel" — never editable (no rename route, no stored header text; the letter is the position and recomputes after every insert/delete) while the sheet TAB stays renamable; clicking a header selects the whole row/column, dragging / Shift+click select a run, the corner box selects everything. **Ctrl+C / Ctrl+X / Ctrl+V use the REAL system clipboard** (native copy/cut/paste events, text/html + text/plain, formatting, cut = move) — never an internal-only copy again; an unusable paste or a refused clipboard says so, never a silent no-op. Ctrl+K stays the command palette; Ctrl+P stays the browser's; Ctrl+click on a header adds that whole row/column as another range (the multi-range model, now Univer's own with the refusals in `lib/univerExcelKeys/`); copy, paste, insert/delete, hide, autofit and merge on several ranges say Excel's "won't work on multiple selections", never act on one range silently. Do not reintroduce a header rename or a ref-only clipboard. (B2455072–B2455075; `lib/keymap.js`, `lib/univerExcelKeys/`; the old `lib/selection.js` and `lib/clipboardIO.js` went with the old grid, 2026-11-23.)
-
-50. **(2026-11-02) A ZONING layer prints its district code on every polygon, and its legend is HEADED by the jurisdiction with ONE code per row.** Michael, on the City of Sugar Land zoning layer (brief NEW-1): "codes labeled on the polygons in the map, legend headed by the jurisdiction ('Sugar Land') not a suffix, one code per legend row, and a clean way to see what a code means." The legend is a single heading naming the government, then one row per district in view — "R-1Z · Zero Lot Line Single-Family Residential" — in the layer's colour; the name comes from the jurisdiction's own source (the layer's legend or the ordinance), never from memory, and a code with no sourced name shows bare. The legend form is `viewLegend` returning `{ heading: true, label }` then `{ label, color, row: true }` entries (rendered by `LayerPanel`'s `Legend`). **Sugar Land's zoning layer (`sugarLandZoning.js`) follows it, and so does DeSoto County's (`desotoZoningNames.zoningLegend`, converted 2026-11-03, B2507063 ×2): a heading per government in view (Olive Branch, Southaven, Horn Lake, Hernando, Walls, Unincorporated DeSoto County), then its codes, one per row; the click card names the place once, in its title. The old "(Olive Branch)" suffix is gone — never copy it into a layer.** Guard: repo-root `test/` **sugarLandZoning**. (B2638208.)
-
-51. **(2026-11-03) The Task Report toolbar is Filter · Group by · Show · Columns — one matching button style, one open slot — and the Status segmented control is RETIRED; do not bring it back.** Michael approved an interactive mockup and said "ship it as is" (B2639169, amending B2631584). **Filter** (funnel + a solid count badge of filter TYPES in use + accent border) holds STATUS (a checkbox for every status incl. custom ones, each with its count; default In Progress + Needs Attention) and PROJECT (a checkbox per project with its count, none = all) and a Clear all; it filters immediately with no Apply, stays open while ticking, closes on outside press / Esc, and opening one dropdown closes any other. Nothing checked in a section narrows nothing. Group by is a "Group by: None | Project" dropdown; Show and Columns keep their contents. Header count, group counts and rows always agree, and an empty result keeps a way back ("Clear filter"). Do not add an Apply button, a second status classification, or a status segmented control. Guard: repo-root `test/` **taskReportStatusFilter**; ui-audit **verify-task-report-status-filter**.
-
-52. **(2026-11-04) The Site Planner plan menu (the plan crumb's dropdown) is the approved mockup — the current plan is ONE row and IS the rename control; there is no Storage dialog and no Save now row.** Michael approved it after two rounds ("ship it"). The current plan = one highlighted row at the top (bold name, `current` tag, ⋯; double-click the name or ⋯ ▸ Rename edits it in place) — NO "Plan name" label or separate field; a Find box only at 8+ plans; the other plans one scrolling list (names wrap, never ellipsised, no ✕ on any row, ⋯ always visible); a footer that cannot be pushed out (New plan | Duplicate · Version history… · Recently deleted (n) ›). A plan's ⋯ and its right-click are ONE menu (Rename · Duplicate · [Lock — current plan only] · Delete plan, red, last, equal rows, no divider). Recently deleted is a bin view ("‹ Plans") with the exact "Deleted Oct 20, 2:37 PM" time on each entry, Restore, and Delete forever only inside the row's ⋯. **Retired by the same decision:** the "Save now" row (`saveNow` stays for the failure banner's Retry), the "This device" heading and the "Storage on this device…" dialog (automatic room-making is untouched). Do not bring back a Plan name field, a per-row ✕, a Save now / Storage row, or a second menu list. Code: the planner's PlanMenu component over `lib/planMenuModel.js`; guards repo-root `test/` **planMenuChrome**, **planMenuModel**; e2e **plan-menu-redesign**. (B2660320.)
-
-53. **(2026-11-06) Ctrl/Cmd+wheel over the Schedule ZOOMS THE SCHEDULE, never the browser page, wherever keyboard focus is in the app.** Michael, verbatim: "i want ctrl zoom to always work if im hovering over the schedule." Over the Gantt → the timeline zooms; over the Grid → the grid zooms (the hover-zone split stays); over the rest of the app Ctrl+wheel behaves as it always did. **The mechanism is a measured trade-off, not a taste:** an always-on blocking wheel listener (the obvious way to say "always") adds about 15 ms to EVERY plain wheel notch at every CPU speed (B2671192; the owner had just confirmed the scroll "works well", B2644624), so the Schedule frame keeps NO blocking wheel listener at rest (`verify-schedule-scroll-smooth.mjs` verdict 7 stays the contract) and instead learns Ctrl/Cmd is down from its own keys, from any pointer event over it carrying the modifier, and from the shell forwarding the key state (`Scheduler.jsx` → `lib/modifierForward.js` → `planar:modifier-keys`). **Disclosed limits, not closed:** Ctrl pressed with focus outside the page document (address bar, another window) while the pointer does not move, and a trackpad pinch (a ctrl+wheel with no key). Do not add a permanent blocking wheel listener to "fix" those without re-measuring against the scroll gate. Guards: `test/scheduleCtrlZoomHover.test.js`; ui-audit `verify-schedule-ctrl-zoom-hover` (embedded in a parent page; red on the pre-fix behaviour) and `verify-schedule-ctrl-zoom-live` (the real shell). (B2671192.)
-
-54. **(2026-11-08) The sign-in panel closes ONLY when the person asked — Close, an Escape that nothing else took, a press AND release on the dark backdrop, or a successful sign-in.** Owner (sign-in must be hassle-free; a lost half-filled form is a dead end), after the panel "disappeared on its own" in desktop Chrome with 1Password. Escape is handled on the card itself (focus inside the panel, not already handled by a password-manager menu / autofill list / open dropdown), never by a document-level capture listener; the backdrop closes only when the press began on it (a drag that starts in a field and ends outside, or an injected click, never closes it); a forced page reload (the stale-build chunk rescue) brings the panel back with the typed email + tab (sessionStorage, never a password, five-minute freshness, forgotten the moment the person closes it). Every path that can close or unmount it is listed in `src/shared/auth/panelDismiss.js` and pinned by `test/authPanelClosePaths.test.js`; an unasked unmount is reported (`auth-panel-vanished`). **Unchanged:** the set-new-password view stays non-dismissable. Guards: repo-root `test/` **authPanelClosePaths**; e2e **auth-panel-stays-open** (Chromium + mobile WebKit; red on e282104). (NEW-1.)
-
-55. **(2026-11-10) Where two roads of DIFFERENT widths meet end to end, the WIDER road tapers into the narrower one — and that is the whole feature.** Michael was offered four shapes and picked only this one: the wider road narrows smoothly, symmetrically about its centerline, over a length (default 10 ft per foot each edge steps in, never under 20 ft, clamped to the road's last straight stretch; editable in that road's Properties "Taper" section, which exists only on a road with a tapered joint), so the pavement is one continuous piece with no notch. **Not chosen — do not build without a new decision:** curb returns at T joints for this case, snap-and-merge of the two roads, or per-end widths on a single road. The taper is DERIVED from the two roads (`lib/roadTaper.js` `roadTapersOf`; same width / a tee / a three-arm node / a roundabout = no taper) — the only stored fact is the typed length, `road.taper = { s?, e? }` on the wider road. It rides the per-road `trim` object (`trim.taper`, delivered by `roundaboutsForSite`) so the strip, the face-of-curb lines, the paved-area figure, the dissolved network and the PDF/print read one answer; the angled joint's outside corner is `taperJointCover` (mitred to the repo's limit, bevelled past it; the inside corner is never filled). **Still holds with it: no bend-flagging / "this curve is wrong" warning — roads let him be wrong.** Guards: repo-root `test/` **roadTaper** (red on main: 24 of 26); e2e **road-taper**. (NEW-1.)
-
-56. **(2026-11-13) While a Measure tool is armed, a left press is ALWAYS a point — it is never eaten by an existing measurement.** Michael, on the Bain plan: after switching from Area to Length "the first click on the map does not register," and his lead that it landed on the edge / vertex of an existing measurement; expected: "a click on or near an existing measurement's edge still places a point … it must never be eaten." Measured (B2671280): the old B910 rule let a finished measurement's invisible grab layer take a press from the Measure tool, select it and silently drop to Select — for an AREA the grab layer is a filled polygon over the whole shape, so a click anywhere INSIDE a finished area was eaten too; open ground never dropped. **This AMENDS B910** (a left click selecting a measurement from the Measure tool is retired): a measurement is picked in the Select tool, or by right-click (its menu selects it from any tool). Do not make a finished measurement grab a left press while a Measure tool is armed, and do not drop the tool to Select on a press. Guards: e2e **measure-first-click** (red on the pre-fix build: every existing-mode × next-mode × vertex / edge / inside-area), **measure-select** (Select-tool selection and cycling); `SitePlanner.jsx` `renderMeasureNode` `canGrab` / `hitLive`.
-
-57. **(2026-11-15) Notes boxes the person PLACES may overlap, like PowerPoint — nothing moves out of the way for a drop, a resize, a nudge or a pasted box; only growth from a box's OWN WORDS pushes the box below clear.** Michael, verbatim, overruling the part of PR #2952 he had not asked for: "We don't need to move the boxes out the way… I want it to function slightly like PowerPoint, where you can post stuff over each other." What he DID ask #2952 for stands: pasting or typing text into a box that makes it grow must not draw over the box below ("atrocious") — that unintended overlap still pushes. "Placed by hand" is decided by the stored placement (x, y, width, height) changing in a user edit (`notesBoxClearPlugin.js` `placedBetween`), never guessed from the picture. Do not bring back a push-aside for a drop or a narrow, and do not add a snap, nudge or warning for a placed overlap. Ctrl+Z undoes both. Guards: repo-root `test/` **notesBoxClear**; **verify-notes-no-overlap** (placement scenarios, red on the pre-change plugin); (B2671289.)
-
-58. **(2026-11-15) In Notes, copying a BOX and copying TEXT are two different things and it must be obvious which one he is doing — Excel's way.** Michael: "it must be obvious when he is copying a BOX as opposed to TEXT, the way Excel shows a copied cell." Click a box's outline (the box itself is selected), Ctrl+C: the box wears a moving dashed outline until Esc, a new copy or an edit (a paste is not an edit), and Ctrl+V makes a NEW box with all its text and formatting — wherever the caret is; with the caret inside another box's text the paste-options tab offers the text-only version. Any text selection (a drag, Shift+arrows, **Ctrl+A**) copies TEXT ONLY: no outline, no box on the clipboard, a paste inserts text — the box frame is taken out of every copied slice (`copyScopePlugin`). The box rides the clipboard in a `data-planyr-boxes` attribute of the HTML; its content is still ordinary HTML + plain text for other apps. Ctrl+X on a selected box cuts it (one Ctrl+Z restores it). Do not make a text copy carry a box, do not draw the outline on a text copy, and do not pour a copied box's words into another box unless he picks Keep Text Only. Guards: repo-root `test/` **notesBoxClipboard**; **verify-notes-box-copy** (a required `build` step). (B2671288.)
-
-59. **(2026-11-15) In Notes, Ctrl+A belongs to the thing you are in — PowerPoint's rule, approved by Michael.** With the caret inside a box, Ctrl+A selects that box's text ONLY; Ctrl+C then copies TEXT (constraint 58: no box, no outline), typing replaces only that box's text, one Ctrl+Z restores it. In a table cell it steps outward — the cell's text, then the whole table, then the box's text — and never escapes into another box. With NO caret in a box (a box selected by its outline, or blank paper) Ctrl+A selects EVERY box on the page as boxes, and Ctrl+C then copies them as boxes with the moving outline; Delete / arrows / Ctrl+Z act on all of them. A page with no box and a form field (the title, search) keep the browser's own Ctrl+A. Do not bring back the whole-page text selection, and do not let a second Ctrl+A handler grow beside `selectAllScope`. Code: `lib/notesSelectAll.js` (keymap, priority 200, above the engine's own Mod-a) + the window handler in `NoteEditor.jsx`; guards: repo-root `test/` **notesSelectAll**; **verify-notes-select-all** (a required `build` step; red on the pre-change build, 19 x). (NEW-1, B2671293.)
-
-60. **(2026-10-19 / 2026-10-22 directions, captured 2026-11-16 from the Goose Creek brief — B2331664 ×2) Adding lots from the county NEVER auto-zooms, and the county's lot lines draw from FURTHER OUT, hiding only house-size lots.** Michael (2026-10-19): arming Add parcels / Select parcels must not move the view; (2026-10-22): outlines "need too much zoom — I need to see parcels from further out", fine to hide only tiny (house-size) lots at wide views, the concern being load on county servers. So both click-a-lot surfaces (the planner's Add parcels › click lots and the Map's Select parcels) draw the SAME larger-lots band (`parcelWideLayer.js`: lots ≥ 0.2 ac one zoom step under a source's own vector floor, ≥ 0.5 ac two steps under, via a size filter the county never sees past) and the short "Zoom in to see the county lot lines" line shows ONLY where the view is genuinely under that band. A click shows its lot's outline the same frame. Do not add an auto-zoom, do not lower the thresholds by downloading every lot and hiding them on the client, and do not let the planner's click-a-lot layers be built without `wide: true` (repo-root `test/` **addLotsOutlineZoom** fails). Parcels on top stays #27.
-
-## Grading model (owner rules 2026-10-16; round 4 2026-10-19)
-Owner-only (constraint #25). Code: `proposedSurface.js` (`grading` argument, `limitGridSteps`), `gradingLimit.js`, `buildableGround.js`, `buildingGrade.js`, `gradingBase.js` — see `src/workspaces/site-planner/CLAUDE.md`.
-- **Round 4 (B2349120–B2349124, owner 2026-10-19: "the calcs seemed awfully rectangular" — the civil's Tomochichi sheet is the target):** grading is ONE pad inside a GRADING LIMIT — in "Around the layout" mode the auto union of every graded element pushed out by the shoulder, outside corners rounded (radius ≈ the aisle width, min 30 ft), holes narrower than an aisle filled, clipped to the setback (never crossing it), editable as a polygon with vertex handles (stored on the plan; a moved element re-grows it and the panel says so, "Reset to auto" returns it); in "Grade to the boundary" mode the setback less the pond and any stream/wetland buffer, with the slope thrown INWARD from that line — bounded by the Level-ground sweep's own boundary samples, so the flat plateau IS the sweep's mask at the building's FFE (`buildableGround.maskAt`, reused, never a second engine) — nothing outside the limit is ever graded there, the setback flag cannot fire, and the daylight line is the setback itself (B2376240). The mode is a two-option control on the panel's "Graded area · n AC" line.
-- ONE stitched surface inside the limit: the pad flat at FFE; each paved element on its plane (court from FFE − dock drop at the face, a lot from FFE − 0.5 ft at its curb, the pavement slope default 1.5%, never below 0.5%); adjacent paved planes MEET by sharing their common edge elevation — the lower wins, the higher bends toward it within its own extent, never a seam ramp (a bend past the max pavement slope, 5% default, says "can't meet without a step; a curb/wall of X ft"); the open ground between elements is interpolated between the planes it touches (the plateau is flat at the FFE in boundary mode). The dock wall is the one exempt step.
-- The daylight slope (2:1 default; 3:1, 4:1) is thrown from the LIMIT only, cut or fill as the ground dictates, around the whole outline — never from an element edge inside it; ONE daylight ring per limit region; earthwork, balance, the suggested FFE and the flag ("the south edge of the graded area runs n ft past the setback", fixes: raise/lower FFE, move building, pull the limit in → Edit outline with the span circled) run over the WHOLE graded area.
-- Proposed contours (Layers row + the panel's "Show proposed contours", off by default) are traced in the terrain worker off the surface's own lattice at the existing contour rule (1 ft, coarser only when the range would drown the picture), bold in the contour brown, index lines every 5 ft labelled, clipped to the daylight line; never in a render, the previous lines kept while a trace is in flight.
-- Cut & Fill (the per-plan "Show cut and fill on the map" box) paints ONLY the slopes outside the limit (rust cut / blue fill by depth, red outside the setback), the limit as a thin dashed ink line, the dotted daylight line, the court spots and fall arrows and the four pad-corner pills; nothing inside the limit is tinted. The Level-pad limit stays its own dashed line, OFF by default. Settings (pavement slope, dock drop, max cut/fill, grading slope, shoulder, corner radius, max pavement slope) live behind the Grading panel header's gear.
-- **Round 5 (B2391552–B2391557, owner 2026-10-20: "loop until the workflow actually makes sense"):** the proposed contours are traced off a FINE CONTOUR LATTICE sampled from the stitched surface itself (`proposedSurface.contourLatticeSteps`, ≤ 6 ft on a 100-acre site, every sample inside the limit is graded ground — the pad exactly at the FFE — and never existing ground; existing ground only past the daylight line, a pond / DEM void NaN), never from the 13 ft earthwork cells.
-- The tracer (`contourTrace.buildProposedContours`, in the worker) is interpolated marching squares, the lines CLIPPED to the daylight line (traced off the lattice's own graded field — the exact locus where the thrown slope meets the ground; in boundary mode the setback is the outer clip and the deep ground the engine leaves ungraded is a hole), CUT out of the building pads with the wall's one-cell interpolation band (a wall is a wall, not a contour), pieces under a cell dropped, Chaikin-smoothed twice with the endpoints kept on the line; one label per index piece, set ALONG the line and upright, never two on top of each other (`gradingPaint.placeContourLabels`).
-- While "Show proposed contours" is on, the EXISTING Contour-lines layer is drawn automatically (forced into the effective overlay set, never written to the Layers prefs), dashed and muted, and cut OUTSIDE the same daylight rings by the same clipper (`contours.clipContourLinesOutside` through the layer's `setGradingClip`), so a proposed contour of level E meets the existing one of level E on the line; a fourth checkbox, "Paper background" (`layers.paper`, ON by default, per plan, also a Layers row), fills the parcel out past the slopes with the sheet's white under the whole picture so the aerial drops out there.
-- The picture is a required check on itself: ui-audit **verify-grading-picture** renders the Chehaw geometry at three zooms (parcel · building · NE corner) in both limit modes, saves the PNGs under `ui-audit/screenshots/grading/`, and asserts zero contour pixels inside the building ring, ≤ ceil(depth × 1.5% / interval) + 1 crossings per court or lot, no staircase, no overlapping labels, and the tie at the daylight line (the ground at a proposed endpoint IS its level); Node guard `test/proposedContours.test.js`.
-- **Round 6 (B2396672–B2396674, owner live check 2026-10-20 on Georgia Test Site › Concept A, "To the boundary"): THE OPEN GROUND INSIDE THE LIMIT FOLLOWS THE PAVEMENT, IT DOES NOT STEP BACK UP TO THE FFE** — in BOTH modes a point of open ground reads the graded edges it touches (the nearest elements whose nearest point it can see without crossing another element) and continues their fall at the site's open-ground slope (default 2%, the gear's "Open-ground slope", `openGroundSlopePct`); each touched edge offers `z_edge − s·d + (d − d_nearest)/(2·ratio)` and the LOWEST offer wins (`proposedSurface.limitGridSteps` `openGroundZ`), so beyond a court falling to E the ground is ≤ E and keeps falling toward the limit, a lower lot pulls the ground down to its curb at the grading slope, and nothing sits above an adjacent pavement edge. Boundary mode's flat plateau at the FFE (the Level-ground sweep's mask) is GONE — the setback's inward slope is thrown from the limit at whatever elevation that surface reaches there, every point inside the setback is graded ground (no hole), and earthwork, balance and the suggested FFE run on this surface. Node guard: `test/gradingLimit.test.js` "ROUND 6" (a court falling to E with 100 ft of open ground beyond it: ≤ E and ≥ E − 2 ft at the limit; no cell above the nearest edge it drains from).
-- **Round 6 — NOTHING INSIDE THE DAYLIGHT LINE BUT THE SURFACE:** in boundary mode the limit (the setback and its pond / buffer holes) is the one ring BOTH families are cut by — the worker clips the proposed lines to it alone (never to the lattice field's own crossing, which sits half a cell off), the existing layer is cut outside it exactly, a closed proposed loop enclosing under two lattice cells is dropped as noise, and a closed ring inside the limit is only ever a real pit or hump of the surface (a perimeter swale where the setback's cut slope meets the falling ground is one, by design).
-- **Round 6 — DENSITY AND WEIGHT BY ZOOM** (`gradingPaint.planContourDraw` / `contourMultiple`, `CONTOUR_DRAW`): the traced set is always the full interval; what is DRAWN follows the zoom scalar — with the parcel filling the map (under 1 px/ft) index lines only (every 5th) at a thin weight; with the building filling it every level, intermediates hairline and index one step heavier; and a piece whose contour spacing (the worker's per-piece `interval / |∇z|`, `contourTrace.pieceSpacingCells`) × px/ft is under 4 px is drawn only at the next coarser multiple that clears it, so two adjacent contours never touch and a steep bank reads as distinct parallel lines, never a fill; labels ride only the pieces drawn. The picture harness gained (f) zero existing-contour pixels inside the daylight polygon, (g) no closed proposed ring on flat ground inside the limit, (h) never a fill (no brown pixel in a run ≥ 5 px both ways; the parcel view index-only).
-- **Round 7 (owner live pass 2026-10-22: "the daylight line and the slope bands are drawn as a cell staircase"):** band outlines (daylight line, limit edge) are traced and smoothed like contours and the hatch is clipped to them — the band field (`gradingPaint.bandField`: + depth in the band, − past the daylight line, extrapolated at the slope so its zero IS where the slope meets the ground) traced in the terrain worker by the contours' interpolated marching squares + Chaikin (`contourTrace.traceBandOutline`), composed with the limit by `gradingLimit.bandRegions` (in layout mode, while the proposed contours are traced, THEIR daylight line is the band's outer edge, so hatch and contours end on one line); the hatch is a smooth-scaled TINT (`BAND_TINT`, never above a quarter opacity, rust / blue kept) clipped to that polygon, the daylight line one thin solid contour-brown line on top, boundary mode's toe / top of slope a thin dashed one. Never in a render (an effect + the worker). Guards: `test/proposedContours.test.js` "ROUND 7"; ui-audit **verify-grading-picture** (i) smooth daylight polygon, (j) hatch clipped to it, (k) contours outnumber stroke-weight tint inside the band.
-- **Round 8 (B2396674 ×2, B2500224, owner live check 2026-10-29 on Concept A, NW corner):** the open ground inside the limit is ONE continuous drainage surface — `L − (K + s)·D`, a min of cones over every graded edge point less the distance term, pit-filled on a fine drain lattice so every point drains to the limit, a pond or a pavement edge (`proposedSurface.js` "ROUND 8") — never a visibility-selected plane, and never a closed contour on open ground.
-- **Round 8 — the boundary limit is the PROPERTY LINE inset by the grading margin (gear, 10 ft default) and any undisturbed buffer (gear, 0 default, along every parcel edge), less ponds and stream buffers — never the building setback** (`gradingLimit.propertyLimit`; the setback bounds buildings only; layout mode clips to the same limit and its flag says "past the property line / into the buffer / into the grading margin").
-- **Round 9 (B2500224 ×2, B2571184, owner 2026-10-30): there is exactly ONE limit object — the grid's `limit` (its `sig` = the limit's definition) — read by the panel, the surface, the band, the contours, the existing-contour cut and the flags alike; a traced picture is painted only against the limit it was traced on (`lib/gradingPicture.js`), never the previous mode's under the new mode's name.** Inside the slope band the surface is the exact plane at the ratio (never the drain lattice), and the band is thinned with one multiple, so its contours run evenly every interval × ratio. Guards: repo-root `test/` **gradingRound9**; ui-audit **verify-grading-picture** (n)(o); live diagnostic ui-audit **diagnose-grading-boundary-live**.
-- **Round 10 (B2571184 ×3, B2431312 ×2, B2585312/B2585313, owner 2026-10-30 7:11 / 7:15 PM): the band's contours are the level sets of the Euclidean distance to the THROW EDGE (the limit with its convex corners rounded by the limit corner radius — `gradingLimit.throwEdge`; the limit itself is untouched), so on level ground they are straight runs joined by concentric arcs of radius R − depth and `interval × ratio` apart on every run; the TRACER may never move a line off its level (`buildProposedContours` simplifies at 0.02 cell — the 0.5 / 0.12 cell passes of rounds 7–9 were the uneven spacing), and the guard judges the DRAWN lines (`gradingRound10Even`, ui-audit `verify-grading-round10` (o)(p)), never the surface alone.** Labelling by scale (`lib/contourLabelPlan.js`): at ≥ ~0.75 px/ft (the 100-ft scale and closer) EVERY drawn contour, index or intermediate, proposed or existing, carries an upright elevation on a straight stretch, never two labels overlapping (existing lines only on the grading-clip branch, so no other account changes); farther out, index lines only as before. Readout contract: the cursor chip shows "Prop NNN.N ft" with Cut / Fill at EVERY point inside the limit, Prop = Exist ("On grade", undisturbed) on the property past the daylight line (B2585313 ×2), and "—" only off the property, on a pond / DEM void, or with grading off; a "—" inside the limit is reported (`grading-readout-dash`, `lib/readoutDash.js`) — an owner-reported symptom that was not reproduced stays open until its V passes (STANDING RULE #2).
-- **Grading PANEL LAYOUT (B2585840, owner-approved 2026-10-31):** the floor is shown and edited in ONE place (Finished floor + the `AUTO · NO HAUL` / `TYPED` pill, never repeated in Ground); **Limits of disturbance is ONE signed number in feet from the property line, negative inside** (default −10; stored as today's positive `gradingMarginFt`, so the panel number is its negation; positive past the line, cap +50) and the "Around the layout / To the boundary" control is gone (**SUPERSEDED 2026-11-04, B2655792 — see the next bullet: the app's limit is ALWAYS the layout's outline; the number is only the fence**); **flags are threshold-only, one sentence each, never a description of the ground** (the depth flag reads "Fill reaches 31 ft on the south side. Past 12 ft, sites usually terrace or wall." — `terraceDepthFt` in the gear); the three suggested floors are **no haul / least digging / shortest slopes**; **Ground shows buildable acres and relief only**. Code: `GradingPanels.jsx`, `lib/gradingPanelModel.js`; guards `gradingPanelLayout`, ui-audit `verify-grading-panel-layout`.
-- **⛔ GRADE ONLY WHAT THE LAYOUT NEEDS; LIMITS OF DISTURBANCE IS A FENCE, NOT A TARGET (B2655792/B2655793, owner 2026-11-04 on Concept A: "grading only what you need" — the Falcon Design Tomochichi sheet).** The B2585840 panel layout was built as "the one number = the old To-the-boundary mode", which graded the WHOLE fenced parcel (Chehaw Concept A through the app's path: 72.4 of 72.4 AC, 657k / 938k CY, 49-ft fill on open ground). A limit of disturbance is the line grading may not cross. **Rule: `gradingCfg` returns `limitMode: "layout"` for EVERY stored value in the app (a plan PR 2775 had converted to `boundary` computes under it without a re-save); the graded area is the auto outline of the layout (building + bump-outs + courts + rows + lots + shoulder, `gradingLimit.autoGradingLimit`) or the owner's hand-edited ring (Edit outline), the slope is thrown OUTWARD to daylight, and `gradingPack` hands the engine the property line ± N ft as `setbackRings` = the FENCE it clips to; any cell past it feeds `grid.outside` → the "slope runs … past the property line / into the buffer / into the grading margin" flag (panel + the map's red dot) with its fixes.** The number moves the fence only: Concept A at −10 / +20 / −40 grades the same 36 AC and 315k / 376k CY. `boundary` survives in the engine for tests and the UI harness behind `gradingCfg(…, { engineBoundary: true })` — the app never passes it; no mode control returns to the panel. Panel words: the Other-floors Haul column is WORDS ("2,200 import" / "1,200 export" / "balanced", `gradingPanelModel.haulWords`), and `floorRows` checks every row name against its numbers (a "no haul" row with a haul is "nearest no haul"; "least digging" / "shortest slopes" sit on the row they are true of). A court spot says "dock" only when the court touches the wall (`spotElevationsFor` → `face.atWall`, `DOCK_FACE_TOUCH_FT`); a trailer row's near edge — lower along the same 1.5% fall — says "row". Guards: repo-root `test/` **gradingOnlyWhatYouNeed** (the app's own path; red on 22676ea), **gradingPanelLayout**; ui-audit **verify-grading-panel-layout** (`app=1`); live V2100464.
-- **3D viewer (B2671220, NEW-1 2026-11-11, owner-approved mockups A + B):** A "3D" button on the map (top right, beside View and Imagery & Layers; only with "Grade this plan" on, owner-only; B2671227 moved it out of the Grading panel) opens a full-screen black-void viewer — the parcel as a solid block, top = the PROPOSED surface in the 2D cut / fill palette, the EXISTING ground as a ghost wire, buildings flat with a dashed outline, Height 1×/2×/3×/5×, a Slice toggle with a draggable section, a live compass + a ground "N" (B2671226; north = the 2D map's north). No new grading math (the planner's own samplers on a lattice); three.js loads only in the viewer's own lazy chunk. Detail + guards: `src/workspaces/site-planner/CLAUDE.md`.
-- **Fit the biggest building (B2671230, NEW-1 2026-11-11, owner-only):** the inverse search — given the parcel and these rules, the biggest building (with its courts / trailer rows / parking) whose WHOLE graded footprint daylights inside the Limits of disturbance with ≤ the panel's max cut / fill. One Grading-panel button → a ghost + a short card (SF, size, finished floor, cut / fill / net, ONE alternative link) → Use this (one undoable action) / Dismiss. On Chehaw Concept A: 439,000 SF at FFE 795 (at the first ship's max cut / fill of 12 ft held against the whole assembly). **⛔ NEVER A DEAD END (V2115882 FAILED 2026-11-11 on the owner's single-load, 650-deep plan, Limits 0: "No building fits…" and nothing else):** the plan's max cut / fill binds the building PAD only (courts, trailer rows and lots need only to daylight inside the fence), and when nothing fits the rule is RELAXED in steps — the smallest pad cut / fill (whole feet) at which the template's smallest building fits, then the biggest building at it; failing even that, the daylight test off — and the card says in one plain line which rule the building breaks and by how much (`breaks`). Only a setback that cannot hold the smallest building at any cut / fill is "no-room". Detail + guards: `src/workspaces/site-planner/CLAUDE.md`.
-- **⛔ A DRIVE TIES INTO THE ROAD'S GRADE AT THE PROPERTY LINE (B2671228, NEW-1 2026-11-11, owner screenshot on Georgia Test Site › Concept A: the 30-ft entrance drive off Chehaw Rd was graded at the truck court's elevation to the line while the road sat near 805 — "54 ft past the property line").** **RETRACTION: this file used to say "Access and drive grading are OUT OF SCOPE. Do not add a drive, a drive grade or a road tie-in." The owner never said that — his 2026-10-16 words were "don't overthink the access, that's its own challenge." It is in scope; do not restore the old line.** Rule (`lib/driveGrade.js`, class `driveRoad` in `proposedSurface.js`): a centerline road that ties into the property line (`driveTieOf`) starts at the EXISTING ground at the line (`existAt`, spot "road 805.2"), runs a near-flat landing (50 ft at ≤ 2 %), then ONE constant grade to the elevation of the court / lot edge it serves (read off that element's plane at the drive's end), then the court's own plane. The graded footprint is the road strip clipped to the grading fence, so the only work at or past the line is the tie-in itself; side slopes daylight inside the property. Every number is a Standards value (the gear: `driveMaxGradePct` 8, `driveLandingFt` 50, `driveLandingPct` 2 — never hard-coded in the engine). A drive that cannot make the change within the max grade is STILL graded to meet both ends and says so in ONE plain flag ("Drive too steep to reach the road") — it never cuts past the line to hide it. **ROUND 3 (V2115881, owner 2026-11-12, measured on his plan: a road ending on the west trailer row 41 ft from any graded court was dropped as "not a drive" and the limit swelled 28 ft past the line):** ANY paved graded element serves a drive — court, trailer row, car lot, paving — the nearest wins; within 120 ft (`DRIVE_SERVE_REACH_FT`) it runs to that element's EDGE elevation, beyond that (or with nothing graded) to the EXISTING GROUND at its far end — a road that ties into the line is ALWAYS a plane, never "not a plane"; the only skip is no ground data at all (said, `driveWhy`). **And no road, plane or not, may carry the grading LIMIT past the property line: a tie road is never an extra ring (it is a plane), every other road joins the limit only inside the fence (`roadLimitRings`, fence = `driveFenceFor`, the ring `gradingPack` hands the engine).** A road with no ground data at all is not a drive and contributes nothing to the limit. Owner-only, only while grading is on; earthwork, contours, the 3D viewer and the past-the-line flag follow because they all read `grid.zOf`. A non-road paved element that itself reaches the line is NOT covered (B2671229, open — needs an owner answer). Guards: repo-root `test/` **driveGrade**; ui-audit **verify-grading-drive** (`?drive=ring` before arm must reproduce the bug or the run is VOID) and **verify-grading-drive-live** (the real planner); live V2115881 (✅ PASSED on the owner's account 2026-11-12, build bcb81ff, after two failed checks on 7890542 and 9588ca6 — see the site-planner CLAUDE.md entry; `window.__plannerGradeDrive()` says why a Road is or is not a drive).
-- Unchanged from rounds 1–3: owner-only through the ONE gate (`gradingGate.js`); per plan, OFF by default ("Grade this plan", `settings.grading.enabled`), the owner's planner byte-for-byte a non-owner's while off; the FFE is SUGGESTED, never asked (`ffeSuggest.js`: balanced dirt over the graded area, pond spoil as fill, rock kept 2 ft clear, docks on the low side said not changed, max cut/fill a soft warning, any flood floor a hard minimum); a bump-out is a pad member of its host (`gradingMembership.js`); volumes are bank volumes (access and drive grading are IN SCOPE — see the drive bullet below); grading never does work in a React render (`useGradeSurface.js`, chunked builds with a stale token, every search yielding inside its builds, drags rebuilding on release only); its own left-dock panel between Drainage and Yield, the model mounted from the planner so the map paints with the panel closed. Guards: `test/gradingLimit.test.js`, `gradingModel`, `ffeSuggest`, `gradingPerPlanSwitch`, `gradeSurfaceOffRender`, `gradingBumpOut`; ui-audit **verify-grading-harness** (§7 limit, §8 contours, §9 boundary; frames < 50 ms at DSF 2.68).
+## Grading model (owner-only; constraint #25)
+The full owner rules, rounds 4 to 10, the panel layout, "grade only what the layout needs", the 3D viewer, Fit the biggest building and the drive tie-in rule moved verbatim to **`docs/site-planner/grading-model.md`** (read it before touching grading). The rules that must never be lost: grading renders only when `is_admin()` is true through the ONE gate `lib/gradingGate.js` (#25); per plan, OFF by default; **the app's limit is ALWAYS the layout's own outline and "Limits of disturbance" is a FENCE, not a target (B2655792, 2026-11-04)**; there is exactly ONE limit object (round 9); never grade work in a React render; a drive ties into the road's grade at the property line (B2671228); the "Access and drive grading are OUT OF SCOPE" line was retracted and must not be restored. Code and guards: `src/workspaces/site-planner/CLAUDE.md` and [grading.md](docs/site-planner/grading.md).
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -817,874 +304,75 @@ server/                   # placeholder README only — NOT built or deployed; b
   domain root too.
 
 ### Dependency notes (client bundle)
-Runtime deps are kept few and deliberate. **No new dependency for "open an uploaded Excel in Spreadsheet" (NEW-1, 2026-10-29):** it reuses ExcelJS (`lib/xlsxIO.js`), `fflate` (already the .docx unzipper) and the already-installed `xlsx` (SheetJS) — the last now ALSO read client-side, for old `.xls` files only, inside the lazy parse worker (`model/lib/spreadsheetWorker.js`), never in an eager chunk. New client dependency added 2026-07-10:
-- **`three` (NEW-1, 2026-11-11, pinned `0.170.0` exact — the owner chose three.js for the 3D grading viewer)** — the WebGL renderer for the owner-only 3D cut-and-fill viewer, ~0.46 MB minified of the viewer's own ~0.49 MB lazy chunk (128 KB gzip). **Loaded ONLY by `lib/grading3d/threeScene.js` → the `Grading3DViewer` lazy chunk, opened by the map's "3D" button**; named imports only, our own orbit controls (no `three/examples`); the main bundle and the plan editor chunk carry none of it (repo-root `test/` **grading3dGate**; `node ui-audit/verify-grading-3d-bundle.mjs`). Justified over MapLibre's built-in terrain (one raster-dem surface from tiles, the map kept around it) because the viewer needs TWO surfaces from the plan's own grids in a black void. Never statically import it, never raise the Site-route limits for it.
-- **`dxf-parser` (B747, ~380 KB, one transitive dep `loglevel`)** — parse-only DXF tokeniser used by
-  the site-plan overlay's CAD import. Justified over hand-rolling: DXF group-code parsing has to
-  survive many real-world exporter/version quirks, and a robust hand-rolled full parser fails the
-  cost/benefit test. We hand-roll ONLY the entity→SVG rendering (the civil subset), never the parse.
-  It's **parse-only** (no DOM), so it runs inside the DXF Web Worker, and it's imported lazily behind
-  a `?worker` specifier + a dynamic `import()` in `openOverlayFile` — so the CAD parser never rides
-  the initial planner bundle (loads only on the first `.dxf`/`.dwg` drop).
+Few, deliberate runtime deps. **No new dependency for "open an uploaded Excel in Spreadsheet"** (reuses ExcelJS, `fflate`, `xlsx` read client-side for old `.xls` only in the lazy parse worker). **`three` is pinned `0.170.0` exact and loaded ONLY by `lib/grading3d/threeScene.js` → the lazy `Grading3DViewer` chunk** (never statically import it; test **grading3dGate**, `node ui-audit/verify-grading-3d-bundle.mjs`). **`dxf-parser`** is parse-only, runs in the DXF worker behind a lazy `import()`. [full text](docs/decisions/dependency-notes.md)
 
-## Workflow & deploy
-- **Branch per workstream; `main` is the protected, always-working, deployed line.
-  No direct commits to `main` from here on.**
-- Branch naming: `doc-review/<feature>`, `site-planner/<feature>`. Branch from the
-  latest `main`; merge the latest `main` back into long-lived branches as you go.
-- **Merge often** — the longer a branch drifts, the larger the eventual merge
-  conflict. Per-workspace work in separate folders rarely conflicts; keep edits to
-  genuinely shared files (the coordinate module, the shell) small.
-- **Land work via pull requests; require a passing build check to merge.** The GitHub
-  Actions workflow runs the build on every PR (a green "it builds" check) and on
-  pushes to `main`; the deploy job is gated to `main` only.
-- **"Commit" means take it LIVE — the whole chain, no stopping, no asking.** When the
-  owner says "commit" (or "ship it", "make it live"), do _all_ of: stage → `git commit`
-  → push the branch → open the PR into `main` → merge it (enable auto-merge if a check
-  must go green first). Merging to `main` is what ships it. Do **not** stop at a local
-  commit, and do **not** ask "want me to open the PR?" — opening and merging the PR is
-  part of what "commit" already authorized. The only acceptable stop short of live is a
-  hard blocker (merge conflict, red required check, protection that rejects the merge) —
-  report _that_, not a request for permission.
-- **⛔ THE CLAUDE CODE WEB SESSION HARNESS DEFAULTS EVERY NEW PR TO DRAFT — THAT DEFAULT DOES
-  NOT APPLY HERE, AND THE SESSION THAT OPENS THE PR IS THE ONE THAT MARKS IT READY, EVERY TIME,
-  BY HAND (B781760 → B793696 → B914448/B914449 → B934400/B934401, 2026-08-26 through
-  2026-08-31).** The harness instruction to open PRs as draft lives outside this repo — not in
-  `CLAUDE.md`, not in any file here, not editable from a session — so a session that reads only
-  "commit means ship it live" above, with nothing telling it who un-drafts the PR, can stall on
-  exactly this collision.
-  **THE HISTORY, briefly, because it explains why this rule is written so bluntly.** A text rule
-  alone lost this collision four times — #1157, #1162, #1166 and #1180 each sat as a green,
-  conflict-free PR parked in draft, waiting for a button the owner was never going to press. That
-  is what `.github/workflows/pr-auto-ready.yml` was built to fix automatically (B781760), and it
-  **never once succeeded on a real PR.** `markPullRequestReadyForReview` and
-  `enablePullRequestAutoMerge` both came back FORBIDDEN ("Resource not accessible by integration")
-  for `GITHUB_TOKEN` in this repo, confirmed on real PRs under every credential/setting
-  combination there was to try (B793696): "Workflow permissions: Read and write" (on), "Allow
-  GitHub Actions to create and approve pull requests" (on), and the installed "Claude" GitHub App
-  (mechanically unusable from a workflow — it can only act as that App if it holds the App's
-  private key, and Anthropic, not this repo, holds this one). **The credential question (a PAT or
-  a self-owned GitHub App) is UNDECIDED, not declined — correction, B1266592, 2026-09-06.** An
-  earlier version of this section said the owner "reviewed the full evidence 2026-08-31 and
-  declined" that fix; he did not — he pushed back asking why this wasn't being fixed properly,
-  said he wanted "set it and forget it," and asked what the automation was even for, and the offer
-  of a self-owned GitHub App was left open and unanswered. On 2026-09-06 he confirmed only that he
-  is fine with the workflow being deleted, which is a separate question from the credential one.
-  Reading that same evidence on 2026-08-31, he then went further and had the workflow removed
-  outright (B934400/B934401): a permanently red job that cannot do either of its two jobs is worse
-  than no job, because it trains sessions to wave off red checks as environmental. **This was NOT
-  the risk being imagined away — it was tried for five days, confirmed dead by three separate live
-  re-tests, and removed because it never worked, not because the collision it was built for stopped
-  mattering.** The credential question stays open and moot while no workflow exists to hold one.
-  **`pr-auto-ready.yml` is DELETED. There is no automation here, and none is coming back without a
-  fresh, explicit owner go-ahead.** So, plainly:
-  - **The session that opens a PR is the one that marks it ready and arms the merge, every time,
-    as a normal, expected part of shipping "commit" — not a workaround, the standing way this
-    gets done.** Right after opening the PR, call the GitHub MCP tools directly:
-    `update_pull_request` with `draft:false`, then `enable_pr_auto_merge`.
-  - **The sanctioned way to ask the owner to look before a PR merges is the `hold` label (still a
-    real label in this repo's label list) or a `<!-- keep-draft -->` marker in the PR body.**
-    Nothing reads either automatically any more — the session opening the PR checks for one of
-    them itself, on its OWN PR, before calling `update_pull_request(draft:false)`, and leaves the
-    PR in draft if either is present.
-  - **If drafts start silently parking again, the fix is a DETECTOR, not another actuator and not
-    a PAT** — a read-only workflow that notices a still-draft `claude/*` PR with a green `build`
-    check and turns a check red about it needs no elevated token, because it only reads. Do not
-    rebuild `pr-auto-ready.yml`'s mutating shape without a fresh, explicit owner go-ahead.
-  It only ever *enables* auto-merge; the required `build` check (below, and the nudge-commit
-  note that follows it) still has to go green before anything actually merges.
-- **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE
-  AUTO-MERGE. GitHub snapshots the squash commit message when auto-merge is ARMED, not when it
-  fires, and a later title edit does NOT update that frozen copy (B225984, 2026-08-07).** PR #931
-  armed auto-merge while its ids read `B3001–B3004`, was renumbered three more times, merged with
-  a correct title and correct files — and `main` still carries `fdcb02d`, whose subject announces
-  **retired ids that name no heading anywhere**. That is the #865/#866 defect arriving through the
-  one door B779's announcement check cannot see: that check guards the commit **you** push, and
-  this message never passed through your branch. Re-arming is the whole remedy; it costs two API
-  calls. **No machine guard exists for this and one was deliberately not built** — scanning `main`'s
-  log needs full history, and CI checks out depth 1, so the guard would pass trivially and rot green
-  (the failure mode VIEW-INDEPENDENT-ONCE §6 names). The reasoning is on B225984 so it is not
-  re-litigated.
-- **The required `build` check often does NOT auto-start on a PR you open via the GitHub
-  MCP / automation — un-stick it yourself with a nudge commit; NEVER hand this to Michael.**
-  GitHub suppresses `pull_request`/`push` workflow triggers for PRs opened or pushed by the
-  automation's app token, so the required `build` check sits **"Expected — Waiting for status
-  to be reported"** and **auto-merge waits forever** (it will NOT merge on its own). A
-  `workflow_dispatch` build _runs_ but its check does **not** satisfy the required context, and
-  a direct merge is rejected with `Required status check "build" is expected`. **Fix:** after
-  opening the PR + enabling auto-merge, push a tiny **empty nudge commit** to the PR branch
-  (`git commit --allow-empty -m "Nudge CI" && git push`) — that fires the real `pull_request`
-  build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
-  involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
-  of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
-  **⚠ THE ROOT-CAUSE EXPLANATION ABOVE — "GitHub suppresses the trigger for the automation's app
-  token" — IS UNVERIFIED, NOT RE-MEASURED SINCE THAT ONE 2026-06-22 OBSERVATION. Measure again before
-  citing it as settled fact, or before repeating it in a brief as an established second cause of a
-  stuck PR.** A brief circulating 2026-08-31 relayed exactly this claim while flagging itself that it
-  was repeating this note, not a fresh check. `docs/incidents/CI-REQUIRED-CHECK.md` separately found a case
-  where what looked like permanent suppression was actually a temporary delay (B226400) — the same
-  kind of mistake this claim invites if treated as proven. The operational fix — push the nudge commit
-  — stays safe and cheap regardless of which explanation is true, so keep doing that; just don't
-  restate the app-token-suppression mechanism itself as proven.
-  **⛔ AND READ THE RIGHT ENDPOINT BEFORE CONCLUDING THE CHECK NEVER STARTED (measured 2026-08-14, and this
-  session got it wrong twice before checking).** `pull_request_read method=get_status` returns the COMMIT
-  STATUS API; this repo's `build` reports a **CHECK RUN**. So `{"state":"pending","total_count":0}` there is
-  the NORMAL reading for a run that is queued or in progress, and it is **NOT evidence that the trigger was
-  suppressed**. Acting on it cost two unnecessary `Nudge CI` commits and a hunt through `build.yml` for a
-  `paths:` filter that does not exist — while three runs were already `in_progress` for those very shas. The
-  authoritative read is the CHECK RUN, and there is a purpose-built endpoint for it that this session
-  only found on its third attempt: **`pull_request_read method=get_check_runs`** returns the head
-  commit's check runs directly — a handful of lines, no pagination, no matching on `head_sha`. Prefer
-  it. `actions_list method=list_workflow_runs event=pull_request` matched on `head_sha` answers the
-  same question but returns tens of thousands of characters and has to be parsed out of a file.
-  Nudge on the absence of a RUN, never on `total_count: 0`.
-  **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
-  fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
-  case at the same time.
-  **(Retired 2026-11-23, audit Batch C: `npm run safe-merge`, `resolve-ledgers.mjs`, the `planyr-ledger` merge driver, the
-  post-merge regen hook, `install-hooks.mjs`/`npm run hooks:install` and the pre-push mint gate are all deleted — the ledger lives on
-  its own branch, so `BACKLOG.md`/`VERIFICATION.md` are not on main and a branch never touches the generated indexes.)** To bring a
-  branch up to date use a plain `git fetch origin main && git merge origin/main`; `MAP.md` / `BACKLOG_OPEN.md` /
-  `docs/UI-INVENTORY.md` carry git's built-in `merge=union` in `.gitattributes` (no install step), and the touch guard stops a PR
-  from carrying them anyway.
-  **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
-  (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
-  test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
-  nothing fires, with no error anywhere. Four nudges did nothing; merging `origin/main` into the branch
-  fixed it instantly. So: nudge once → if `actions_list` shows NO run for the branch, fetch the PR
-  (`pull_request_read get`) and look at `mergeable_state` BEFORE nudging again — `dirty` means resolve
-  the conflict first (main moves fast here), then the next push fires CI on its own.
-  **⚠ One nudge is often NOT enough, and a PR never merges itself — BABYSIT it to `merged:true`
-  (learned 2026-06-27 on PR #379).** Automation-token pushes (PR-open + a single nudge) frequently
-  still don't fire the `pull_request` build — recent PRs have needed **two** `Nudge CI` commits — so
-  after nudging, **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch
-  / `pull_request_read get_status`) and **nudge again** if not. Separately, `main` moves fast (many
-  concurrent sessions) so a PR often goes `mergeable_state:dirty` on `BACKLOG*.md`/`VERIFICATION*.md`
-  — resolve by merging `origin/main` in (keep both sides' done-entries; renumber only a genuinely
-  colliding new B#/V#), re-run the gate, push. **Poll every ~150s while a PR is open** (webhooks do
-  NOT deliver CI-success / merge / conflict transitions — always re-fetch), never on a 20-min idle tick.
-- **⛔ BEFORE PUSHING A FIX FOR A CI FAILURE, RUN `npm run ci-parity` — NEVER APPROXIMATE CI BY HAND
-  (2026-09-02, owner-approved after the third CI-vs-local mismatch in a week: B927104, the
-  2026-08-31 bundle night, PR #1323).** It runs every gate the required `build` check runs, in the
-  same order, reading them from `.github/ci-gates.yml` (which `.github/workflows/build.yml` itself
-  calls via this same command — one list, not two that can drift). It reproduces CI's environment
-  too — the same build-time env vars, the pinned Chromium revision for the visual-regression gate —
-  and if a real secret (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) is absent locally it says so
-  LOUDLY and substitutes the documented dummy rather than silently measuring something CI doesn't.
-  `--list` shows the gate order with nothing run; `--skip-install` skips `npm ci` (loud, deviates).
-  **THE REQUIRED `build` CHECK IS NOW PARALLEL LANES (2026-11-23, audit Batch C).** `build` is a small aggregator job over
-  `detect` · `static` · `vitest` (3 shards) · `build-app` (uploads `dist/`) · `browser` (4 shards, downloads `dist/`); each lane runs
-  `npm run ci-parity -- --lane <name> [--shard i/n]` against the SAME `.github/ci-gates.yml`, and `ui-audit/lib/ciGates.mjs` `LANES`
-  says which gate runs where (an unlisted gate lands in `static`). A bare `npm run ci-parity` still runs every gate serially.
-  The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
-  Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
-  See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
-  **NOTES GATES SPLIT (owner decision 2026-11-23):** only five `verify-notes-*` gates stay in the required check (placement surface,
-  clipboard regression bank, box copy vs text copy, overlap rule, Ctrl+A scope — `REQUIRED_NOTES_GATES` in `ciGates.mjs`); the other 13
-  run as lane `notes-extra` in `.github/workflows/notes-gates.yml` (nightly, on demand, and on PRs touching `src/workspaces/notes/**`) —
-  NOT required, so a red nightly there is a "go look". A bare `npm run ci-parity` still runs all 18. Do not call a moved gate "a required build step".
-- **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
-  app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
-  inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
-  deploy pipeline — ✅ DONE" near the end of this file; GitHub Actions now only runs the
-  build status check, it doesn't publish.)
-- **`functions/` (repo root) is the Cloudflare Pages Functions directory — it deploys
-  automatically with every build, no `wrangler.toml` and no env-var change needed.** Any file
-  under it becomes a server-side route at the matching path (`functions/api/files.js` →
-  `/api/files`, `functions/gis-proxy/[[path]].js` → `/gis-proxy/*`), and it's where a request
-  that needs to run somewhere CORS doesn't apply — a county GIS host with no
-  `Access-Control-Allow-Origin` header, a Drive upload — belongs. `functions/gis-proxy/`
-  (NEW-1, 2026-09-24) is a plain same-origin relay for a hard-coded allow-list of hosts
-  (`ALLOWED_HOSTS` in that file) — a new host must be added there before a
-  county can be wired through it; see `docs/STATEWIDE-PARCELS.md`'s "GIS pass-through" section.
-  This is a **different** mechanism from the B445 `/api/gis-cache/` proxy (Drive-backed raster
-  imagery caching, its own regex allow-list) — don't conflate the two.
-- **⛔ A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
-  CALL AS THE ASSERTION (owner correction, 2026-09-03, B1112449/B1112450 false-alarm recurrence).**
-  A browser tab can silently keep serving a pre-deploy cached bundle — content-hashed chunk
-  filenames (`AppHeader-<hash>.js`) are meant to be cached long-term, so a STALE tab's own reload
-  can reload the SAME stale chunks rather than fetch the new deploy; two tabs opened at different
-  times can each be on a genuinely different build with no visible sign of it. The case this
-  produced: a "still broken after the fix shipped" report was measured in a tab on the pre-fix
-  bundle, while a DIFFERENT tab (used minutes earlier to confirm an unrelated part of the same fix)
-  was already on the new one — the mismatch went unnoticed because neither check read its own chunk
-  hash. **The fix is procedural, not architectural: whenever a live check's PASS/FAIL claim matters,
-  read the served chunk hash (Network tab, or `document.querySelectorAll('script[src]')`) in the
-  SAME observation as the behavior being asserted** — never assume a reload guarantees a fresh
-  bundle, and never let one tab's confirmed-fresh reading vouch for a different tab.
-- **Per-branch preview URLs** (seeing an unmerged branch live without merging to `main`)
-  are a separate, optional Cloudflare concern — not required to build or to see both
-  workspaces. (Don't conflate this with PR status checks, which are a separate GitHub
-  Actions concern.)
-- End commit messages with the session link the harness provides. Don't include the
-  model identifier in commits/PRs/code.
+## Workflow & deploy (operative rules; history in [docs/decisions/workflow-and-deploy.md](docs/decisions/workflow-and-deploy.md))
+<!--rule:WORKFLOW-DEPLOY-->
+- **`main` is protected, always working, deployed. No direct commits.** Branch per workstream (`doc-review/<feature>`, `site-planner/<feature>`), merge `main` in often, land work by PR with the required `build` check green; the deploy job is gated to `main`.
+- **"Commit" means take it LIVE, the whole chain, no stopping, no asking:** commit → push → open the PR → mark it ready → arm auto-merge → babysit to `merged:true`. The only acceptable stop is a hard blocker (conflict, red required check, rejecting protection); report that, not a request for permission.
+- **⛔ The harness defaults new PRs to DRAFT; that does NOT apply here. The session that opens the PR marks it ready and arms the merge, every time, by hand** (`update_pull_request` `draft:false`, then `enable_pr_auto_merge`). The sanctioned way to ask Michael to look first is the `hold` label or a `<!-- keep-draft -->` marker in the PR body, which the session checks on its OWN PR before un-drafting. `pr-auto-ready.yml` is deleted and does not come back without a fresh explicit owner go-ahead; if drafts park again the fix is a read-only detector, never a mutating actuator or a PAT. History B781760 → B934401.
+- **⛔ After ANY change to a PR title (every renumber), DISABLE AND RE-ENABLE auto-merge**: GitHub freezes the squash message when auto-merge is armed (B225984). No machine guard exists, deliberately.
+- **The required `build` check often does not auto-start on a PR opened via MCP: un-stick it yourself, never hand it to Michael.** Check `mergeable_state` FIRST (`dirty` swallows every nudge: merge `origin/main`); read the CHECK RUN (`pull_request_read get_check_runs`), not the commit-status API (`total_count: 0` is normal); nudge on the absence of a RUN only, preferably by `git fetch origin main && git merge origin/main` rather than an empty commit; verify a run appeared and nudge again if not; poll every ~150 s while a PR is open (webhooks do not deliver CI transitions). The "automation app token suppresses triggers" explanation is UNVERIFIED: do not restate it as fact.
+- **⛔ Before pushing a fix for a CI failure run `npm run ci-parity`** (never approximate CI by hand; `--list` shows gate order; `--lane <name> [--shard i/n]`; reads `.github/ci-gates.yml`, the one gate list). `build` is an aggregator over parallel lanes (`detect`, `static`, `vitest` ×3, `build-app`, `browser` ×4); the required name is still exactly `build`. Only five `verify-notes-*` gates are required (`REQUIRED_NOTES_GATES` in `ui-audit/lib/ciGates.mjs`); the other 13 run nightly / on demand / on Notes PRs as lane `notes-extra` (`notes-gates.yml`, NOT required, so a red nightly is "go look"); never call a moved gate "a required build step".
+- **Deploy = Cloudflare Pages (planyr.io); GitHub Actions only runs the build check.** `functions/` (repo root) is the Pages Functions directory and deploys with every build (`functions/gis-proxy/` allow-list `ALLOWED_HOSTS`: add a host there before wiring a county through it).
+- **⛔ A live measurement on planyr.io is only valid if the DEPLOYED CHUNK HASH is read in the SAME call as the assertion** (a tab can silently serve a pre-deploy bundle; one tab's fresh reading never vouches for another).
+- Per-branch preview URLs are an optional Cloudflare concern, separate from PR status checks. End commit messages with the session link the harness provides; no model identifier in commits, PRs or code.
 
 ## Engineering rules (invoke by name) + Definition of Done (B649)
+A chat brief may name a rule ("apply PDF-PARITY, LOUD-FAILURE"): treat it as if its full text were pasted. Named rules are binding shorthand. Each carries `<!--rule:NAME-->`; **the full text, incident evidence and clauses of a named rule are in `docs/decisions/<name-lowercased>.md`** (e.g. `docs/decisions/loud-failure.md`).
 
-A chat brief may reference any rule below **by name** ("apply PDF-PARITY, LOUD-FAILURE") — treat a
-named rule as if its full text were pasted into the brief. This is the **session contract**: named
-rules are binding shorthand, not optional style. (Full-text home so briefs stay short.)
-
-### Named rules
-- **LOUD-FAILURE** — No silent failure path. Every write / fetch / parse that can fail must surface the
-  failure visibly (a banner, a telemetry event, a thrown error) — never a silent no-op or a swallowed
-  `catch` that reads as success. When in doubt, crash loudly over degrading quietly. (The B209 / B595 /
-  B610 class: a "saved ✓" that didn't save is exactly the bug this rule exists to prevent.)
-- **AUDIT-FIRST** — Before patching, instrument and reconcile the prior `B#` claims against the ACTUAL
-  code. Build understanding from what the code does now, not from what a comment / backlog note says it
-  does. Where they disagree, record the code reality and **flag the discrepancy**. (Stops you "fixing" a
-  bug a prior B# already fixed, or trusting a stale claim.)
-- **PDF-PARITY** — Any change to an on-screen render must be mirrored and verified in the export / print
-  path, and vice-versa; the two must not drift. Scheduler `GanttView` ↔ `buildGanttSVG`
-  (`public/sequence/index.html`); the Site Planner canvas ↔ its PDF / print export pipeline. A render fix
-  that skips the export path is half-done. (This is a mandatory **LIVE-VERIFY** class.)
-- **MODULE-SCOPE-COMPONENTS** — Define React components at module scope, **never inside another
-  component's render body**. An inner-defined component is a brand-new type every render → React
-  remounts it → focus loss, lost input state, thrashing. (The remount / focus-loss regression class.)
-- **VIEWPORT-STABLE** — When a panel / rail / divider toggle changes a render surface's width or
-  left/top edge, the surface must neither **JUMP** nor **FLASH**. **(a) Compensate against the
-  MEASURED delta in a layout effect:** read the real DOM edge (e.g. `wrapRef.offsetLeft`) in a
-  `useLayoutEffect` (before paint) and fold the exact delta into the view transform in the SAME frame
-  as the reflow — never an ASSUMED width, never a passive (after-paint) `useEffect` (that skips the
-  content sideways for one-plus frames). Measuring the real edge **self-gates**: overlay / portaled /
-  right-side panels steal no layout width → zero delta → no shift. **(b) Buffer the surface across any
-  resize-driven re-layout / re-raster / reload:** hold the current pixels (a ghost/buffer) across the
-  reflow and drop them only when the new render is ready, so it never wipes to blank; fold any separate
-  un-buffered relayout (or an un-rastered remount) into the buffered path. Precedents: the Leaflet
-  basemap pan-compensation + tile ghost (**B837** `SitePlanner.jsx` `panelShiftRef` / geo `sizeChanged`;
-  **B65** `geoGhostRef`) and the Doc Review sheet-rail compensation + stitch-return re-raster
-  (**B838** `DocReview.jsx`).
-- **CHROME-NEVER-EATS-A-PRESS** — **Anything that paints ABOVE the content and stops propagation must either be
-  GATED on its own object being selected, or FORWARD the press to `isDoubleTap` keyed on the UNDERLYING
-  feature.** In SVG, paint order IS hit-test order, so a late-painted node with `pointerEvents` on wins every
-  press inside it — and a handler that stops propagation without calling `setSel` or `isDoubleTap` makes that
-  press *invisible*: nothing selects, no double-tap can pair, and an undo frame is often burnt for nothing.
-  Three corollaries, each learned the hard way:
-  1. **A private double-tap key on chrome that sits over its own object is a POISON.** `isDoubleTap` keeps ONE
-     tap record, so `eldim:${id}` / `${id}:label` over a footprint both dissolved the pair AND clobbered the
-     record, so a third press had nothing left to pair with. **One key per feature**; branch the ACTION on
-     which surface took the press, never the key.
-  2. **Chrome that only EXISTS once selected is the worst case, because it is invisible to a static reading.**
-     The dimension grab band renders `if (dimSel)`, so press 2 of a real double-click lands on a layer press 1
-     just created — dead by construction, and no source scan can see it.
-  3. **A guard that names one component protects one component.** Assert it STRUCTURALLY, on the real render:
-     with nothing selected, every element's own centre must answer to that element via `elementFromPoint`.
-  4. **⛔ CHROME MOUNTED BY THE FIRST PRESS IS INVISIBLE TO ANY CHECK THAT READS THE DOM BEFORE THE INTERACTION
-     (B233153) — so the probe shape is the TWO-PRESS INVARIANT: press once, RE-ASK what a double-click at that
-     point now addresses, and require the same feature.** Corollary 2 said chrome that only exists once selected
-     is the worst case; B233153 is that case at its worst, because the chrome was the feature's OWN vertex
-     handle — pressing the pond mounted the 18px hit square that then ate press 2, at the point the pointer had
-     not moved from. **And the variable that hid it was not the SHAPE but VERTEX COUNT against handle size at
-     the probe point:** six realistic four-vertex sandbox ponds all passed, because their grips sit at four
-     distant corners while a surveyed ring peppers its own basin edge. Two things make this observable rather
-     than lucky: the app exposes its own resolution read-only (`window.__plannerHitTarget`, E2E-gated — a
-     harness re-implementing the rule tests its own copy), and a harness must deliver a **native** `dblclick`
-     (`clickCount: 1` then `2`; two bare down/up pairs leave the counter at 1 and Chromium synthesises nothing,
-     so the whole root-resolver path goes unexercised while every row reads green).
-  5. **The fix belongs at the RESOLVER, not on the object that was reported.** A handle is chrome belonging to
-     the selected feature, so it is TRANSPARENT to "which feature was double-clicked" — one rule closes every
-     element type that renders grips at once. Identification only: grips keep their own pointer events and
-     their own `onPointerDown`, and **a vertex must still drag** — assert that in the same commit, counting how
-     many vertices moved (a press falling THROUGH an inert grip moves the whole object, which passes any
-     "the geometry changed" check).
-  6. **⛔ AND THE FIFTH INSTANCE'S CLAUSE — WHEN THE FEATURE IS SMALLER THAN ITS OWN CHROME, "WHAT IS
-     BENEATH THIS GRIP" AND "WHAT IS THIS GESTURE ABOUT" STOP BEING THE SAME QUESTION.** Clause 5 fixed
-     identification at the resolver by looking THROUGH the handle layer, which answers the first
-     question. It does not answer the second, and those coincide only while the feature is bigger than
-     the chrome it summons. Captured live on the owner's Bain plan: a road stub whose whole rendered
-     body is **6×12 CSS px**, wearing a 12 px endpoint handle inside a 15×22 px handle box. Press 1
-     selected it; press 2, at the same point, addressed **a different, larger road**, and the panel
-     open after press 1 was gone after press 2. **The control matters as much as the capture** — on a
-     LARGE road, a point where press 1 mounts an endpoint handle directly over the press point still
-     resolves to the road and still opens Properties, so looking through the handle layer works and the
-     endpoint handle is not the differentiator. **The SIZE RATIO is.** The rule: **while a double-click
-     is in flight, the feature press 1 selected WINS the hit test at that point** — anchored on the
-     native double-click's own time and distance budgets, so one press outside them is not a gesture and
-     resolves off the stack exactly as before (`featureTarget.gestureAnchorTarget`). Two corollaries:
-     **(a)** a "prefer it on a tie" rule is not enough — it still loses to whatever the stack puts on
-     top, which is the failure; **(b)** the same size ratio makes REVIEW chrome dangerous, not just
-     grips — the min-radius flag's 7 px corner dot is wider than that stub, and it swallowed the press
-     entirely AND ran the corner fix on press 2, **silently re-cutting the alignment**. Chrome that
-     paints ON its feature's body identifies AS that feature and forwards the press; chrome offset into
-     clear space keeps its own action and does NOT claim to be the feature. **A gesture whose contract
-     is "open Properties" must never edit the plan, and never CLOSE a panel that was already open** —
-     both are now asserted for every feature by `audit-doubleclick-properties`.
-  7. **⛔ THE SIXTH INSTANCE — CHROME ARMED BY THE CURSOR MERELY *RESTING* ON IT (B280402), and it is
-     the one clause 4 cannot reach.** Clause 4 says chrome mounted by the FIRST PRESS is invisible to
-     any check that reads the DOM before the interaction. This is worse: the parcel acreage badge
-     becomes a hit target on HOVER (B1327/NEW-4 moved the gate from selection to hover so the badge
-     could be dragged at all), and **a cursor resting on a point is exactly what a cursor does between
-     the two presses of a double-click**. Measured on the owner's plan and reproduced: at one point,
-     nothing selected, the stack reads `["el:<stub>"]` after touching another feature and
-     `["parcel:<lot>", "el:<stub>"]` after resting on it — **the parcel does not move above the
-     element, IT ENTERS**, and the element is still there, second, unchanged. It is not paint order and
-     not a pointer-events flip on the element (both proven identical across the two states). **So the
-     probe shape is: park the cursor, let it arm whatever it arms, and RE-ASK** — every other check in
-     this repo reads after a click, never after a plain hover. Fix shape: chrome that is a manipulation
-     affordance is IDENTITY-TRANSPARENT wherever it lives — `data-chrome` joins `data-handle-layer` in
-     the resolver — while keeping its own press, so the badge still drags.
-  Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
-  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
-  element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
-  pavement and a double-click aimed at the road cannot miss it; the general fix is that chrome sitting over
-  its own object's BODY forwards the press to the body, asked once for every type rather than special-cased), and
-  **B233153** (a detention pond's OWN vertex handle — the fourth instance, and the one that produced clauses 4 and 5
-  above; captured live on the owner's Bain plan after six realistic sandbox reproductions all came back green), and
-  **B806082** (a callout's own leader re-aim grips — the tip and elbow handles paint exactly where a right-click
-  naturally lands, and neither carried an `onContextMenu`, so the press fell through in total silence to the
-  empty-canvas map menu instead of the leader's own "Delete Leader" row; fixed by forwarding both grips' right-click
-  to the same handler their leader body already uses).
-  **⛔ AND THE COROLLARY B50008/B50009 ADD: A GESTURE CAN DIE WITH NOTHING EATING IT.** This rule is about
-  chrome swallowing a press, and reading every failure through it is how two other causes survived for
-  months — the pair being measured on a WALL CLOCK read inside the handler (so a busy plan spends the whole
-  budget on queueing delay), and the native `dblclick` retargeting to the root because press 1 re-rendered
-  the node the browser was holding. When a double-click "does nothing", check the CLOCK and the TARGET
-  before hunting for what covered it. The deliberate
-  EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
-  with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
-  there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
-- **FOREGROUND-OR-VOID** — **A BACKGROUND TAB CANNOT BE MEASURED: NOT ITS CLOCK, AND NOT ITS PIXELS.
-  A browser-driving harness MUST assert `document.visibilityState === "visible"` BEFORE it measures
-  ANYTHING — time or geometry — and FAIL LOUDLY if it is not.** (Owner rule, 2026-08-09, filed with
-  both measurements that produced it. **ONE precondition rather than two rules, deliberately: one
-  cause produces both failures, and a harness must not be able to satisfy it by halves.**)
-  0. **⛔ CLAUSE 2 — GEOMETRY, AND IT IS THE MORE DANGEROUS OF THE TWO. Any DOM measurement taken
-     after a VIEW CHANGE on a background tab is void, because rAF is SUSPENDED and the drawing never
-     repaints.** Measured on the owner's live tab at `visibilityState === "hidden"`: `requestAnimation
-     Frame` **did not fire once** when raced against a MessageChannel loop for two full seconds. A CDP
-     wheel then updated the app's STATE correctly — `data-view-ppf` and `data-render-ppf` both
-     0.0501 → 0.1062, a clean 2× zoom in — while the pond's DOM geometry **did not move at all**:
-     centre (892.9, 248), width 143.4 px, identical to three wheel gestures earlier, to one decimal
-     place. **A throttled timer gives you a wrong NUMBER; a suspended rAF gives you a wrong PICTURE
-     THAT IS INTERNALLY CONSISTENT** — boxes, positions, sizes and hit tests all agree with each other
-     and all describe a view the app already left, and the app's own state attributes will confirm the
-     view you asked for. Anything built on `elementFromPoint`, `getBoundingClientRect` or a screenshot
-     inherits it silently. **It cost a false lead before it was caught:** an apparent anchored-zoom
-     defect (a wheel-out at pointer x=900 leaving the drawing at x=104, moving AWAY from the pointer)
-     was flagged against **B1449 / B258992 / V56000** and is **REFUTED — a stale frame, not a broken
-     anchor. The anchored-zoom work is not implicated; do not re-open it on that evidence.**
-     **THE rAF LIVENESS PROBE IS PART OF THE ASSERTION, not an extra:** race one rAF against a
-     MessageChannel loop, because it catches the case `visibilityState` cannot — a tab that claims to
-     be visible while its frame loop is wedged anyway.
-  1. **CLAUSE 1 — TIMING.** A probe of one double-click gesture on the owner's real plan reported **3,156 ms and
-     2,992 ms**. The tab was `document.visibilityState === "hidden"` throughout (it was being driven
-     from another tab) and the harness paced itself with `setTimeout`, which Chrome CLAMPS in a hidden
-     tab. It was timing the clamp. **The control — same gesture, same build, same tab, same hidden
-     state, ONLY the pacing primitive changed to a MessageChannel yield: 138–182 ms** end to end, 13–63
-     ms of synchronous handler time. Four elements measured honestly: 111 / 138 / 154 / 182 ms. There
-     was never a multi-second interaction cost to chase.
-  2. **WHY IT IS A GUARD AND NOT A NOTE.** This trap's FIRST appearance produced an obvious failure and
-     cost one round of probing. This one produced a **plausible number** — self-consistent, repeatable,
-     in the right units, off by a factor of twenty — that reached the owner and was on its way onto two
-     perf backlog items. A wrong number that looks right is strictly more dangerous than a crash, and
-     nothing downstream can tell them apart, so the check belongs at the source.
-  3. **MACHINE-ENFORCED, because a rule nobody's code consults is not a guard.**
-     `ui-audit/lib/tabTiming.mjs` — **`assertMeasurable(page, harness)`** is the one precondition
-     (visibility THEN rAF liveness, both throwing and both named), plus `pacedWait` (a MessageChannel
-     loop; unthrottled, and the drop-in for a `waitForTimeout` INSIDE a timed section) and
-     `timingProvenance`. **Wired into ALL 347 ui-audit harnesses that drive a browser — universal, not
-     a list.** The first version named the 28 that read a clock; clause 2 swept in nearly all the rest
-     for a real reason rather than a loose heuristic — almost every harness here clicks "Zoom to fit"
-     and then measures a bounding box, which is exactly the pattern that returns a stale frame. So
-     `test/tabTiming.test.js` requires it of every harness that launches Chromium, and requires the
-     call to NAME itself so a failure says which run is void. **There is no list left to rot, and a new
-     harness cannot be written without it.**
-  4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
-  5. **⛔ AND AN INSTRUMENT BUILT TO ANSWER "WHY DID IT FAIL ON HIS MACHINE" HAS TO BE ARMABLE ON HIS
-     MACHINE (B280403).** A read-only diagnostic hook shipped gated on `window.__PLANYR_E2E` — read
-     ONCE AT MOUNT by an effect with `[]` deps — so it was unreachable on the owner's signed-in
-     production tab, which is the only place the defect it was built for exists. The session that
-     needed it armed the flag by hand and forced a remount by switching plans and back; that is
-     folklore, not a feature. **Rule: gate a diagnostic at CALL time, never at mount, and give it a
-     way in that needs no console — `?planyrDiag=1` (latched into `sessionStorage`, so an in-app
-     navigation does not disarm it mid-diagnosis) or the session key.** The boundary that makes this
-     safe and must not be widened: arming exposes READ-ONLY answers, writes nothing, changes no
-     behaviour, and is session-scoped. It is not a debug mode and may never gate anything that
-     mutates. (`lib/diagArm.js`; guards in `test/diagArm.test.js`.)
-  6. **⛔ AND ITS SIBLING: A PROBE THAT OBSERVES THE MIDDLE OF A GESTURE HAS CHANGED THE GESTURE.**
-     A reading taken BETWEEN the two presses of a double-click costs hundreds of ms and pushes the
-     pair past `DBLTAP_MS` — at which point it is two clicks, not a double-click, and it will
-     "reproduce" failures that mean nothing. Measured: a 900 ms read between presses manufactured
-     exactly such a failure and nearly became a bug report. **So a harness either takes its reading
-     only at the END of the gesture, or it MEASURES the press-to-press interval from the events' own
-     `timeStamp`s and asserts it is inside the budget** — never assumes it. The deliberate exception
-     is the TWO-PRESS INVARIANT, which is a single press followed by a question and does not claim to
-     be a double-click. `audit-doubleclick-properties` now measures and asserts its own gap, and that
-     assertion caught a defect in ITSELF on its first run (it was timing deselect→press-1, not
-     press-1→press-2), which is the argument for measuring rather than assuming in one line.
-- **DRIVER-SCROLL-IS-NOT-APP-SCROLL** — **AN AUTOMATION TOOL THAT SCROLLS TO REACH AN OFF-SCREEN TARGET
-  CANNOT BE USED TO MEASURE SCROLL BEHAVIOUR. In a VIRTUALISED list, "the first rendered row" is NOT
-  "a row on screen."** (B463922, 2026-08-13 — the sixth instrument failure of the day, and the first
-  that survived long enough to be reported to the owner as a finding about his product.)
-  1. **THE CASE.** `diagnose-grid-view-anchor.mjs` clicked the fold triangle on the FIRST RENDERED row
-     of the scheduler grid. A virtualiser renders a buffer of rows ABOVE the viewport, so that toggle
-     sat 75 px off screen; Playwright — like every browser driver — scrolls a target into view before
-     clicking it, **through CDP, where a patched `scrollTop` setter cannot see it.** The harness then
-     reported its own scroll as the app throwing the edited row 477 px down the screen and out of view.
-  2. **⛔ "PROGRAMMATIC SCROLL WRITES: 0" IS THE TELL, NOT THE CORROBORATION.** That reading was taken
-     as proof the app was innocent of *causing* the scroll, and used to argue the row was "abandoned".
-     It actually meant the scroll came from OUTSIDE the page's JavaScript entirely. Whenever a
-     container moves with no app write, the first two suspects are **the driver** and **the browser** —
-     not a subtle app defect.
-  3. **THE DISCRIMINATOR IS ONE LINE: drive the same control from inside the page.** `.click()` in page
-     JS performs no actionability scroll. Same toggle, same build: driver click **+477 px**, page-JS
-     click **−24 px**, a click on a toggle genuinely inside the viewport **−48 px** — and a target
-     BELOW the viewport moved it the other way (+459). **Magnitude and sign follow where the target
-     sat**, which is the driver's signature.
-  4. **THE RULE.** Inside a scroll container, click only what a human could actually see. Enforced by
-     `ui-audit/lib/visibleClick.mjs`: `visibleClick` proves the target is inside the container's
-     viewport BEFORE clicking and THROWS if it is not, naming how far outside it sat;
-     `installScrollWitness` + `assertNoDriverScroll` catch the same lie from the other side (the
-     container moved during an action with no app write → the measurement is void). Pure verdict
-     unit-tested in `test/visibleClick.test.js`; the refusal path is re-proved against the real app on
-     every run of `ui-audit/verify-grid-row-hold.mjs`, aimed at the very toggle that produced the false
-     finding — a guard nobody has seen fail is not a guard.
-  5. **IT WILL BITE AGAIN ON ANY VIRTUALISED LIST** — the scheduler grid, the Gantt, the Library file
-     list, any future long table. It is not specific to scrolling either: a driver's actionability
-     scroll changes what is on screen, so ANY geometry read taken across it is suspect. Sibling of
-     FOREGROUND-OR-VOID (a background tab cannot be measured) and SYNTHETIC-KEYS-DONT-EDIT (a
-     synthetic keystroke does not mutate the plan): three ways for a harness to believe its own
-     instrument.
-  6. **⛔ AND THE FOURTH WAY, WHICH IS THIS RULE ONE STEP FURTHER: THE HARNESS'S OWN *QUERY* PRODUCED
-     THE READING. POINT A PROBE AT A CASE WHOSE ANSWER IS ALREADY KNOWN, AND REQUIRE IT TO REPORT THAT
-     KNOWN ANSWER, BEFORE TRUSTING IT ON THE UNKNOWN CASE.** (B532112, 2026-08-14, owner-adopted.)
-     Clauses 1–5 are *the harness's own ACTION* changed what it then measured; this is *the harness's
-     own QUESTION* was never about the thing it claims. Same species, same remedy shape as clause 3 —
-     ask a second, known way and compare the two answers.
-     - **⛔ WHY THIS REPO DID NOT ALREADY HAVE IT, and it is the sharpest part: EVERY DISCIPLINE HERE
-       PROVES A GUARD CAN GO *RED* ON KNOWN-BROKEN CODE, AND NOTHING FORCES A PROBE TO GO *GREEN* ON
-       KNOWN-GOOD CODE.** The teeth proof (NO-ONE-OWNS-A-COMPOSITE), the mutation check,
-       `mintGateE2E`'s rejection path, VIEW-INDEPENDENT-ONCE §6's never-OBSERVED failure — all of them
-       guard the red side. **That asymmetry is not incidental: it is exactly why both failures below
-       landed on the unguarded side**, each reporting a defect in code that was correct.
-     - **THE TWO CASES**, from one session's aerial-backdrop diagnostic: a page-wide
-       `document.querySelectorAll('label input[type=range]')` swept in a slider belonging to a
-       DIFFERENT panel and reported the row as carrying a control it does not have; and a control that
-       only renders once its row is SELECTED was read COLLAPSED, reporting a working row broken. A
-       third the same day is the same species one level up — a position check compared the empty state
-       against the OCCUPIED one and reported those two branches' *intended* difference as a regression.
-     - **WHAT CAUGHT ALL THREE was a known-good arm sitting beside the unknown ones** — it stayed green
-       while the others failed, which is what localised each fault to the probe rather than to the app.
-       **It was there by luck of the question's shape, not by rule.** That is what this clause fixes.
-     - **THE CHECKABLE FORM, because a caution rots and a check does not:** a harness asserting a
-       property must carry **at least one arm whose expected value is known INDEPENDENTLY of the code
-       under test**, and must FAIL if that arm does not report its known value. **A run that exercises
-       only the unknown arms is VACUOUS and must say so rather than print a score.** The vocabulary
-       already exists — `MUST_BE_PRESENT` in `count-pond-invocations`, the vacuity guards in
-       `verify-hidden-content-behaviour` — this makes it the default rather than a per-harness habit.
-     - Scope every query to the element under test, and put a surface into the state the assertion is
-       about before measuring it. (The two precedent harnesses this clause originally cited,
-       `verify-aerial-empty-state-copy.mjs` and `diagnose-aerial-backdrop-row.mjs`, were retired with
-       the UI/data model they guarded — B848736 folded the standalone aerial card into the unified
-       References list, so both a distinct empty-state heading and a distinct `underlay` field to seed
-       stopped existing.)
-- **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
-  sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
-  the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and
-  the element count read **120 before, 120 after** — a false "paste succeeds silently but writes nothing"
-  was one keystroke from being filed against a working feature. The plan holds **145 distinct features**
-  against those 120 elements. Every feature stamps `data-feature="<kind>:<id>"` (el · markup · measure ·
-  callout · parcel); count **DISTINCT KEYS, never NODES** — chrome carries its owner's key too, so a node
-  count drifts with selection and hover. Use `ui-audit/lib/featureCensus.mjs`; a targeted
-  `[data-el-id="b3"]` lookup is untouched, and a genuine element-tier read says so with an `el-tier:`
-  marker naming why. Enforced by `test/featureCensus.test.js` (source sweep + the counting rule) and
-  `e2e/feature-census.spec.js` (one of each kind = five, with an el-only counter answering ONE beside it).
-  **⛔ AND THE THING THAT RESCUED IT: Ctrl+Z, then diff the feature list. WHEN A COUNT SAYS NOTHING HAPPENED
-  BUT THE APP SAYS IT DID, THE UNDO KNOWS** — an undo frame exists only if something was really committed,
-  and undoing it names exactly what went in. A counter can be blind to a kind; the model's own history cannot.
-  The same trap applies to picking a "blank" canvas point: free of ELEMENTS is not free of FEATURES, and a
-  pan started on a markup DRAGS IT (`BLANK_POINT_EXCLUDE`).
-- **NO-ONE-OWNS-A-COMPOSITE** — **A SURFACE BUILT FROM SEVERAL OBJECTS AT ONCE IS OWNED BY NONE OF THEM,
-  SO NO PER-OBJECT PREDICATE CAN REACH IT AND NO FEATURE CENSUS CAN SEE IT.** (B505664, 2026-08-14, after
-  the same species surfaced THREE times in one day.) A composite is a dissolved region, a merged outline,
-  a union, or a **cached raster** — anything drawn once on behalf of many.
-  1. **THE OBLIGATION.** When you add a hide, an exclusion, or **ANY** per-object state, ask separately
-     **what composites read that object**, and invalidate them EXPLICITLY. A per-object filter applied at
-     the object's own draw site is not enough and never was: the composite has already been built.
-  2. **⛔ THE GUARD IS INK OR PIXELS, NEVER REGISTRATIONS.** A census counts things that REGISTERED
-     themselves — `data-feature` keys, `[data-el-id]` nodes, model entries. A composite registers nothing,
-     so it is invisible to every count by construction. Assert on what is PAINTED
-     (`ui-audit/lib/inkCensus.mjs` attributes every painted node; a canvas pixel count answers where even
-     that cannot).
-  3. **⛔ AND THIS IS EXACTLY WHERE `COUNT-EVERY-KIND` STOPS, WHICH IS WHY THE TWO ARE NAMED TOGETHER.**
-     That rule guarantees you counted every FAMILY of object, and it is the closest thing this repo had —
-     so the next reader will reach for it and believe they are covered. **They are not.** COUNT-EVERY-KIND
-     is the instrument half, and it is the very rule that certified the road pavement green: every road's
-     own node correctly left the canvas, `4 drawn → 0`, ✓, while four unbroken grey ribbons stayed on the
-     drawing. A rule about counting every kind of object says nothing about ink belonging to several at once.
-  4. **THE THREE INSTANCES, so this entry carries its own evidence rather than reading as theory:**
-     · **B3296 — the dissolved road pavement.** Hiding Roads removed every road's hit target, label and
-       dimension and left the merged pavement painted, because `roadNet` unions the cluster from `els`.
-     · **B494050 — the export crop.** `devExtent`/`exportFeetExtent` framed the printed sheet from the whole
-       model, so a hidden group left blank paper where it used to be (PDF-PARITY).
-     · **B503184 — Doc Review's cached sharp tile.** `renderDetail`'s `tileCovers` check asks *"does what I
-       already drew still cover this view"* and knows nothing about the drawing having changed, so a
-       switched-off PDF layer stayed on screen: backdrop 0 blue px, the tile above it **579,121** — exactly
-       that shape's share of the page.
-  5. **⛔ THE SHAPE THEY SHARE, and it is why each survived review: IN EVERY ONE, THE PER-OBJECT SIDE WAS
-     CORRECT AND LOOKED CORRECT.** The filter was applied, the predicate was asked, the object's own node
-     left the DOM, the unit tests passed. Nothing in the per-object code reads as wrong on inspection —
-     which is precisely why "I checked the filter" is not evidence here.
-  ⚠ **PROSE, WITH PER-INSTANCE GUARDS — there is no generic detector and this entry does not imply one.**
-  "Is this surface a composite?" is not decidable from source, so the enforcement is behavioural and lives
-  with each instance: the repo-root `test/` suites **contentVisibility** (the seam sweep), **hiddenContentReads**
-  (the declaration table + its teeth proof) and **docReviewLayerVisibility**, plus the ui-audit harnesses
-  **verify-content-visibility** (per-family ink), **verify-hidden-content-behaviour** and
-  **verify-pdf-layer-hiding** (canvas pixels). `test/compositeSurfaceRule.test.js` guards the ENTRY itself:
-  that the rule is still stated with its operative line, and that every guard it cites still exists —
-  a rule whose evidence has been deleted has rotted, and reads as covered.
-  **⛔ AND THE PREFERRED FORM OF THE TEETH PROOF, learned on B503184: point the new check at UNTOUCHED
-  code and require it to go RED there BEFORE writing the fix.** That is stronger than planting a synthetic
-  defect, because a planted one only proves the check can see the thing you already built it to see.
-- **SYNTHETIC-KEYS-DONT-EDIT** — **A SYNTHETIC KEYSTROKE DOES NOT MUTATE THE PLAN, AND ONE DOM READ IS NOT
-  A CHECK. Drive the real input, then RE-READ UNTIL THE FEATURE IS GENUINELY ABSENT.** (NEW-3, 2026-08-09.
-  Sits beside FOREGROUND-OR-VOID because it is the same species: a harness that believes its own instrument.)
-  1. **THE COST, which is the reason it is a rule and not a note.** This has taken **two cleanup rounds on
-     the owner's LIVE plans** — a stray easement left on Bain / "Concept - Original" (2026-08-08) and three
-     pasted markups left on Silvestri (V27088, 2026-08-09). Both times the harness "deleted" the object,
-     **reported success, and the object was still on his plan**, so a human had to finish it by hand.
-  2. **THE MECHANISM, MEASURED rather than reasoned** (build 7307342, one selected building, count before →
-     after). The planner's key handler is bound to **`window`**, and `new KeyboardEvent(…)` defaults
-     **`bubbles: false`** — a real key event never does — so a synthetic event dispatched on `document` or
-     `document.body` never propagates to it:
-
-         document.dispatchEvent(new KeyboardEvent("keydown", {key:"Delete"}))        1 → 1  ✗
-         document.body.dispatchEvent(…)                                              1 → 1  ✗
-         window.dispatchEvent(…)                    (the listener's own target)      1 → 0  ✓
-         …any of the three with { bubbles: true }                                    1 → 0  ✓
-         page.keyboard.press("Delete")              (a real key event)               1 → 0  ✓
-
-     So it is NOT that the app rejects untrusted events — it never checks `isTrusted`. It is one missing
-     option, and it fails in **total silence**: no error, nothing in the console, the object still selected.
-  3. **AND TWO MORE GATES SWALLOW THE KEY BY DESIGN**, so a driver can do everything right and still no-op:
-     a **FOCUSED FIELD** (while `activeElement` is an input/select/textarea/contentEditable the handler
-     returns early so you can type — correct product behaviour, invisible to a driver that did not blur),
-     and an **INACTIVE PLANNER** (`if (!active) return` — a keep-alive planner behind another workspace
-     must never eat keys).
-  4. **THE RULE.** Never dispatch a synthetic keystroke to mutate the plan. Use the driver's real key input
-     (`page.keyboard.press` / CDP `Input.dispatchKeyEvent`), or press the control that does the job — the
-     Properties panel's **Delete element**, or the right-click menu's. **And RE-READ BETWEEN ATTEMPTS:** the
-     DOM read races the re-render, which is exactly how a pass was reported for an object still present.
-     Poll until the feature is ABSENT, then **reload and confirm** — a removal that never reached storage
-     comes back.
-  5. **MACHINE-ENFORCED, both halves.** `ui-audit/lib/deleteFeature.mjs` is the only supported deletion
-     driver (`deleteFeatureUntilGone` escalates key → panel → menu, re-reading between each, and **THROWS
-     rather than reporting a pass it did not earn**); `test/deleteDrive.test.js` pins the verdict table and
-     **sweeps `ui-audit/` + `e2e/` for the banned shape**. The claim itself cannot become folklore:
-     `ui-audit/verify-delete-drive.mjs` re-measures the table above against the real app every run and
-     **fails if the banned shape ever starts working** — the day the key wiring changes, the rule says so
-     instead of quietly going stale.
-- **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
-  working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
-  working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see
-  certain levels of detail."*) **This SUPERSEDES the B1345 bar — byte-identical, or one unit of 255 on one
-  channel — for every LOD-class change.** B1345's bar measured the FILE, and it cost real work twice: B1350's
-  dock-door leaves were refused at 12–23/255 and 424 DOM nodes stayed on the table, the second time for a
-  cause that turned out to be that Chromium does not rasterise a `<rect>` and a rectangular `<path>` to the
-  same antialiased edge at any zoom — so no gate could ever have saved it.
-  1. **THE METRIC IS CIEDE2000 (ΔE00) ON AN ACUITY-FILTERED PAIR**, not a channel delta — 10/255 in a dark
-     blue and 10/255 in a light yellow are nothing alike to a viewer. Both renders are low-pass filtered
-     first, at **two scales**, because a raw diff cannot tell *the same ink moved a sub-pixel* (invisible)
-     from *a line of ink removed* (a downgrade) — both read ~23/255, and refusing both is what byte-identity
-     did. Engine: `ui-audit/lib/perceptualDiff.mjs`, driven by `ui-audit/verify-perceptual-parity.mjs`. The
-     **measurement did not go away** — the pixel-diff harness and its dependency-free PNG decoder are the
-     same ones; the threshold and the metric changed.
-  2. **THE BAR, three magnitudes, all pinned by unit test** (`test/perceptualParity.test.js`, whose CIEDE2000
-     is checked against Sharma/Wu/Dalal's published vectors): **detail ΔE00 ≤ 6.0** near acuity (what stops a
-     fine texture being replaced by its own local average) · **perceived ΔE00 ≤ 1.0** — the classical JND —
-     and **perceived frame-mean ΔE00 ≤ 0.10** (what stops a thousand invisible differences adding up).
-     Coverage is REPORTED but does not gate: for an antialiasing-class change the pixels touched scale with
-     total edge length, i.e. with how much is drawn, not with how much changed.
-  3. **THE VIEWING GEOMETRY IS STATED, NOT ASSUMED, and it is a parameter.** 20/20 acuity (1 arcmin), 600 mm
-     viewing distance, 0.50 mm per CSS pixel (a 27″ 2560-wide panel at the owner's measured dpr ~2.15) → one
-     CSS pixel subtends ~2.9 arcmin. The two numbers this repo cannot measure — his panel's physical width
-     and how far he sits from it — are on `OWNER-TODO.md`, and every run prints the geometry it used.
-  4. **⛔ THE THRESHOLD IS CHOSEN BEFORE THE MEASUREMENT, NEVER AFTER.** Picking a bar to suit a result you
-     have already seen is not a measurement. Moving one of the three numbers is a product decision about
-     drawing quality: argue it on the item, name the price, never nudge it to make a run pass. The first real
-     use of this bar REJECTED the change it was introduced for (B1350's fold: perceived ΔE00 1.20–2.19), and
-     the bar was left alone — that is the standard.
-  5. **EVERY change that alters the picture records a before/after crop in the PR**, so the owner sees what
-     he approved. `--shots` writes them.
-  6. **The old bar is not gone, it is DEMOTED**: byte-identical is still the right claim to make when a change
-     genuinely is byte-identical (B1437's dock-plan cache), and saying so is stronger than a ΔE00 of 0.
-
-- **WRONG-CASE** — **WHEN A USER SAYS A FEATURE "NEVER WORKS" AND IT DEMONSTRABLY WORKS IN THE CASE YOU
-  TESTED, YOU TESTED THE WRONG CASE. Go and find the case they are in. Do not close the loop on your own
-  fixture.** (B548064–B548066, 2026-08-14, owner-instructed after the sixth report of one symptom.)
-  1. **THE CASE IT COMES FROM, and the cost is the argument.** "Send to back / layers never work" was
-     reported **six times** and "fixed" **four times** — B421, B820, B671, B293072/B293073 — and **every
-     one of those fixes was correct**. All four tested MARKUP AGAINST MARKUP, which already worked before
-     any of them. His case was a markup over a **BUILDING**: two markups share a band, so "back" moves
-     within it and the picture changes, while a markup over a building is a question about the OTHER band
-     — which the command could not address at all. It ran, changed nothing visible, and **greyed itself**,
-     which reads as "already done".
-  2. **THE VARIABLE IS NEVER THE COMMAND — IT IS WHAT THE COMMAND IS BEING ASKED ABOUT.** Before writing a
-     fixture for a reported symptom, write down what is DIFFERENT about the reporter's scene: what is
-     underneath, what is selected, what is on top, how many, how big, which band. A fixture built to make
-     the mechanism observable is usually built to make that difference disappear.
-  3. **A HARNESS FOR A REPORTED SYMPTOM CARRIES A PRECONDITION THAT REFUSES TO REPORT A SCORE** unless the
-     reported configuration is really present. `verify-markup-over-building.mjs` asserts the markup is
-     painted over the building AND that a point exists where the app's own hit stack holds both, and
-     throws otherwise. Without that, a tidy fixture reports PASS on a dead implementation — which is
-     precisely what happened four times. (Same shape as DRIVER-SCROLL-IS-NOT-APP-SCROLL §6's known-good
-     arm: prove the instrument can see the thing before believing its verdict.)
-  4. **AND THE PROCESS HALF, which is where this actually failed: A LIVE CHECK MUST STATE A CLOSURE
-     CONDITION SOMEONE OTHER THAN THE OWNER CAN MEET.** V91632 said *"only he knows which objects he
-     tried"* — not a blocker, a check nobody but him could close, so four sessions closed it on the case
-     they could think of. A named `Blocker:` (`auth` / `real-data` / `live-GIS`) is the LEGITIMATE form:
-     it names a configuration someone can obtain and leaves every step runnable. Deferring to what is in
-     the owner's head names nothing. Every `V###` gets concrete steps with a **named expected result per
-     step**. Guard: `test/verificationClosability.test.js`, whose mutation check flags V91632's real
-     sentence verbatim and clears an honest `Blocker:` item.
-  5. **RELATION TO THE NEIGHBOURING RULES, so this is not read as a duplicate.** ATTEMPT-BEFORE-YOU-PARK
-     says a Claude-doable check may not be deferred; **STANDING RULE #2** says an owner-reported symptom
-     may not be closed on a null. **Both were followed here** — V91632 was run, by the cohort, on his real
-     plan, and it passed honestly. Neither asks *was the check pointed at the case that was reported?*
-- **DEDUPE-FIRST** — Search **Open, ⏳ Verify, AND Done** (`^### B` headings + `#tags` + symbols; grep
-  `BACKLOG_OPEN.md` for the live set) before minting a `B#`. A matching prior item gets the recurrence
-  treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number. When you DO mint,
-  get the number from **`npm run next-id`** (B755) — never grep the archives for the max.
-- **TOMBSTONE-DELETES** — Every removal path records tombstones for its **FULL cascade set** before the
-  next flush, so a merge / sync can't resurrect the deleted item (or raise a false "changed in another
-  session" conflict). Applies to every delete handler, not just the obvious one. (B276 / B556 / B596 / B612.)
-- **TIER-BY-REBUILDABILITY** — **User work and re-fetchable cache NEVER share a storage tier, and anything
-  that can be re-fetched belongs in the LARGE one** (B1427, 2026-08-06, after a disposable map cache
-  crowded the owner's saved plans out of a ~5 MB store — the B473 "your work is safe in the cloud, this
-  device's storage is full" banner, with 400 KB terrain tiles keeping their space while a real plan was
-  refused). Four parts, all binding:
-  1. **THE TWO TIERS ARE DIFFERENT BY THREE ORDERS OF MAGNITUDE AND ARE NEVER REASONED ABOUT AS ONE.**
-     Measured on the owner's own Chrome: **localStorage 3.88 MB across 156 keys against a hard ~5 MB
-     per-origin cap (~78% full)** · **IndexedDB 35.9 MB against a 10,275.9 MB quota (0.3%), persisted.**
-     Never sum them, never report a combined figure, never call the large one "uncapped" or "a store that
-     can't fill" (`localDb.js`'s header said exactly that, and that framing is what let the mistake live
-     for a year). A combined "4 MB of 10 GB" reads as empty while the store that matters is about to throw.
-  2. **THE SMALL STORE IS FOR IRREPLACEABLE WORK ONLY** — saved plans, the cloud index, the version ring,
-     the autosave. A cache that competes with it is a **priority inversion**: pure cache holding room that
-     irreplaceable user work needs. Put the cache in IndexedDB (`gisCache.js`'s persistent tier, B1427)
-     and keep its own budget there — bounded is still right, it was just bounded against the wrong ceiling.
-  3. **A BUDGET IS NOT OPTIONAL, EVEN IN THE LARGE STORE.** `SitePlannerApp.jsx` calls `idbPersist()`, so
-     this origin is **PERSISTENT** — the browser will never evict it for us. That is correct for data safety
-     and it makes the app solely responsible for its own size.
-  4. **NO EVICTION MAY EVER COST DATA THAT CANNOT BE REBUILT.** Every reclaimable class must **declare a
-     rehydration source** (cloud Storage, the source PDF, a re-fetchable GIS service) before anything is
-     removed; a class that cannot name one for EVERY member is not reclaimable at any pressure. B474's
-     hazard is the precedent — "a raster whose src had been dropped (idbKey set) was then unrecoverable" —
-     so reference images declare `rebuild: null` and are never bulk-cleared. Declarations live in
-     `shared/storage/storageCensus.js`; `shared/storage/storageReclaim.js` is the only module allowed to
-     act on them, and it refuses the whole pass if any class claims to be reclaimable with no way back.
-  - **Corollary — MEASURE, don't reason.** Nothing knew its own size before B1429, which is why the first
-    diagnosis of this crisis blamed IndexedDB and was wrong by three orders of magnitude. Both tiers are
-    now surfaced (the planner's plan menu → Storage, reachable signed-out) and both ride every storage-failure telemetry
-    row, tier-labelled `local_*` / `idb_*`. Guards: the repo-root `test/` suites **storageReclaim** (incl.
-    the raster-with-no-cloud-copy case) and **gisCache**.
-- **ROWS-CANONICAL-ON-SEED** — **Which ledger wins when a plan is opened, decided explicitly (B1113,
-  2026-07-29, after the ambiguity cost a real plan three times).** A signed-in plan has THREE copies of
-  every element: the `site_elements` ROWS, the on-device CACHE (localStorage mirror), and the pending-edit
-  JOURNAL. The rule: **for an element the server ALREADY HAS, the rows win** the moment the engine seeds
-  from them — unless there is a *pending local op* to explain the difference, which is a real edit and is
-  kept. **For an element the server has NEVER seen, local wins** — that, and only that, is what the
-  B124 / B756 "never drop local work" guarantee covers. The trap this closes: after a seed the shadow
-  holds the FRESH rev, so a stale cached copy commits **cleanly** — the rev guard cannot help, because the
-  client legitimately holds the current rev. Mechanically: `reconcile(collections, { afterSeed: true })`
-  on the seeder's own diff (`elementSync.js`), which adopts rows via `onRowsCanonical` instead of
-  enqueueing; and the bonded heal runs **AFTER** the journal / never-synced folds in `refetchReplace`, so
-  no fold can put a geometrically impossible assembly on the canvas. Never re-order those two.
-- **DANGEROUS-MEANS-UNOBSERVABLE** — **When work is called DANGEROUS, NAME WHAT IS MISSING that makes it so.
-  If the answer is "nothing can observe whether it is correct", that gap is itself a DEFECT — and it is
-  usually the more valuable thing to fix.** (Owner rule, 2026-08-08, verbatim: *"I'm not really worried about
-  any path just because one is dangerous. I don't know that that's a good reason. If it is dangerous, then,
-  like, we should probably be fixing it in the first place because why is it dangerous?"* He was right and he
-  overruled the framing.)
-  **THE CASE IT COMES FROM.** B1449 (smooth zoom) was called too dangerous to ship for weeks, and the stated
-  reason was that at rest `renderView.ppf === view.ppf`, so a correct implementation and a broken one produce
-  IDENTICAL output in every existing test, e2e spec and pixel harness. **That is not a property of the
-  refactor — it is a hole in the harness.** The repo could not observe MID-GESTURE rendering at all, and that
-  hole bites every future interaction change, not just that one. So "it is dangerous" was never a reason to
-  avoid the work; it was a reason to **build the missing instrument first**, which was already step 1 of the
-  plan and is worth having on its own merits.
-  **HOW TO APPLY IT, three steps:** (a) write down the specific observation the guards cannot make — not
-  "this is risky" but *"no check in this repo can distinguish X from Y"*; (b) build that instrument and
-  **prove it goes RED on a deliberately wrong build** (a guard nobody has seen fail is a guard that rots
-  green — VIEW-INDEPENDENT-ONCE §6 names the same failure mode); (c) then do the work. If the instrument
-  cannot be built, THAT is the honest blocker to report — never the vague "dangerous".
-  **Do not confuse this with genuine caution.** Irreversible/destructive actions and real product decisions
-  still stop for the owner. This rule is about ENGINEERING risk that is really an observability gap.
-- **LIVE-VERIFY** — These classes can only be *confirmed* live, so they file `Verify: live` and park in
-  `## ⏳ Verify` until seen working: timing / race bugs · concurrency / multi-writer · GIS endpoint
-  behavior · zoom- or data-density-dependent rendering · PDF / export parity · anything whose repro
-  cites real project data. Each class maps to ≥1 e2e harness spec (`e2e/`, B278/B280/B281) so the manual
-  live gate shrinks over time.
-
-- **EDITOR-EXIT-CONTRACT** — **EVERY WAY OUT OF AN EDITOR KEEPS WHAT THE EDITOR SHOWS AS FINISHED.
-  An editor that draws part of its value in FINISHED form while still holding it as unsaved state is
-  a defect by construction — not a keystroke to patch.** (Owner report 2026-09-15, B1341728/B1341729,
-  measured on his own account on a throwaway duplicate schedule.)
-  1. **THE CASE.** The Schedule grid's Owner cell let you click a contact out of a list; it appeared
-     as a **chip with its own remove control** — pixel-for-pixel how a SAVED owner looks. It was
-     unsaved component state. Escape threw it away. Enter threw it away and moved the cursor on, so
-     the loss was silent. Tab and click-away saved. Owners saved BEFORE the edit survived all four,
-     so it destroyed new work only — the least likely kind of loss to be noticed, and the most
-     annoying to redo.
-  2. **THREE EDITOR CLASSES. Pick one; a hybrid is the bug.**
-     · **text** — the value in flight is text the person is still typing. **Enter / Tab /
-       click-away COMMIT; Escape abandons the typed text.** Nothing is drawn as finished, so Escape
-       destroys nothing anyone could mistake for saved. (Excel's contract, and the right one here.)
-     · **select** — a menu. **CHOOSING is the commit.** The arrow-key highlight is in progress, not
-       finished, so an exit taken without choosing correctly leaves the value alone — and **every**
-       exit, Tab included, CLOSES the menu rather than leaving it floating over the grid.
-     · **tokens** — a chip / token field. **Every token is written through the instant it is added,
-       removed or reordered**; every exit merely closes, and none can discard. Undo is the recovery
-       for a mistaken add or removal, exactly as for any other committed edit.
-  3. **THE INVARIANT THAT BINDS ALL THREE: no exit may remove anything the editor renders in
-     FINISHED form.** If you want a token to be abandonable, it has to LOOK pending. Shipping it in
-     the finished style and calling it pending is the defect, whichever exit happens to expose it.
-  4. **⛔ AND THE REASON THIS IS A RULE RATHER THAN A FIX: THE REPORTED KEY IS NEVER THE SCOPE.**
-     Escape reproduced instantly in the sandbox; **Enter did not** — it committed correctly on every
-     route tried (double-click, Enter-to-open, type-to-edit; no prior owner, one, several; one add,
-     three). Patching the key that reproduced would have left the one that did not, on his machine,
-     unexplained and unfixed. Closing the STATE GAP retires both, plus the unmount nobody planned
-     for. When a user reports one exit, audit all four, on every editor of that surface.
-     **⛔ AND THE OUTCOME, WHICH IS THE PART THAT MATTERS AND MUST NOT BE READ OFF THE SENTENCE
-     ABOVE: THE ENTER ARM WAS REAL.** Michael re-ran his own four-exit test on his signed-in
-     browser against the merge commit itself (V978448, passed 2026-09-15, build named in the same
-     observation) and reported Enter both **saving** and no longer jumping the cursor down a row
-     with the value discarded. So "Enter did not reproduce here" was a statement about the
-     SANDBOX — logged out, local fixture, no cloud round-trip — and never about the defect. Do not
-     read this clause as "the unreproduced arm was imaginary": it is the cleanest instance this
-     repo has of **STANDING RULE #2 clause 1** — a first-hand owner report is evidence, a failed
-     reproduction is not a refutation, and when the two disagree the INSTRUMENT is on trial. Had
-     the null been taken as a disposition, Enter would have shipped unfixed.
-  5. **MACHINE-ENFORCED, both halves.** `ui-audit/verify-cell-editor-exit-contract.mjs` drives every
-     editable cell in the Schedule grid through Escape · Enter · Tab · click-away in a real browser
-     and prints the audit table (it carries a known-good arm and declares the run VOID rather than
-     scoring it if that arm does not report its known value). `test/cellEditorExitContract.test.js`
-     is the CI-runnable half: it fails if a cell editor omits an exit, if the token editor grows a
-     deferred-commit path again, or if this rule is deleted from CLAUDE.md.
-
-- **PANEL-BREVITY** — **LESS IS BETTER. The default view is the scarcest space in the product; every
-  line must earn its place.** (Owner rule, 2026-07-28, verbatim: *"you keep adding words to the yield
-  panel. So make a rule somewhere in the repo that that's not what we want to do. Less is better. I just
-  want the information literally as brief as it can be."* Written after three consecutive sessions each
-  added individually-correct copy — the honest storage explainer, the five-case berm state, the
-  reconciliation paragraph — and nobody consolidated, so the panel became a wall of text.)
-  1. **VERDICT + NUMBER FIRST, then at most ONE short line per group.** Everything else collapses
-     behind the group's existing `Assumptions & method ▸` disclosure (the B862 pattern).
-  2. **New copy REPLACES, it does not ACCUMULATE.** A change that adds a sentence to a panel must
-     **name the sentence it removed**, in the commit and on the item.
-  3. **Prefer a NAMED STATE over a sentence explaining the state.** A short labelled chip beats a
-     clause: `berm ring 17.4 · below flood 12.2` beats *"17.4 ac-ft is taken up by the earthen berm
-     ring built inside the outline, and 12.2 sits below the flood level…"*.
-  4. **Numbers over prose; absolute values over percentages** (a percentage against a near-zero
-     denominator is noise — B1034).
-  5. **Never render the same sentence in more than one place.** State it once; elsewhere reference it.
-  6. **Honesty stays REACHABLE, not VISIBLE.** Collapsing is the tool — deleting facts is not.
-     **Brevity is never bought with accuracy.** If you find yourself removing a fact to shorten a
-     panel, you have taken the wrong branch: shorten the DEFAULT VIEW, not the information.
-  7. **Measure it.** Any change touching yield / pond panel copy reports the visible line + character
-     count per group **before and after**. A net increase requires explicit justification on the item.
-  - **MACHINE-ENFORCED, because a markdown rule rots.** `node ui-audit/panel-copy-budget.mjs --check`
-    (in the `/improve` gate + `test/panelBrevity.test.js`) measures the visible default-view copy of
-    each panel region against **zero-headroom budgets** in `ui-audit/panel-copy-budget.json`, so an
-    accumulating change goes **red in CI** instead of relying on a reviewer noticing. Copy inside a
-    `<Collapse>`, in a `title=` / `basis=` hover, or in a `keyedNote(...)` method note is **exempt** —
-    those are the sanctioned escape valves, which is why collapsing gets you under budget and deleting
-    is never necessary. Raising a budget number is allowed but never silent: justify it on the item.
-    (Extends the per-line caps this repo already had — B823's 110-char `warnNote` cap in
-    `test/drainageNoteLength.test.js`, and `test/pondCopyLint.test.js` — from *"no one line may be a
-    paragraph"* to *"no group may accumulate lines."*)
-
-- **VIEW-INDEPENDENT-ONCE** — **Work whose inputs are MODEL + SETTINGS must not be recomputed because
-  the VIEW moved. A memo key may never contain a view term unless the value is genuinely view-derived
-  — and then only the term it actually uses.** (Named 2026-08-06 after the owner, verbatim: *"since
-  you're saying it's the same bug, it's like, alright. Well, we didn't find it for this, so find it for
-  all the other times. or all the other scenarios."*)
-  1. **THE CLASS, and why intuition will not find it.** The same defect had been found TWICE by
-     accident: **#926/B1440** — `f2p` was `worldToScreen(view, …)`, so every element's pixel geometry
-     was a function of the live view and a pan re-derived all of it (fixing it took DOM mutation
-     records per gesture from 101,267 to 2,194) — and the pond **label fit**, re-solved every frame
-     with the fit question asked in FEET, so a pan recomputed an identical answer sixty times. One
-     class, two accidents. The third was found by an instrument, not by looking.
-  2. **⛔ IT IS INVISIBLE TO EVERY VISUAL TEST IN THIS REPO, WHICH IS WHY THE GUARD COUNTS.** #926 said
-     it plainly: *"a pan that silently goes back to baking the view is invisible to every screenshot
-     and behavioural test in this repo; only a frame counter would notice."* Both instances draw the
-     **identical picture** when broken — pixel diffs, DOM assertions, e2e paths and PERCEPTUAL-PARITY
-     all pass on the defect. Never propose a screenshot as the guard for this class.
-  3. **THE DETECTOR IS THE DELIVERABLE, not a case list.** `ui-audit/detect-view-recompute.mjs` drives
-     a gesture that changes ONLY the view on a plan whose model and settings are frozen, through a
-     build instrumented by `scripts/vite-plugin-recompute-probe.mjs` (**inert without
-     `PLANYR_PROBE=1`** — no probe byte reaches production), and records per computation: identity
-     (`file:line:name`, assigned at transform time), call count, ms, and **a structural fingerprint of
-     its INPUTS and of its RESULT**. The fingerprint has to be STRUCTURAL: every instance of this bug
-     returns a FRESH object holding an IDENTICAL answer, so `Object.is` — which is all React's memo
-     does — reports "changed" on 100% of them. Four verdicts (`ui-audit/lib/viewIndependence.mjs`):
-     **`once`** ✅ · **`redundant`** (same inputs, same answer, ran N times — a missing memo) ·
-     **`view-churned`** (inputs moved, answer did not — a view term in the key) · **`productive`**
-     (the answer genuinely moved — the cull rect, the scale bar, the north arrow, the LOD gates, and
-     NOT a violation). It runs four scenarios, because the owner asked for all of them: **pan** ·
-     **zoom** (correct answer: once per ppf step, not once per frame) · **single-element edit**
-     (correct answer: only what depends on that element) · **panel open/close**.
-  4. **THE INVERSE IS ALSO CHECKED AND IS NEVER "FIXED" HERE.** Something memoised so hard it fails to
-     change when the view legitimately should change it is a correctness bug in the other direction.
-     Reported separately (`inverseFindings`), never merged into the violation list.
-  5. **THE FIX IS ALWAYS THE SAME SHAPE — extend the resolve-once boundary B1352/B1437/B1440
-     established; do not invent a fifth mechanism.** Memoise by a MODEL + SETTINGS key. Where a value
-     IS view-derived, key it on the SCALAR it uses (`view.ppf`) rather than on `view`, and where a
-     view-derived value only needs to be *approximately* current, LATCH it (`viewCull.cullRectFor`
-     keeps the rect it already holds while the true viewport is proven inside it) — holding the same
-     OBJECT is half the fix, because a fresh object with identical numbers still invalidates every
-     memo downstream. For pure library leaves with no hook to hang a memo on, use
-     `site-planner/lib/pureCache.js` (a signature cache, or a `WeakMap` identity cache when the input
-     is a large array that is rebuilt rather than mutated).
-  6. **MACHINE-ENFORCED, in two halves, because the browser half cannot run in this repo's CI.**
-     `ui-audit/verify-view-independent.mjs` is the **counter-based gate**: it drives a real pure pan
-     and fails if any computation in its `REGISTRY` ran more than once — **and fails if a registered
-     one was never OBSERVED**, which is exactly how a guard of this shape rots into a permanent green.
-     `npm run perf:viewindep`; mutation-proven (disabling the cull latch takes it from ✅ to four
-     failures at 186 calls each). The CI-runnable half is `test/viewIndependentRegistry.test.js`,
-     which asserts every registered memo still exists and that **no dep array carries a raw view
-     term**. Pure core unit-tested in `test/recomputeProbe.test.js`, the fixes in
-     `test/pureCache.test.js`.
-
-- **NO-PER-MOVE-WORK** — **No feature may add per-pointer-move work to the planner.** A pan move, a wheel-zoom step and a drag
-  move rebuild no grading surface, post no worker job, re-encode no picture, and commit React about once per move; whatever a
-  gesture changes is rebuilt ONCE, at the release (owner 2026-10-30: "improve the speed of the software"; B2596704–B2596708).
-  **The budgets, as numbers** (owner's Concept A on the real Chehaw ground, grading + contours + cut/fill + paper on, production
-  build, CPU throttled 4×, 1913×1000 at DSF 2.15 — `ui-audit/planner-perf-budget.json`): pan ≤ 16 ms of main-thread work per
-  move · a zoom step's picture ≤ 1.5 s, never re-running the surface · mode switch ≤ 3 s · open → picture ≤ 4 s · no task
-  > 50 ms outside `runChunked` slices. **The last two are NOT met today** (B2596707 / B2596708; ratcheted, so they may not get
-  worse). Measure with `npm run perf:planner:profile` (the cost table, `docs/perf/PLANNER-SPEED-ROUND.md`); the COUNTS are a
-  required build gate (`node ui-audit/verify-planner-perf.mjs --counts`, red on the pre-fix engine, VOID unless its known-slow
-  `?perfMutant=1` arm fails); the timings run on demand (`npm run perf:planner`) before shipping anything that touches render or
-  grading. A memo keyed on an object rebuilt every move (a Map, a fresh array) IS per-move work — key it on a value.
-
-- **NO-RETRYABLE-ERRCODE** — **No SQL function may raise errcode `40001` or `40P01`; a business-rule refusal uses a PostgREST custom code (`PT409` → HTTP 409).** PostgREST retries those two codes forever inside one request, so on 2026-10-11 a version-conflict raise pinned every pool connection and took planyr.io down for every user (6:05–6:31 PM CT). Guard: `test/noRetryableErrcode.test.js`.
-
-- **CONSTRAINT-CAPTURE** — **When Michael states or corrects a product constraint in chat, the
-  session that hears it writes it into `## Owner product constraints` IN THE SAME SESSION, before
-  doing the work it was dispatched for.** Not "later," not "filed for a follow-up" — a constraint
-  that exists only in a chat is not a constraint; the repo is the only store every future session
-  reads. (Owner rule, 2026-09-05, after PR #1461 was built and armed for auto-merge carrying a
-  "Needs an owner" dashboard card and a scheduler column reorder Michael had already told a
-  different session to drop — the correction lived only in the orchestrating chat's memory of him
-  and nowhere in the repo, so the dispatch brief that produced #1461 carried the pre-correction
-  spec and nothing in the session contradicted it. Caught by hand; should have been caught by the
-  repo.) The reciprocal check lives in the Definition of Done below: before opening a PR, confirm
-  nothing built contradicts `## Owner product constraints`, and say so.
-
-- **ONE SHELL, ONE TOOLBAR, ONE SWEEP (owner rule, 2026-10-05, B2090336–B2090338: "I want the frame to always work
-  regardless of the size of computer or screen")** — browser zoom and OS display scaling SHRINK the CSS viewport, so
-  "big monitor" never means "wide viewport". (1) **Any new header, tab-row or toolbar control goes through the shared
-  shell/toolbar**: the header rows live in `AppHeader` (never wrap; Row 2 is `nowrap`, every zone is handed a budget
-  measured on the row's own box), and every action row is a `PriorityToolbar` (`src/shared/ui/PriorityToolbar.jsx`, pure
-  rules in `toolbarPlan.js`) — labels drop to icons, then the lowest-priority items fold into a More menu; never a
-  second row, never clipped, never sideways scroll on desktop. Declare each item's `priority`; do not write a
-  per-module media query or a hard-coded chrome width. Use a ResizeObserver / container query on the element's own
-  box for chrome inside a resizable region, never window width. (2) **The width sweep is a required CI gate**
-  (`ui-audit/verify-width-sweep.mjs`, verdict in `ui-audit/lib/widthSweep.mjs`): a NEW MODULE ROUTE MUST BE ADDED to its
-  `ROUTES` list in the same commit, and a strip that scrolls on purpose must say why with `data-sweep-exempt="<reason>"`.
-  A control that owns a shared ref or a portaled menu must honour `render({ measuring })` (the hidden measuring copies must
-  not steal it). Phone `narrow` behaviour is unchanged by this rule.
+<!--rule:LOUD-FAILURE-->
+- **LOUD-FAILURE** — No silent failure path: every write/fetch/parse that can fail surfaces visibly (banner, telemetry, thrown error), never a swallowed `catch` that reads as success; crash loudly over degrading quietly (B209/B595/B610).
+<!--rule:AUDIT-FIRST-->
+- **AUDIT-FIRST** — Before patching, instrument and reconcile prior `B#` claims against the ACTUAL code; where they disagree, record the code reality and flag the discrepancy.
+<!--rule:PDF-PARITY-->
+- **PDF-PARITY** — Any on-screen render change is mirrored and verified in the export/print path and vice-versa (Scheduler `GanttView` ↔ `buildGanttSVG`; Site Planner canvas ↔ PDF/print). A mandatory LIVE-VERIFY class.
+<!--rule:MODULE-SCOPE-COMPONENTS-->
+- **MODULE-SCOPE-COMPONENTS** — Define React components at module scope, never inside another component's render body (remount, focus loss, lost input state).
+<!--rule:VIEWPORT-STABLE-->
+- **VIEWPORT-STABLE** — A panel/rail/divider toggle that changes a render surface's width or edge must neither JUMP nor FLASH: (a) compensate against the MEASURED delta in a `useLayoutEffect` (real DOM edge, never an assumed width or a passive effect); (b) buffer the surface (ghost) across any resize-driven re-layout/re-raster. Precedents B837, B65, B838.
+<!--rule:CHROME-NEVER-EATS-A-PRESS-->
+- **CHROME-NEVER-EATS-A-PRESS** — Anything painted ABOVE content that stops propagation must be GATED on its own object being selected or FORWARD the press to `isDoubleTap` keyed on the UNDERLYING feature (one key per feature). Handles and `data-chrome` are identity-transparent at the resolver but keep their own press; while a double-click is in flight the feature press 1 selected WINS the hit test; probe the TWO-PRESS INVARIANT (press once, re-ask what a double-click there addresses); when a double-click "does nothing" check the CLOCK and TARGET first. Guards e2e **chrome-swallows-press**, `audit-doubleclick-properties`.
+<!--rule:FOREGROUND-OR-VOID-->
+- **FOREGROUND-OR-VOID** — A background tab cannot be measured (clock or pixels). Every browser-driving harness asserts `document.visibilityState === "visible"` plus a rAF-liveness probe BEFORE measuring and fails loudly otherwise (`ui-audit/lib/tabTiming.mjs` `assertMeasurable`, `pacedWait`; `test/tabTiming.test.js` requires it of every Chromium harness). Gate diagnostics at CALL time (`?planyrDiag=1`), read-only; never probe between the two presses of a double-click.
+<!--rule:DRIVER-SCROLL-IS-NOT-APP-SCROLL-->
+- **DRIVER-SCROLL-IS-NOT-APP-SCROLL** — A driver's actionability scroll cannot be used to measure scroll: in a virtualised list click only what a human could see (`ui-audit/lib/visibleClick.mjs`; "programmatic scroll writes: 0" is the tell). And every probe carries an arm whose answer is KNOWN independently and must report it; a harness with only unknown arms is vacuous and says so.
+<!--rule:COUNT-EVERY-KIND-->
+- **COUNT-EVERY-KIND** — A plan's contents are its five drawn kinds (el · markup · measure · callout · parcel); a count of `[data-el-id]` sees one. Count DISTINCT `data-feature` keys via `ui-audit/lib/featureCensus.mjs`; when a count says nothing happened but the app says it did, Ctrl+Z and diff the feature list. Guards: `test/featureCensus.test.js`, e2e **feature-census**.
+<!--rule:NO-ONE-OWNS-A-COMPOSITE-->
+- **NO-ONE-OWNS-A-COMPOSITE** — A surface built from several objects (dissolved region, merged outline, cached raster) is owned by none, so no per-object predicate or census reaches it: when adding any per-object hide/exclusion, find the composites that read it and **invalidate them EXPLICITLY**; **THE GUARD IS INK OR PIXELS, NEVER REGISTRATIONS** (`ui-audit/lib/inkCensus.mjs`). Instances B3296, B494050, B503184. `test/compositeSurfaceRule.test.js`, **contentVisibility**, **hiddenContentReads**.
+<!--rule:SYNTHETIC-KEYS-DONT-EDIT-->
+- **SYNTHETIC-KEYS-DONT-EDIT** — A synthetic keystroke does not mutate the plan (the key handler is on `window`; `new KeyboardEvent` defaults `bubbles:false`). Use real key input or the Delete control, RE-READ until the feature is absent, then reload and confirm. Only driver: `ui-audit/lib/deleteFeature.mjs`; `test/deleteDrive.test.js`.
+<!--rule:PERCEPTUAL-PARITY-->
+- **PERCEPTUAL-PARITY** — A picture change must be imperceptible at working zoom (2026-08-06), measured as CIEDE2000 on an acuity-filtered pair: **detail ΔE00 ≤ 6.0 · perceived ≤ 1.0 · perceived frame-mean ≤ 0.10**, chosen BEFORE the measurement, never nudged; record before/after crops in the PR (`ui-audit/verify-perceptual-parity.mjs`, `test/perceptualParity.test.js`).
+<!--rule:WRONG-CASE-->
+- **WRONG-CASE** — When a user says a feature "never works" and it works in your case, you tested the wrong case: write down what differs in the reporter's scene before writing the fixture; a harness for a reported symptom carries a PRECONDITION that refuses to score unless that configuration is present; every `V###` states a closure condition someone other than the owner can meet (`test/verificationClosability.test.js`).
+<!--rule:DEDUPE-FIRST-->
+- **DEDUPE-FIRST** — Search Open, ⏳ Verify AND Done (`^### B` headings, `#tags`, symbols; grep `BACKLOG_OPEN.md` for the live set) before minting a `B#`; a match gets the recurrence treatment, never a fresh number; mint with `ledger add`.
+<!--rule:TOMBSTONE-DELETES-->
+- **TOMBSTONE-DELETES** — Every removal path records tombstones for its FULL cascade set before the next flush, so a merge/sync cannot resurrect the item or raise a false conflict (B276/B556/B596/B612).
+<!--rule:TIER-BY-REBUILDABILITY-->
+- **TIER-BY-REBUILDABILITY** — User work and re-fetchable cache NEVER share a storage tier: re-fetchable data goes in IndexedDB (own budget), localStorage (~5 MB) is for irreplaceable work only; never sum the tiers. No eviction may cost unrebuildable data: every reclaimable class declares a rehydration source in `shared/storage/storageCensus.js`, only `storageReclaim.js` acts on them (B1427). **storageReclaim**, **gisCache**.
+<!--rule:ROWS-CANONICAL-ON-SEED-->
+- **ROWS-CANONICAL-ON-SEED** — When a plan opens, for an element the server ALREADY HAS the `site_elements` rows win unless a pending local op explains the difference; for an element the server has NEVER seen, local wins. `reconcile(collections, { afterSeed: true })` adopts rows via `onRowsCanonical`; the bonded heal runs AFTER the journal/never-synced folds in `refetchReplace`; never re-order those two (B1113).
+<!--rule:DANGEROUS-MEANS-UNOBSERVABLE-->
+- **DANGEROUS-MEANS-UNOBSERVABLE** — "Dangerous" is never a reason to avoid work: name the specific observation no guard can make, build that instrument and prove it goes RED on a deliberately wrong build, then do the work; if it cannot be built that is the honest blocker. Irreversible/destructive actions and real product decisions still stop for the owner (2026-08-08, B1449).
+<!--rule:LIVE-VERIFY-->
+- **LIVE-VERIFY** — Timing/race, concurrency/multi-writer, GIS endpoint behaviour, zoom- or density-dependent rendering, PDF/export parity and anything citing real project data file `Verify: live` and park in ⏳ Verify until seen working; each class maps to at least one e2e spec.
+<!--rule:EDITOR-EXIT-CONTRACT-->
+- **EDITOR-EXIT-CONTRACT** — Every way out of an editor keeps what the editor shows as FINISHED; a hybrid is the bug. Three classes: **text** (Enter/Tab/click-away COMMIT, Escape abandons the typed text) · **select** (CHOOSING is the commit; every exit closes the menu) · **tokens** (every token is written through the instant it is added/removed/reordered; every exit merely closes). The reported key is never the scope: audit all four exits on every editor. Guards: `ui-audit/verify-cell-editor-exit-contract.mjs`, `test/cellEditorExitContract.test.js`.
+<!--rule:PANEL-BREVITY-->
+- **PANEL-BREVITY** — "Less is better" (2026-07-28): verdict + number first, at most ONE short line per group, the rest behind the group's `Assumptions & method ▸`; new copy REPLACES (name the sentence removed); prefer a named state to a sentence; numbers over prose; never the same sentence twice; honesty stays reachable, never bought with accuracy; report visible line + character count before/after. Enforced by `node ui-audit/panel-copy-budget.mjs --check` against `ui-audit/panel-copy-budget.json`, `test/panelBrevity.test.js`.
+<!--rule:VIEW-INDEPENDENT-ONCE-->
+- **VIEW-INDEPENDENT-ONCE** — Work whose inputs are MODEL + SETTINGS must not be recomputed because the VIEW moved; a memo key may never contain a view term unless the value is genuinely view-derived, and then only the scalar it uses (`view.ppf`). Latch approximate view values (`viewCull.cullRectFor`), use `site-planner/lib/pureCache.js` for pure leaves; never propose a screenshot as the guard. Detector `ui-audit/detect-view-recompute.mjs`, gate `ui-audit/verify-view-independent.mjs` (`npm run perf:viewindep`), `test/viewIndependentRegistry.test.js`.
+<!--rule:NO-PER-MOVE-WORK-->
+- **NO-PER-MOVE-WORK** — No feature may add per-pointer-move work to the planner: a pan move, wheel-zoom step or drag move rebuilds no grading surface, posts no worker job, re-encodes no picture and commits React about once per move; whatever a gesture changes is rebuilt ONCE at release. Budgets in `ui-audit/planner-perf-budget.json` (pan ≤ 16 ms/move; the open and mode-switch budgets are ratcheted, not yet met). Gate `node ui-audit/verify-planner-perf.mjs --counts` (required); timings `npm run perf:planner` before shipping render/grading changes.
+<!--rule:NO-RETRYABLE-ERRCODE-->
+- **NO-RETRYABLE-ERRCODE** — No SQL function may raise errcode `40001` or `40P01` (PostgREST retries them forever and took planyr.io down on 2026-10-11); a business-rule refusal uses a custom code (`PT409`). Guard `test/noRetryableErrcode.test.js`.
+<!--rule:CONSTRAINT-CAPTURE-->
+- **CONSTRAINT-CAPTURE** — When Michael states or corrects a product constraint in chat, the session that hears it writes it into `## Owner product constraints` IN THE SAME SESSION, before the work it was dispatched for (2026-09-05). Before opening a PR, confirm nothing built contradicts the constraints and say so.
+<!--rule:ONE-SHELL-ONE-TOOLBAR-ONE-SWEEP-->
+- **ONE SHELL, ONE TOOLBAR, ONE SWEEP** (2026-10-05, "I want the frame to always work regardless of the size of computer or screen") — Browser zoom and OS scaling shrink the CSS viewport. Any new header/tab-row/toolbar control goes through the shared shell: `AppHeader` rows never wrap, every action row is a `PriorityToolbar` (`src/shared/ui/PriorityToolbar.jsx`, `toolbarPlan.js`: labels drop to icons, then low-priority items fold into More; declare each item's `priority`; no per-module media query or hard-coded chrome width; ResizeObserver on the element's own box). The width sweep `ui-audit/verify-width-sweep.mjs` is a required gate: a NEW MODULE ROUTE MUST BE ADDED to its `ROUTES`, and an intentionally scrolling strip says why with `data-sweep-exempt="<reason>"`; a control owning a shared ref or portaled menu honours `render({ measuring })`.
 
 ### Definition of Done (every item)
 1. **Implemented** — the whole job, including the hard / real part (STANDING RULE #1). No diagnosis-only.
@@ -1709,126 +397,17 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
 
 The full catalog of shipped-and-verified work (Site Planner, Supabase backend, multi-workspace foundation, Document Review) lives in **`docs/SHIPPED.md`**. Read it only when you need the history of a specific feature — it is not needed to orient.
 
-## KEY DECISIONS (must persist)
-- **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
-  has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens
-  in `src/index.css`, mirrored to JS for the SVG canvas in `src/shared/theme/palette.js` (var()
-  can't be used in SVG attributes / canvas export — keep the two in sync). **Chrome themes WITH
-  the app** (light theme = light chrome) — never a permanently-dark bar over a light app (the
-  constant pupil readjustment is the worst case for eye strain). **Build text hierarchy through
-  weight, size, and uppercase letter-spacing — NEVER by fading text toward the background.**
-  Low-contrast gray body/label text is **disallowed** (eye strain in bright offices); subtle grays
-  are correct ONLY for borders, the drafting grid, and the semantic "Complete" status badge. New UI
-  must reference **theme tokens, never raw hex**, and clear **WCAG AA (≥ 4.5:1)** for body text on
-  its surface in **both** themes. This is now **machine-enforced**: `ui-audit/contrast-audit.mjs`
-  (parses the real `index.css`) + `test/contrast.test.js` fail CI if any defined token pair drops
-  below its floor — so a palette edit can't silently re-introduce a low-contrast pair. Text/icon ON
-  the global accent fill uses **`--on-accent`** (white in light, near-black in dark — the dark accent
-  is too light for white); saving/unsaved/offline labels use **`--warn-text`** (AA amber). The common
-  trap (the B341 regression): a chrome-region component that **hardcodes a color instead of a token**
-  reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
-  lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
-  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
-- **Project-status palette + map markers (owner rules, B433/B434; the single source is
-  `src/shared/ui/statusTokens.js`, mirrored to the `--status-*` CSS vars in `index.css`).** Three
-  standing rules govern how a deal stage looks, everywhere (map pins, left-rail chips, list markers,
-  section headers, the status menu):
-  1. **Map markers are always solid-filled with a white keyline — never a transparent/hollow primary
-     marker on the aerial** (a thin hollow ring vanishes over green imagery). The zoomed-out marker is
-     the **precision pin** (`sitePinIcon`, B434): a color **bulb** on a short **stalk** seated over a
-     **ground ring**, the ring center being the anchor (it sits exactly on the site coordinate). Progress
-     (derived from status until a real `progress_pct` lands — B161/B163) folds into the ground-ring
-     **sweep** (pursuit 10 · active 60 · onhold 30 · complete 100 · dead 0).
-  2. **Status salience is MONOTONIC, Pursuit loudest → Dead quietest** — size + opacity track importance;
-     settled stages (Complete, Dead) are smaller + dimmed. Never invert this.
-  3. **RED is reserved for genuine alert/error** (the `--danger` CSS token — cloud-off badge, a failed
-     layer dot, a destructive ×), **never an inert state.** Dead is therefore neutral **gray** (✕ +
-     strike), the same gray as Complete (distinguished by glyph + strike, not hue). Active is **blue**
-     (not green — green blends into green imagery and coral+green is the red-green-colorblind confusion
-     pair); Pursuit is **coral**. Pursuit/Active are glyphless solid discs; the colorblind-safe glyph
-     (‖/✓/✕) rides only on the settled stages.
-- **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
-  with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
-  on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline
-  `<input>` overlay in `SitePlanner.jsx` (road width, per-edge setback, overlay trace length) or
-  the callout `foreignObject` `<textarea>`. Commit on Enter / click-away, cancel on Esc. Applies
-  to any new editing affordance.
-- **Brand spelling — Planyr (P-L-A-N-Y-R).** Human-readable text → **Planyr** (capital
-  P); package name + technical identifiers → lowercase `planyr`. Michael often
-  says/dictates "Planner" (or "Planner Fit") — read these as the brand **Planyr** (and
-  the old name **Planar_Fit**), not the literal word "planner." Don't reintroduce a
-  "Planner"/"Planar" spelling for the brand.
-- **Module naming — the Document Review workspace is user-facing "Review" (owner rule, B418, 2026-06-23).**
-  The canonical **user-facing** name for this module is **"Review"** — the row-2 tab, the loader caption, the
-  empty-state heading, and the error-boundary label all say "Review". The **internal id stays `doc-review`**,
-  the folder is `src/workspaces/doc-review/`, the route is `/markup`, and the data-model field is `markups` —
-  none of those change (renaming them would orphan routes/storage). The module accent token is
-  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**
-  and **"Document Review"** mean this same Review module — don't treat them as separate features.
-  Distinct from this: the Site Planner's **"Markup line/rect"** drawing tools are their own thing — leave
-  their labels alone.
-  - **⚠ UPDATE (B496, 2026-06-27): "Library" is now its OWN top-level workspace, NOT the Review module.**
-    The file browser (`FileBrowser`, was Review's landing screen) was lifted into a dedicated **Library** tab
-    (`src/workspaces/library/`, internal id `library`, route `#/library`, teal accent `--accent-library`
-    **#0E7490** / JS `accentLibrary`). Review is now purely "open one drawing + mark it up" — with nothing
-    open it shows a "No drawing open" empty state with a **Browse the Library** button. Clicking a file in
-    Library opens it in Review via the existing Shell `onOpenReviewInDocReview` intent. The file-storage
-    **data layer (`reviewStore`/`autofiling`/`fileIndex`) stays in `doc-review/lib`** (project-scoped,
-    canvas-independent) and Library imports it cross-workspace — no new backend/tables/keys. So pre-B496
-    text below that calls `FileBrowser` "the Document Review landing surface" now means the **Library**
-    tab. **(B542 update:)** the Site Planner's old slide-over `ProjectFilesDrawer` + its row-1
-    **🗂 Files** button were **removed as redundant** once the Library tab shipped — `ProjectFilesDrawer.jsx`
-    is deleted and the Library tab is the one and only file browser now.
-- **Private by default.** Any future sharing or shared workspaces default to private;
-  sharing is always a deliberate, explicit act — never automatic.
-- **No cross-customer admin view — amended 2026-08-30 (owner go-ahead), superseded by B711904 /
-  B877442.** The original absolute form of this line ("no admin view, do not add one") stopped being
-  true in practice once B711904 shipped Michael's own internal operator page and B877442 added a
-  section to it — the docs were catching up to reality, not granting new permission. What actually
-  holds: an **owner-only internal admin surface** exists at `#/admin` (`src/workspaces/admin/`),
-  allowlisted to a single account (Michael's) through `admin_users` + the `is_admin()` SECURITY
-  DEFINER RPC — see that workspace's `CLAUDE.md`. It may read **operational** data about how the
-  product is running (telemetry / error rows from `client_errors`, feature-request queues like
-  B877442's county criteria requests) — never a per-customer support-agent view. It still may **NOT**
-  become a cross-customer view of other users' **plans, projects, or files**, and `admin_users` still
-  **never** gets a SELECT policy — the zero-policy RLS design (client can't read/write the allowlist
-  directly; `is_admin()` is the only door) stays load-bearing. The customer-trust reasoning behind the
-  original line is unchanged; only its absoluteness was wrong.
-- **Secrets stay in env/secrets, never committed.** Covers Supabase keys, the Autodesk
-  APS key, and Google Drive credentials. The Supabase **anon key is RLS-protected and
-  safe to ship in the client**; the Supabase **service_role key and all third-party
-  API keys must stay server-side only** and never reach the browser.
-- **Logged-in users' data lives in the cloud.**
-- **Monorepo, one repo, folder per workspace.** The `/server` folder's secrets and
-  deploy pipeline are walled off from the public GitHub Pages deploy, so no
-  credential can ride along to a live URL.
-- **DWG handling (Document Review):** Michael normally receives DWG (and PDF) and will
-  not ask consultants for DXF. The tool auto-converts DWG → DXF on the backend. Start
-  with free **LibreDWG** + a hard-failure fallback to **Autodesk APS Model Derivative**
-  (~$0.30/file, pay-as-you-go). Optional later verification layer (proxy-object
-  pre-screen, header/extents sanity checks, embedded-preview diff) decides when to
-  pay. Reserve **ODA** (~$6k first yr / $3.6k/yr) or **Apryse** (~$10k+/yr) only for
-  high volume or to keep files off third-party clouds. (Pricing mid-2026 — re-verify.)
-- **Auto-filing never auto-guesses.** Files matched confidently to one of the 4 named
-  projects (via title block + aliases) are auto-routed and auto-named; no-match /
-  multi-match / low-confidence files go to a "needs filing" holding area with
-  one-click confirm. A misfiled drawing is worse than an unfiled one.
-- **Screening fetches: recompute is free, re-fetch is user-action-driven — never map-view-driven
-  (B860, chat NEW-1; amends the "explicit request only" fetch rule).** The drainage/floodplain
-  "facts pass" has two halves and they behave differently. **Recompute (no network)** — the
-  detention / mitigation / pond-split / buildability math over already-held geometry and inputs —
-  runs **automatically and live** on every edit off the cached context; pure math never goes stale
-  by a click's worth, so there is no "numbers reflect the old boundary" banner and no manual
-  re-check for it (changed verdicts flash instead). **Re-fetch (network)** — GIS geometry (flood
-  zones, reviewing authority, WSE rasters, 3DEP) — stays **stale-while-revalidate**: serve the
-  cached pull instantly, background-refresh only when a **user action** (a boundary/element edit)
-  makes the drawn footprint outgrow the fetched envelope (or the cached snapshot ages past its
-  TTL), and **always display the data's age** ("flood data 16h ago"). The deliberate amendment:
-  fetches remain **user-action-driven** — a boundary edit is a user action — and are **never
-  triggered by panning/zooming the map** (map-view-driven fetching stays banned; `mapillary` /
-  `evidenceLayers` remain the only view-driven vectors). The pure decision layer is
-  `lib/factRevalidation.js` (`revalidationNeed` / `fetchStaleForEdit`); the manual ↻ Re-check is a
-  force-refresh of the fetch half only.
+## KEY DECISIONS (must persist; full text in `docs/decisions/key-decision-*.md`)
+<!--rule:KEY-DECISIONS-->
+- **Theming: Light / Dark / System (2026-06-21).** `data-theme` on `<html>` + CSS tokens in `src/index.css`, mirrored for SVG/canvas in `src/shared/theme/palette.js` (keep in sync). Chrome themes WITH the app; build hierarchy through weight, size and uppercase letter-spacing, NEVER by fading text; low-contrast gray body text is disallowed; new UI uses tokens never raw hex and clears WCAG AA 4.5:1 in both themes (`ui-audit/contrast-audit.mjs`, `test/contrast.test.js`); text on the accent fill uses `--on-accent`, saving/unsaved/offline labels `--warn-text`. The picker lives in the row-1 Settings gear. [full](docs/decisions/key-decision-theming.md)
+- **Project-status palette + map markers (B433/B434; source `src/shared/ui/statusTokens.js`).** Markers are always solid-filled with a white keyline (precision pin `sitePinIcon`), never hollow; salience is MONOTONIC Pursuit loudest → Dead quietest, never inverted; RED is reserved for genuine alert/error (Dead is neutral gray ✕ + strike, Active blue, Pursuit coral; colorblind glyphs only on settled stages). [full](docs/decisions/key-decision-project-status.md)
+- **No dialog-box edits (2026-06-17):** never `window.prompt/confirm/alert`; edit in place with an inline editor (`numEdit`, the callout `foreignObject` textarea); commit on Enter/click-away, cancel on Esc. [full](docs/decisions/key-decision-no-dialog-box.md)
+- **Brand spelling: Planyr (P-L-A-N-Y-R)** in human text, lowercase `planyr` in identifiers; Michael's "Planner"/"Planner Fit" means the brand Planyr (and the old Planar_Fit). Never reintroduce "Planner"/"Planar" as the brand. [full](docs/decisions/key-decision-brand-spelling.md)
+- **Module naming (B418, 2026-06-23):** the Document Review workspace is user-facing **"Review"** (internal id `doc-review`, folder, route `/markup` and the `markups` field do not change; accent `--accent-review` #EF9F27). **"Library" is its own top-level workspace** (B496, `src/workspaces/library/`, route `#/library`, `--accent-library` #0E7490); the file-storage data layer stays in `doc-review/lib`; the Site Planner's old Files drawer is gone (B542). "Markup"/"Document Review" in old text mean Review. [full](docs/decisions/key-decision-module-naming.md)
+- **Private by default:** sharing is always a deliberate, explicit act. **No cross-customer admin view** (amended 2026-08-30): the owner-only `#/admin` surface (allowlist `admin_users` via `is_admin()`) may read operational data only, never other users' plans, projects or files, and `admin_users` never gets a SELECT policy. [sharing](docs/decisions/key-decision-private-by-default.md) · [admin](docs/decisions/key-decision-no-cross-customer.md)
+- **Secrets stay in env/secrets, never committed;** the Supabase anon key is RLS-protected and safe in the client, the service-role key and every third-party key stay server-side only, never a `VITE_` var. [full](docs/decisions/key-decision-secrets.md) · Logged-in users' data lives in the cloud. · Monorepo, one repo, a folder per workspace; `/server` secrets are walled off from the public deploy.
+- **DWG (Document Review):** auto-convert DWG → DXF on the backend, LibreDWG first with a hard-failure fallback to Autodesk APS (never ask consultants for DXF). **Auto-filing never auto-guesses:** confident single-project matches auto-route, everything else goes to "needs filing"; a misfiled drawing is worse than an unfiled one. [DWG](docs/decisions/key-decision-dwg.md) · [filing](docs/decisions/key-decision-auto-filing.md)
+- **Screening fetches (B860):** recompute (pure math over held geometry) is free, automatic and live; re-fetch (network) is stale-while-revalidate, triggered ONLY by a user action (a boundary/element edit outgrowing the fetched envelope, or TTL), never by panning/zooming, and always displays the data's age; `lib/factRevalidation.js`. [full](docs/decisions/key-decision-screening.md)
 
 ## DEFERRED (with reasons — waiting creates no rework debt)
 - Per-site sharing, shared team workspaces, and a possible commercial/SaaS direction.
@@ -1852,69 +431,6 @@ The two-track roadmap (Site Planner maturation + Document Review buildout) lives
 - GIS layer status: honest per-layer status + ~45s self-heal re-probe; at last note
   roughly 10 of 14 layers were live.
 
-## Two backends — don't conflate
-Two layers that talk **over the network** — one for **data**, one for **compute**. Never
-conflate them.
-
-1. **Supabase — the data / auth / storage layer (BUILT).** Cloud Postgres, email/password
-   auth, row-level security, and cloud save/load of site data **and** Document Review state
-   (the `doc_reviews` table + the `doc-review-files` Storage bucket, same anon client +
-   private-by-default RLS). The **frontend talks to Supabase directly with the anon key** —
-   which is safe to ship in the browser **because RLS protects it** (a request can only
-   ever see/write the signed-in user's own rows). This is the **permanent home for user
-   data**; little custom server code.
-2. **The server-side compute/integration tier — two delivery shapes, DIFFERENT deploy status.**
-   Don't lump them: the **Drive storage backend is LIVE on the edge**; the **heavy CAD/AI compute
-   is built in-repo but not yet deployed** to Cloud Run.
-   - **✅ LIVE & DEPLOYED — Google Drive storage (bytes I/O).** The storage backend
-     (`server/storage/`, B206–B209 / B207) runs **IN same-origin Cloudflare Pages Functions** —
-     Drive byte-I/O needs no container, and same-origin means no CORS. It is the one home for
-     Document Review source files: **uploads go CHUNKED through `/api/uploads/*`** (B409 rework —
-     ~16 MB slices relayed to a Drive resumable session held server-side in `public.upload_sessions`,
-     so ANY file size works; no whole-file request ever rides through the Worker) and **downloads
-     STREAM through `GET /api/files` with Range→206** so huge PDFs open progressively. The old
-     Supabase Storage upload fallback was REMOVED (its 50 MB cap caused silent "oversize" failures;
-     pre-cutover files still read back). The Planyr-key↔Drive-file-id map persists in **Supabase Postgres**
-     (`server/storage/db/drive_files.sql`, own-row RLS) so the stateless Function can't lose it;
-     the queryable **file-facts index** also lives in Supabase (`doc-review/db/file_facts.sql`),
-     not Drive. The one-time OAuth *consent* callback is a sibling Pages Function
-     (`functions/api/auth/google/*`); `functions/api/drive/selftest.js` is a guarded round-trip
-     smoke test. **Provisioned + owner-verified 2026-06-22 in Cloudflare Pages Production:**
-     `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` + `PLANYR_STORAGE_BACKEND=drive` + `SUPABASE_URL/ANON_KEY`.
-     The chunked path **removes every per-file size ceiling** (Worker body/memory caps + the old
-     Supabase 50 MB cap all cleared). **⛔ Do NOT attempt browser-direct-to-Drive uploads** — CORS-dead
-     (no readable `Location` header, no ACAO on preflight; refuted 2026-07-11). **⛔ Do NOT re-mint
-     `GOOGLE_REFRESH_TOKEN`** — a fresh consent no longer matches the deployed secret and would take
-     Drive filing offline.
-   - **⏳ Built in-repo, NOT yet deployed — Cloud Run.** Scale-to-zero containers (idle = free; a
-     request spins one up) for work that genuinely needs a container or a server-only key:
-     - **DWG→DXF conversion** — **LibreDWG** primary (free, native binary compiled into the
-       container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG failures
-       (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned; a LibreDWG
-       failure with APS off returns an explicit error, never a silent success). Code:
-       `server/convert/` (B238). LibreDWG needs a real container (native binary + filesystem) —
-       exactly why this is Cloud Run and not a Pages Function.
-     - **Tier-2 AI auto-filing title-block read** — `server/filing/` (B299): reads a dropped
-       drawing's title block with the Claude API (key **server-side only**), matches it to a named
-       project (**never auto-guesses**), returns a filing decision + placement facts. Dormant
-       behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED` (the not-yet-deployed
-       proxy `functions/api/file.js` 503s → the drawer files manually, no regression). NOTE:
-       **Tier-1 auto-filing (B312, plain code in the browser) is LIVE default-on** — this AI tier is
-       only the scanned/image-only fallback.
-
-   **All third-party secrets stay server-side only** — the APS key, the **Anthropic read key**
-   (auto-filing), the **Google credentials** (Drive), and the Supabase **service-role** key. They live
-   in the Cloudflare Pages env as **encrypted secrets read only by the server-side `functions/api/*`
-   handlers** (or on Cloud Run) — **never inlined into the public browser bundle** (never a `VITE_`
-   var). The only Supabase key that reaches the frontend is the RLS-protected **anon** key.
-
-So the **data** backend (Supabase) and the **Drive storage** backend (the `functions/api/files.js`
-Pages Function) are **LIVE**; the **Cloud Run** compute — DWG→DXF conversion + the Tier-2 AI filing
-read — is built in-repo but **not yet deployed**. Keep the **data**, **storage**, and **heavy-compute**
-layers distinct when reasoning about what exists.
-
----
-
-# Technical reference — see `docs/REFERENCE.md`
-
-Deep implementation detail (Site Model schema, map-layer plumbing, Supabase DDL/RLS, Document Review persistence, GIS plumbing, the sandbox Playwright quirk) lives in **`docs/REFERENCE.md`**. Pull it up on demand when you touch that subsystem — you do not need it loaded to orient.
+## Two backends — don't conflate (full text: [docs/decisions/two-backends.md](docs/decisions/two-backends.md))
+1. **Supabase = data/auth/storage, LIVE.** The frontend talks to it directly with the RLS-protected anon key; it is the permanent home for user data (`doc_reviews`, the `doc-review-files` bucket, the Drive key↔file-id map and the file-facts index).
+2. **Server-side compute/integration tier, two shapes with DIFFERENT deploy status.** **LIVE: Google Drive byte I/O** in same-origin Cloudflare Pages Functions (`server/storage/`, `functions/api/files.js`; uploads CHUNKED through `/api/uploads/*` into a Drive resumable session held in `public.upload_sessions`; downloads STREAM with Range→206). **⛔ Never browser-direct-to-Drive uploads (CORS-dead, refuted 2026-07-11); ⛔ never re-mint `GOOGLE_REFRESH_TOKEN`.** **BUILT, NOT DEPLOYED: Cloud Run** for DWG→DXF (`server/convert/`, LibreDWG, APS fallback dormant behind `APS_ENABLED`) and the Tier-2 AI filing read (`server/filing/`, dormant behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED`; Tier-1 browser auto-filing B312 is LIVE). All third-party secrets stay server-side only.

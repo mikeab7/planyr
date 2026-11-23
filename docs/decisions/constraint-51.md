@@ -1,0 +1,7 @@
+# Owner product constraint #51
+
+_Backstory moved verbatim out of `/CLAUDE.md` (audit batch H, 2026-11-23). Nothing below was reworded, shortened or removed: the rule in force is still stated in `/CLAUDE.md`, and this file is the full text and history behind it._
+
+---
+
+51. **(2026-11-03) The Task Report toolbar is Filter · Group by · Show · Columns — one matching button style, one open slot — and the Status segmented control is RETIRED; do not bring it back.** Michael approved an interactive mockup and said "ship it as is" (B2639169, amending B2631584). **Filter** (funnel + a solid count badge of filter TYPES in use + accent border) holds STATUS (a checkbox for every status incl. custom ones, each with its count; default In Progress + Needs Attention) and PROJECT (a checkbox per project with its count, none = all) and a Clear all; it filters immediately with no Apply, stays open while ticking, closes on outside press / Esc, and opening one dropdown closes any other. Nothing checked in a section narrows nothing. Group by is a "Group by: None | Project" dropdown; Show and Columns keep their contents. Header count, group counts and rows always agree, and an empty result keeps a way back ("Clear filter"). Do not add an Apply button, a second status classification, or a status segmented control. Guard: repo-root `test/` **taskReportStatusFilter**; ui-audit **verify-task-report-status-filter**.

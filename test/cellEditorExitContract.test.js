@@ -197,10 +197,14 @@ describe("EDITOR-EXIT-CONTRACT — the tokens-class editor writes through; no ex
 });
 
 describe("EDITOR-EXIT-CONTRACT — the rule is written down where a new editor's author will read it", () => {
-  const claude = readFileSync(resolve(here, "../CLAUDE.md"), "utf8");
-  it("CLAUDE.md carries the named rule", () => {
-    expect(claude, "the named rule must exist so a brief can invoke it by name")
-      .toMatch(/\*\*EDITOR-EXIT-CONTRACT\*\*/);
+  // Slimmed 2026-11-23 (audit batch H): CLAUDE.md keeps the short rule + anchor; the full three-class text is
+  // verbatim in docs/decisions/editor-exit-contract.md, which the rule-content assertions below read.
+  const root = readFileSync(resolve(here, "../CLAUDE.md"), "utf8");
+  const claude = readFileSync(resolve(here, "../docs/decisions/editor-exit-contract.md"), "utf8");
+  it("CLAUDE.md carries the named rule (anchor) and its decision doc exists", () => {
+    expect(root, "the named rule must exist so a brief can invoke it by name")
+      .toContain("<!--rule:EDITOR-EXIT-CONTRACT-->");
+    expect(root).toMatch(/\*\*EDITOR-EXIT-CONTRACT\*\*/);
   });
   it("the rule states all three classes and the binding invariant", () => {
     const i = claude.indexOf("**EDITOR-EXIT-CONTRACT**");

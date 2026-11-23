@@ -57,7 +57,10 @@ describe("no component seeds state from a name", () => {
   });
 
   it("CLAUDE.md states the rule", () => {
-    expect(readFileSync("CLAUDE.md", "utf8")).toMatch(/never copy a name into component state/i);
+    const claude = readFileSync("CLAUDE.md", "utf8");
+    expect(claude).toContain("<!--rule:NAMES-ONE-SOURCE-->");
+    expect(claude).toMatch(/never copy a name into component state/i);
+    expect(readFileSync("docs/decisions/names-one-source-of-truth.md", "utf8")).toMatch(/never copy a name into component state/i);
   });
 });
 

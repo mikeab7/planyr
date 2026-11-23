@@ -144,7 +144,9 @@ describe("Arrange stays honest", () => {
 
 describe("the exception is on the record (so the next session does not undo it)", () => {
   it("root CLAUDE.md constraint 10, planStyle and paintOrder all name it", () => {
+    expect(read("CLAUDE.md")).toContain("<!--constraint:10-->");
     expect(read("CLAUDE.md")).toMatch(/TRAILER PARKING ALWAYS DRAWS ABOVE ROADS/);
+    expect(read("docs/decisions/constraint-10.md")).toMatch(/TRAILER PARKING ALWAYS DRAWS ABOVE ROADS/);
     expect(read("src/workspaces/site-planner/lib/planStyle.js")).toMatch(/trailerOverRoads/);
     expect(read("src/workspaces/site-planner/lib/paintOrder.js")).toMatch(/trailerOverRoads/);
     expect(read("src/workspaces/site-planner/lib/zOrder.js")).toMatch(/trailerOverRoads/);
