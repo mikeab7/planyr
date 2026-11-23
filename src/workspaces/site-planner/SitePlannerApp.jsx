@@ -298,7 +298,7 @@ export default function App({
     const all = readCloudWriteFailures();
     const dead = all.filter((e) => e && e.error === PUSH_MISSING);
     if (dead.length) { dead.forEach((e) => clearCloudWriteFailure(e.id)); reportClientEvent("write-failure-pruned-missing", "dropped logged cloud-write failures for plans that were never stored on this device", { count: dead.length }); }
-    const pending = all.filter((e) => !(e && e.error === PUSH_MISSING));
+    const pending = all.filter((e) => !(e && (e.error === PUSH_MISSING || e.kind === "notes")));  // a Notes sync record is Notes' own to surface
     if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   /* NEW-1 (B2671215 follow-up, owner 2026-11-11) — A FAILED RENAME'S BANNER ENDS WHEN THE CLOUD HOLDS THE NAME, not only when Retry is pressed.
@@ -317,7 +317,7 @@ export default function App({
       if (clearCloudWriteFailuresFor({ siteId: id })) reconcileBannerWithLog();
     });
     const onOnline = () => {
-      const pending = readCloudWriteFailures().filter((e) => e && e.error !== PUSH_MISSING);
+      const pending = readCloudWriteFailures().filter((e) => e && e.error !== PUSH_MISSING && e.kind !== "notes");
       if (!pending.length) return;
       beginPushRetry();
       attemptCloudWriteRetry();

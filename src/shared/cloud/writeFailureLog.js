@@ -38,6 +38,7 @@ const newId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 export const WHAT_RENAME = "The project rename";
 export const WHAT_STATUS = "The status change";
 export const WHAT_DATES = "The deal-date change"; // B1161793 (NEW-2) — feasibility/LOI/closing dates
+export const WHAT_NOTES_SYNC = "Notes sync"; // audit 2026-11-20 (B1) — Notes' own push failures; settled by Notes' next good sync, never replayed by the Site Planner
 export const WHAT_PLAN_RENAME = "The plan rename"; // NEW-1 (B2671215 follow-up) — a plan's own name; a single-row write, recorded by `pushLoud`
 
 /* Record one failed write. `what` is a short owner-facing label ("The project rename"); `groupId`/
@@ -100,7 +101,7 @@ export function clearAllCloudWriteFailures(win) {
  * genuinely single-row action regardless of its label. */
 export function inferEntryKind(e) {
   if (!e) return null;
-  if (e.kind === "rename" || e.kind === "status" || e.kind === "dates" || e.kind === "row") return e.kind;
+  if (e.kind === "rename" || e.kind === "status" || e.kind === "dates" || e.kind === "row" || e.kind === "notes") return e.kind;
   if (!e.groupId) return "row";
   if (e.what === WHAT_RENAME) return "rename";
   if (e.what === WHAT_STATUS) return "status";

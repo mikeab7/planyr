@@ -424,11 +424,11 @@ const NotePastePlain = Extension.create({
                 /* ⛔ OFFICE'S CLASS-BASED AND <font> TEXT FORMATTING (NEW-1, 2026-11-05, notesOfficeStyle.js): Excel's bold / red
                  * cell arrives bold / red, and `<font color face>` keeps its colour and typeface. Its own guard: a throw leaves
                  * the paste exactly as it was before this existed. */
-                try { normalizeOfficeStyle(d); } catch (_) { /* paste unchanged */ }
+                try { normalizeOfficeStyle(d); } catch (e) { reportClientEvent("notes-paste-normalise-failed", String(e?.message || e).slice(0, 160), { step: "officeStyle" }); /* paste unchanged */ }
                 return d;
               };
               let doc2;
-              try { doc2 = prepare(true); } catch (_) { doc2 = prepare(false); }
+              try { doc2 = prepare(true); } catch (_) { reportClientEvent("notes-paste-normalise-failed", "office list conversion threw", { step: "officeLists" }); doc2 = prepare(false); }
               try {
                 sourceSlot = { at: Date.now(), tables: readSourceTables(doc2.body, doc2.documentElement), grids: tableGridsOf(doc2.body), skeleton: skeletonOf(doc2.body) };
               } catch (_) { sourceSlot = null; }

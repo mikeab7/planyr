@@ -28,6 +28,7 @@
  * (ui-audit/verify-notes-table-paste.mjs) exercises the real parse.
  */
 
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { Fragment } from "@tiptap/pm/model";
 import { ANCHOR_BOX_PAD_X } from "./notesBoxResize.js";
 import { normalizeFill } from "./notesTableFill.js";
@@ -398,7 +399,7 @@ export function tableGridsOf(root) {
       const rows = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
       const grid = rows.map((tr) => cellsOf(tr).map((c) => (c.textContent || "").replace(/[\s\u00a0]+/g, " ").trim()));
       if (grid.length && grid.some((r) => r.length >= 2)) out.push(grid);
-    } catch (_) { /* one unreadable table costs its rescue, never the paste */ }
+    } catch (e) { reportClientEvent("notes-paste-normalise-failed", String(e?.message || e).slice(0, 160), { step: "tableGrids" }); /* one unreadable table costs its rescue, never the paste */ }
   }
   return out;
 }
@@ -435,7 +436,7 @@ export function readSourceTables(root, styleRoot = root) {
       const cols = Math.max(widths.length, fromCells.length);
       const merged = Array.from({ length: cols }, (_, i) => widths[i] ?? fromCells[i] ?? null);
       out.push({ widths: merged, fills });
-    } catch (_) { /* one unreadable table costs its look, never the paste */ }
+    } catch (e) { reportClientEvent("notes-paste-normalise-failed", String(e?.message || e).slice(0, 160), { step: "sourceTables" }); /* one unreadable table costs its look, never the paste */ }
   }
   return out;
 }
