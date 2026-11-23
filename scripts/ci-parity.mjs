@@ -42,6 +42,11 @@
  *   npm run ci-parity -- --list           print the parsed gate/infra list and exit; runs nothing
  *   npm run ci-parity -- --skip-install   skip `npm ci` — LOUD warning, deliberately deviates from CI
  *   npm run ci-parity -- --json           print the final summary as JSON (in addition to the human report)
+ *   npm run ci-parity -- --lane <name> [--shard i/n]
+ *                                         run only one CI lane's gates (static | vitest | build-app | browser —
+ *                                         ui-audit/lib/ciGates.mjs LANES); what each parallel job in build.yml runs.
+ *                                         --shard splits the vitest and browser lanes across n jobs. The default
+ *                                         (no --lane) still runs EVERY gate in order — the full-parity local run.
  *   npm run ci-parity -- --docs-only      run only ui-audit/lib/ciGates.mjs's DOCS_ONLY_GATE_NAMES subset
  *                                         — what build.yml runs for a pull request that changes only
  *                                         Markdown (its "Detect docs-only change" step sets CI_DOCS_ONLY=true,
@@ -62,13 +67,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { jobSteps } from "../ui-audit/lib/workflowContract.mjs";
-import { splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv, selectDocsOnlyGates } from "../ui-audit/lib/ciGates.mjs";
+import { splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv, selectDocsOnlyGates, selectLane, shardRun, parseShard, LANE_NAMES } from "../ui-audit/lib/ciGates.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 const WORKFLOW = join(REPO, ".github", "workflows", "build.yml");
 const GATES_MANIFEST = join(REPO, ".github", "ci-gates.yml");
-const JOB_ID = "build";
+// build.yml is a set of parallel LANE jobs (static / vitest / build-app / browser — see ui-audit/lib/ciGates.mjs LANES) plus
+// a `build` aggregator that only checks their results. The runner plumbing (setup-node pin, the one delegator step) is read
+// from every lane job; the gate LIST is still only ever .github/ci-gates.yml's `build` job.
+const GATES_JOB_ID = "build";
+const LANE_JOB_IDS = LANE_NAMES;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000; // safety net only — no gate this repo runs is expected to near it
 
 // build.yml's "Detect docs-only change" step is a second `run:` step alongside the "npm run
@@ -79,10 +88,19 @@ const GATE_TIMEOUT_MS = 20 * 60 * 1000; // safety net only — no gate this repo
 // "npm run ci-parity" that loadPlan()'s stray-step check (below) and test/ciGates.test.js both
 // assert on. Named here, once, so that check can allow it without also blinding itself to a
 // genuinely new stray step.
-const KNOWN_NON_GATE_RUN_STEPS = new Set(["Detect docs-only change (a pull_request whose diff is Markdown only)"]);
+const KNOWN_NON_GATE_RUN_STEPS = new Set();
+const isDelegator = (run) => /^npm run ci-parity( -- .*)?$/.test(run.trim());
 
 const argv = process.argv.slice(2);
+const argValue = (flag) => {
+  const eq = argv.find((a) => a.startsWith(`${flag}=`));
+  if (eq) return eq.slice(flag.length + 1);
+  const i = argv.indexOf(flag);
+  return i > -1 ? argv[i + 1] : null;
+};
 const FLAGS = {
+  lane: argValue("--lane"),
+  shard: argValue("--shard"),
   list: argv.includes("--list"),
   json: argv.includes("--json"),
   skipInstall: argv.includes("--skip-install"),
@@ -109,6 +127,9 @@ function preflightNode(infra) {
 
 function preflightGit() {
   const notes = [];
+  // A CI lane job (--lane) other than `static` is a deliberately SHALLOW checkout (the full history is ~190 MB and only the
+  // static lane's touch guard needs it) — never un-shallow it, and don't fetch main for it either.
+  if (FLAGS.lane && FLAGS.lane !== "static") return [`lane "${FLAGS.lane}" runs on a shallow checkout by design — no history fetch.`];
   try {
     const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { cwd: REPO, encoding: "utf8" }).trim();
     if (shallow === "true") notes.push("this checkout is SHALLOW — attempting `git fetch --unshallow` (best effort).");
@@ -162,24 +183,26 @@ function loadPlan() {
     return null;
   };
 
-  const workflow = jobSteps(readFileSync(WORKFLOW, "utf8"), JOB_ID);
-  if (!workflow.ok) return refuse(".github/workflows/build.yml", workflow.unparsed);
-  // build.yml keeps only the steps that genuinely can't live in the script (`uses:` — CI-runner
-  // plumbing) plus exactly ONE step that calls this script. Any OTHER `run:` step in build.yml
-  // would mean a gate snuck back in there instead of into the manifest — the exact drift this tool
-  // exists to prevent — so that's a loud warning, not a silent extra gate to run (running it would
-  // also risk recursing into `npm run ci-parity` itself for the delegator step).
-  const { gates: workflowRunSteps, infra } = splitSteps(workflow.steps);
-  const strayRunSteps = workflowRunSteps.filter(
-    (s) => s.run.trim() !== "npm run ci-parity" && !KNOWN_NON_GATE_RUN_STEPS.has(s.name),
-  );
-  if (strayRunSteps.length) {
-    warn(`build.yml has ${strayRunSteps.length} run: step(s) besides the "npm run ci-parity" delegator — ` +
-      `${strayRunSteps.map((s) => `"${s.name}"`).join(", ")}. These are NOT being run by this script ` +
-      `(they'd belong in .github/ci-gates.yml instead) — build.yml and the gate list may have drifted apart.`);
+  // Runner plumbing: every lane job keeps only `uses:` steps (checkout, setup-node, cache, artifact up/download) plus exactly
+  // ONE step that calls this script. Any OTHER `run:` step in a lane would mean a gate snuck back into build.yml instead of
+  // the manifest — the exact drift this tool exists to prevent — so that is a loud warning, not a silent extra gate.
+  const buildYml = readFileSync(WORKFLOW, "utf8");
+  const infra = [];
+  const seenInfra = new Set();
+  for (const jobId of LANE_JOB_IDS) {
+    const laneJob = jobSteps(buildYml, jobId);
+    if (!laneJob.ok) return refuse(`.github/workflows/build.yml (job "${jobId}")`, laneJob.unparsed);
+    const { gates: runSteps, infra: laneInfra } = splitSteps(laneJob.steps);
+    for (const st of laneInfra) { const k = `${st.uses}`; if (!seenInfra.has(k)) { seenInfra.add(k); infra.push(st); } }
+    const stray = runSteps.filter((st) => !isDelegator(st.run) && !KNOWN_NON_GATE_RUN_STEPS.has(st.name));
+    if (stray.length) {
+      warn(`build.yml job "${jobId}" has ${stray.length} run: step(s) besides the "npm run ci-parity" delegator — ` +
+        `${stray.map((st) => `"${st.name}"`).join(", ")}. These are NOT being run by this script ` +
+        `(they'd belong in .github/ci-gates.yml instead) — build.yml and the gate list may have drifted apart.`);
+    }
   }
 
-  const manifest = jobSteps(readFileSync(GATES_MANIFEST, "utf8"), JOB_ID);
+  const manifest = jobSteps(readFileSync(GATES_MANIFEST, "utf8"), GATES_JOB_ID);
   if (!manifest.ok) return refuse(".github/ci-gates.yml", manifest.unparsed);
   const { gates, infra: manifestInfra } = splitSteps(manifest.steps);
   if (manifestInfra.length) {
@@ -198,6 +221,10 @@ function main() {
   let { gates, infra } = plan;
   const totalGateCount = gates.length;
 
+  const shard = FLAGS.shard ? parseShard(FLAGS.shard) : null;
+  if (FLAGS.shard && !shard) { process.stderr.write(`\n⛔ ci-parity: --shard wants i/n (1-based, e.g. 2/4), got "${FLAGS.shard}".\n\n`); process.exitCode = 2; return; }
+  if (FLAGS.shard && !FLAGS.lane) { process.stderr.write("\n⛔ ci-parity: --shard only makes sense with --lane.\n\n"); process.exitCode = 2; return; }
+
   if (FLAGS.docsOnly) {
     const sel = selectDocsOnlyGates(gates);
     if (!sel.ok) {
@@ -214,8 +241,19 @@ function main() {
     gates = sel.selected;
   }
 
+  let laneNote = "";
+  if (FLAGS.lane) {
+    const sel = selectLane(gates, FLAGS.lane, shard);
+    if (!sel.ok) { process.stderr.write(`\n⛔ ci-parity: ${sel.error}\n\n`); process.exitCode = 2; return; }
+    // Docs-only mode never installs dependencies, so the lane's own "Install dependencies" gate has already been dropped
+    // above and a lane with nothing left of the docs-only subset has nothing to do — exit green, not "no gates ran".
+    gates = sel.selected;
+    laneNote = ` — lane "${FLAGS.lane}"${shard && shard.total > 1 ? `, shard ${shard.index}/${shard.total}` : ""}`;
+    if (!gates.length) { say(`ci-parity${laneNote}: nothing for this lane to run${FLAGS.docsOnly ? " on a docs-only change" : ""}.`); return; }
+  }
+
   if (FLAGS.list) {
-    say(`Gates (${gates.length}${FLAGS.docsOnly ? ` of ${totalGateCount}, docs-only mode` : ""}), in order, read from .github/ci-gates.yml:`);
+    say(`Gates (${gates.length}${FLAGS.docsOnly ? ` of ${totalGateCount}, docs-only mode` : ""}${laneNote}), in order, read from .github/ci-gates.yml:`);
     gates.forEach((g, i) => say(`  ${i + 1}. ${g.name}`));
     say(`\nInfra steps NOT covered (${infra.length}) — why: see the header of this file / ui-audit/lib/ciGates.mjs`);
     for (const s of infra) { const c = classifyInfra(s); say(`  - ${s.name} (${c.action}): ${c.reason}`); }
@@ -227,7 +265,7 @@ function main() {
       `ui-audit/lib/ciGates.mjs DOCS_ONLY_GATE_NAMES subset). No node_modules needed — "Install ` +
       `dependencies" isn't in that subset, so npm ci never runs.\n`);
   } else {
-    say(`ci-parity — running the ${gates.length} gates .github/ci-gates.yml declares, in order.\n`);
+    say(`ci-parity${laneNote} — running ${gates.length} of the ${totalGateCount} gates .github/ci-gates.yml declares, in order.\n`);
   }
 
   // ---- preflight, all reported before a single gate runs -------------------------------------
@@ -273,7 +311,7 @@ function main() {
         break;
       }
       const env = { ...process.env, ...stepEnv };
-      const r = runGate(step, env, tmpDir, i + 1, gates.length);
+      const r = runGate(FLAGS.lane ? { ...step, run: shardRun(step, FLAGS.lane, shard) } : step, env, tmpDir, i + 1, gates.length);
       results.push(r);
       if (r.status === "fail") { stoppedEarly = true; break; }
     }

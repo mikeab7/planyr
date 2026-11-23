@@ -49,6 +49,9 @@ export const KNOWN_INFRA_USES = {
   "actions/setup-node": "installs a pinned Node runtime on the runner; this script checks your Node version against the same pin and warns (never silently substitutes a different Node) rather than installing one.",
   "actions/cache": "restores/saves the Playwright browser cache between CI runs — a speed optimization with no correctness effect and no local equivalent (your machine keeps its own browsers on disk).",
   "actions/upload-artifact": "uploads .perf/visual-regression/ as a downloadable CI artifact on failure — the same files are already on your disk, so there's nothing to upload to.",
+  "actions/download-artifact": "restores the dist/ the build-app lane uploaded, so the browser lanes test the exact bytes that were measured, without building again. Locally you already have your own dist/ from the Build gate.",
+  "actions/cache/save": "saves the base-ref bundle stats under the commit's sha so a later pull request can reuse them instead of building the base ref a second time (a CI-only speed optimization; the budget gate still runs unchanged).",
+  "actions/cache/restore": "restores those saved base-ref bundle stats (see actions/cache/save); on a miss the Base-ref bundle snapshot gate builds the base itself, exactly as before.",
   "actions/github-script": "backfills the required \"build\" commit status for a PR that build-check-sweep.yml re-dispatched (NEW-3) — it calls the live GitHub API against a real PR number and run id, which only exist inside an actual Actions run; inert (its `if:` is false) on an ordinary run, and there's nothing for a local script to re-execute either way.",
 };
 
@@ -108,6 +111,106 @@ export function selectDocsOnlyGates(gates, names = DOCS_ONLY_GATE_NAMES) {
   if (missing.length) return { ok: false, missing, selected: [] };
   const wanted = new Set(names);
   return { ok: true, missing: [], selected: gates.filter((g) => wanted.has(g.name)) };
+}
+
+/*
+ * LANES (2026-11-23, Batch C). The required `build` check used to be ONE serial job (~42 min). It is now an aggregator
+ * (`build`, needs: every lane) over parallel LANE jobs, and every lane runs `npm run ci-parity -- --lane <name>` — so
+ * `.github/ci-gates.yml` is STILL the one list of gates; this table only says which lane runs which gate.
+ *
+ *   static     — lint + the cheap guards (no browser, no build)            → 1 job
+ *   vitest     — `npm test`, split with `--shard i/n`                       → n jobs
+ *   build-app  — the Vite build, the base-ref snapshot, the bundle budget; uploads dist/  → 1 job
+ *   browser    — every gate that drives Chromium against the built app (downloads dist/) → n jobs, gates split by weight
+ *
+ * A gate NOT named here lands in `static` (the cheap default), so adding a guard to ci-gates.yml never needs a second
+ * edit; a gate that needs a browser, a build or the test suite must be named, and test/ciGates.test.js pins every
+ * heavy gate to its lane. "Install dependencies" runs in every lane (each lane is its own machine).
+ */
+export const LANE_NAMES = ["static", "vitest", "build-app", "browser"];
+export const SETUP_GATE = "Install dependencies";
+/** Gate-name PREFIXES per non-static lane (a prefix keeps the long trailing "— NEW-1, B…" tags out of this table). */
+export const LANE_PREFIXES = {
+  vitest: ["Test ("],
+  "build-app": ["Build", "Base-ref bundle snapshot", "Performance budget"],
+  browser: [
+    "Install Playwright chromium",
+    "Serve the built app",
+    "Wait for the preview server",
+    "Signature-budget gate",
+    "Visual regression baselines",
+    "Notes ",
+    "App-shell width sweep",
+    "Parcels list layout",
+    "Planner per-pointer-move rule",
+    "Critical interaction lane",
+  ],
+};
+/** Browser-lane gates that must run in EVERY shard (they bring up the server the others use). */
+export const BROWSER_SETUP_PREFIXES = ["Install Playwright chromium", "Serve the built app", "Wait for the preview server"];
+/** Rough seconds per browser gate (main run #44539206677, 19 Nov; unlisted = DEFAULT). Only used to balance shards — a wrong
+ *  weight makes a shard slower, never a gate skipped, and test/ciGates.test.js proves every gate runs in exactly one shard. */
+export const BROWSER_WEIGHTS_S = [
+  ["Parcels list layout", 166],
+  ["Signature-budget gate", 120],
+  ["Critical interaction lane", 120],
+  ["Visual regression baselines", 86],
+  ["App-shell width sweep", 60],
+  ["Planner per-pointer-move rule", 30],
+  ["Notes ", 85],
+];
+export const BROWSER_WEIGHT_DEFAULT_S = 90;
+
+const startsWithAny = (name, prefixes) => prefixes.some((p) => name.startsWith(p));
+
+/** Which lane runs this gate? (`Install dependencies` is special — it runs in all of them; see `selectLane`.) */
+export function laneOf(name) {
+  for (const lane of Object.keys(LANE_PREFIXES)) if (startsWithAny(name, LANE_PREFIXES[lane])) return lane;
+  return "static";
+}
+
+export function browserWeightS(name) {
+  const hit = BROWSER_WEIGHTS_S.find(([p]) => name.startsWith(p));
+  return hit ? hit[1] : BROWSER_WEIGHT_DEFAULT_S;
+}
+
+/** Parse "i/n" (1-based) → { index, total }, or null if it is not a valid shard spec. */
+export function parseShard(spec) {
+  const m = /^(\d+)\/(\d+)$/.exec(String(spec ?? "").trim());
+  if (!m) return null;
+  const index = Number(m[1]), total = Number(m[2]);
+  return index >= 1 && total >= 1 && index <= total ? { index, total } : null;
+}
+
+/**
+ * The gates one lane job runs, in manifest order. `shard` ({index,total}) splits the lane's WORK across n jobs:
+ *   - browser: the setup gates run in every shard; the rest are dealt out largest-weight-first to the lightest shard
+ *     (deterministic — ties go to the lower shard number), so every gate runs in exactly one shard;
+ *   - vitest: the one `npm test` gate runs in every shard and `shardArgs()` hands it its slice;
+ *   - static / build-app: not shardable (a shard spec is ignored, loudly, by the caller).
+ */
+export function selectLane(gates, lane, shard = null) {
+  if (!LANE_NAMES.includes(lane)) return { ok: false, error: `unknown lane "${lane}" (expected ${LANE_NAMES.join(" | ")})`, selected: [] };
+  const inLane = gates.filter((g) => g.name === SETUP_GATE || laneOf(g.name) === lane);
+  if (lane !== "browser" || !shard || shard.total === 1) return { ok: true, selected: inLane };
+
+  const setup = (g) => g.name === SETUP_GATE || startsWithAny(g.name, BROWSER_SETUP_PREFIXES);
+  const work = inLane.filter((g) => !setup(g));
+  const load = Array.from({ length: shard.total }, () => 0);
+  const owner = new Map();
+  for (const g of [...work].sort((a, b) => browserWeightS(b.name) - browserWeightS(a.name) || gates.indexOf(a) - gates.indexOf(b))) {
+    let best = 0;
+    for (let i = 1; i < load.length; i++) if (load[i] < load[best]) best = i;
+    owner.set(g.name, best + 1);
+    load[best] += browserWeightS(g.name);
+  }
+  return { ok: true, selected: inLane.filter((g) => setup(g) || owner.get(g.name) === shard.index), load };
+}
+
+/** Extra CLI args a sharded gate needs (only `npm test` takes any: vitest's own `--shard i/n`). */
+export function shardRun(gate, lane, shard) {
+  if (lane === "vitest" && shard && shard.total > 1 && gate.run.trim() === "npm test") return `npm test -- --shard=${shard.index}/${shard.total}`;
+  return gate.run;
 }
 
 /** Split build.yml's parsed `build`-job steps into gates (have a `run:`) and infra (`uses:` only,

@@ -20,7 +20,7 @@
  *   node scripts/perf-base-stats.mjs --out .perf/base-stats.json [--ref origin/main]
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, symlinkSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBuild, measureBundle, attributeBytes, statsSnapshot, ROOT } from "../ui-audit/lib/bundleMetrics.mjs";
@@ -34,8 +34,29 @@ const OUT = argOf("--out") || join(ROOT, ".perf", "base-stats.json");
 const git = (args, opts = {}) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...opts }).trim();
 const bail = (why) => { console.log(`ⓘ base-ref comparison unavailable: ${why}`); console.log("  (The performance budget gate itself is unaffected — this only affects the diagnosis.)"); process.exit(0); };
 
+// Batch C (2026-11-23): in CI the checkout is shallow, so the base ref comes in one of two cheaper ways instead of a full clone —
+//  - PERF_BASE_STATS_HIT=true: build.yml restored the stats main saved under that base commit's sha (the head-stats main's own
+//    build wrote), so there is nothing to build; the file is already at --out.
+//  - PERF_BASE_SHA=<sha>: a cache miss; build.yml fetched just that one commit (depth 1) and names it here.
+// Neither is set locally or in the old full-history checkout, so the merge-base path below is unchanged.
+const CACHED = join(ROOT, ".perf", "cached-stats.json");
+if (process.env.PERF_BASE_STATS_HIT === "true" && existsSync(CACHED)) {
+  mkdirSync(dirname(OUT), { recursive: true });
+  copyFileSync(CACHED, OUT);
+  console.log(`✓ base stats restored from the cache (saved by main's own build of that commit) → ${OUT}`);
+  process.exit(0);
+}
+
 let baseSha;
 try {
+  const wanted = /^[0-9a-f]{7,40}$/i.test(process.env.PERF_BASE_SHA || "") && !/^0+$/.test(process.env.PERF_BASE_SHA) ? process.env.PERF_BASE_SHA : null;
+  if (wanted) {
+    // A shallow checkout does not hold the base commit — fetch exactly that one (depth 1), never the history.
+    try { git(["rev-parse", "--verify", `${wanted}^{commit}`]); } catch {
+      try { git(["fetch", "--no-tags", "--depth=1", "origin", wanted]); } catch (e) { bail(`could not fetch the base commit ${wanted.slice(0, 8)} (${String(e.message).split("\n")[0]})`); }
+    }
+    baseSha = git(["rev-parse", "--verify", `${wanted}^{commit}`]);
+  } else {
   const explicit = argOf("--ref");
   const baseRef = explicit || (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "origin/main");
   const head = git(["rev-parse", "HEAD"]);
@@ -47,6 +68,7 @@ try {
   }
   // A push to main: HEAD is its own merge base, so the honest comparison is the commit before it.
   baseSha = candidate === head ? git(["rev-parse", "HEAD^"]) : candidate;
+  }
 } catch (e) {
   bail(`git could not resolve the base ref (${e.message})`);
 }
