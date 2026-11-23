@@ -14,12 +14,10 @@
  */
 import { safeEqual } from "../lib/safeEqual.js";
 import { TOOLS, callTool, InvalidParams } from "./_tools.js";
+import { json } from "../lib/http.js";
 
 const SUPPORTED_VERSIONS = ["2025-03-26", "2025-06-18"];
 const LATEST_VERSION = "2025-06-18";
-
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 
 const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result });
 const rpcError = (id, code, message) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });

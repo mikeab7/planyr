@@ -14,7 +14,7 @@ import { safeEqual } from "../lib/safeEqual.js";
 import { buildStorageAdapter, storageConfig, defaultDriveClientFactory } from "../../../server/storage/index.js";
 
 const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+  new Response(JSON.stringify(obj, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8" } }); // pretty-printed on purpose (a human reads this self-test)
 
 export async function onRequestGet(context) {
   const { env, request } = context;

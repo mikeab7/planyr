@@ -19,27 +19,18 @@
  * treats it as "Drive not enabled yet" (the tree still lives in Supabase; only the mirror waits).
  * Needs deploy env: SUPABASE_URL, SUPABASE_ANON_KEY, the Google creds, PLANYR_STORAGE_BACKEND=drive.
  */
-import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
-import { storageConfig, defaultDriveClientFactory } from "../../server/storage/index.js";
+import { json, authedContext } from "./lib/http.js";
 import { folderStoreSupabase } from "../../server/storage/folderStoreSupabase.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
 import { projectHasLivePlans } from "../../server/storage/projectLiveness.js";
 import { syncProjectFolders, planDelete, migrateFilesToTree, moveKeyToTree, purgeProjectDrive } from "../../server/storage/folderMirror.js";
 
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
-
 // Auth + a live Drive client + the folder store, all scoped to the caller. Mirrors files.js.
 async function context_(env, request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const v = await verifySupabaseUser({ token, supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY });
-  if (!v.ok) return { error: json({ ok: false, error: v.error }, 401) };
-  const cfg = storageConfig(env);
-  if (cfg.backend !== "drive") return { error: json({ ok: false, error: 'Storage backend is not "drive".' }, 503) };
-  const client = defaultDriveClientFactory(cfg.drive);
-  if (!client) return { error: json({ ok: false, error: "Google Drive isn't connected yet." }, 503) };
-  const store = folderStoreSupabase({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
-  return { user: v.user, client, store };
+  const a = await authedContext(env, request, { needDrive: true });
+  if (a.error) return a;
+  const store = folderStoreSupabase({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: a.token });
+  return { user: a.user, client: a.client, store };
 }
 
 export async function onRequestPost(context) {
