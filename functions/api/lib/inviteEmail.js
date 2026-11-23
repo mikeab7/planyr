@@ -14,6 +14,7 @@
  */
 import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
 import { sendViaGmail } from "./gmailSend.js";
+import { json } from "./http.js";
 
 /* Public From address on invite mail (a Workspace alias of the INVITE_SENDER mailbox, which still
  * authenticates the send). INVITE_FROM overrides it. */
@@ -59,9 +60,6 @@ export function buildInviteEmail({ inviterName, teamName, role, inviteId, hasAcc
 </div></body></html>`;
   return { subject, html, text };
 }
-
-const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 
 async function rpc(env, token, name, args, fetchImpl) {
   const res = await fetchImpl(`${String(env.SUPABASE_URL).replace(/\/+$/, "")}/rest/v1/rpc/${name}`, {

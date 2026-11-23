@@ -10,53 +10,21 @@
 import {
   parseMgPath, arcQueryToMg, mgFeaturesUrl, mgToArcQuery, layerMetadata, arcError, MG_SERVERS,
 } from "../../src/shared/gis/mapguideAdapter.js";
+import { makeArcProxy } from "../api/lib/arcProxyShell.js";
 
-const UPSTREAM_TIMEOUT_MS = 20000;
-const USER_AGENT = "planyr-gis-proxy";
 
-const json = (body, status = 200, cache = "no-store") =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": cache } });
-
-async function upstream(url) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    return await fetch(url, { headers: { "user-agent": USER_AGENT, accept: "application/json" }, signal: ctrl.signal });
-  } finally { clearTimeout(timer); }
-}
-
-export async function onRequest(context) {
-  const { request } = context;
-  const method = request.method;
-  if (method !== "GET" && method !== "POST") return json(arcError(405, "method not allowed"), 405);
-
-  const p = context.params && context.params.path;
-  const segs = (Array.isArray(p) ? p : String(p || "").split("/")).filter(Boolean);
-  const parsed = parseMgPath(segs);
-  if (parsed.error) return json(arcError(404, parsed.error), 404);
-
-  const params = Object.fromEntries(new URL(request.url).searchParams);
-  if (method === "POST") {
-    try { for (const [k, v] of new URLSearchParams(await request.text())) params[k] = v; } catch (_) { return json(arcError(400, "unreadable request body"), 400); }
-  }
-
-  const base = mgFeaturesUrl(parsed.server, parsed.county);
-  try {
-    if (parsed.op === "meta") return json(layerMetadata(parsed.county), 200, "public, max-age=3600"); // static — see MG_CORE_FIELDS
-
-    let q;
-    try { q = arcQueryToMg(params); } catch (e) {
-      if (e && e.mgBadRequest) return json(arcError(400, e.message), 200); // ArcGIS reports a bad query as HTTP 200 + {error}
-      throw e;
-    }
-    const qs = new URLSearchParams(q.params).toString();
-    const res = await upstream(`${base}?${qs}`);
-    if (!res.ok) return json(arcError(502, `The county MapGuide server answered ${res.status}.`), 502);
-    const text = await res.text();
-    let gj;
-    try { gj = JSON.parse(text); } catch (_) { return json(arcError(502, "The county MapGuide server returned an unreadable answer."), 502); }
-    return json(mgToArcQuery(gj, q), 200, "public, max-age=300");
-  } catch (_e) {
-    return json(arcError(502, `Upstream MapGuide request to ${MG_SERVERS.includes(parsed.server) ? "fgis-map-" + parsed.server : "the county"} failed or timed out.`), 502);
-  }
-}
+/* Only what is MapGuide-specific lives here; the HTTP shell is functions/api/lib/arcProxyShell.js (audit batch I7). */
+export const onRequest = makeArcProxy({
+  arcError,
+  timeoutMs: 20000,
+  parsePath: parseMgPath,
+  metadata: (parsed) => layerMetadata(parsed.county),
+  translate: (params) => arcQueryToMg(params),
+  upstreamUrl: (parsed, q) => `${mgFeaturesUrl(parsed.server, parsed.county)}?${new URLSearchParams(q.params).toString()}`,
+  toArc: (gj, q) => mgToArcQuery(gj, q),
+  messages: {
+    status: (parsed, res) => `The county MapGuide server answered ${res.status}.`,
+    unreadable: () => "The county MapGuide server returned an unreadable answer.",
+    failed: (parsed) => `Upstream MapGuide request to ${MG_SERVERS.includes(parsed.server) ? "fgis-map-" + parsed.server : "the county"} failed or timed out.`,
+  },
+});

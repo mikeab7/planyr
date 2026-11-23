@@ -22,8 +22,7 @@ const MAX_QUERY_CHARS = 2000;
 // arbitrary text is a relay someone will eventually point somewhere else.
 const FORBIDDEN = /\b(insert|update|delete|drop|alter|create|truncate|exec|execute|merge|grant|revoke)\b|;|--|\/\*/i;
 
-const json = (obj, status = 200, extra = {}) =>
-  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
+import { json } from "./lib/http.js";
 
 function sameOriginOk(origin, host) {
   if (!origin) return true; // same-origin POSTs from fetch() omit Origin in some browsers
