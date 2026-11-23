@@ -72,7 +72,7 @@ function everythingWorkbook() {
 }
 
 describe("Univer bridge — real fixtures round trip", () => {
-  for (const name of ["chart.xlsx", "legacy.xls"]) {
+  for (const name of ["chart.xlsx", "legacy.xlsx"]) {
     it(`${name}: blob → Univer → blob is byte-equivalent`, async () => {
       const parsed = await parseSpreadsheetFile(fixture(name), name);
       const wb = parsed.workbook;

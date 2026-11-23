@@ -27,7 +27,7 @@ export default [
   // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
   // Audit batch D (2026-11-23): dead `eslint-disable` comments are reported, and .mjs (scripts/, ui-audit/) is linted.
   { linterOptions: { reportUnusedDisableDirectives: "warn" } },
-  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**"] },
+  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**", "public/sequence/vendor/**"] },
   {
     files: ["**/*.{js,jsx,mjs}"],
     plugins: { "react-hooks": reactHooks },

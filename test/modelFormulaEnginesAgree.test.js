@@ -1,6 +1,6 @@
 // NEW-1 (one formula engine) — Univer's engine, run headless (lib/univerEval.js), is THE evaluator. This suite is the measurement and its guard:
 //   1. the DIFFERENTIAL: ~380 formulas (every context-free formula of the older engine's own suite + hand-written reference / lookup / finance /
-//      text / date blocks) and the pro-forma, [Column], chart.xlsx and legacy.xls workbooks run through BOTH engines. Every cell where they differ
+//      text / date blocks) and the pro-forma, [Column], chart.xlsx and legacy.xlsx workbooks run through BOTH engines. Every cell where they differ
 //      is listed in test/fixtures/spreadsheet/engineKnownDiffs.json with a reason; a NEW difference fails, and so does a listed one that stopped
 //      happening (the list may only shrink on purpose).
 //   2. independent expected values (known answers, not the older engine's) so the comparison is never "two engines agreeing on a wrong number".
@@ -33,7 +33,7 @@ describe("the differential: Planyr's older engine vs Univer headless", () => {
     expect(s.corpus.compared).toBeGreaterThanOrEqual(350);
     expect(s.proForma.compared).toBeGreaterThanOrEqual(85);
     expect(s["chart.xlsx"].compared).toBe(5);
-    expect(s["legacy.xls"].compared).toBe(5);
+    expect(s["legacy.xlsx"].compared).toBe(5);
     expect(harvestFormulaSuite(path.join(__dirname, "..")).length, "the older suite's own formulas are harvested").toBeGreaterThan(150);
   });
   it("every disagreement is a KNOWN one with a reason — and every known one still happens", async () => {
@@ -71,7 +71,7 @@ describe("independent known answers (not the older engine's)", () => {
     });
   });
   it("the real fixtures (written by Excel-compatible tools) evaluate to their known cell values", async () => {
-    for (const name of ["chart.xlsx", "legacy.xls"]) {
+    for (const name of ["chart.xlsx", "legacy.xlsx"]) {
       const p = await parseSpreadsheetFile(new Uint8Array(fs.readFileSync(path.join(__dirname, "fixtures/spreadsheet", name))).buffer, name);
       const ev = await evaluateWorkbookUniver(p.workbook);
       const data = p.workbook.sheets[0], sh = data.sheet, col = (i) => sh.columns[i].id;

@@ -1,3 +1,4 @@
+// source-scan: reads the shipped source text because the guarded wiring cannot run in node (added by Batch A to unblock the guard from audit batch D).
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Industrial site planner (TestFit-style) for Harris / Fort Bend / Chambers County, TX",
   "scripts": {
+    "vendor:sequence": "node scripts/vendor-sequence.mjs",
     "dev": "vite",
-    "build": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js build && node scripts/build-sequence-compiled.mjs",
+    "build": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js build && node scripts/build-sequence-compiled.mjs && node scripts/build-ocr-assets.mjs",
     "preview": "vite preview --host",
     "lint": "eslint .",
     "ci-parity": "node scripts/ci-parity.mjs",
@@ -121,13 +122,14 @@
     "react-grid-layout": "1.5.4",
     "rxjs": "7.8.2",
     "tesseract.js": "^6.0.1",
-    "three": "0.170.0",
-    "xlsx": "^0.18.5"
+    "three": "0.170.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.61.1",
+    "@tabler/icons-webfont": "3.52.0",
+    "@tesseract.js-data/eng": "1.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",

@@ -10,6 +10,7 @@
  * Recommended use: set PLANYR_SELFTEST_TOKEN to a random value, run once, then delete the
  * var to turn the endpoint back off.
  */
+import { safeEqual } from "../lib/safeEqual.js";
 import { buildStorageAdapter, storageConfig, defaultDriveClientFactory } from "../../../server/storage/index.js";
 
 const json = (obj, status = 200) =>
@@ -18,7 +19,7 @@ const json = (obj, status = 200) =>
 export async function onRequestGet(context) {
   const { env, request } = context;
   const token = new URL(request.url).searchParams.get("token");
-  if (!env.PLANYR_SELFTEST_TOKEN || token !== env.PLANYR_SELFTEST_TOKEN) {
+  if (!env.PLANYR_SELFTEST_TOKEN || !token || !(await safeEqual(token, env.PLANYR_SELFTEST_TOKEN))) {
     return new Response("Not found", { status: 404 }); // off unless explicitly enabled
   }
 

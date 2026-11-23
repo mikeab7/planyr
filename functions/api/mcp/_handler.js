@@ -12,6 +12,7 @@
  *   notifications (any message without an id) → 202 empty body
  * Tool failures are result.isError content — never protocol errors, never 500s.
  */
+import { safeEqual } from "../lib/safeEqual.js";
 import { TOOLS, callTool, InvalidParams } from "./_tools.js";
 
 const SUPPORTED_VERSIONS = ["2025-03-26", "2025-06-18"];
@@ -55,9 +56,14 @@ async function dispatchOne(env, msg) {
 }
 
 export async function handleMcp({ env, request, method, segs }) {
-  // Capability-URL guard FIRST — before revealing that anything lives here at all.
-  const token = Array.isArray(segs) && segs.length === 1 ? segs[0] : null;
-  if (!env?.PLANYR_MCP_TOKEN || !token || token !== env.PLANYR_MCP_TOKEN) {
+  // Token guard FIRST — before revealing that anything lives here at all. The token is accepted either as
+  // `Authorization: Bearer <token>` (preferred: it stays out of URLs and access logs; the route is then
+  // /api/mcp with no path) or as the single path segment /api/mcp/<token> (kept ONLY because claude.ai's
+  // custom-connector client takes a bare URL — the existing connector keeps working). Constant-time compare.
+  const bearer = /^Bearer\s+(.+)$/i.exec(request?.headers?.get?.("authorization") || "")?.[1]?.trim() || null;
+  const pathTok = Array.isArray(segs) && segs.length === 1 ? segs[0] : null;
+  const token = bearer && (!segs || segs.length === 0) ? bearer : pathTok;
+  if (!env?.PLANYR_MCP_TOKEN || !token || !(await safeEqual(token, env.PLANYR_MCP_TOKEN))) {
     return new Response("Not found", { status: 404 });
   }
 

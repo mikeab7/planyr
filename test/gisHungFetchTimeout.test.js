@@ -1,3 +1,4 @@
+// source-scan: reads the shipped source text because the guarded wiring cannot run in node (added by Batch A to unblock the guard from audit batch D).
 import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs";
 import { fetchWithRetry, GIS_FETCH_TIMEOUT_MS, GIS_MAX_GET_URL } from "../src/workspaces/site-planner/lib/gisFetch.js";

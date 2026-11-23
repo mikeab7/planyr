@@ -17,6 +17,7 @@
  */
 
 import { releaseCanvas } from "./releaseCanvas.js";
+import { selfHostedEngineWithLang } from "../../../shared/files/ocrAssets.js";
 
 // Pinned model/engine assets (jsDelivr). Overridable via createOcrRunner({ cdnBase, version }).
 // MUST track the installed "tesseract.js" package version (package.json) — this is the CDN
@@ -93,12 +94,15 @@ async function defaultRenderPage(doc, pageNum) {
 // the worker posts back, and passing `logger: undefined` into createWorker clobbers Tesseract's own
 // default — so on a scanned page the worker threw "logger is not a function" on each message. A
 // callable default silences that error storm (and keeps the seam injectable for a real progress UI).
-async function defaultMakeWorker({ cdnBase = CDN, version = TJS_VERSION, data = ENG_DATA, logger = () => {} } = {}) {
+async function defaultMakeWorker({ cdnBase = CDN, version = TJS_VERSION, data = ENG_DATA, logger = () => {}, ...own } = {}) {
   const { createWorker, OEM, PSM } = await import("tesseract.js");
+  // Production: worker + engine + English data come from this site (/ocr/…, see ocrAssets.js). Dev/tests: the CDN, as before.
+  const hosted = "workerPath" in own ? own : selfHostedEngineWithLang();
   const worker = await createWorker("eng", OEM.LSTM_ONLY, {
     workerPath: `${cdnBase}/tesseract.js@${version}/dist/worker.min.js`,
     corePath: `${cdnBase}/tesseract.js-core@${version}`,
     langPath: `${cdnBase}/${data}`,
+    ...hosted,
     gzip: true,
     logger,
   });

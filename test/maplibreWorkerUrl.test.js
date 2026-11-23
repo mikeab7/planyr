@@ -1,3 +1,4 @@
+// source-scan: reads the shipped source text because the guarded wiring cannot run in node (added by Batch A to unblock the guard from audit batch D).
 /* B2671297 — MapLibre 6 resolves its worker relative to its own bundled chunk, a file the build never emits, so every
  * vector road-name layer failed ("Worker failed to load") and fell back to the raster road names. The loader must name
  * the worker file itself. (Browser proof: a harness with the fix reports a network error only; without it, "Worker failed".) */
