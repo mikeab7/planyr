@@ -14,6 +14,8 @@
  *
  * PURE: no network, no React — the style / label rules below unit-test standalone (test/desotoLayers.test.js). */
 
+import { pipeSizeLabel } from "./pipeSizeLabel.js"; // lives in its own file so layerRequest.js can read it without loading this lazy layer file
+export { pipeSizeLabel };
 import { zoningStyle, zoningRows, zoningTitle, zoneLabelText, approvalDate, zoneClass, ZONE_COLORS } from "./desotoZoning.js";
 import { zoningLegend, ZONING_CITATIONS } from "./desotoZoningNames.js";
 import { CITY_LINE_MIN_WEIGHT, CITY_TINT_OPACITY } from "./boundaryStyle.js";
@@ -33,20 +35,6 @@ function featureInterior(f) {
 
 export const OB_AGOL = "https://services9.arcgis.com/VGtdH6iTQlVulSnr/ArcGIS/rest/services";
 export const DESOTO_RELAY = RELAY;
-
-/* A pipe-size string the city typed by hand → the short label printed beside the line, or null when there is nothing to say.
- * Measured values include: 8" · 8'' · 8 (bare) · "2\" Abandoned" · "6 HP\"" · "FUTURE 6" · "FDC 4\"" · "None" · a stray creek name. */
-export function pipeSizeLabel(raw) {
-  const s = String(raw == null ? "" : raw).trim();
-  if (!s || /^none$/i.test(s)) return null;
-  const m = s.match(/(\d+(?:\.\d+)?)/);
-  if (!m) return /abandon/i.test(s) ? "abandoned" : null;
-  const n = m[1];
-  const hp = /\bHP\b/i.test(s) ? " HP" : "";
-  if (/future/i.test(s)) return `${n}" future`;
-  if (/abandon|\bab\b/i.test(s)) return `${n}" abandoned`;
-  return `${n}"${hp}`;
-}
 
 /* The city's own convention for its utility lines: a line whose CONVERSION_STATUS is "FIELD VERIFIED" (case varies by layer) is drawn SOLID; a
  * line that was digitised from paper plans and not yet field-verified — or has no status at all — is DASHED. */
