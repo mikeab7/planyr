@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { indentSelection, outdentSelection, promoteChildrenAndDelete, flatOrderWithLevel, moveSelectionToDestination } from "../ui-audit/stress/schedule-tree-ops.mjs";
-import { recomputeSchedule } from "../ui-audit/stress/scheduler-engine.mjs";
+import { recomputeSchedule } from "./helpers/schedulerEngine.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // Fast, CI-runnable half of the multi-row indent/outdent + delete-with-children fix. The full
 // real-browser proof (both entry points, both undo, health rollup, mutation-proven) lives in
@@ -347,7 +348,7 @@ describe("flatOrderWithLevel — the shared visual-order walk indent/outdent bot
   });
 });
 
-// ── Combined with the REAL recompute engine (scheduler-engine.mjs, the pre-existing mirror of
+// ── Combined with the REAL recompute engine (the real engine modules, the pre-existing mirror of
 // cascadeDates/rollupParentDates) — the B463072-shaped landmine and live predecessor survival.
 // The live-browser harness measured both of these against the actual app; these are the fast,
 // CI-runnable pins for the same two properties, run through the real date-cascade math rather
@@ -425,7 +426,7 @@ describe("indent/outdent through the real recompute engine — B463072 landmine 
 
 // ── Source-pin: the fast anchors a CI push can check without a browser ──────────────────────────
 describe("wiring in public/sequence/index.html", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/schedule-tree-ops.mjs", import.meta.url)), "utf8");
 
   // Extract a top-level `const <name> = (...) => { ... };` function body from a source string by

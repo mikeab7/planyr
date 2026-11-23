@@ -7,7 +7,7 @@
 //
 //   node ui-audit/stress/stress-scheduler3.mjs
 //
-import * as E from "./scheduler-engine.mjs";
+import * as E from "../../test/helpers/schedulerEngine.js";
 
 const log = (s = "") => process.stdout.write(s + "\n");
 const findings = [];

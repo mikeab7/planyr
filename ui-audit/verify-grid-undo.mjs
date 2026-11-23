@@ -25,7 +25,7 @@
  * THE FIX (public/sequence/index.html, `isDerivedUpdate` ref beside `isUndoing`): a derived
  * recompute now marks itself before its own setData and the history-capture effect folds it into
  * the CURRENT snapshot instead of pushing a new one — exactly like an undo/redo restore already
- * does. Mirrored in ui-audit/stress/scheduler-engine.mjs is out of scope here (that mirror holds
+ * does. Mirrored in src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js) is out of scope here (that mirror holds
  * only the PURE cascade functions — this bug lives entirely in the React effect wiring, which is
  * why it needs a live browser to prove, not a unit test).
  *

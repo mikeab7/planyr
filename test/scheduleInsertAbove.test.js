@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { insertRowAbove, sortByVisualOrder } from "../ui-audit/stress/schedule-insert-above.mjs";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 — the Insert key adds the row directly ABOVE the selected row in the VISIBLE order and never
 // opens anything hidden (Excel / Microsoft Project parity). Owner report (Baytown schedule): rows 73
@@ -159,7 +160,7 @@ describe("Insert above — edge cases", () => {
 });
 
 describe("wiring in public/sequence/index.html", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/schedule-insert-above.mjs", import.meta.url)), "utf8");
   const extractFn = (source, signature) => {
     const start = source.indexOf(signature);

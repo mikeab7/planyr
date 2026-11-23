@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { mergeCloudDoc, _mStripRev, _mIsObj, _mEq, countChangedTaskRows, changedProjectIds } from "../ui-audit/stress/scheduler-engine.mjs";
+import { mergeCloudDoc, _mStripRev, _mIsObj, _mEq, countChangedTaskRows, changedProjectIds } from "./helpers/schedulerEngine.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // Regression guard for the B851 RECURRENCE (schedule grid shows the wrong project + a false
 // "a newer version was saved on another device" reload prompt), diagnosed via a forced-ordering
@@ -25,7 +26,7 @@ import { mergeCloudDoc, _mStripRev, _mIsObj, _mEq, countChangedTaskRows, changed
 // file and evaluates them, so it can never drift from the code the owner actually runs — same
 // pattern as test/ganttLabelAbove.test.js.
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 function sliceBetween(startMarker, endMarker, { fromLast = false } = {}) {
   const start = fromLast ? SRC.lastIndexOf(startMarker) : SRC.indexOf(startMarker);
@@ -189,7 +190,7 @@ describe("forced-ordering race: overlapping same-tab saves via the real Layer-0/
   }
 
   // Faithful mirror of _rawSet's Layer-0 concurrency guard (cloudRev > knownRev → merge or block),
-  // using the REAL mergeCloudDoc mirror already in this repo (ui-audit/stress/scheduler-engine.mjs,
+  // using the REAL mergeCloudDoc mirror already in this repo (src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js),
   // confirmed byte-identical to the live source's mergeCloudDoc).
   async function rawSet(client, server, parsed, { readDelay, writeDelay }) {
     parsed = JSON.parse(JSON.stringify(parsed));

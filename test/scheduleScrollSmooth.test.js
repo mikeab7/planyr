@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (2026-11-03) — "scrolling on the schedule module is kinda shakey vertically".
 // The browser half is ui-audit/verify-schedule-scroll-smooth.mjs (real wheel input, frame by frame). This is the
 // CI-runnable half: the row-window arithmetic that decides which rows are mounted, and source guards on the two
 // other causes (a blocking wheel listener; a rAF-released lock in the Split scroll sync).
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 const grab = (name) => { const s = SRC.indexOf(`const ${name} = `); expect(s, `${name} not found`).toBeGreaterThan(-1); const e = SRC.indexOf("\n});", s); const e2 = SRC.indexOf(";\n", s); return SRC.slice(s, e > -1 && e < SRC.indexOf("\nconst ", s + 5) ? e + 4 : e2 + 2); };
 const make = (ROW_H) => new Function("ROW_H", `${grab("WIN_CHUNK").split("\n")[0].replace(/^const WIN_CHUNK = 8, WIN_OVER = 12;.*/, "const WIN_CHUNK = 8, WIN_OVER = 12;")}\n${grab("rowWindowTop")}\n${grab("rowWindow")}\nreturn { rowWindowTop, rowWindow, WIN_CHUNK, WIN_OVER };`)(ROW_H);

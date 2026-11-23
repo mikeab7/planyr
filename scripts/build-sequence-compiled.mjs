@@ -67,15 +67,15 @@ export function assertNoBabelStandalone(html) {
 
 /** Pure transform: source HTML (as authored, both <script type="text/babel"> blocks intact) in,
  *  compiled-and-babel-free HTML out. Throws loudly rather than emitting a possibly-broken page:
- *  fewer than 2 babel blocks found (the source's shape changed under us), any block failing to
+ *  no babel block found (the source's shape changed under us), any block failing to
  *  compile, the CDN <script> tag not found where expected, or — as a final belt-and-braces
  *  check — the output still referencing @babel/standalone after the transform claims to have
  *  removed it. */
 export function compileSequenceHtml(html) {
   const blocks = checkBabelBlocks(html);
-  if (blocks.length < 2) {
+  if (blocks.length < 1) {
     throw new Error(
-      `build-sequence-compiled: expected >=2 <script type="text/babel"> blocks in ` +
+      `build-sequence-compiled: expected >=1 <script type="text/babel"> block in ` +
         `public/sequence/index.html, found ${blocks.length}. Refusing to emit a page that may ` +
         "no longer match what this build step was written against."
     );
@@ -120,7 +120,7 @@ function main() {
   const before = Buffer.byteLength(html, "utf8");
   const after = Buffer.byteLength(compiled, "utf8");
   console.log(
-    `build-sequence-compiled: OK — 2 babel blocks compiled, @babel/standalone removed. ` +
+    `build-sequence-compiled: OK — babel block compiled, @babel/standalone removed. ` +
       `source ${before.toLocaleString()} bytes → compiled ${after.toLocaleString()} bytes ` +
       `(${after >= before ? "+" : ""}${(((after - before) / before) * 100).toFixed(1)}%).`
   );

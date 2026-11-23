@@ -28,7 +28,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import * as E from "./stress/scheduler-engine.mjs";
+import * as E from "../test/helpers/schedulerEngine.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;

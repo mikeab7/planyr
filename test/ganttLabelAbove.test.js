@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expandFixture, visibleTasks, depthOf } from "../e2e/fixtures/schedules/expand.mjs";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 — ONE rule for every task name in the Gantt CHART: it renders ABOVE its bar. Never centred
 // on it, never inside it, never beside it. `align` (Left / Center / Right) chooses only the
@@ -21,7 +22,7 @@ import { expandFixture, visibleTasks, depthOf } from "../e2e/fixtures/schedules/
 // this single pure helper is EXTRACTED FROM THE SHIPPED FILE and evaluated, so the test can never
 // drift from the code the owner actually runs.
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 const extract = (name) => {
   const start = SRC.indexOf(`const ${name} = `);

@@ -4,8 +4,9 @@
 import { it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 
 it("on-screen Gantt caption honours the name cell's bold / italic / underline", () => {
   const i = src.indexOf("const GanttName = ");

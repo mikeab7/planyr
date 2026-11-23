@@ -17,7 +17,7 @@
       "fixture": "schedules/dense-project.fixture.json",
       "golden": "schedules/dense-project.golden.json",
       "kind": "scheduler-project",
-      "engine": "ui-audit/stress/scheduler-engine.mjs (mirror of public/sequence/index.html) + buildGanttSVG (browser)",
+      "engine": "src/shared/schedule/engine (the modules public/sequence/index.html runs) + buildGanttSVG (browser)",
       "repro": "Pappadoupolos-scale dense schedule (~119 tasks / ~103 deps), exercised at ~33% zoom in the browser spec."
     },
     {

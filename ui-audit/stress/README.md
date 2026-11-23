@@ -1,16 +1,15 @@
 # Scheduler stress harness
 
 Adversarial input testing for the **Scheduler** date/cascade engine
-(`public/sequence/index.html`). Run after touching any of the date math
+(`src/shared/schedule/engine/`). Run after touching any of the date math
 (`addBD`, `difBD`, `calcEnd`, `cascadeDates`, `rollupParentDates`, `parseFlexDate`).
 
-The engine lives inside a single in-browser-Babel HTML file and isn't importable, so
-`scheduler-engine.mjs` is a **faithful copy** of those functions. The vitest suite
-`test/schedulerEngine.test.js` runs the same checks on every `npm test` and includes an
-**anti-drift** block that asserts the guard lines still exist in the real `index.html`.
+The engine lives in real modules under `src/shared/schedule/engine/` (the page loads them through the generated
+`public/sequence/engine.js`), and the stress scripts import those same modules via `test/helpers/schedulerEngine.js`
+— there is no copy to keep in sync. The vitest suite `test/schedulerEngine.test.js` runs the same checks on every
+`npm test`.
 
 ## Files
-- `scheduler-engine.mjs` — verbatim copy of the engine helpers (keep in sync).
 - `stress-scheduler.mjs` — round 1: malformed / hostile date & graph inputs; reports
   CRASH / HANG / WRONG. `node ui-audit/stress/stress-scheduler.mjs`
 - `stress-scheduler2.mjs` — round 2: predecessor parsing, the four constraint types,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { approxTextPx, layoutExhibitCols, EXHIBIT_MIN_GANTT } from "../ui-audit/stress/exhibit-cols.mjs";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // Guards the PDF/Print Exhibit column sizing: content-fit defaults (B390) so the
 // Start/End/Duration columns stop truncating and the giant Task-Name gap is gone, plus
@@ -74,7 +75,7 @@ describe("layoutExhibitCols — content-fit + clamps + overrides", () => {
 });
 
 describe("anti-drift: the exhibit-cols helpers still match public/sequence/index.html", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   it("EXHIBIT_MIN_GANTT + approxTextPx + layoutExhibitCols are present in the real source", () => {
     expect(src).toMatch(/const EXHIBIT_MIN_GANTT = 240;/);
     expect(src).toMatch(/function approxTextPx\(str, fs\)\{/);

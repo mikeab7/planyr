@@ -1,4 +1,5 @@
 # `src/shared/` — cross-workspace modules (folder pointer)
+- **`schedule/engine/*` (audit batch J1, 2026-11-23) — the Schedule's rules engine, one copy.** Dates, predecessors, cascade, merge, owners, health, task-tree moves, load normalisation (`loadDocument`). `public/sequence/index.html` imports none of it directly: the repo-root build-sequence-engine script bundles `engine/pageEntry.js` into the committed the committed Schedule engine bundle (loaded before the page; mutable engine state like `NOW` is published as global accessors). Edit a module, run `npm run build:sequence-engine`; CI (`--check`) and the repo-root sequenceEngineBundle test fail on a stale bundle. Tests import the same modules through the repo-root test helper schedulerEngine. The four old paste-in copies, their sync scripts and the old ui-audit scheduler-engine mirror are deleted.
 
 Code used by more than one workspace. Keep edits here small and additive — a change ripples
 into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE.md`.

@@ -6,7 +6,7 @@
  * half (e2e/gantt-density.spec.js) — buildGanttSVG lives only in the in-browser Babel app. */
 import { describe, it, expect } from "vitest";
 import { loadFixture, loadGolden } from "../e2e/fixtures/index.js";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "./helpers/schedulerEngine.js";
 
 const fx = loadFixture("schedules/dense-project.fixture.json");
 const golden = loadGolden("schedules/dense-project.golden.json");

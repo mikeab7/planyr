@@ -42,11 +42,9 @@
 //   number  | string | boolean | DATE {k:'date',s:serial} | BLANK | FormulaError(thrown)
 // "serial" is an integer day count since 1970-01-01 UTC (clean, DST-free).
 //
-// ⚠ This file is the single source of truth. A byte-equivalent copy is inlined
-// into public/sequence/index.html between the FORMULA-ENGINE markers by
-// scripts/sync-sequence-formula.mjs, and test/formula-inline-sync.test.js fails
-// CI if the two ever drift. Everything BETWEEN the markers must stay free of
-// import/export (so it is valid inside the scheduler's <script type="text/babel">).
+// ⚠ This file is the single source of truth. The Schedule page does NOT carry a copy: it loads
+// public/sequence/engine.js, a bundle of this file (via src/shared/schedule/engine/pageEntry.js).
+// After editing, run `npm run build:sequence-engine`; CI fails if the committed bundle is stale.
 
 /* FORMULA-ENGINE:START */
 // ── Error type ────────────────────────────────────────────────────────────────

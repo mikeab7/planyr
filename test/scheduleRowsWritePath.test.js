@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { mergeCloudDoc, _mEq, _mIsObj, decomposeForDualWrite } from "../ui-audit/stress/scheduler-engine.mjs";
+import { mergeCloudDoc, _mEq, _mIsObj, decomposeForDualWrite } from "./helpers/schedulerEngine.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // B1777120 — THE AUTHORITY FLIP write path (writeScheduleRowsPrimary / writeOneScheduleRow /
 // writeIndexRow / attemptScheduleWrite), EXTRACTED verbatim from public/sequence/index.html —
@@ -29,7 +30,7 @@ import { mergeCloudDoc, _mEq, _mIsObj, decomposeForDualWrite } from "../ui-audit
 // src/workspaces/scheduler/db/test/schedules_authority_flip.test.sql and
 // schedules_decompose_recompose.sql's own BACKLOG-recorded live exercise, not here.)
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 function sliceBetween(startMarker, endMarker) {
   const start = SRC.indexOf(startMarker);

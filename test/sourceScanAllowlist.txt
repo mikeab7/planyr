@@ -178,7 +178,6 @@ foodSliderScrollGuard.test.js
 foodVisitSheetFixes.test.js
 foodVisitSheetLayout.test.js
 foodWarmSearch.test.js
-formula-inline-sync.test.js
 freePinchZoom.test.js
 freshCloneMerge.test.js
 fullscreenChrome.test.js
@@ -444,7 +443,6 @@ propsPanelHeaderLock.test.js
 publicContactAddresses.test.js
 pumpAllowance.test.js
 rampFollowsWall.test.js
-rangeSelectionInlineSync.test.js
 rasterTrackerTeardownGuards.test.js
 recordsHeaderWrap.test.js
 regradeBanner.test.js
@@ -473,9 +471,7 @@ scheduleDashboardNav.test.js
 scheduleDeleteLast.test.js
 scheduleHeaderCenterSlot.test.js
 scheduleHeaderLayout.test.js
-scheduleHealthEngineParity.test.js
 scheduleListLoadState.test.js
-scheduleOwnership-inline-sync.test.js
 scheduleToolbarReserve.test.js
 schedulerEngine.test.js
 schedulerNavState.test.js

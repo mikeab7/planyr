@@ -21,6 +21,7 @@ import {
   needsScheduleCarryIn, dashboardNavActions, isPickShowing, isGridMismatched, newProjectAction,
   shouldNeutralizeToReports, resolveReportRowNavigation, needsArrivalSelect,
 } from "../src/workspaces/scheduler/lib/navState.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -841,7 +842,7 @@ describe("parseNavState — carries the embed's row-jump mark as a strict boolea
 });
 
 describe("public/sequence/index.html — only goToTask marks an announcement as a row jump (NEW-1, B1638832)", () => {
-  const EMBED = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const EMBED = sequenceSource();
 
   it("the ref is set in goToTask and nowhere else", () => {
     expect(EMBED.match(/rowJumpRef\.current = true/g)).toHaveLength(1);

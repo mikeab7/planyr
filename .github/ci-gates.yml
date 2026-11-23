@@ -59,6 +59,12 @@ jobs:
       # same class of check as the lint step above it, not a logic or type check.
       - name: Scheduler syntax guard (public/sequence/index.html — B643105)
         run: node ui-audit/stress/check-babel.mjs
+      # Schedule engine bundle (audit batch J1). The page loads public/sequence/engine.js, a committed bundle of
+      # src/shared/schedule/engine/* (+ formula, ownership, selection, health rules). It replaces four paste-in
+      # copies that used to be kept in step by tests; this fails when the committed bundle is stale.
+      # Fix: npm run build:sequence-engine
+      - name: Schedule engine bundle is current (public/sequence/engine.js — audit batch J1)
+        run: node scripts/build-sequence-engine.mjs --check
       # Required-check contract guard (NEW-2). On 2026-08-06 seven PRs were stuck at
       # "build — Expected — Waiting for status to be reported" with nothing red anywhere, and GitHub
       # offers no merge control at all in that state. This asserts that every context the ruleset

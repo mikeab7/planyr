@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (Schedule grid) — a row's highlight runs edge to edge: the frozen ID / Task cells must paint the same
 // colour as the date cells beside them. The browser half (real computed backgrounds, every row kind, selection,
 // sideways scroll, Split) is `ui-audit/verify-row-highlight-continuous.mjs`; this is the CI-runnable half and
 // runs the REAL `pinnedFillLayers` sliced out of public/sequence/index.html (red-proof: on the pre-fix source the
 // function does not exist, so every test here fails at extraction).
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const line = (prefix) => { const s = src.indexOf(prefix); if (s === -1) throw new Error(prefix + " missing from public/sequence/index.html"); return src.slice(s, src.indexOf("\n", s)); };
 const { pinnedFillLayers } = new Function(`${line("const pinnedFillLayers =")}; return { pinnedFillLayers };`)();
 

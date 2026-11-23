@@ -46,11 +46,8 @@
 //    next-task-id counter and any last-active pointer — because this document is the whole account
 //    in one row and orphaned keys there are unbounded growth.
 //
-// This file is the CANONICAL copy. `public/sequence/index.html` is a standalone in-browser-Babel
-// page that cannot import from src/, so it carries a VERBATIM inlined copy between the
-// SCHEDULE-OWNERSHIP markers, written only by `scripts/sync-sequence-ownership.mjs` and guarded
-// against drift by `test/scheduleOwnership-inline-sync.test.js`. Keep everything between the
-// markers free of `import`/`export` (the export block lives after the END marker).
+// This file is the single copy. The Schedule page loads public/sequence/engine.js, a bundle that includes it
+// (src/shared/schedule/engine/pageEntry.js); after editing run `npm run build:sequence-engine`.
 
 /* SCHEDULE-OWNERSHIP:START */
 

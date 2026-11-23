@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { setNOW, computeDisplayHealth, rolledStatusLeaf, leafFocusStatus, hideStatusOf } from "../ui-audit/stress/scheduler-engine.mjs";
+import { setNOW, computeDisplayHealth, rolledStatusLeaf, leafFocusStatus, hideStatusOf } from "./helpers/schedulerEngine.js";
 
 /* B717 — Focus must not hide overdue tasks that display red "Needs Attn.".
  *
@@ -98,7 +98,7 @@ describe("B717 design choice: dueSoonYellow promotion also survives Focus (match
 
 describe("B717 anti-drift: the single-source-of-truth fix is present in the real source", () => {
   const src = read("../public/sequence/index.html");
-  const mjs = read("../ui-audit/stress/scheduler-engine.mjs");
+  const mjs = read("./helpers/schedulerEngine.js");
 
   it("flatTasks captures settings and the leaf branch classifies via computeDisplayHealth", () => {
     expect(src).toMatch(/const settings = data\?\.settings;/);

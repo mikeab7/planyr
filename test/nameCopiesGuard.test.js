@@ -73,7 +73,7 @@ describe("schedules — the linked project's name is a read-time lookup", () => 
     expect(crossScheduleLabel(sched)).toBe("Pappadoupolos / Master Schedule");
   });
   it("no host code reads linkedSiteName for DISPLAY outside the ownership module", () => {
-    const allowed = ["scheduleOwnership.js", "scheduleSource.js", "scheduleLinkHints.js", "navState.js", "scheduleSiteNames.js"];
+    const allowed = ["scheduleOwnership.js", "scheduleSource.js", "scheduleLinkHints.js", "navState.js", "scheduleSiteNames.js", "merge.js"];
     const bad = [];
     const scan = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) scan(p); else if (/\.(jsx?|mjs)$/.test(f) && !allowed.includes(f)) {
       readFileSync(p, "utf8").split("\n").forEach((l, i) => { if (/\.linkedSiteName\b/.test(l) && !/^\s*(\/\/|\*)/.test(l) && !/liveSiteName/.test(l)) bad.push(`${p}:${i + 1}: ${l.trim()}`); });
