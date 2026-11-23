@@ -12,12 +12,13 @@
  *   <RecentlyDeletedList> — the bin: Restore + Delete forever (two-step)
  *   <DeleteButton>      — the ✕ with the confirm, for any file row (44px target on coarse pointers)
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { deleteReview, restoreReview, purgeReview } from "../../doc-review/lib/reviewStore.js";
 import { deleteReviewOutcome, deleteFailureEvent } from "../../doc-review/lib/deleteOutcome.js";
 import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { useToast } from "../../../shared/ui/Toast.jsx";
 
 export const FileTypeIcon = ({ kind }) => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"
@@ -103,6 +104,26 @@ export function TrashNotice({ notice, onDismiss, style }) {
       <button onClick={onDismiss} title="Dismiss" aria-label="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 700, padding: 2 }}>✕</button>
     </div>
   );
+}
+
+/* The undo offer as an APP-level toast (audit I6): the same words, Undo and ✕ as `UndoToast`, raised
+ * through the shell's one toast host instead of a box each Library surface mounts for itself. It
+ * follows `undo` — shown while it is set, withdrawn when it clears or the surface unmounts. */
+export function useUndoToast(undo, onUndo, onDismiss) {
+  const { show, dismissByKey } = useToast();
+  const cb = useRef({ onUndo, onDismiss });
+  cb.current = { onUndo, onDismiss };
+  useEffect(() => {
+    if (!undo) { dismissByKey("trash-undo"); return undefined; }
+    show({
+      dedupeKey: "trash-undo", testId: "trash-undo", ttlMs: 10000,
+      text: `Moved “${undo.title}” to Recently deleted.`,
+      action: { label: "Undo", onClick: () => cb.current.onUndo?.() },
+      onClose: () => cb.current.onDismiss?.(),
+    });
+    return undefined;
+  }, [undo, show, dismissByKey]);
+  useEffect(() => () => dismissByKey("trash-undo"), [dismissByKey]);
 }
 
 /* `style` overrides the floating placement — the Reviews ▾ menu (NEW-1) renders this INLINE in its
