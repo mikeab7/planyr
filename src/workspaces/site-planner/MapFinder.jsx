@@ -800,7 +800,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (error) { setMapNotesErr(error.message || String(error)); return; }
     setMapNotesErr(""); setMapNotes(data);
   };
-  useEffect(() => { if (visible) reloadMapNotes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [visible]);
+  useEffect(() => { if (visible) reloadMapNotes();   }, [visible]);
 
   // An anchor (a decide-bar verb on a dropped pin or on a parcel selection) opens the editor on a
   // brand-new, UNSAVED note. Nothing is written until the user saves, so a note started and
@@ -1520,7 +1520,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       });
     }
     return () => { g.remove(); };
-  }, [calibration]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [calibration]);  
   // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
   // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
   // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
@@ -2126,7 +2126,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       detachHeal(); imageryHealRef.current = null;
       try { map.removeLayer(layer); } catch (_) {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [basemap]);
 
   /* faint labels overlay (toggle) — initial opacity set from live zoom (B162)
@@ -2162,7 +2162,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       labelsRef.current = handle;
     }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [roadsOn, basemap]);
 
   /* Label strength (B427410 ×3: the owner's own slider). The vector layer lives in its own pane, so the
@@ -2406,7 +2406,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   useEffect(() => {
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
     if (visible) { selectEpochRef.current += 1; clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [visible]);
 
   /* Saved sites on the overview map. Zoomed out: a branded pin per site.
@@ -2800,7 +2800,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       top: noteTypingKb ? 18 : 76, left: 16, right: 16, bottom: noteBox.bottom + noteCardH + (noteTypingKb ? 20 : 28),
     });
     if (dx || dy) map.panBy([-dx, -dy], { animate: true, duration: 0.25 });
-  }, [noteOpen, noteCardH, noteBox.bottom, noteTypingKb, nKind, nLat, nLon, nGeom]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [noteOpen, noteCardH, noteBox.bottom, noteTypingKb, nKind, nLat, nLon, nGeom]);  
 
   // The just-saved note keeps its ring for a few seconds so the owner sees where it landed.
   useEffect(() => {

@@ -20,6 +20,7 @@
  */
 import { supabase, supabaseRest, currentAccessToken } from "../../site-planner/lib/supabase.js";
 import { getUser } from "../../site-planner/lib/auth.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
@@ -1006,9 +1007,14 @@ export async function downloadSource(storageKey) {
 
 const draftKey = (uid, id) => `planyr:docreview:draft:${uid || "anon"}:${id}`;
 
+/** Returns false (and reports) when the local markup backup could not be written — storage full / private mode. */
 export function writeDraft(uid, record) {
-  if (!record || !record.id) return;
-  try { localStorage.setItem(draftKey(uid, record.id), JSON.stringify({ ...record, _localAt: Date.now() })); } catch (_) {}
+  if (!record || !record.id) return false;
+  try { localStorage.setItem(draftKey(uid, record.id), JSON.stringify({ ...record, _localAt: Date.now() })); return true; }
+  catch (e) {
+    reportClientEvent("review-draft-write-failed", "the local backup of the open review could not be written on this device", { id: record.id, error: (e && e.message) || "" });
+    return false;
+  }
 }
 export function readDraft(uid, id) {
   try { const s = localStorage.getItem(draftKey(uid, id)); return s ? JSON.parse(s) : null; } catch (_) { return null; }

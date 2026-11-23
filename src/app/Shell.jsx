@@ -21,7 +21,7 @@ import AccountControl from "./AccountControl.jsx";
 import { adminStatusStore } from "../workspaces/admin/lib/adminStatus.js";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setOrgName } from "../shared/profile/orgNameStore.js";
-import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
+import { setTelemetryModule, reportClientEvent } from "../shared/telemetry/clientErrors.js";
 import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
@@ -443,8 +443,8 @@ export default function Shell() {
     // downloads for the sake of these two functions. This only ever fires from a mounted
     // Schedule embed, so the one-time chunk fetch costs nothing anyone notices.
     import("../workspaces/site-planner/lib/storage.js")
-      .then(({ setScheduleLink }) => { try { setScheduleLink(groupId, info || {}); } catch (_) {} })
-      .catch(() => {});
+      .then(({ setScheduleLink }) => { try { setScheduleLink(groupId, info || {}); } catch (e) { reportClientEvent("schedule-link-failed", "recording the schedule link hint threw", { groupId, error: (e && e.message) || "" }); } })
+      .catch((e) => reportClientEvent("schedule-link-failed", "loading the schedule link writer failed", { groupId, error: (e && e.message) || "" }));
   };
 
   /* ⛔ WHO THE PROJECT STORE BELONGS TO IS THE SHELL'S JOB, NOT THE SITE PLANNER'S (B482 ×2).

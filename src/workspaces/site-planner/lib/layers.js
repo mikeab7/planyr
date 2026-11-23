@@ -12,6 +12,7 @@
  * Every endpoint is a free, keyless public ArcGIS REST service rendered
  * server-side (export image) so each agency's standard symbology comes through.
  */
+import { fetchWithRetry } from "./gisFetch.js";
 import * as EL from "esri-leaflet";
 import { guardRasterErrors } from "./parcelOpacityGuard.js"; // NEW-1 (2026-11-12): an /export image failing after its row was switched off must not throw "removeLayer of null"
 import { flattenTooltip } from "./flatLabel.js"; // NEW-1 (pan stutter, 2026-10-30): a label positions with a 2D transform, not a layer-promoting 3D one
@@ -1496,20 +1497,8 @@ export function withTileRetry(layer, max = 2) {
   return layer;
 }
 
-// fetch with exponential backoff on transient failures (429/5xx + network errors).
-export async function fetchWithRetry(url, opts = {}, tries = 3) {
-  let delay = 400;
-  for (let i = 0; ; i++) {
-    try {
-      const r = await fetch(url, opts);
-      if (r.ok || !isTransientStatus(r.status) || i >= tries - 1) return r;
-    } catch (e) {
-      if (i >= tries - 1) throw e;
-    }
-    await new Promise((res) => setTimeout(res, delay));
-    delay *= 2;
-  }
-}
+// fetch with exponential backoff on transient failures — lives in gisFetch.js (pure, node-testable); re-exported here.
+export { fetchWithRetry };
 
 /* Probe an ArcGIS service root for health. ArcGIS returns HTTP 200 with a JSON
  * error body when a service is missing/stopped, so we parse and treat a present

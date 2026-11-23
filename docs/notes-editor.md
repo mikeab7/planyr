@@ -125,6 +125,6 @@ writes are Planyr's to normalise. Nothing the audit could replace was left in pl
   fill was dropped by *Values and Source Formatting* (`excel-mixed-cells`). **After: 62 passed, 0 failed.**
 
 ## 7 · The engine contract
-`ui-audit/verify-notes-engine-contract.mjs` (also a required `build` step) pins what Notes relies on from Tiptap so an upgrade cannot change a decided
+`ui-audit/verify-notes-engine-contract.mjs` (in `.github/workflows/notes-gates.yml` — nightly + Notes-paths PRs; not the required check since 2026-11-23) pins what Notes relies on from Tiptap so an upgrade cannot change a decided
 behaviour silently: A Tab after a list · B column-width undo leaves no stale `<col>` width · C a right-click keeps a Ctrl+click multi-cell selection · D a
 stored font value with a `;` adds no CSS declaration. Known-good arms VOID the run.

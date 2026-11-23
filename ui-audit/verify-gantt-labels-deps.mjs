@@ -1,3 +1,4 @@
+/* global ganttNameWeight, placeGanttLabel, buildGanttSVG, ROW_H -- defined inside the page under test (code runs in page.evaluate / the Schedule iframe) */
 // B393/B394/B395 — Gantt label alignment + uniform-ink/weight hierarchy + orthogonal
 // dependency connectors. Verifies all three (they share one label/render pass):
 //   B393 — Left/Center/Right name alignment, uniform near-black ink, weight hierarchy,

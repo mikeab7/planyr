@@ -358,7 +358,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **⛔ A SESSION DOES NOT END ITS TURN WHILE ITS OWN CHANGE IS MERGED-BUT-UNVERIFIED.** Merge → wait for the
 > deploy to serve your build → run the signed-in check → record the result. If the route answers 503/404
 > (`not configured`), say so in one line as a needs-Michael item (Retry deployment in Cloudflare Pages).
-> (Everything about `verification-inbox/` and Cowork below is HISTORY for the checks already queued; the
+> (Everything about `verification-inbox/` (now `docs/history/verification-inbox/`) and Cowork below is HISTORY for the checks already queued; the
 > Cowork chat may still verify, it is no longer the only actor that can.)
 >
 
@@ -368,7 +368,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > commits the result straight into the ledger (since 2026-11-05 the `ledger` BRANCH — see the LEDGER block for how a chat with a
 > shell, a chat with only the GitHub connector, and a chat with no push access each do it) itself, instead of
 > relaying it to a Claude Code session to type in. This **supersedes the inbox-then-drain path above for
-> new checks** — `verification-inbox/` stays only for whatever is already queued in it. Claude Code still
+> new checks** — `verification-inbox/` (archived 2026-11-23 to `docs/history/verification-inbox/`, four stale August files) is history only. Claude Code still
 > owns every line of product code; this is recording, never building. **Why:** a session spun up purely
 > to transcribe one paragraph is the most expensive possible way to write it, and the hand-off fails
 > open — 79 completed live checks once piled up unrecorded because the courier didn't always get sent.
@@ -979,6 +979,10 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
   Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
   See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
+  **NOTES GATES SPLIT (owner decision 2026-11-23):** only five `verify-notes-*` gates stay in the required check (placement surface,
+  clipboard regression bank, box copy vs text copy, overlap rule, Ctrl+A scope — `REQUIRED_NOTES_GATES` in `ciGates.mjs`); the other 13
+  run as lane `notes-extra` in `.github/workflows/notes-gates.yml` (nightly, on demand, and on PRs touching `src/workspaces/notes/**`) —
+  NOT required, so a red nightly there is a "go look". A bare `npm run ci-parity` still runs all 18. Do not call a moved gate "a required build step".
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages

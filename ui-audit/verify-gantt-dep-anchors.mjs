@@ -1,3 +1,4 @@
+/* global ROW_H, depAnchors, ARROW_REACH, buildGanttSVG -- defined inside the page under test (code runs in page.evaluate / the Schedule iframe) */
 // B629 — Dependency-arrow directional anchors + low-zoom label de-collision (Scheduler / Gantt).
 //
 // NEW-1 (re-report of the B395→B396 anchor thread): dependency connectors must leave a bar's

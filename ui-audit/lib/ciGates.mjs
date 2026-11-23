@@ -125,9 +125,29 @@ export function selectDocsOnlyGates(gates, names = DOCS_ONLY_GATE_NAMES) {
  * heavy gate to its lane. "Install dependencies" runs in every lane (each lane is its own machine).
  */
 export const LANE_NAMES = ["static", "vitest", "build-app", "browser"];
+/** Lanes that run OUTSIDE the required `build` check (their own workflow, .github/workflows/notes-gates.yml). */
+export const EXTRA_LANE_NAMES = ["notes-extra"];
 export const SETUP_GATE = "Install dependencies";
 /** Gate-name PREFIXES per non-static lane (a prefix keeps the long trailing "— NEW-1, B…" tags out of this table). */
 export const LANE_PREFIXES = {
+  // Notes browser harnesses OWNER-MOVED OFF THE REQUIRED CHECK (2026-11-23, audit decision 2): 13 of the 18 verify-notes-* gates run
+  // in the nightly / Notes-paths workflow instead. They are listed FIRST so they win over the browser lane's "Notes " prefix; the
+  // five that stay required are named in REQUIRED_NOTES_GATES below. A local `npm run ci-parity` still runs all 18.
+  "notes-extra": [
+    "Notes table click",
+    "Notes table copy / cut / paste",
+    "Notes paste options (",
+    "Notes Word/OneNote outline paste",
+    "Notes paste-options menu",
+    "Notes paste-option live preview",
+    "Notes undo history survives",
+    "Notes caret snap-back recorder",
+    "Notes engine contract",
+    "Notes Enter after a pasted bullet",
+    "Notes header row on any row",
+    "Notes drag pans from anywhere",
+    "Notes box border move handle",
+  ],
   vitest: ["Test ("],
   "build-app": ["Build", "Base-ref bundle snapshot", "Performance budget"],
   browser: [
@@ -145,6 +165,17 @@ export const LANE_PREFIXES = {
 };
 /** Browser-lane gates that must run in EVERY shard (they bring up the server the others use). */
 export const BROWSER_SETUP_PREFIXES = ["Install Playwright chromium", "Serve the built app", "Wait for the preview server"];
+/** The five Notes gates that STAY in the required check: the placement surface (the original PR #1805 regression), the clipboard
+ *  regression bank, and the gates behind constraints #57 (overlap), #58 (box copy vs text copy) and #59 (Ctrl+A scope). */
+export const REQUIRED_NOTES_GATES = [
+  "Notes placement surface",
+  "Notes clipboard regression bank",
+  "Notes box copy vs text copy",
+  "Notes overlap rule",
+  "Notes Ctrl+A scope",
+];
+/** The extra lane also builds the app first (it has no build-app lane in front of it), so `Build` is part of its setup. */
+export const EXTRA_SETUP_PREFIXES = [...BROWSER_SETUP_PREFIXES, "Build"];
 /** Rough seconds per browser gate (main run #44539206677, 19 Nov; unlisted = DEFAULT). Only used to balance shards — a wrong
  *  weight makes a shard slower, never a gate skipped, and test/ciGates.test.js proves every gate runs in exactly one shard. */
 export const BROWSER_WEIGHTS_S = [
@@ -162,7 +193,7 @@ const startsWithAny = (name, prefixes) => prefixes.some((p) => name.startsWith(p
 
 /** Which lane runs this gate? (`Install dependencies` is special — it runs in all of them; see `selectLane`.) */
 export function laneOf(name) {
-  for (const lane of Object.keys(LANE_PREFIXES)) if (startsWithAny(name, LANE_PREFIXES[lane])) return lane;
+  for (const lane of ["notes-extra", ...LANE_NAMES]) if (LANE_PREFIXES[lane] && startsWithAny(name, LANE_PREFIXES[lane])) return lane;
   return "static";
 }
 
@@ -187,11 +218,14 @@ export function parseShard(spec) {
  *   - static / build-app: not shardable (a shard spec is ignored, loudly, by the caller).
  */
 export function selectLane(gates, lane, shard = null) {
-  if (!LANE_NAMES.includes(lane)) return { ok: false, error: `unknown lane "${lane}" (expected ${LANE_NAMES.join(" | ")})`, selected: [] };
-  const inLane = gates.filter((g) => g.name === SETUP_GATE || laneOf(g.name) === lane);
-  if (lane !== "browser" || !shard || shard.total === 1) return { ok: true, selected: inLane };
+  if (!LANE_NAMES.includes(lane) && !EXTRA_LANE_NAMES.includes(lane)) return { ok: false, error: `unknown lane "${lane}" (expected ${[...LANE_NAMES, ...EXTRA_LANE_NAMES].join(" | ")})`, selected: [] };
+  const extraSetup = (g) => lane === "notes-extra" && startsWithAny(g.name, EXTRA_SETUP_PREFIXES);
+  const inLane = gates.filter((g) => g.name === SETUP_GATE || laneOf(g.name) === lane || extraSetup(g));
+  const shardable = lane === "browser" || lane === "notes-extra";
+  if (!shardable || !shard || shard.total === 1) return { ok: true, selected: inLane };
 
-  const setup = (g) => g.name === SETUP_GATE || startsWithAny(g.name, BROWSER_SETUP_PREFIXES);
+  const setupPrefixes = lane === "notes-extra" ? EXTRA_SETUP_PREFIXES : BROWSER_SETUP_PREFIXES;
+  const setup = (g) => g.name === SETUP_GATE || startsWithAny(g.name, setupPrefixes);
   const work = inLane.filter((g) => !setup(g));
   const load = Array.from({ length: shard.total }, () => 0);
   const owner = new Map();

@@ -151,7 +151,7 @@ function Harness({ data }) {
     const full = [{ x: start.x + nx, y: start.y + ny }, { x: best.x + nx, y: best.y + ny }, { x: best.x - nx, y: best.y - ny }, { x: start.x - nx, y: start.y - ny }];
     const t = driveTieOf([start, best], setback.parcelRings);
     return t ? { full, best, tie: t.tie, path: t.path } : null;
-  }, [driveQ, els, setback]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [driveQ, els, setback]);  
   const packBase = gradingPack(cfg, setback, driveGeo && driveQ === "ring" ? { extraRings: [driveGeo.full] } : undefined);
   if (driveGeo && driveQ === "1") gsEls.push({ id: "drv", type: "drive", ring: driveRingOnSite(driveGeo.full, packBase.setbackRings, driveGeo.best), dockStack: null, accessible: false, slopeOverridePct: null, padElevFt: null, drive: { tie: driveGeo.tie, path: driveGeo.path } });
   const gsInputs = { els: gsEls, ffeFt: null, dockDropFt: 4, fieldT: 0, drainTarget: null, daylightAsap: false, existAt, parcelRings: setback.parcelRings, pondRings: [], easementRings: [], opts: { existKey: "h" }, grading: packBase };

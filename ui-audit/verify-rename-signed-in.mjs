@@ -1,3 +1,4 @@
+/* global crossScheduleLabel -- defined inside the page under test (code runs in page.evaluate / the Schedule iframe) */
 /* verify-rename-signed-in — the signed-in half of B1991041 (V1416129) and the schedule leg of B1991040
  * (V1416128), driven against a real deploy as the throwaway test account (e2e@planyr.test).
  *

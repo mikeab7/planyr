@@ -27,6 +27,12 @@ import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/key
 import { imageFileFromClipboard, pastedImageName } from "./lib/pasteImage.js"; // NEW-1 — Ctrl+V a clipboard image as an overlay
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
+
+// writeJournal returns false when the device refuses the pending-edit journal (quota / too big / privacy mode). The
+// edits are still on the canvas and in the cloud retry queue, but a reload would lose them — say so (telemetry), never silently.
+function noteJournalWrite(ok, entries) {
+  if (ok === false && entries > 0) reportClientEvent("journal-write-refused", "the pending-edit journal could not be saved on this device", { entries });
+}
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
@@ -2975,9 +2981,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       applyRoadNamesOpacity();
     }).catch((e) => console.error("SitePlanner: road names failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [roadsOn, origin]);
-  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]);  
   useEffect(() => { saveRoadNamesPref(roadNamesPref); }, [roadNamesPref]);
 
   /* City names over the aerial (B2391216 ×2) — Map Base › Labels carries City Names beside Road Names, as the map
@@ -3605,7 +3611,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (layerGateReady || !origin || !viewFramed || geoZoom == null) return;
     if (Math.abs(geoZoom - ppfToZoom(view.ppf, origin.lat)) < 0.01) setLayerGateReady(true);
-  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]);  
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
@@ -4521,7 +4527,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (readOnlyRef.current || !normalizeOnSeedRef.current) return;
     const stamped = stampParcelNumbers(parcels);
     if (stamped !== parcels) setParcels((cur) => (cur === parcels ? stamped : stampParcelNumbers(cur)));
-  }, [parcels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [parcels]);  
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
   // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).
@@ -4823,7 +4829,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
            * advised the user into losing exactly the edits the banner was complaining it could not
            * save. Naming the state removes the coincidence. */
           if (s.pending > 0 || s.state === "committing" || s.state === "retrying" || s.state === "failed" || s.state === "stale")
-            writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now());
+            noteJournalWrite(writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now()), live.dirtyEntries().length);
           else if (s.state === "idle") clearJournal(siteId, journalSid);
         } catch (_) { /* journaling is belt-and-suspenders — never let it break sync */ }
       },
@@ -6421,7 +6427,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * another workspace) HAS no box, so the rect refuses it directly; a merely-backgrounded tab has a
    * perfectly real box, so the rect admits it and the framing commits while hidden, which is exactly
    * what B1600353 established and what the last attempt got backwards. */
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately dep-array-free: it re-asks
+   
   // on every render until it can answer, then the first line returns. It cannot loop — `setSize`
   // bails functionally on an unchanged box, and the only path that dispatches anything else also
   // sets the reveal.
@@ -9979,7 +9985,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       onClick: () => {
         try {
           const live = elSyncRef.current;
-          if (live) writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now());
+          if (live) noteJournalWrite(writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now()), live.dirtyEntries().length);
         } catch (_) { /* journaling is belt-and-suspenders — never block the reload the user asked for */ }
         try { window.location.reload(); } catch (_) {}
       },
@@ -17167,7 +17173,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lint caught as 'setJurBadge is not defined'. Leave the declaration here. */
   const [jurBadge, setJurBadge] = useState(null);
   const jurBadgeCache = useRef(new Map()); // signature → badge (cache by parcel geometry hash)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!jurBadgeSig) { setJurBadge(null); return; }
     const cached = jurBadgeCache.current.get(jurBadgeSig);
@@ -22039,7 +22045,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const prev = new Map(batch.map((e) => { const k = `${e.section}.${e.field}`; return [k, lookPrev.current.get(k)]; }));
       batch.forEach((e) => lookPrev.current.delete(`${e.section}.${e.field}`));
       await persistLookBatch({ batch, prev, uid: uid(), updateUserPrefs, applyPrefsLocal, setParcelLookPref, warn });
-    }, 400);
+    }, 400, undefined, (err) => { // commit threw (persistLookBatch handles its own refusals): never a silent "saved"
+      reportClientEvent("prefs-write-failed", "parcel look default write threw", { error: (err && err.message) || "" });
+      lookIo.current.flashWarn("⚠ Style default didn't save — kept on this computer only.", 6000);
+    });
   }
   useEffect(() => {
     const flush = () => { lookWriter.current && lookWriter.current.flush(); };

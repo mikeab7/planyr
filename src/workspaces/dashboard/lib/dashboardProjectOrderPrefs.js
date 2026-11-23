@@ -14,7 +14,7 @@
  * holds it and `local: true` tells the caller that is expected, not an error.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { getProfileRow, updateProfilePrefs } from "../../../shared/profile/profileRowCache.js";
 import { normalizeProjectOrder } from "../../../shared/projects/projectOrder.js";
 
 export const PROJECT_ORDER_PREF_KEY = "dashboardProjectOrder";
@@ -59,32 +59,14 @@ function announce(order) {
   try { if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(PROJECT_ORDER_EVENT, { detail: { order } })); } catch { /* no window */ }
 }
 
-let writeChain = Promise.resolve();
-
 /** Persist `order` ({ids, at}). Mirror first (instant; the signed-out home), then a fresh
- * read-modify-write of the cloud row. Resolves { ok, order, local?, error? }. */
+ * read-modify-write of the cloud row through the one shared writer. Resolves { ok, order, local?, error? }. */
 export function saveProjectOrder(uid, order) {
   const next = normalizeProjectOrder(order);
   if (!next) return Promise.resolve({ ok: false, order: null, error: "invalid order" });
   writeMirror(next);
   announce(next);
   if (!supabase || !uid) return Promise.resolve({ ok: true, order: next, local: true });
-  const run = async () => {
-    try {
-      const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
-      if (readErr) return { ok: false, order: next, error: readErr.message };
-      const prev = (row?.prefs && typeof row.prefs === "object") ? row.prefs : {};
-      const { error } = await supabase
-        .from("profiles")
-        .upsert({ id: uid, prefs: { ...prev, [PROJECT_ORDER_PREF_KEY]: next }, updated_at: new Date().toISOString() }, { onConflict: "id" });
-      if (error) return { ok: false, order: next, error: error.message };
-      invalidateProfileRow(uid); // the next load must see this write, not a cached pre-write row
-      return { ok: true, order: next };
-    } catch (e) {
-      return { ok: false, order: next, error: e?.message || "order save failed" };
-    }
-  };
-  const p = writeChain.then(run, run);
-  writeChain = p.catch(() => {});
-  return p;
+  return updateProfilePrefs(uid, (prev) => ({ ...prev, [PROJECT_ORDER_PREF_KEY]: next }))
+    .then((r) => (r.ok ? { ok: true, order: next } : { ok: false, order: next, error: r.error }));
 }

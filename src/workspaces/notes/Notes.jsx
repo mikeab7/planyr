@@ -42,6 +42,10 @@ import {
 import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { listProjects, warmProjects, onProjectsChanged, ensureProjectExists } from "../../shared/projects/projects.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+/* LOUD-FAILURE: a purge that throws must be named, never an unhandled rejection nobody reads. */
+const reportPurgeFailure = (e) => reportClientEvent("notes-purge-failed", String(e?.message || e).slice(0, 160), {});
+
 import {
   clearNotesStorageError, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
@@ -570,7 +574,7 @@ export default function Notes({
         ids.push(...r.pageIds);
       }
       writeTree(loaded);
-      purgePages(ids);
+      purgePages(ids).catch(reportPurgeFailure);
     }
 
     /* The safety net for a delete that was INTERRUPTED (a tab closed between the tree
@@ -1256,7 +1260,7 @@ export default function Notes({
     // Same reasoning as handleRestore above — a purged entry's bytes are gone, so a peek open
     // on it must close rather than keep rendering a body that no longer exists.
     setPeek((p) => (p && p.entryId === entryId ? null : p));
-    purgePages(r.pageIds);
+    purgePages(r.pageIds).catch(reportPurgeFailure);
   }, [persistTree, treeNow]);
 
   /* ⛔ THE BIN'S FACTS, COMPUTED ONLY WHILE THE BIN IS OPEN (NEW-3). It reads every binned
@@ -1293,7 +1297,7 @@ export default function Notes({
     }
     if (!entryIds?.length) return;   // the TOMBSTONE has to be persisted even for an entry
     persistTree(next);               // that named no pages, or the purge cannot survive a merge
-    purgePages(ids);
+    purgePages(ids).catch(reportPurgeFailure);
     setExportNote(`${entryIds.length} empty ${entryIds.length === 1 ? "note" : "notes"} deleted for good. Nothing that had words in it was touched.`);
   }, [tree, persistTree]);
 
@@ -1307,7 +1311,7 @@ export default function Notes({
     }
     persistTree(next);
     setDeleted(null);
-    purgePages(ids);
+    purgePages(ids).catch(reportPurgeFailure);
   }, [tree, persistTree]);
 
   /* ---- moves (B1316 — the model op had no caller at all before that item) ----
@@ -1488,7 +1492,7 @@ export default function Notes({
     if (plan.purge.length) {
       // Finish the purge SILENTLY (same body+assets+versions+merge-base+cloud path as a normal
       // purge), then re-read storage: only a body that is still there reaches the bar.
-      purgePages(plan.purge).catch(() => {}).then(() => {
+      purgePages(plan.purge).catch(reportPurgeFailure).then(() => {
         const left = plan.purge.filter((id) => listStoredPageIds().includes(id));
         if (left.length) setIntegrity((st) => ({ ...st, purgeFailed: left.length }));
       });

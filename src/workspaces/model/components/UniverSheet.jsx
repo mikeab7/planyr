@@ -411,7 +411,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       mk("done");
     } catch (err) {
       setError(err);
-      // eslint-disable-next-line no-console
+       
       console.error("UniverSheet: failed to start", err);
     }
     return () => {
@@ -471,7 +471,7 @@ export default function UniverSheet({ workbook, projectNames, viewKey, onChange,
       }
       L.projectDefs = next;
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.error("UniverSheet: could not update project names", err);
       if (L.onNotice) L.onNotice("The Site.* / Plan.* / Comp.* names could not be refreshed in the new grid.");
     }

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
 import univerPrune from "./scripts/vite-plugin-univer-prune.mjs";
 import spreadsheetPreload from "./scripts/vite-plugin-spreadsheet-preload.mjs";
@@ -190,6 +191,11 @@ function buildStamp() {
 // fetches. If a particular county server blocks CORS, uncomment the matching proxy
 // entry below and point that county's URL in src/lib/counties.js at the local path
 // (e.g. "/gis-harris/HCAD/Parcels/MapServer/0").
+function countyPolygonsVersion() {
+  try { return createHash("sha1").update(fs.readFileSync(path.resolve("public/geo/county-polygons.json"))).digest("hex").slice(0, 10); }
+  catch { return "dev"; }
+}
+
 export default defineConfig(({ command }) => ({
   // Absolute (root) asset paths. Production is Cloudflare Pages served at the domain
   // root (planyr.io) — root-absolute /assets/… URLs resolve identically on every page
@@ -199,7 +205,9 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? (process.env.PLANYR_BASE || "/") : "/",
   // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
-  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
+  // __COUNTY_POLYGONS_V__ (audit batch E): content hash of public/geo/county-polygons.json, appended as ?v= to its URL so the
+  // file can carry a long cache lifetime (a changed file = a new URL = a fresh fetch) instead of revalidating on every visit.
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID), __COUNTY_POLYGONS_V__: JSON.stringify(countyPolygonsVersion()) },
   // A Web Worker is bundled WITHOUT the app's plugins, so the Univer prune has to be named here too (lib/univerFormulaWorker.js
   // reaches the render engine through @univerjs/sheets; unpruned, the engine's lazy language files make the worker un-bundlable).
   worker: { plugins: () => [univerPrune()] },

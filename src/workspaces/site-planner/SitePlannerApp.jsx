@@ -298,7 +298,7 @@ export default function App({
     const all = readCloudWriteFailures();
     const dead = all.filter((e) => e && e.error === PUSH_MISSING);
     if (dead.length) { dead.forEach((e) => clearCloudWriteFailure(e.id)); reportClientEvent("write-failure-pruned-missing", "dropped logged cloud-write failures for plans that were never stored on this device", { count: dead.length }); }
-    const pending = all.filter((e) => !(e && e.error === PUSH_MISSING));
+    const pending = all.filter((e) => !(e && (e.error === PUSH_MISSING || e.kind === "notes")));  // a Notes sync record is Notes' own to surface
     if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   /* NEW-1 (B2671215 follow-up, owner 2026-11-11) — A FAILED RENAME'S BANNER ENDS WHEN THE CLOUD HOLDS THE NAME, not only when Retry is pressed.
@@ -317,7 +317,7 @@ export default function App({
       if (clearCloudWriteFailuresFor({ siteId: id })) reconcileBannerWithLog();
     });
     const onOnline = () => {
-      const pending = readCloudWriteFailures().filter((e) => e && e.error !== PUSH_MISSING);
+      const pending = readCloudWriteFailures().filter((e) => e && e.error !== PUSH_MISSING && e.kind !== "notes");
       if (!pending.length) return;
       beginPushRetry();
       attemptCloudWriteRetry();
@@ -1006,7 +1006,7 @@ export default function App({
    * zoom step), so a device with many saved plans paid that parse each time. Memoised on what can change the
    * answer: the open plan, the mode, and `sites` (re-read by `refreshSites` after every store mutation). */
   const effGroup = useMemo(() => groupForPlan(activeSiteId, mode), [activeSiteId, mode, sites]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!isActive || !mayReconcileUrl(bootResolved)) return;
     // B881664 (×3) — a route change and a reactivation can land in the SAME commit (the
@@ -1037,7 +1037,7 @@ export default function App({
 
   // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a
   // project created/renamed from another module while we were hidden shows without a reload.
-  useEffect(() => { if (isActive) refreshSites(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isActive) refreshSites();  
   }, [isActive]);
 
   // 3) "New project" from any workspace → start a blank site here (a side effect, not a

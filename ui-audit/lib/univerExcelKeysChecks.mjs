@@ -113,7 +113,6 @@ export function registerExcelKeyChecks(h) {
     await press("Control+Shift+_"); const gone = [await edges(0, 0), await edges(1, 1)];
     if (gone.some((x) => x)) return FAIL(`borders left after Ctrl+Shift+_: ${JSON.stringify(gone)}`);
     return (await undoOnce(b1)) ? PASS(`outline A1 "${e[0]}" … B2 "${e[3]}"; Ctrl+Shift+_ cleared them; each was one undo step`) : FAIL("one Ctrl+Z did not restore the borders");
-    void outline;
   });
 
   // ---- selection ----------------------------------------------------------------------------------------------------------------

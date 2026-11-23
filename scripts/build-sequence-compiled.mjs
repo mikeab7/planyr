@@ -37,6 +37,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { transformSync } from "esbuild";
 import { checkBabelBlocks } from "../ui-audit/stress/check-babel.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -93,7 +94,10 @@ export function compileSequenceHtml(html) {
   let out = html;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
-    out = out.slice(0, b.tagStart) + `<script>\n${b.code}</script>` + out.slice(b.tagEnd);
+    // Audit batch E: minify the compiled output (esbuild never renames top-level names in a classic script, so the two
+    // blocks still share their globals; behaviour is unchanged, the page is just smaller).
+    const min = transformSync(b.code, { loader: "js", minify: true }).code;
+    out = out.slice(0, b.tagStart) + `<script>\n${min}</script>` + out.slice(b.tagEnd);
   }
 
   if (!BABEL_CDN_SCRIPT_RE.test(out)) {

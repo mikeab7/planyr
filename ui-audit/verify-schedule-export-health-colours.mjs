@@ -1,3 +1,4 @@
+/* global buildPDFHtml -- defined inside the page under test (code runs in page.evaluate / the Schedule iframe) */
 // GUARD — measures, never reads the code. A prior session read buildGanttSVG's `HC[t.health]`
 // line and reported (explicitly as a code-read, not a live measurement) that the export never
 // shows automation-derived health. Live measurement here confirmed a real (but differently

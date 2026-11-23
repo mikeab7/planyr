@@ -181,7 +181,7 @@ describe("the wiring stays in place", () => {
     expect(src.indexOf("convertOfficeLists(d.body)")).toBeLessThan(src.indexOf("readSourceTables(doc2.body"));
   });
   it("a conversion that throws falls back to the unconverted paste, never to no paste", () => {
-    expect(src).toMatch(/try \{ doc2 = prepare\(true\); \} catch \(_\) \{ doc2 = prepare\(false\); \}/);
+    expect(src).toMatch(/try \{ doc2 = prepare\(true\); \} catch \(_\) \{ (reportClientEvent\([^)]*\); )?doc2 = prepare\(false\); \}/);
   });
   it("the text-grid fallback stands down when the html already gave a list", () => {
     expect(src).toMatch(/!sliceHasTable\(slice\) && !sliceHasList\(slice\)/);

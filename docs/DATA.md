@@ -385,7 +385,7 @@ still outstanding: watching a real cross-device rename on the owner's signed-in 
 the correct, non-lazy disposition under this repo's own three-state lifecycle
 (`## ⛔ MERGED ≠ LIVE`) — re-implementing it here would not be able to do anything the shipped code
 doesn't already do, and would not close the live-verify gap either. It needs a Cowork-thread pass
-against `planyr.io`, via the `verification-inbox/` mechanism, not more code.
+against `planyr.io`, via the `verification-inbox/` mechanism (now archived under docs/history/), not more code.
 
 **⛔ CORRECTION (B1440976, 2026-09-09) — NEW-3's "already shipped" verdict above was wrong about ONE
 seam, and it is the seam that actually reached the owner.** He reported the rename "doesn't hold"

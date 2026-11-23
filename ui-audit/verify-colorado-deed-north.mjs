@@ -153,7 +153,7 @@ const run = async () => {
       row.click();
       return label;
     });
-    check(!!clicked, `${plan.key}: reached the deed's "Rotate to grid north" action`, clicked ? `menu row: "${clicked}"` : `selected=${fired}; menu row not found`);
+    check(!!clicked, `${plan.key}: reached the deed's "Rotate to grid north" action`, clicked ? `menu row: "${clicked}"` : "menu row not found");
     if (!clicked) continue;
     await page.waitForTimeout(2000);
 
