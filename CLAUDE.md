@@ -1006,6 +1006,12 @@ Runtime deps are kept few and deliberate. **No new dependency for "open an uploa
   and if a real secret (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) is absent locally it says so
   LOUDLY and substitutes the documented dummy rather than silently measuring something CI doesn't.
   `--list` shows the gate order with nothing run; `--skip-install` skips `npm ci` (loud, deviates).
+  **THE REQUIRED `build` CHECK IS NOW PARALLEL LANES (2026-11-23, audit Batch C).** `build` is a small aggregator job over
+  `detect` · `static` · `vitest` (3 shards) · `build-app` (uploads `dist/`) · `browser` (4 shards, downloads `dist/`); each lane runs
+  `npm run ci-parity -- --lane <name> [--shard i/n]` against the SAME `.github/ci-gates.yml`, and `ui-audit/lib/ciGates.mjs` `LANES`
+  says which gate runs where (an unlisted gate lands in `static`). A bare `npm run ci-parity` still runs every gate serially.
+  The check's name is still exactly `build`, and it goes red if ANY lane fails (`test/ciGates.test.js` runs its verdict script).
+  Pushes to main are keyed per commit (they no longer queue); PRs still cancel superseded pushes.
   See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
