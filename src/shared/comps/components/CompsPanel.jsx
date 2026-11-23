@@ -57,6 +57,7 @@ import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
 import { compLocationFor } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
+import { useParcelTablesVersion } from "../../../workspaces/site-planner/lib/useParcelTablesVersion.js"; // Batch K stage 2 — re-render when a state's county table lands
 import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
 import {
   PIN_ADDR_STORAGE_KEY, PIN_ADDR_STORAGE_MAX, readPinAddrStorage, persistPinAddr, pinCacheKey,
@@ -705,6 +706,7 @@ export default function CompsPanel({
   // View-only: `onCompsChange` still carries every comp to every other reader.
   onVisibleCompsChange,
 }) {
+  useParcelTablesVersion(); // Batch K stage 2 — the county-label fallback reads COUNTIES; re-render when a state table lands
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);

@@ -6,7 +6,7 @@
  * county's current viewer reads parcels from gis.niagaracounty.gov/server (PublicViewer/Public_Viewer layer 4, "Parcels (Niagara County Final Roll, 2026)"). It is wired through
  * the relay; the statewide layer holds none of Niagara (see NY_UNCOVERED), so its fallbacks are the extras in parcelFallbacks.js.
  * Row: [slug, county name, layer, idField, addrField, scopeWhere, owner column?, centre lat, lng, padded bbox, displayMinZoom?]. */
-export const NY_UNCOVERED = ["Allegany", "Cattaraugus", "Chemung", "Chenango", "Clinton", "Columbia", "Delaware", "Dutchess", "Essex", "Franklin", "Fulton", "Herkimer", "Jefferson", "Madison", "Monroe", "Nassau", "Niagara", "Orleans", "Saratoga", "Schenectady", "Schoharie", "Seneca", "Washington", "Yates"];
+export { NY_UNCOVERED } from "./nyUncovered.js"; // lives in a small eager side file (counties.js needs it for the NY statewide row; this file loads on demand)
 export const NY_ROWS = [
   ["allegany","Allegany","https://services6.arcgis.com/TUMWUdOUQ0tPtTxU/arcgis/rest/services/Tax_Map_2025_Ally_Co_Final_Merge/FeatureServer/0","Printkey","Street",null,1,42.2635,-78.0135,[41.977, -78.325, 42.55, -77.702],16],
   ["cattaraugus","Cattaraugus","/gis-proxy/maps2.cattco.org/arcgiswebadaptor/rest/services/PublicNotification/Public_Notification_Parcels/FeatureServer/0","PRINTKEY","ParcelAdd",null,1,42.272,-78.6823,[41.979, -79.079, 42.565, -78.285],16],

@@ -259,7 +259,8 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, countyKeyForNameLoaded, onParcelTablesLoaded, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { useParcelTablesVersion } from "./lib/useParcelTablesVersion.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
@@ -17352,8 +17353,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ready.then(() => { if (!gone) attach(); });
     // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
     Promise.all([ready, Promise.resolve(loadCountyPolygons()).catch(() => null)]).then(() => { if (!gone) set.sync(); });
+    // Batch K stage 2 — and again when a state's county table lands (the view answer is `pending` until the rows of the state it is over are in).
+    const offTables = onParcelTablesLoaded(() => { if (!gone) set.sync(); });
     return () => {
       gone = true;
+      offTables();
       clearLotFlash();
       if (poll) clearTimeout(poll);
       if (map) map.off("moveend", onMoved);
@@ -17402,20 +17406,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * `[siteId]` only). That one-word change is what makes "Set location" deliver the county — and
    * therefore jurisdiction, setbacks and drainage rules — on a plan that was drawn with the GIS
    * down: the anchor lands, this re-runs, and the county resolves without a reload. */
+  useParcelTablesVersion([restored?.county]); // Batch K stage 2 — the saved county's state table loads, and this view re-renders when it lands
   const [, setCountyHealTick] = useState(0);
   useEffect(() => {
     const o = origin;
     if (!siteId || !o || !Number.isFinite(o.lat) || !Number.isFinite(o.lon)) return;
     let live = true;
-    countyAtPoint(o.lon, o.lat).then((ans) => {
+    countyAtPoint(o.lon, o.lat).then(async (ans) => {
       if (!live || !ans?.name) return;
       // NEW-1 (adversarial review, 2026-09-08) — state-qualified. `countyAtPoint` falls back to a
       // NATIONAL county geometry when the boundary service can't answer, and an unqualified name
       // is read as Texas — so a site outside TX/CO used to heal its county to the same-named TEXAS
       // key (and with it that county's drainage authority, detention criteria and setbacks). A
       // qualified miss is null and heals nothing, which is the correct outcome.
-      const key = countyKeyForName(ans.name, ans.state);
-      if (!key || key === (restored?.county || null)) return;
+      const key = await countyKeyForNameLoaded(ans.name, ans.state); // K2: waits for the state table — null never means "still loading"
+      if (!live || !key || key === (restored?.county || null)) return;
       const wrong = restored?.county ?? null;
       if (restored) restored.county = key; // metaRef re-reads restored.county every render
       metaRef.current = { ...metaRef.current, county: key }; // flush below must not save the stale meta

@@ -48,6 +48,7 @@ import { FONT_SIZE } from "../../ui/designTokens.js";
 import { reverseGeocodeLatLon, geocodeAddress } from "../../../workspaces/site-planner/lib/geocode.js";
 import { resolveCountyForPoint } from "../../sitePlans/lib/overlayCompCounty.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
+import { useParcelTablesVersion } from "../../../workspaces/site-planner/lib/useParcelTablesVersion.js"; // Batch K stage 2 — re-render when a state's county table lands
 import { MOBILE_BREAKPOINT_PX } from "../lib/compMobileLayout.js";
 import CompEntryMobileSheet from "./CompEntryMobileSheet.jsx";
 import { pinDragCursor } from "../../ui/controls.jsx";
@@ -817,6 +818,7 @@ export default function CompEntryGrid({
   // other direction: the panel names a row it just filled, and the sheet moves the cursor there.
   onActiveRowChange, selectRowId, locationNote, onDismissLocationNote,
 }) {
+  useParcelTablesVersion(); // Batch K stage 2 — the Location cell reads COUNTIES; re-render when a state table lands
   const isMobile = useIsMobileViewport();
   // B850016 (NEW-9) — arming a row's Location cell ("Set") has nowhere to go on desktop either:
   // the docked panel can still cover most of the map at a short window (measured 71% of a
