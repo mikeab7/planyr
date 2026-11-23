@@ -282,8 +282,6 @@ measureSheet.test.js
 measureWiring.test.js
 memphisLineBand.test.js
 memphisRadius.test.js
-mergeDriverE2E.test.js
-mergeDriverLedgers.test.js
 metesAndBoundsDeeds.test.js
 michiganCounties.test.js
 michiganSecondPass.test.js
@@ -463,7 +461,6 @@ renameStampIntegrity.test.js
 renderBudgetMemos.test.js
 renderLoopProbe.test.js
 requiredChecks.test.js
-resolveLedgers.test.js
 reviewCloseFile.test.js
 reviewOpenedFileNaming.test.js
 reviewsMenuPortal.test.js
