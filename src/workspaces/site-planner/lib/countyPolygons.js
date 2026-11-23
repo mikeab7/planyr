@@ -108,6 +108,7 @@ async function installZoneLocator() {
   catch (err) { if (typeof console !== "undefined") console.error("[countyPolygons] state-plane point locator unavailable — bare points use the coarse boxes:", err); }
 }
 
+/* global __COUNTY_POLYGONS_V__ */
 /** URL of the county-outline asset. A `?v=<content hash>` (injected at build time) makes it safe for /geo/* to be cached
  *  for a long time: a changed file is a new URL. Absent in dev/test (no define), where the plain path is used. */
 export function countyPolygonsUrl() {
