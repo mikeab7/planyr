@@ -120,7 +120,7 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
       "const closeHdrMenus = () => {",
     );
     const begin = body.indexOf("opTrackerRef.current.beginOperation(");
-    const setParcels = body.indexOf("setParcels(merged.parcels)");
+    const setParcels = body.indexOf("replacePlanContents(merged)");   // G2 — the one whole-plan restore
     expect(begin, "takeOverEditing must call beginOperation before its union-merge state set").toBeGreaterThan(-1);
     expect(setParcels, "takeOverEditing must still re-hydrate the canvas from the merged union").toBeGreaterThan(-1);
     expect(begin).toBeLessThan(setParcels);

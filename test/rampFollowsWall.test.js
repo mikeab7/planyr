@@ -141,7 +141,8 @@ describe("one answer for the end spot: the '+' button and the heal", () => {
   });
   it("SitePlanner wires the seam: reseatRamps in setEls, the heal effect, the tombstone flush, and planRampAt through pickRampSpot", () => {
     const src = plannerSource();
-    expect(src).toMatch(/refitRamps\(reseatRamps\(gestureBase \|\| prev, prev, next, rampSeatCtx\(\)\)/);
+    expect(src).toMatch(/seamElements\(prev, u, \{ gestureBase, restrip: reRoad, rampSeatCtx/);   // G2 — the seam body is lib/elsSeam.js
+    expect(readFileSync(new URL("../src/workspaces/site-planner/lib/elsSeam.js", import.meta.url), "utf8")).toMatch(/refitRamps\(reseatRamps\(gestureBase \|\| prev, prev, next, rampSeatCtx\(\)\)/);
     expect(src).toMatch(/reseatRamps\(prev, prev, prev, rampSeatCtx\(\)\)/);
     expect(src).toMatch(/rampDropQueue\.current/);
     expect(src).toMatch(/pickRampSpot\(\{ run: isDock/);

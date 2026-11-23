@@ -238,9 +238,10 @@ describe("the load-time heal carries a road along with a re-seated bonded field"
 describe("the planner seam (source guard)", () => {
   const src = plannerSource();
   it("every element write goes through followDrives; whole-canvas replacements (undo/redo, remote, load, restore, adopt) use the raw setter", () => {
-    expect(src).toMatch(/const setEls = \(u\) => \{[\s\S]{0,400}followDrives\(gestureBase \|\| prev/);
+    expect(src).toMatch(/const setEls = \(u\) => \{[\s\S]{0,500}seamElements\(prev, u, \{ gestureBase/);   // G2 — the seam body lives in lib/elsSeam.js
+    expect(readFileSync(new URL("../src/workspaces/site-planner/lib/elsSeam.js", import.meta.url), "utf8")).toMatch(/followDrives\(gestureBase \|\| prev/);
     expect(src).toMatch(/const \[els, setElsRaw\] = useState/);
-    for (const needle of ["setElsRaw(s.els)", "setElsRaw(n.els || [])", "setElsRaw(merged.els)", "setElsRaw(v.els)", "setElsRaw(beforeEls)", "{ el: setElsRaw,"]) {
+    for (const needle of ["setElsRaw(c.els || [])", "replacePlanContents(s);", "replacePlanContents(merged);", "replacePlanContents(v);", "replacePlanContents(n, { withDeleted: false })", "setElsRaw(beforeEls)", "{ el: setElsRaw,"]) {
       expect(src.includes(needle)).toBe(true);
     }
   });

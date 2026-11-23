@@ -357,7 +357,8 @@ import { roadCenterline, projectToRoadCenterline, insertRoadVertex, removeRoadVe
 import { regionPathD, polylinesPathD, roadSurfaceRing } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
-import { followDrives } from "./lib/driveFollow.js";
+import { seamElements } from "./lib/elsSeam.js";
+import { useLatestRender, useLatestEffect } from "./lib/useLatest.js";
 import { RAMP_DEFAULTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampLayout, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, rampGeometry, fitAlongTheWall, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
@@ -632,10 +633,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
-    setElsRaw((prev) => {
-      const next = followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad });
-      return refitRamps(reseatRamps(gestureBase || prev, prev, next, rampSeatCtx()), (h) => dockSidesFor(h).dockSides, rampDockInRef.current);
-    });
+    setElsRaw((prev) => seamElements(prev, u, { gestureBase, restrip: reRoad, rampSeatCtx, dockSidesOf: (h) => dockSidesFor(h).dockSides, dockIn: rampDockInRef.current }));
   };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
@@ -3114,8 +3112,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — `origin` rides the snapshot too, so setting or adjusting the plan's location is a
   // normal undoable frame (and a rotate, which moves geometry AND is paired with an anchor, undoes
   // as ONE step rather than leaving the drawing turned under the old anchor).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {}, origin: null });
-  stateRef.current = { parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin };
+  const stateRef = useLatestRender({ parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin });   // G2 — lib/useLatest.js
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -3448,8 +3445,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return ok;
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
-  const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
+  const liveRef = useLatestEffect({ parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove });   // G2 — lib/useLatest.js
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -4755,6 +4751,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `/CLAUDE.md`'s owner-constraints entry 10. With no type bands, what that control did — draw one
      element over everything, or under everything — is already ordinary Bring to Front / Send to
      Back (`arrangeSel`, above), so it needed no separate mechanism to survive the reversal. */
+  /* G2 — the ONE whole-plan content replacement, for undo / redo, the take-over merge, a version restore and a collection adoption. They used to
+     each spell the six setters out and differed by accident (one never set `deletedIds`, two lacked the `|| []` guards). `withDeleted: false` keeps
+     the tombstone list untouched (the seed adoption, which has none to give). Raw element write on purpose — see lib/elsSeam.js. */
+  const replacePlanContents = (c, { withDeleted = true } = {}) => {
+    setParcels(c.parcels || []); setElsRaw(c.els || []); setMeasures(c.measures || []);
+    setCallouts(c.callouts || []); setMarkups(c.markups || []); setSheetOverlays(c.sheetOverlays || []);
+    if (withDeleted) setDeletedIds(c.deletedIds || []);
+  };
   const applySnapshot = (s) => {
     // NEW-1 — the REVERT seam. An undo/redo restores a whole-canvas snapshot, so the restore itself
     // is assembly-whole; what it cannot fix is a snapshot that was ALREADY torn when it was pushed
@@ -4779,7 +4783,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // an echo landing in the window right after the restore is kept off the canvas too.
     pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
     try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
-    setParcels(s.parcels); setElsRaw(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    replacePlanContents(s);
     // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
     // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
     // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
@@ -5020,10 +5024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       cloudActive: isCloudActive, loadSite, saveSite, pushModelToCloud, onSiteSaved,
       report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
       setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
-      setCollections: (n) => {
-        setParcels(n.parcels || []); setElsRaw(n.els || []); setMeasures(n.measures || []);
-        setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
-      },
+      setCollections: (n) => replacePlanContents(n, { withDeleted: false }),
       addParcel: (pc) => setParcels((a) => [...a, pc]),
       selectParcel: (id) => { setSel({ kind: "parcel", id }); setLeftPanel("parcel"); },
       parcelDefaultStyle: () => parcelDefaultStyle(settings),
@@ -16691,8 +16692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // any content this union commits (this tab's own work made while read-only, never yet synced)
       // would otherwise land with `op_kind: "unknown"`. Guard: test/opEnvelopeSeedCoverage.test.js.
       opTrackerRef.current.beginOperation("create");
-      setParcels(merged.parcels); setElsRaw(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
+      replacePlanContents(merged);
       saveSite(merged);                     // write the union to the device mirror immediately
     } else {
       cloudPushWithWatchdog(siteId);        // couldn't fetch the cloud row (offline) → push the live work at the version we have
@@ -16868,8 +16868,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     pushHistory();
-    setParcels(v.parcels); setElsRaw(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
-    setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    replacePlanContents(v);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
     // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
     // still round-trips and must survive a version restore (else a restored version would keep the
