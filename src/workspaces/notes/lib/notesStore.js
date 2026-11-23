@@ -173,7 +173,6 @@ import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { mergeNoteDocs } from "./notesBlockMerge.js";
-import { recordCloudWriteFailure, clearCloudWriteFailuresFor, readCloudWriteFailures, WHAT_NOTES_SYNC } from "../../../shared/cloud/writeFailureLog.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
  * module allowed to touch these keys (`notesProjectLink.js`, which answers "what is this
@@ -1167,16 +1166,31 @@ function setSyncState(next) {
  * in-memory and dies with a reload; the shared write-failure log is the one record that survives the
  * navigation. Keyed per account (`groupId` = scope) so a second failure supersedes the first. Settled by
  * the next good sync (`noteSynced`); `startNotesSync` re-raises it on the next load. */
+/* ⛔ WHY THIS WRITES THE SHARED KEY ITSELF INSTEAD OF IMPORTING `shared/cloud/writeFailureLog.js`: that module is
+ * statically part of the Site route, and a second importer from the Notes route splits it into its own shared chunk,
+ * which the Site-route chunk allowlist (perf budget NEW-8) rejects. Raising the allowlist to fit a feature is not this
+ * change's call, so the Notes side keeps to the log's documented entry shape (`planyr:cloudWriteFailures`, newest last,
+ * capped) and the Site Planner's drain skips `kind: "notes"` entries. If the allowlist is ever widened on its own merits,
+ * swap this block for `recordCloudWriteFailure` / `clearCloudWriteFailuresFor`. */
+const FAILURE_LOG_KEY = "planyr:cloudWriteFailures";
+const NOTES_SYNC_WHAT = "Notes sync";
+const readFailureLog = () => {
+  try { const a = JSON.parse(store()?.getItem(FAILURE_LOG_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; }
+};
+const writeFailureLog = (list) => { try { store()?.setItem(FAILURE_LOG_KEY, JSON.stringify(list.slice(-12))); } catch { /* storage blocked: the footer still says so */ } };
 const logNotesFailure = (why) => {
   if (scope === LOCAL_SCOPE) return;
-  try { recordCloudWriteFailure({ what: WHAT_NOTES_SYNC, groupId: scope, kind: "notes", error: String(why || "") }); } catch { /* the log refusing must not break sync */ }
+  const rest = readFailureLog().filter((e) => !(e && e.kind === "notes" && e.groupId === scope));
+  rest.push({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, what: NOTES_SYNC_WHAT, groupId: scope, siteId: null, kind: "notes", error: String(why || ""), at: Date.now() });
+  writeFailureLog(rest);
 };
 const settleNotesFailures = () => {
-  try { if (scope !== LOCAL_SCOPE) clearCloudWriteFailuresFor({ groupId: scope, what: WHAT_NOTES_SYNC }); } catch { /* best effort */ }
+  if (scope === LOCAL_SCOPE) return;
+  const all = readFailureLog();
+  const keep = all.filter((e) => !(e && e.kind === "notes" && e.groupId === scope));
+  if (keep.length !== all.length) writeFailureLog(keep);
 };
-const hasLoggedNotesFailure = () => {
-  try { return readCloudWriteFailures().some((e) => e && e.kind === "notes" && e.groupId === scope); } catch { return false; }
-};
+const hasLoggedNotesFailure = () => readFailureLog().some((e) => e && e.kind === "notes" && e.groupId === scope);
 
 function noteSynced() {
   settleNotesFailures();
