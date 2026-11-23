@@ -14,7 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { jobSteps } from "../ui-audit/lib/workflowContract.mjs";
 import {
   KNOWN_DUMMY_SECRETS, KNOWN_INFRA_USES, secretRefName, isUnsupportedExpression,
@@ -155,6 +155,13 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
     expect(wait.run).toContain("curl -sSf http://localhost:4173/");
     expect(wait.run).toContain('echo "preview server never came up');
     expect(wait.run.split("\n").length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("every gate's run: text is valid shell on its own (no fragments of the next step's comments left on the end of a block)", () => {
+    for (const g of jobSteps(readGates(), "build").steps) {
+      const r = spawnSync("bash", ["-n"], { input: `${g.run}\n`, encoding: "utf8" });
+      expect(r.status, `${g.name}: ${r.stderr}`).toBe(0);
+    }
   });
 
   it("reads env: as a mapping, secrets refs included verbatim", () => {
