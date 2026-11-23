@@ -5862,7 +5862,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `layerVisibility` answer the Layers panel row shows, reported here so the owner is told why
      nothing painted rather than the map jumping. Text only: no click, no zoom. */
   const analysisLayerZoomNote = useCallback((layerId) => {
-    if (!origin || !layerId || !overlays?.[layerId]?.on) return null;
+    if (!origin || !layerId || !overlays?.[layerId]?.on || !ALL_LAYERS[layerId]) return null; // a per-state layer file still loading has no zoom note yet (batch K stage 1)
     const v = layerVisibility({ cfg: ALL_LAYERS[layerId], on: true, zoom: ppfToZoom(view.ppf, origin.lat), status: layerStatus?.[layerId] });
     return v.state === "dormant-zoom" ? dormantZoomLine(v.levels) : null;
   }, [origin, overlays, view.ppf, layerStatus]);

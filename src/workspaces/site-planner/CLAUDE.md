@@ -2065,3 +2065,6 @@ never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
+
+## Lazy per-state layer files (batch K stage 1, B2671306)
+The 14 per-state layer files (state/county `…Layers` modules) load ON DEMAND (`lib/lazyLayerFiles.js`, loader in `lib/layers.js`, React hooks `lib/useLayerRegistry.js`). An unloaded layer is still a known id (`isLayerId`, generated `lazyLayerIndex.generated.js`) so saved settings are never pruned; new layer in one of those files → `npm run layer-index`. Never import one statically from eager code (guarded by the lazyLayerRegistry test).

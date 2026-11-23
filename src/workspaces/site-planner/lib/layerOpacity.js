@@ -13,13 +13,13 @@
  *
  * The write unit is a PATCH of only the layers that changed — never the whole map — so a device with
  * a stale copy that touches one layer cannot revert another. See opacityPatch / the SQL header. */
-import { ALL_LAYERS, defaultOverlayState } from "./layers.js";
+import { ALL_LAYERS, isLayerId, defaultOverlayState } from "./layers.js";
 import { OPACITY_MIN, OPACITY_MAX } from "./layerPanelModel.js";
 
 /* The slider steps 0.05 and a typed % is a whole number, so two decimals is lossless; it also stops
  * float noise (0.6000000000000001) from reading as a change. */
 const q = (v) => Math.round(v * 100) / 100;
-const defaultOf = (k) => { const c = ALL_LAYERS[k]; return q((c && c.opacity) ?? 0.8); };
+const defaultOf = (k) => { const c = ALL_LAYERS[k]; return q((c && c.opacity) ?? (isLayerId(k) ? 1 : 0.8)); }; // an unloaded lazy layer is still known: full opacity (constraint #42)
 
 /* Any persisted / candidate value → a clean sparse `{ [key]: number }`: registry layers only, finite,
  * clamped to the slider's range, and dropped when it equals that layer's default. A fresh {} for
@@ -28,7 +28,7 @@ export function sanitizeLayerOpacity(raw) {
   const out = {};
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     for (const [k, v] of Object.entries(raw)) {
-      if (!ALL_LAYERS[k] || typeof v !== "number" || !Number.isFinite(v)) continue;
+      if (!isLayerId(k) || typeof v !== "number" || !Number.isFinite(v)) continue;
       const n = q(Math.max(OPACITY_MIN, Math.min(OPACITY_MAX, v)));
       if (n !== defaultOf(k)) out[k] = n;
     }
@@ -78,7 +78,7 @@ export function opacityPatch(prev, next, storedRaw = null) {
   for (const k of Object.keys(b)) if (a[k] !== b[k]) patch[k] = b[k];
   for (const k of Object.keys(a)) if (!(k in b)) patch[k] = null;
   if (storedRaw && typeof storedRaw === "object") {
-    for (const k of Object.keys(storedRaw)) if (!ALL_LAYERS[k]) patch[k] = null;
+    for (const k of Object.keys(storedRaw)) if (!isLayerId(k)) patch[k] = null;
   }
   return patch;
 }

@@ -16,10 +16,11 @@
  * net._http_response). The store, fetch, clock, sleeper and mail sender are injected so test/signinHeartbeatRoute.test.js runs it all. */
 import { checkSiteKey, checkGate, checkEmailLink, extractSupabaseConfig } from "../../../scripts/lib/signinChecks.mjs";
 import { overallOf, THRESHOLDS } from "../../../src/shared/auth/signinHealth.js";
+import { json as baseJson } from "./http.js";
 import { sendViaGmail } from "./gmailSend.js";
 import { createPostgrestStore, recordReport, isNotMigrated } from "./signinHealthRoute.js";
 
-const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 
 export const EDGE_BASE = "https://planyr.io";
 export const EDGE_MAX_BUNDLE_FILES = 25;     // the live bundle is read until the site key turns up; bounded so a broken site cannot make this run away
