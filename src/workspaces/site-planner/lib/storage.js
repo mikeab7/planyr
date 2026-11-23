@@ -27,6 +27,21 @@ import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared
 // pulling in the rest of this file's heavy siteModel/cloudSync graph. Re-exported here so every
 // existing importer of storage.js (SitePlanner.jsx, SitePlannerApp.jsx, …) is unaffected.
 import { setActiveUser, isCloudActive, activeUid, cloudSitesKey } from "./activeUser.js";
+
+/* B2 audit item 3 — planStore.writeMap/writeOne RETURN false (they do not throw) when the device refuses a
+ * write, and every `try { planStore.write…() } catch (_) {}` below swallowed that. Check the result and
+ * report it (telemetry — never a silent no-op). These are cache stagings, so the user-visible banner is raised by
+ * planStore.refuseWrite itself; this names WHICH seam lost the write. */
+/** The refresh that follows a write failed: say so (telemetry) instead of swallowing it. */
+export const reportPullFailed = (e) => reportClientEvent("cloud-read-failed", "post-write cloud pull failed", { error: (e && e.message) || "" });
+
+function checkedDeviceWrite(label, fn) {
+  let ok = false, err = "";
+  try { ok = fn() !== false; } catch (e) { ok = false; err = (e && e.message) || "threw"; }
+  if (!ok) reportClientEvent("device-write-refused", `${label}: the device refused a plan-cache write`, { seam: label, error: err });
+  return ok;
+}
+
 export { setActiveUser, isCloudActive, activeUid };
 const cloudKey = cloudSitesKey;
 
@@ -315,7 +330,7 @@ export async function pullCloud(uid) {
     reportClientEvent("cloud-id-collision", "two cloud rows shared one id in the same pull — the second overwrote the first in the merge", { id: c.id, groupId: c.groupId });
   for (const d of (groupDivergence || []))
     reportClientEvent("cloud-group-count-diverged", "a project's plan count shrank between the cloud fetch and the merged store", { groupId: d.groupId, cloudCount: d.cloudCount, mergedCount: d.mergedCount });
-  try { planStore.writeMap(cloudKey(uid), map); } catch (_) {}
+  checkedDeviceWrite("pull-merge-cache", () => planStore.writeMap(cloudKey(uid), map));
   // B1525088 (NEW-1) — a pull can rewrite names/statuses this device never wrote itself (another
   // device's edit landing here for the first time — restoreDeletedProject's own pull included), so
   // announce it on the same shared channel an identity-changing saveSite/delete already uses.
@@ -364,7 +379,7 @@ export function pruneMigratedLegacy(cloudMap) {
     for (const id of Object.keys(legacy)) {
       if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
     }
-    if (dropped) planStore.writeMap(SITES_KEY, legacy);
+    if (dropped) checkedDeviceWrite("legacy-prune", () => planStore.writeMap(SITES_KEY, legacy));
   } catch (_) {}
 }
 
@@ -404,7 +419,7 @@ export async function importLegacyIntoCloud(uid) {
     const r = await cloudUpsert(uid, local);  // and persist to Supabase
     if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
   }
-  try { planStore.writeMap(cloudKey(uid), cloud); } catch (_) {}
+  checkedDeviceWrite("legacy-import-cache", () => planStore.writeMap(cloudKey(uid), cloud));
   return { copied, skipped, failed };
 }
 
@@ -455,7 +470,7 @@ export function stageLegacySite(uid, siteId) {
   const local = createSiteModel(plainCopy(rec));
   if (!local.id) return null;
   recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
-  try { planStore.writeOne(cloudKey(uid), local.id, local); } catch (_) {}
+  checkedDeviceWrite("legacy-adopt-cache", () => planStore.writeOne(cloudKey(uid), local.id, local));
   return local;
 }
 
@@ -493,7 +508,7 @@ export async function importOneSiteToCloud(uid, siteId) {
   const local = createSiteModel(plainCopy(rec));
   if (!local.id) return { ok: false, error: "invalid record" };
   recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
-  try { planStore.writeOne(cloudKey(uid), local.id, local); } catch (_) {} // stage in cache so it shows immediately
+  checkedDeviceWrite("legacy-import-one-cache", () => planStore.writeOne(cloudKey(uid), local.id, local)); // stage in cache so it shows immediately
   return cloudUpsert(uid, local);
 }
 
@@ -1819,7 +1834,7 @@ export async function restoreDeletedProject(ids) {
   const results = await Promise.all(list.map((id) => cloudRestore(activeUid(), id).catch((e) => ({ ok: false, restored: 0, error: (e && e.message) || "restore threw" }))));
   const restored = results.reduce((n, r) => n + ((r && r.restored) || 0), 0);
   for (const id of list) clearRecentlyDeleted(id); // lifts BOTH the per-tab set and the durable tombstone
-  await pullCloud(activeUid()).catch(() => {});
+  await pullCloud(activeUid()).catch(reportPullFailed);
   const failed = results.find((r) => r && r.ok === false);
   if (restored === 0) return { ok: false, restored: 0, error: (failed && failed.error) || "Nothing was restored — it may already have been permanently removed." };
   return { ok: !failed, restored, error: failed ? failed.error : null };

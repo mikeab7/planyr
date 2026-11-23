@@ -1,3 +1,4 @@
+import { isTransientStatus } from "./layerRequest.js";
 /* Shared GIS fetch resilience + honest error taxonomy (B366).
  *
  * THE BUG THIS FIXES: the Site Analysis screen fired ~8–10 ArcGIS /query calls all at
@@ -278,4 +279,25 @@ export function pLimit(concurrency) {
       next();
     });
   };
+}
+
+// fetch with exponential backoff on transient failures (429/5xx + network errors).
+export async function fetchWithRetry(url, opts = {}, tries = 3) {
+  let delay = 400;
+  const { timeoutMs = GIS_FETCH_TIMEOUT_MS, ...fetchOpts } = opts; // audit B2 item 4: every attempt is bounded
+  for (let i = 0; ; i++) {
+    try {
+      // A caller-supplied signal wins; otherwise each attempt gets its own deadline so a hung host can't stall the probe forever.
+      const ctrl = !fetchOpts.signal && timeoutMs && typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+      let r;
+      try { r = await fetch(url, ctrl ? { ...fetchOpts, signal: ctrl.signal } : fetchOpts); }
+      finally { if (timer) clearTimeout(timer); }
+      if (r.ok || !isTransientStatus(r.status) || i >= tries - 1) return r;
+    } catch (e) {
+      if (i >= tries - 1) throw e;
+    }
+    await new Promise((res) => setTimeout(res, delay));
+    delay *= 2;
+  }
 }

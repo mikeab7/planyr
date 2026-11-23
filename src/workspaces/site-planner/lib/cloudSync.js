@@ -886,7 +886,7 @@ export async function cloudList(uid) {
     // pull: this tab's UI/mirror may not have adopted what the pull just saw, and moving the base
     // would relabel the other writer's change as this tab's own edit. `pulledHeader` remembers it.
     if (r.version != null && m.id != null) {
-      try { const sl = headerSlice(createSiteModel(m)); if (!headerBase[m.id]) headerBase[m.id] = sl; pulledHeader[m.id] = sl; } catch (_) {}
+      try { const sl = headerSlice(createSiteModel(m)); if (!headerBase[m.id]) headerBase[m.id] = sl; pulledHeader[m.id] = sl; } catch (e) { reportClientEvent("cloud-read-failed", "header base seed failed on pull", { id: m.id, error: (e && e.message) || "" }); }
     }
     return m;
   }).filter(Boolean);

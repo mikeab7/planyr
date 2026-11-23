@@ -24,7 +24,7 @@
  * scope; Review and the file index did have one, and are now deliberately left alone.
  */
 import { supabase } from "./supabase.js";
-import { pullCloud } from "./storage.js";
+import { pullCloud, reportPullFailed } from "./storage.js";
 import { currentIdentity } from "./teams.js";
 
 // "That RPC isn't deployed in this database yet" — same detector shape as teams.js.
@@ -68,7 +68,7 @@ async function setProjectTeam(groupId, teamId) {
   const st = await supabase.rpc("set_project_team_state", { p_group_id: groupId, p_team_id: val });
   if (!st.error) {
     const d = (st.data && typeof st.data === "object") ? st.data : {};
-    await pullCloud(uid).catch(() => {});
+    await pullCloud(uid).catch(reportPullFailed);
     return shareOutcome({
       outcome: d.outcome || "changed", teamId: val,
       matched: Number(d.matched) || 0, changed: Number(d.changed) || 0, already: Number(d.already) || 0,
@@ -82,7 +82,7 @@ async function setProjectTeam(groupId, teamId) {
   const rpc = await supabase.rpc("set_project_team", { p_group_id: groupId, p_team_id: val });
   if (!rpc.error) {
     const n = typeof rpc.data === "number" ? rpc.data : 0;
-    await pullCloud(uid).catch(() => {});
+    await pullCloud(uid).catch(reportPullFailed);
     return shareOutcome({ outcome: n > 0 ? "changed" : "already", teamId: val, matched: n, changed: n, already: 0, plans: n, foreign: 0, mismatched: 0 });
   }
   if (!isMissingFunction(rpc.error)) return { ok: false, error: rpc.error.message || "Couldn't change sharing." };
@@ -96,7 +96,7 @@ async function setProjectTeam(groupId, teamId) {
     return { ok: false, error: s.error.message };
   }
   const n = (s.data || []).length;
-  await pullCloud(uid).catch(() => {});
+  await pullCloud(uid).catch(reportPullFailed);
   return shareOutcome({ outcome: n > 0 ? "changed" : "not-found", teamId: val, matched: n, changed: n, already: 0, plans: n, foreign: 0, mismatched: 0, degraded: true });
 }
 
@@ -129,6 +129,6 @@ export async function setPlanLock(siteId, locked) {
     if (isMissingFunction(rpc.error)) return { ok: false, error: "Run the team-sharing database migration first." };
     return { ok: false, error: rpc.error.message || "Couldn't change the lock." };
   }
-  await pullCloud(uid).catch(() => {});
+  await pullCloud(uid).catch(reportPullFailed);
   return { ok: true, locked: !!rpc.data };
 }

@@ -34,7 +34,9 @@ async function getRow(env, county, year, prefix) {
   return rows[0] || null;
 }
 async function delRow(env, county, year, prefix) {
-  await fetch(`${env.SUPABASE_URL}/rest/v1/cad_taxunit_shards?county=eq.${county}&roll_year=eq.${year}&prefix=eq.${encodeURIComponent(prefix)}`, { method: "DELETE", headers: hdrs(env) });
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/cad_taxunit_shards?county=eq.${county}&roll_year=eq.${year}&prefix=eq.${encodeURIComponent(prefix)}`, { method: "DELETE", headers: hdrs(env) });
+  // A refused delete (the leftover checkpoint row) is an error the run reports, never a silent success.
+  if (!r.ok) throw new Error(`supabase delete failed: HTTP ${r.status}`);
 }
 
 export async function onRequestPost({ request, env }) {

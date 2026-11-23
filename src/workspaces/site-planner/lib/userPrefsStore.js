@@ -24,6 +24,7 @@
  */
 import { supabase } from "./supabase.js";
 import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
 import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
 import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js";
 import { normalizeLook, patchLook, validateLook } from "./parcelLook.js";
@@ -167,25 +168,13 @@ export async function savePrefsRaw(uid, prefs) {
  * Writes are serialised so two quick edits land in order. LOUD-FAILURE: { ok:false, error }.
  * A failed cloud write leaves the on-device mirror (the caller says "saved on this computer only").
  */
-let writeChain = Promise.resolve();
 export function updatePrefs(uid, reducer) {
   const local = normalize(reducer(readMirror()));
   writeMirror(local);
   if (!supabase || !uid) return Promise.resolve({ ok: false, prefs: local, error: "not signed in" });
-  const run = async () => {
-    try {
-      const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
-      if (readErr) return { ok: false, prefs: local, error: readErr.message };
-      const next = normalize(reducer(normalize(row?.prefs)));
-      const { error } = await supabase.from("profiles").upsert({ id: uid, prefs: next, updated_at: new Date().toISOString() }, { onConflict: "id" });
-      if (error) return { ok: false, prefs: local, error: error.message };
-      invalidateProfileRow(uid);
-      return { ok: true, prefs: next };
-    } catch (e) { return { ok: false, prefs: local, error: e?.message || "prefs save failed" }; }
-  };
-  const p = writeChain.then(run, run);
-  writeChain = p.catch(() => {});
-  return p;
+  // ONE shared queue for every writer of this blob (shared/profile/profilePrefsWriter.js).
+  return updateProfilePrefs(uid, (raw) => normalize(reducer(normalize(raw)))).then((r) =>
+    r.ok ? { ok: true, prefs: r.prefs } : { ok: false, prefs: local, error: r.error });
 }
 
 /* ---------------------------------------------------------------- pure edits */

@@ -10,7 +10,8 @@
  * mirror-then-cloud, LOUD-FAILURE, a `source` the caller can report.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
+import { getProfileRow } from "../../../shared/profile/profileRowCache.js";
 
 const MIRROR_KEY = "planyr:sinceLastHere:v1";
 
@@ -63,17 +64,6 @@ export async function saveSinceLastHere(uid, mark) {
   const next = normalizeMark(mark);
   writeMirror(next);
   if (!supabase || !uid) return { ok: false, mark: next, error: "not signed in" };
-  try {
-    const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
-    if (readErr) return { ok: false, mark: next, error: readErr.message };
-    const prevPrefs = (row?.prefs && typeof row.prefs === "object") ? row.prefs : {};
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({ id: uid, prefs: { ...prevPrefs, sinceLastHere: next }, updated_at: new Date().toISOString() }, { onConflict: "id" });
-    if (error) return { ok: false, mark: next, error: error.message };
-    invalidateProfileRow(uid); // NEW-1 — the next load must see this write, not a cached pre-write row
-    return { ok: true, mark: next };
-  } catch (e) {
-    return { ok: false, mark: next, error: e?.message || "since-last-here save failed" };
-  }
+  const r = await updateProfilePrefs(uid, (prev) => ({ ...prev, sinceLastHere: next }));
+  return r.ok ? { ok: true, mark: next } : { ok: false, mark: next, error: r.error };
 }

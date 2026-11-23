@@ -17,7 +17,8 @@
  * report) — proven pattern, just narrower.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
+import { getProfileRow } from "../../../shared/profile/profileRowCache.js";
 import { normalizeLayout, normalizeDismissed, appendNewCatalogCards, normalizeJumpBackInCount } from "./dashboardLayout.js";
 
 const MIRROR_KEY = "planyr:dashboardLayout:v1";
@@ -89,17 +90,8 @@ export async function saveDashboardLayout(uid, layout, dismissed, jumpBackInCoun
   const nextJumpBackInCount = normalizeJumpBackInCount(jumpBackInCount);
   writeMirror(next, nextDismissed, nextJumpBackInCount);
   if (!supabase || !uid) return { ok: false, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount, error: "not signed in" };
-  try {
-    const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
-    if (readErr) return { ok: false, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount, error: readErr.message };
-    const prevPrefs = (row?.prefs && typeof row.prefs === "object") ? row.prefs : {};
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({ id: uid, prefs: { ...prevPrefs, dashboardLayout: next, dashboardDismissedCards: nextDismissed, dashboardJumpBackInCount: nextJumpBackInCount }, updated_at: new Date().toISOString() }, { onConflict: "id" });
-    if (error) return { ok: false, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount, error: error.message };
-    invalidateProfileRow(uid); // NEW-1 — the next load must see this write, not a cached pre-write row
-    return { ok: true, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount };
-  } catch (e) {
-    return { ok: false, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount, error: e?.message || "layout save failed" };
-  }
+  const r = await updateProfilePrefs(uid, (prev) => ({ ...prev, dashboardLayout: next, dashboardDismissedCards: nextDismissed, dashboardJumpBackInCount: nextJumpBackInCount }));
+  return r.ok
+    ? { ok: true, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount }
+    : { ok: false, layout: next, dismissed: nextDismissed, jumpBackInCount: nextJumpBackInCount, error: r.error };
 }

@@ -17,7 +17,8 @@
  * here") can never be clobbered.
  */
 import { supabase } from "../../../workspaces/site-planner/lib/supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../profile/profileRowCache.js";
+import { updateProfilePrefs } from "../../profile/profilePrefsWriter.js";
+import { getProfileRow } from "../../profile/profileRowCache.js";
 
 const MIRROR_KEY = "planyr:compsRatePeriod:v1";
 export const DEFAULT_COMPS_RATE_PERIOD = "annual";
@@ -64,17 +65,6 @@ export async function saveCompsRatePeriod(uid, period) {
   const next = normalizePeriod(period);
   writeMirror(next);
   if (!supabase || !uid) return { ok: false, period: next, error: "not signed in" };
-  try {
-    const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
-    if (readErr) return { ok: false, period: next, error: readErr.message };
-    const prevPrefs = (row?.prefs && typeof row.prefs === "object") ? row.prefs : {};
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({ id: uid, prefs: { ...prevPrefs, compsRatePeriod: next }, updated_at: new Date().toISOString() }, { onConflict: "id" });
-    if (error) return { ok: false, period: next, error: error.message };
-    invalidateProfileRow(uid); // NEW-1 — the next load must see this write, not a cached pre-write row
-    return { ok: true, period: next };
-  } catch (e) {
-    return { ok: false, period: next, error: e?.message || "comps rate period save failed" };
-  }
+  const r = await updateProfilePrefs(uid, (prev) => ({ ...prev, compsRatePeriod: next }));
+  return r.ok ? { ok: true, period: next } : { ok: false, period: next, error: r.error };
 }

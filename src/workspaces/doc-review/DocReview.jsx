@@ -73,6 +73,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 import { pinDragCursor } from "../../shared/ui/controls.jsx";
 import { viewportCursor, vertexGripAt, gripCursorFor, gripHoverCursor, fileDropEffect } from "./lib/reviewCursor.js";
 import { commaInt as f0, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -1489,7 +1490,8 @@ export default function DocReview({
     // BEFORE the incoming load starts. The debounced autosave's timer is cancelled the instant
     // this load changes the deps, so without this the outgoing edit would live only in the local
     // mirror — and returning to that file would load the stale cloud copy and clobber it.
-    try { await saveNow(); } catch (_) {}
+    // A throwing save is reported, never swallowed (the status chip already shows an unsaved/failed result for a refused write).
+    try { await saveNow(); } catch (e) { reportClientEvent("review-save-before-switch-failed", "saving the open review before switching files threw", { error: (e && e.message) || "" }); }
     setBusy(true); setBusyLabel(row.title || row.item || "file"); // B446: overlay up immediately so the click visibly registers
     let rec = null;
     try {

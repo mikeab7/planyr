@@ -88,7 +88,10 @@ async function cloudRenameGroupFallback(uid, groupId, site, at) {
   // key anyway. Soft-deleted rows are not filtered out (the `deleted_at` column may not exist on a
   // DB this old); renaming a binned project's rows is harmless and correct — if it is ever restored
   // it comes back under the project's current name rather than a stale one.
-  const sel = await supabase.from("sites").select("id, data");
+  // Same refusal guard as cloudRole.js's fallback: advance `version` past what was read and ask for the row
+  // back (`.select("id")`) — the version-monotonic trigger refuses a stale write as a 200 with ZERO rows.
+  let sel = await supabase.from("sites").select("id, data, version");
+  if (sel.error && /version/i.test(sel.error.message || "") && /column|does not exist|schema cache/i.test(sel.error.message || "")) sel = await supabase.from("sites").select("id, data");
   if (sel.error) {
     reportClientEvent("cloud-read-failed", "project rename fallback couldn't read the group", { groupId, error: sel.error.message || "" });
     return { ok: false, rows: 0, atomic: false, error: PROJECT_RENAME_TEXT, rawError: sel.error.message || "couldn't read the project", authExpired: isAuthExpiredError(sel.error) };
@@ -98,10 +101,14 @@ async function cloudRenameGroupFallback(uid, groupId, site, at) {
   if (!rows.length) return { ok: false, rows: 0, atomic: false, error: "The rename didn't match any project in your account." };
   let failed = 0;
   for (const r of rows) {
-    const { error } = await supabase.from("sites")
-      .update({ site, data: { ...r.data, site, siteRenamedAt: at }, updated_at: new Date(at).toISOString() }).eq("id", r.id);
+    const payload = { site, data: { ...r.data, site, siteRenamedAt: at }, updated_at: new Date(at).toISOString() };
+    if (r.version != null) payload.version = r.version + 1; // absent only on a version-less schema
+    const { data: written, error } = await supabase.from("sites").update(payload).eq("id", r.id).select("id");
     if (error) failed += 1;
-    else { delete lastHeaderSig[r.id]; delete siteVersions[r.id]; } // re-read the version on the next push
+    else if (r.version != null && (!Array.isArray(written) || written.length === 0)) {
+      failed += 1; // the database refused it (200, zero rows) — never report that as done
+      reportClientEvent("rename-row-refused", "project rename fallback write affected no rows", { id: r.id, groupId });
+    } else { delete lastHeaderSig[r.id]; delete siteVersions[r.id]; } // re-read the version on the next push
   }
   if (failed) {
     reportClientEvent("cloud-write-failed", "project rename fallback partly failed", { groupId, failed, total: rows.length });
