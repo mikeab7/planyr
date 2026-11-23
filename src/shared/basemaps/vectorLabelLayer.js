@@ -88,7 +88,7 @@ export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = 
       const [{ maplibreGL }, maplibre, { default: workerUrl }] = await Promise.all([
         import("@maplibre/maplibre-gl-leaflet"),
         import("maplibre-gl"),
-        // B2671297 — MapLibre 6 (#2993) finds its worker by a path RELATIVE TO ITS OWN BUNDLED CHUNK, a file the build never
+        // B2671297 — MapLibre 6 (the 2026-11-21 upgrade) finds its worker by a path RELATIVE TO ITS OWN BUNDLED CHUNK, a file the build never
         // emitted: the request fell through to the SPA's index.html, the worker "failed to load" and every map silently fell
         // back to the raster road names (which re-load and visibly flash on each zoom). Name the real file explicitly.
         import("maplibre-gl/dist/maplibre-gl-worker.mjs?url"),
