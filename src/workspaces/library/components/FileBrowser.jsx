@@ -28,7 +28,7 @@ import {
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
-import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, FileTypeIcon } from "./ReviewTrash.jsx";
+import { useReviewTrash, useUndoToast, TrashNotice, RecentlyDeletedList, FileTypeIcon } from "./ReviewTrash.jsx";
 import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
 import { menuPanelStyle, MenuItem } from "../../../shared/ui/controls.jsx";
 import { FILE_MOVE_TYPE, isFileMoveDrag, readFileMoveId, moveDecision, disciplineForMove, applyOptimisticFolder, fileMenuItems } from "../lib/fileMove.js";
@@ -626,6 +626,7 @@ export default function FileBrowser({
   // Delete / undo / restore / delete-forever: ONE implementation, shared with the no-project Home (ReviewTrash.jsx, B2086368).
   const { pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
     useReviewTrash({ titleOf: (id) => (reviews.find((x) => x.id === id) || {}).title, refresh: () => refresh() });
+  useUndoToast(undoDel, undoDelete, () => setUndoDel(null));
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
   // review's sources (not the file-fact row), so load the record on demand.
   const startShare = (id) => setShare((s) => ({ ...s, [id]: { status: "confirm" } }));
@@ -1096,7 +1097,6 @@ export default function FileBrowser({
         return <FileRowMenu x={fileMenu.x} y={fileMenu.y} title={f.title || f.item || "file"} items={items} onClose={() => setFileMenu(null)} onPick={(id) => { setFileMenu(null); runMenuAction(id, f); }} />;
       })()}
 
-      <UndoToast undo={undoDel} onUndo={undoDelete} onDismiss={() => setUndoDel(null)} />
 
       {/* drop-anywhere overlay hint — the pill names the REAL target: the hovered folder row
           (rail drop), else the selected folder, else the auto-file path. */}
