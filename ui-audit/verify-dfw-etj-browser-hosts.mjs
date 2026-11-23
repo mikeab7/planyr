@@ -33,7 +33,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = process.env.BASE_URL || "https://planyr.io";
-const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sources.js"));
+const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sourcesAll.js"));
 const { SOURCE_FIXTURES } = await import(path.join(ROOT, "src/shared/gis/sourceFixtures.js"));
 
 const NCTCOG = "https://geospatial.nctcog.org/map/rest/services";

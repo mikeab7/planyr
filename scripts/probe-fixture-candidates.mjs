@@ -17,7 +17,7 @@
  *   node scripts/probe-fixture-candidates.mjs                # every row
  *   node scripts/probe-fixture-candidates.mjs rail airports   # named rows only
  */
-import { GIS_SOURCES, statesFor } from "../src/shared/gis/sources.js";
+import { GIS_SOURCES, statesFor } from "../src/shared/gis/sourcesAll.js";
 
 /* The candidate points, grouped by the region they exercise. The six Houston-area points are the
  * owner's own audit sites (B209505) and are deliberately first: they are the ones that produced this

@@ -40,20 +40,6 @@ const CHEROKEE = "https://services3.arcgis.com/jmdMqrrIb2yaWJJ6/arcgis/rest/serv
 
 export const OK_SOURCES = {
   /* ---- Jurisdictions ---- */
-  okCounty: OK("okCounty", {
-    label: "County boundaries (Oklahoma)",
-    provider: "Oklahoma Department of Transportation (ODOT) — GIS Management Branch, County Boundaries",
-    serviceUrl: `${ODOT}/County_Boundaries/FeatureServer/0`,
-    geometryType: "polygon", fields: { name: "COUNTY_NAME", fips: "COUNTY_FIPS_NO" }, dataLastEdited: "2025-06-20",
-  }),
-  okCity: OK("okCity", {
-    label: "City limits (Oklahoma)",
-    provider: "Oklahoma Department of Transportation (ODOT) — GIS Management Branch, City Limits (from the Oklahoma Tax Commission)",
-    serviceUrl: `${ODOT}/Cities/FeatureServer/0`,
-    // The layer holds municipal limits and nothing else — one polygon, one government (the cityLimitClass rule).
-    fullPurposeOnly: true,
-    geometryType: "polygon", fields: { name: "CITY_NAME", pop: "POPULATION" }, dataLastEdited: "2026-10-05",
-  }),
   okRoad: OK("okRoad", {
     label: "State highways & turnpikes (Oklahoma)",
     provider: "Oklahoma Department of Transportation (ODOT) — Roadways (Linear Referencing System)",

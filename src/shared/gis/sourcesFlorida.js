@@ -15,22 +15,7 @@
 const FL = (key, o) => ({ key, layerId: null, coverage: "florida", states: ["FL"], tier: "production", lastVerified: "2026-10-29", ...o });
 
 export const FLORIDA_SOURCES = {
-  /* ── Jurisdictions ───────────────────────────────────────────────────────────────────────────── */
-  countyFl: FL("countyFl", {
-    label: "County boundaries (Florida)",
-    provider: "Florida Division of Emergency Management (FDEM) — statewide counties",
-    serviceUrl: "https://services.arcgis.com/3wFbqsFPLeKqOlIK/arcgis/rest/services/Counties_Hosted/FeatureServer/5",
-    geometryType: "polygon",
-    fields: { name: "NAME", fips: "FIPS" },
-  }),
-  cityFl: FL("cityFl", {
-    label: "City limits (Florida)",
-    provider: "UF GeoPlan Center / Florida Dept. of Revenue — city limits compiled from the 2021 county tax rolls (hosted by FWC)",
-    serviceUrl: "https://services2.arcgis.com/z6TmTIyYXEYhuNM0/arcgis/rest/services/par_citylm_2021/FeatureServer/0",
-    geometryType: "polygon",
-    fields: { name: "NAME", county: "COUNTY" },
-    fullPurposeOnly: true,
-  }),
+  /* ── Jurisdictions: countyFl / cityFl live in sources.js (the eager core — jurisdiction + vectorLayers read them at load) ── */
   wmdFl: FL("wmdFl", {
     label: "Water management districts (Florida)",
     provider: "South Florida Water Management District — hosting FDEP's boundary of the five Florida water management districts",

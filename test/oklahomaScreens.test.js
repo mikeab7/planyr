@@ -19,7 +19,10 @@ import { layerAvailableHere } from "../src/workspaces/site-planner/lib/layerPane
 import { siteState } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { cleanCard } from "../src/workspaces/site-planner/lib/identifyCard.js";
 import { GIS_SOURCES, auditRegistry, looksNonProduction, fixtureReachProblems } from "../src/shared/gis/sources.js";
-import { OK_SOURCES } from "../src/shared/gis/sourcesOk.js";
+import { OK_SOURCES as OK_PACK } from "../src/shared/gis/sourcesOk.js";
+import { GIS_SOURCES as REGISTRY } from "../src/shared/gis/sources.js";
+// All 32 Oklahoma rows: okCounty / okCity stay in the eager registry core (oklahomaStatic.js reads them at load); the other 30 are the `oklahoma` source pack (batch K stage 3).
+const OK_SOURCES = { okCounty: REGISTRY.okCounty, okCity: REGISTRY.okCity, ...OK_PACK };
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { OK_FIXTURES } from "../src/shared/gis/sourceFixturesOk.js";
 import { ALLOWED_HOSTS } from "../functions/gis-proxy/[[path]].js";

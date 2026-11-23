@@ -6,7 +6,7 @@
  *   node ui-audit/record-chehaw-screen-polygons.mjs */
 import { chromium } from "playwright";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { GIS_SOURCES } from "../../src/shared/gis/sources.js";
+import { GIS_SOURCES } from "../../src/shared/gis/sourcesAll.js";
 import { assertMeasurable } from "../lib/tabTiming.mjs";
 import { siteWindow, clipRingToWindow } from "../../src/workspaces/site-planner/lib/jurisdictionShare.js";
 
