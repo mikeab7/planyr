@@ -70,7 +70,7 @@ describe("resendInvite (NEW-1: emails, never writes a row — full flow in teamI
   beforeEach(() => vi.resetModules());
   async function load(resp) {
     const from = vi.fn();
-    vi.doMock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: { from, auth: { getSession: async () => ({ data: { session: { access_token: "t" } } }) } } }));
+    vi.doMock("../src/shared/supabase/client.js", () => ({ supabase: { from, auth: { getSession: async () => ({ data: { session: { access_token: "t" } } }) } } }));
     const fetchMock = vi.fn(async () => resp);
     globalThis.fetch = fetchMock;
     const mod = await import("../src/workspaces/site-planner/lib/teams.js");

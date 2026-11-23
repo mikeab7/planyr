@@ -1,3 +1,4 @@
+import { notesRelative } from "../../../shared/units/dateFormat.js";
 /* notesTime — how a note's age is written, in one place (B1312).
  *
  * A page node now carries `createdAt` / `updatedAt`, and those numbers show up in three
@@ -19,21 +20,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 /** "just now" · "12m" · "5h" · "3d" · "6w" · "2 Jul" · "2 Jul 2025" — or "" when unknown. */
-export function relativeTime(ms, { now = Date.now() } = {}) {
-  if (!Number.isFinite(ms) || ms <= 0) return "";
-  const d = now - ms;
-  if (d < 0) return "just now";              // a clock that ran backwards is not a future note
-  if (d < MIN) return "just now";
-  if (d < HOUR) return `${Math.floor(d / MIN)}m`;
-  if (d < DAY) return `${Math.floor(d / HOUR)}h`;
-  if (d < 7 * DAY) return `${Math.floor(d / DAY)}d`;
-  if (d < 60 * DAY) return `${Math.floor(d / (7 * DAY))}w`;
-  try {
-    const then = new Date(ms);
-    const sameYear = then.getFullYear() === new Date(now).getFullYear();
-    return then.toLocaleDateString(undefined, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
-  } catch (_) { return ""; }
-}
+export const relativeTime = notesRelative;
 
 /** The full moment, for a hover title and the printed sheet. "" when unknown. */
 export function absoluteStamp(ms) {

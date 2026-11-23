@@ -139,7 +139,7 @@ describe("wiring — the two ways back exist and are reachable from the element 
   it("the markup band toggle re-stacks (it did not, before this was named)", () => {
     const at = SRC.indexOf("const setMarkupBand");
     expect(at).toBeGreaterThan(0);
-    expect(SRC.slice(at, at + 800)).toContain("nextZ(");
+    expect(SRC.slice(at, at + 800)).toContain("bandSetter("); // G1 — the re-stack (nextZ) lives in lib/bandSetter.js
   });
 });
 

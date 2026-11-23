@@ -539,7 +539,8 @@ describe("plumbing", () => {
   it("storage events from other tabs don't fan out three-fold: the per-plan and ledger keys are ignored by every sites listener", async () => {
     const { readFileSync } = await import("node:fs");
     const files = ["src/shared/ui/ProjectBreadcrumb.jsx", "src/shared/projects/projects.js", "src/workspaces/site-planner/SitePlannerApp.jsx", "src/workspaces/site-planner/SitePlanner.jsx"];
-    for (const f of files) expect(readFileSync(f, "utf8")).toMatch(/:p:\|:led|:p:\)\|\(:led|\(:p:\|:led/);
+    const { plannerSource } = await import("./helpers/plannerSource.js");
+    for (const f of files) expect(f.endsWith("/SitePlanner.jsx") ? plannerSource() : readFileSync(f, "utf8")).toMatch(/:p:\|:led|:p:\)\|\(:led|\(:p:\|:led/);
   });
   it("nothing outside planStore reads or writes the sites store keys directly any more", async () => {
     const { execSync } = await import("node:child_process");

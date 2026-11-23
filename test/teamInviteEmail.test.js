@@ -157,7 +157,7 @@ describe("throttle helper", () => {
 
 // ── client wrappers, with a mocked supabase client ─────────────────────────────────────────────
 const sb = { upserts: [], from: null, auth: { getSession: async () => ({ data: { session: { access_token: "tok" } } }) } };
-vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: sb }));
+vi.mock("../src/shared/supabase/client.js", () => ({ supabase: sb }));
 
 describe("client invite / resend", () => {
   let teams;

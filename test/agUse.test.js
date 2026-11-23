@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import { countyRecord } from "../src/workspaces/site-planner/lib/appraisal.js";
 import { agUseOf, agUseLine, agMoney, validAgUseRule, AG_USE_RULES } from "../src/workspaces/site-planner/lib/agUseRules.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const mueschke = { acct_num: "0432370000001", tax_year: "2026", state_class: "1D1", productivity_value: 10078, total_market_val: 1948231, land_value: 1948231, acreage_1: 88.9009 };
 const fellows = { acct_num: "0420180000146", tax_year: "2026", state_class: "1D1", productivity_value: 1400, total_market_val: 1306800, land_value: 1306800, acreage_1: 10 };
@@ -82,6 +83,6 @@ describe("wiring", () => {
   const src = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
   it("the parcel page renders the line from agUseLine and the planner passes the county's state", () => {
     expect(src("../src/workspaces/site-planner/components/ParcelPage.jsx")).toMatch(/agUseLine\(rec\.agUse\)[\s\S]*parcel-ag-use/);
-    expect(src("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/countyState=\{\(COUNTIES\[restored\?\.county\] \|\| \{\}\)\.state \|\| null\}/);
+    expect(plannerSource()).toMatch(/countyState=\{\(COUNTIES\[restored\?\.county\] \|\| \{\}\)\.state \|\| null\}/);
   });
 });

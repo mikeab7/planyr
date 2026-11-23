@@ -8,13 +8,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { GradingPanel } from "../src/workspaces/site-planner/components/GradingPanels.jsx";
 import View3dButton from "../src/workspaces/site-planner/components/View3dButton.jsx";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const SRC = new URL("../src", import.meta.url).pathname;
 const walk = (d) => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(jsx?|mjs)$/.test(n) ? [p] : []; });
 const files = walk(SRC);
 const rel = (p) => relative(SRC, p);
 const read = (p) => readFileSync(p, "utf8");
-const planner = read(join(SRC, "workspaces/site-planner/SitePlanner.jsx"));
+const planner = plannerSource();
 const panels = read(join(SRC, "workspaces/site-planner/components/GradingPanels.jsx"));
 const buttonSrc = read(join(SRC, "workspaces/site-planner/components/View3dButton.jsx"));
 

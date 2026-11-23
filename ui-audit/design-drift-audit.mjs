@@ -89,6 +89,12 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/components/NumInput.jsx",
   "src/workspaces/site-planner/components/YieldDrainagePanels.jsx",
   "src/workspaces/site-planner/lib/planRenderHelpers.jsx",
+  // Audit batch G1 — pieces moved verbatim out of SitePlanner.jsx keep its exemption.
+  "src/workspaces/site-planner/components/PropFields.jsx",
+  "src/workspaces/site-planner/components/WallRows.jsx",
+  "src/workspaces/site-planner/components/PlannerIcons.jsx",
+  "src/workspaces/site-planner/lib/plannerConstants.js",
+  "src/workspaces/site-planner/lib/floodFootprintMemo.js",
   "src/workspaces/site-planner/lib/plannerShared.js",
   "src/workspaces/site-planner/lib/layers.js",
   "src/workspaces/site-planner/lib/desotoLayers.js", // B2507057 — registry rows of the same kind as layers.js: map ink for drawn utility lines

@@ -160,7 +160,7 @@ describe("⛔ the surface inventory — a NEW surface may not grow an ungated co
     // A new consumer is fine — it just has to be a deliberate choice, recorded here, so nobody
     // adds a fourth surface that raises a state notice without asking whether it can stack.
     const consumers = ["src/shared/ui/Toast.jsx", "src/workspaces/site-planner/SitePlanner.jsx", "src/workspaces/site-planner/SitePlannerApp.jsx"];
-    for (const f of consumers) expect(read("../" + f)).toContain("useToasts");
+    for (const f of consumers) expect(f.endsWith("/SitePlanner.jsx") ? plannerSource() : read("../" + f)).toContain("useToasts");
     expect(consumers).toHaveLength(3);
   });
 

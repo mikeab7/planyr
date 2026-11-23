@@ -1,3 +1,4 @@
+import { presenceAgo } from "../../../shared/units/dateFormat.js";
 // Header presence chip — pure data + presentation derivation (B674, rebuilt NEW-1).
 //
 // Presence rides the SAME per-site realtime channel the element rows stream on (Supabase Realtime
@@ -72,16 +73,7 @@ const OP_LABELS = {
 // relativeAgo(atMs, nowMs) → "just now" | "4m ago" | "3h ago" | "a while ago". Coarse buckets on
 // purpose (never seconds) — shared by the presence hover below AND the plan-activity feed
 // (SitePlanner.jsx), so "how recent" always reads the same way everywhere the app says it.
-export function relativeAgo(atMs, nowMs = Date.now()) {
-  if (!Number.isFinite(atMs)) return null;
-  const deltaMs = nowMs - atMs;
-  if (deltaMs < 0 || deltaMs < 45 * 1000) return "just now";
-  const mins = Math.round(deltaMs / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return "a while ago";
-}
+export const relativeAgo = presenceAgo;
 
 // presenceLastOpLabel(lastOp, nowMs) → "moved · 3m ago" | "moved · just now" | null (nothing seen yet).
 export function presenceLastOpLabel(lastOp, nowMs = Date.now()) {

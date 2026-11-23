@@ -6,6 +6,7 @@ import { snapshotHostedInMap, snapshotDrawnInCanvas, snapshotBounds } from "../s
 import { feetExtentToBbox, aerialPlacement } from "../src/workspaces/site-planner/lib/arcgis.js";
 import { PANE_AREA, PANE_AREA_LABEL, PANE_SNAPSHOT, PANE_SNAPSHOT_Z } from "../src/workspaces/site-planner/lib/mapStack.js";
 import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const ORIGIN = { lat: 29.6122132390976, lon: -95.6693177247584 };
 // the owner's Academy plan's stored snapshot (fields as read from production, 2026-11-05)
@@ -67,7 +68,7 @@ describe("the stacking model", () => {
     expect(PANE_AREA).toBe("gisAreaPane"); expect(PANE_AREA_LABEL).toBe("gisAreaLabelPane");
   });
   it("SitePlanner hosts it in that pane and its canvas no longer draws a located plan's snapshot (source guard — red on the pre-fix `origin && basemapOn` stand-down)", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toMatch(/L\.imageOverlay\(snapOverlay\.src, bounds, \{ pane: PANE_SNAPSHOT/);
     expect(src).toMatch(/o\.fromMap && !snapshotDrawnInCanvas\(o, \{ origin, showAerial \}\)\) return null/);
     expect(src).not.toMatch(/o\.fromMap && \(!showAerial \|\| \(origin && basemapOn\)\)/);

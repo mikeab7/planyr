@@ -6,6 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { aerialWantedOnSheet, isAerialVisible, withAerialVisible } from "../src/workspaces/site-planner/lib/aerialVisibility.js";
+import { plannerSource } from "./helpers/plannerSource.js";
 
 const read = (p) => readFileSync(new URL("../src/workspaces/site-planner/" + p, import.meta.url), "utf8");
 
@@ -35,7 +36,7 @@ describe("the export honours it at both seams, and the planner passes it", () =>
     expect(src).toMatch(/showAerial = true,/);
   });
   it("SitePlanner's exportCtx hands the export the live plan-level value", () => {
-    const planner = read("SitePlanner.jsx");
+    const planner = plannerSource();
     const ctx = planner.slice(planner.indexOf("const exportCtx = () => ({"));
     expect(ctx.slice(0, 2500)).toMatch(/\n\s+showAerial,/);
   });

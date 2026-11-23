@@ -217,7 +217,7 @@ describe("a brand-new signup is NOT added to the team (REVERSES the 2026-10-28 '
 
 describe("the client no longer silently joins people on every load", () => {
   const app = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
-  const teams = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/teams.js"), "utf8");
+  const teams = readFileSync(join(ROOT, "src/shared/supabase/teams.js"), "utf8");
   it("applyUser does not call claim-all, and lib/teams.js no longer exports it", () => {
     expect(app).not.toMatch(/claimInvites\s*\(/);
     expect(teams).not.toMatch(/export (async )?function claimInvites/);
