@@ -1,3 +1,4 @@
+// source-scan: asserts the shell mounts the one toast host and Library no longer mounts its own — wiring that cannot run in node.
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { useToast, resetAppToasts } from "../src/shared/ui/Toast.jsx";
