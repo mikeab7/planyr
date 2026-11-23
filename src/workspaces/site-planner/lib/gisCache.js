@@ -58,6 +58,12 @@
  * does not replace them. Age is surfaced through the same `onStatus` channel.
  */
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./localDb.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+
+/** An onFresh callback that throws is a caller bug — surface it (telemetry) instead of swallowing it. */
+function reportOnFreshThrow(e) {
+  reportClientEvent("gis-onfresh-threw", "a screening-cache onFresh callback threw", { error: (e && e.message) || String(e) });
+}
 
 export const NS = "planyr:giscache:v1:";        // LEGACY localStorage namespace — purged, never written
 export const IDB_NS = "giscache:v1:";           // IndexedDB key prefix (the persistent home)
@@ -363,7 +369,7 @@ export function createGisCache(opts = {}) {
       const stored = await readAsync(key);
       if (stored && !isStale(stored, ttl, now())) {
         const r = { data: stored.data, ts: stored.ts, ageMs: now() - stored.ts, updated: false };
-        if (onFresh) { try { onFresh(r); } catch (_) {} }
+        if (onFresh) { try { onFresh(r); } catch (e) { reportOnFreshThrow(e); } }
         return r;
       }
       return refresh(key, fetcher, stored, onFresh);
@@ -378,14 +384,14 @@ export function createGisCache(opts = {}) {
       .then((data) => {
         const w = write(key, data);
         const r = { data, ts: w.ts, ageMs: 0, updated: true };
-        if (onFresh) { try { onFresh(r); } catch (_) {} }
+        if (onFresh) { try { onFresh(r); } catch (e) { reportOnFreshThrow(e); } }
         return r;
       })
       .catch((error) => {
         const r = prior
           ? { data: prior.data, ts: prior.ts, ageMs: now() - prior.ts, updated: false, error }
           : { data: null, ts: null, ageMs: null, updated: false, error };
-        if (onFresh) { try { onFresh(r); } catch (_) {} }
+        if (onFresh) { try { onFresh(r); } catch (e) { reportOnFreshThrow(e); } }
         return r;
       });
   }

@@ -27,6 +27,7 @@
  * mapping) takes an injectable fetch + cache so it unit-tests in Node, no network.
  */
 
+import { GIS_MAX_GET_URL } from "./gisFetch.js";
 import { gisCache as defaultCache } from "./gisCache.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage } from "./gisFetch.js";
@@ -980,7 +981,7 @@ export function simplifyRing(ring, max = 80) {
  *     triangle. Fewer vertices is a slightly coarser INTERSECT test; a 404 is no test at all.
  * (POST would remove the ceiling outright, but the B445 same-origin cache proxy is GET-addressed,
  * so a POST body would silently bypass the cache. Bounded GET keeps both.) */
-export const MAX_QUERY_URL = 1900;
+export const MAX_QUERY_URL = GIS_MAX_GET_URL; // ONE cap (was a second, 1900, beside gisFetch's 2000 — audit B2 item 4)
 export const VERTEX_LADDER = [80, 56, 40, 28, 20, 14, 10, 6, 4];
 export const round6 = (ring) => ring.map(([x, y]) => [Math.round(x * 1e6) / 1e6, Math.round(y * 1e6) / 1e6]);
 

@@ -21,6 +21,7 @@
  */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { GIS_FETCH_TIMEOUT_MS } from "./gisFetch.js";
 import { OK_VECTOR_SOURCES } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
@@ -1051,7 +1052,9 @@ export function buildQueryUrl(baseUrl, params) {
  * ArcGIS Server instance measured 16.5–18.3 s, every call after under a tenth of a
  * second, so the cap must be generous enough to survive the spin-up yet still bounded —
  * an unbounded fetch that never resolves is the silent-hang failure mode. */
-async function defaultFetchJson(url, { timeoutMs = null } = {}) {
+async function defaultFetchJson(url, { timeoutMs } = {}) {
+  // Audit B2 item 4: NEVER unbounded — no `timeoutMs` (absent OR null) means the shared GIS cap; a row's own `query.timeoutMs` still wins.
+  if (timeoutMs == null) timeoutMs = GIS_FETCH_TIMEOUT_MS;
   const ctrl = timeoutMs && typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
@@ -1145,7 +1148,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
       if (targets.length) {
         let county = null;
         try {
-          const j = await opts.fetchJson(buildQueryUrl(row.supersedeClipUrl + "/query", { where: "1=1", outFields: "OBJECTID", returnGeometry: "true", outSR: 4326, geometryPrecision: 4, maxAllowableOffset: 0.0002, f: "json" }), { timeoutMs: null });
+          const j = await opts.fetchJson(buildQueryUrl(row.supersedeClipUrl + "/query", { where: "1=1", outFields: "OBJECTID", returnGeometry: "true", outSR: 4326, geometryPrecision: 4, maxAllowableOffset: 0.0002, f: "json" }));
           county = (j && !j.error && j.features) || null;
         } catch (_) { county = null; }
         if (county && county.length) for (const t of targets) outs[t] = cutEtjBy(outs[t], county, { ref: refOf }).features;
@@ -1172,7 +1175,7 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
   // Loop guard: paging can't exceed cap/pageSize rounds + 1; never spin forever.
   for (;;) {
     // B1079: forward the row's own abort cap (undefined for every source that declares none).
-    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? null });
+    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? GIS_FETCH_TIMEOUT_MS });
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
     if (!batch.length) {

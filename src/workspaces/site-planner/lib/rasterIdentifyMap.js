@@ -14,6 +14,7 @@
  * (its console noise is the thing B691 was written to stop) and goes straight to the proxy.
  * When the proxy isn't deployed either, the failure is reported honestly — never a spinner.
  */
+import { GIS_FETCH_TIMEOUT_MS } from "./gisFetch.js";
 import L from "leaflet";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { gisProxyEnabled, rasterIdentifyLayers } from "./layers.js";
@@ -34,6 +35,17 @@ class UnreadableIdentifyError extends Error {
 }
 
 async function getJson(url, signal) {
+  // Audit B2 item 4: a hung identify host must reject, not hang the hover forever. Our own deadline aborts the
+  // fetch; a caller signal (hover cancel) still aborts it too.
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), GIS_FETCH_TIMEOUT_MS) : null;
+  const onAbort = () => { if (ctrl) ctrl.abort(); };
+  if (signal && ctrl) { if (signal.aborted) ctrl.abort(); else signal.addEventListener("abort", onAbort, { once: true }); }
+  try { return await getJsonOnce(url, ctrl ? ctrl.signal : signal); }
+  finally { if (timer) clearTimeout(timer); if (signal && ctrl) signal.removeEventListener("abort", onAbort); }
+}
+
+async function getJsonOnce(url, signal) {
   const res = await fetch(url, signal ? { signal } : undefined);
   if (!res.ok) throw new IdentifyHttpError(res.status);
   /* A 200 that isn't JSON means we reached something that is NOT the service — a captive portal, an

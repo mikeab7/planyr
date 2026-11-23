@@ -27,6 +27,12 @@ import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/key
 import { imageFileFromClipboard, pastedImageName } from "./lib/pasteImage.js"; // NEW-1 — Ctrl+V a clipboard image as an overlay
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
+
+// writeJournal returns false when the device refuses the pending-edit journal (quota / too big / privacy mode). The
+// edits are still on the canvas and in the cloud retry queue, but a reload would lose them — say so (telemetry), never silently.
+function noteJournalWrite(ok, entries) {
+  if (ok === false && entries > 0) reportClientEvent("journal-write-refused", "the pending-edit journal could not be saved on this device", { entries });
+}
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
@@ -4823,7 +4829,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
            * advised the user into losing exactly the edits the banner was complaining it could not
            * save. Naming the state removes the coincidence. */
           if (s.pending > 0 || s.state === "committing" || s.state === "retrying" || s.state === "failed" || s.state === "stale")
-            writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now());
+            noteJournalWrite(writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now()), live.dirtyEntries().length);
           else if (s.state === "idle") clearJournal(siteId, journalSid);
         } catch (_) { /* journaling is belt-and-suspenders — never let it break sync */ }
       },
@@ -9979,7 +9985,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       onClick: () => {
         try {
           const live = elSyncRef.current;
-          if (live) writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now());
+          if (live) noteJournalWrite(writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now()), live.dirtyEntries().length);
         } catch (_) { /* journaling is belt-and-suspenders — never block the reload the user asked for */ }
         try { window.location.reload(); } catch (_) {}
       },
@@ -22039,7 +22045,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const prev = new Map(batch.map((e) => { const k = `${e.section}.${e.field}`; return [k, lookPrev.current.get(k)]; }));
       batch.forEach((e) => lookPrev.current.delete(`${e.section}.${e.field}`));
       await persistLookBatch({ batch, prev, uid: uid(), updateUserPrefs, applyPrefsLocal, setParcelLookPref, warn });
-    }, 400);
+    }, 400, undefined, (err) => { // commit threw (persistLookBatch handles its own refusals): never a silent "saved"
+      reportClientEvent("prefs-write-failed", "parcel look default write threw", { error: (err && err.message) || "" });
+      lookIo.current.flashWarn("⚠ Style default didn't save — kept on this computer only.", 6000);
+    });
   }
   useEffect(() => {
     const flush = () => { lookWriter.current && lookWriter.current.flush(); };
