@@ -1,32 +1,30 @@
-/* verify-univer-live — the Univer grid on a REAL deploy, signed in as the throwaway test account on a THROWAWAY project
- * (docs/SPREADSHEET-UNIVER-SPIKE.md, V-entries for B2557488 and the default-on cutover). Nothing of the owner's is read or written;
- * everything it makes is deleted and the database is asked again to prove it is gone (owner rule: test artifacts are always cleared).
+/* verify-univer-live — the Spreadsheet (the Univer grid, the only grid) on a REAL deploy, signed in as the throwaway test account on a
+ * THROWAWAY project (docs/SPREADSHEET-UNIVER-SPIKE.md). Nothing of the owner's is read or written; everything it makes is deleted and
+ * the database is asked again to prove it is gone (owner rule: test artifacts are always cleared).
  *
- *  A  DEFAULT, non-admin     the test account is NOT an admin (the real is_admin() RPC says false): the Spreadsheet tab opens in the
- *                            Univer grid with NO switch anywhere (no "Try the new grid", no "Use the regular grid"), a stored
- *                            "regular grid" flag and the retired "Try the new grid" key change nothing, and the old grid is never in the page
- *  B  HATCH, admin side      is_admin is answered `true` by a network intercept for THIS browser only — the client gate is a
- *                            visibility switch, not a security boundary (data access is still the test account's own, by RLS).
- *                            KNOWN-GOOD ARM: the intercept must actually have been hit, or the run is VOID. The File menu then
- *                            offers "Use the regular grid"; the round trip regular → new grid works and is remembered per device
- *  C  MOUNT                  the default open: time from navigation to its first readable cell is reported
- *  D  CHECKLIST (subset)     the same real-keystroke checks as verify-univer-parity, run against the real app
- *  E  PERSISTENCE            a value typed in Univer reaches the SAME model_sheets row (cloud) and shows in the regular grid
- *  F  PROJECT NAMES          =Site.Acres and =Plan.Building1.SF typed in the regular grid show the same numbers in Univer
+ *  A  OPENS                  the test account (a non-admin per the real is_admin() RPC) opens the Spreadsheet tab in the Univer grid with NO
+ *                            grid switch anywhere, the retired grid-switch keys are dropped, and the old grid is never in the page
+ *  C  MOUNT                  the open: time from navigation to its first readable cell is reported
+ *  D  CHECKLIST (subset)     the same real-keystroke checks as verify-univer-parity (edit, undo, copy / paste, formatting keys…), run against the real app
+ *  E  PERSISTENCE            a value typed in Univer reaches the model_sheets row (cloud), in Planyr's own shape
+ *  F  PROJECT NAMES          =Site.Acres and =Plan.Building1.SF typed in Univer arrive as typed and show a result (a number, or the named error
+ *                            the throwaway plan's missing data gives — never blank)
+ *  H  INDENT                 the indent check passes on the real app
+ *  T  TOOLS                  the Planyr-only tools checks (flags, trace, palette, names, colour convention)
  *  G  CLEANUP                the workbook row and the throwaway plan are gone
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-univer-live.mjs [base=https://planyr.io] [--json out.json] */
 import { writeFileSync } from "node:fs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { bind, checks, record, results_ as parityResults, ink, edges, click as clickCell, clickToolbar, INDENT_INC } from "./verify-univer-parity.mjs";
+import { bind, checks, record, results_ as parityResults } from "./verify-univer-parity.mjs";
 
 const args = process.argv.slice(2);
 const BASE = args.find((a) => /^https?:/.test(a)) || "https://planyr.io";
 const JSON_OUT = (() => { const i = args.indexOf("--json"); return i >= 0 ? args[i + 1] : null; })();
 const PROJECT = `${LIVE_PREFIX}univer-${Date.now().toString(36)}`;
-const REGULAR_KEY = "planyr:model:regularGrid";   // the owner-only per-device hatch (lib/gridChoice.js): "1" = this device asks for the regular grid
-const LEGACY_KEY = "planyr:model:univerGrid";     // the retired "Try the new grid" key: removed on load, never read for a decision
+const REGULAR_KEY = "planyr:model:regularGrid";   // retired: the owner-only "Use the regular grid" device flag — dropped on load, never read
+const LEGACY_KEY = "planyr:model:univerGrid";     // retired: the pre-cutover "Try the new grid" key — dropped on load, never read
 let failures = 0, voided = false;
 const ok = (name, cond, extra = "") => { console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); if (!cond) failures++; };
 const log = [];
@@ -44,7 +42,6 @@ try {
   const url = () => `${BASE}/?cb=${Date.now()}#/project/${PROJECT}/spreadsheet`;
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });          // the harness handle (never set in a user's tab)
   const openSheet = async () => { await page.goto(url(), { waitUntil: "load" }); await page.waitForSelector('[data-testid="model-root"]', { timeout: 60000 }); await page.waitForTimeout(2500); };
-  const oldCell = (r, c) => page.locator(`[data-row="${r}"][data-col="${c}"]`).first();
   const cloudRow = () => page.evaluate(async (id) => { const q = await window.pfSupabase.from("model_sheets").select("data, version").eq("id", id).maybeSingle(); return q.data || null; }, PROJECT);
   const waitCloud = async (pred, ms = 30000) => { const t0 = Date.now(); for (;;) { const r = await cloudRow(); if (r && pred(r)) return r; if (Date.now() - t0 > ms) return r; await page.waitForTimeout(700); } };
   const openFileMenu = async () => { await page.click('[data-testid="model-file-menu-btn"]'); await page.waitForTimeout(250); };
@@ -60,7 +57,7 @@ try {
   await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 25 });
   const openMs = Date.now() - tOpen;
   const g0 = await gridState();
-  ok("A1 a NON-ADMIN opens the Spreadsheet in the Univer grid with no switch to find (and the old grid is not in the page)", g0.univer === 1 && g0.old === 0, `univer canvases ${g0.univer}, old-grid nodes ${g0.old}; open → first readable cell ${openMs} ms (network included, plus this harness's fixed 2.5 s settle)`);
+  ok("A1 the Spreadsheet opens in the Univer grid with no switch to find (and the old grid is not in the page)", g0.univer === 1 && g0.old === 0, `univer canvases ${g0.univer}, old-grid nodes ${g0.old}; open → first readable cell ${openMs} ms (network included, plus this harness's fixed 2.5 s settle)`);
   await openFileMenu();
   ok("A2 the File menu has NO grid switch row (neither wording)", (await page.locator('[data-testid="model-univer-switch"]').count()) === 0 && !/Try the new grid|Use the regular grid|Use the new grid/.test(await page.locator("body").innerText()));
   ok("A2b …and does have its ordinary rows (known-good arm: the menu really opened)", (await page.locator('[data-testid="model-export-xlsx"]').count()) === 1);
@@ -69,33 +66,11 @@ try {
   await openSheet();
   await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
   const g1 = await gridState();
-  ok("A3 a stored 'regular grid' flag changes nothing for a non-admin, and the retired 'Try the new grid' key is dropped", g1.univer === 1 && g1.old === 0 && (await page.evaluate((l) => localStorage.getItem(l), LEGACY_KEY)) === null, `univer ${g1.univer}, old ${g1.old}`);
+  ok("A3 stored flags from the retired grid switches change nothing and are dropped", g1.univer === 1 && g1.old === 0 && (await page.evaluate(([k, l]) => localStorage.getItem(k) === null && localStorage.getItem(l) === null, [REGULAR_KEY, LEGACY_KEY])), `univer ${g1.univer}, old ${g1.old}`);
   ok("A4 Univer's own files were requested by the non-admin view (it IS the grid)", requested.length > 0, `${requested.length} request(s)`);
-  await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY);
-
-  // ── B. the owner's hatch (intercept) ───────────────────────────────────────────────────────────────────────────────────────────
-  let hits = 0;
-  await page.route("**/rest/v1/rpc/is_admin*", (route) => { hits++; route.fulfill({ status: 200, contentType: "application/json", body: "true" }); });
-  await openSheet();
-  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
-  await openFileMenu();
-  ok("B0 KNOWN-GOOD ARM: the is_admin intercept was actually hit", hits > 0, `${hits} hit(s)`);
-  if (!hits) { voided = true; throw new Error("VOID — the intercept never fired, so the admin-side checks would prove nothing"); }
-  ok("B1 the File menu now shows 'Use the regular grid' (and the grid is still the new one — admins get it by default too)", (await page.locator('[data-testid="model-univer-switch"]').innerText().catch(() => "")).includes("Use the regular grid") && (await gridState()).univer === 1);
-  await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 });
-  ok("B2 'Use the regular grid' shows the old grid, remembered on this device", (await gridState()).univer === 0 && (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === "1");
-  await page.reload({ waitUntil: "load" }); await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 60000 });
-  ok("B3 …and a reload keeps the old grid for the owner (per-device hatch)", (await gridState()).univer === 0);
-  await openFileMenu();
-  ok("B4 the same row now reads 'Use the new grid'", (await page.locator('[data-testid="model-univer-switch"]').innerText().catch(() => "")).includes("Use the new grid"));
-  await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 90000 });
-  await page.waitForFunction(() => { const a = window.__planyrUniverRead && window.__planyrUniverRead.api(); return !!(a && a.getActiveWorkbook() && a.getActiveWorkbook().getActiveSheet()); }, null, { timeout: 90000, polling: 25 });
-  ok("B5 'Use the new grid' comes back to Univer and forgets the device choice", (await gridState()).old === 0 && (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === null);
 
   // ── C. the grid the rest of the run uses ──────────────────────────────────────────────────────────────────────────────────────
-  ok("C1 Univer is showing for the checklist (the default; no click needed)", (await gridState()).univer === 1);
+  ok("C1 Univer is showing for the checklist (no click needed)", (await gridState()).univer === 1);
   const dl = await page.evaluate(() => { const es = performance.getEntriesByType("resource"); return { files: es.length, bytes: es.reduce((a, e) => a + (e.transferSize || 0), 0), decoded: es.reduce((a, e) => a + (e.decodedBodySize || 0), 0) }; });
   ok("C2 what this tab has downloaded in total (network, compressed)", dl.files > 0, `${dl.files} files, ${(dl.bytes / 1048576).toFixed(2)} MB transferred (${(dl.decoded / 1048576).toFixed(1)} MB once unpacked)`);
   await page.waitForTimeout(1500);
@@ -148,35 +123,26 @@ try {
   const a10 = await rect(9, 0); await page.mouse.click(a10.x, a10.y); await page.waitForTimeout(250);
   await page.keyboard.type("persist-check-1", { delay: 8 }); await page.keyboard.press("Enter"); await page.waitForTimeout(400);
   const row1 = await waitCloud((r) => Object.values(r.data?.sheets?.[0]?.sheet?.cells || {}).includes("persist-check-1"));
-  ok("E1 a value typed in Univer reached the cloud row (the same model_sheets path as the regular grid)", !!row1 && Object.values(row1.data.sheets[0].sheet.cells).includes("persist-check-1"), `version ${row1?.version}`);
+  ok("E1 a value typed in Univer reached the cloud row (the model_sheets row)", !!row1 && Object.values(row1.data.sheets[0].sheet.cells).includes("persist-check-1"), `version ${row1?.version}`);
   const saved = row1 && row1.data.sheets[0].sheet;
   ok("E2 the saved workbook is in Planyr's own shape (stable column ids, raw text, formulas as typed)", !!saved && saved.columns[0].id === "c1" && saved.cells["c1:9"] === "persist-check-1" && saved.cells[`${saved.columns[1].id}:2`] === "=A1+A2", saved ? `c1:9=${saved.cells["c1:9"]} ${saved.columns[1].id}:2=${saved.cells[`${saved.columns[1].id}:2`]} (column ids ${saved.columns.slice(0, 4).map((c) => c.id).join(",")})` : "no row");
   // (column B's id is read from the saved columns, not assumed "c2": the keyboard checks above delete columns and undo them, and Univer's
   // undo of a column delete re-inserts the column under a NEW id — the data follows it, so the cell is stored under whatever id B has now.)
   ok("E3 no 'different copy in the cloud' bar appeared", (await page.locator('[data-testid="model-diverged-bar"]').count()) === 0);
-  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 30000 }); await page.waitForTimeout(1500);
-  ok("E4 switching back shows the regular grid with the value Univer saved", (await oldCell(9, 0).innerText()).trim() === "persist-check-1");
-  ok("E5 choosing the regular grid is remembered on this device (the owner's hatch)", (await page.evaluate((k) => localStorage.getItem(k), REGULAR_KEY)) === "1");
 
-  // ── F. project names ────────────────────────────────────────────────────────────────────────────────────────────────────
-  const typeOld = async (r, c, text) => { await oldCell(r, c).click(); await page.keyboard.type(text); await page.keyboard.press("Enter"); };
-  await typeOld(11, 0, "=Site.Acres"); await typeOld(12, 0, "=Plan.Building1.SF");
+  // ── F. project names ───────────────────────────────────────────────────────────────────
+  const typeUniver = async (r, c, text) => { const p = await rect(r, c); await page.mouse.click(p.x, p.y); await page.waitForTimeout(200); await page.keyboard.type(text, { delay: 8 }); await page.keyboard.press("Enter"); await page.waitForTimeout(300); };
+  await typeUniver(11, 0, "=Site.Acres"); await typeUniver(12, 0, "=Plan.Building1.SF");
   await page.waitForTimeout(2500);
-  const oldAcres = (await oldCell(11, 0).innerText()).trim(), oldSf = (await oldCell(12, 0).innerText()).trim();
-  console.log(`regular grid shows Site.Acres = "${oldAcres}"  Plan.Building1.SF = "${oldSf}"`);
-  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 60000 }); await page.waitForTimeout(3500);
   const uni = await page.evaluate(() => { const ws = window.__planyrUniverRead.api().getActiveWorkbook().getActiveSheet(); return { acres: ws.getRange(11, 0).getValue(), sf: ws.getRange(12, 0).getValue(), f1: ws.getRange(11, 0).getFormula(), f2: ws.getRange(12, 0).getFormula() }; });
-  const num = (t) => parseFloat(String(t).replace(/,/g, ""));
+  console.log(`Univer shows Site.Acres = ${JSON.stringify(uni.acres)}  Plan.Building1.SF = ${JSON.stringify(uni.sf)}`);
   ok("F1 the formulas arrived in Univer exactly as typed", uni.f1 === "=Site.Acres" && uni.f2 === "=Plan.Building1.SF", `${uni.f1} / ${uni.f2}`);
-  // "The same result in both grids": two numbers agree, or two ERRORS read the same. The throwaway plan has no origin / element rows, so the
-  // regular grid itself answers #REF! / #NAME? here — Univer must say exactly what the regular grid says, never a naked number or a blank.
-  const sameResult = (u, oldText, tol) => (typeof u === "number" && Number.isFinite(num(oldText)) ? Math.abs(u - num(oldText)) < tol : String(u).trim() === String(oldText).trim());
-  ok("F2 =Site.Acres shows the same result in Univer as in the regular grid", sameResult(uni.acres, oldAcres, 0.01), `Univer ${JSON.stringify(uni.acres)} vs regular "${oldAcres}"`);
-  ok("F3 =Plan.Building1.SF shows the same result in Univer as in the regular grid", sameResult(uni.sf, oldSf, 1), `Univer ${JSON.stringify(uni.sf)} vs regular "${oldSf}"`);
+  // The throwaway plan has no origin / element rows, so each answers a NAMED error (#REF! / #NAME? / #N/A) — never a blank and never a naked number.
+  const shown = (v) => (typeof v === "number" && Number.isFinite(v)) || /^#[A-Z/0!?]+/.test(String(v).trim());
+  ok("F2 =Site.Acres shows a result (a number or a named error, never blank)", shown(uni.acres), JSON.stringify(uni.acres));
+  ok("F3 =Plan.Building1.SF shows a result (a number or a named error, never blank)", shown(uni.sf), JSON.stringify(uni.sf));
 
-  // ── H. indent (NEW-1): drawn in Univer, saved as Planyr's number, the same in the regular grid, both directions ───────────
+  // ── H. indent (NEW-1): drawn in Univer and saved as Planyr's number ───────────
   // The input / formula colour convention (B2586720) is ON by default and recolours typed text blue; the indent checks measure the DARK ink of a label's left
   // edge, so they start with it off. Section T's `tools-color` check turns it back on itself and asserts the colours.
   await page.evaluate(() => { const t = window.__planyrUniverRead.tools && window.__planyrUniverRead.tools(); if (t && t.getState().autoColor) t.run("planyr.tools.toggle-autocolor"); });
@@ -197,27 +163,7 @@ try {
     }, [cells, sh.columns.map((c) => c.width), COLW]);
     await page.waitForTimeout(600);
   };
-  // H2 Univer → regular grid: indent a label twice in Univer, switch, and the regular grid shows it two steps in (14 px a step, like the label beside it).
-  await seedWorkbook((() => { const w = JSON.parse(JSON.stringify({ sheets: [{ sheet: { columns: Array.from({ length: 14 }, (_, i) => ({ id: `c${i + 1}`, width: COLW })), cells: { "c1:2": "Same", "c1:3": "Same", "c1:4": "Same" }, styles: {} } }] })); return w; })());
-  await clickCell(2, 0); await clickToolbar(INDENT_INC); await clickToolbar(INDENT_INC);
-  const viaUniver = await waitCloud((r) => r.data?.sheets?.[0]?.sheet?.styles?.["c1:2"]?.indent === 2);
-  ok("H2a two Increase Indent clicks in Univer reach the cloud row as indent 2 on that cell only", viaUniver?.data?.sheets?.[0]?.sheet?.styles?.["c1:2"]?.indent === 2 && viaUniver.data.sheets[0].sheet.styles["c1:3"]?.indent === undefined, JSON.stringify(viaUniver?.data?.sheets?.[0]?.sheet?.styles || {}));
-  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="model-sheet"]', { timeout: 30000 }); await page.waitForTimeout(1500);
-  const textLeft = (r, c) => page.evaluate(([rr, cc]) => { const el = document.querySelector(`[data-row="${rr}"][data-col="${cc}"]`); const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (n.nodeValue.trim()) { const rg = document.createRange(); rg.selectNodeContents(n); return rg.getBoundingClientRect().left - el.getBoundingClientRect().left; } return null; }, [r, c]);
-  const oldIn = (await textLeft(2, 0)) - (await textLeft(3, 0));
-  ok("H2b the regular grid draws that Univer-made indent 28 px in (two steps), like the label under it", Math.abs(oldIn - 28) <= 1.5, `${oldIn.toFixed(1)} px`);
-  // H3 regular grid → Univer: one Increase Indent in the regular grid's ribbon, switch, and Univer paints it one step in.
-  await oldCell(3, 0).click(); await page.click('[data-testid="ribbon-indent-inc"]'); await page.waitForTimeout(400);
-  const viaOld = await waitCloud((r) => r.data?.sheets?.[0]?.sheet?.styles?.["c1:3"]?.indent === 1);
-  ok("H3a one Increase Indent in the regular grid reaches the cloud row as indent 1", viaOld?.data?.sheets?.[0]?.sheet?.styles?.["c1:3"]?.indent === 1);
-  await openFileMenu(); await page.click('[data-testid="model-univer-switch"]');
-  await page.waitForSelector('[data-testid="univer-grid"] canvas', { timeout: 60000 }); await page.waitForTimeout(3500);
-  await clickCell(15, 8);
-  const e0 = await edges(await ink(4, 0)), e1 = await edges(await ink(3, 0)), e2 = await edges(await ink(2, 0));
-  ok("H3b Univer paints the regular grid's indents: none, one step (+14), two steps (+28) on three identical labels", Math.abs(e1.left - e0.left - 14) <= 1.5 && Math.abs(e2.left - e0.left - 28) <= 1.5, `left edges ${e0.left} / ${e1.left} / ${e2.left}`);
-
-  // H1 last: its column-insert step re-ids the first column, which the cross-grid checks above key on.
+  // H1: its column-insert step re-ids the first column.
   bind({ page, reset: seedWorkbook, savedLast: async () => { const r = await cloudRow(); return r ? { wb: r.data } : null; }, flushSave: async () => { await page.evaluate(() => window.__planyrUniverRead.flush()); await page.waitForTimeout(3500); } });
   const indentRun = checks.find((x) => x.id === "indent");
   let indentRes;
@@ -253,14 +199,12 @@ try {
   ok("T0 every tools check ran (none silently skipped)", toolRuns.length === TOOL_IDS.length, `${toolRuns.length} of ${TOOL_IDS.length}`);
   log.push({ phase: "T", tools: toolRuns });
 
-  await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY);
 } catch (e) {
   console.log("ABORT:", String(e.message).split("\n")[0]);
   failures++;
 } finally {
   // ── G. cleanup + proof ──────────────────────────────────────────────────────────────────────────────────────────────────
   try {
-    await page.evaluate((k) => localStorage.removeItem(k), REGULAR_KEY).catch(() => {});
     const out = await page.evaluate(async (id) => { const c = window.pfSupabase; await c.from("model_sheets").delete().eq("id", id); return ((await c.from("model_sheets").select("id").eq("id", id)).data || []).length; }, PROJECT);
     const gone = await cleanupLive(page, { planId: PROJECT }).catch((e) => ({ errors: [String(e)] }));
     ok("G1 the throwaway workbook row and plan are gone (re-read from the database)", out === 0 && !(gone.errors || []).length && gone.left?.site === 0, `model_sheets rows left ${out}; ${JSON.stringify(gone)}`);

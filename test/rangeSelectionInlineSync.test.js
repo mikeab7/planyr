@@ -1,11 +1,10 @@
 /* B2530690 — the Schedule page (public/sequence/index.html) cannot import from src/, so the shared range-selection
  * model + edge-scroll speed are inlined between the RANGE-SELECTION markers by scripts/sync-sequence-selection.mjs.
- * This fails the build if that copy drifts from src/shared/selection/* (one model, three surfaces — the Spreadsheet,
- * the Schedule grid and the Notes tables). Also pins that the Spreadsheet's import path still resolves to it. */
+ * This fails the build if that copy drifts from src/shared/selection/* (one model, two surfaces — the Schedule grid
+ * and the Notes tables). */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { buildSyncedHtml } from "../scripts/sync-sequence-selection.mjs";
-import * as model from "../src/workspaces/model/lib/selectionModel.js";
 import * as shared from "../src/shared/selection/rangeSelection.js";
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
@@ -15,9 +14,6 @@ describe("inlined range selection", () => {
     const html = read("public/sequence/index.html");
     const srcs = ["src/shared/selection/rangeSelection.js", "src/shared/selection/edgeScroll.js"].map(read);
     expect(buildSyncedHtml(srcs, html) === html).toBe(true);
-  });
-  it("the Spreadsheet's selectionModel path IS the shared module (no second implementation)", () => {
-    for (const k of Object.keys(shared)) expect(model[k]).toBe(shared[k]);
   });
 });
 

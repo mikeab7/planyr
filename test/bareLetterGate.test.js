@@ -48,8 +48,7 @@ describe("wiring (a gate nobody calls is not a gate)", () => {
     expect(h).toContain("bareFullscreenAllowed({");
     expect(h).not.toMatch(/\(e\.key === "f" \|\| e\.key === "F"\) && !e\.altKey && !writeableDocumentOnScreen\(\)/);
   });
-  it("every type-to-edit grid carries the opt-in", () => {
-    expect(read("src/workspaces/model/components/SheetView.jsx")).toContain("data-letters-are-text");
+  it("every type-to-edit grid carries the opt-in (the Spreadsheet is Univer's canvas, which has no bare-letter commands to gate)", () => {
     expect(read("src/shared/comps/components/CompEntryGrid.jsx")).toContain("data-letters-are-text");
   });
 });
