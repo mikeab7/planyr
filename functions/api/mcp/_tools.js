@@ -22,6 +22,7 @@
  * same account.
  */
 import { summarizeSite } from "./_metrics.js";
+import { serviceHeaders } from "../lib/http.js";
 
 const SEQ_KEY = "hs-v1"; // the one planar_data row the scheduler reads/writes
 
@@ -43,7 +44,7 @@ async function pgGet(env, table, params) {
   qs.append("user_id", `eq.${env.PLANYR_MCP_OWNER_ID}`);
   const r = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/${table}?${qs}`, {
     method: "GET",
-    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
+    headers: serviceHeaders(env.SUPABASE_SERVICE_ROLE_KEY),
   });
   if (!r.ok) throw new Error(`Supabase ${table} query failed: ${r.status} ${await r.text().catch(() => "")}`);
   return r.json();

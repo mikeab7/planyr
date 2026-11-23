@@ -8,13 +8,19 @@
  * the memo, so the result keeps the INPUT's identity whenever nothing is filtered (B385040 — three
  * effects key off the overlays object identity and one of them re-stages the whole stack). */
 import { useMemo } from "react";
-import { ALL_LAYERS } from "./layers.js";
+import { ALL_LAYERS, lazyFilesForIds } from "./layers.js";
+import { useLayerRegistryVersion, useEnsureLayerFiles } from "./useLayerRegistry.js";
 import { drawnOverlaysOf } from "./layerPanelModel.js";
 import { useLayersHidden } from "./layerHide.js";
 import { useServiceAreas } from "./useServiceAreas.js";
 
 export function useDrawnOverlays(overlays, state, loc) {
   const hideAll = useLayersHidden();
+  // Batch K stage 1 — a layer that is ON but belongs to a per-state file that has not loaded yet loads it here (the one seam both map surfaces
+  // draw through); the version re-keys the memo so the new rows are drawn the moment the file lands.
+  const registryVersion = useLayerRegistryVersion();
+  const needKeys = lazyFilesForIds(Object.entries(overlays || {}).filter(([, st]) => st && st.on).map(([id]) => id)).sort();
+  useEnsureLayerFiles(needKeys);
   const hasLoc = !!(loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)));
   const areasReady = useServiceAreas(hasLoc); // a source scoped to a service area is judged once its geometry has loaded
   const lat = loc && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null;
@@ -23,6 +29,6 @@ export function useDrawnOverlays(overlays, state, loc) {
   return useMemo(
     () => drawnOverlaysOf(overlays, { hideAll, layers: ALL_LAYERS, scope: { state: state || null, loc: lat != null && lng != null ? { lat, lng } : null } }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overlays, hideAll, state, lat, lng, areasReady],
+    [overlays, hideAll, state, lat, lng, areasReady, registryVersion],
   );
 }
