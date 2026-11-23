@@ -174,8 +174,3 @@ export function syntheticAssemblyEls(box, settings, ffe, opts = {}) {
   return out;
 }
 
-/* The element a "Use this" creates when the plan has no building (planner-side; the planner adds the court / trailer / buffer zones
- * through its own factories). */
-export function newBuildingFields(box) {
-  return { type: "building", cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: mod360(box.rot), dock: "cross", dockAxis: "x", dockSide: "bottom" };
-}

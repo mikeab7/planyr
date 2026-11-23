@@ -13,9 +13,6 @@
 import { validPlacement } from "../../overlay/overlayPlacement.js";
 import { isValidCropShape } from "../../overlay/overlayCrop.js";
 
-export function validOverlayUpload({ imgW, imgH } = {}) {
-  return Number.isFinite(imgW) && imgW > 0 && Number.isFinite(imgH) && imgH > 0;
-}
 
 /** Whether an overlay has ever been placed on the map — a freshly-picked page has no
  * placement yet (it's placed the moment it's created, so in practice this is only false for a

@@ -69,11 +69,6 @@ export function formatRateValue(v) {
   return `$${v.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
-/** The words Michael actually sees on the toggle — "per year" / "per month" — named here once so
- * the card and any other reader of a period value can't drift on wording. */
-export function periodWords(period) {
-  return period === "monthly" ? "per month" : "per year";
-}
 
 /** How many peers the horizontal scale needs before it means anything. Below this the card draws no
  * scale and says so in one line — exported so `CompsCard.jsx` and `peerComparisonSentence` can

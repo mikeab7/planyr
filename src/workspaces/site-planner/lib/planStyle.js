@@ -80,7 +80,6 @@ export const getAccountStyleDefaults = () => ACCOUNT_STD;
  */
 let PREVIEW_STD = { typeStyles: {} };
 export const setPreviewStyleDefaults = (v) => { PREVIEW_STD = { typeStyles: { ...(v?.typeStyles || {}) } }; };
-export const getPreviewStyleDefaults = () => PREVIEW_STD;
 
 /**
  * Where a given standard's current value comes from — what the Standards scope chips read.

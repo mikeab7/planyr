@@ -31,8 +31,6 @@ const SHAPES = {
   </>),
 };
 
-/** The kinds that have an icon — the same six the strip, legend and edit box draw. */
-export const WALL_KIND_ICONS = Object.keys(SHAPES);
 
 export default function WallKindIcon({ kind, size = 11, style }) {
   const shape = SHAPES[kind];

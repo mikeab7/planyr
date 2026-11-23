@@ -263,7 +263,7 @@ import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, candidate
 import { parcelGapNotice } from "./lib/parcelGaps.js";
 import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
 const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
-import { lookupParcels, situsFor } from "./lib/parcelQuery.js";
+import { situsFor } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
   largestRingLngLat,
@@ -1219,14 +1219,7 @@ function roadRadiusStatus(el, settings) {
 
 /* ----------------------- geometry helpers -------------------------- */
 // Parcel split geometry (straight + bent cuts) lives in lib/polygonSplit.js, imported above.
-// Closest point on segment a-b to point p (used for snapping to a boundary).
-function nearestPointOnSeg(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy || 1;
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return { x: a.x + t * dx, y: a.y + t * dy };
-}
+// Closest point on segment a-b to point p (used for snapping to a boundary): nearestOnSeg above.
 
 /* ------------------------------ format ----------------------------- */
 // NEW-1 — the pond's area line is the ACREAGE and nothing else ("6.58 ac"), per the owner:
@@ -2266,20 +2259,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [ovCropId, setOvCropId] = useState(null);      // NEW-1 (B1838704) — the overlay whose Crop… dialog is open
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
-  // county parcel lookup — ⛔ B877440: no hard Harris/Houston seed. An unresolved county is
-  // unresolved, never Harris; the search box starts empty until `onCountyChange` (an explicit
-  // pick) sets it.
-  const [county, setCounty] = useState(null);
-  const [lookupUrl, setLookupUrl] = useState("");
-  const [searchMode, setSearchMode] = useState("address"); // "address" | "id"
-  const [searchVal, setSearchVal] = useState("");
-  const [lookupBusy, setLookupBusy] = useState(false);
-  const [lookupErr, setLookupErr] = useState("");
-  const [lookupRes, setLookupRes] = useState([]);    // [{ft, layerUrl, idField, addrField}]
-
-  // rectangular parcel quick-add inputs
-  const [lotW, setLotW] = useState(600);
-  const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   // NEW-1 — a typed building number that is already taken by another building, parked here
@@ -3576,7 +3555,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-2 — which county's baked flood archive (if any) this plan may use. The plan header's
       // county is the right key: it is what the site was filed under, and it is stable across a
       // pan, which the map-view county is not.
-      countyKey: restored?.county || county || null,
+      countyKey: restored?.county || null,
       onStatus: (id, state, msg, extra) => {
         if (id === "contours" && grContourClipRef.current) applyGradingClip();   // ROUND 5: a freshly mounted/painted layer takes the clip
         setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null }));
@@ -6098,7 +6077,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     for (const pc of visibleParcels(hiddenGroups, parcels)) {
       const pts = pc.points;
       for (let i = 0; i < pts.length; i++) {
-        const q = nearestPointOnSeg(p, pts[i], pts[(i + 1) % pts.length]);
+        const q = nearestOnSeg(p, pts[i], pts[(i + 1) % pts.length]);
         const d = Math.hypot(q.x - p.x, q.y - p.y);
         if (d < bestD) { bestD = d; best = q; }
       }
@@ -8524,7 +8503,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (opts.select !== false) { const p = menuParcel(); if (p && sel?.kind !== "parcel") setSel({ kind: "parcel", id: p.id }); }
     if (opts.addMenu) setAddParcelMenu(true);
   };
-  const openParcelToolsMenu = () => { if (narrow) setMobileTools(true); setToolMenu(true); };
 
   /* ------------ callouts (annotations) ------------ */
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
@@ -10632,13 +10610,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
   }, []);
 
-  const addRectParcel = () => {
-    const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
-    pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], source: "drawn", ...parcelDefaultStyle(settings) }; // B929
-    setParcels((a) => [...a, pc]);
-    requestFit();
-  };
 
   /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
   // Add a dropped PDF/image/DXF/DWG as a backdrop overlay, placed centered on the current view.
@@ -10968,7 +10939,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      touch only the overlay's transform layer + its reference to the source file, never the source
      bytes (Duplicate/Paste share the same `src` + `storageKey`, they don't re-import). */
   const OV_OFFSET = () => 24 / view.ppf; // a constant ~24px visual nudge for a copy, in feet (zoom-independent)
-  const overlayCenter = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 });
   const copyOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("⚠ Couldn't copy — that drawing is no longer in the list.", 4000); return; }
@@ -11415,55 +11385,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => clearTimeout(timer);
   }, [view.ppf, sheetOverlays, size.w, size.h, hiresTick]); // eslint-disable-line
 
-  /* ------------ county parcel lookup ------------ */
-  const onCountyChange = (key) => {
-    setCounty(key);
-    const c = COUNTIES[key];
-    setLookupUrl(c.layerUrl || c.serviceUrl || "");
-    setLookupRes([]);
-    setLookupErr("");
-  };
-  const runLookup = async () => {
-    setLookupErr(""); setLookupRes([]);
-    const v = searchVal.trim();
-    if (!v) { setLookupErr("Type an account number or address to search."); return; }
-    setLookupBusy(true);
-    try {
-      // One shared lookup: builds the (county-scoped, injection-safe) where-clause and,
-      // if the county's own CAD server is down, automatically retries the statewide
-      // TxGIO layer scoped to this one county so the search still answers and can't
-      // match a like-named parcel elsewhere (B244/B245).
-      const r = await lookupParcels({ county, lookupUrl: lookupUrl.trim(), mode: searchMode, value: v });
-      if (!r.feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
-      if (r.backup) setLookupErr(`Using the ${String(r.backupLabel || "Statewide backup (TxGIO)").replace(/^S/, "s")} for ${r.backupCounty} — the county’s own server is unavailable; results may lag county updates.`);
-      setLookupRes(r.feats.map((ft) => ({ ft, layerUrl: r.layerUrl, idField: r.idField, addrField: r.addrField })));
-    } catch (err) {
-      setLookupErr(humanizeError(err));
-    } finally {
-      setLookupBusy(false);
-    }
-  };
-  const importFeature = (entry) => {
-    // Project with the SAME 365223 equirectangular model as map-click/identify so a
-    // looked-up parcel and a clicked one are sized identically — this path used true
-    // EPSG:2278 feet before, a ~0.3% mismatch for the same lot (B57c). Anchored on the
-    // parcel's own lon/lat centroid so it still drops centered (unchanged placement).
-    const rings = outerRingsLngLat(entry.ft); // open [lon,lat] rings (4326) — every part of a multipart parcel
-    if (!rings.length) { setLookupErr("That record has no usable polygon geometry."); return; }
-    // One shared anchor across all parts so separate tracts keep their true relative
-    // position (anchoring each on its own centroid would stack them on top of each other).
-    let n = 0, slon = 0, slat = 0;
-    rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
-    const lon0 = slon / n, lat0 = slat / n;
-    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), source: "county", ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929 · looked up from a county record
-    if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
-    pushHistory("import"); // NEW-7 (NEW-1) — a county-record parcel brought onto the plan
-    setParcels((a) => [...a, ...pcs]);
-    setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
-    setLookupRes([]);
-    requestFit();
-  };
-
   /* ------------ element / handle interactions ------------ */
   // Attachment: an element may be bonded to a host (attachedTo). Bonded members
   // move and rotate as one assembly and can't be separated by dragging.
@@ -11739,7 +11660,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const findZoneIn = (arr, b, side, i) => { const c = findCourtIn(arr, b, side); if (i === 0) return c; const t = findTrailerIn(arr, c); if (i === 1) return t; return findBufferIn(arr, t); };
   // How many zones are present on a side (0..3), within `arr`.
   const stackCountIn = (arr, b, side) => { const c = findCourtIn(arr, b, side); if (!c) return 0; const t = findTrailerIn(arr, c); if (!t) return 1; return findBufferIn(arr, t) ? 3 : 2; };
-  const courtOnSide = (b, side) => findCourtIn(els, b, side);
   // Is this element a member of a dock-zone stack, and which zone (0 court / 1 trailer / 2 buffer)?
   const isDockZone = (el) => !!el && !el.points && !!(el.truckCourt || el.forCourt || el.forTrailer);
   const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
@@ -12278,7 +12198,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Trailer parking flush against the FAR (outer) edge of a truck court — where trailers
   // actually back in. Routes through the stack ("+" adds the next zone, here the trailer).
-  const addCourtTrailer = (tc) => { const b = buildingOf(tc); if (b && tc.truckCourt && !findTrailerIn(els, tc)) addZoneOnSide(b, tc.truckCourt.side); };
   const isWallStrip = (x) => x.type === "sidewalk" || x.type === "landscape"; // 5′ wall strips
   // Recompute a wall strip's run + along-centre to span the FULL building side, folding in any
   // corner bump-outs that lengthen that wall (B492). Preserves the strip's thickness and its
@@ -14004,7 +13923,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const outfallTypeEff = settings.drainage?.outfallType || null;
   const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
   const acresActive = metrics.acresActive;
-  const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
   // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
   // >20 ac greater-of branch fires); otherwise use the detected HOUSTON membership
   // specifically (B789 — any-city membership let a Katy frontage sliver read as "in city
@@ -20314,7 +20232,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const bannerX = { flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 };
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
-  const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
@@ -21903,7 +21820,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
   const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
-  const curHint = TOOLS.find((t) => t.id === tool)?.hint;
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
   const dockPanelOn = !multiStyleable && !!selEl && isDockLayerEl(selEl);
@@ -22338,11 +22254,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } finally { setLockBusy(false); setPlanMenu(false); }
   };
 
-  const otherSites = (() => {
-    const seen = new Set([groupId]), out = [];
-    (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
-    return out;
-  })();
   // ── AppHeader slot content ───────────────────────────────────────────────────
   // The project name now lives in exactly ONE place — the Row-1 breadcrumb
   // (Map / 🔒 <Site> ▾). The old standalone center "Site ▾ › Plan ▾" group duplicated
@@ -26377,7 +26288,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {layersOpen && (
                 <div style={{ padding: "8px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
                   <LazyPanel name="Layers panel" minHeight={140}>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || null} layerStatus={layerStatus} coverage={coverage}
                     /* B1076/B1077 — the flood group scopes its district rows off the SAME
                        drainage context the Stormwater readout uses, so the panel and the
                        readout can never disagree about who governs drainage here. */
@@ -31061,7 +30972,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {mapMenu && (() => {
         const MW = 214;
-        const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const close = () => setMapMenu(null);
         const row = ({ text, on, danger, dis, hint, title }) => (
           <button title={title} disabled={!!dis}
@@ -31113,10 +31023,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const bringToFrontDis = ref.kind === "callout" ? calloutAtAbsoluteFront(callouts, ref.id) : af.atTop;
           return <>
             {hdr}
-            {r("Bring to Front", "front", bringToFrontDis, `${MOD}⇧]`)}
-            {r("Bring Forward", "forward", af.atTop, `${MOD}]`)}
-            {r("Send Backward", "backward", af.atBottom, `${MOD}[`)}
-            {r("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
+            {r("Bring to Front", "front", bringToFrontDis, `${MOD_LABEL}⇧]`)}
+            {r("Bring Forward", "forward", af.atTop, `${MOD_LABEL}]`)}
+            {r("Send Backward", "backward", af.atBottom, `${MOD_LABEL}[`)}
+            {r("Send to Back", "back", af.atBottom, `${MOD_LABEL}⇧[`)}
           </>;
         };
         const sep = <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />;
@@ -31164,9 +31074,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
-            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
+            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
             {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
-            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "markup", id: m.id }); close(); } })}
+            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "markup", id: m.id }); close(); } })}
             {arrangeGroup({ kind: "markup", id: m.id }, { hdr: sep })}
             {row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND, on: setBehind })}
             {sep}
@@ -31202,8 +31112,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               on: () => { setMeasureBand(m.id, !m.behindEls); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMeasureLock(m.id); close(); } })}
-            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
-            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
+            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
+            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }, { entry: "menu:measure" }); close(); } })}
           </>;
@@ -31227,8 +31137,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 so a text box or callout can be the align SOURCE too: click a building, another
                 callout/text box, or a parcel edge next to match this one's angle to it. */}
             {row({ text: "Align rotation\u2026", on: () => { setAlignFor({ kind: "callout", id: c.id }); close(); } })}
-            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
-            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
+            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
+            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
             {arrangeGroup({ kind: "callout", id: c.id }, { hdr: sep })}
             {row({ text: c.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND,
               title: c.behindEls ? "Draw this note over the buildings again" : "Draw this note under the buildings, so the plan sits on top of it",
@@ -31241,7 +31151,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           header = "Map";
           body = <>
             {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
-            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); close(); } })}
+            {row({ text: "Paste", hint: `${MOD_LABEL}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); close(); } })}
             {/* Google Earth (KMZ) export is NOT here — owner decision 2026-10-22 (NEW-1): File ▾ is its ONE home in the planner. */}
           </>;
         }
@@ -31277,7 +31187,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // B820 — Arrange (z-order). B1788912 (NEW-1): elements no longer reorder within a
               // TYPE-LAYER band — the peer set is every element on the plan, Bluebeam-style.
               const af = arrangeFlags(els, t.id);
-              const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
               // A greyed row says WHY it is greyed — a disabled control with no explanation reads as broken.
               const arrWhy = (!af || af.count < 2)
                 ? "This is the only element on the plan, so there is nothing to reorder it against."
@@ -31451,10 +31360,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {af && (
                     <>
                       <div style={hdr()}>Arrange</div>
-                      {arrRow(<BringToFrontIcon />, "Bring to Front", "front", af.atTop || af.count < 2, `${MOD}⇧]`)}
-                      {arrRow(<BringForwardIcon />, "Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
-                      {arrRow(<SendBackwardIcon />, "Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
-                      {arrRow(<SendToBackIcon />, "Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
+                      {arrRow(<BringToFrontIcon />, "Bring to Front", "front", af.atTop || af.count < 2, `${MOD_LABEL}⇧]`)}
+                      {arrRow(<BringForwardIcon />, "Bring Forward", "forward", af.atTop || af.count < 2, `${MOD_LABEL}]`)}
+                      {arrRow(<SendBackwardIcon />, "Send Backward", "backward", af.atBottom || af.count < 2, `${MOD_LABEL}[`)}
+                      {arrRow(<SendToBackIcon />, "Send to Back", "back", af.atBottom || af.count < 2, `${MOD_LABEL}⇧[`)}
                     </>
                   )}
 
@@ -31462,7 +31371,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ height: 1, background: PAL.panelLine, margin: "4px 0" }} />
                   {miRow({ icon: <PropertiesIcon />, text: "Properties…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); openInspector(); setTypeMenu(null); } })}
                   {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
-                  {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
+                  {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD_LABEL}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
                   {miRow({ icon: <LockGlyph locked={!!t.locked} size={14} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
                   {t.type === "trailer" && miRow({ icon: <LabelIcon />, text: t.labelHidden ? "Show label" : "Hide label", testId: "el-menu-label-toggle", onClick: () => { toggleElLabel(typeMenu.id); setTypeMenu(null); } })}
                   {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
@@ -31489,7 +31398,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const isAbove = overlayBand(o) === "above";
         const isAerialRow = !!o.fromMap; // B848736 — the pinned map reference: no promote, no align (see the panel row for the full rationale)
         const locked = !!o.locked, hasParcel = parcels.length > 0;
-        const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
         const item = ({ text, hint, on, dis, danger, title }) => (
           <button title={title} disabled={!!dis}
@@ -31501,9 +31409,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return (
           <ContextMenu x={ovMenu.x} y={ovMenu.y} onClose={() => setOvMenu(null)} width={MW} zIndex={1998} className="menu" panelStyle={menuPanel}>
             <div style={hdr(false)}>Edit</div>
-            {item({ text: "Copy", hint: `${MOD}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
-            {item({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
-            {item({ text: "Paste", hint: `${MOD}V`, dis: !hasOverlayClip(), title: hasOverlayClip() ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
+            {item({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
+            {item({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
+            {item({ text: "Paste", hint: `${MOD_LABEL}V`, dis: !hasOverlayClip(), title: hasOverlayClip() ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}

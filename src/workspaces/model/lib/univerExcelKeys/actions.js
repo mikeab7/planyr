@@ -306,5 +306,3 @@ export function createActions(env) {
   };
   return { actions: A, runAction, ids: Object.keys(A) };
 }
-
-export { UNIVER as UNIVER_COMMAND_IDS };

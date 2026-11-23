@@ -26,7 +26,6 @@ export const LIST_COLORS = [
   { key: "indigo", label: "Indigo", hex: "#3949C9" }, // design-exempt: stored list-colour palette (data, written to the list row; a canvas pin ring cannot read a CSS token)
   { key: "lime", label: "Lime", hex: "#6B9A12" }, // design-exempt: stored list-colour palette (data, written to the list row; a canvas pin ring cannot read a CSS token)
 ];
-export const DEFAULT_LIST_COLOR = LIST_COLORS[0].hex;
 const PALETTE_HEX = new Set(LIST_COLORS.map((c) => c.hex.toLowerCase()));
 export const isPaletteColor = (hex) => PALETTE_HEX.has(String(hex || "").toLowerCase());
 

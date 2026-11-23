@@ -78,7 +78,6 @@ export function withTitleFallback(row) {
 
 /* ---- Term: stored in months, entered in months OR years -------------------------------------- */
 
-export const TERM_UNITS = ["months", "years"];
 
 /** What the person typed -> the string the `leaseTerm` column setter commits (always MONTHS).
  * Years are ×12 (rounded to 2 decimals so 5.3 yr stays 63.6 mo, never a float tail). */

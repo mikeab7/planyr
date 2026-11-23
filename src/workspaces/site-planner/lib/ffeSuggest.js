@@ -21,8 +21,7 @@ import { solveBalanced, compass8, cap, BALANCE_TOL_CY, evalSteps, scopeIds } fro
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
 
 export const ROCK_CLEARANCE_FT = 2;      // cut may go no deeper than depth-to-rock minus this
-export const DOCK_UPHILL_MIN_FT = 1;     // a court is "uphill" when its ground is this much above the pad's mean ground
-export const SOFT_DEPTH_FT = 12;         // default max cut / fill under a pad
+export const DOCK_UPHILL_MIN_FT = 1;              // default max cut / fill under a pad
 const MAX_ROCK_PASSES = 5;
 
 const round1 = (v) => Math.round(v * 10) / 10;

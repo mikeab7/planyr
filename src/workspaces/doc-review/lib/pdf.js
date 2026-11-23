@@ -80,23 +80,6 @@ export async function extractPageText(pdf, pageNum) {
   }
 }
 
-/* Pull the first `maxPages` pages' embedded text as one joined string — the title block / cover
- * identifies the project & set (the filing read, B312). The ONE embedded-text reader (B360):
- * localRead's own first-pages loop folded into here so the doc-review workspace has a single
- * extractor. Accepts a File/Blob/ArrayBuffer (loads + destroys its own pdf) OR an already-loaded
- * pdf (reads it, leaves the caller's pdf open). Returns "" for a scanned/no-text set. */
-export async function firstPagesText(fileOrPdf, maxPages = 2) {
-  const owned = !(fileOrPdf && typeof fileOrPdf.getPage === "function");
-  const pdf = owned ? await loadPdf(fileOrPdf) : fileOrPdf;
-  try {
-    const n = Math.min(maxPages, pdf.numPages || 1);
-    const parts = [];
-    for (let p = 1; p <= n; p++) parts.push(await extractPageText(pdf, p));
-    return parts.join(" ");
-  } finally {
-    if (owned) { try { pdf.destroy(); } catch (_) { /* best-effort */ } }
-  }
-}
 
 /* Pull EVERY page's embedded text as an array of per-page strings — the multi-discipline filing
  * read (2026-06-23) classifies each page on its own so a combined PDF (a make-ready package, a full

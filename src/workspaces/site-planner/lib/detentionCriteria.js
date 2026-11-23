@@ -626,11 +626,6 @@ export function jurKeyForAuthority(authorityId) {
   return AUTHORITY_TO_JUR[authorityId] || (DETENTION_CRITERIA[authorityId] ? authorityId : null);
 }
 
-/* Short label for a criteria row's authority (badge copy). Pure. */
-export function criteriaAuthorityShort(jurKey) {
-  const row = DETENTION_CRITERIA[jurKey];
-  return (row && (AUTHORITY_SHORT[row.authorityRuleId] || row.label)) || "Unknown";
-}
 
 /* R1 — resolve a criteriaFor() result's coincident-storm carrier into a plain
  * { coincident, verified, source } the pond split + verdict line read. The stored flag is

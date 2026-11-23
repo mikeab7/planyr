@@ -1185,8 +1185,6 @@ export const DERIVED_BFE_NOTE =
   "This BFE was DERIVED by interpolating FEMA's published Base Flood Elevation lines at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a BFE to override.";
 export const DERIVED_XS_WSEL_NOTE =
   "This 1% water surface was DERIVED from FEMA's published S_XS cross-section regulatory water-surface elevation (WSEL_REG) on the nearest modeled stream reach — a screening estimate, not a surveyed value, and never a cross-creek pick. Confirm before design; type a BFE to override.";
-export const DERIVED_WSE02_NOTE =
-  "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";
 export const DERIVED_WSE02_DRAFT_NOTE =
   "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";
 export const EST_BOUNDARY_WSE_NOTE =

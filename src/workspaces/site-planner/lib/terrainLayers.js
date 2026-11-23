@@ -161,10 +161,6 @@ const rememberGrid = (key, req, grid) => {
   gridLru.set(key, { req, grid });
   while (gridLru.size > GRID_LRU_MAX) gridLru.delete(gridLru.keys().next().value);
 };
-export function sampleTerrainGrids(lat, lng) {
-  const r = sampleTerrainGridsInfo(lat, lng);
-  return r.status === "value" ? r.ft : r.status === "void" ? null : undefined;
-}
 
 /* The same local sample, with the provenance the NEW-2 readout needs: which of the
  * three honest states this point is in, and how much GROUND one cell of the grid that

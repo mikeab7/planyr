@@ -31,7 +31,6 @@ export const SOURCE_TAGS = {
   unverified: { id: "unverified", label: "UNVERIFIED", order: 5, short: "Placeholder default — confirm before use" },
 };
 
-export const SOURCE_TAG_ORDER = ["code", "plan", "survey", "estimate", "yours", "unverified"];
 
 // One CSS custom property per tag — SourceTag/SourcesLegend read these, never raw hex.
 // PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED reuse the existing AA-audited semantic-text

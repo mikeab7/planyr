@@ -166,12 +166,4 @@ export const hasParcelOverride = (pc) => !!pc && parcelLookKeys.some((k) => pc[k
 /** Label size in points → SVG user units at 96 dpi (1 pt = 4/3 px). */
 export const ptToPx = (pt) => (pt * 96) / 72;
 
-/** A stroke width the canvas may draw: the resolved weight, passed through as-is (screen px, no zoom factor). */
-export const lookStrokePx = (weightPx) => weightPx;
 
-/** Merge a debounced burst of workspace-default field edits into one patch list (last write per field wins). */
-export function coalesceEdits(edits) {
-  const m = new Map();
-  for (const e of edits) m.set(`${e.section}.${e.field}`, e);
-  return [...m.values()];
-}

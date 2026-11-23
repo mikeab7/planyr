@@ -19,22 +19,12 @@ export { supabase };
 const TABLE = "map_notes";
 const SELECT_COLS =
   "id,user_id,team_id,project_id,title,body,anchor_kind,lat,lon,county,parcel_apn,parcel_geom,created_at,updated_at";
-const TRASH_SELECT_COLS = `${SELECT_COLS},deleted_at`;
 
 /** Every LIVE note the signed-in user can see (their own + their team's). Small personal/team
  * table — no pagination at any realistic scale, same call shape as fetchAllComps. */
 export async function fetchAllMapNotes() {
   if (!supabase) return { data: [], error: null };
   const { data, error } = await supabase.from(TABLE).select(SELECT_COLS).is("deleted_at", null).order("updated_at", { ascending: false });
-  if (error) return { data: [], error };
-  return { data: (data || []).map(rowToMapNote), error: null };
-}
-
-/** Soft-deleted notes — the data behind a future "Recently deleted" list. Not wired to a control
- * in this cut; it exists so a soft delete is demonstrably recoverable rather than nominally so. */
-export async function fetchDeletedMapNotes() {
-  if (!supabase) return { data: [], error: null };
-  const { data, error } = await supabase.from(TABLE).select(TRASH_SELECT_COLS).not("deleted_at", "is", null).order("deleted_at", { ascending: false });
   if (error) return { data: [], error };
   return { data: (data || []).map(rowToMapNote), error: null };
 }

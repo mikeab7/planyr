@@ -49,7 +49,6 @@ export const THRESHOLDS = Object.freeze({
   cooldownMin: 60,
 });
 
-export const CHECK_NAMES = Object.freeze(["site-key-in-bundle", "server-gate", "panel-renders", "real-sign-in", "email-link"]);
 export const STATUSES = Object.freeze(["pass", "fail", "unknown", "skipped"]);
 
 /** Plain-words labels for the checks (the email and the Ops card never show the internal id). */
@@ -87,8 +86,6 @@ export function overallOf(checks) {
   return "pass";
 }
 
-/* ── Client-reported events ─────────────────────────────────────────────────────────────────────────────────────── */
-export const EVENT_PREFIX = "event:auth-";
 /** source → bucket name used in the snapshot / rate rule. */
 export const EVENT_BUCKETS = Object.freeze({
   "event:auth-ok": "ok",

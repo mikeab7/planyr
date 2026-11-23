@@ -723,13 +723,6 @@ export async function fetchTree(client) {
   return { ok: true, tree: data.data, rev: Number(data.rev) };
 }
 
-/** Just the revision — the cheap poll. A tree can be a few kilobytes; its rev is one
- *  integer, so "has anything changed on another device?" costs a number, not a notebook. */
-export async function fetchTreeRev(client) {
-  const { data, error } = await client.from(TREE_TABLE).select("rev").maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, rev: data ? Number(data.rev) : null };
-}
 
 /** Push the tree, guarded on the revision it was based on. `{ conflict:true }` means another
  *  device wrote first — the caller MERGES and retries. It never clobbers.

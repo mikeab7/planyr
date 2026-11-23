@@ -2025,8 +2025,6 @@ export function migrateRoads(els) {
   const out = (els || []).map((e) => { const m = migrateRoad(e, { pinned }); if (m !== e) changed = true; return m; });
   return changed ? out : (els || []);
 }
-// Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
-export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.
 export const parcelDrawingsOf = (m, parcelId = null) =>
   (m.parcelDrawings || []).filter((d) => parcelId == null || d.parcelId === parcelId);
@@ -2034,14 +2032,6 @@ export const parcelDrawingsOf = (m, parcelId = null) =>
 // siteStatus.js and re-exported at the top of this file — kept here as a comment landmark since
 // this is where a reader would look for it.
 
-// Team sharing (team feature). `teamId` = the team this plan is shared with (null = private);
-// `ownerId` = the user who created it (set from the DB user_id column by cloudList). Returns a
-// small descriptor the UI reads to show a "Shared / Private" badge and "owned by a teammate".
-export const teamShareOf = (m) => ({
-  teamId: (m && m.teamId) || null,
-  shared: !!(m && m.teamId),
-  ownerId: (m && m.ownerId) || null,
-});
 
 /* ⛔ NEW-2 — THE SHARING POINTER IS NOT CONTENT, SO IT IS NEVER DECIDED BY A TIMESTAMP.
  *
@@ -2135,7 +2125,6 @@ export const annotationsOf = (m) => ({
   callouts: m.callouts || [],
 });
 
-export const crossSectionsOf = (m) => (m.elevation && m.elevation.crossSections) || [];
 
 // Per-parcel setbacks as a read view (raw per-edge values; null = use settings default).
 export const setbacksOf = (m) =>

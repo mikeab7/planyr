@@ -89,9 +89,6 @@ export async function fetchOverlayDataUrl(key) {
 /* Download stored overlay bytes as an ArrayBuffer (ready for loadPdf), or null. */
 export async function downloadOverlayBytes(key) { return (await fetchOverlayBytes(key)).data; }
 
-/* Download a stored image overlay as a data URL (its raster is the source, no rasterize),
- * or null. PDFs use downloadOverlayBytes + rasterizeStoredPdf instead. */
-export async function downloadOverlayDataUrl(key) { return (await fetchOverlayDataUrl(key)).data; }
 
 /* NEW-1 (sibling overlays) — can THIS user read the object? A signed URL is only issued for an object
  * the caller's Storage RLS lets them select, so it is a cheap read test with no download. Used before a

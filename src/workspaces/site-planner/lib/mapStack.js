@@ -108,7 +108,6 @@ export const STACK_Z = Object.freeze(Object.fromEntries(MAP_STACK.map((t) => [t.
  * `data-gis-front-band` anchor, so a lifted fill clears the elements without leaving the one
  * SVG — which is exactly what keeps it under the labels and under the handle layer. */
 export const SVG_TIERS = ["reference", "gisArea", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "label", "handle"];
-export const SVG_Z = STACK_Z.reference;
 
 /* The DOM anchor the lifted band is hosted at, inside the plan SVG. Named here (not spelled
  * inline at each site) because THREE renderers have to agree on it: the canvas mounts the
@@ -352,12 +351,6 @@ export function auditLayerRoles(allLayers = {}) {
   return problems;
 }
 
-/** Ordering key for anything that has to paint the whole stack itself in one pass —
- *  the PDF/PNG export (PDF-PARITY). Lower paints first. */
-export function stackOrder(tierId) {
-  const t = MAP_STACK.find((x) => x.id === tierId);
-  return t ? t.z : STACK_Z.elements;
-}
 
 /** Export helper: does this layer config paint ABOVE the drawn plan on the sheet?
  *  Split configs paint in BOTH bands, so the caller asks per role, not per config. */

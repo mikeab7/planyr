@@ -24,7 +24,6 @@ import { reportClientEvent } from "./clientErrors.js";
 // ~1 in 50 clean completions is recorded — enough for a baseline rate without flooding the table.
 export const PINCH_COMPLETE_SAMPLE_RATE = 0.02;
 
-export const PINCH_OUTCOMES = ["completed", "cancelled", "anomaly"];
 
 /* Pure: should this gesture outcome be logged? `rand` is a caller-supplied [0,1) draw (never
  * Math.random() called from in here) so the decision stays pure and unit-testable. */

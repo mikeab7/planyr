@@ -26,9 +26,6 @@ export function zoneClass(code) {
 export const ZONE_COLORS = {
   industrial: "#7c3aed", commercial: "#ea580c", residential: "#ca8a04", agricultural: "#4d7c0f", pud: "#0f766e", overlay: "#64748b", other: "#6b7280",
 };
-export const ZONE_CLASS_LABEL = {
-  industrial: "Industrial", commercial: "Commercial / office", residential: "Residential", agricultural: "Agricultural / rural", pud: "Planned unit development", overlay: "Overlay district", other: "Other",
-};
 
 /* Layer style (esri-leaflet per-feature style function): a translucent fill in the class colour with a thin outline. The fill is deliberately
  * quiet (zoning is a reference wash under the plan, tier "reference" ≤ 0.55 default opacity; the row's slider scales it). */
