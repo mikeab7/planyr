@@ -82,11 +82,6 @@ export const PARCEL_OUTLINE_COLOR = "#a21caf"; // design-exempt: the one parcel-
 export const PARCEL_OUTLINE_RGB = [162, 28, 175];
 export const PARCEL_OUTLINE_WEIGHT = 1.3;
 
-/* The one floor a queryable MapServer CAD may draw vectors from (see the amendment above).
- * A FeatureServer (or any non-MapServer URL) has no image regime to hand over to, so it stays at
- * PARCEL_MINZOOM; the image-only statewide source is exempt — it draws its image from there. */
-export const parcelVectorFloorFor = (url) =>
-  (parcelUrlSupportsImageExport(url) ? PARCEL_VECTOR_MINZOOM : PARCEL_MINZOOM);
 
 /* `dynamicLayers` for an /export of ONE sublayer: Planyr's outline colour, no fill, and labels
  * OFF. A county server's /export otherwise paints with its own drawingInfo — its own colour and,

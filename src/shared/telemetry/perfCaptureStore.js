@@ -70,13 +70,3 @@ export async function listCaptureKeys() {
   return keys.sort();
 }
 
-/* Read them back, newest first — what a console read uses when the cloud row never made it out. */
-export async function readPerfCaptures() {
-  const rows = [];
-  try {
-    await walkOriginStore(CAPTURE_PREFIX, (k, v) => {
-      try { rows.push({ key: String(k), capture: JSON.parse(v) }); } catch (_) { /* skip */ }
-    });
-  } catch (_) { /* ignore */ }
-  return rows.sort((a, b) => (a.key < b.key ? 1 : -1));
-}

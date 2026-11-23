@@ -112,28 +112,6 @@ export function identifyTitle(source = {}, props = {}) {
 export const identifyRowsFor = (source, props) =>
   identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref });
 
-export function appendIdentifyRows(el, source, props) {
-  for (const r of identifyRowsFor(source, props)) {
-    const row = document.createElement("div");
-    const lab = document.createElement("span");
-    lab.style.cssText = "opacity:0.7;";
-    lab.textContent = `${r.label}: `;
-    row.append(lab);
-    const text = r.text, href = r.href;
-    if (href) {
-      const a = document.createElement("a");
-      a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
-      a.textContent = text;
-      row.append(a);
-    } else {
-      const val = document.createElement("span");
-      val.textContent = text;
-      row.append(val);
-    }
-    el.append(row);
-  }
-  return el;
-}
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 

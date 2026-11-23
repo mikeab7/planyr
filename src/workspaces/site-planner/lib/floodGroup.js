@@ -51,7 +51,6 @@ export const FLOOD_TIERS = [
 ];
 
 export const FLOOD_TIER_ORDER = FLOOD_TIERS.map((t) => t.key);
-export const floodTierLabel = (key) => (FLOOD_TIERS.find((t) => t.key === key) || {}).label || key;
 
 /* The standing honesty line for the whole group (NEW-3, stated ONCE — never repeated per
  * row). This is the sentence that would have answered the original report on its own. */

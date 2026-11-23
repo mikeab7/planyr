@@ -59,18 +59,6 @@ export function inkBBox(bin, W, H, mask) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
-/** Candidate anchor features for matching — currently the ink-bbox corners + centroid (a sparse,
- *  stable set good enough for translation + uniform scale; rotation goes through manualRegister). */
-export function detectAnchors(bin, W, H, mask, max = 8) {
-  const bb = inkBBox(bin, W, H, mask);
-  if (!bb) return [];
-  const pts = [
-    { x: bb.x, y: bb.y }, { x: bb.x + bb.w - 1, y: bb.y },
-    { x: bb.x + bb.w - 1, y: bb.y + bb.h - 1 }, { x: bb.x, y: bb.y + bb.h - 1 },
-    { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 },
-  ];
-  return pts.slice(0, max);
-}
 
 /* Build a B→A transform (+ its inverse, for resampling A-pixels from B) from point pairs, reusing the
  * canonical solver both directions. Returns { scale, rotDeg, residual, apply, inv } or null. */

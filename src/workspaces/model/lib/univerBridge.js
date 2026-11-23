@@ -497,7 +497,3 @@ export function projectNamesToDefinedNames(projectNames) {
   return out;
 }
 
-/** True when two Planyr workbooks hold the same content (order-insensitive keys; see sheetModel.canonicalJson). */
-export function sameWorkbook(a, b, canonicalJson) {
-  return canonicalJson(migrateWorkbook(a)) === canonicalJson(migrateWorkbook(b));
-}

@@ -9,7 +9,6 @@
  * the old ones; the old entry stays) · an entry written before this feature has no save date/author and is
  * shown as "Date not recorded", never invented. */
 
-const FIELDS = ["srcId", "name", "size", "storageKey", "driveKey", "oversize", "savedAt", "savedBy", "restoredFrom"];
 
 /** The persisted shape of one source/version entry — keeps the save stamp that older code dropped. */
 export function packSource(s) {
@@ -24,7 +23,6 @@ export function packSource(s) {
   if (s.local) out.local = true; // bytes live only in this browser session (signed out) — never persisted to the record
   return out;
 }
-export const SOURCE_FIELDS = FIELDS;
 
 /** A source is a retrievable version only if it was actually stored somewhere. */
 const stored = (s) => !!(s && (s.storageKey || s.driveKey || s.oversize));

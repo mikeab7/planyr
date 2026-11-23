@@ -1959,8 +1959,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   SURVEY/ESTIMATE/YOURS/UNVERIFIED) + color-token map + `classifyWseSource`/`classifyVerified`
   (pure mappings from signals the engine already computes — WSE_PROVIDER_LABEL codes, the
   `pondAutoValues` `verified` flag — to a tag). Consumed by `components/SourceTag.jsx` (the
-  right-aligned pill + Basis popover), `components/SourcesLegend.jsx` (the one "Sources ⓘ" panel
-  legend), `components/WatchOutChip.jsx` (the one ⚠ item-specific-risk rendering), `components/
+  right-aligned pill + Basis popover; the one-time "Sources ⓘ" legend component was
+  removed unused, 2026-11), `components/WatchOutChip.jsx` (the one ⚠ item-specific-risk rendering), `components/
   ActionLink.jsx` (the accent-colored "do something" affordance, distinct from a passive tag), and
   `components/YieldFooterDisclaimer.jsx` (the ONE persistent screening disclaimer).
 

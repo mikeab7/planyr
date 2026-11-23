@@ -27,7 +27,6 @@ export const BEDROCK_CLASSES = [
   { id: "shallow", maxIn: 40, color: "#ea580c", label: "20–40 in" }, // design-exempt: map ink for a drawn depth class (cartography, not UI chrome)
   { id: "moderate", maxIn: 60, color: "#facc15", label: "40–60 in" }, // design-exempt: map ink for a drawn depth class (cartography, not UI chrome)
 ];
-export const BEDROCK_PAINT_MAX_IN = 60;
 
 /* cm → class, or null when there is no depth, it is not a number, or it is ≥ 60 in. Pure. */
 export function classifyDepthCm(cm) {
@@ -39,7 +38,6 @@ export function classifyDepthCm(cm) {
   return null;
 }
 
-export const depthInchesFromCm = (cm) => Math.round(Number(cm) / CM_PER_IN);
 
 /* The WFS GetFeature URL for the map units in a view. `bb` = { s, w, n, e }. Pure. */
 export function buildWfsUrl(bb, { max = WFS_MAX_FEATURES } = {}) {

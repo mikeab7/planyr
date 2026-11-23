@@ -25,9 +25,6 @@ export function emptyPlacementFacts() {
   };
 }
 
-export const PLACEMENT_FLAG_KEYS = [
-  "embeddedCoords", "scaleBar", "statedScale", "northArrow", "boundary", "dimensions",
-];
 
 /* Merge captured facts over the empty shape so a partial capture (or a legacy row with
  * no facts) is always a complete, safe object. Arrays replace; sub-objects shallow-merge. */

@@ -21,7 +21,6 @@ const AXIS_OF_WALL = { top: "x", bottom: "x", left: "y", right: "y" };
 // Outward unit normal of each wall in the building's OWN (unrotated) frame, +y = south/down.
 const LOCAL_NORMAL = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
 
-export const wallAxis = (side) => AXIS_OF_WALL[side];
 
 /* ------------------------------------------------------------------ words */
 

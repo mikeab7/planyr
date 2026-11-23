@@ -189,7 +189,3 @@ export function resolveFloodSource({ enabled = false, countyKey = null, archiveS
  * ----------------------------------------------------------------------- */
 export const floodAbsenceKindFor = (source) => (source === "tiles" ? "outside-mapped" : "no-map");
 
-/* The sentence for each. Kept here beside the rule that picks it so the two cannot drift. */
-export const FLOOD_TILE_ABSENCE_NOTE =
-  "Outside the mapped floodplain on the baked FEMA tiles. The authoritative check for a parcel " +
-  "is still the live FEMA query.";

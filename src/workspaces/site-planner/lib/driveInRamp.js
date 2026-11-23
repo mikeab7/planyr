@@ -21,8 +21,7 @@
 
 export const RAMP_DEFAULTS = Object.freeze({ widthFt: 16, gradePct: 8, layout: "straight", dir: 1, door: "12x14", wings: true, bollards: true });
 export const RAMP_MAX_GRADE_PCT = 10;          // the practical forklift maximum
-export const RAMP_MIN_GRADE_PCT = 2;           // below this the length runs away; the input is clamped, never refused
-export const RAMP_MIN_WIDTH_FT = 14;           // one lane
+export const RAMP_MIN_GRADE_PCT = 2;                      // one lane
 export const RAMP_MAX_WIDTH_FT = 40;
 export const DOCK_HEIGHT_IN_DEFAULT = 48;
 export const RAMP_LAYOUTS = Object.freeze(["straight", "along"]);

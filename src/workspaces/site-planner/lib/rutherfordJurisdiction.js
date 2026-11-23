@@ -31,8 +31,6 @@ export function jurisdictionFrom(fc, lat, lng) {
 let CACHE = null;
 let LOADING = null;
 const subs = new Set();
-export const limitsReady = () => !!CACHE;
-export const subscribeLimits = (cb) => { subs.add(cb); return () => subs.delete(cb); };
 export function _setLimits(fc) { CACHE = fc; LOADING = fc ? Promise.resolve(fc) : null; } // tests / harness seam
 
 export function ensureLimits(fetchImpl = (typeof fetch === "function" ? fetch : null)) {

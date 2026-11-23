@@ -102,12 +102,3 @@ export function planToolbar({ items, available, prevStep = 0, opts }) {
 
 /* ---- module-tab strip: the same ladder with one extra rule ----------------------------------- */
 
-/** Priorities for a module tab strip: the ACTIVE tab is never collapsible (you must always see where you
- *  are); the rest keep their left-to-right order (rightmost goes first). */
-export function tabItems(tabs, activeId) {
-  return tabs.map((t, i) => ({
-    id: t.id, widthFull: t.widthFull, widthIcon: t.widthIcon,
-    priority: t.id === activeId ? 1000 : 100 - i,
-    collapsible: t.id !== activeId,
-  }));
-}

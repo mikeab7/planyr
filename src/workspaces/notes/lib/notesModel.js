@@ -63,10 +63,6 @@ export function newId(prefix = "n") {
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
 export const DEFAULT_PAGE_TITLE = "Untitled page";
-/** The home for pages that belong to no project — signed-out notes, and everything that
- *  was a loose notebook. It is a real place with the same shape as a project's pages, not a
- *  holding pen: nothing about a page changes by being here. */
-export const NO_PROJECT = null;
 export const NO_PROJECT_LABEL = "Not in a project";
 
 /* ---- construction ---------------------------------------------------------------- */

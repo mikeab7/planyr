@@ -52,7 +52,6 @@ export function publishSideDockWidth(px) {
   sideWidth = px > 0 ? px : 0;
   sideSubs.forEach((fn) => fn(sideWidth));
 }
-export function currentSideDockWidth() { return sideWidth; }
 export function useSideDockWidth() {
   const [w, setW] = useState(sideWidth);
   useEffect(() => {

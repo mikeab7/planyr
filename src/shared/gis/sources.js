@@ -3935,7 +3935,7 @@ export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
 // NEW-1 (FL/GA pipelines) — the four EIA rows the Florida/Georgia pipeline screen reads (one finding).
 export const EIA_PIPELINE_KEYS = ["eiaGas", "eiaPetroleum", "eiaCrude", "eiaHgl"];
 export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale", "etj_montbelvieu", "etj_chambers_neighbors"];
-export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
+ // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
 export function gisSource(key) {

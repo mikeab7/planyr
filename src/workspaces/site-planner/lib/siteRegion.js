@@ -300,8 +300,4 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
 }
 
 export const isColorado = (pt) => siteState(pt) === "CO";
-export const isGeorgia = (pt) => siteState(pt) === "GA";
-export const isTennessee = (pt) => siteState(pt) === "TN"; // NEW-1 (Tennessee)
-export const isCalifornia = (pt) => siteState(pt) === "CA";
-export const isNewJersey = (pt) => siteState(pt) === "NJ";
-export const isNewYork = (pt) => siteState(pt) === "NY";
+ 

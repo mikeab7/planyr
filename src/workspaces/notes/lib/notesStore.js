@@ -1143,7 +1143,6 @@ function saveSyncState() {
 
 const syncListeners = new Set();
 export function onNotesSyncState(fn) { syncListeners.add(fn); return () => syncListeners.delete(fn); }
-export function notesSyncState() { return { ...syncState }; }
 
 /** `pageId → the server's deleted_at (ms)`, for every page the last successful seed's index
  *  reported as BINNED (not yet purged). A snapshot, so a caller can hand it to a pure function
@@ -2221,12 +2220,6 @@ export async function readPageVersions(pageId) {
   return db.idbListVersions(versionPageKey(pageId));
 }
 
-/** One snapshot's document. */
-export async function readPageVersion(key) {
-  if (!key) return null;
-  const rec = await (await imageDb()).idbGetVersion(key);
-  return rec?.doc || null;
-}
 
 /** ⛔ RESTORE — AND IT CREATES A NEW VERSION RATHER THAN DESTROYING HISTORY.
  *

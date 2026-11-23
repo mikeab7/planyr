@@ -31,7 +31,6 @@ let CACHE = null;
 let LOADING = null;
 const subs = new Set();
 export const satellitesReady = () => !!CACHE;
-export const subscribeSatellites = (cb) => { subs.add(cb); return () => subs.delete(cb); };
 export function _setSatellites(fc) { CACHE = fc; LOADING = fc ? Promise.resolve(fc) : null; } // tests / harness seam
 
 export function ensureSatellites(fetchImpl = (typeof fetch === "function" ? fetch : null)) {

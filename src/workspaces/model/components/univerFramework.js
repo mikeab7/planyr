@@ -170,4 +170,3 @@ export function takePrewarmed() {
   }
   return p;
 }
-export const prewarmWaiting = () => !!pool;

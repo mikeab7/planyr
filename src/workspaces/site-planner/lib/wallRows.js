@@ -52,8 +52,6 @@ export function wallRowPlan(b) {
 export const KIND_LABEL = { court: "Court", trailer: "Trailer", buffer: "Buffer", sidewalk: "Sidewalk", parking: "Parking", road: "Road" };
 /** The longer name used in the editor box and the "+" catalog. */
 export const KIND_NAME = { court: "Truck court", trailer: "Trailer parking", buffer: "Landscape buffer", sidewalk: "Sidewalk", parking: "Car parking", road: "Road" };
-/** The ZONE_CATALOG key behind a layer kind. */
-export const KIND_CATALOG_KEY = { court: "court", trailer: "trailer", buffer: "buffer", sidewalk: "sidewalk", parking: "parking", road: "road" };
 
 const ft = (n) => `${Math.round(Number(n) || 0)}′`;
 
