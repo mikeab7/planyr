@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // B2584496 — the Schedule grid's selected / hovered ROW MARKER is ONE element per row, so a frozen (sticky, opaque) cell and a plain cell
 // cannot draw it differently.
@@ -12,7 +13,7 @@ import { fileURLToPath } from "node:url";
 //   cell's own border and a frozen cell rasterises them differently from a plain one wherever the device pixel ratio is fractional
 //   (browser zoom 125 / 150 / 175 %): ID / Task read thinner and greyer, Start onward heavier and bluer. So the line AND those two pixels
 //   are now painted by one element that sits above the frozen cells.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const css = src.slice(src.indexOf(".drow { display: flex;"), src.indexOf("/* A full-cell hover-revealed overlay"));
 const harness = readFileSync(fileURLToPath(new URL("../ui-audit/verify-grid-row-marker-uniform.mjs", import.meta.url)), "utf8");
 

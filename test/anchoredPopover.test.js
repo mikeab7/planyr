@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 / B2465520 — a popover opened from a Schedule cell stays attached to that cell.
 //
@@ -14,7 +15,7 @@ import { fileURLToPath } from "node:url";
 // REAL source (sliced out of public/sequence/index.html, not a mirror), and a sweep that stops the old pattern
 // coming back. Red-proof: against the pre-change source `anchorHidden` / `useAnchoredPopover` do not exist and
 // every test here fails at extraction.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 
 const sliceFrom = (signature, close) => {
   const start = src.indexOf(signature);

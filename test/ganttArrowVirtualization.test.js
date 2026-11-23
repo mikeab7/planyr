@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // B1113712 (NEW-1) / B1113713 (NEW-2) — owner report: "a bunch of arrows pointing to nothing" on
 // the Pappadoupolos schedule. Dependency arrows in the Gantt are drawn from a fully-computed
@@ -23,7 +24,7 @@ import { fileURLToPath } from "node:url";
 // RENDERED arrow endpoint's row index must fall inside the rendered bars' own [startIdx, endIdx)
 // window.
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 const extractConst = (name) => {
   const start = SRC.indexOf(`const ${name} = `);

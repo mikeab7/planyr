@@ -1,12 +1,12 @@
 // Adversarial stress test for the Scheduler date/cascade engine.
-// Exercises the REAL extracted functions (scheduler-engine.mjs) with malformed,
+// Exercises the REAL extracted functions (the real engine modules) with malformed,
 // hostile, and boundary inputs that a user (or imported/synced/hand-edited data)
 // could realistically produce. Reports CRASH (throw), HANG (unbounded loop), or
 // WRONG (silently bad result) findings.
 //
 //   node ui-audit/stress/stress-scheduler.mjs
 //
-import * as E from "./scheduler-engine.mjs";
+import * as E from "../../test/helpers/schedulerEngine.js";
 
 let pass = 0, fail = 0;
 const findings = [];

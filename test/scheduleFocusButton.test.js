@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // B2470832 — every summary row (a row with children) gets a Focus button. Owner report 2026-10-28, Grand Port ›
 // Master Schedule: Testing Consultants (children in progress), CMT (its one child in progress) and Alternates
@@ -11,7 +12,7 @@ import { fileURLToPath } from "node:url";
 // render-site pins below fail on the old inline `hasChildren && isExpanded && hideableCount > 0` condition.
 // The browser half (a real rendered schedule shaped like those rows, Grid + Split) is
 // ui-audit/verify-schedule-focus-button.mjs — 26/66 against the old page, 66/66 now.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const extractFn = (signature) => {
   const start = src.indexOf(signature);
   if (start === -1) throw new Error(`"${signature}" not found in public/sequence/index.html`);

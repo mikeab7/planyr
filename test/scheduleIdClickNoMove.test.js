@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (2026-10-28) — a press on a row's ID cell / grip is a CLICK until the held pointer has travelled a clear
 // distance, and the distance is larger for a pen and larger again for a finger. These run the REAL helpers and
 // assert the real source's gesture wiring (the browser behaviour itself is ui-audit/verify-schedule-id-click-no-move.mjs).
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const line = (prefix) => { const s = src.indexOf(prefix); if (s === -1) throw new Error(prefix + " missing"); return src.slice(s, src.indexOf("\n", s)); };
 const { ROW_DRAG_THRESHOLD, rowDragThreshold, rowDragArmed } = new Function(`
   ${line("const ROW_DRAG_THRESHOLD =")}

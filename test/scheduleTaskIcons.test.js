@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // SCHEDULE › TASK ICONS (NEW-1, owner-approved design 2026-11-06). The pure rules + the wiring, run against the REAL files:
 // public/sequence/taskIcons.js is evaluated (not mirrored) and the page source is sliced for the few functions that must carry
 // icons through a copy. The rendered behaviour (alignment, picker, summary, fallback) is ui-audit/verify-schedule-task-icons.mjs.
 const root = (p) => fileURLToPath(new URL("../" + p, import.meta.url));
 const libSrc = readFileSync(root("public/sequence/taskIcons.js"), "utf8");
-const page = readFileSync(root("public/sequence/index.html"), "utf8");
+const page = sequenceSource();   // page + the engine modules it runs (SCHEDULE_INPUT_KEYS etc. live in the engine)
 
 const TI = (() => { const g = {}; new Function("globalThis", "window", libSrc.replace(/\}\)\(typeof window[^\n]*\n?$/, "})(globalThis);\n"))(g, undefined); return g.PlanyrTaskIcons; })();
 

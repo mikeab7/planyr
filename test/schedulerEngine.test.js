@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "./helpers/schedulerEngine.js";
+import { sequenceSource, sequenceEngineSource } from "./helpers/sequenceSource.js";
 
 // Regression guard for the Scheduler date/cascade engine hardening (scheduling
 // stress-test, 2026-06-21). The engine lives in public/sequence/index.html (compiled
-// in-browser by Babel — not importable), so ui-audit/stress/scheduler-engine.mjs is a
+// in-browser by Babel — not importable), so src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js) is a
 // FAITHFUL COPY of those functions. The final `describe` block asserts the copy hasn't
 // drifted from the real source by checking the guard lines are present in index.html.
 
@@ -182,8 +183,8 @@ describe("constrainedStartFrom — the four MS-Project conventions", () => {
 });
 
 describe("anti-drift: the calendar-lag wiring exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("constrainedStartFrom branches addD (calendar) vs addBD (working) on lagUnit in both", () => {
     expect(src).toMatch(/dep\.lagUnit === "calendar" \? addD\(base, n\) : addBD\(base, n\)/);
     expect(mjs).toMatch(/dep\.lagUnit === "calendar" \? addD\(base, n\) : addBD\(base, n\)/);
@@ -384,9 +385,9 @@ describe("B568: renumberTasks resolves a duplicate id to the FIRST occurrence (o
 });
 
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   it("B568: renumberTasks first-occurrence guard exists in BOTH source and the engine mirror", () => {
-    const mirror = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    const mirror = sequenceEngineSource();
     expect(src).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
     expect(mirror).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
   });
@@ -513,8 +514,8 @@ describe("recomputeAfterStructureChange — parents roll up after an indent/outd
 });
 
 describe("anti-drift: the schedule-input fixes still exist in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const sjsx = sequenceEngineSource();
 
   it("export cover Date + Prepared-for are HTML-escaped", () => {
     expect(src).toMatch(/Prepared for: <strong>\$\{escapeHtml\(cfg\.preparedFor\)\}/);
@@ -604,8 +605,8 @@ describe("computeRolledHealth — a parent reflects the worst of its descendants
 });
 
 describe("anti-drift: the schedule-output fixes still exist in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const sjsx = sequenceEngineSource();
 
   it("the web/JSON/PDF exports use the Site-Planner filename format, not Hillwood/planar", () => {
     expect(src).not.toMatch(/Hillwood Schedule/);
@@ -720,8 +721,8 @@ describe("parseFlexDate — ISO fast-path must reject impossible calendar dates 
 });
 
 describe("anti-drift: the scheduler bug-batch fixes still exist in the real source", () => {
-  const src  = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs  = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src  = sequenceSource();
+  const mjs  = sequenceEngineSource();
 
   it("#1 parseFlexDate ISO fast-path round-trips through the calendar check (source + mirror)", () => {
     expect(src).toMatch(/const isoM = s\.match\(/);
@@ -953,8 +954,8 @@ describe("NEW-1 adjacentMeetingDate — step a bound row to the next/previous me
 });
 
 describe("anti-drift: NEW-1 adjacentMeetingDate exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("both directions read off meetingDatesInRange — no second recurrence engine", () => {
     expect(src).toMatch(/return meetingDatesInRange\(body, addD\(refDate, 1\), addD\(refDate, 366 \* 3\)\)\[0\] \|\| null;/);
     expect(mjs).toMatch(/return meetingDatesInRange\(body, addD\(refDate, 1\), addD\(refDate, 366 \* 3\)\)\[0\] \|\| null;/);
@@ -1224,8 +1225,8 @@ describe("NEW-1 migrateRecurrenceRule / normalizeMeetingCadence — lossless mig
 });
 
 describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("subBD is the inverse of addBD in both", () => {
     expect(src).toMatch(/subBD = \(s, n\) => addBD\(s, -n\);/);
     expect(mjs).toMatch(/subBD = \(s, n\) => addBD\(s, -n\);/);
@@ -1245,8 +1246,8 @@ describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirr
 });
 
 describe("anti-drift: NEW-1 mbRuleSummary + the meeting-cadence migration exist VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("mbRuleSummary builds the anchor clause the same way in both", () => {
     expect(src).toMatch(/base \+= `, counting from after the \$\{MB_SETPOS_LABEL\[String\(r\.anchor\.position\)\] \|\| r\.anchor\.position\} \$\{MB_WD_FULL\[r\.anchor\.weekday\] \|\| "\?"\}`;/);
     expect(mjs).toMatch(/base \+= `, counting from after the \$\{MB_SETPOS_LABEL\[String\(r\.anchor\.position\)\] \|\| r\.anchor\.position\} \$\{MB_WD_FULL\[r\.anchor\.weekday\] \|\| "\?"\}`;/);
@@ -1268,8 +1269,8 @@ describe("anti-drift: NEW-1 mbRuleSummary + the meeting-cadence migration exist 
 });
 
 describe("anti-drift: the NEW-1 generalized anchor primitive exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("meetingDatesInRange computes the anchor date and filters occurrences strictly after it, in both", () => {
     expect(src).toMatch(/const anchorDate = nthWeekdayOfMonth\(y, m, anchor\.weekday, anchor\.position\);/);
     expect(mjs).toMatch(/const anchorDate = nthWeekdayOfMonth\(y, m, anchor\.weekday, anchor\.position\);/);
@@ -1376,8 +1377,8 @@ describe("B816 cascadeDates — meeting-bound snap + the interaction matrix", ()
 });
 
 describe("anti-drift: the B816 meeting-bound snap exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("cascadeDates takes (tasks, bodies) and merges the MEETING_BODY_INDEX in both", () => {
     expect(src).toMatch(/const cascadeDates = \(tasks, bodies = \[\]\) => \{/);
     expect(src).toMatch(/const bodyMap = \{\.\.\.MEETING_BODY_INDEX\};/);
@@ -1710,8 +1711,8 @@ describe("deadline rows — computeDisplayHealth surfaces the call/file-by risk"
 });
 
 describe("anti-drift: the deadline-row wiring exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("the cascade post-pass snaps the row to anchor.meetingDeadline in both", () => {
     expect(src).toMatch(/t\.start = t\.end = anchor\.meetingDeadline; t\.duration = 0;/);
     expect(mjs).toMatch(/t\.start = t\.end = anchor\.meetingDeadline; t\.duration = 0;/);
@@ -1732,7 +1733,7 @@ describe("anti-drift: the deadline-row wiring exists VERBATIM in src + mirror", 
 
 // ── Round-2 scheduler bug-batch (2026-06-30) — anti-drift guards for the App-level fixes ──
 describe("anti-drift: the round-2 scheduler fixes still exist in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   const fjs = readFileSync(fileURLToPath(new URL("../src/shared/formula/formula.js", import.meta.url)), "utf8");
 
   it("TH1: renameProject guards a stale/non-existent project id (no ghost project)", () => {
@@ -1782,7 +1783,7 @@ describe("anti-drift: the round-2 scheduler fixes still exist in the real source
 
 // ── Round-3 scheduler bug-batch (2026-06-30) — anti-drift guards ──
 describe("anti-drift: the round-3 scheduler fixes still exist in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
 
   it("E1: the Gantt window is anchored to today + xOf is clamped (axis-clamp regression fixed)", () => {
     expect(src).toMatch(/const hardBack = addD\(NOW, -365 \* 30\), hardFwd = addD\(NOW, 365 \* 50\);/);
@@ -2083,8 +2084,8 @@ describe("B616 cascadeDates — a pinnedEnd task is a FIXED POINT, conflicts fla
 
 // ── anti-drift: the B615/B616 engine lives in BOTH the source and the mirror ──────────────────
 describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("B615: the pure helpers are present in source AND mirror", () => {
     for (const s of [src, mjs]) {
       expect(s).toContain("parseDurationInput");
@@ -2140,12 +2141,13 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
 // check is the only way to measure real box overflow. This is the cheap, CI-runnable half: pins the
 // two properties that caused the defect so neither can silently come back.
 describe("anti-drift: B1539584 showToast wraps instead of overflowing", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   it("the container no longer clips long content to a fixed nowrap width", () => {
     // The removed defect, verbatim: `whiteSpace: "nowrap"` on the flex container combined with the
     // flex-item default `min-width: auto` let text render past the box's own `max-width` — the box
     // was capped correctly, the TEXT inside it wasn't. Must not reappear on the toast container.
-    const toastFn = src.slice(src.indexOf("const showToast = (() => {"), src.indexOf("const parsePreds = raw"));
+    const from = src.indexOf("const showToast = (() => {");
+    const toastFn = src.slice(from, from + 3600);   // showToast is page-local; parsePreds (its old end marker) moved to the engine module
     expect(toastFn).not.toMatch(/whiteSpace:\s*"nowrap"/);
     expect(toastFn).toMatch(/maxWidth:\s*"min\(420px, calc\(100vw - 32px\)\)"/);   // caps at phone width too
   });
@@ -2166,7 +2168,7 @@ describe("anti-drift: B1539584 showToast wraps instead of overflowing", () => {
 // account, where background activity (autosave, realtime) makes the race far more likely to lose
 // than in a quiet sandbox tab.
 describe("anti-drift: B1539585 the meeting-roll toast survives deferred setData timing", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   it("the pending message is held in a ref, not a closure variable raced against setData", () => {
     expect(src).toMatch(/const rollToastRef = useRef\(null\);/);
     expect(src).not.toMatch(/let _rollToast = null;/);
@@ -2243,8 +2245,8 @@ describe("B817 computeDisplayHealth — a bound task surfaces risk before it sli
 });
 
 describe("anti-drift: the B817 float/cost + health wiring exists in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("meetingFloatBD + meetingCostDays present in both", () => {
     expect(src).toMatch(/const meetingFloatBD = \(task, todayIso\) =>/);
     expect(mjs).toMatch(/export const meetingFloatBD = \(task, todayIso\) =>/);
@@ -2316,8 +2318,8 @@ describe("B836 — detectCascadeDrift flags non-pinned tasks whose stored start 
 });
 
 describe("B836 — the drift guard is wired into the real source + engine mirror (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("detectCascadeDrift is defined in both the app source and the engine mirror", () => {
     expect(src).toContain("const detectCascadeDrift =");
     expect(mjs).toContain("export const detectCascadeDrift =");
@@ -2436,8 +2438,8 @@ describe("B835 (×2) — once the gate fires, a typed-duration edit re-flows the
 });
 
 describe("B835 (×2) — the touchesSchedule gate is wired into the real source + engine mirror (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("touchesSchedule + SCHEDULE_INPUT_KEYS are defined in BOTH the app source and the engine mirror", () => {
     expect(src).toContain("const touchesSchedule =");
     expect(src).toContain("const SCHEDULE_INPUT_KEYS =");
@@ -2503,8 +2505,8 @@ describe("B864 — orphaned meeting binding: preserve the date + flag it, never 
 });
 
 describe("B864 — the orphaned-binding hardening exists in BOTH the app source and the engine mirror (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("cascadeDates computes bodyMissing and soft-pins the start in both files", () => {
     for (const s of [src, mjs]) {
       expect(s).toContain("const bodyMissing = !!(t.meetingBound && !bodyMap[t.meetingBodyId] && !parentIds.has(t.id));");
@@ -2580,8 +2582,8 @@ describe("B864(b) — mergeCloudDoc rebases our edits onto the newer cloud witho
 });
 
 describe("B864(b) — the cloud-doc merge is wired into the save path in the real source", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("mergeCloudDoc is defined in BOTH the app source and the engine mirror", () => {
     expect(src).toContain("mergeCloudDoc");
     expect(mjs).toContain("export const mergeCloudDoc =");
@@ -2729,8 +2731,8 @@ describe("B443250 — a pinned start still WINS, but a pin that beats the chain 
 });
 
 describe("anti-drift: B443248/B443249/B443250 exist VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("cascadeDates skips date derivation for a summary row in both", () => {
     for (const s of [src, mjs]) expect(s).toMatch(/if \(parentIds\.has\(t\.id\)\) \{ t\.finishConflict = false; t\.startConflict = false; return; \}/);
   });
@@ -2800,8 +2802,8 @@ describe("B463072 — a summary row prints its ROLLED span, never the leftover t
 });
 
 describe("anti-drift: B463072 exists VERBATIM in src + mirror, and every render site passes the flag", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("fmtTaskDuration takes isSummary and short-circuits to the rolled span in both", () => {
     for (const s of [src, mjs]) {
       expect(s).toMatch(/fmtTaskDuration = \(t, isSummary = false\) =>/);
@@ -2921,18 +2923,20 @@ describe("NEW-schedule-health — evalHealthCondition: one condition, one fact, 
 });
 
 describe("NEW-schedule-health — evalHealthRules: ordering IS the mechanism (first match wins)", () => {
-  const task = { id: 1, name: "t", percentComplete: 100, responsibleParty: "" };  // matches BOTH "complete" and "noOwner"
-  it("complete-then-noOwner picks green; noOwner-then-complete picks red — same task, same rules, different order", () => {
-    const greenFirst = E.evalHealthRules(task, { healthRules: [
-      { id: "a", type: "complete", color: "green" },
-      { id: "b", type: "noOwner", color: "red" },
-    ] }, "2026-08-15");
+  // Matches BOTH "finishPastDays" and "noOwner". (It used to be a 100%-complete task matching "complete" + "noOwner";
+  // since B1953795 a complete task is guarded out of every attention-colour rule, so order can no longer be shown with one.)
+  const task = { id: 1, name: "t", health: "gray", end: "2026-08-01", percentComplete: 0, responsibleParty: "" };
+  it("finishPastDays-then-noOwner picks red; noOwner-then-finishPastDays picks yellow — same task, same rules, different order", () => {
     const redFirst = E.evalHealthRules(task, { healthRules: [
-      { id: "b", type: "noOwner", color: "red" },
-      { id: "a", type: "complete", color: "green" },
+      { id: "a", type: "finishPastDays", days: 1, color: "red" },
+      { id: "b", type: "noOwner", color: "yellow" },
     ] }, "2026-08-15");
-    expect(greenFirst).toBe("green");
+    const yellowFirst = E.evalHealthRules(task, { healthRules: [
+      { id: "b", type: "noOwner", color: "yellow" },
+      { id: "a", type: "finishPastDays", days: 1, color: "red" },
+    ] }, "2026-08-15");
     expect(redFirst).toBe("red");
+    expect(yellowFirst).toBe("yellow");
   });
   it("no rule matches → null, so the caller falls back to the stored health (never invents a color)", () => {
     expect(E.evalHealthRules({ id: 1, percentComplete: 0, responsibleParty: "Bob" }, { healthRules: [
@@ -3280,8 +3284,8 @@ describe("RULES-DECIDE (2026-08-25) — normalizeToV9 is RETIRED, along with the
 describe("COMPLETE-BEATS-ALL (2026-08-26, owner correction) — marking a task Complete overrides a firing rule, unconditionally", () => {
   const orig = E.NOW;
   afterEach(() => E.setNOW(orig));
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("a Complete (health:green) task with a past finish date and percentComplete < 100 renders green, not red — WITH an overdue rule configured", () => {
     // This is the exact live-production shape that regressed: the ordinary single-task edit path
@@ -3338,7 +3342,9 @@ describe("COMPLETE-BEATS-ALL (2026-08-26, owner correction) — marking a task C
     const NOWv = "2026-08-26";
     const preFixEvalHealthRules = (task, settings, taskById) => {
       const rules = Array.isArray(settings?.healthRules) ? settings.healthRules : [];
-      for (const r of rules) { if (E.evalHealthCondition(r.type, r.days, task, NOWv, taskById)) return r.color; }
+      // The v1 condition, written out (E.evalHealthCondition now treats a Complete task as 100% and so can no longer
+      // reproduce the pre-fix behaviour): "finish date N+ days past due", with no Complete awareness at all.
+      for (const r of rules) { if (r.type === "finishPastDays" && task.end && E.dif(task.end, NOWv) >= (r.days ?? 1)) return r.color; }
       return null;
     };
     const preFixComputeDisplayHealth = (task, settings, taskById) => {
@@ -3469,7 +3475,7 @@ describe("NEW-schedule-health — group headers: the engine NEVER runs on a pare
     expect(rolled[1]).toBe("yellow"); // raw, not rule-computed red — the cycle guard, not the leaf path
   });
   it("computeDisplayHealth itself is never even asked about the parent in the real call sites (source check)", () => {
-    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const src = sequenceSource();
     // Every real call site branches hasChildren/isSummary BEFORE reaching computeDisplayHealth.
     expect(src).toMatch(/task\.hasChildren\s*\n\s*\? \(rolledHealthMap\?\.\[task\.id\] \|\| task\.health\)\s*\n\s*: computeDisplayHealth\(task, data\.settings, taskById\)/);
     expect(src).toMatch(/const displayHealth = isSummary/);
@@ -3560,10 +3566,10 @@ describe("NEW-schedule-health — group headers: the engine NEVER runs on a pare
   });
 
   it("source check: computeRolledHealth and computeDisplayHealth never reference task.isExpanded (the invariant the test above relies on)", () => {
-    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const src = readFileSync(fileURLToPath(new URL("../src/shared/schedule/engine/health.js", import.meta.url)), "utf8");
     const between = (startRe, endRe) => { const s = src.match(startRe); if (!s) return ""; const from = s.index; const rest = src.slice(from); const e = rest.match(endRe); return e ? rest.slice(0, e.index) : rest; };
-    const computeRolledHealthBody = between(/const computeRolledHealth = /, /\n\nconst fmtD = /);
-    const computeDisplayHealthBody = between(/const computeDisplayHealth = /, /\n\n\/\/ Worst-of-descendants/);
+    const computeRolledHealthBody = between(/const computeRolledHealth = /, /$/);
+    const computeDisplayHealthBody = between(/const computeDisplayHealth = /, /\n\n\/\/ B1161792/);
     expect(computeRolledHealthBody).not.toMatch(/isExpanded/);
     expect(computeDisplayHealthBody).not.toMatch(/isExpanded/);
   });
@@ -3576,7 +3582,7 @@ describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, u
     const milestone = { id: 1, health: "gray", healthOverride: false, start: "2026-08-15", end: "2026-08-15", duration: 0, percentComplete: 0 };
     expect(E.computeDisplayHealth(milestone, settings)).toBe("yellow");
   });
-  it("B785744: percentComplete alone no longer exempts a task — only the STATUS field does (yellow + pct 100 still goes red)", () => {
+  it("B1953795 (supersedes B785744's 'pct alone does not exempt'): a task at 100% IS complete — yellow + pct 100 reads green, not red", () => {
     // ⛔ REWRITTEN for B785744. Under the v1 engine, every legacy condition's own `pct>=100` guard
     // meant a task with percentComplete:100 was silently exempt from ANY attention rule, however it
     // was labeled. That guard is gone — it's exactly the mechanism that made "Task is 100% complete"
@@ -3593,8 +3599,11 @@ describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, u
       { id: "b", type: "notStarted", color: "yellow" },
       { id: "c", type: "complete", color: "green" },
     ] };
+    // B1953795 (S2): completion has ONE answer (healthEngine.isCompleteTask — health "green" OR percentComplete >= 100), so
+    // the guard that protects a Complete task from an attention rule now protects a 100% task too. (The older B785744
+    // expectation here, "red", was only ever asserted against a stale hand copy of the engine, never the shipped code.)
     const done = { id: 1, health: "yellow", healthOverride: false, start: "2020-01-01", end: "2020-01-01", percentComplete: 100 };
-    expect(E.computeDisplayHealth(done, settings)).toBe("red");
+    expect(E.computeDisplayHealth(done, settings)).toBe("green");
     // The Status-marked-Complete equivalent DOES still exempt it, same overdue dates.
     const actuallyComplete = { ...done, health: "green" };
     expect(E.computeDisplayHealth(actuallyComplete, settings)).toBe("green");
@@ -3620,12 +3629,12 @@ describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, u
 });
 
 describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("the condition vocabulary is defined identically in both", () => {
     const vocab = /const HEALTH_CONDITIONS = \[\s*\n\s*\{k:"finishPastDays",   label:"Finish date is N\+ days past due",     needsDays:true,  defaultDays:1\},/;
     expect(src).toMatch(vocab);
-    expect(mjs).toMatch(/export const HEALTH_CONDITIONS = \[\s*\n\s*\{k:"finishPastDays",   label:"Finish date is N\+ days past due",     needsDays:true,  defaultDays:1\},/);
+    expect(mjs).toMatch(/(?:export )?const HEALTH_CONDITIONS = \[\s*\n\s*\{k:"finishPastDays",   label:"Finish date is N\+ days past due",     needsDays:true,  defaultDays:1\},/);
   });
   it("evalHealthCondition's switch cases are present in both, same order", () => {
     for (const s of [src, mjs]) {
@@ -3723,7 +3732,7 @@ describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mi
 // are removed. The Complete CAPABILITY is unchanged — only these two anchors below flip from
 // asserting presence to asserting absence; everything else in this block is untouched.
 describe("NEW-1: the successor prompt's Complete option and its own accept path", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
 
   it("StatusPills still offers Complete alongside the three original options", () => {
     expect(src).toMatch(/\{ k:'gray',   label:'Not Started' \},\s*\{ k:'yellow', label:'In Progress' \},\s*\{ k:'red',    label:'Needs Attn\.' \},\s*\{ k:'green',  label:'Complete' \},/);
@@ -3986,8 +3995,8 @@ describe("validatePredEdit — an ancestor/parent can never be accepted as a pre
 });
 
 describe("NEW-1 — the fix is wired into the real source + engine mirror (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("ancestorIdsOf + stripAncestorPredecessors are defined in both the app source and the engine mirror", () => {
     expect(src).toContain("const ancestorIdsOf =");
@@ -4010,7 +4019,7 @@ describe("NEW-1 — the fix is wired into the real source + engine mirror (anti-
 
 // ── NEW-2 (B1696641) — the drift/locked-finish banners name a row (ID + click-to-scroll), not just a name ──
 describe("NEW-2 — banners carry a row ID and jump to the row on click (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
 
   it("driftNotice renders the task ID and a goToTask jump per named row", () => {
     expect(src).toMatch(/#\{t\.id\} "\{t\.name\}" \{fmtD\(t\.from\)/);
@@ -4194,8 +4203,8 @@ describe("NEW-1 — mergeCloudDoc matches task-array elements by _sid, not the r
 });
 
 describe("NEW-3 — the merge/stale banners say what's known, never an unknowable tab/device (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("countChangedTaskRows is defined in both the app source and the engine mirror", () => {
     expect(src).toContain("const countChangedTaskRows =");
@@ -4218,7 +4227,7 @@ describe("NEW-3 — the merge/stale banners say what's known, never an unknowabl
 // available in this repo for this file, so these assert the actual wiring exists in source,
 // mirroring the pattern the "NEW-3" block above already uses for the same reason.
 describe("NEW-1 — false-conflict fixes are wired into the real source (anti-drift)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
 
   it("_sid is minted at task creation (mkt) and preserved/backfilled through renumberTasks + normalizeIds", () => {
     expect(src).toMatch(/const _mintTaskSid = \(\)/);
@@ -4322,7 +4331,7 @@ describe("scheduleLabelParts — the two halves crossScheduleLabel joins, for so
 // Goose Creek, one under Grand Port) and MasterView's "Group by project" merged them into one
 // section with a summed count, because it grouped by the bare `projName` instead of `projId`.
 // groupRowsByProject is the extracted, pure fix — mirrored verbatim in
-// ui-audit/stress/scheduler-engine.mjs. See ui-audit/verify-master-group-by-project.mjs for the
+// src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js). See ui-audit/verify-master-group-by-project.mjs for the
 // live-browser proof (this drives the same fixture shape headlessly against the real page).
 describe("groupRowsByProject — MasterView's 'Group by project' sections, never merged by a shared bare name", () => {
   // Row shape mirrors what MasterView's `rows` useMemo actually attaches to every task row.
@@ -4499,18 +4508,18 @@ describe("mergeLocationPhrase — the merge toast's \"where\", never silent abou
 });
 
 describe("NEW-1 — the cross-schedule label helpers are wired into every notice that names a row, and mirrored", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("crossScheduleLabel/scheduleRowPrefix/changedProjectIds/mergeLocationPhrase are defined in both the app source and the engine mirror", () => {
     for (const fn of ["crossScheduleLabel", "scheduleRowPrefix", "changedProjectIds", "mergeLocationPhrase"]) {
       expect(src, `${fn} missing from public/sequence/index.html`).toMatch(new RegExp("(function|const) " + fn));
-      expect(mjs, `${fn} missing from the engine mirror`).toContain("export " + (fn === "crossScheduleLabel" || fn === "scheduleRowPrefix" || fn === "mergeLocationPhrase" ? "function " : "const ") + fn);
+      expect(mjs, `${fn} missing from the engine modules`).toMatch(new RegExp("(?:export )?(?:function|const) " + fn));
     }
   });
   it("scheduleLabelParts is defined in both, and is what crossScheduleLabel is built from (B1873360)", () => {
     expect(src, "scheduleLabelParts missing from public/sequence/index.html").toMatch(/function scheduleLabelParts/);
-    expect(mjs, "scheduleLabelParts missing from the engine mirror").toContain("export function scheduleLabelParts");
+    expect(mjs, "scheduleLabelParts missing from the engine modules").toMatch(/(?:export )?function scheduleLabelParts/);
     expect(src).toMatch(/function crossScheduleLabel\(schedule\) \{\n\s*const \{ ownerLabel, name \} = scheduleLabelParts\(schedule\);/);
   });
   it("the ancestor-predecessor notice prints the disambiguating prefix in front of every named row, not just the schedule's own name", () => {
@@ -4542,7 +4551,7 @@ describe("NEW-1 — the cross-schedule label helpers are wired into every notice
 // behavior itself is unit-tested (groupRowsByProject, otherScheduleMeetingBodies) and
 // live-browser-verified (ui-audit/verify-master-group-by-project.mjs).
 describe("B1873360/B1873361 — every cross-schedule display in MasterView/the switcher/exports is qualified, never bare", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
 
   it("MasterView's rows carry projOwnerLabel/projLabel computed once per schedule (not per cell)", () => {
     expect(src).toMatch(/const \{ ownerLabel \} = scheduleLabelParts\(p\);/);
@@ -4578,7 +4587,7 @@ describe("B1873360/B1873361 — every cross-schedule display in MasterView/the s
     expect(src).toMatch(/\{projects\.map\(\(\[k, p\]\) => <option key=\{k\} value=\{k\}>\{crossScheduleLabel\(p\)\}<\/option>\)\}/);
   });
   it("the destructive delete-schedule confirm names the qualified label, not the bare name", () => {
-    expect(src).toMatch(/const name = crossScheduleLabel\(proj\);/);
+    expect(src).toMatch(/crossScheduleLabel\(proj0\)/);
   });
   it("both export paths' per-project section headers use crossScheduleLabel (PDF-PARITY: buildPDFHtml's Web Snapshot AND the standalone exportHTML)", () => {
     const literal = '<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>';
@@ -4603,11 +4612,11 @@ describe("B1873360/B1873361 — every cross-schedule display in MasterView/the s
 });
 
 // B1777120 — the schedule-normalization dual-write's pure decomposition step, mirrored in
-// ui-audit/stress/scheduler-engine.mjs. See src/workspaces/scheduler/db/schedules_normalization.sql
+// src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js). See src/workspaces/scheduler/db/schedules_normalization.sql
 // / schedules_decompose_recompose.sql for the SQL-side counterpart these fields must agree with.
 describe("decomposeForDualWrite — mirrored, source-checked", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("decomposeForDualWrite is defined in both the app source and the engine mirror", () => {
     expect(src, "decomposeForDualWrite missing from public/sequence/index.html").toMatch(/const decomposeForDualWrite = doc =>/);
@@ -4692,8 +4701,8 @@ describe("decomposeForDualWrite — mirrored, source-checked", () => {
 // itself and src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
 // schedules_recompose_to_planar_data() for the SQL-side counterpart of this pure function.
 describe("recomposeFromRows — mirrored, source-checked, and gated per-account by the server", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
 
   it("recomposeFromRows is defined in both the app source and the engine mirror", () => {
     expect(src, "recomposeFromRows missing from public/sequence/index.html").toMatch(/const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
@@ -4933,8 +4942,8 @@ describe("NEW-2 — meetingDoubleLagFlag / dropDuplicateLagPatch / meetingBindin
 });
 
 describe("anti-drift: NEW-1 findMeetingBodyElsewhere + NEW-2 double-lag helpers exist VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("findMeetingBodyElsewhere walks every OTHER project's meetingBodies in both", () => {
     expect(src).toMatch(/if \(!p \|\| p\.id === excludePid \|\| !Array\.isArray\(p\.meetingBodies\)\) continue;/);
     expect(mjs).toMatch(/if \(!p \|\| p\.id === excludePid \|\| !Array\.isArray\(p\.meetingBodies\)\) continue;/);
@@ -5182,8 +5191,8 @@ describe("NEW-1 — meeting-bound tasks jump FORWARD to the next real meeting", 
   });
 
   describe("anti-drift: the gate is wired into every edit path in the real source", () => {
-    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-    const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    const src = sequenceSource();
+    const mjs = sequenceEngineSource();
     it("resolveMeetingForward / resolveBoundEdit / boundEditNotice exist VERBATIM in src + mirror", () => {
       for (const needle of [
         "return meetingDatesInRange(body, iso, addD(iso, 366 * 3))[0] || null;",
@@ -5295,8 +5304,8 @@ describe("NEW-1 — meeting-bound tasks jump FORWARD to the next real meeting", 
       expect(r.msg).toMatch(/agenda closed 12\/01\/26 and "t1" isn't ready until 12\/09\/26/);
     });
     it("anti-drift: the check is wired into updateTask AND previewProject's reviewer (one check, VERBATIM in the mirror)", () => {
-      const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-      const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+      const src = sequenceSource();
+      const mjs = sequenceEngineSource();
       expect(src).toContain("newPinConflicts(_beforeTasks, tasks, _typedDate ? [taskId] : [])");
       expect(src).toContain("newPinConflicts(proj.tasks, previewTasks,");
       for (const needle of ['const kind = t.finishConflict ? "finish" : t.startConflict ? "start"', "return [...now.values()].filter(c => !was.has(c.id) || always.has(c.id));"]) {
@@ -5454,8 +5463,8 @@ describe("B2642096 ×2 — a person's date edit replaces an earlier stepped meet
   });
 
   describe("anti-drift: the fix exists VERBATIM in src + mirror, and the false comments are gone", () => {
-    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-    const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    const src = sequenceSource();
+    const mjs = sequenceEngineSource();
     it("the pure helpers match", () => {
       for (const needle of ["const settleBoundNotice = ", "const unpinStartPatch = ", "const startIsPinned = ", "const dropStep = "]) {
         expect(src.replace("export ", "")).toContain(needle); expect(mjs.replace(/export const/g, "const")).toContain(needle);

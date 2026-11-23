@@ -23,7 +23,7 @@ import { dirname, join, resolve } from "node:path";
 import { pondContours, detentionStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { createSiteModel, mergeSiteContent, contentCount, SITE_MODEL_VERSION } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { interpretCas, interpretInsert, isMissingVersionColumn } from "../src/shared/cloud/optimisticUpsert.js";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "../test/helpers/schedulerEngine.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -121,7 +121,7 @@ function ganttFixture() {
   return {
     fixtureVersion: FIXTURE_VERSION,
     generator: "scripts/build-fixtures.mjs",
-    engine: "ui-audit/stress/scheduler-engine.mjs (mirror of public/sequence/index.html)",
+    engine: "src/shared/schedule/engine (the modules public/sequence/index.html runs)",
     note: "Synthetic dense schedule (no real project). Load into public/sequence/index.html via loadPipeline for the ~33% zoom browser spec.",
     project: { id: "e2e-fixture-schedule", name: "E2E Dense Program", tasks },
     settings: { workingWeek: [1, 2, 3, 4, 5], barLabels: true },

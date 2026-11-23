@@ -39,6 +39,7 @@ import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { DELETE_VERIFY_MS, deleteStillPresent, deleteFailureMessage } from "./lib/scheduleDeleteVerify.js";
 import { installModifierForward } from "./lib/modifierForward.js";
+import { useTheme } from "../../shared/theme/ThemeProvider.jsx";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -448,6 +449,15 @@ export default function Scheduler({
       );
     } catch (_) {}
   };
+
+  // Audit batch J2 — the embedded Schedule follows the app's Light / Dark theme. The page also reads the shell's theme on
+  // first paint (same origin), so this message only has to carry the CHANGES (and cover a page that booted before it).
+  const { resolved: themeResolved } = useTheme();
+  useEffect(() => {
+    if (!ready && !navConfirmed) return;
+    post({ type: "planar:theme", theme: themeResolved });
+     
+  }, [ready, navConfirmed, themeResolved]);
 
   // NEW-1 (B1991040) — hand the embedded page every project's LIVE name so it resolves a schedule's
   // "<Project> / <Schedule>" label by linked id at read time (the stored `linkedSiteName` is only a

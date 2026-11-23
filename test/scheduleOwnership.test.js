@@ -110,7 +110,7 @@ describe("invariant 4 — the unowned state is unrepresentable", () => {
 // has used since PR #1849, instead of a second hand-copy. This is the first time these functions
 // are exercised by a plain `vitest` unit test rather than only a source-pattern check against the
 // scheduler HTML page (test/schedulerEngine.test.js, which tests a separate hand-maintained mirror,
-// ui-audit/stress/scheduler-engine.mjs).
+// src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js)).
 describe("crossScheduleLabel / scheduleLabelParts — the qualified '<Project> / <Schedule>' label", () => {
   it("RED-PROOF (fails on unmodified main): two schedules named identically under different projects must not produce the same string", () => {
     const a = { name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: "Goose Creek" };

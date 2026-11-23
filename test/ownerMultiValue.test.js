@@ -6,11 +6,11 @@
  * (isBlank/isNotBlank/is/contains all read the WHOLE list, not just the first entry).
  *
  * The pure functions live in public/sequence/index.html (compiled in-browser by Babel — not
- * importable); ui-audit/stress/scheduler-engine.mjs is a FAITHFUL mirror, guarded against drift by
+ * importable); src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js) is a FAITHFUL mirror, guarded against drift by
  * test/schedulerEngine.test.js's own anti-drift assertions. This file exercises the mirror directly.
  */
 import { describe, it, expect } from "vitest";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "./helpers/schedulerEngine.js";
 
 const T = (rp) => ({ id: 1, responsibleParty: rp });
 

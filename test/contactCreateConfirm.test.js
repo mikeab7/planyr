@@ -27,9 +27,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequenceSource();
 
 const pickerSrc = (() => {
   const start = seq.indexOf("function ContactPicker(");

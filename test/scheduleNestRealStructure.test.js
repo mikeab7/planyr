@@ -1,7 +1,9 @@
+// source-scan: reads the Schedule engine modules and page text, which cannot run in node on their own.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { grandPortTasks, GRAND_PORT_PLAN_A, GRAND_PORT_TASK_COUNT } from "../ui-audit/lib/grandPortScheduleStructure.mjs";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // B2445008 (×2) — "i still cant drop the rows under plan a", on the owner's REAL schedule structure.
 // The first nest fix passed its own tests and a signed-in live check and still failed for him. Two causes,
@@ -12,7 +14,7 @@ import { grandPortTasks, GRAND_PORT_PLAN_A, GRAND_PORT_TASK_COUNT } from "../ui-
 // These run the REAL functions sliced out of public/sequence/index.html. Red-proof: against 3a33571 the
 // file fails at extraction (rowFloatAtPointer / idPressMovesRows did not exist) — and the browser
 // harness goes 14/40 there, which is the behavioural red-proof.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const extractFn = (signature) => {
   const start = src.indexOf(signature);
   if (start === -1) throw new Error(`"${signature}" not found in public/sequence/index.html`);
@@ -34,7 +36,7 @@ const real = new Function(`
   ${extractFn("const flatOrderWithLevel = (tasks) => {")};
   ${extractFn('const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {')};
   ${stmt("const rowFloatAtPointer =")}
-  ${src.slice(src.indexOf("/* RANGE-SELECTION:START */"), src.indexOf("/* RANGE-SELECTION:END */"))}
+  ${readFileSync(fileURLToPath(new URL("../src/shared/selection/rangeSelection.js", import.meta.url)), "utf8").replace(/^export /gm, "")}
   ${extractFn("const idPressMovesRows = (selRange, ri, colCount) => {")};
   return { rowDropIntent, flatOrderWithLevel, moveSelectionToDestination, rowFloatAtPointer, idPressMovesRows };
 `)();

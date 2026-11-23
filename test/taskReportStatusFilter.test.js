@@ -6,8 +6,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 const START = "// ── Task Report filter (NEW-1)";
 const END = "// ── end Task Report filter";
 const a = SRC.indexOf(START), b = SRC.indexOf(END);

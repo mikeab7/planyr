@@ -4,7 +4,7 @@
 //   node ui-audit/stress/verify-b615-migration.mjs
 // (The real production before/after diff was run separately against the live scheduler Supabase —
 //  667 tasks, 0 real shifts; the 5 flagged were parents whose end comes from rollup, unchanged.)
-import * as E from "./scheduler-engine.mjs";
+import * as E from "../../test/helpers/schedulerEngine.js";
 
 let fail = 0;
 const ok = (cond, msg) => { if (!cond) { console.error("  ✗ " + msg); fail++; } };

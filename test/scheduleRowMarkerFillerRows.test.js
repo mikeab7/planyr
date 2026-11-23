@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (Schedule grid) — the hovered / selected ROW MARKER (the two thin lines) must run the full width of EVERY kind of
 // row, ID and Task included. The painted proof (pixels, on blank rows, "+ New task", task rows, scrolled, Split) is
@@ -10,7 +11,7 @@ import { fileURLToPath } from "node:url";
 //   and (b) must be positioned (relative or sticky) so the ::before is boxed by its OWN cell. A child that is matched but
 //   NOT positioned anchors the line to the whole row — painted over ordinary cells and UNDER the opaque sticky ID / Task
 //   cells, which is exactly the owner's "starts at START, not on ID/Task" report.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 const css = src.slice(src.indexOf(".drow { display: flex;"), src.indexOf("/* A full-cell hover-revealed overlay"));
 const sel = (name) => css.includes(name);
 

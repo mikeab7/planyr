@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "./helpers/schedulerEngine.js";
+import { sequenceSource, sequenceEngineSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (B1824576) — "Reuse a meeting calendar from another schedule instead of rebuilding it."
 // The import/copy/dedup logic lives in public/sequence/index.html (compiled in-browser by Babel
-// — not importable), so ui-audit/stress/scheduler-engine.mjs carries a VERBATIM mirror, same
+// — not importable), so src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js) carries a VERBATIM mirror, same
 // discipline as every other meeting-body engine function in this repo (see schedulerEngine.test.js).
 
 const rules = {
@@ -172,8 +173,8 @@ describe("otherScheduleMeetingBodies — the account-wide source list for the im
 });
 
 describe("anti-drift: the B1824576 meeting-import engine exists VERBATIM in src + mirror", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  const src = sequenceSource();
+  const mjs = sequenceEngineSource();
   it("mbBodiesSameCadence compares name + recurrence signature only, in both", () => {
     expect(src).toMatch(/mbBodiesSameCadence = \(a, b\) => !!a && !!b && \(a\.name \|\| ""\)\.trim\(\) === \(b\.name \|\| ""\)\.trim\(\) && mbRecurrenceSignature\(a\.recurrence\) === mbRecurrenceSignature\(b\.recurrence\);/);
     expect(mjs).toMatch(/mbBodiesSameCadence = \(a, b\) => !!a && !!b && \(a\.name \|\| ""\)\.trim\(\) === \(b\.name \|\| ""\)\.trim\(\) && mbRecurrenceSignature\(a\.recurrence\) === mbRecurrenceSignature\(b\.recurrence\);/);
@@ -199,7 +200,7 @@ describe("anti-drift: the B1824576 meeting-import engine exists VERBATIM in src 
 });
 
 describe("anti-drift: buildDuplicateProject reuses copyMeetingBodyWithNewId (no second re-id implementation)", () => {
-  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const src = sequenceSource();
   it("the per-body mapper calls the shared helper instead of re-ided inline", () => {
     expect(src).toMatch(/const copy = copyMeetingBodyWithNewId\(mb, i\);/);
     expect(src).toMatch(/if \(mb && mb\.id\) bodyIdMap\[mb\.id\] = copy\.id;/);

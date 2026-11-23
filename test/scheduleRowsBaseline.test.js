@@ -24,11 +24,12 @@ import { fileURLToPath } from "node:url";
 import {
   mergeCloudDoc, _mEq, _mIsObj, decomposeForDualWrite,
   countChangedTaskRows, changedProjectIds, mergeLocationPhrase,
-} from "../ui-audit/stress/scheduler-engine.mjs";
+} from "./helpers/schedulerEngine.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 const _deepClone = (o) => { try { return JSON.parse(JSON.stringify(o)); } catch { return o; } };
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 
 // Structural landmarks (the block's own opening declaration + the next top-level declaration/
 // object literal), never a copy of the logic — a mutation inside a block changes what gets

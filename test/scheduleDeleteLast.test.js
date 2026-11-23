@@ -6,8 +6,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { deleteStillPresent, deleteFailureMessage, DELETE_VERIFY_MS } from "../src/workspaces/scheduler/lib/scheduleDeleteVerify.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 const grab = (startMarker, endMarker) => {
   const a = SRC.indexOf(startMarker);
   if (a < 0) throw new Error("marker not found in public/sequence/index.html: " + startMarker);

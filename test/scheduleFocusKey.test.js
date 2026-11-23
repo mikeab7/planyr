@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-1 (B2455200) — Alt+F toggles Focus on the selected group. These run the REAL helpers out of
 // public/sequence/index.html (sliced from the source and evaluated), not a hand-copied mirror. Red-proof:
 // against the pre-change source neither helper exists and every test here fails at extraction.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 
 const extractFn = (signature) => {
   const start = src.indexOf(signature);

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { recomputeSchedule } from "../ui-audit/stress/scheduler-engine.mjs";
+import { recomputeSchedule } from "./helpers/schedulerEngine.js";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
 // NEW-ROWNEST — dragging rows onto the CENTRE of a row nests them under it, including a row that has
 // no children yet (the only case where there is no gap between a parent and a first child to aim at).
@@ -9,7 +10,7 @@ import { recomputeSchedule } from "../ui-audit/stress/scheduler-engine.mjs";
 // These tests run the REAL functions out of public/sequence/index.html (sliced out of the source and
 // evaluated), not a hand-copied mirror, so they cannot drift from what ships. The red-proof: against
 // the pre-change source `rowDropIntent` does not exist and every test here fails at extraction.
-const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const src = sequenceSource();
 
 const extractFn = (signature) => {
   const start = src.indexOf(signature);

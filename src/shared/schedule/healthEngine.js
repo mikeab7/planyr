@@ -1,39 +1,19 @@
 // src/shared/schedule/healthEngine.js
 //
 // B1953795 (S2/S4/S5) — the Scheduler's task-health rule engine + the ONE "is it complete / what %"
-// answer, as a real ES module the Dashboard can import. The embedded Scheduler
-// (public/sequence/index.html, compiled in-browser, cannot import from src/) holds the SAME text
-// between its `@shared-engine:begin/end` markers; test/scheduleHealthEngineParity.test.js fails if
-// the two ever differ, so there is ONE definition kept in two places by a machine check, not two
-// hand-maintained heuristics (the Dashboard's old "simplified independent heuristic" is retired).
-//
-// Everything between the markers below is copied VERBATIM from index.html. Edit index.html first,
-// then re-copy (node scripts/sync-health-engine.mjs writes this file from it).
+// answer, as a real ES module. The Dashboard imports it directly; the Schedule page gets it through the
+// generated public/sequence/engine.js bundle (npm run build:sequence-engine), so there is ONE definition —
+// the old pasted copy inside index.html and its parity test are gone (audit batch J1).
 //
 // WHAT THIS DOES NOT COVER (said loudly, not hidden): the meeting-bound / deadline-row risk blocks of
 // the grid's computeDisplayHealth need business-day math + cascade-derived fields (meetingInfeasible,
-// deadlineInfeasible) that live only in the embedded app, so `displayHealth` here is the rule engine
+// deadlineInfeasible); those live in engine/health.js. `displayHealth` here is the rule engine
 // + the completion answer + the stored-status fallback, i.e. exactly the grid's answer for every task
 // that is not meeting-bound / a deadline row.
 
-const pd = s => new Date(s + "T12:00:00");
-const dif  = (a, b) => Math.round((pd(b) - pd(a)) / 86400000);
-const ownerListOf = t => {
-  const rp = t && t.responsibleParty;
-  const raw = Array.isArray(rp) ? rp : (rp ? [rp] : []);
-  const seen = new Set(); const out = [];
-  raw.forEach(name => {
-    const s = String(name == null ? "" : name).trim();
-    if (!s) return;
-    const k = s.toLowerCase();
-    if (seen.has(k)) return;
-    seen.add(k); out.push(s);
-  });
-  return out;
-};
+import { pd, dif } from "./engine/calendar.js";
+import { ownerListOf } from "./engine/owners.js";
 
-/* @shared-engine:begin — mirrored VERBATIM in src/shared/schedule/healthEngine.js (the Dashboard
- * consumes that module); test/scheduleHealthEngineParity.test.js fails if the two drift. Edit BOTH. */
 // ── B1953795 (S2) — "Complete" has ONE answer. A task's completion lives in two stored fields
 // (`health === "green"` from the status pill, `percentComplete` from the % cell); leaf writers used to
 // update only one, and readers picked whichever they liked. Now every reader asks these functions and
@@ -347,7 +327,6 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
   for (const r of rules) { const c = evalRule(r, task, NOW, taskById); if (c) return c; }
   return null;
 };
-/* @shared-engine:end */
 
 export {
   isCompleteTask, leafPercent, rolledPercentMap, effectivePercentComplete, completionDelta, cascadeDelta,

@@ -1,14 +1,16 @@
+// source-scan: reads the Schedule engine modules and page text, which cannot run in node on their own.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import * as E from "../ui-audit/stress/scheduler-engine.mjs";
+import * as E from "./helpers/schedulerEngine.js";
+import { sequenceSource, sequencePageSource } from "./helpers/sequenceSource.js";
 
 /* B1953795 (S7) — the owner<->contact link is by NAME string. The picker and ensureContacts compared
  * lower-cased; the rename/delete cascade used case-SENSITIVE includes(). So a legacy task owner 'jon smith'
  * against contact 'Jon Smith': renaming the contact left the task on the old name AND ensureContacts then
  * respawned 'jon smith' as a duplicate contact. One normalizer (ownerKey) now serves all three.
  * The functions live in public/sequence/index.html (not importable); the mirror in
- * ui-audit/stress/scheduler-engine.mjs is exercised here and its text is asserted present in the source. */
-const html = readFileSync("public/sequence/index.html", "utf8");
+ * src/shared/schedule/engine/ (via test/helpers/schedulerEngine.js) is exercised here and its text is asserted present in the source. */
+const html = sequenceSource();
 
 describe("ownerKey / ownerHas / renameOwnerIn / removeOwnerFrom", () => {
   it("RED-PROOF (main used case-sensitive includes): a legacy lower-case owner still matches the contact", () => {
@@ -38,9 +40,11 @@ describe("ownerKey / ownerHas / renameOwnerIn / removeOwnerFrom", () => {
 describe("Scheduler source uses the ONE normalizer at every link site (no drift from the mirror)", () => {
   it("the four pure functions are present verbatim in index.html", () => {
     for (const fn of ["ownerKey", "ownerHas", "renameOwnerIn", "removeOwnerFrom"]) {
-      const m = readFileSync("ui-audit/stress/scheduler-engine.mjs", "utf8").match(new RegExp(`export const ${fn} = [\\s\\S]*?;\\n`));
-      expect(m, fn).toBeTruthy();
-      expect(html.includes(m[0].replace("export const", "const")), fn).toBe(true);
+      // One definition now (src/shared/schedule/engine/owners.js, bundled into the page): it must exist there, and the
+      // page must no longer carry a second copy of it.
+      const owners = readFileSync("src/shared/schedule/engine/owners.js", "utf8");
+      expect(owners, fn).toMatch(new RegExp(`export const ${fn} = `));
+      expect(sequencePageSource(), fn).not.toMatch(new RegExp(`\\bconst ${fn} = `));
     }
   });
   it("the cascade, picker and ensureContacts all compare through ownerKey — no raw case-sensitive owner compare remains", () => {

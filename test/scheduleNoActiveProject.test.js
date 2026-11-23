@@ -7,8 +7,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sequenceSource } from "./helpers/sequenceSource.js";
 
-const SRC = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+const SRC = sequenceSource();
 const block = SRC.slice(SRC.indexOf("const VIEW_TAB_KEYS"), SRC.indexOf("function App() {"));
 const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };
 const mod = new Function("sessionStorage", "localStorage", `${block}\nreturn { pickActivePid, activeProjectOf, resolveViewState };`)(store(), store());

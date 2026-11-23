@@ -79,19 +79,18 @@ describe("build-sequence-compiled (B1167200)", () => {
     // (main app) <script type="text/babel"> block, in memory only, and require compilation to
     // throw rather than silently emit a broken page.
     const marker = '<script type="text/babel">';
-    const firstStart = REAL_HTML.indexOf(marker);
-    const secondStart = REAL_HTML.indexOf(marker, firstStart + 1);
-    expect(secondStart).toBeGreaterThan(-1);
-    const openTag = REAL_HTML.indexOf(">", secondStart) + 1;
+    const appStart = REAL_HTML.indexOf(marker);
+    expect(appStart).toBeGreaterThan(-1);
+    const openTag = REAL_HTML.indexOf(">", appStart) + 1;
     const mutated =
       REAL_HTML.slice(0, openTag) + "\nconst __MUTATION_TEST__ = (;\n" + REAL_HTML.slice(openTag);
     expect(() => compileSequenceHtml(mutated)).toThrow(/failed to compile/);
   });
 
   it("⛔ MUTATION PROOF — compileSequenceHtml refuses to emit a page missing the babel blocks entirely", () => {
-    // If the source's shape ever changes so the walker finds fewer than 2 blocks (a bad merge,
+    // If the source's shape ever changes so the walker finds no block (a bad merge,
     // an accidental strip), the build must fail loudly rather than silently ship whatever it found.
     const noBlocks = "<html><body><script>var x = 1;</script></body></html>";
-    expect(() => compileSequenceHtml(noBlocks)).toThrow(/expected >=2/);
+    expect(() => compileSequenceHtml(noBlocks)).toThrow(/expected >=1/);
   });
 });

@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "node:fs";
 import {
   computeDisplayHealth as NEW_computeDisplayHealth,
   buildHolidaySet, setHOLIDAY_SET, setNOW,
-} from "./scheduler-engine.mjs";
+} from "../../test/helpers/schedulerEngine.js";
 
 const snapshotPath = process.argv[2] || new URL("../../.golden/hs-v1.json", import.meta.url).pathname;
 if (!existsSync(snapshotPath)) {
