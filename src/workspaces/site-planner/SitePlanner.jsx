@@ -28241,10 +28241,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onCommit={(deg) => rotateSelTo(deg)} onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} style={{ justifyContent: "flex-end" }} />, "")}
 
                         {specHead("Parking layout", [specAction("Set as standard", () => {
-                          setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle }));
-                          flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000);
-                        }, "Make this field's stall depth & drive aisle the plan standard for new parking")])}
+                          setSettings((s) => ({ ...s, stallW: pc.stallW, stallDepth: pc.stallDepth, aisle: pc.aisle }));
+                          flashWarn("Saved to Standards — new parking starts with this stall width, depth & aisle.", 4000);
+                        }, "Make this field's stall width, stall depth & drive aisle the plan standard for new parking")])}
                         {specRow("Stall depth", <NumInput style={specNum} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} />, "ft")}
+                        {specRow("Stall width", <NumInput style={specNum} value={pc.stallW} min={6} onCommit={(n) => setParkCfg(selEl, { stallW: n })} />, "ft")}
                         {specRow("Drive aisle", <NumInput style={specNum} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} />, "ft")}
                         {rows >= 2 && specRow("Module", <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 12, color: PAL.ink, fontWeight: 600 }}>{f0(pc.stallDepth)}′+{f0(pc.aisle)}′+{f0(pc.stallDepth)}′={f0(mod)}′</span>, "",
                           "Row + aisle + row — the double-loaded module this field's depth is built from")}
@@ -28893,7 +28894,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} SF) → <b style={{ color: PAL.ink }}>{f0(area + ba)} SF</b> total<br /></span>;
                     })()}
-                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || carStalls(selEl.w, selEl.h, cfgOf(selEl))).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
+                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || carStalls(selEl.w, selEl.h, cfgOf(selEl))).count)}</b>{poly ? " (est.)" : <> @ {cfgOf(selEl).stallW}′×{cfgOf(selEl).stallDepth}′ {cfgOf(selEl).parkAngle}°, {cfgOf(selEl).aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws

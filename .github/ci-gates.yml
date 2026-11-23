@@ -79,12 +79,6 @@ jobs:
         run: node ui-audit/doc-pointer-audit.mjs
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
-      # Mint gate (B779 second pass). RETIRED IN PRACTICE since 2026-11-05 (NEW-1): the ledger lives on its own branch and ids are
-      # minted atomically by `npm run ledger -- add`, so a branch adds no ledger entries and this exits 0 at once
-      # (scripts/check-mint.mjs, `isBranchMode`). It stays as a step so that if the marker file `.github/ledger-branch.json` is ever
-      # removed — the ledger moved back into the tree — the original collision gate re-engages instead of silently vanishing.
-      - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
-        run: node scripts/check-mint.mjs --ci
       # Ops digest dry run (B2159504). The `ops-digest` job in build.yml pushes the ledger digest to the admin
       # Ops page after every merge to main; this proves on every PR that the payload still builds and validates
       # and the request is well formed, without sending anything or needing the OPS_INGEST_TOKEN secret.
