@@ -11,7 +11,7 @@ const src = plannerSource();
 
 describe("DECISION 3 — the finished floor floats off the regulatory code minimum, never below", () => {
   it("imports the pure ffeBalance layer", () => {
-    expect(src).toContain('import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";');
+    expect(src).toContain('import { solveBalanceFfe, ffeDualDisplay } from "../lib/ffeBalance.js";');
   });
   it("fmEffectivePadFt folds the balance uplift onto the AUTO code floor (manual pad still wins)", () => {
     expect(src).toContain("const fmBalanceRaiseFt = fmManualPadFt == null && Number.isFinite(gradingSettings.ffeBalanceRaiseFt) && gradingSettings.ffeBalanceRaiseFt > 0");
