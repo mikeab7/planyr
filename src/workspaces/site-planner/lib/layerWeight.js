@@ -35,7 +35,7 @@
  * Pure: no React, no Leaflet, no DOM.
  */
 
-import { OK_LAYER_TIERS } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
+import { OK_LAYER_TIERS } from "./oklahomaStatic.js"; // NEW-1 (Oklahoma screening)
 
 export const TIERS = ["constraint", "reference", "context"];
 

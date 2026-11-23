@@ -15,12 +15,14 @@
  */
 import { useEffect, useRef } from "react";
 import { ALL_LAYERS } from "./layers.js";
+import { useLayerRegistryVersion } from "./useLayerRegistry.js";
 import { nextHiddenToast } from "./layerHiddenToast.js";
 
 export const LAYER_HIDDEN_TOAST_KEY = "layer-hidden-at-zoom";
 export const LAYER_HIDDEN_SETTLE_MS = 250;
 
 export function useLayerHiddenToast({ enabled, zoom, overlays, pushToast, dismissByKey, zoomTo }) {
+  const registryVersion = useLayerRegistryVersion(); // a layer file that lands late can have a zoom gate to announce
   const announcedRef = useRef(null);
   const zoomToRef = useRef(zoomTo);
   zoomToRef.current = zoomTo;
@@ -41,5 +43,5 @@ export function useLayerHiddenToast({ enabled, zoom, overlays, pushToast, dismis
       }
     }, LAYER_HIDDEN_SETTLE_MS);
     return () => clearTimeout(t);
-  }, [enabled, zoom, overlays]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, zoom, overlays, registryVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -22,7 +22,7 @@
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { GIS_FETCH_TIMEOUT_MS } from "./gisFetch.js";
-import { OK_VECTOR_SOURCES } from "./oklahomaLayers.js"; // NEW-1 (Oklahoma screening)
+import { OK_VECTOR_SOURCES } from "./oklahomaStatic.js"; // NEW-1 (Oklahoma screening)
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
