@@ -500,7 +500,6 @@ export function fsElement() {
   if (typeof document === "undefined") return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
-export function fsSupported() { return fullscreenApiAvailable(); }
 /* Ask for fullscreen on the document ROOT. Resolves when the browser granted it; REJECTS when it
  * refused (no user activation, a permissions policy, an iframe without allow="fullscreen") or
  * when the API is absent — the caller falls back to hiding the header alone. */

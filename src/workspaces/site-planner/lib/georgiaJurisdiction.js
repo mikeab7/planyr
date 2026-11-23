@@ -38,8 +38,6 @@ export const GA_CONSOLIDATED = {
 
 const norm = (s) => String(s == null ? "" : s).trim().toLowerCase().replace(/\s+county$/, "").replace(/[.,']/g, "").replace(/\s+/g, " ");
 
-export const inGeorgiaEnvelope = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng)
-  && lat >= GA_ENVELOPE.latMin && lat <= GA_ENVELOPE.latMax && lng >= GA_ENVELOPE.lonMin && lng <= GA_ENVELOPE.lonMax;
 
 /* The consolidated government a jurisdiction answer sits in, or null. `counties` is the county name list
  * from the identify ("Clarke"); `cities` is the city list. A county is consolidated on its own — every

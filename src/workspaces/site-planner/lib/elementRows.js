@@ -17,7 +17,6 @@ export const KIND_TO_FIELD = {
 export const FIELD_TO_KIND = Object.fromEntries(
   Object.entries(KIND_TO_FIELD).map(([k, f]) => [f, k])
 );
-export const ELEMENT_FIELDS = Object.values(KIND_TO_FIELD);
 
 // Migration z step: array position * Z_GAP, so reorders can insert between neighbors
 // without renumbering (same rule as the SQL backfill — change BOTH or neither).

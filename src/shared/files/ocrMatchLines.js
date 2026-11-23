@@ -17,7 +17,6 @@
  */
 import { reconstructLines, parseMatchLines, edgeOf } from "./sheetMeta.js";
 
-export const OCR_ORIENTATIONS = [0, 90, 270];
 
 // In-frame page-unit dims for a pass: a 90°/270° pass swaps width/height (the page is on its side).
 function frameDims(deg, W, H) {

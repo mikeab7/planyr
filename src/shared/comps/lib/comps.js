@@ -17,13 +17,6 @@ import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 export const COMP_TYPES = ["land", "building_sale", "lease"];
 export const LEASE_PERIODS = ["annual", "monthly"];
 export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
-// ⛔ EXHAUSTIVE, not open to extension (B972512-HARDENING new finding 4) — the database's
-// `comps_anchor_kind_check` CHECK constraint enumerates exactly these three values. Adding a
-// fourth kind here without a matching migration (drop + recreate that constraint, and
-// comps_parcel_anchor_has_identity alongside it) fails every insert/update of that kind with a
-// raw 23514 the instant it reaches Postgres — never just a frontend change.
-export const ANCHOR_KINDS = ["pin", "parcel", "site_plan"];
-
 
 export function isCompType(t) {
   return COMP_TYPES.includes(t);

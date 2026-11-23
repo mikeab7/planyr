@@ -10,12 +10,10 @@
  * possible callers.
  */
 
-let openState = false;
 const listeners = new Set();
 
-export function openShortcutsPage() { openState = true; for (const cb of listeners) cb(true); }
-export function closeShortcutsPage() { openState = false; for (const cb of listeners) cb(false); }
-export function isShortcutsPageOpen() { return openState; }
+export function openShortcutsPage() { for (const cb of listeners) cb(true); }
+export function closeShortcutsPage() { for (const cb of listeners) cb(false); }
 
 /** Subscribe to open/close changes. Returns an unsubscribe function. */
 export function subscribeShortcutsPage(cb) {

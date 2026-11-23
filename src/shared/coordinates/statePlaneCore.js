@@ -477,4 +477,3 @@ export function gridConvergenceDegIn(lat, lon, zone) {
 }
 
 export const zoneById = (id) => SP_ZONES[id] || null;
-export const ZONE_IDS = Object.keys(SP_ZONES);

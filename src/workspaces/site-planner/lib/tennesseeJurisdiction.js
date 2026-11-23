@@ -20,8 +20,6 @@
  *
  * Pure. No React, no DOM, no network. Node-testable. */
 
-/* [latMin, lonMin, latMax, lonMax] — same tuple order as `siteRegion.STATE_ENVELOPES`. */
-export const TN_ENVELOPE_BOX = [34.95, -90.4, 36.72, -81.55];
 export const TN_ENVELOPE = { latMin: 34.95, latMax: 36.72, lonMin: -90.4, lonMax: -81.55 };
 
 /* The state outline, [lng, lat] — hand-simplified from the real border, nudged a few km outward on the Mississippi and

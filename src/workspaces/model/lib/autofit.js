@@ -12,7 +12,7 @@
 import { displayFor } from "./sheetEngine.js";
 import { colAt, mergeAt, styleAt, DEFAULT_ROW_H } from "./sheetModel.js";
 
-export const CELL_FONT = "12.5px system-ui, sans-serif"; // must match the cell's rendered font in SheetView
+ // must match the cell's rendered font in SheetView
 const BASE_FONT_PX = 12.5;
 const PAD_X = 12;      // 6px cell padding each side
 const COL_PAD = 18;    // + breathing room (the historical value, unchanged)

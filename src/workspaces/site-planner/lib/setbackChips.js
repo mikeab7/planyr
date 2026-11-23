@@ -226,6 +226,3 @@ function spreadOf(edges, signedTurn, edgeCount) {
   return hi - lo;
 }
 
-/** The run containing edge `edgeIndex`, or null. */
-export const chipRunOfEdge = (runs, edgeIndex) =>
-  (runs || []).find((r) => r.edges.includes(edgeIndex)) || null;

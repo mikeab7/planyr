@@ -17,7 +17,6 @@ const DB_NAME = "planyr";
 const STORE = "kv";
 const idb = (typeof indexedDB !== "undefined" && indexedDB) ? indexedDB : null;
 
-export const originStoreAvailable = () => !!idb;
 
 // Open read-only. Resolves null when IndexedDB is missing, the open fails, or the store isn't there.
 function openDb() {

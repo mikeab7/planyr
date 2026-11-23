@@ -813,7 +813,6 @@ const textString = (s) => {
   for (let i = 0; i < t.length; i++) hex += t.charCodeAt(i).toString(16).padStart(4, "0");
   return `<${hex}>`;
 };
-export const pdfTextString = textString;
 
 /**
  * The annotation dictionary body (without the /AP reference), as a string. `apRef` is "N 0 R".

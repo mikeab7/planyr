@@ -6,7 +6,6 @@
  *   blocked   — the environment can never answer (opacity-dimmed; handled outside this table)
  * Events: tap · found · error · panned · stop. Unknown pairs return the state unchanged. */
 
-export const LOCATE_STATES = ["idle", "locating", "following", "located", "blocked"];
 
 const TABLE = {
   idle:      { tap: "locating" },

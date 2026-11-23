@@ -13,8 +13,7 @@
 import { PALETTES } from "../../theme/palette.js";
 import { notePinSvg, pinHitBox } from "./mapPinSymbol.js";
 
-export const NOTE_MARKER_COLOR = PALETTES.light.accentNotes;   // the --accent-notes magenta
-export const NOTE_MARKER_INK = PALETTES.light.onAccentNotes;   // white — the --on-accent-notes token
+export const NOTE_MARKER_COLOR = PALETTES.light.accentNotes;      // white — the --on-accent-notes token
 
 /** The note pin's svg (circle + folded-page glyph; ring when `selected`). */
 export function mapNoteMarkerSvg({ selected = false } = {}) {

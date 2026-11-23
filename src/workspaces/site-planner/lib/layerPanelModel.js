@@ -33,7 +33,6 @@ export const PANEL_GROUPS = [
   { key: "env", label: "Environmental" },
   { key: "access", label: "Access" },
 ];
-export const PANEL_GROUP_KEYS = PANEL_GROUPS.map((g) => g.key);
 
 /* registry `group` → panel group. The registry's own taxonomy (LAYER_GROUP_ORDER) is left exactly as
  * it is — other surfaces and tests read it; this map is the panel's view of it. */
@@ -145,9 +144,6 @@ export function drawnOverlaysOf(overlays, { hideAll = false, scope = null, layer
 export const CONTOUR_INTERVALS = Object.freeze([1, 2, 5, 10]);
 export const DEFAULT_CONTOUR_INTERVAL = 1;
 export const normalizeContourInterval = (v) => (CONTOUR_INTERVALS.includes(Number(v)) ? Number(v) : DEFAULT_CONTOUR_INTERVAL);
-/* The heavier (index) line sits on every 5th interval: 1→5 ft, 2→10 ft, 5→25 ft, 10→50 ft. */
-export const CONTOUR_INDEX_EVERY = 5;
-export const contourIndexFt = (interval) => normalizeContourInterval(interval) * CONTOUR_INDEX_EVERY;
 export const contourIntervalLabel = (interval) => `${normalizeContourInterval(interval)} ft`;
 export const contourRowValue = (interval) => `${normalizeContourInterval(interval)}′`;
 

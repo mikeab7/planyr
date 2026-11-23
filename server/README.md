@@ -1,15 +1,17 @@
-# server/ — placeholder (NOT built, NOT deployed)
+# server/ — what is live, what is not
 
-This folder is intentionally empty for now. It will hold **backend code and
-secrets** in a later phase (e.g. Autodesk APS, Google Drive integrations) — things
-that must run server-side and must never ship in the public frontend bundle.
+This folder holds server-side code that must never ship in the public frontend bundle. It is
+excluded from the static Vite build. Secrets live only in environment/secret stores (Cloudflare
+Pages env, Cloud Run), never committed and never imported by anything under `src/` that deploys.
 
-Rules for when this is populated:
-- **Nothing here is built or deployed** by the current frontend pipeline (Vite →
-  `dist/`, published by Cloudflare Pages). It is excluded from the static build.
-- **Secrets live only here**, in environment/secret stores — never committed, never
-  imported by anything under `src/` that auto-deploys to a public URL.
-- Keep this isolated from any auto-merge-to-public-URL path.
+**Status of each subfolder** (so audits stop counting dormant code as live):
 
-Until then: frontend is a public static app with no secrets (Supabase anon key is
-public-safe and gated by RLS).
+| Folder | Status | Notes |
+|---|---|---|
+| `auth/` | **Live** | Imported by the Cloudflare Pages Functions under `functions/api/` (files, file, mailbox-proof, share). |
+| `oauth/` | **Live** | Google OAuth consent start/callback (`functions/api/auth/google/*`). Do not re-mint the refresh token. |
+| `storage/` | **Live** | Drive-backed file storage, id maps, folder mirror; used by `functions/api/files`, `drive/selftest`, the gis-/parcel-cache proxies. |
+| `uploads/` | **Live** | Chunked resumable upload relay (`functions/api/uploads/*`). |
+| `convert/` | **Built, NOT deployed** | DWG→DXF (LibreDWG, APS fallback) for a Cloud Run container. Frontend client `convertClient.js` 503s gracefully until deployed. |
+| `filing/` | **Dormant** | Tier-2 AI title-block read (Claude API) for Cloud Run; off until `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED` are set. Tier-1 auto-filing runs in the browser and does not use this folder. |
+| `ingest/thoroughfare.mjs` | **Manual CLI** | One-off ingest script run by hand to regenerate thoroughfare data; not part of any deploy or runtime path. |

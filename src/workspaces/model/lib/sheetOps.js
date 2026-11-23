@@ -119,15 +119,6 @@ export function fillRight(sheet, r1, r2, c1, c2) {
   return s;
 }
 
-/** Ctrl+Enter: write one typed entry into every cell of the selection (a formula's relative
- *  references shift per cell, exactly like a fill). */
-export function fillSelectionWith(sheet, r1, r2, c1, c2, text) {
-  const rr1 = Math.min(r1, r2), rr2 = Math.max(r1, r2);
-  const cc1 = Math.min(c1, c2), cc2 = Math.max(c1, c2);
-  let s = sheet;
-  for (let r = rr1; r <= rr2; r++) for (let c = cc1; c <= cc2; c++) s = setRaw(s, r, c, relocateText(text, rr1, cc1, r, c));
-  return s;
-}
 
 const looksNumeric = (raw) => {
   if (raw === "" || raw == null) return false;

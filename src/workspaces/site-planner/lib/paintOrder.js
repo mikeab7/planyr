@@ -106,8 +106,6 @@ export function defaultRung(family) {
   return r ? r.rung : null;
 }
 
-/** Every rung this family can reach, low to high. */
-export const rungsFor = (family) => PAINT_LADDER.filter((x) => x.family === family).map((x) => x.rung);
 
 /* Which families can cross the plan with the ONE named command, and in which directions. A
  * family that cannot is not a gap — an element IS the plan, and a parcel is the ground; neither

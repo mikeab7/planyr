@@ -40,7 +40,6 @@ export function ensureServiceAreas() {
 /* tests / harness seam */
 export function _setServiceAreas(data) { DATA = data; loading = data ? Promise.resolve(data) : null; }
 
-export const hasServiceArea = (key) => !!(DATA && DATA[key]);
 
 function inRing(ring, x, y) {
   let c = false;

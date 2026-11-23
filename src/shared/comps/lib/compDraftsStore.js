@@ -32,15 +32,6 @@ export async function insertDrafts(rows) {
   return { data: (data || []).map(rowToImportDraft), error: null };
 }
 
-/** Save an in-progress edit to a draft's proposed values (the review row's own typed corrections
- * before promotion) without promoting it yet. */
-export async function updateDraftProposed(id, proposed) {
-  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
-  const { data, error } = await supabase.from(TABLE).update({ proposed }).eq("id", id).select(SELECT_COLS).maybeSingle();
-  if (error) return { data: null, error };
-  if (!data) return { data: null, error: new Error("Not saved — draft not found") };
-  return { data: rowToImportDraft(data), error: null };
-}
 
 /** Reject/discard a draft outright — never promoted, removed from the holding area. */
 export async function deleteDraft(id) {

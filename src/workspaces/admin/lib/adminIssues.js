@@ -89,7 +89,6 @@ export function foldIssues(groups, now = Date.now(), newWindowMs = 86_400_000) {
   };
 }
 
-export const ISSUE_SORTS = ["count", "lastSeen", "accounts", "message"];
 /** Default: count then last seen, both descending. */
 export function sortIssues(groups, key = "count", dir = "desc") {
   const sign = dir === "asc" ? 1 : -1;

@@ -52,7 +52,6 @@ import { storedProjectName } from "../../../shared/names/names.js";
 export { fmtDocDate, composeTitle };
 const liveRows = (rows) => (Array.isArray(rows) ? rows.map((r) => withLiveReviewNames(r, storedProjectName)) : rows);
 
-export const cloudConfigured = () => !!supabase;
 
 export async function currentUid() {
   const u = await getUser();
@@ -399,16 +398,6 @@ export async function listDeletedReviews() {
   return liveRows(data || []);
 }
 
-// Mark a review as placed on the map at least once (NEW-3) — the write half of the
-// Filed → On-map transition the drawer's "Place on map" action triggers. Stores `placed`
-// in the review's data jsonb (so listReviews' `data->placed` surfaces it); idempotent.
-export async function markReviewPlaced(id) {
-  if (!(await cloudReady())) return { ok: false, error: "Sign in to place documents." };
-  const rec = await loadReview(id);
-  if (!rec) return { ok: false, error: "Review not found." };
-  if (rec.placed) return { ok: true }; // already on the map — nothing to write
-  return upsertReview({ ...rec, placed: true, placedAt: Date.now(), updatedAt: Date.now() });
-}
 
 /* Delete = SOFT delete (NEW-F3): stamp deleted_at and keep everything — the row (the markup
  * work layer), the stored bytes, and the local draft — so a mistaken two-click delete is
@@ -705,21 +694,6 @@ export async function listProjects() {
   return r.ok ? r.rows : [];
 }
 
-// Set a project's lifecycle status across its whole site group, reusing the Site
-// Planner's own write path so there's a single source of truth (no parallel store).
-export async function setProjectStatus(projectId, status) {
-  if (!supabase || !projectId || !STATUSES.includes(status)) return { ok: false };
-  const uid = await currentUid();
-  if (!uid) return { ok: false };
-  const { data, error } = await supabase.from("sites").select("data").eq("group_id", projectId);
-  if (error || !data) return { ok: false };
-  // Write each plan in the group in parallel and report partial failure, rather than a
-  // serial loop that returned ok:true even if one plan kept its old status (B56c).
-  const rows = data.filter((r) => r.data);
-  const results = await Promise.allSettled(rows.map((r) => cloudUpsert(uid, { ...r.data, status, updatedAt: Date.now() })));
-  const failed = results.filter((x) => x.status === "rejected" || !(x.value && x.value.ok)).length;
-  return { ok: failed === 0, failed, total: rows.length };
-}
 
 /* --------------------------- file-facts index (B299) ----------------------- */
 // The queryable auto-filing index (db/file_facts.sql): one small row per filed drawing, so the

@@ -34,9 +34,6 @@ import { remapBondRefs } from "./bondRemap.js";
 // Used only by `resolveClipFrame` below — pure math, no Leaflet, no DOM.
 import { lngLatToFeet, feetToLatLngPair, ftPerDeg } from "./mapLock.js";
 
-// A stable string key for a selection ref, so a mixed set dedupes cleanly.
-const refKey = (r) => `${r.kind}:${r.id}`;
-
 /* ---------------------------------------------------------------- collect */
 
 /**
@@ -311,11 +308,3 @@ export function pasteClipboard(items, { mint, translate, dx = 0, dy = 0 } = {}) 
   }
   return out;
 }
-
-/** Human summary for the paste toast / menu label ("3 items", "Building + 4 parts"). */
-export function clipboardLabel(counts) {
-  const n = Object.values(counts || {}).reduce((s, v) => s + v, 0);
-  return n === 1 ? "1 item" : `${n} items`;
-}
-
-export const clipRefKey = refKey;

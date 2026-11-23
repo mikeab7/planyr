@@ -714,23 +714,6 @@ export function loadAutosave() {
   }
 }
 
-// Persist the working state. If it's too big for localStorage (usually a large
-// pasted screenshot dataURL), retry without that image so everything else saves.
-export function saveAutosave(state) {
-  try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state));
-    return true;
-  } catch (_) {
-    try {
-      const u = state.underlay;
-      const slim = u && String(u.src || "").startsWith("data:") ? { ...state, underlay: null } : state;
-      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(slim));
-      return true;
-    } catch (_2) {
-      return false;
-    }
-  }
-}
 
 /* ---- Local version history (automatic backups) ---------------------------
  * Every save snapshots the PRIOR stored version of a site into a small, local-only ring
