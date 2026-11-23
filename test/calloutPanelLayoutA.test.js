@@ -209,8 +209,9 @@ describe("NEW-1 — the value columns are a fixed compact width, fixed in the sh
 });
 
 describe("NEW-2 — the measurement panel is layout A", () => {
-  const start = SP.indexOf("{!multiStyleable && selMeasure && (() => {");
-  const body = SP.slice(start, SP.indexOf("{/* selected element */}", start));
+  // G5c: the measurement block is the MeasureInspector component now.
+  const start = SP.indexOf("export const MeasureInspector");
+  const body = SP.slice(start, SP.indexOf("export const DriveInRampInspector", start));
   it("has a Label input, then Appearance, then Size & position, in that order", () => {
     expect(start).toBeGreaterThan(-1);
     const lab = body.indexOf('<Field label="Label">'), ap = body.indexOf('section="appearance"'), sz = body.indexOf('section="size"');
