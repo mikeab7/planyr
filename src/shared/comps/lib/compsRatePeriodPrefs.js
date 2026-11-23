@@ -17,8 +17,7 @@
  * here") can never be clobbered.
  */
 import { supabase } from "../../../workspaces/site-planner/lib/supabase.js";
-import { updateProfilePrefs } from "../../profile/profilePrefsWriter.js";
-import { getProfileRow } from "../../profile/profileRowCache.js";
+import { getProfileRow, updateProfilePrefs } from "../../profile/profileRowCache.js";
 
 const MIRROR_KEY = "planyr:compsRatePeriod:v1";
 export const DEFAULT_COMPS_RATE_PERIOD = "annual";

@@ -17,8 +17,7 @@
  * report) — proven pattern, just narrower.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
-import { getProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { getProfileRow, updateProfilePrefs } from "../../../shared/profile/profileRowCache.js";
 import { normalizeLayout, normalizeDismissed, appendNewCatalogCards, normalizeJumpBackInCount } from "./dashboardLayout.js";
 
 const MIRROR_KEY = "planyr:dashboardLayout:v1";

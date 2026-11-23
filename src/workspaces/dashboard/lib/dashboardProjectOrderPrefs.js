@@ -14,8 +14,7 @@
  * holds it and `local: true` tells the caller that is expected, not an error.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
-import { getProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { getProfileRow, updateProfilePrefs } from "../../../shared/profile/profileRowCache.js";
 import { normalizeProjectOrder } from "../../../shared/projects/projectOrder.js";
 
 export const PROJECT_ORDER_PREF_KEY = "dashboardProjectOrder";

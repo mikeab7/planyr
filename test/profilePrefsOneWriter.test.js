@@ -40,7 +40,7 @@ describe("every profiles.prefs writer shares ONE serialized queue (no lost updat
 });
 
 describe("guard: nothing outside the one writer writes profiles.prefs", () => {
-  const ALLOWED = new Set(["src/shared/profile/profilePrefsWriter.js", "src/workspaces/site-planner/lib/userPrefsStore.js"]);
+  const ALLOWED = new Set(["src/shared/profile/profileRowCache.js", "src/workspaces/site-planner/lib/userPrefsStore.js"]);
   function walk(d, out = []) {
     for (const f of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, f.name);

@@ -23,8 +23,7 @@
  * is never swallowed into a silent "saved".
  */
 import { supabase } from "./supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
-import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
+import { getProfileRow, invalidateProfileRow, updateProfilePrefs } from "../../../shared/profile/profileRowCache.js";
 import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
 import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js";
 import { normalizeLook, patchLook, validateLook } from "./parcelLook.js";
@@ -172,7 +171,7 @@ export function updatePrefs(uid, reducer) {
   const local = normalize(reducer(readMirror()));
   writeMirror(local);
   if (!supabase || !uid) return Promise.resolve({ ok: false, prefs: local, error: "not signed in" });
-  // ONE shared queue for every writer of this blob (shared/profile/profilePrefsWriter.js).
+  // ONE shared queue for every writer of this blob (shared/profile/profileRowCache.js updateProfilePrefs).
   return updateProfilePrefs(uid, (raw) => normalize(reducer(normalize(raw)))).then((r) =>
     r.ok ? { ok: true, prefs: r.prefs } : { ok: false, prefs: local, error: r.error });
 }

@@ -10,8 +10,7 @@
  * mirror-then-cloud, LOUD-FAILURE, a `source` the caller can report.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
-import { updateProfilePrefs } from "../../../shared/profile/profilePrefsWriter.js";
-import { getProfileRow } from "../../../shared/profile/profileRowCache.js";
+import { getProfileRow, updateProfilePrefs } from "../../../shared/profile/profileRowCache.js";
 
 const MIRROR_KEY = "planyr:sinceLastHere:v1";
 
