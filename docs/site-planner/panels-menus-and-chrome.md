@@ -43,3 +43,6 @@ _Moved verbatim out of `src/workspaces/site-planner/CLAUDE.md` (audit batch H, 2
   Guards: the repo-root `test/` suite **numEditInPlace** + the ui-audit harness
   **verify-numedit-inplace** (real browser, two zooms × both themes, all three floating callers,
   with the parcel grips proven still clickable while the editor is open).
+
+## Diagnostics and version history are their own hooks (audit batch G4)
+The planner's `window.__planner*` read-only diagnostic / E2E hooks (view changes, layers, hit target, foreign overlays, grading readout and drive, perf, fit, identify result, parcel outlines, road network, export sheet) are ONE hook, `lib/usePlannerDiagnostics.js`, called once from the component with the values they read; each keeps its call-time gate (`isDiagArmed` / `__PLANYR_E2E`) and cleanup. The Version history dialog's state, the Activity tab fetch and open/restore are `lib/useVersionHistory.js`. Neither imports back from `SitePlanner.jsx`. Tests: `plannerDiagnosticsHook` in the repo-root `test/` folder.

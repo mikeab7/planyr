@@ -82,6 +82,8 @@ export const DECLARATIONS = Object.freeze([
     why: "A lazy-import helper. Its body is swept only because it is the LAST module-scope binding before the component (since the G1 split moved hexA out) and the sweep reads a whole top-level span; it produces no picture." },
   { name: "ParcelCopyNote", verdict: U,
     why: "A lazy-import line. Its swept body runs to the next module-scope binding (since the G1 split moved the module constants out) and so spans module-scope glue only; it produces no picture." },
+  { name: "usePlannerDiagnostics", verdict: U,
+    why: "The read-only window.__planner* diagnostic hooks (moved here from the component in G4). They report what the app HOLDS (the road network, the raw model), so they must see ALL of it; they draw nothing." },
   { name: "probeRef", verdict: U, why: "The E2E read-only probe store. It reports what the app holds, so it must report ALL of it." },
   { name: "onUp", verdict: U, why: "Release handler; the marquee pick it hosts is already visibility-filtered (B442688)." },
   { name: "calloutDblAction", verdict: U, why: "Acts on the callout that was double-clicked; a hidden one cannot be." },
