@@ -59,6 +59,7 @@
  */
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./localDb.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { cacheAge } from "../../../shared/units/dateFormat.js";
 
 /** An onFresh callback that throws is a caller bug — surface it (telemetry) instead of swallowing it. */
 function reportOnFreshThrow(e) {
@@ -73,18 +74,7 @@ export const IDB_INDEX_KEY = "giscache:v1:__index"; // key → { ts, bytes }, so
 
 /* Human age label from a millisecond age, for the screening UI next to a layer.
  * Deliberately coarse — this is "how old is this answer," not a precise clock. */
-export function formatAge(ms) {
-  if (ms == null || !isFinite(ms) || ms < 0) return "";
-  const s = Math.floor(ms / 1000);
-  if (s < 45) return "just now";
-  const m = Math.floor(s / 60);
-  if (m < 1) return `${s}s ago`;
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
-}
+export const formatAge = cacheAge;
 
 /* A cache entry is stale when it's missing, has no ttl horizon (ttl 0 ⇒ always
  * revalidate), or is older than ttl. Pure; `now` is passed in. */

@@ -29,6 +29,7 @@
  *
  * Pure: no DOM, no network. */
 import { resolveFloodZone } from "./floodZone.js";
+import { agoMinHrShort } from "../../../shared/units/dateFormat.js";
 
 const s = (v) => (v == null ? "" : String(v)).trim();
 const up = (v) => s(v).toUpperCase();
@@ -399,11 +400,5 @@ function firmBasis(flood, span) {
 }
 
 /* "3h ago" / "2d ago" — the age convention the flood group already shows. Pure. */
-function fmtAge(ms) {
-  const m = Math.max(0, Math.round(Number(ms) / 60000));
-  if (!isFinite(m)) return "age unknown";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
-}
+const fmtAge = agoMinHrShort;
 
