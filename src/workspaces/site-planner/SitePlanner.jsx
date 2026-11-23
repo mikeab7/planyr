@@ -9,7 +9,7 @@ import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } 
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
 import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
@@ -17,10 +17,9 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale } from "../../shared/telemetry/perfRecorderHandle.js";
-import { installPlannerPerf } from "./lib/plannerPerf.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
+import { createOperationTracker, undoOwnership, undoRiskEnvelope } from "./lib/operationEnvelope.js";
 import { planDelete } from "./lib/deletePlan.js";
 import { SCOPE, focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/keyboard/keyScope.js";
@@ -58,9 +57,9 @@ import {
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
-import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
+import { isDiagArmed } from "./lib/diagArm.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
-import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
+import { createViewChangeRecorder } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR, CHROME_ATTR, gestureAnchorKey, chromePressFacts } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, freeParkStack } from "./lib/parking.js";
@@ -72,7 +71,7 @@ import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsR
 import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
@@ -385,6 +384,8 @@ import { cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, dockSideCompassLabel } from "./lib/dockZones.js";
 import { resyncBondedRot, WALL_KID_TYPES, SIDEWALK_W, OPP_TRAILER_W, SIDE_N, makeStrip, makeDogEar, SIDE_PARK_ANGLE, isSideParkPad, findCourtIn, findZoneIn, stackCountIn, zoneIndexOf, isDockLayerEl, zoneSideOf, zoneDepthOfIn, courtBumpOpts, wallExtentCtx, dockChainOnSide, relayoutSideIn, relayoutAllSidesIn, killSetWithChildren, removeWithChildren, baseZone, makeCourtZoneIn, makeTrailerZoneIn, makeBufferZoneIn, makeChainZoneIn, buildNextZoneIn, sideOuterPerp, wallOutermostExtent, refitChildrenIn, isWallStrip, sidewalkFullRunPatch, isWallTrailer, relayoutWallKids, relayoutBumpSidewalks, rampsOnHost, sideOfKid, swSideOn, outwardUnit } from "./lib/assemblyOps.js";
+import { usePlannerDiagnostics } from "./lib/usePlannerDiagnostics.js";
+import { useVersionHistory } from "./lib/useVersionHistory.js";
 import { wallClickPatch, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
 import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull } from "./lib/dockLayerPanel.js";
 import { wallRowPlan, KIND_LABEL, clampTrailerRows, trailerSpec, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
@@ -451,13 +452,13 @@ import { resolveSoils } from "./lib/soils.js";
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
-import { noteReadoutDash, noteReadoutNoSurface, readoutDashFacts } from "./lib/readoutDash.js";
+import { noteReadoutDash, noteReadoutNoSurface } from "./lib/readoutDash.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap, gradingCfg } from "./lib/gradingBase.js";
-import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
+import { driveTieOf, driveRingOnSite, propertyLineRings, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
@@ -709,20 +710,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
     planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null),
     undoAnchor = useRef(null), redoAnchor = useRef(null);
-  const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
-  const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
-  /* B472048 (NEW-7 · NEW-3) — PLAN ACTIVITY: a second tab in the SAME dialog (per the item's own
-   * instruction to extend the existing clock/history control rather than build a second one).
-   * Version history is a per-DEVICE ring of whole-plan snapshots with no actor; it cannot answer
-   * "who did this" by construction. Activity reads the opposite source — the site_elements ROWS
-   * themselves, which now carry an operation envelope (db/commit_elements_op_envelope.sql) — and
-   * is therefore the one surface in the app that is genuinely CROSS-SESSION: unlike the local
-   * Undo/Redo history dropdown (B648353's `describeHistoryStep`, which can only ever describe
-   * frames THIS tab pushed), it names what a DIFFERENT session did too. */
-  const [activityTab, setActivityTab] = useState("versions"); // "versions" | "activity"
-  const [activityRows, setActivityRows] = useState(null);     // null = not loaded yet; [] = loaded, empty
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [activityErr, setActivityErr] = useState("");
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
   // NEW-1 (poppable panels): panels detached over the map. { [panelId]: {x,y} } in viewport px.
   // A panel is EXACTLY one of docked (leftPanel===id), floating (id in `floating`), or closed.
@@ -1058,19 +1045,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (rec) { try { rec.recordChange({ from: v, to: next, stack, visibility }); } catch (_) { /* a diagnostic never breaks the app */ } }
       return next;
     });
-  }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const rec = viewRecRef.current;
-    const hook = () => (rec && isDiagArmed(window) ? rec.snapshot() : null);
-    window.__plannerViewChanges = hook;
-    const detach = rec ? attachTimeline(window, rec) : null;
-    if (rec) rec.noteEvent("planner:mount");
-    return () => {
-      if (window.__plannerViewChanges === hook) window.__plannerViewChanges = null;
-      if (rec) rec.noteEvent("planner:unmount");
-      if (detach) detach();
-    };
   }, []);
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
@@ -5191,28 +5165,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [view]);
   const probeRef = useRef({});
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = {
-      get: () => ({ ...view, w: size.w, h: size.h, identityEpoch: viewIdentityEpoch.current }),
-      centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
-      // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
-      // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
-      registration: () => ({ ...probeRef.current.regShift }),
-      cursor: () => (probeRef.current.cursorLL
-        ? { ft: { ...probeRef.current.cursorFt }, lat: probeRef.current.cursorLL.lat, lng: probeRef.current.cursorLL.lng }
-        : null),
-      measures: () => JSON.parse(JSON.stringify(probeRef.current.measures || [])),
-    };
-    window.__plannerView = hook;
-    /* NEW-3 — NULL IT ON UNMOUNT. These hooks close over the live render (`setView`, `probeRef`,
-       `exportCtx()` → `svgRef`/`wrapRef`), so a hook left on `window` after the component unmounts
-       keeps that whole tree — and its detached SVG — reachable from a GC root. The neighbouring
-       `window.__geoMap` hook (:2612) has always done this; these four did not. It is dev-gated
-       code, but it is dev-gated code that EVERY performance harness here arms, so a measurement
-       taken through it was measuring the instrument as much as the product (B1439). */
-    return () => { if (window.__plannerView === hook) window.__plannerView = null; };
-  }, [view, size.w, size.h, setView]);
   /* NEW-1 — E2E/self-audit hook for the LAYER SET (same `window.__PLANYR_E2E` gate as above; never
    * runs in production). `ui-audit/boot-tail.mjs` has to build a plan that OPENS WITH N LAYERS ON,
    * because the reference fixture saves none and `defaultOverlayState()` starts every layer off —
@@ -5230,29 +5182,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * check can assert rather than something a human has to catch out of the corner of their eye.
    * (DANGEROUS-MEANS-UNOBSERVABLE: build the missing instrument first.) */
   const layerIdentityEpoch = useRef(0);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    layerIdentityEpoch.current += 1;
-    const epoch = layerIdentityEpoch.current;
-    const hook = () => ({
-      ids: Object.keys(overlays || {}),
-      on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
-      // NEW-1 (Imagery & Layers) — what the map is actually told to draw (Hide Layers / hidden-here applied) and what has a LIVE layer right now.
-      drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
-      live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
-      // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
-      opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
-      // B2528688 — features each live vector layer has painted (null for a raster): the harness's "it drew real features" observable.
-      features: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefFeatureCount(overlayRefs.current[k])])),
-      identityEpoch: epoch,
-      /* B2472945 — what a live vector layer has PAINTED at a point (its own `identifyAt`, the same hit-test the canvas click uses over the
-       * same GeoJSON the map draws). The drawn ETJ layer's "is anything shaded here?" has no other observable: the DOM holds Leaflet
-       * paths, not ground truth. Read-only, E2E-gated, null for a layer that is off or has no identify. */
-      identify: (id, at) => { const g = overlayRefs.current && overlayRefs.current[id]; return g && g !== "pending" && typeof g.identifyAt === "function" ? g.identifyAt(at) : null; },
-    });
-    window.__plannerLayers = hook;
-    return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
-  }, [overlays, overlaysDrawn]);
   /* B2335056 — click-ack rings riding the LIVE view (see beginIdentifyPress). Layout effect: re-projected
      in the same frame as the view change, never a frame behind it. */
   const ackMoversRef = useRef(new Set());
@@ -9801,30 +9730,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       };
     };
   });
-  /* ⛔ NEW-1 (B280403) — INSTALLED UNCONDITIONALLY, ANSWERED ONLY WHEN ARMED, AND THE GATE IS READ AT
-   * CALL TIME. These two are the DIAGNOSTIC hooks, and they were gated the way every other probe
-   * here is: on `window.__PLANYR_E2E`, read once at mount by an effect with `[]` deps. That made
-   * them unreachable in the one place the defects they exist for actually live — the owner's
-   * signed-in production tab — because arming the flag there did nothing until `SitePlanner`
-   * remounted. The session that needed them got in by setting the flag and then switching plans and
-   * back, which is folklore that requires knowing this dependency array.
-   * Now: the functions always exist and return `null` until `isDiagArmed()` says otherwise, so
-   * arming can never require a remount. `?planyrDiag=1` arms a tab with no console at all (it
-   * latches into sessionStorage so an in-app plan switch keeps it); `window.__PLANYR_E2E = true`
-   * still works, so every existing harness is untouched. READ-ONLY: they answer questions, they
-   * change nothing — see lib/diagArm.js for why that boundary is the whole safety argument. */
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    latchDiagArm(window);
-    const hook = (x, y) => (isDiagArmed(window) && dblResolveRef.current ? dblResolveRef.current(x, y) : null);
-    const why = (x, y) => (isDiagArmed(window) && dblWhyRef.current ? dblWhyRef.current(x, y) : null);
-    window.__plannerHitTarget = hook;
-    window.__plannerHitWhy = why;
-    return () => {
-      if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null;
-      if (window.__plannerHitWhy === why) window.__plannerHitWhy = null;
-    };
-  }, []);
 
 
   /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
@@ -10053,25 +9958,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel(null); setSelOverlay(ov.id); setLeftPanel("references");
     flashWarn(`Showing “${ov.name}” from ${row.planName}.`, 3500);
   };
-  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the others; read-only answers + the same two
-  // actions the panel row calls — it is a driver for the live acceptance, not a second code path).
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = {
-      siteId: () => siteId,
-      rows: () => foreignOverlays.rows.map((r) => ({ key: r.key, planName: r.planName, name: r.overlay.name, page: r.overlay.page || 1 })),
-      status: () => ({ status: foreignOverlays.status, error: foreignOverlays.error }),
-      refresh: () => refreshSiblings(),
-      show: (key) => showForeignOverlay(foreignOverlays.rows.find((r) => r.key === key)),
-      remove: (id) => removeOverlay(id),
-      crop: (id, crop) => setOverlayCrop(id, crop), // the exact write the Crop… dialog commits through
-      duplicate: (id) => duplicateOverlay(id),
-      setPage: (id, page) => setOverlayPage(id, page),
-      own: () => stateRef.current.sheetOverlays.map((o) => ({ id: o.id, name: o.name, page: o.page || 1, x: o.x, y: o.y, crop: o.crop || null, sharedFrom: o.sharedFrom || null, storageKey: o.storageKey || null, idbKey: o.idbKey || null, hasSrc: !!o.src })),
-    };
-    window.__plannerForeign = hook;
-    return () => { if (window.__plannerForeign === hook) window.__plannerForeign = null; };
-  });
   // Release a removed overlay's stored bytes only when NO plan references them — this site's other plans
   // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
   const releaseOverlayAssets = async (o) => {
@@ -13086,70 +12972,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the owner's tab, or the E2E flag; otherwise it returns null. */
   const gradeReadoutRef = useRef(null);
   gradeReadoutRef.current = { cursor, cursorProp, gradeSurface, grOn, gsEnabled };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = () => {
-      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
-      const L = gradeReadoutRef.current || {}, st = gsStatsRef.current || {};
-      const kept = lastGridRef.current, grid = (L.gradeSurface && L.gradeSurface.grid) || (L.grOn ? kept : null);
-      const f = grid && L.cursor ? readoutDashFacts(grid, L.cursor, L.cursorProp, !(L.gradeSurface && L.gradeSurface.grid)) : null;
-      const now = Date.now();
-      return {
-        enabled: !!L.gsEnabled, grOn: !!L.grOn, hasBuilt: !!(L.gradeSurface && L.gradeSurface.grid), hasKept: !!kept,
-        buildSeq: st.buildSeq || 0, lastBuildMs: st.lastBuildMs ?? null, lastBuildOutcome: st.lastBuildOutcome || null,
-        isDragging: !!drag.current, sigChangesLast10s: (st.sigChanges || []).filter((t) => now - t <= 10000).length,
-        cursor: L.cursor ? { x: Math.round(L.cursor.x * 10) / 10, y: Math.round(L.cursor.y * 10) / 10 } : null,
-        cursorStatus: L.cursorProp ? L.cursorProp.status : null, cursorReason: L.cursorProp ? L.cursorProp.reason || (L.cursorProp.undisturbed ? "undisturbed" : null) : null,
-        cursorFt: L.cursorProp && Number.isFinite(L.cursorProp.ft) ? Math.round(L.cursorProp.ft * 10) / 10 : null,
-        inLimit: f ? f.inLimit : null, limitMode: f ? f.mode : null, limitRegionCount: f ? f.limitRegionCount : 0, limitBbox: f ? f.limitBbox : null,
-        cursorBbox: L.cursor ? [L.cursor.x, L.cursor.y, L.cursor.x, L.cursor.y].map((v) => Math.round(v * 10) / 10) : null,
-      };
-    };
-    window.__plannerGradeReadout = hook;
-    return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
-  }, [grOn]);
   /* NEW-1 (2026-11-12, V2115881 re-opened) — `window.__plannerGradeDrive()`: WHY each road is or is not graded as a drive, and who owns the grading past the property line, in ONE call
    * — so a live check answers "is this plain Road a drive?" without a reproduction. Owner-only (installed while the grading gate is on), READ-ONLY, armed at CALL time
    * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the tab, or the E2E flag; otherwise it returns null. */
   const gradeDriveRef = useRef(null);
   gradeDriveRef.current = { els, gsEls, gradeSurface, grDriveTies, grDriveParcels, grOn, settings };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = () => {
-      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
-      const L = gradeDriveRef.current || {};
-      const surf = L.gradeSurface || null, planes = surf && surf.planes ? surf.planes : new Map(), why = surf && surf.driveWhy ? surf.driveWhy : new Map();
-      const line = propertyLineRings(L.grDriveParcels || []);
-      const roads = (L.els || []).filter(isCenterlineRoad).map((e) => {
-        const tie = L.grDriveTies && L.grDriveTies.get(e.id);
-        const pl = planes.get(e.id);
-        return {
-          id: e.id, travelW: e.travelW ?? null, points: e.pts.length, ends: [e.pts[0], e.pts[e.pts.length - 1]].map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })),
-          diagnose: driveDiagnose(e.pts, line), tied: !!tie, inGraded: !!(L.gsEls || []).find((g) => g.id === e.id && g.type === "drive"),
-          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId, servedBy: pl.drive.servedBy || null, nearestElementFt: pl.drive.nearestFt != null ? Math.round(pl.drive.nearestFt) : null } : null,
-          notAPlaneBecause: why.get(e.id) || null,
-        };
-      });
-      const out = surf && surf.grid && surf.grid.outside ? surf.grid.outside : null;
-      return {
-        grOn: !!L.grOn, hasSurface: !!surf, build: surf ? surf.surfaceKey && String(surf.surfaceKey).length : null, roads,
-        pastLine: out ? { cells: out.count, beyondParcel: out.beyondParcel ?? null, perElement: Object.entries(out.perEl || {}).map(([id, p]) => ({ id, type: ((L.gsEls || []).find((g) => g.id === id) || {}).type || null, cells: p.count, maxPastFt: Math.round(p.maxPastFt * 10) / 10, at: { x: Math.round(p.centroid.x), y: Math.round(p.centroid.y) } })) } : null,
-      };
-    };
-    window.__plannerGradeDrive = hook;
-    return () => { if (window.__plannerGradeDrive === hook) window.__plannerGradeDrive = null; };
-  }, [grOn]);
   /* NEW-1 (2026-11-01) — `window.__plannerPerf()`: the last minute of long frames WITH script attribution, the blocked-vs-waiting
    * split, repeating timers and which grading layers were drawn — so a "the graded plan is slow" report is answered in one call,
    * not a guess (lib/plannerPerf.js). Same gate and arming as `__plannerGradeReadout`: owner-only (installed while the grading gate
    * is on), read-only, armed at call time by `?planyrDiag=1`. */
   const plannerPerfRef = useRef(null);
   plannerPerfRef.current = { ppf: view.ppf, grOn, gsEnabled, buildMs: (gsStatsRef.current || {}).lastBuildMs ?? null };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = installPlannerPerf(window, { extra: () => { const P = plannerPerfRef.current || {}; return { ppf: Number.isFinite(P.ppf) ? Math.round(P.ppf * 1000) / 1000 : null, gradingPlanOn: !!P.gsEnabled, lastGradeBuildMs: P.buildMs }; } });
-    return () => { if (window.__plannerPerf === hook) window.__plannerPerf = null; };
-  }, [grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
@@ -13245,12 +13078,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // button off for every test account, so e2e/fit-building-apply drives the planner's real apply path through this.
   const grFitDoorRef = useRef(null);
   grFitDoorRef.current = { source: grFitSource, apply: grApplyFit };
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
-    const hook = { source: (...a) => grFitDoorRef.current.source(...a), apply: (...a) => grFitDoorRef.current.apply(...a) };
-    window.__plannerFit = hook;
-    return () => { if (window.__plannerFit === hook) window.__plannerFit = null; };
-  }, []);
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
   // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
   const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
@@ -15563,12 +15390,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
   const identifyResRef = useRef(null);
   identifyResRef.current = identifyRes;
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const hook = () => (window.__PLANYR_E2E ? identifyResRef.current : null);
-    window.__plannerIdentifyResult = hook;
-    return () => { if (window.__plannerIdentifyResult === hook) window.__plannerIdentifyResult = null; };
-  }, []);
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const [outlinePhase, setOutlinePhase] = useState("none"); // NEW-1 (select-parcel first paint): what the lit-up outlines are doing — loading | drawn | empty | zoom | none (lib/parcelOutlineSet.js status())
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
@@ -15973,13 +15794,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
-  /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
-   * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
-  useEffect(() => {
-    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted(), ...outlineLayersRef.current.status() } : null);
-    window.__plannerParcelOutlines = hook;
-    return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
-  }, []);
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
@@ -16208,70 +16022,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }).catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); });  // B507: a rejected push must clear the transient banner + surface the honest failure
     } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
-  // Version history (automatic local backups, B126): open the dialog with this plan's
-  // saved snapshots, and restore one into the canvas (which then autosaves as the newest
-  // version — and the thinner state it replaces is itself snapshotted, so a restore is
-  // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
-  const openVersionHistory = () => { setVersionList(listVersions(siteId)); initHistoryStore().then(() => setVersionList(listVersions(siteId))).catch(() => {}); /* B2236000 — the ring hydrates off the boot path; re-list once it has */ setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
-  // B472048 (NEW-7 · NEW-3) — the Activity tab's data, fetched lazily on first switch (not on
-  // every dialog open) so opening "Version history" for its ordinary purpose costs nothing new.
-  // `groupRowsIntoOperations` + `describeOperation` are the ALREADY-SHIPPED, unit-tested pure
-  // model from lib/operationEnvelope.js (B472048's foundation PR) — this is the wiring, not a
-  // reimplementation. Names are resolved through the SAME roster resolver B673's conflict toasts
-  // use (`nameResolverRef`), so a teammate's name can never disagree between the two surfaces.
-  const loadPlanActivity = async () => {
-    if (!siteId || !isCloudActive()) { setActivityRows([]); return; }
-    setActivityLoading(true); setActivityErr("");
-    try {
-      const r = await fetchElements(supabase, siteId);
-      if (!r.ok) { setActivityErr("Couldn't load activity — try again."); setActivityRows([]); return; }
-      const ops = groupRowsIntoOperations(r.rows, { selfSessionId: journalSid }).slice(0, 40);
-      const uids = [...new Set(ops.filter((o) => !o.isMine && o.userId).map((o) => o.userId))];
-      const names = new Map();
-      await Promise.all(uids.map(async (u) => {
-        try { const a = await nameResolverRef.current(u); if (a && !a.self && a.name) names.set(u, a.name); } catch (_) { /* falls back to "Someone" below */ }
-      }));
-      setActivityRows(ops.map((op) => ({
-        opId: op.opId, at: op.at, rowCount: op.rowCount,
-        text: describeOperation(op, { nameOf: (sessionId, userId) => names.get(userId) || "Someone" }),
-        created: op.created, deleted: op.deleted, updated: op.updated,
-      })));
-    } catch (_) {
-      setActivityErr("Couldn't load activity — try again.");
-      setActivityRows([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  };
-  const openActivityTab = () => { setActivityTab("activity"); if (activityRows === null && !activityLoading) loadPlanActivity(); };
-  const restoreVersion = async (at) => {
-    // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
-    // able to overwrite the canvas; block it loudly with the way out.
-    if (readOnly) { flashWarn("⚠ This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
-    const v = getVersion(siteId, at);
-    if (!v) return;
-    // B467/NEW-4 — VERIFY the dialog's "your current version is backed up too, so a restore can be
-    // undone" promise BEFORE destroying the current canvas. Flush the live state to the mirror, then
-    // force a backup snapshot and confirm it actually persisted; if it couldn't (device storage full),
-    // CANCEL rather than overwrite current work with no real undo.
-    flushSite();
-    if (!(historyIdbOnly() ? await backupNowVerified(siteId) : backupNow(siteId))) {   // B2200385 — on a device whose ring lives only in IndexedDB the backup is awaited, committed and read back before it is claimed
-      reportClientEvent("restore-backup-failed", "pre-restore backup could not be written — restore blocked", { id: siteId, at });
-      flashWarn("Couldn't back up your current version, so the restore was cancelled — your current work is safe. (Your device's storage may be full.)", 11000);
-      return;
-    }
-    pushHistory();
-    replacePlanContents(v);
-    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
-    // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
-    // still round-trips and must survive a version restore (else a restored version would keep the
-    // CURRENT drawings — a mixed-version state). The stored version captures parcelDrawings, so
-    // durably re-apply them via a saveSite MERGE ({...existing, ...partial} preserves the rest).
-    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard — a restore to a
-    // thinner version now diffs into per-element deletes through the rev-checked path.)
-    if (siteId) saveSite({ id: siteId, parcelDrawings: v.parcelDrawings || [] });
-    setSel(null); setMulti([]); setVersionsOpen(false);
-  };
+  const { activityErr, activityLoading, activityRows, activityTab, openActivityTab, openVersionHistory, restoreVersion, setActivityTab, setVersionsOpen, versionList, versionsOpen } = useVersionHistory({ closeHdrMenus, flashWarn, flushSite, nameResolverRef, pushHistory, readOnly, replacePlanContents, setMulti, setSel, siteId });
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   // NEW-1 (2026-11-04) — Duplicate for ANY plan of the site: the footer's button passes the current plan, a plan's ⋯ / right-click passes that plan.
@@ -22666,91 +22417,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return out;
   }, [els, settings, hiddenGroups, radiusReviewOn]);
-  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
-  // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
-  // instead of inferring it from pixels.
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = () => ({
-      regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
-      tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length), cornerR: t.geom.gaps.map((g) => g.R), arcs: t.geom.gaps.map((g) => (g.a === 2 || g.b === 2) && g.R > 0 ? g.arc.map((p) => ({ x: p.x, y: p.y })) : null) })),
-      /* NEW-1/NEW-2 (2026-10-15) — what the junction-paint acceptance reads: where each road's decoration may paint (`deco`, rings in world feet) and the
-         trimmed face-of-curb stripes (`stripes`), against the dissolved `regions` above. */
-      roads: (els || []).filter((e) => isCenterlineRoad(e) && !e.attachedTo).map((e) => ({ id: e.id, pts: e.pts.map((p) => ({ x: p.x, y: p.y })) })),   // AFTER the load-time cleanup — what the geometry is really built from
-      deco: [...(roadNet.decoDomains || [])].map(([id, rings]) => ({ id, rings })),
-      /* NEW-1 (road → parking) — what each car field does about the roads around it: the stalls a drive took (`removed` = "band:column" cells, `count` = what the Yield
-         reads) and the openings in its outline (`mouths`, world feet). Read-only; same E2E gate. */
-      stallClips: [...(roadNet.stallClips || [])].map(([id, c]) => ({ id, base: c.base, count: c.count, removed: c.removed.map((r) => `${r.band}:${r.k}`) })),
-      mouths: [...(roadNet.mouths || [])].map(([id, m]) => ({ id, mouths: m.map((x) => ({ a: { x: x.a.x, y: x.a.y }, b: { x: x.b.x, y: x.b.y } })) })),
-      stripes: [...(roadNet.stripes || [])].map(([id, lines]) => ({ id, lines })),
-      // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
-      // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
-      // requested. Six rounds of this item shipped green because every check read the requested arc
-      // (`returns`, below, which is always complete) and none read the finished boundary against it;
-      // the corner is what makes that comparison possible (a complete return of radius R across a
-      // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
-      // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
-      drives: driveJunctions.map((d) => ({
-        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length, cornerR: (d.geom.returns || []).map(() => d.geom.R),
-        corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
-        returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
-      })),
-      // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
-      // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
-      // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.
-      pads: driveJunctions.map((d) => {
-        const T = (els || []).find((e) => e.id === d.targetId);
-        if (!T) return null;
-        if (Array.isArray(T.points) && T.points.length >= 3) return { targetId: T.id, ring: T.points };
-        if (typeof T.cx === "number" && T.w > 0 && T.h > 0) {
-          return { targetId: T.id, ring: rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a) };
-        }
-        return null;
-      }).filter(Boolean),
-    });
-    window.__plannerRoadNet = hook;
-    return () => { if (window.__plannerRoadNet === hook) window.__plannerRoadNet = null; }; // NEW-3 — see the note on __plannerView
-  }, [roadNet, teeJunctions, driveJunctions, els]);
-  /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
-     production). The measurement/export defect is invisible to any source reading — it only exists in
-     the CLONE the sheet is built from — so the guard spec has to inspect the real built sheet. No dep
-     array on purpose: `exportCtx()` closes over the current render, and the hook must never hand the
-     sheet a stale one. */
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = async (frame = null) => {
-      const { createExportSheet } = await loadExportSheet();
-      const built = createExportSheet(exportCtx())
-        .buildExportSvg(frame, true, PAL.paper, null, null, false, null, "letter", "landscape");
-      return built && built.clone ? built.clone.outerHTML : null;
-    };
-    window.__plannerExportSvg = hook;
-    /* NEW-1 (print ignores send-to-back) — the REAL editable-PDF composition (the default "Flatten markups" OFF
-       path): which annotations became native PDF annotations (they paint ABOVE the page) and which stayed in the
-       page picture. Read-only; same gate. */
-    const composedHook = async (o = {}) => {
-      const { createExportSheet } = await loadExportSheet();
-      // `o` (E2E only): { paper, orient, buildingsTable, annotate, scaleBar, scaleText } — the sheet shape under test; defaults are the editable-PDF Letter sheet
-      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, o.scaleText || "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false, o.scaleBar !== false);
-      if (!c) return null;
-      return {
-        sheetSvg: c.sheetSvg,
-        annotRects: (c.annotationSet?.annots || []).map((a) => ({ nm: a.nm, family: a.family, subtype: a.subtype, rect: a.rect })),
-        liftedIds: (c.annotationSet?.annots || []).length,
-        keptInPage: c.annotationsKeptInPage || 0,
-        pins: c.annotationPins || [],
-        annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
-        degraded: c.annotationSet?.degraded || [],
-        hasViewport: !!c.annotationSet?.viewport, // the PDF's embedded measurement scale (/VP + /Measure) — independent of the drawn scale bar
-      };
-    };
-    window.__plannerExportComposed = composedHook;
-    /* NEW-1 (2026-10-20) — the feet → clone-unit map the export used, as an affine (origin, +x foot, +y foot), so a test
-       fixture captured from __plannerExportSvg can be replayed through the extractor in node. Read-only; same gate. */
-    const f2pHook = () => { const c = exportCtx(); return [c.f2p({ x: 0, y: 0 }), c.f2p({ x: 1, y: 0 }), c.f2p({ x: 0, y: 1 })]; };
-    window.__plannerExportF2p = f2pHook;
-    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; if (window.__plannerExportF2p === f2pHook) window.__plannerExportF2p = null; }; // NEW-3 — see the note on __plannerView
-  });
+  usePlannerDiagnostics({ PAL, dblResolveRef, dblWhyRef, drag, driveJunctions, duplicateOverlay, els, exportCtx, foreignOverlays, grFitDoorRef, grOn, gradeDriveRef, gradeReadoutRef, gsStatsRef, identifyResRef, lastGridRef, layerIdentityEpoch, loadExportSheet, outlineLayersRef, overlayRefs, overlays, overlaysDrawn, plannerPerfRef, probeRef, refreshSiblings, removeOverlay, roadNet, setOverlayCrop, setOverlayPage, setView, showForeignOverlay, siteId, size, stateRef, teeJunctions, view, viewIdentityEpoch, viewRecRef });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   /* NEW-2 — ONE MEASUREMENT → ITS SVG NODE. Extracted from the old inline map so a measurement can
