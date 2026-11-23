@@ -55,6 +55,8 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     // NEW-1 (parcel-drawing-offline) appended `origin` — the geo anchor rides the snapshot so
     // "Set location" / a placement nudge is a normal undo frame. The guard's subject is the
     // DURING-RENDER assignment, so it stays anchored on the collections and tolerates the tail.
-    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove(, origin)? \};/);
+    expect(sp).toMatch(/\n  const stateRef = useLatestRender\(\{ parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove(, origin)? \}\);/);
+    // …and the render flavour of the hook really assigns during render (not in an effect)
+    expect(readFileSync(new URL("../src/workspaces/site-planner/lib/useLatest.js", import.meta.url), "utf8")).toMatch(/export function useLatestRender\(value\) \{\s*const ref = useRef\(value\);\s*ref\.current = value;/);
   });
 });
