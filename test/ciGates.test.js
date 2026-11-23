@@ -20,7 +20,7 @@ import {
   KNOWN_DUMMY_SECRETS, KNOWN_INFRA_USES, secretRefName, isUnsupportedExpression,
   splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv,
   DOCS_ONLY_GATE_NAMES, selectDocsOnlyGates,
-  LANE_NAMES, SETUP_GATE, laneOf, selectLane, shardRun, parseShard, browserWeightS,
+  LANE_NAMES, EXTRA_LANE_NAMES, REQUIRED_NOTES_GATES, EXTRA_SETUP_PREFIXES, SETUP_GATE, laneOf, selectLane, shardRun, parseShard, browserWeightS,
 } from "../ui-audit/lib/ciGates.mjs";
 
 const REPO = process.cwd();
@@ -349,16 +349,37 @@ describe("LANES — which parallel job runs which gate (Batch C, 2026-11-23)", (
   const names = () => gates().map((g) => g.name);
 
   it("every gate is run by at least one lane, and each heavy gate sits in its named lane", () => {
-    const byLane = Object.fromEntries(LANE_NAMES.map((l) => [l, selectLane(gates(), l).selected.map((g) => g.name)]));
+    const ALL = [...LANE_NAMES, ...EXTRA_LANE_NAMES];
+    const byLane = Object.fromEntries(ALL.map((l) => [l, selectLane(gates(), l).selected.map((g) => g.name)]));
     for (const g of names()) {
-      if (g === SETUP_GATE) continue;
-      expect(LANE_NAMES.filter((l) => byLane[l].includes(g)), g).toHaveLength(1);
+      if (g === SETUP_GATE || EXTRA_SETUP_PREFIXES.some((p) => g.startsWith(p) && laneOf(g) !== "notes-extra")) continue; // setup gates are shared by design
+      expect(ALL.filter((l) => byLane[l].includes(g)), g).toHaveLength(1);
     }
     const idx = (l, prefix) => byLane[l].some((n) => n.startsWith(prefix));
     expect(idx("vitest", "Test (")).toBe(true);
     for (const p of ["Build", "Base-ref bundle snapshot", "Performance budget"]) expect(idx("build-app", p), p).toBe(true);
     for (const p of ["Install Playwright chromium", "Serve the built app", "Wait for the preview server", "Signature-budget gate", "Visual regression baselines", "Notes placement surface", "Notes clipboard regression bank", "App-shell width sweep", "Parcels list layout", "Planner per-pointer-move rule", "Critical interaction lane"]) expect(idx("browser", p), p).toBe(true);
     for (const p of ["Lint", "Scheduler syntax guard", "Required-check contract guard", "Generated-index touch guard", "Doc pointer freshness guard"]) expect(idx("static", p), p).toBe(true);
+  });
+
+  it("Notes gates: exactly the five owner-kept ones stay in the REQUIRED lanes; the other 13 run only in notes-extra", () => {
+    const notes = names().filter((n) => n.startsWith("Notes "));
+    expect(notes).toHaveLength(18);
+    const required = notes.filter((n) => LANE_NAMES.includes(laneOf(n)));
+    const extra = notes.filter((n) => laneOf(n) === "notes-extra");
+    expect(required).toHaveLength(5);
+    expect(extra).toHaveLength(13);
+    for (const p of REQUIRED_NOTES_GATES) expect(required.some((n) => n.startsWith(p)), p).toBe(true);
+    for (const l of LANE_NAMES) for (const g of selectLane(gates(), l).selected) expect(extra, `${g.name} (${l})`).not.toContain(g.name);
+  });
+
+  it("notes-extra builds the app itself and shards cleanly: every extra gate runs in exactly one of 3 shards", () => {
+    const sel = (i) => selectLane(gates(), "notes-extra", { index: i, total: 3 }).selected.map((g) => g.name);
+    const setup = (n) => n === SETUP_GATE || EXTRA_SETUP_PREFIXES.some((p) => n.startsWith(p));
+    for (const i of [1, 2, 3]) { expect(sel(i)).toContain("Build"); expect(sel(i)).toContain(SETUP_GATE); }
+    const work = [1, 2, 3].flatMap((i) => sel(i).filter((n) => !setup(n)));
+    expect(work).toHaveLength(13);
+    expect(new Set(work).size).toBe(13);
   });
 
   it("`Install dependencies` runs in every lane (each lane is its own machine); a gate nobody names defaults to the cheap static lane", () => {
@@ -416,7 +437,7 @@ describe("LANES — which parallel job runs which gate (Batch C, 2026-11-23)", (
 
   it("ci-parity --lane / --shard reads the same manifest: the lanes together cover all 40 gates", () => {
     const seen = new Set();
-    for (const [lane, shards] of [["static", 1], ["vitest", 3], ["build-app", 1], ["browser", 4]]) {
+    for (const [lane, shards] of [["static", 1], ["vitest", 3], ["build-app", 1], ["browser", 4], ["notes-extra", 3]]) {
       for (let i = 1; i <= shards; i++) {
         const args = ["scripts/ci-parity.mjs", "--list", "--lane", lane, ...(shards > 1 ? ["--shard", `${i}/${shards}`] : [])];
         const out = execFileSync("node", args, { cwd: REPO, encoding: "utf8" });
