@@ -19080,7 +19080,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (host) { const yAxis = rot2(0, 1, el.rot); outSign = (yAxis.x * (el.cx - host.cx) + yAxis.y * (el.cy - host.cy)) >= 0 ? 1 : -1; }
     const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, cfg: ncfg, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+    // A wall-bonded field changes depth OUTWARD, so the buffer / road beyond it (flush layers, not derived) is
+    // repacked in the same step — otherwise a changed stall depth / drive aisle leaves them floating off the
+    // parking (the "detached landscaping buffer"). Same step the "+ / −" row ladder (growParking) already takes.
+    const side = host && host.type === "building" && !host.dogEar && el.sideParkSide;
+    setEls((a) => {
+      const next = a.map((x) => x.id === el.id ? { ...x, cfg: ncfg, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x);
+      return side ? repackFlushBeyond(relayoutWallKids(next, host), host, side) : next;
+    });
   };
   // Per-element curb width (NEW-3): default 6" (0.5′) or a heavier 12" (1.0′) curb
   // for trailer-tire/dolly abuse. The property lives globally on any band; only
