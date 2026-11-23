@@ -54,3 +54,29 @@ export function placeMenu({
   top = Math.max(M, Math.min(top, viewportH - menuH - M));
   return { left, top };
 }
+
+/* Point/flip mode (audit I8; lifted verbatim from the Notes editor's private placeMenu): place a menu of
+ * measured size w×h at a pointer (x, y) — below-right of the pointer, FLIPPED above when it does not fit
+ * below, clamped into the viewport. Distinct from `placeMenu` (anchor-rect mode). */
+export function placeAtPoint({ x, y, w, h, viewW, viewH, margin = 8 }) {
+  const vw = Number.isFinite(viewW) ? viewW : 1200;
+  const vh = Number.isFinite(viewH) ? viewH : 800;
+  const width = Number.isFinite(w) ? w : 0;
+  const height = Number.isFinite(h) ? h : 0;
+
+  // Below the pointer if it fits; otherwise ABOVE it — a flip, not a nudge, so the pointer is
+  // never left sitting on top of the first row.
+  let top = y;
+  const fitsBelow = y + height + margin <= vh;
+  const fitsAbove = y - height - margin >= 0;
+  if (!fitsBelow && fitsAbove) top = y - height;
+  // Whichever branch ran, the result is clamped: a menu taller than the whole viewport still has
+  // to start on screen, and `max` is what keeps the TOP visible rather than the bottom.
+  top = Math.max(margin, Math.min(top, vh - height - margin));
+  if (height + margin * 2 > vh) top = margin;
+
+  let left = x;
+  if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
+  left = Math.max(margin, left);
+  return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
+}

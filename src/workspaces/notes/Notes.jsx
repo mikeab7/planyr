@@ -57,6 +57,7 @@ import {
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
 } from "./lib/notesMarkdown.js";
+import { RADIUS } from "./lib/notesControls.js";
 
 const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
 /* QUICK OPEN is lazy for the same reason the editor is (NEW-2): it is a palette nobody has
@@ -76,7 +77,6 @@ const ConflictNotice = lazy(() => import("./components/ConflictNotice.jsx"));
  * argument as the editor itself. */
 const TemplateManager = lazy(() => import("./components/TemplateManager.jsx"));
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* ⛔ THE FOOTER'S TONE MAP IS GONE WITH THE FOOTER (B539649). It coloured a sync line that no
  * longer exists — Notes now feeds the ONE app-wide badge, which does its own colouring. Deleted
  * rather than left "in case": a dead lookup table is exactly what the dead-store guard exists to

@@ -24,8 +24,8 @@
 import { useEffect, useRef } from "react";
 import { versionReasonLabel } from "../lib/notesVersions.js";
 import { absoluteStamp, stampLabel } from "../lib/notesTime.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
 export default function NoteHistory({ open, versions = [], busy = false, onRestore, onClose, narrow = false }) {
   const ref = useRef(null);

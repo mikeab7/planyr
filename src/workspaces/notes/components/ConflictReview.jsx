@@ -106,8 +106,8 @@ import { notesConflictKeptLine, readNoteImages } from "../lib/notesStore.js";
 import NoteRedline, { ChangeTag } from "./NoteRedline.jsx";
 import ConflictSideBySide from "./ConflictSideBySide.jsx";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
+import { RADIUS } from "../lib/notesControls.js";
 
-const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const PAD = { sm: "5px 10px", lg: "9px 14px" }; // mirrored from shared/ui/controls.jsx — see below
 const FONT = { sm: 10.5 }; // mirrored from shared/ui/controls.jsx — see below
 const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // design-exempt: neutral rest-shadow mirrored verbatim from shared/ui/controls.jsx's own REST_SHADOW — token-independent by design, see that file's Button comment
