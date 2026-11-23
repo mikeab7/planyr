@@ -80,8 +80,10 @@ export const DECLARATIONS = Object.freeze([
   /* ── CORRECT-UNFILTERED: judged, and filtering any of these would be the worse bug ─────────── */
   { name: "loadPlaceCmds", verdict: U,
     why: "A lazy-import helper. Its body is swept only because it is the LAST module-scope binding before the component (since the G1 split moved hexA out) and the sweep reads a whole top-level span; it produces no picture." },
-  { name: "ParcelCopyNote", verdict: U,
-    why: "A lazy-import line. Its swept body runs to the next module-scope binding (since the G1 split moved the module constants out) and so spans module-scope glue only; it produces no picture." },
+  { name: "StandardsBar", verdict: U,
+    why: "A lazy-import line. Its swept body runs to the next module-scope binding (the component, since the G6 split moved the last lazy panel lines out) and so spans module-scope glue only; it produces no picture." },
+  { name: "LeftPanelBody", verdict: U,
+    why: "The left panel body (moved here from the component in G6). Its two reads are a building COUNT for the Standards bar and the cost roll-up totals: numbers about what the plan holds, which a hide checkbox must not move. It draws nothing on the canvas." },
   { name: "usePlannerDiagnostics", verdict: U,
     why: "The read-only window.__planner* diagnostic hooks (moved here from the component in G4). They report what the app HOLDS (the road network, the raw model), so they must see ALL of it; they draw nothing." },
   { name: "probeRef", verdict: U, why: "The E2E read-only probe store. It reports what the app holds, so it must report ALL of it." },
