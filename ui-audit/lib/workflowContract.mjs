@@ -186,6 +186,12 @@ function dedentBlock(lines) {
     break;
   }
   if (base == null) return "";
+  // Trailing lines indented LESS than the script are the NEXT step's leading comments (blockAfter keeps comment lines), not part of
+  // this script — slicing them at `base` used to leave fragments like "gnature-budget gate (NEW-1…" on the end of the run text, which
+  // only escaped being executed because the one script it happened to (the preview-server wait) always `exit`s first.
+  let end = lines.length;
+  while (end > 0 && (!lines[end - 1].trim() || lines[end - 1].length - lines[end - 1].trimStart().length < base)) end--;
+  lines = lines.slice(0, end);
   return lines.map((l) => (l.length >= base ? l.slice(base) : l.trimStart())).join("\n").replace(/\s+$/, "");
 }
 

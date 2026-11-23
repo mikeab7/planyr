@@ -124,7 +124,9 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
-        run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json
+        # The copy is what build.yml's build-app lane saves under this commit's sha (main only), so the NEXT pull request can
+        # restore it as its base-ref stats instead of building the base ref again — see scripts/perf-base-stats.mjs.
+        run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json && cp .perf/head-stats.json .perf/cached-stats.json
       # Visual regression baselines (NEW-1). The one check in this job with no theory of what
       # "wrong" looks like: render the key surfaces, diff pixel-for-pixel against a human-approved
       # baseline in ui-audit/visual-baselines/, fail on anything that moved. See
