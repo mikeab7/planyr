@@ -186,6 +186,16 @@ import { LOCAL_SCOPE, PAGE_KEY_BASE, SYNC_KEY_BASE, TREE_KEY_BASE } from "./note
 
 let scope = LOCAL_SCOPE;
 
+/* ⛔ ACCOUNT-SWITCH GENERATION (audit 2026-11-20, batch B1). `scope`, `sync`, `busy` and
+ * `pushRunning` are module globals, and `seed()` / `pushOnce()` / `setBinned()` await the
+ * network. Without this token, a pass started for account A that resumes after the account
+ * changed wrote A's server data under B's (or the `local`) keys — and later pushed it to B —
+ * and a leftover `busy` made B's first seed return early, silently skipped. Every pass
+ * captures `gen` when it starts and checks `gen === myGen` after each await; a mismatch
+ * means "abandon quietly, this pass belongs to an account that is gone". `setNotesScope`
+ * and `stopNotesSync` bump it and clear the locks. */
+let gen = 0;
+
 /** Point the store at a user's notes (or back at the signed-out `local` set).
  *  Returns true when the scope actually changed, so the caller knows to re-read. */
 export function setNotesScope(userId) {
@@ -325,12 +335,9 @@ export function purgeLegacyViews() {
     const dead = [];
     for (let i = 0; i < st.length; i += 1) { const k = st.key(i); if (k && k.startsWith(`${VIEW_KEY_BASE}:`)) dead.push(k); }
     for (const k of dead) { st.removeItem(k); n += 1; }
-  } catch (e) { legacyViewPurgeError = String(e?.message || e || "unknown"); /* a preference is not data — a dead key is never read; recorded, readable via legacyViewPurgeFailure() */ }
+  } catch (e) { reportClientEvent("notes-legacy-view-purge-failed", String(e?.message || e || "unknown").slice(0, 160)); /* a preference is not data — a dead key is never read */ }
   return n;
 }
-let legacyViewPurgeError = null;
-/** Why the last legacy-view cleanup failed, or null. A leftover key is never READ, so this is a diagnostic, not a banner. */
-export const legacyViewPurgeFailure = () => legacyViewPurgeError;
 
 export function readNoteView(pageId, s = scope) {
   purgeLegacyViews();
@@ -1022,13 +1029,21 @@ export async function markPagesRestored(pageIds) { return setBinned(pageIds, fal
 async function setBinned(pageIds, binned) {
   const ids = (Array.isArray(pageIds) ? pageIds : [pageIds]).filter(Boolean);
   if (!ids.length || !syncOn()) return { ok: true };
+  const g = gen;
   const c = await cloud();
+  if (g !== gen) return { ok: true };
   const r = await c.binPages(client(), ids, binned);
+  if (g !== gen) return r;       // the account changed on the wire: that ledger is not ours to edit
   // The stamp bumps each row's rev server-side, so adopt the new ones here — otherwise the
   // next body push would be refused and reported as a conflict that was only ever a delete.
+  // ⛔ ONLY FOR A PAGE THAT IS NOT DIRTY. A dirty page's guard rev is the one its unpushed edit
+  // was BASED on; adopting the bumped rev would make the next push "clean" against a server row
+  // that already holds another device's change, and overwrite it. A dirty page keeps its old
+  // rev, so the push is refused and goes through the merge, exactly as before the bin stamp.
   for (const [id, rev] of Object.entries(r.revs || {})) {
     const prev = sync.pages[id] || {};
-    sync.pages[id] = { rev, dirty: !!prev.dirty, purged: !!prev.purged, auto: !!prev.auto };
+    if (prev.dirty) continue;
+    sync.pages[id] = { rev, dirty: false, purged: !!prev.purged, auto: !!prev.auto };
   }
   saveSyncState();
   if (!r.ok) reportSyncFailure(r.error);
@@ -1147,7 +1162,38 @@ function setSyncState(next) {
  * clean sync, so this reports the conflict state instead rather than letting the footer read
  * "Synced" over an unresolved note. Resolving one of two conflicts must not clear the line
  * for the other; that would be the same quiet lie one layer up. */
+/* ⛔ DURABLE PUSH-FAILURE RECORD (audit 2026-11-20, batch B1). The footer's "couldn't sync" state is
+ * in-memory and dies with a reload; the shared write-failure log is the one record that survives the
+ * navigation. Keyed per account (`groupId` = scope) so a second failure supersedes the first. Settled by
+ * the next good sync (`noteSynced`); `startNotesSync` re-raises it on the next load. */
+/* ⛔ WHY THIS WRITES THE SHARED KEY ITSELF INSTEAD OF IMPORTING `shared/cloud/writeFailureLog.js`: that module is
+ * statically part of the Site route, and a second importer from the Notes route splits it into its own shared chunk,
+ * which the Site-route chunk allowlist (perf budget NEW-8) rejects. Raising the allowlist to fit a feature is not this
+ * change's call, so the Notes side keeps to the log's documented entry shape (`planyr:cloudWriteFailures`, newest last,
+ * capped) and the Site Planner's drain skips `kind: "notes"` entries. If the allowlist is ever widened on its own merits,
+ * swap this block for `recordCloudWriteFailure` / `clearCloudWriteFailuresFor`. */
+const FAILURE_LOG_KEY = "planyr:cloudWriteFailures";
+const NOTES_SYNC_WHAT = "Notes sync";
+const readFailureLog = () => {
+  try { const a = JSON.parse(store()?.getItem(FAILURE_LOG_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; }
+};
+const writeFailureLog = (list) => { try { store()?.setItem(FAILURE_LOG_KEY, JSON.stringify(list.slice(-12))); } catch { /* storage blocked: the footer still says so */ } };
+const logNotesFailure = (why) => {
+  if (scope === LOCAL_SCOPE) return;
+  const rest = readFailureLog().filter((e) => !(e && e.kind === "notes" && e.groupId === scope));
+  rest.push({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, what: NOTES_SYNC_WHAT, groupId: scope, siteId: null, kind: "notes", error: String(why || ""), at: Date.now() });
+  writeFailureLog(rest);
+};
+const settleNotesFailures = () => {
+  if (scope === LOCAL_SCOPE) return;
+  const all = readFailureLog();
+  const keep = all.filter((e) => !(e && e.kind === "notes" && e.groupId === scope));
+  if (keep.length !== all.length) writeFailureLog(keep);
+};
+const hasLoggedNotesFailure = () => readFailureLog().some((e) => e && e.kind === "notes" && e.groupId === scope);
+
 function noteSynced() {
+  settleNotesFailures();
   setSyncState(conflicts.size
     ? { mode: "conflict", at: Date.now(), reason: null }
     : { mode: "synced", at: Date.now(), reason: null });
@@ -1159,6 +1205,7 @@ function noteSynced() {
 function reportSyncFailure(error) {
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   setSyncState({ mode: offline ? "offline" : "error", reason: cloudReason(error), at: syncState.at });
+  if (!offline) logNotesFailure(cloudReason(error));
   return false;
 }
 
@@ -1588,11 +1635,15 @@ export async function startNotesSync({ onTree } = {}) {
   if (!cloudClient) { setSyncState({ mode: "local" }); return { ok: true, mode: "local" }; }
   sync = readSyncState();
   attachListeners();
+  // A failure the last session left in the durable log is shown again until a sync actually succeeds.
+  if (hasLoggedNotesFailure()) setSyncState({ mode: "error", reason: "your last Notes save did not reach your account — retrying", at: null });
   await adoptLocalNotes();
   return { ok: await seed({ full: true }), mode: "cloud" };
 }
 
 export function stopNotesSync() {
+  gen += 1;                       // any pass still on the wire now belongs to a gone account
+  busy = false; pushRunning = false; pushQueued = false;
   if (pushTimer) { clearTimeout(pushTimer); pushTimer = 0; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
   detachListeners();
@@ -1684,13 +1735,17 @@ export async function refreshNotesSync() {
 async function seed({ full }) {
   if (!syncOn() || busy) return true;
   busy = true;
+  const g = gen;
+  const stale = () => g !== gen;
   setSyncState({ mode: "syncing" });
   try {
     const c = await cloud();
+    if (stale()) return true;
     let treeChanged = false;
 
     /* ---- the tree: rows canonical on seed, MERGED (never clobbered) when both moved ---- */
     const srv = await c.fetchTree(client());
+    if (stale()) return true;
     if (!srv.ok) return reportSyncFailure(srv.error);
     if (srv.tree) {
       if (!sync.treeDirty) {
@@ -1731,6 +1786,7 @@ async function seed({ full }) {
 
     /* ---- page bodies ---------------------------------------------------------------- */
     const idx = await c.fetchPageIndex(client());
+    if (stale()) return true;
     if (!idx.ok) { saveSyncState(); return reportSyncFailure(idx.error); }
 
     // A fresh read of the index's bin state, every seed — see `knownBinnedPages` above. A row
@@ -1752,6 +1808,7 @@ async function seed({ full }) {
      * the row un-purged server-side, and the next seed lists it again — never forgotten. */
     if (plan.repurge.length) {
       const rp = await c.purgePagesCloud(client(), plan.repurge);
+      if (stale()) return true;
       if (rp.ok) {
         for (const id of plan.repurge) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
       } else reportSyncFailure(rp.error);
@@ -1764,6 +1821,7 @@ async function seed({ full }) {
       for (const id of plan.purged) for (const imgId of imageIdsInDoc(readPage(id))) imgs.push(imgId);
       deletePages(plan.purged);
       if (imgs.length) await deleteNoteImages(imgs);
+      if (stale()) return true;
       for (const id of plan.purged) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
       for (const id of imgs) sync.images[id] = { up: false, purged: true };
       await forgetMergeBases(plan.purged);   // NEW-1: nothing left here to merge
@@ -1804,6 +1862,7 @@ async function seed({ full }) {
     const need = [...plan.adopt, ...plan.conflicts];
     if (need.length) {
       const got = await c.fetchPages(client(), need);
+      if (stale()) return true;
       if (!got.ok) { saveSyncState(); return reportSyncFailure(got.error); }
       const adopted = [];
       for (const id of plan.adopt) {
@@ -1824,6 +1883,7 @@ async function seed({ full }) {
           // needs a base to be. Best-effort: a failed write here costs nothing but a future
           // merge attempt, never a banner.
           await recordMergeBase(id, row.doc, row.rev);
+          if (stale()) return true;
         }
       }
       // An adopted body under an OPEN editor is the self-race, not a background detail —
@@ -1835,12 +1895,16 @@ async function seed({ full }) {
         if (!row) continue;
         // A MOVED REVISION IS NOT YET A DISAGREEMENT (B1391). Only a real divergence may
         // interrupt; identical text, or nothing here to lose, reconciles in silence.
-        if (await settleQuietly(id, row)) { changed = true; continue; }
+        const settled = await settleQuietly(id, row);
+        if (stale()) return true;
+        if (settled) { changed = true; continue; }
         // ⛔ NEW-1 — a genuine divergence tries the per-paragraph merge before falling back to
         // the whole-document banner. `resolveDivergence` returns false in EXACTLY the cases
         // the old code below already handled (no base recorded, or the merge itself declined),
         // so an untouched page sees no behaviour change at all.
-        if (await resolveDivergence(id, row)) { changed = true; continue; }
+        const resolved = await resolveDivergence(id, row);
+        if (stale()) return true;
+        if (resolved) { changed = true; continue; }
         conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() });
         changed = true;
       }
@@ -1858,18 +1922,22 @@ async function seed({ full }) {
     /* ---- pictures: eager UP, lazy DOWN (see planImageSync) ---------------------------- */
     if (full) {
       const iIdx = await c.fetchImageIndex(client());
+      if (stale()) return true;
       if (iIdx.ok) {
         cloudImagePages.clear();
         for (const r of iIdx.index) if (r.pageId) cloudImagePages.set(r.id, r.pageId);
         const db = await imageDb();
         const meta = await db.idbListImageMeta(scope);
+        if (stale()) return true;
         const imgPlan = c.planImageSync({ index: iIdx.index, localMeta: meta, state: sync });
         if (imgPlan.dropLocal.length) {
           await deleteNoteImages(imgPlan.dropLocal);
+          if (stale()) return true;
           for (const id of imgPlan.dropLocal) sync.images[id] = { up: false, purged: true };
         }
         for (const id of imgPlan.upload) {
           const rec = await db.idbGetImage(imageKey(id));
+          if (stale()) return true;
           if (!rec?.dataUrl) continue;
           // `kind`/`name` ride along so an ATTACHMENT re-uploads as one (NEW-5) — a v1
           // record has neither, and absent means picture, which is what every one was.
@@ -1881,6 +1949,7 @@ async function seed({ full }) {
 
     busy = false;
     const pushed = await pushPending();
+    if (stale()) return pushed;
     if (treeChanged) onTreeChanged?.();
     return pushed;
   } catch (e) {
@@ -1889,7 +1958,7 @@ async function seed({ full }) {
     // "syncing…" that never resolves, which is the state this rule exists to forbid.
     reportSyncFailure(e?.message || e);
     return false;
-  } finally { busy = false; }
+  } finally { if (!stale()) busy = false; }
 }
 
 /* ⛔ THE BULK-PUSH DETECTOR (NEW-1, B1055088). Eleven pages committed by one client inside
@@ -1935,12 +2004,14 @@ async function pushPending() {
   if (!syncOn()) return true;
   if (pushRunning) { pushQueued = true; return true; }
   pushRunning = true;
+  const g = gen;
   let ok;
   try {
     ok = await pushOnce();
   } finally {
-    pushRunning = false;
+    if (g === gen) pushRunning = false;   // a switch already cleared the lock for the new account
   }
+  if (g !== gen) return ok;
   if (pushQueued) {
     pushQueued = false;
     return (await pushPending()) && ok;
@@ -1952,7 +2023,10 @@ async function pushPending() {
  *  was based on. A refusal is a CONFLICT, never a retry that clobbers. Never call this
  *  directly; `pushPending` above is the reentrancy-safe entry point every caller must use. */
 async function pushOnce() {
+  const g = gen;
+  const stale = () => g !== gen;
   const c = await cloud();
+  if (stale()) return true;
   let ok = true;
 
   const dirtyPages = Object.keys(sync.pages).filter((id) => sync.pages[id].dirty && !sync.pages[id].purged && !conflicts.has(id));
@@ -1968,6 +2042,7 @@ async function pushOnce() {
     const doc = readPage(id);
     if (doc == null) { sync.pages[id] = { ...sync.pages[id], dirty: false, auto: false }; continue; }
     const r = await c.pushPage(client(), id, doc, sync.pages[id].rev);
+    if (stale()) return true;
     if (r.ok) {
       /* ⛔ THE DOC JUST PUSHED IS A SNAPSHOT, NOT NECESSARILY WHAT IS ON DISK RIGHT NOW (NEW-1,
        * found while closing the push-self-race above). `doc` was read BEFORE the awaited
@@ -1984,19 +2059,25 @@ async function pushOnce() {
       // Live flag, not the pre-await `wasAuto`: an edit that landed mid-flight already set auto:false and must keep it.
       sync.pages[id] = { rev: r.rev, dirty: !stillCurrent, purged: false, auto: stillCurrent ? false : (wasAuto && !!sync.pages[id]?.auto) };
       await recordMergeBase(id, doc, r.rev);   // NEW-1: this device and the server just agreed on `doc`
+      if (stale()) return true;
       if (!stillCurrent) schedulePush();       // more local content is owed — make sure it lands
       continue;
     }
     if (r.conflict) {
       const got = await c.fetchPages(client(), [id]);
+      if (stale()) return true;
       const row = got.pages?.[id];
       if (row?.purged) { deletePages([id]); sync.pages[id] = { rev: row.rev, dirty: false, purged: true, auto: false }; continue; }
       // THE REFUSAL IS NOT THE BUG REPORT (B1391). The guard did its job — now find out
       // whether the two copies actually differ before saying a word to anyone.
-      if (row && await settleQuietly(id, row)) { emitConflicts(); continue; }
+      const settled = row ? await settleQuietly(id, row) : false;
+      if (stale()) return true;
+      if (settled) { emitConflicts(); continue; }
       // ⛔ NEW-1 — same fallback order as the seed's own conflicts loop: try the per-paragraph
       // merge before raising the whole-document banner.
-      if (row && await resolveDivergence(id, row)) { emitConflicts(); continue; }
+      const resolved = row ? await resolveDivergence(id, row) : false;
+      if (stale()) return true;
+      if (resolved) { emitConflicts(); continue; }
       /* ⛔ NEW-1/B1055088 — A HOUSEKEEPING-ONLY WRITE NEVER SURFACES A CONFLICT, EVEN ON A RACE.
        * `planPageSeed` already keeps an `auto`-dirty page out of `plan.conflicts` at PLAN time;
        * this is the narrow race where the row moved between that plan and this push actually
@@ -2023,15 +2104,18 @@ async function pushOnce() {
 
   if (sync.treeDirty) {
     let r = await c.pushTree(client(), readTreeRaw(), sync.treeRev);
+    if (stale()) return true;
     if (!r.ok && r.conflict) {
       // Someone else wrote the structure. MERGE and push once more — never overwrite, and
       // never spin: a second refusal simply leaves the tree dirty for the next seed.
       const again = await c.fetchTree(client());
+      if (stale()) return true;
       if (again.ok) {
         const merged = c.mergeTrees(migrate(readTreeRaw()), migrate(again.tree));
         writeTreeLocal(merged);
         onTreeChanged?.();
         r = await c.pushTree(client(), merged, again.rev);
+        if (stale()) return true;
       }
     }
     if (r.ok) { sync.treeRev = r.rev; sync.treeDirty = false; }
