@@ -30,7 +30,7 @@ function plannerKeyHandlerSource() {
   const s = plannerSource();
   const start = s.indexOf("/* ------------ keyboard ------------ */");
   expect(start, "the planner keyboard effect banner moved — re-point this sweep").toBeGreaterThan(0);
-  const end = s.indexOf('window.addEventListener("keydown", onKey);', start);
+  const end = s.indexOf("plannerKeyRef.current = { onKey, onKeyUp };", start); // B-Q-FIRST-PRESS: the handler is now published to a ref from a layout effect (one stable listener)
   expect(end, "the planner keydown registration moved — re-point this sweep").toBeGreaterThan(start);
   return s.slice(start, end);
 }
@@ -660,5 +660,31 @@ describe("⛔ B1012832 — the plan-name field and every AnchoredMenu-portalled 
     const body = s.slice(i, i + 1600);
     expect(body).toMatch(/isTextControl\(activeNow\)/);
     expect(body).toMatch(/reportClientEvent\("nudge-blocked-text-focus"/);
+  });
+});
+
+/* B-Q-FIRST-PRESS — a committed (pristine) number box hands tool letters to the drawing.
+ * Owner: "when I press Q … it doesn't [arm the callout] the first time … I have to double tap".
+ * Measured: type in a Properties number box, Enter (commit, caret stays), Q → typed "q" into the box. */
+describe("keyScopeVerdict — a pristine number box does not swallow a tool letter", () => {
+  const toolIds = KEY_CONTRACT.filter((k) => k.id.startsWith("tool-")).map((k) => k.id).concat("toggle-snap");
+  it("every tool-arming key passes through a pristine number box and asks the caller to release the field", () => {
+    for (const id of toolIds) {
+      const v = keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.FIELD, pristineNumber: true });
+      expect(v.allow, id).toBe(true);
+      expect(v.releaseField, id).toBe(true);
+    }
+  });
+  it("the same keys are still refused while the box holds uncommitted typing", () => {
+    for (const id of toolIds) {
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.FIELD, pristineNumber: false }).allow, id).toBe(false);
+    }
+  });
+  it("Delete, Backspace, arrows, undo and paste are never released by a pristine box (they edit the box)", () => {
+    for (const id of ["delete", "nudge", "paste", "cut", "duplicate", "commit"]) {
+      const e = KEY_CONTRACT.find((k) => k.id === id);
+      if (!e) continue;
+      expect(keyScopeVerdict({ entry: e, scope: SCOPE.FIELD, pristineNumber: true }).allow, id).toBe(false);
+    }
   });
 });

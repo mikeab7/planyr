@@ -6350,7 +6350,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [active]);
 
   /* ------------ keyboard ------------ */
+  /* ⛔ B-Q-FIRST-PRESS — THE LISTENER IS REGISTERED ONCE; ONLY THE HANDLER BEHIND IT IS SWAPPED.
+   * This handler used to be removed and re-added from a passive effect on every change of `sel`, `tool`,
+   * `els`, `multi` …. React flushes pending passive effects at the START of the next discrete event, which
+   * is MID-DISPATCH of that very keypress: the old window listener was unregistered after the event had
+   * already been queued to it, and the new one was added too late to be called. Result: a key that lands
+   * right after a render was silently DROPPED (the owner: "Q sometimes doesn't work the first time, I
+   * double tap"). Measured: 10-25% of Enter→Q presses under load, listener log showed unreg/reg in the same
+   * millisecond as the keydown. A stable listener forwarding to a ref that a LAYOUT effect (synchronous with
+   * the commit, so always current before any later event) keeps fresh cannot lose a press.
+   * Guard: test/keyListenerStable.test.js. */
+  const plannerKeyRef = useRef(null);
   useEffect(() => {
+    const down = (e) => plannerKeyRef.current?.onKey(e);
+    const up = (e) => plannerKeyRef.current?.onKeyUp(e);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
+  useLayoutEffect(() => {
     const onKey = (e) => {
       if (!active) return; // keep-alive: a hidden planner must never eat keys (or Delete markups) while another module is on screen
       /* NEW-1 — WHO OWNS THE KEYBOARD. This replaces the old "is a text field focused" guard, which
@@ -6372,7 +6390,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         insideCanvas: !!(t && canvasEl && (canvasEl === t || canvasEl.contains(t))),
         lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
       });
-      const verdict = keyScopeVerdict({ entry: resolveKeyEntry(e), scope, fieldEdit: canvasTouchRef.current === TOUCH.FIELD });
+      const verdict = keyScopeVerdict({ entry: resolveKeyEntry(e), scope, fieldEdit: canvasTouchRef.current === TOUCH.FIELD,
+        pristineNumber: !!(t && t.getAttribute && t.getAttribute("data-num-pristine") === "1") });
+      if (verdict.releaseField) { try { t.blur(); } catch (_) {} } // a committed number box hands the keyboard back so the tool letter works first press
       if (!verdict.allow) {
         /* LOUD-FAILURE — a refused key that would have CHANGED the plan says so, once per episode.
          * A refused tool letter stays quiet: nothing was lost and nothing looks broken. */
@@ -6480,9 +6500,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSel(null, { entry: "key:delete" }); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKeyUp);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
+    plannerKeyRef.current = { onKey, onKeyUp };
   }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big

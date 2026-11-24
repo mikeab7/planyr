@@ -170,7 +170,16 @@ export const CONTROL_CONSUMES = Object.freeze({
  * this table learned about it. The build check is what stops that drifting: a branch the table
  * does not declare fails CI rather than failing quietly at runtime.
  */
-export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
+/* ⛔ B-Q-FIRST-PRESS — A NUMBER BOX THAT HOLDS NOTHING UNSAVED DOES NOT NEED THE KEYBOARD.
+ * Owner: "when I press Q sometimes for the first time, it doesn't [arm the callout] … I have to double tap".
+ * Reproduced: type a value in a Properties number box and press Enter. Enter commits and (by design, NEW-1
+ * in NumInput) KEEPS the caret, so FIELD scope refuses every tool letter and the next Q just types "q" into a
+ * box that only accepts numbers. A number box with nothing typed since its last commit has no use for a
+ * letter, so a tool-arming key (the "tool-*" entries and snap) passes through it; the caller then blurs the
+ * box. Anything typed-but-uncommitted keeps the box, and Delete/Backspace/arrows are untouched (not tool keys). */
+export const armsTool = (entry) => !!entry && (String(entry.id).startsWith("tool-") || entry.id === "toggle-snap");
+
+export function keyScopeVerdict({ entry, scope, fieldEdit = false, pristineNumber = false }) {
   if (!entry) return { allow: true, reason: null, entry: null };
   if (scope === SCOPE.CANVAS) return { allow: true, reason: null, entry };
   /* A focused CONTROL refuses only what it consumes (CONTROL_CONSUMES above) — never the rest. */
@@ -197,6 +206,7 @@ export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
    * (CONTROL_CONSUMES above) is a deliberate, different, self-resolving case, not a "stuck" one. */
   if (scope === SCOPE.FIELD) {
     if (entry.guaranteed) return { allow: true, reason: null, entry };
+    if (pristineNumber && armsTool(entry)) return { allow: true, reason: null, entry, releaseField: true };
     return { allow: false, reason: REFUSAL.FIELD, entry };
   }
   /* CHROME — and the line here is MUTATION, not canvas-ness, which is a correction worth stating.
