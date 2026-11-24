@@ -88,7 +88,7 @@ import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 // title — where the comp IS) and BUILDING (clear height, year built — physical facts about the
 // improvement, not the deal); Notes left the sheet entirely as its own column (see NOTES_COLUMN
 // below) so NOTES drops out of the band list too. Banding only — no column's meaning moved.
-export const GROUPS = ["TYPE", "LOCATION", "BUILDING", "CONSTRUCTION", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+export const GROUPS = ["TYPE", "LOCATION", "BUILDING", "CONSTRUCTION", "AVAILABILITY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
 
 // HARDENING-10 — leaseTerm's cell boundary: the stored field stays free text (a real deal can be
 // "10 yr + 2x5 options", which a bare-months cell can't hold) but the SHEET CELL itself only ever
@@ -110,6 +110,7 @@ export const TYPE_OPTIONS = [
   { value: "building_sale", label: "Bldg Sale" },
   { value: "lease", label: "Lease" },
   { value: "under_construction", label: "Under constr." },
+  { value: "available", label: "Available" },
 ];
 export const UC_STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -117,9 +118,12 @@ export const UC_STATUS_OPTIONS = [
   { value: "delivered", label: "Delivered" },
 ];
 export const UC_KIND_OPTIONS = [{ value: "spec", label: "Spec" }, { value: "bts", label: "BTS" }];
+export const AV_KIND_OPTIONS = [{ value: "direct", label: "Direct" }, { value: "sublease", label: "Sublease" }];
+// Types that carry a rent (signed or asking) in the lease-rate fields.
+const isRateType = (t) => t === "lease" || t === "under_construction" || t === "available";
 // Types whose Size column is the BUILDING's square feet (`bldgSizeSf`), and that carry building specs.
 const isBldgSizeType = (t) => t === "building_sale" || t === "under_construction";
-const hasBldgSpecs = (t) => t === "building_sale" || t === "lease" || t === "under_construction";
+const hasBldgSpecs = (t) => t === "building_sale" || t === "lease" || t === "under_construction" || t === "available";
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
 export const BASIS_OPTIONS = [{ value: "nnn", label: "NNN" }, { value: "gross", label: "GROSS" }];
 export const UNIT_OPTIONS = [{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }];
@@ -233,8 +237,9 @@ export const SHEET_COLUMNS = [
       // typed override states explicitly, not the common case. Per (rate period, monthly vs
       // annual) is NOT given a default here or anywhere else — that ambiguity is a real 12x
       // error risk with no safe guess, unlike Basis, so it stays genuinely blank.
-      if ((v === "lease" || v === "under_construction") && !d.leaseRateExpense) next.leaseRateExpense = "nnn";
+      if (isRateType(v) && !d.leaseRateExpense) next.leaseRateExpense = "nnn";
       if (v === "under_construction" && !d.ucStatus) next.ucStatus = "under_construction";
+      if (v === "available" && !d.avKind) next.avKind = "direct";
       return next;
     },
     flagKey: () => "compType",
@@ -333,13 +338,16 @@ export const SHEET_COLUMNS = [
   // (compMobileLayout.js, sourced from this flag) re-demands it on its own, contradicting the
   // very save gate it's supposed to describe.
   // Executed is a fact about a TRANSACTION: an under-construction record has none (it carries start/delivery dates instead).
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t !== "under_construction" }),
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t !== "under_construction" && t !== "available" }),
   // CONSTRUCTION — competing supply (`db/comps_under_construction.sql`); applies to the under-construction type only.
   simpleColumn({ key: "ucStatus", label: "Status", group: "CONSTRUCTION", width: 76, align: "left", kind: "select", options: UC_STATUS_OPTIONS, appliesTo: (t) => t === "under_construction" }),
   simpleColumn({ key: "ucDeliveryKind", label: "Spec/BTS", fullLabel: "Spec or build-to-suit", group: "CONSTRUCTION", width: 66, align: "left", kind: "select", options: UC_KIND_OPTIONS, appliesTo: (t) => t === "under_construction" }),
   simpleColumn({ key: "ucStartDate", label: "Start", fullLabel: "Construction start", group: "CONSTRUCTION", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t === "under_construction" }),
   simpleColumn({ key: "ucDeliveryDate", label: "Delivery", fullLabel: "Expected delivery", group: "CONSTRUCTION", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t === "under_construction" }),
   simpleColumn({ key: "ucPreleasedPct", label: "Pre-lsd (%)", fullLabel: "Pre-leased (%)", group: "CONSTRUCTION", width: 70, align: "right", kind: "number", appliesTo: (t) => t === "under_construction" }),
+  // AVAILABILITY — a vacancy (`db/comps_available_space.sql`); available-space type only.
+  simpleColumn({ key: "avKind", label: "Space", fullLabel: "Direct or sublease", group: "AVAILABILITY", width: 66, align: "left", kind: "select", options: AV_KIND_OPTIONS, appliesTo: (t) => t === "available" }),
+  simpleColumn({ key: "avDate", label: "Avail.", fullLabel: "Date available", group: "AVAILABILITY", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t === "available" }),
   simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 68, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
   {
     // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",
@@ -394,9 +402,9 @@ export const SHEET_COLUMNS = [
 
   // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
   // because escalation IS rent, over time — never a generic "term".
-  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" || t === "under_construction" }),
-  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" || t === "under_construction" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" || t === "under_construction" }),
+  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: isRateType }),
+  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: isRateType }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: isRateType }),
   // B843664 (owner: "add opex as an optional input") — fixed at $/SF/YR regardless of the rate's
   // own Per (mo/yr): industrial OpEx is conventionally quoted $/SF/yr even when rent isn't, and a
   // second period selector wasn't worth the friction. Optional in every sense — never required,
@@ -864,4 +872,12 @@ export function frozenLeftOffsets(visibleIdx, flexWidths) {
     left += widthFor(col, flexWidths);
   }
   return offsets;
+}
+
+/** A draft switched to `compType` through the Type column's OWN setter, so every default it applies
+ * (basis NNN on a rate type, status on under construction, Direct on available space) is the same
+ * whether the type was picked in the sheet or chosen up front from the map's "Log supply" menu. */
+export function draftWithType(draft, compType) {
+  const col = SHEET_COLUMNS.find((c) => c.key === "compType");
+  return col.setValue(draft, compType);
 }

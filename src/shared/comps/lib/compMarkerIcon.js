@@ -11,6 +11,7 @@ const TYPE_COLOR = {
   building_sale: "#2f6fb0", // blue — a built asset changing hands
   lease: "#3f8f5f", // green — an occupancy deal
   under_construction: "#d9822b", // orange — competing supply, not a transaction
+  available: "#7a4fb5", // design-exempt: map-marker type colour — purple, available space (a vacancy), also supply
 };
 
 export function compMarkerColor(compType) {
@@ -54,6 +55,11 @@ export function compMarkerSvg(compType, { selected = false } = {}) {
     (compType === "under_construction"
       ? `<rect x="${cx - r + ring * 2.2}" y="${cy - r + ring * 2.2}" width="${(r - ring * 2.2) * 2}" height="${(r - ring * 2.2) * 2}" rx="1" ` +
         `transform="rotate(45 ${cx} ${cy})" fill="none" stroke="#fff" stroke-width="0.9" stroke-dasharray="1.6 1.4"/>` // design-exempt: map-marker keyline white, the same white as the tag's backing rect
+      : "") +
+    // Available space reads apart by SHAPE too: a hollow centre (an empty building).
+    (compType === "available"
+      ? `<rect x="${cx - r * 0.42}" y="${cy - r * 0.42}" width="${r * 0.84}" height="${r * 0.84}" rx="0.8" ` +
+        `transform="rotate(45 ${cx} ${cy})" fill="#fff" stroke="none"/>` // design-exempt: map-marker keyline white, same white as the backing rect
       : "") +
     `</svg>`
   );

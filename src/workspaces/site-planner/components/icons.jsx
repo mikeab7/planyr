@@ -260,6 +260,17 @@ export const SitePlanIcon = ({ size = 16 }) => (
   </svg>
 );
 
+// A building outline drawn with a broken line — "supply": a building going up or standing empty,
+// distinct from CompIcon's box (a deal). The owner-approved "Log supply" row (2026-11-24).
+export const SupplyIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M4 20V9.5L12 4l8 5.5V20" strokeDasharray="3 2.2" />
+    <path d="M9 20v-5.5h6V20M2.5 20h19" />
+  </svg>
+);
+
 // A ruled note — two text lines on a plain page, distinct from SitePlanIcon's divided rect.
 export const NoteIcon = ({ size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"

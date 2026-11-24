@@ -41,7 +41,7 @@ describe("finishGroundAction — the ONE way a decide-bar verb returns the map t
   });
 
   it("placeCompOnSelectedParcel (\"Log a comp\" from a parcel selection) calls it too — the same defect, the same fix", () => {
-    const body = finder.slice(finder.indexOf("const placeCompOnSelectedParcel = ()"), finder.indexOf("const placeCompOnSelectedParcel = ()") + 700);
+    const body = finder.slice(finder.indexOf("const placeCompOnSelectedParcel = ("), finder.indexOf("const placeCompOnSelectedParcel = (") + 700);
     expect(body).toMatch(/finishGroundAction\(\)/);
   });
 

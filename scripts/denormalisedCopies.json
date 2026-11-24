@@ -455,7 +455,9 @@
       "uc_delivery_kind",
       "uc_start_date",
       "uc_delivery_date",
-      "uc_preleased_pct"
+      "uc_preleased_pct",
+      "av_kind",
+      "av_date"
     ],
     "map_notes": [
       "anchor_kind",

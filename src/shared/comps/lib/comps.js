@@ -14,7 +14,7 @@
 import { formatDateDisplay } from "./compDates.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 
-export const COMP_TYPES = ["land", "building_sale", "lease", "under_construction"];
+export const COMP_TYPES = ["land", "building_sale", "lease", "under_construction", "available"];
 
 /* ---- UNDER CONSTRUCTION (competing supply, owner ask 2026-11-24) ------------------------------
  * A fourth record type in the SAME `comps` table (`db/comps_under_construction.sql`): a building
@@ -34,6 +34,23 @@ export const UC_DELIVERY_KINDS = [
 export const isUnderConstruction = (comp) => comp?.compType === "under_construction";
 export const ucStatusLabel = (v) => UC_STATUSES.find((o) => o.value === v)?.label || null;
 export const ucKindLabel = (v) => UC_DELIVERY_KINDS.find((o) => o.value === v)?.label || null;
+
+/* ---- AVAILABLE SPACE (a vacancy; owner ask 2026-11-24 "we should also log vacancies") -----------
+ * A fifth type in the same table (`db/comps_available_space.sql`). Like under construction it is
+ * SUPPLY, not a transaction: no executed date, never in an average. Landlord = partyProvider,
+ * listing broker = partyAcquirer, available SF = leaseSizeSf, building size = bldgSizeSf (optional),
+ * asking rate = the lease-rate fields. New: avKind (direct | sublease), avDate (date available). */
+export const AV_KINDS = [
+  { value: "direct", label: "Direct" },
+  { value: "sublease", label: "Sublease" },
+];
+export const avKindLabel = (v) => AV_KINDS.find((o) => o.value === v)?.label || null;
+/** The two SUPPLY types (on the market, not a deal). Every average/summary already filters on its own
+ * compType; this is for the places that ask "is this supply?" (badge colour, dashboard, convert). */
+export const SUPPLY_TYPES = ["under_construction", "available"];
+export const isSupplyType = (t) => SUPPLY_TYPES.includes(t);
+/** Types that carry an ASKING or signed rent in the lease-rate fields (period required with a rate). */
+export const isRateCompType = (t) => t === "lease" || t === "under_construction" || t === "available";
 export const LEASE_PERIODS = ["annual", "monthly"];
 export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
 
@@ -465,6 +482,7 @@ export function partyLabels(compType) {
   if (compType === "land") return { provider: "Seller", acquirer: "Buyer" };
   if (compType === "building_sale") return { provider: "Seller", acquirer: "Buyer/User" };
   if (compType === "under_construction") return { provider: "Developer", acquirer: "Tenant" };
+  if (compType === "available") return { provider: "Landlord", acquirer: "Listing broker" };
   return { provider: "Owner/Developer", acquirer: "Tenant" }; // lease, and the honest default
 }
 
@@ -548,6 +566,20 @@ export function compFieldRows(comp, displayPeriod, opts) {
       const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
       push("rate", "Asking rate", `$${disp.formatted}/SF${period}${basis}`);
     }
+  } else if (comp?.compType === "available") {
+    push("avKind", "Space", avKindLabel(comp?.avKind));
+    if (comp?.leaseSizeSf != null) push("avSize", "Available SF", `${Number(comp.leaseSizeSf).toLocaleString()} SF`);
+    if (comp?.avDate) push("avDate", "Available", fmtCompDate(comp.avDate));
+    if (comp?.leaseRate != null) {
+      const disp = leaseRateDisplayFor(comp, displayPeriod);
+      const period = disp.period === "monthly" ? "/mo" : disp.period === "annual" ? "/yr" : "";
+      const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
+      push("rate", "Asking rate", `$${disp.formatted}/SF${period}${basis}`);
+    }
+    if (comp?.bldgSizeSf != null) push("size", "Building size", `${Number(comp.bldgSizeSf).toLocaleString()} SF`);
+    if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
+    push("power", "Power", powerLabel(comp));
   } else if (comp?.compType === "lease") {
     if (comp?.leaseRate != null) {
       const disp = leaseRateDisplayFor(comp, displayPeriod);
@@ -615,6 +647,7 @@ export function compBadgeLabel(compType) {
   if (compType === "land") return "LAND";
   if (compType === "building_sale") return "SALE";
   if (compType === "under_construction") return "UNDER CONSTRUCTION";
+  if (compType === "available") return "AVAILABLE";
   return "LEASE";
 }
 
@@ -625,6 +658,7 @@ const RECORD_DEAL_ORDER = {
   lease: ["rate", "term", "escalation", "freeRent", "ti", "opex", "commencement", "date", "netEffective", "opexNormalized", "dateEntered"],
   building_sale: ["price", "psf", "capRate", "noi", "date", "dateEntered"],
   under_construction: ["ucStatus", "ucKind", "ucStart", "ucDelivery", "ucPreleased", "rate", "dateEntered"],
+  available: ["avKind", "avSize", "avDate", "rate", "dateEntered"],
   land: ["price", "psf", "size", "date", "dateEntered"],
 };
 const RECORD_BUILDING_KEYS = ["size", "clearHeight", "yearBuilt", "parcelApn"];
@@ -685,6 +719,11 @@ export function compHeadline(comp, displayPeriod) {
     if (comp.bldgSizeSf != null) bits.push(`${Number(comp.bldgSizeSf).toLocaleString()} SF`);
     return bits.join(" · ");
   }
+  if (comp?.compType === "available") {
+    const bits = [comp.avKind === "sublease" ? "Sublease available" : "Available"];
+    if (comp.leaseSizeSf != null) bits.push(`${Number(comp.leaseSizeSf).toLocaleString()} SF`);
+    return bits.join(" · ");
+  }
   return "Comp";
 }
 
@@ -715,7 +754,7 @@ export function validateComp(draft) {
   // NEW-1 (round 3, 2026-10-19) — only when a RATE is present: no rate, nothing to pick a period for
   // (`comps_lease_rate_requires_period` is `lease_rate is null or period is not null`).
   const hasRate = draft?.leaseRate !== "" && draft?.leaseRate != null && Number.isFinite(Number(draft.leaseRate));
-  if ((draft?.compType === "lease" || draft?.compType === "under_construction") && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
+  if (isRateCompType(draft?.compType) && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
   // db/comps_power_docks.sql: integer columns, and phase is 1 or 3 — refused here in plain words
   // instead of surfacing the raw Postgres text.
   const blank = (v) => v === "" || v == null;
@@ -811,6 +850,9 @@ export function rowToComp(r) {
     ucStartDate: r.uc_start_date || null,
     ucDeliveryDate: r.uc_delivery_date || null,
     ucPreleasedPct: r.uc_preleased_pct != null ? Number(r.uc_preleased_pct) : null,
+    // Available-space facts (`db/comps_available_space.sql`) — null on every other type.
+    avKind: r.av_kind || null,
+    avDate: r.av_date || null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -857,6 +899,7 @@ export function emptyDraft(anchor) {
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
     ucStatus: "", ucDeliveryKind: "", ucStartDate: "", ucDeliveryDate: "", ucPreleasedPct: "",
+    avKind: "", avDate: "",
   };
 }
 
@@ -961,6 +1004,7 @@ export function draftToComp(d) {
     ucStatus: d.ucStatus || null, ucDeliveryKind: d.ucDeliveryKind || null,
     ucStartDate: d.ucStartDate || null, ucDeliveryDate: d.ucDeliveryDate || null,
     ucPreleasedPct: num(d.ucPreleasedPct),
+    avKind: d.avKind || null, avDate: d.avDate || null,
   };
 }
 
@@ -988,6 +1032,7 @@ export function compToDraft(c) {
     leaseEscalationPct: str(c.leaseEscalationPct), leaseOpex: str(c.leaseOpex),
     ucStatus: c.ucStatus || "", ucDeliveryKind: c.ucDeliveryKind || "",
     ucStartDate: c.ucStartDate || "", ucDeliveryDate: c.ucDeliveryDate || "", ucPreleasedPct: str(c.ucPreleasedPct),
+    avKind: c.avKind || "", avDate: c.avDate || "",
   };
 }
 
@@ -1041,30 +1086,55 @@ export function compToRow(comp) {
     uc_start_date: comp.ucStartDate || null,
     uc_delivery_date: comp.ucDeliveryDate || null,
     uc_preleased_pct: comp.ucPreleasedPct ?? null,
+    av_kind: comp.avKind || null,
+    av_date: comp.avDate || null,
     updated_at: new Date().toISOString(),
   };
 }
 
-/* ---- converting a DELIVERED building into a regular record --------------------------------------
- * The only way an under-construction record becomes a transaction. Pure: returns the draft for the
- * new record, never writes. `to` is "lease" (the usual case: it delivered and a tenant leased it) or
- * "building_sale". What carries: location/anchor, title, notes, site link, team, the building facts,
- * the developer (as landlord / seller), the tenant, and the asking rate as the lease rate (so it is
- * visibly the same figure, to be corrected to the signed one). What is dropped: the uc_* fields. The
- * executed date is left BLANK — never guessed (comp_date is a fact about the deal). */
+/* ---- converting SUPPLY into the next record in a building's life ------------------------------
+ * Under construction -> Available space -> Lease / Sale. Pure: returns the draft for the converted
+ * record (SAME id, so the edit form's save updates it in place), never writes. Allowed targets:
+ *   from under_construction: "available" | "lease" | "building_sale"
+ *   from available:          "lease" | "building_sale"
+ * What carries: location/anchor, title, notes, site link, team, the building facts, the landlord /
+ * developer, the asking rate (as the lease rate on a lease, so it is visibly the same figure to be
+ * corrected to the signed one). The executed date is left BLANK, never guessed. The previous type's
+ * own fields are cleared. A listing broker is never carried into the Tenant/Buyer slot, and a
+ * tenant is never carried into the Listing broker slot. */
+export const CONVERT_TARGETS = {
+  under_construction: ["available", "lease", "building_sale"],
+  available: ["lease", "building_sale"],
+};
+export function convertTargetsFor(compType) { return CONVERT_TARGETS[compType] || []; }
 export function convertDeliveredComp(comp, to = "lease") {
-  const target = to === "building_sale" ? "building_sale" : "lease";
+  const from = comp?.compType;
+  const target = ["available", "lease", "building_sale"].includes(to) ? to : "lease";
   const d = compToDraft(comp);
   const out = {
     ...d,
     compType: target,
     compDate: "",
     ucStatus: "", ucDeliveryKind: "", ucStartDate: "", ucDeliveryDate: "", ucPreleasedPct: "",
+    avKind: "", avDate: "",
   };
+  if (target === "available") {
+    // A delivered building with space still open. Fully un-leased -> the whole building is available;
+    // partly pre-leased -> the available SF is left for the person to type (never a guessed split).
+    const pre = Number(d.ucPreleasedPct);
+    out.leaseSizeSf = d.ucPreleasedPct === "" || pre === 0 ? d.bldgSizeSf : "";
+    out.avKind = "direct";
+    out.avDate = d.ucDeliveryDate || "";
+    out.partyAcquirer = ""; // the tenant slot becomes the listing broker
+    return out;
+  }
+  if (from === "available") out.partyAcquirer = ""; // a listing broker is not the tenant / buyer
   if (target === "lease") {
-    out.leaseSizeSf = d.bldgSizeSf;
+    if (from !== "available") out.leaseSizeSf = d.bldgSizeSf;
     out.bldgSizeSf = "";
   } else {
+    if (from === "available" && !d.bldgSizeSf) out.bldgSizeSf = d.leaseSizeSf;
+    out.leaseSizeSf = "";
     out.leaseRate = ""; out.leaseRatePeriod = "";
   }
   return out;

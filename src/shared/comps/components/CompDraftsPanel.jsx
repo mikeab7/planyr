@@ -17,7 +17,7 @@ import {
 import { draftTitleFor } from "../lib/compDrafts.js";
 import { NO_AUTOFILL } from "../../ui/noAutofill.js";
 
-const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease", under_construction: "Under construction" };
+const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease", under_construction: "Under construction", available: "Available space" };
 
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12, borderRadius: 6, fontFamily: "inherit",
