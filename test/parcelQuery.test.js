@@ -236,3 +236,30 @@ describe("idAttrFor — the parcel card's Account/ID resolves the pinned column,
     expect(idAttrFor("ga_effingham", undefined)).toBeNull();
   });
 });
+
+describe("NEW-1 (Meriwether GA, 2026-11) — a typed id finds a SPACE-PADDED stored id", () => {
+  const META = { fields: [{ name: "Parcel_No", type: "esriFieldTypeString" }] };
+  const w = (value, extra = {}) => buildParcelWhere({ meta: META, mode: "id", value, idField: "Parcel_No", addrField: null, ...extra });
+  it("tokens are matched in order, so the card's collapsed form finds the padded one", () => {
+    expect(w("023 012")).toBe("UPPER(Parcel_No) LIKE UPPER('%023%012%')");
+    expect(w("023-012")).toBe("UPPER(Parcel_No) LIKE UPPER('%023%012%')");
+    expect(w("  004   016 001 ")).toBe("UPPER(Parcel_No) LIKE UPPER('%004%016%001%')");
+    expect(w("069A 009")).toBe("UPPER(Parcel_No) LIKE UPPER('%069A%009%')");
+  });
+  it("a single token is unchanged; a county with a declared id normaliser keeps the typed text", () => {
+    expect(w("023012")).toBe("UPPER(Parcel_No) LIKE UPPER('%023012%')");
+    expect(w("156-027.00-000", { idTokens: false })).toBe("UPPER(Parcel_No) LIKE UPPER('%156-027.00-000%')");
+  });
+  it("a padded-id county (idSpread) also finds the unseparated form across the gap", () => {
+    expect(w("023012", { idSpread: true })).toBe("UPPER(Parcel_No) LIKE UPPER('%0%2%3%0%1%2%')");
+    expect(w("023", { idSpread: true })).toBe("UPPER(Parcel_No) LIKE UPPER('%023%')");
+    expect(COUNTIES_PADDED()).toBe(true);
+  });
+  it("a numeric id field keeps '='; quotes stay escaped", () => {
+    const num = { fields: [{ name: "ID", type: "esriFieldTypeInteger" }] };
+    expect(buildParcelWhere({ meta: num, mode: "id", value: "40594", idField: "ID" })).toBe("ID = 40594");
+    expect(w("A'B C")).toBe("UPPER(Parcel_No) LIKE UPPER('%A''B%C%')");
+  });
+});
+import { COUNTIES as _C } from "../src/workspaces/site-planner/lib/counties.js";
+function COUNTIES_PADDED() { return _C.ga_meriwether.idPadded === true; }
