@@ -128,7 +128,7 @@ import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — t
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { skipWhileHidden } from "./lib/hiddenRenderGate.js";
 import { siteAnchorLatLon } from "./lib/siteAnchor.js";
-import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
+import { pinStacks, pinStacksSig, pinPlacement, placedAnchor, pinStackHtml, isStackBadgePress } from "./lib/pinCluster.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
 // parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
@@ -1609,11 +1609,14 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // buckets here at all, so a null `status` on one can never be defaulted into "Pursuit."
   const pursuitSites = useMemo(() => sites.filter((s) => roleOf(s) === "pursuit"), [sites]);
 
-  // NEW-1 — pins that sit on the SAME ground (a parcel-anchored comp, a note on that parcel, the
-  // site's own pin: all resolve to the parcel centre) get nudged apart in SCREEN pixels so none hides
-  // another and each stays clickable at any zoom. Priority: site, then comps, then notes; the first
-  // keeps its true spot. Only what is actually painted counts (layer checkboxes + name filter).
-  // Held by signature so the three marker effects rebuild only when an offset really changes.
+  // NEW-1 / B2671329 — pins that sit on the SAME ground (a parcel-anchored comp, a note on that
+  // parcel, the site's own pin, a park's buildings sharing one coordinate) form a STACK drawn ON ITS
+  // TRUE POINT with a count badge; the badge fans it out until the map next zooms (lib/pinCluster.js
+  // says why: the old fixed screen-pixel nudge made pins slide against the map on every zoom).
+  // Priority: site, then comps, then notes. Only what is actually painted counts (layer checkboxes +
+  // name filter). Held by signature so the marker effects rebuild only when a stack really changes.
+  const [fannedStack, setFannedStack] = useState(null);
+  const toggleStack = (key) => setFannedStack((cur) => (cur === key ? null : key));
   const pinOffsetsRef = useRef(new Map());
   const pinOffsets = useMemo(() => {
     const pts = [];
@@ -1624,12 +1627,25 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
     if (showCompsLayer) for (const c of mapComps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
     if (showNotesLayer) for (const n of mapNotes) if (n?.anchor) pts.push({ id: `note:${n.id}`, lat: n.anchor.lat, lon: n.anchor.lon });
-    const next = pinClusterOffsets(pts);
-    return pinOffsetsSig(next) === pinOffsetsSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
+    const next = pinStacks(pts);
+    return pinStacksSig(next) === pinStacksSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pursuitSites, parcelSummary, mapComps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
   pinOffsetsRef.current = pinOffsets;
-  const shiftAnchor = (anchor, id) => { const o = pinOffsets.get(id); return o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; };
+  const placeOf = (id) => pinPlacement(pinOffsets, id, fannedStack);
+  // A fan is only ever open at the zoom it was opened at: the map starting to zoom, or a press on
+  // empty map, puts the stack back. Fanned pins sit a fixed screen distance from their point, so a
+  // fan left open through a zoom would slide against the aerial (B2671329, the bug this replaces).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || fannedStack == null) return undefined;
+    const close = () => setFannedStack(null);
+    map.on("zoomstart", close); map.on("click", close);
+    return () => { map.off("zoomstart", close); map.off("click", close); };
+  }, [fannedStack]);
+  useEffect(() => {
+    if (fannedStack != null && ![...pinOffsets.values()].some((s) => s.key === fannedStack)) setFannedStack(null);
+  }, [pinOffsets, fannedStack]);
 
   const clearHilites = () => {
     const map = mapRef.current;
@@ -2497,9 +2513,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // the same decoupling rule as the sites layer above.
       (showCompsLayer ? mapComps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
+        const pl = placeOf(`comp:${c.id}`);
+        if (pl.hidden) return; // a member of a collapsed stack: its lead stands on the spot for it
         const { size, anchor } = compMarkerSize(false);
-        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
-        const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
+        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType) + pinStackHtml(pl, anchor, anchor[0]), iconSize: size, iconAnchor: placedAnchor(anchor, pl) });
+        // On a site's own spot the comp draws ABOVE the site pin (it is the smaller mark, and the
+        // site stays clickable around it); a fanned stack rises above everything near it.
+        const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true, zIndexOffset: pl.fanned ? 3000 : pl.aboveSite ? 2000 : 0 });
         // A building under construction has no executed date: its tooltip says when it delivers instead.
         const tipWhen = c.compType === "under_construction" ? (c.ucDeliveryDate ? `delivers ${c.ucDeliveryDate}` : "") : c.compType === "available" ? (c.avDate ? `available ${c.avDate}` : "") : (c.compDate || "");
         const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${tipWhen}`;
@@ -2513,7 +2533,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             if (oe) { oe.preventDefault(); oe.stopPropagation(); }
             setCompMenu({ comp: c, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
           };
-          marker.on("click", () => { if (editingNoteRef.current) return; return onCompClickRef.current && onCompClickRef.current(c.id); }).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
+          marker.on("click", (e) => { if (editingNoteRef.current) return;
+            if (isStackBadgePress(e)) return toggleStack(pl.key); // the count badge fans / restacks
+            return onCompClickRef.current && onCompClickRef.current(c.id);
+          }).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
         }
         marker.addTo(group);
       });
@@ -2523,7 +2546,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapComps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
+  }, [mapComps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets, fannedStack]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -2541,6 +2564,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       (showNotesLayer ? mapNotes : []).forEach((n) => {
         if (!n?.anchor || typeof n.anchor.lat !== "number" || typeof n.anchor.lon !== "number") return;
         const isOpen = (editingNote?.id != null && editingNote.id === n.id) || (notePulseId != null && notePulseId === n.id); // ring on the note being edited / just saved
+        const pl = placeOf(`note:${n.id}`);
+        if (pl.hidden) return; // a member of a collapsed stack: its lead stands on the spot for it
         const { size, anchor: iconAnchor } = mapNoteMarkerSize(isOpen);
         // The marker carries its own note id so a check (or a future "focus this note" path) can
         // address ONE note rather than guessing from marker order. Deliberately `data-note-id` and
@@ -2548,12 +2573,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         // planner SVG, and a Leaflet map marker is not one of them (COUNT-EVERY-KIND).
         const icon = L.divIcon({
           className: "map-note-feature",
-          html: `<span data-note-id="${String(n.id).replace(/"/g, "")}"${isOpen ? ' data-open="1"' : ""}>${pinHtml(mapNoteMarkerSvg({ selected: isOpen }), isOpen)}</span>`,
-          iconSize: size, iconAnchor: shiftAnchor(iconAnchor, `note:${n.id}`),
+          html: `<span data-note-id="${String(n.id).replace(/"/g, "")}"${isOpen ? ' data-open="1"' : ""}>${pinHtml(mapNoteMarkerSvg({ selected: isOpen }), isOpen)}</span>` + pinStackHtml(pl, iconAnchor, PIN_KEYLINE_R),
+          iconSize: size, iconAnchor: placedAnchor(iconAnchor, pl),
         });
-        const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
+        const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true, zIndexOffset: pl.fanned ? 3000 : pl.aboveSite ? 2000 : 0 });
         if (!selectMode && !placingCompPin) {
-          marker.on("click", () => { if (editingNoteRef.current) return; /* never silently swap or drop the open composer (NEW-1, 2026-10-08) */ setEditingNote(n); }).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
+          marker.on("click", (e) => { if (editingNoteRef.current) return; /* never silently swap or drop the open composer (NEW-1, 2026-10-08) */ if (isStackBadgePress(e)) return toggleStack(pl.key); setEditingNote(n); }).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
         }
         marker.addTo(group);
       });
@@ -2563,7 +2588,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, notePulseId, pinOffsets]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, notePulseId, pinOffsets, fannedStack]);
 
   /* ── NEW-1 (2026-10-08): THE NOTE COMPOSER KEEPS ITS TARGET IN VIEW ─────────────────────────────
    * Owner report (iPhone): choosing "Add a note" made the thing he had clicked disappear and left a

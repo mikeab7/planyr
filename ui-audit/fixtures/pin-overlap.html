@@ -3,25 +3,58 @@
 <style>html,body,#map{margin:0;height:100%}</style></head>
 <body><div id="map"></div>
 <script type="module">
-/* Fixture for ui-audit/verify-pin-overlap.mjs — a real Leaflet map carrying a site pin, a comp marker
- * and a map-note marker on ONE parcel centre, built from the app's own marker modules and the same
- * cluster helper MapFinder.jsx uses. `?cluster=0` skips the offsets: that is the red arm (the pre-fix
- * layout), which the harness requires to FAIL so a green run means something. */
+/* Fixture for ui-audit/verify-pin-overlap.mjs — a real Leaflet map carrying a site pin, one comp of
+ * EVERY type and a map note on ONE parcel centre, plus a lone comp of every type elsewhere, built
+ * from the app's own marker modules and the same stack helpers MapFinder.jsx uses (B2013744,
+ * B2671329). `?mode=legacy` draws the retired fixed screen-pixel nudge (`pinClusterOffsets`): that
+ * is the red arm, which the harness requires to DRIFT against the map on zoom. `?mode=stacks` is the
+ * shipped layout: every pin on its own point, a count badge that fans the stack, a fan that closes
+ * when the map starts to zoom. */
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { compMarkerSvg, compMarkerSize } from "/src/shared/comps/lib/compMarkerIcon.js";
 import { mapNoteMarkerSvg, mapNoteMarkerSize } from "/src/shared/mapNotes/lib/mapNoteMarkerIcon.js";
-import { sitePinSvg, pinHitBox, pinHtml } from "/src/shared/mapNotes/lib/mapPinSymbol.js";
-import { pinClusterOffsets } from "/src/workspaces/site-planner/lib/pinCluster.js";
+import { sitePinSvg, pinHitBox, pinHtml, PIN_KEYLINE_R } from "/src/shared/mapNotes/lib/mapPinSymbol.js";
+import { pinClusterOffsets, pinStacks, pinPlacement, placedAnchor, pinStackHtml, isStackBadgePress } from "/src/workspaces/site-planner/lib/pinCluster.js";
+const TYPES = ["land", "building_sale", "lease", "under_construction", "available"];
 const P = { lat: 29.62316598, lon: -95.28208917 };
-const cluster = new URLSearchParams(location.search).get("cluster") !== "0";
-const offs = cluster ? pinClusterOffsets([{ id: "site:s", ...P }, { id: "comp:c", ...P }, { id: "note:n", ...P }]) : new Map();
-const shift = (a, id) => { const o = offs.get(id); return o ? [a[0] - o[0], a[1] - o[1]] : a; };
-const map = L.map("map", { zoomControl: false }).setView([P.lat, P.lon], 17);
-const mk = (cls, html, size, anchor, z) => L.marker([P.lat, P.lon], { icon: L.divIcon({ className: cls, html, iconSize: size, iconAnchor: anchor }), zIndexOffset: z }).addTo(map);
-const hb = pinHitBox();
-mk("map-site-feature", pinHtml(sitePinSvg("pursuit", false), false), hb.size, shift(hb.anchor, "site:s"), 100);
-{ const { size, anchor } = compMarkerSize(false); mk("map-comp-feature", compMarkerSvg("lease"), size, shift(anchor, "comp:c"), 0); }
-{ const { size, anchor } = mapNoteMarkerSize(false); mk("map-note-feature", `<span data-note-id="n">${pinHtml(mapNoteMarkerSvg({ selected: false }), false)}</span>`, size, shift(anchor, "note:n"), 0); }
+const legacy = new URLSearchParams(location.search).get("mode") === "legacy";
+const pts = [{ id: "site:s", ...P }, ...TYPES.map((t) => ({ id: `comp:${t}`, ...P, t })), { id: "note:n", ...P }];
+TYPES.forEach((t, i) => pts.push({ id: `comp:lone-${t}`, lat: P.lat - 0.004, lon: P.lon - 0.006 + i * 0.003, t }));
+const map = L.map("map", { zoomControl: false }).setView([P.lat, P.lon], 16);
+const offs = legacy ? pinClusterOffsets(pts) : null;
+const stacks = legacy ? null : pinStacks(pts);
+let fanned = null;
+let layer = null;
+window.__points = pts;
+function build() {
+  if (layer) map.removeLayer(layer);
+  layer = L.layerGroup().addTo(map);
+  const hb = pinHitBox();
+  L.marker([P.lat, P.lon], { icon: L.divIcon({ className: "map-site-feature", html: pinHtml(sitePinSvg("pursuit", false), false), iconSize: hb.size, iconAnchor: hb.anchor }), zIndexOffset: 100 })
+    .on("click", () => { window.__lastClick = "site:s"; }).addTo(layer);
+  for (const p of pts) {
+    if (p.id === "site:s") continue;
+    const isNote = p.id.startsWith("note:");
+    const { size, anchor } = isNote ? mapNoteMarkerSize(false) : compMarkerSize(false);
+    let pl = null, a = anchor;
+    if (legacy) { const o = offs.get(p.id); a = o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; }
+    else { pl = pinPlacement(stacks, p.id, fanned); if (pl.hidden) continue; a = placedAnchor(anchor, pl); }
+    const body = isNote ? `<span data-note-id="n">${pinHtml(mapNoteMarkerSvg({ selected: false }), false)}</span>` : compMarkerSvg(p.t);
+    const html = body + (pl ? pinStackHtml(pl, anchor, isNote ? PIN_KEYLINE_R : anchor[0]) : "");
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: isNote ? "map-note-feature" : "map-comp-feature", html, iconSize: size, iconAnchor: a }),
+      zIndexOffset: pl ? (pl.fanned ? 3000 : pl.aboveSite ? 2000 : 0) : 0 })
+      .on("click", (e) => {
+        if (pl && isStackBadgePress(e)) { fanned = fanned === pl.key ? null : pl.key; build(); return; }
+        window.__lastClick = p.id;
+      })
+      .addTo(layer)
+      .getElement().setAttribute("data-pin-id", p.id);
+  }
+}
+map.on("zoomstart", () => { if (fanned != null) { fanned = null; build(); } });
+map.on("click", () => { if (fanned != null) { fanned = null; build(); } });
+build();
+window.__map = map;
 window.__ready = true;
 </script></body></html>
