@@ -539,6 +539,7 @@ import { cleanText, GEO_REG_EFFECT, GEO_REG_DEPS, ZERO_REG_SHIFT, PANEL_SHIFT_EF
 import { Section, ROAD_GUTTER_W, ROAD_SELECT_STYLE, Field, PairedField, PairedFieldHead, DockLayerPanel, PercentField, AisleSideCard, StdSubLabel, RotationField, withoutStyleOverrides, LoadingWallPicker, InspectorMoreMenu, LineSample } from "./components/PropFields.jsx";
 import { WallRows, PadElevRow } from "./components/WallRows.jsx";
 import { HatchPatternDef, ToolIcon, RailIcon } from "./components/PlannerIcons.jsx";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, onGoDashboard, onSelectOrg, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
@@ -19633,7 +19634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const applyMultiStyle = (patch) => { pushHistory(); liveMultiStyle(patch); };
   // Drop per-element overrides across every selected element (multi "Reset" → back to type defaults).
   const clearMultiElStyle = () => { const ids = multiElHostIds(); if (!ids.size) return; pushHistory(); setEls((a) => a.map((e) => { if (!ids.has(e.id)) return e; return withoutStyleOverrides(e); })); };
-  // Opacity slider drag = ONE undo frame (a <input type=range> has no focus/input split like a
+  // Opacity slider drag = ONE undo frame (a <input {...NO_AUTOFILL} type=range> has no focus/input split like a
   // color picker): snapshot lazily on the first change of a drag, reset on pointer-down. Shared
   // ref is safe because only one slider can be dragged at a time. `apply(e)` is a NO-history
   // writer; EVERY opacity slider must spread {...sliderHistory(apply)} so a single edit is undoable
@@ -25180,7 +25181,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {calls.length > 0 && !closes && (
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
                     Corridor width
-                    <input type="number" min={1} value={mbWidth} onChange={(e) => setMbWidth(Math.max(1, +e.target.value || 1))} style={{ ...numInput, width: 56 }} /> ft
+                    <input {...NO_AUTOFILL} type="number" min={1} value={mbWidth} onChange={(e) => setMbWidth(Math.max(1, +e.target.value || 1))} style={{ ...numInput, width: 56 }} /> ft
                   </label>
                 )}
                 <div style={{ flex: 1 }} />

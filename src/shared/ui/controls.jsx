@@ -541,7 +541,7 @@ export function pinDragCursor(cursor) {
 /* useListboxNav — one highlight state + the keydown handler + the a11y props for a typeahead suggestion list, so every list in the app
  * (map address search, party names, Food restaurant search) behaves identically. Rules: listboxNav.js.
  *   const nav = useListboxNav({ count: rows.length, open, setOpen, onCommit: (i) => pick(rows[i]), listboxId });
- *   <input {...nav.inputProps} onKeyDown={(e) => { if (nav.onKeyDown(e)) return; …own Enter fallback… }} onChange={() => nav.reset()} />
+ *   <input {...NO_AUTOFILL} {...nav.inputProps} onKeyDown={(e) => { if (nav.onKeyDown(e)) return; …own Enter fallback… }} onChange={() => nav.reset()} />
  *   <li {...nav.optionProps(i)} style={{ …, ...listboxRowStyle(i === nav.activeIndex) }} onClick={…} />
  * - The caret never jumps: Up/Down are preventDefault-ed whenever the list has rows.
  * - The highlighted row scrolls into view (nearest edge) when the list scrolls.

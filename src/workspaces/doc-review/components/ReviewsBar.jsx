@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { listReviews, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
 import { useReviewTrash, TrashNotice, UndoToast } from "../../library/components/ReviewTrash.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
@@ -109,12 +110,12 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
             {DISCIPLINES.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
           <div style={{ display: "flex", gap: 6 }}>
-            <input value={meta.item || ""} placeholder="Item / type" onChange={(e) => onMeta?.("item", e.target.value)} style={fld} />
-            <input value={meta.revision || ""} placeholder="Rev" onChange={(e) => onMeta?.("revision", e.target.value)} style={{ ...fld, width: 80 }} />
+            <input {...NO_AUTOFILL} value={meta.item || ""} placeholder="Item / type" onChange={(e) => onMeta?.("item", e.target.value)} style={fld} />
+            <input {...NO_AUTOFILL} value={meta.revision || ""} placeholder="Rev" onChange={(e) => onMeta?.("revision", e.target.value)} style={{ ...fld, width: 80 }} />
           </div>
-          <input type="date" value={meta.docDate || ""} onChange={(e) => onMeta?.("docDate", e.target.value)} style={fld} />
+          <input {...NO_AUTOFILL} type="date" value={meta.docDate || ""} onChange={(e) => onMeta?.("docDate", e.target.value)} style={fld} />
           <div style={{ ...lbl, marginTop: 8 }}>Name</div>
-          <input value={meta.title || ""} placeholder={composeTitle(meta)} onChange={(e) => onMeta?.("title", e.target.value)} style={fld} />
+          <input {...NO_AUTOFILL} value={meta.title || ""} placeholder={composeTitle(meta)} onChange={(e) => onMeta?.("title", e.target.value)} style={fld} />
 
           <button onClick={() => { onNew?.(); setOpen(false); }} style={{ marginTop: 10, width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 7, border: `1px solid ${PAL.accent}`, background: "var(--surface-raised)", color: PAL.accent }}>＋ New review</button>
 

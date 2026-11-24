@@ -57,6 +57,7 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import {
   isHidden, groupState, setVisible, setManyVisible, showAll, groupsFor, hiddenSummary,
 } from "../lib/contentVisibility.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 // Same 13px eye as the planner's per-overlay visibility toggle (B277) — redeclared here
 // because SitePlanner.jsx keeps its icons file-private and importing back from the
@@ -91,7 +92,7 @@ function GridNumInput({ value, min = 1, max = 1000, style, onCommit }) {
     if (v !== value) onCommit(v);
   };
   return (
-    <input type="text" inputMode="decimal" value={draft} style={style}
+    <input {...NO_AUTOFILL} type="text" inputMode="decimal" value={draft} style={style}
       onFocus={() => { editing.current = true; }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

@@ -63,6 +63,7 @@ import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js
 import {
   PIN_ADDR_STORAGE_KEY, PIN_ADDR_STORAGE_MAX, readPinAddrStorage, persistPinAddr, pinCacheKey,
 } from "../lib/pinAddrCache.js";
+import { NO_AUTOFILL } from "../../ui/noAutofill.js";
 
 // Re-exported for existing importers (test/compPinAddrCache.test.js, and any future one) — the
 // pure, disk-backed half of this cache now lives in lib/pinAddrCache.js (B1497890) so a caller
@@ -456,15 +457,15 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
           name for this field. */}
       {draft.compType !== "under_construction" && (
         <Field label="Executed" stacked>
-          <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
+          <input {...NO_AUTOFILL} type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
         </Field>
       )}
       {draft.compType === "lease" && (
         <Field label="Commencement" stacked>
-          <input type="date" value={draft.leaseCommencementDate} onChange={set("leaseCommencementDate")} style={inputStyle} />
+          <input {...NO_AUTOFILL} type="date" value={draft.leaseCommencementDate} onChange={set("leaseCommencementDate")} style={inputStyle} />
         </Field>
       )}
-      <Field label="Title" stacked><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
+      <Field label="Title" stacked><input {...NO_AUTOFILL} value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
 
       {/* Facts about the deal's PARTIES, not its economics — kept with Title, ahead of the
           money block, so the rate/price figures stay together and readable (NEW-7 amended).
@@ -505,12 +506,12 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
             </select>
           </Field>
           <Field label="Building SF" stacked><NumField value={draft.bldgSizeSf} onChange={setVal("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
-          <Field label="Construction start" stacked><input type="date" value={draft.ucStartDate} onChange={set("ucStartDate")} style={inputStyle} /></Field>
-          <Field label="Expected delivery" stacked><input type="date" value={draft.ucDeliveryDate} onChange={set("ucDeliveryDate")} style={inputStyle} /></Field>
-          <Field label="Pre-leased (%)" stacked><input type="number" min="0" max="100" value={draft.ucPreleasedPct} onChange={set("ucPreleasedPct")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Construction start" stacked><input {...NO_AUTOFILL} type="date" value={draft.ucStartDate} onChange={set("ucStartDate")} style={inputStyle} /></Field>
+          <Field label="Expected delivery" stacked><input {...NO_AUTOFILL} type="date" value={draft.ucDeliveryDate} onChange={set("ucDeliveryDate")} style={inputStyle} /></Field>
+          <Field label="Pre-leased (%)" stacked><input {...NO_AUTOFILL} type="number" min="0" max="100" value={draft.ucPreleasedPct} onChange={set("ucPreleasedPct")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Asking rate ($/SF)" stacked>
             <span style={{ display: "flex", gap: 6 }}>
-              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <input {...NO_AUTOFILL} type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
               <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 60, flex: "none" }}>
                 <option value="">?</option>
                 {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
@@ -608,7 +609,7 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
               is exactly the case the owner's own list of exclusions named. */}
           <Field label="Rate ($/SF)" stacked>
             <span style={{ display: "flex", gap: 6 }}>
-              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <input {...NO_AUTOFILL} type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
               <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 60, flex: "none" }}>
                 {/* NEW-1 (owner call, 2026-09-10) — the unset option, which CompDraftsPanel.jsx's
                     identical control already had and this one did not. Without it a blank period
@@ -634,12 +635,12 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
             </div>
           )}
           <Field label="TI $/SF" stacked><NumField value={draft.leaseTi} onChange={setVal("leaseTi")} placeholder="optional" style={inputStyle} /></Field>
-          <Field label="Term" stacked><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={inputStyle} /></Field>
+          <Field label="Term" stacked><input {...NO_AUTOFILL} value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={inputStyle} /></Field>
           {/* NEW-13 — Free rent is a small MONTH COUNT, not a money/area figure (never remotely
               near 1,000), and Escalation is a PERCENTAGE — the owner's own two named exclusions.
               Both deliberately stay plain number inputs. */}
-          <Field label="Free rent (mo)" stacked><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={inputStyle} /></Field>
-          <Field label="Escalation %/yr" stacked><input type="number" value={draft.leaseEscalationPct} onChange={set("leaseEscalationPct")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Free rent (mo)" stacked><input {...NO_AUTOFILL} type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Escalation %/yr" stacked><input {...NO_AUTOFILL} type="number" value={draft.leaseEscalationPct} onChange={set("leaseEscalationPct")} placeholder="optional" style={inputStyle} /></Field>
         </>
       )}
 

@@ -6,6 +6,7 @@ import { zoomLabel } from "../lib/notesViewport.js";
 import { pageHeightLabel } from "../lib/notesPageHeight.js";
 import { PAGE_WIDTH_PRESETS } from "../lib/notesPageWidth.js";
 import { RADIUS } from "../lib/notesControls.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 export function EditorStyles() {
   return <style dangerouslySetInnerHTML={{ __html: EDITOR_CSS }} />;
@@ -240,7 +241,7 @@ export function FindReplaceBar({ editor, find, onClose }) {
         borderBottom: "1px solid var(--border-default)", background: "var(--surface-page)",
       }}
     >
-      <input ref={findRef} data-testid="note-find-input" value={term} placeholder="Find"
+      <input {...NO_AUTOFILL} ref={findRef} data-testid="note-find-input" value={term} placeholder="Find"
         onChange={(e) => setTerm(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); step(e.shiftKey ? -1 : 1); } }}
         style={inputStyle} />
@@ -249,7 +250,7 @@ export function FindReplaceBar({ editor, find, onClose }) {
       </span>
       <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={btnFor(!!count)}>‹</button>
       <button type="button" data-testid="note-find-replace-next" title="Next match" disabled={!count} onClick={() => step(1)} style={btnFor(!!count)}>›</button>
-      <input data-testid="note-replace-input" value={replacement} placeholder="Replace"
+      <input {...NO_AUTOFILL} data-testid="note-replace-input" value={replacement} placeholder="Replace"
         onChange={(e) => setReplacement(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); replaceOne(); } }}
         style={inputStyle} />

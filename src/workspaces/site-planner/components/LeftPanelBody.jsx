@@ -35,6 +35,7 @@ import { CostDisclosure, DrainagePanel, ProvenanceLegend, YieldPanel } from "./Y
 import { COLOR_SEED, ROW4 } from "../lib/plannerConstants.js";
 import { Section, Field, PairedField, PairedFieldHead, PercentField, StdSubLabel } from "./PropFields.jsx";
 import { DASH_OPTIONS } from "./PlannerIcons.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const GradingPanel = lazy(() => import("./GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
 const SiteAnalysis = lazy(() => import("./SiteAnalysis.jsx"));
@@ -1010,7 +1011,7 @@ export const LeftPanelBody = memo(function LeftPanelBody({
           <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
             <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
             <Field label="Road widths (ft)">
-              <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
+              <input {...NO_AUTOFILL} style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
             </Field>
             {/* Road classes — civil defaults + min-radius warning thresholds (B599/NEW-4). */}

@@ -29,6 +29,7 @@ import { Section, Field, PairedField, PairedFieldHead, PercentField, StdSubLabel
 import { DASH_OPTIONS } from "./PlannerIcons.jsx";
 import { loadDeed } from "../lib/deedLazy.js";
 import { courseParts, courseEditable, retraceWithEdit, deedClosureFacts, COURSE_LABEL_SIZE_DEFAULT, courseLabelPlaceOf, nameAtOf, nameShown } from "../lib/deedCourses.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 /* One course row: a typed bearing, a typed distance, and a bearing / distance visibility pair. The bearing keeps its own
  * draft: Enter or click-away commits, Escape puts the old text back (EDITOR-EXIT-CONTRACT, text class). */
@@ -51,7 +52,7 @@ const CourseRow = memo(function CourseRow({ call, index, PAL, disabled, onEdit, 
     <li data-testid={`deed-course-${index}`} style={{ listStyle: "none", display: "grid", gridTemplateColumns: "16px minmax(0,1.5fr) minmax(0,1fr) 22px 22px", columnGap: 5, alignItems: "center", marginBottom: 5 }}>
       <span style={{ fontSize: FONT_SIZE.label, color: PAL.muted, textAlign: "right" }}>{index + 1}</span>
       {editable
-        ? <input aria-label={`Bearing of course ${index + 1}`} data-testid={`deed-course-bearing-${index}`} value={draft} spellCheck={false} style={box}
+        ? <input {...NO_AUTOFILL} aria-label={`Bearing of course ${index + 1}`} data-testid={`deed-course-bearing-${index}`} value={draft} spellCheck={false} style={box}
             onChange={(e) => setDraft(e.target.value)} onBlur={commit}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); setDraft(parts.bearing); e.currentTarget.blur(); } }} />
         : <span title={call.curve ? "A curved course keeps its arc as read from the deed" : "Unlock the deed (and edit before using it as the parcel) to retype courses"} style={{ ...box, display: "flex", alignItems: "center", border: "1px solid transparent", background: "transparent", overflow: "hidden", whiteSpace: "nowrap" }}>{parts.bearing}{call.curve ? " (curve)" : ""}</span>}
@@ -141,7 +142,7 @@ export const DeedInspector = memo(function DeedInspector({
         {/* NAME & LABELS — the tract's name on the map: text, show, size, colour, placement, rotation. */}
         <StdSubLabel section="text">Name &amp; labels</StdSubLabel>
         <Field gutter={ROAD_GUTTER_W} oneLine label="Name">
-          <input value={m.label || ""} maxLength={120} data-testid="deed-name" placeholder={defaultName} style={txt}
+          <input {...NO_AUTOFILL} value={m.label || ""} maxLength={120} data-testid="deed-name" placeholder={defaultName} style={txt}
             onChange={(ev) => writeLabel({ label: ev.target.value }, { live: true })} onBlur={() => { labelSessionRef.current = null; }} />
         </Field>
         {check("Show name on the map", nameShown(m), (v) => setSelMarkupGeom({ showName: v }), "deed-show-name")}

@@ -10,6 +10,7 @@
  * WCAG AA color-contrast — all text uses theme tokens, never raw low-contrast grays.
  */
 import { schemaForMarkup } from "./propertySchema.js";
+import { NO_AUTOFILL } from "../ui/noAutofill.js";
 
 const FONT = "system-ui, sans-serif";
 const L = "var(--text-secondary)";  // label / caption
@@ -34,7 +35,7 @@ function ColorControl({ value, label, onChange }) {
 
 function NumberControl({ value, min, max, label, onChange }) {
   return (
-    <input type="number" value={value ?? ""} min={min} max={max} aria-label={label}
+    <input {...NO_AUTOFILL} type="number" value={value ?? ""} min={min} max={max} aria-label={label}
       onChange={(e) => { const n = parseFloat(e.target.value); if (Number.isFinite(n)) onChange(n); }}
       style={{ width: "100%", padding: "3px 6px", fontSize: 12, fontFamily: "ui-monospace, monospace",
         border: `1px solid ${B}`, borderRadius: 5, background: "var(--surface-page)", color: T }} />

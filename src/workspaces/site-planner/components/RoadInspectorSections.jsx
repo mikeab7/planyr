@@ -13,6 +13,7 @@ import Collapse from "./Collapse.jsx";
 import { NumInput } from "./NumInput.jsx";
 import { Field, ROAD_GUTTER_W, ROAD_SELECT_STYLE } from "./PropFields.jsx";
 import { RoadStripCaption, RoadXSectionStrip } from "./RoadPanelParts.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, jumpToStandards, setRoadClass, setRoadLength, stepBox, settings, linkBtn, travelFt, roadLengthOf, designed, selEl, showRow, cl, setRoadRowFt, setRoadTravel, mutedEll }) {
   return (
@@ -66,7 +67,7 @@ export const RoadXSectionSection = memo(function RoadXSectionSection({ roadCurbO
 export const RoadLabelSection = memo(function RoadLabelSection({ inlineLabelControls, setSelEl, coalesceLabelWrite, selEl, pushHistory }) {
   return (
     <Collapse sectionId="road-label" title="Label" defaultOpen summary={roadLabelSummary(selEl)}>
-      <Field gutter={ROAD_GUTTER_W} oneLine label="Name"><input data-testid="road-name" aria-label="Road name" value={selEl.inlineLabel || ""} maxLength={120}
+      <Field gutter={ROAD_GUTTER_W} oneLine label="Name"><input {...NO_AUTOFILL} data-testid="road-name" aria-label="Road name" value={selEl.inlineLabel || ""} maxLength={120}
         onFocus={() => pushHistory()}
         onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
         placeholder="e.g. MAIN STREET" style={ROAD_SELECT_STYLE} /></Field>

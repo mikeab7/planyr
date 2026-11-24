@@ -16,6 +16,7 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { Button, MenuItem } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 function Icon({ children }) {
   return (
@@ -34,7 +35,7 @@ const chromeBtnStyle = {
 };
 
 // ⛔ NEW-1 (command palette) — `forwardRef` exposing `openImportXlsx`/`openImportCsv`, which just
-// click the SAME hidden `<input type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
+// click the SAME hidden `<input {...NO_AUTOFILL} type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
 // rows already click — so a palette-driven import opens the identical OS file picker through the
 // identical DOM node, never a second import trigger.
 const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile, onOpenFile }, ref) {

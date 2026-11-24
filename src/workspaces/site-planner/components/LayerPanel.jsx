@@ -64,6 +64,7 @@ import { useServiceAreas } from "../lib/useServiceAreas.js";
 import { getContourInterval, setContourInterval, subscribeContourInterval } from "../lib/contourIntervalPref.js";
 import { setLayersHidden, useLayersHidden } from "../lib/layerHide.js";
 import { useViewLegends } from "../lib/viewLegendStore.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const TEXT = FONT_SIZE.control;
@@ -128,7 +129,7 @@ function OpacityRow({ label, value, onChange }) {
       <span style={{ flex: "none", color: MUTED, fontWeight: 600 }}>Opacity</span>
       <input type="range" min={OPACITY_MIN} max={OPACITY_MAX} step={0.05} value={value} aria-label={`${label} opacity`}
         onChange={(e) => { setDraft(null); onChange(+e.target.value); }} style={{ flex: 1, minWidth: 0 }} />
-      <input type="text" inputMode="numeric" value={shown} aria-label={`${label} opacity percent`}
+      <input {...NO_AUTOFILL} type="text" inputMode="numeric" value={shown} aria-label={`${label} opacity percent`}
         onChange={(e) => { setDraft(e.target.value); const f = opacityFromPercent(e.target.value); if (f != null) onChange(f); }}
         onBlur={() => setDraft(null)}
         style={{ ...fieldBase, width: 44, padding: "2px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums", flex: "none" }} />

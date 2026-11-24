@@ -28,6 +28,7 @@ import { NumInput } from "./NumInput.jsx";
 import { COLOR_SEED, measPts, measMode, pathLen } from "../lib/plannerConstants.js";
 import { Section, Field, PairedField, PairedFieldHead, DriveInRampPanel, PercentField, StdSubLabel, AlignIcon, VAlignIcon, RotationField, LineSample } from "./PropFields.jsx";
 import { DASH_OPTIONS } from "./PlannerIcons.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 export const DockLayerInspector = memo(function DockLayerInspector({
   els,
@@ -288,7 +289,7 @@ export const MeasureInspector = memo(function MeasureInspector({
               <div>
               <Section title={null}>
                 {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
-                <Field label="Label"><input value={m.label || ""} maxLength={80}
+                <Field label="Label"><input {...NO_AUTOFILL} value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
                   placeholder="e.g. Front setback" style={textInput} /></Field>

@@ -57,6 +57,7 @@ import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../.
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import { PALETTES } from "../../theme/palette.js";
 import { createWriteSerializer } from "../../cloud/writeSerializer.js";
+import { NO_AUTOFILL } from "../../ui/noAutofill.js";
 
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: FONT_SIZE.control, borderRadius: 6, fontFamily: "inherit",
@@ -305,7 +306,7 @@ function OverlayRow({
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingName ? (
-            <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+            <input {...NO_AUTOFILL} autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={(e) => { if (e.key === "Enter") commitName(); if (e.key === "Escape") { setNameDraft(o.docTitle || ""); setEditingName(false); } }}
               style={{ ...inputStyle, fontSize: FONT_SIZE.display, fontWeight: 600, padding: "3px 6px" }} />
@@ -453,7 +454,7 @@ function OverlayScaleSection({ o, calib, scaleMsg, onSetScale, onPick, onCancel,
           {selVal === "custom" && (
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <span style={metaText}>1 inch on the page =</span>
-              <input aria-label="Feet per page inch" data-testid="site-plan-scale-custom" style={{ ...inputStyle, width: 64 }} value={custom} placeholder="feet"
+              <input {...NO_AUTOFILL} aria-label="Feet per page inch" data-testid="site-plan-scale-custom" style={{ ...inputStyle, width: 64 }} value={custom} placeholder="feet"
                 onChange={(e) => setCustom(e.target.value)} onBlur={applyCustom} onKeyDown={(e) => { if (e.key === "Enter") applyCustom(); }} />
               <span style={metaText}>ft</span>
             </div>
@@ -466,7 +467,7 @@ function OverlayScaleSection({ o, calib, scaleMsg, onSetScale, onPick, onCancel,
           <span style={{ ...metaText, color: "var(--text-primary)" }}>{calibrationPrompt(calib)}</span>
           {calib.kind === "trace" && calib.pts.length === 2 && (
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input aria-label="Real length" data-testid="site-plan-scale-trace-length" style={{ ...inputStyle, width: 70 }} value={traceText} placeholder="length" autoFocus
+              <input {...NO_AUTOFILL} aria-label="Real length" data-testid="site-plan-scale-trace-length" style={{ ...inputStyle, width: 70 }} value={traceText} placeholder="length" autoFocus
                 onChange={(e) => setTraceText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onApplyTrace(traceText, traceUnit); }} />
               <select aria-label="Unit" style={inputStyle} value={traceUnit} onChange={(e) => setTraceUnit(e.target.value)}>{REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
             </div>
@@ -562,7 +563,7 @@ function SitePlanAdjustPanel({
             <span style={metaText}>Rotation</span>
             {(
               <>
-                <input type="number" step={0.1}
+                <input {...NO_AUTOFILL} type="number" step={0.1}
                   value={rotDraft != null ? rotDraft : Math.round((o.rotationDeg || 0) * 10) / 10}
                   onChange={(e) => setRotDraft(e.target.value)}
                   onFocus={() => setRotDraft(String(Math.round((o.rotationDeg || 0) * 10) / 10))}
@@ -1463,8 +1464,8 @@ export default function SitePlansSection({
                 </div>
               )}
               {!flow.overlayId && <>
-                <Field label="Document title" stacked><input value={flow.title} onChange={(e) => setF({ title: e.target.value })} style={inputStyle} /></Field>
-                <Field label="Document date" stacked required><input type="date" value={flow.docDate} onChange={(e) => setF({ docDate: e.target.value })} style={inputStyle} /></Field>
+                <Field label="Document title" stacked><input {...NO_AUTOFILL} value={flow.title} onChange={(e) => setF({ title: e.target.value })} style={inputStyle} /></Field>
+                <Field label="Document date" stacked required><input {...NO_AUTOFILL} type="date" value={flow.docDate} onChange={(e) => setF({ docDate: e.target.value })} style={inputStyle} /></Field>
                 {projects?.length > 0 && (
                   <Field label="Project (optional)" stacked>
                     <select value={flow.projectId || ""} onChange={(e) => setF({ projectId: e.target.value || null })} style={inputStyle}>

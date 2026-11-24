@@ -72,11 +72,18 @@ function stamp(el) {
     ios: isIosLike(el.ownerDocument.defaultView?.navigator),
   });
   el.dataset.planyrStamped = "";
-  if (!next) return;
-  if (next.autocomplete) el.setAttribute("autocomplete", next.autocomplete);
-  if (next.name) el.setAttribute("name", next.name);
+  const ac = (el.getAttribute("autocomplete") || "").trim();
+  const keep = el.hasAttribute("data-contact-field") || (ac && ac !== "off" && ac !== "on" && REAL_TOKEN.test(ac)); // contact / sign-in: leave to the password manager
+  if (next) {
+    if (next.autocomplete) el.setAttribute("autocomplete", next.autocomplete);
+    if (next.name) el.setAttribute("name", next.name);
+  }
+  if (!next && keep) return;
+  if (el.tagName === "SELECT") return;
+  // Password managers (LastPass "•••", 1Password, Bitwarden, Dashlane) key off these, even when autocomplete is already "off".
   el.setAttribute("data-1p-ignore", "");
   el.setAttribute("data-lpignore", "true");
+  el.setAttribute("data-bwignore", "");
   el.setAttribute("data-form-type", "other");
 }
 
@@ -253,6 +260,7 @@ export function installPhoneTyping(win = typeof window !== "undefined" ? window 
     attached.add(d);
     d.addEventListener("touchstart", onTouch, { capture: true, passive: true });
     d.addEventListener("pointerdown", onTouch, { capture: true, passive: true });
+    d.addEventListener("pointerover", onTouch, { capture: true, passive: true }); // desktop: stamp before the click focuses it, so the extension's icon never attaches
     d.addEventListener("focusin", onFocusIn, true);
     d.addEventListener("focusout", onFocusOut, true);
     d.addEventListener("input", onInput, true);

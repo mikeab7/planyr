@@ -26,6 +26,7 @@ import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs, createRosterLoader } from "../lib/teamRoster.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -394,7 +395,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
           {/* Desktop pane header: name + counts left; Invite · team ⋯ right. (Phone: the page header
               carries the team name; stat tiles carry the counts and the Invite action.) */}
           {renaming ? (
-            <input autoFocus aria-label="Team name" value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
+            <input {...NO_AUTOFILL} autoFocus aria-label="Team name" value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
               onBlur={commitRename}
               onKeyDown={(e) => { if (e.key === "Enter") commitRename(); else if (e.key === "Escape") setRenaming(false); }}
               style={{ ...field, fontSize: 15, fontWeight: 700, marginBottom: 8 }} />
@@ -491,7 +492,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
           <div style={{ height: 1, background: PAL.line, margin: "14px 0 12px" }} />
           <div style={label}>Create a team</div>
           <div style={{ display: "flex", gap: 6 }}>
-            <input placeholder="Team name (e.g. Acme Development)" value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doCreate(); }} />
+            <input {...NO_AUTOFILL} placeholder="Team name (e.g. Acme Development)" value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doCreate(); }} />
             <button style={btn(true)} disabled={busy || !name.trim()} onClick={doCreate}>{busy ? "…" : "Create"}</button>
           </div>
         </>
@@ -502,7 +503,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
             <div>
               <div style={label}>Create another team</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <input autoFocus placeholder="Team name (e.g. Acme Development)" value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doCreate(); else if (e.key === "Escape") { setShowCreate(false); setName(""); } }} />
+                <input {...NO_AUTOFILL} autoFocus placeholder="Team name (e.g. Acme Development)" value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") doCreate(); else if (e.key === "Escape") { setShowCreate(false); setName(""); } }} />
                 <button style={btn(true)} disabled={busy || !name.trim()} onClick={doCreate}>{busy ? "…" : "Create"}</button>
                 <button style={btn(false)} disabled={busy} onClick={() => { setShowCreate(false); setName(""); }}>Cancel</button>
               </div>

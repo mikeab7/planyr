@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useId } from "react";
 import NumberBox, { NUMBOX_INPUT_STYLE } from "../../../shared/ui/NumberBox.jsx";
 import { BORDER_1, SURF_RAISED } from "../lib/plannerShared.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 // A numeric input you can edit freely (clear it, type partial values) — it only
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
@@ -142,7 +143,7 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
    * also have been rounded. */
   const note = invalidReason || altered;
   const input = (
-    <input style={boxed ? (muted ? { ...NUMBOX_INPUT_STYLE, color: "var(--text-secondary)" } : NUMBOX_INPUT_STYLE) : style} data-numbox-input={boxed ? "1" : undefined} data-muted={muted ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+    <input {...NO_AUTOFILL} style={boxed ? (muted ? { ...NUMBOX_INPUT_STYLE, color: "var(--text-secondary)" } : NUMBOX_INPUT_STYLE) : style} data-numbox-input={boxed ? "1" : undefined} data-muted={muted ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       aria-invalid={invalidReason ? "true" : undefined}
       /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
        * carries the non-error "Using 614" note, which is not an error message at all. */

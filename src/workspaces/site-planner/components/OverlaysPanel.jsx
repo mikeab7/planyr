@@ -53,6 +53,7 @@ import { DIAL_TICKS, dialAngleFromPoint, dialDragAngle, dialKeyAngle, needleEnd,
 import { overlayBand, overlayPanelOrder, overlayOrderFlags, canDropOverlay } from "../lib/overlayOrder.js";
 import { overlaySubline, placementPlan, formatScaleRatio, scaleEntryPlan, OV_KIND } from "../lib/overlayPanelModel.js";
 import { EyeIcon, EyeOffIcon, LockGlyph, UnlockGlyph, MoreIcon, iconBtn as rowIconBtn } from "./ParcelsPanel.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const LINE = "1px solid var(--border-default)";
 const C = FONT_SIZE.control;   // values + controls
@@ -194,7 +195,7 @@ function DegBox({ value, disabled, reason, onCommit, onStep }) {
       onUp={() => step(1)} onDown={() => step(-1)} upLabel="Increase rotation 1 degree" downLabel="Decrease rotation 1 degree"
       upTitle={disabled ? reason : undefined} downTitle={disabled ? reason : undefined} upTestid="overlay-rot-plus" downTestid="overlay-rot-minus" upGlyph={<Chevron up />} downGlyph={<Chevron />}>
       <span role="group" aria-label="Rotation" title={disabled ? reason : undefined} style={{ display: "inline-flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, paddingRight: SPACE.xs }}>
-        <input value={draft} disabled={disabled} inputMode="decimal" aria-label="Rotation in degrees" data-testid="overlay-rotation"
+        <input {...NO_AUTOFILL} value={draft} disabled={disabled} inputMode="decimal" aria-label="Rotation in degrees" data-testid="overlay-rotation"
           style={{ ...inputStyle, border: "none", background: "transparent", height: "100%", width: "100%", padding: "0 1px 0 0", textAlign: "right", outline: "none" }}
           onFocus={() => { editing.current = true; }}
           onChange={(e) => setDraft(e.target.value)}
@@ -364,7 +365,7 @@ export function ScaleTools({ o, onApply }) {
       ) : (
         <div data-testid="overlay-scale-custom" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: SPACE.xs, minWidth: 0 }}>
           <span style={{ ...valueStyle, flex: "none" }}>1" =</span>
-          <input data-testid="overlay-scale-custom-input" aria-label="Feet per inch" aria-invalid={bad || undefined} inputMode="decimal" value={draft}
+          <input {...NO_AUTOFILL} data-testid="overlay-scale-custom-input" aria-label="Feet per inch" aria-invalid={bad || undefined} inputMode="decimal" value={draft}
             style={{ ...inputStyle, flex: "none", width: 92, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
             onChange={(e) => { setDraft(e.target.value); setBad(false); setDirty(true); }}
             onBlur={(e) => commit(e.currentTarget.value)}
@@ -528,7 +529,7 @@ function AppearanceSection({ o, plan, isMap, h }) {
         <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} aria-label="Opacity" style={{ flex: "1 1 60px", minWidth: 0, margin: 0, accentColor: ACCENT }}
           {...h.sliderHistory((e) => { h.onPatch(o.id, { opacity: +e.target.value }, false); setPctDraft(null); })} />
         {/* plain text ("85%") that becomes editable on click / focus — no box, no separate % */}
-        <input type="text" inputMode="numeric" aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct" title="Click to type a value"
+        <input {...NO_AUTOFILL} type="text" inputMode="numeric" aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct" title="Click to type a value"
           style={{ ...valueStyle, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, flex: "none", boxSizing: "border-box", width: 40, height: H, padding: 0, border: "none", borderBottom: pctFocus ? `1px solid ${ACCENT}` : "1px solid transparent", borderRadius: 0, background: "transparent", textAlign: "right", outline: "none", cursor: "text" }}
           value={pctFocus ? pct : `${pct}%`}
           onFocus={(e) => { setPctFocus(true); h.pushHistory(); e.currentTarget.select(); }}
@@ -637,7 +638,7 @@ function OverlayRow({ o, on, hidden, flags, menuOpen, renaming, drag, h, isMap, 
         <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flex: "1 1 0", minWidth: 0 }}>
         <Thumb o={o} />
         {renaming ? (
-          <input autoFocus value={nameDraft == null ? o.name || "" : nameDraft} aria-label="Overlay name" data-testid="overlay-rename-input" style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+          <input {...NO_AUTOFILL} autoFocus value={nameDraft == null ? o.name || "" : nameDraft} aria-label="Overlay name" data-testid="overlay-rename-input" style={{ ...inputStyle, flex: 1, minWidth: 0 }}
             onChange={(e) => setNameDraft(e.target.value)} onFocus={(e) => e.currentTarget.select()}
             onBlur={() => finishRename(true)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); finishRename(true); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finishRename(false); } e.stopPropagation(); }} />
