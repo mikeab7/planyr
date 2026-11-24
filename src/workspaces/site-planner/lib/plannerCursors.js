@@ -47,6 +47,7 @@ const DRAG_KIND = {
   rotate: ROTATE_CURSOR, mkRotate: ROTATE_CURSOR, ovRotate: ROTATE_CURSOR, calloutRotate: ROTATE_CURSOR,
   easeLabelRot: ROTATE_CURSOR,
   resize: null, mkResize: null, edgeResize: null, printResize: null, ovScale: null, calloutResize: null, calloutResizeH: null,
+  rowSide: null, // 2026-11-24 — a right-of-way line drag keeps the perpendicular resize arrow its grip showed
 };
 
 /** The cursor a live drag shows for its whole gesture. `pressCursor` = what the pressed grip showed. */
