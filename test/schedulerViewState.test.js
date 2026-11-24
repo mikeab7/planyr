@@ -30,7 +30,7 @@ function sliceBetween(startMarker, endMarker) {
 // Structural landmarks (the block's own opening declaration and the next top-level component's
 // declaration) rather than a copy of the logic — a mutation inside the block changes what gets
 // extracted and evaluated, it never breaks the extraction step itself.
-const viewStateSrc = sliceBetween("const VIEW_TAB_KEYS", "function App() {");
+const viewStateSrc = sliceBetween("const VIEW_TAB_KEYS", "\nexposeToHarness({");
 
 function makeStorage() {
   const m = new Map();

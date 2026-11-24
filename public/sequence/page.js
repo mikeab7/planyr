@@ -13396,27 +13396,238 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     GridView: [() => GridView]
   });
 
-  // src/workspaces/scheduler/page/main.jsx
-  var { useState: useState7, useEffect: useEffect6, useRef: useRef7, useMemo: useMemo4, useCallback: useCallback2 } = React;
-  function removeScheduleFromDoc(d, id) {
-    if (!d || !d.projects || !d.projects[id]) return d;
-    const newProjects = { ...d.projects };
-    delete newProjects[id];
-    const remaining = Object.keys(newProjects).map(Number);
-    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
-    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
-  }
-  function logMergeToastEvent(changedRows, changedPids, projects) {
+  // src/workspaces/scheduler/page/viewState.js
+  var VIEW_TAB_KEYS = ["aPid", "view", "section"];
+  var VIEW_PREF_KEYS = [
+    "gridZoom",
+    "gridColWidths",
+    "masterSort",
+    "masterCols",
+    "masterColWidths",
+    "masterGroupBy",
+    "masterLevelFilter",
+    "masterHealthFilter",
+    "masterProjectFilter",
+    "healthColStyle"
+  ];
+  var VIEW_TRANSIENT_KEYS = ["editProjId"];
+  var VIEW_STATE_KEYS = /* @__PURE__ */ new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
+  var VIEW_TAB_STORAGE_KEY = "planar:tabView:v1";
+  var VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
+  function loadTabView() {
     try {
-      if (!window.__sb) return;
-      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
-      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
-      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
-      }, () => {
-      });
-    } catch (e) {
+      return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {};
+    } catch {
+      return {};
     }
   }
+  function saveTabView(obj) {
+    try {
+      sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  function loadViewPrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveViewPrefs(obj) {
+    try {
+      localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  var TASK_FOCUS_STORAGE_KEY = "planar:taskFocus:v1";
+  function loadTaskFocus() {
+    try {
+      const v = JSON.parse(localStorage.getItem(TASK_FOCUS_STORAGE_KEY) || "{}");
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveTaskFocus(obj) {
+    try {
+      localStorage.setItem(TASK_FOCUS_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  function applyTaskFocus(d) {
+    if (!d || typeof d !== "object" || !d.projects || typeof d.projects !== "object") return d;
+    const store = loadTaskFocus();
+    let projects = null;
+    Object.keys(store).forEach((pid) => {
+      const proj = d.projects[pid], ids = store[pid];
+      if (!proj || !Array.isArray(proj.tasks) || !Array.isArray(ids) || !ids.length) return;
+      const want = new Set(ids);
+      let changed = false;
+      const tasks = proj.tasks.map((t) => {
+        if (t && want.has(t.id) && t.focused === void 0) {
+          changed = true;
+          return { ...t, focused: true };
+        }
+        return t;
+      });
+      if (!changed) return;
+      if (!projects) projects = { ...d.projects };
+      projects[pid] = { ...proj, tasks };
+    });
+    return projects ? { ...d, projects } : d;
+  }
+  function persistTaskFocus(prev, next) {
+    if (!next || !next.projects || prev && prev.projects === next.projects) return;
+    const store = loadTaskFocus();
+    let dirty = false;
+    Object.entries(next.projects).forEach(([pid, proj]) => {
+      if (!proj || !Array.isArray(proj.tasks) || !proj.tasks.length) return;
+      const before = Array.isArray(store[pid]) ? store[pid] : [];
+      const live = new Set(proj.tasks.map((t) => t && t.id));
+      const set = new Set(before.filter((id) => live.has(id)));
+      proj.tasks.forEach((t) => {
+        if (!t) return;
+        if (t.focused === true) set.add(t.id);
+        else if (t.focused === false) set.delete(t.id);
+      });
+      const after = [...set];
+      if (after.length === before.length && after.every((id, i) => id === before[i])) return;
+      dirty = true;
+      if (after.length) store[pid] = after;
+      else delete store[pid];
+    });
+    if (dirty) saveTaskFocus(store);
+  }
+  function coreChanged(prev, next) {
+    if (prev === next) return false;
+    if (!prev || !next) return true;
+    const keys = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const k of keys) {
+      if (VIEW_STATE_KEYS.has(k)) continue;
+      if (prev[k] !== next[k]) return true;
+    }
+    return false;
+  }
+  var TASK_VIEW_FIELDS = ["focused"];
+  function stripTaskViewFields(tasks) {
+    if (!Array.isArray(tasks)) return tasks;
+    return tasks.map((t) => {
+      if (!t || typeof t !== "object") return t;
+      let changed = false;
+      const out = { ...t };
+      TASK_VIEW_FIELDS.forEach((k) => {
+        if (k in out) {
+          delete out[k];
+          changed = true;
+        }
+      });
+      return changed ? out : t;
+    });
+  }
+  function stripViewState(d) {
+    if (!d || typeof d !== "object") return d;
+    const out = { ...d };
+    VIEW_STATE_KEYS.forEach((k) => {
+      delete out[k];
+    });
+    if (out.projects && typeof out.projects === "object") {
+      const projects = {};
+      Object.entries(out.projects).forEach(([pid, proj]) => {
+        projects[pid] = proj && Array.isArray(proj.tasks) ? { ...proj, tasks: stripTaskViewFields(proj.tasks) } : proj;
+      });
+      out.projects = projects;
+    }
+    return out;
+  }
+  function withLastActiveSite(d, siteId, scheduleId) {
+    if (siteId == null || scheduleId == null) return d;
+    if (d.lastActiveBySite && d.lastActiveBySite[siteId] === scheduleId) return d;
+    return { ...d, lastActiveBySite: { ...d.lastActiveBySite || {}, [siteId]: scheduleId } };
+  }
+  function persistViewState(prev, next) {
+    let tabChanged = false, prefsChanged = false;
+    VIEW_TAB_KEYS.forEach((k) => {
+      if (!prev || prev[k] !== next[k]) tabChanged = true;
+    });
+    VIEW_PREF_KEYS.forEach((k) => {
+      if (!prev || prev[k] !== next[k]) prefsChanged = true;
+    });
+    if (tabChanged) {
+      const cur = loadTabView();
+      VIEW_TAB_KEYS.forEach((k) => {
+        cur[k] = next[k];
+      });
+      saveTabView(cur);
+    }
+    if (prefsChanged) {
+      const cur = loadViewPrefs();
+      VIEW_PREF_KEYS.forEach((k) => {
+        cur[k] = next[k];
+      });
+      saveViewPrefs(cur);
+    }
+    persistTaskFocus(prev, next);
+  }
+  function pickActivePid(projects, preferred) {
+    if (!projects || typeof projects !== "object") return null;
+    if (preferred != null && projects[preferred]) return preferred;
+    const first = Object.values(projects).find((p) => p && typeof p === "object" && p.id != null);
+    return first ? first.id : null;
+  }
+  function resolveViewState(d) {
+    if (!d || typeof d !== "object") return d;
+    const tab = loadTabView();
+    const prefs = loadViewPrefs();
+    const patch = { editProjId: null };
+    VIEW_TAB_KEYS.forEach((k) => {
+      patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k];
+    });
+    VIEW_PREF_KEYS.forEach((k) => {
+      patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k];
+    });
+    if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
+      patch.aPid = pickActivePid(d.projects, d.aPid);
+    }
+    const tabPatch = {};
+    VIEW_TAB_KEYS.forEach((k) => {
+      tabPatch[k] = patch[k];
+    });
+    const prefsPatch = {};
+    VIEW_PREF_KEYS.forEach((k) => {
+      prefsPatch[k] = patch[k];
+    });
+    saveTabView({ ...tab, ...tabPatch });
+    saveViewPrefs({ ...prefs, ...prefsPatch });
+    return applyTaskFocus({ ...d, ...patch });
+  }
+  exposeToHarness({
+    VIEW_TAB_KEYS: [() => VIEW_TAB_KEYS],
+    VIEW_PREF_KEYS: [() => VIEW_PREF_KEYS],
+    VIEW_TRANSIENT_KEYS: [() => VIEW_TRANSIENT_KEYS],
+    VIEW_STATE_KEYS: [() => VIEW_STATE_KEYS],
+    VIEW_TAB_STORAGE_KEY: [() => VIEW_TAB_STORAGE_KEY],
+    VIEW_PREFS_STORAGE_KEY: [() => VIEW_PREFS_STORAGE_KEY],
+    loadTabView: [() => loadTabView],
+    saveTabView: [() => saveTabView],
+    loadViewPrefs: [() => loadViewPrefs],
+    saveViewPrefs: [() => saveViewPrefs],
+    TASK_FOCUS_STORAGE_KEY: [() => TASK_FOCUS_STORAGE_KEY],
+    loadTaskFocus: [() => loadTaskFocus],
+    saveTaskFocus: [() => saveTaskFocus],
+    applyTaskFocus: [() => applyTaskFocus],
+    persistTaskFocus: [() => persistTaskFocus],
+    coreChanged: [() => coreChanged],
+    TASK_VIEW_FIELDS: [() => TASK_VIEW_FIELDS],
+    stripTaskViewFields: [() => stripTaskViewFields],
+    stripViewState: [() => stripViewState],
+    withLastActiveSite: [() => withLastActiveSite],
+    persistViewState: [() => persistViewState],
+    pickActivePid: [() => pickActivePid],
+    resolveViewState: [() => resolveViewState]
+  });
+
+  // src/workspaces/scheduler/page/common/formatConsts.js
   var ROW_COLORS = [
     { color: "#fef3c7", label: "Yellow tint" },
     { color: "#ffedd5", label: "Orange tint" },
@@ -13454,171 +13665,18 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     const prev = FONT_SIZE_STEPS.filter((v) => v < base);
     return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
   };
-  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
-  var askConfirm = /* @__PURE__ */ (() => {
-    let _open = null;
-    return ({ title, body = "", confirmLabel = "Continue", danger = false } = {}) => new Promise((resolve) => {
-      if (_open) _open(false);
-      const prevFocus = document.activeElement;
-      const back = document.createElement("div");
-      back.setAttribute("data-testid", "schedule-confirm");
-      Object.assign(back.style, { position: "fixed", inset: "0", background: "rgba(0,0,0,.45)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-      const card = document.createElement("div");
-      card.setAttribute("role", "alertdialog");
-      card.setAttribute("aria-modal", "true");
-      Object.assign(card.style, { background: "var(--bg)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: "10px", boxShadow: "0 12px 40px rgba(0,0,0,.35)", width: "min(440px, 100%)", padding: "18px 20px 14px", fontFamily: "'Inter', system-ui, sans-serif" });
-      const h = document.createElement("div");
-      h.textContent = title || "Are you sure?";
-      Object.assign(h.style, { fontSize: "14px", fontWeight: "600", marginBottom: body ? "8px" : "14px", lineHeight: "1.4" });
-      card.appendChild(h);
-      if (body) {
-        const b = document.createElement("div");
-        b.textContent = body;
-        Object.assign(b.style, { fontSize: "12.5px", color: "var(--mut)", lineHeight: "1.55", whiteSpace: "pre-wrap", marginBottom: "16px" });
-        card.appendChild(b);
-      }
-      const row = document.createElement("div");
-      Object.assign(row.style, { display: "flex", justifyContent: "flex-end", gap: "8px" });
-      const mk = (label, primary) => {
-        const x = document.createElement("button");
-        x.type = "button";
-        x.textContent = label;
-        Object.assign(x.style, {
-          font: "inherit",
-          fontSize: "12.5px",
-          fontWeight: "600",
-          padding: "7px 14px",
-          borderRadius: "7px",
-          cursor: "pointer",
-          border: primary ? "1px solid transparent" : "1px solid var(--bd2)",
-          background: primary ? danger ? "#b42318" : "var(--amber)" : "var(--surf)",
-          color: primary ? danger || document.documentElement.dataset.theme !== "dark" ? "#fff" : "#14171C" : "var(--txt)"
-        });
-        return x;
-      };
-      const no = mk("Cancel", false), yes = mk(confirmLabel, true);
-      row.appendChild(no);
-      row.appendChild(yes);
-      card.appendChild(row);
-      back.appendChild(card);
-      let done = false;
-      const finish = (v) => {
-        if (done) return;
-        done = true;
-        _open = null;
-        document.removeEventListener("keydown", onKey, true);
-        back.remove();
-        try {
-          prevFocus && prevFocus.focus && prevFocus.focus();
-        } catch {
-        }
-        resolve(v);
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();
-          finish(false);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          e.stopPropagation();
-          finish(document.activeElement === no ? false : true);
-        } else if (e.key === "Tab") {
-          e.preventDefault();
-          (document.activeElement === yes ? no : yes).focus();
-        }
-      };
-      _open = finish;
-      no.onclick = () => finish(false);
-      yes.onclick = () => finish(true);
-      back.addEventListener("mousedown", (e) => {
-        if (e.target === back) finish(false);
-      });
-      document.addEventListener("keydown", onKey, true);
-      document.body.appendChild(back);
-      (danger ? no : yes).focus();
-    });
-  })();
-  var mkt = (id, name, start, dur, parentId = null, health = "gray", predecessors = []) => {
-    const isBlank2 = !start && (dur === "" || dur === null || dur === void 0);
-    const safeStart = isBlank2 ? "" : start && !isNaN(new Date(start).getTime()) ? start : NOW;
-    const safeDur = isBlank2 ? 0 : dur;
-    return {
-      id,
-      _sid: _mintTaskSid(),
-      name,
-      start: safeStart,
-      end: calcEnd(safeStart, safeDur),
-      duration: safeDur,
-      durUnit: "d",
-      durValue: safeDur,
-      predecessors,
-      health,
-      percentComplete: health === "green" ? 100 : health === "yellow" ? 40 : 0,
-      parentId,
-      responsibleParty: [],
-      cost: "",
-      notes: [],
-      isExpanded: true,
-      meetingBound: false
-      // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
-    };
-  };
-  window.__planarLoadStatus = "loading";
-  function postLoadState(state) {
-    try {
-      if (window.self !== window.top) {
-        window.parent.postMessage({ source: "planar-seq", type: "planar:load-state", state }, window.location.origin);
-      }
-    } catch (_) {
-    }
-  }
-  var LOAD_ATTEMPT_TIMEOUT_MS = 2e4;
-  var LOAD_RETRY_BASE_MS = 2e3;
-  var LOAD_RETRY_MAX_MS = 3e4;
-  var SEED = {
-    nPid: 4,
-    nTid: { 1: 12, 2: 5, 3: 10 },
-    aPid: 3,
-    view: "split",
-    section: "projects",
-    editProjId: null,
-    healthColStyle: "stoplight",
-    settings: { ...DEFAULT_SETTINGS, holidays: { ...DEFAULT_HOLIDAYS } },
-    projects: {
-      1: { id: 1, name: "Hillwood I-10 Logistics", tasks: [
-        mkt(1, "Site Acquisition", "2025-01-06", 30, null, "green", []),
-        mkt(2, "Title Search", "2025-01-06", 14, 1, "green", []),
-        mkt(3, "Environmental Phase I", "2025-01-13", 21, 1, "green", [1]),
-        mkt(4, "Design & Engineering", "2025-02-03", 60, null, "yellow", []),
-        mkt(5, "Schematic Design", "2025-02-03", 21, 4, "green", [1]),
-        mkt(6, "Construction Documents", "2025-02-24", 35, 4, "yellow", [5]),
-        mkt(7, "Permitting", "2025-04-01", 45, null, "yellow", [4]),
-        mkt(8, "Submit Plans", "2025-04-01", 5, 7, "green", [6]),
-        mkt(9, "City Review", "2025-04-07", 30, 7, "yellow", [8]),
-        mkt(10, "Permit Issued", "2025-05-07", 0, 7, "red", [9]),
-        mkt(11, "Construction", "2025-05-08", 180, null, "gray", [7])
-      ] },
-      2: { id: 2, name: "Grand Pkwy Distribution", tasks: [
-        mkt(1, "Site Control", "2025-03-01", 21, null, "green", []),
-        mkt(2, "Due Diligence", "2025-03-22", 30, null, "yellow", [1]),
-        mkt(3, "Design", "2025-04-22", 60, null, "gray", [2]),
-        mkt(4, "Construction", "2025-06-22", 150, null, "gray", [3])
-      ] },
-      3: { id: 3, name: "Sample Project", tasks: [
-        mkt(1, "Project Kick Off", "2025-06-02", 0, null, "gray", []),
-        mkt(2, "Due Diligence", "2025-06-02", 30, null, "green", [1]),
-        mkt(3, "Order Reports", "2025-06-02", 5, 2, "green", []),
-        mkt(4, "Review Reports", "2025-06-09", 15, 2, "yellow", [3]),
-        mkt(5, "Entitlements", "2025-07-14", 60, null, "gray", [2]),
-        mkt(6, "Submit Application", "2025-07-14", 5, 5, "gray", []),
-        mkt(7, "Agency Review", "2025-07-21", 40, 5, "gray", [6]),
-        mkt(8, "Approval", "2025-09-15", 0, 5, "gray", [7]),
-        mkt(9, "Construction", "2025-09-16", 120, null, "gray", [5])
-      ] }
-    }
-  };
-  installRowPointerTypeListener();
+  exposeToHarness({
+    ROW_COLORS: [() => ROW_COLORS],
+    SAFE_COLOR_RE: [() => SAFE_COLOR_RE],
+    isValidColor: [() => isValidColor],
+    FONT_SIZE_STEPS: [() => FONT_SIZE_STEPS],
+    FONT_SIZE_MIN: [() => FONT_SIZE_MIN],
+    FONT_SIZE_MAX: [() => FONT_SIZE_MAX],
+    isValidFontSize: [() => isValidFontSize],
+    stepFontSize: [() => stepFontSize]
+  });
+
+  // src/workspaces/scheduler/page/dialogs/taskDialogs.jsx
   function celebrateTaskComplete(taskName) {
     try {
       document.getElementById("planar-celebrate-toast")?.remove();
@@ -14212,6 +14270,1407 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       )
     );
   }
+  exposeToHarness({
+    celebrateTaskComplete: [() => celebrateTaskComplete],
+    notifyRowsDeleted: [() => notifyRowsDeleted],
+    FOOTER_BTN_STYLE: [() => FOOTER_BTN_STYLE],
+    SuccessorPromptModal: [() => SuccessorPromptModal],
+    DeleteChildrenModal: [() => DeleteChildrenModal],
+    MoveToModal: [() => MoveToModal]
+  });
+
+  // src/workspaces/scheduler/page/dialogs/confirm.jsx
+  var askConfirm = /* @__PURE__ */ (() => {
+    let _open = null;
+    return ({ title, body = "", confirmLabel = "Continue", danger = false } = {}) => new Promise((resolve) => {
+      if (_open) _open(false);
+      const prevFocus = document.activeElement;
+      const back = document.createElement("div");
+      back.setAttribute("data-testid", "schedule-confirm");
+      Object.assign(back.style, { position: "fixed", inset: "0", background: "rgba(0,0,0,.45)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+      const card = document.createElement("div");
+      card.setAttribute("role", "alertdialog");
+      card.setAttribute("aria-modal", "true");
+      Object.assign(card.style, { background: "var(--bg)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: "10px", boxShadow: "0 12px 40px rgba(0,0,0,.35)", width: "min(440px, 100%)", padding: "18px 20px 14px", fontFamily: "'Inter', system-ui, sans-serif" });
+      const h = document.createElement("div");
+      h.textContent = title || "Are you sure?";
+      Object.assign(h.style, { fontSize: "14px", fontWeight: "600", marginBottom: body ? "8px" : "14px", lineHeight: "1.4" });
+      card.appendChild(h);
+      if (body) {
+        const b = document.createElement("div");
+        b.textContent = body;
+        Object.assign(b.style, { fontSize: "12.5px", color: "var(--mut)", lineHeight: "1.55", whiteSpace: "pre-wrap", marginBottom: "16px" });
+        card.appendChild(b);
+      }
+      const row = document.createElement("div");
+      Object.assign(row.style, { display: "flex", justifyContent: "flex-end", gap: "8px" });
+      const mk = (label, primary) => {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.textContent = label;
+        Object.assign(x.style, {
+          font: "inherit",
+          fontSize: "12.5px",
+          fontWeight: "600",
+          padding: "7px 14px",
+          borderRadius: "7px",
+          cursor: "pointer",
+          border: primary ? "1px solid transparent" : "1px solid var(--bd2)",
+          background: primary ? danger ? "#b42318" : "var(--amber)" : "var(--surf)",
+          color: primary ? danger || document.documentElement.dataset.theme !== "dark" ? "#fff" : "#14171C" : "var(--txt)"
+        });
+        return x;
+      };
+      const no = mk("Cancel", false), yes = mk(confirmLabel, true);
+      row.appendChild(no);
+      row.appendChild(yes);
+      card.appendChild(row);
+      back.appendChild(card);
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        _open = null;
+        document.removeEventListener("keydown", onKey, true);
+        back.remove();
+        try {
+          prevFocus && prevFocus.focus && prevFocus.focus();
+        } catch {
+        }
+        resolve(v);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(false);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(document.activeElement === no ? false : true);
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          (document.activeElement === yes ? no : yes).focus();
+        }
+      };
+      _open = finish;
+      no.onclick = () => finish(false);
+      yes.onclick = () => finish(true);
+      back.addEventListener("mousedown", (e) => {
+        if (e.target === back) finish(false);
+      });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(back);
+      (danger ? no : yes).focus();
+    });
+  })();
+  exposeToHarness({
+    askConfirm: [() => askConfirm]
+  });
+
+  // src/workspaces/scheduler/page/menus/ProjectMenus.jsx
+  var { useState: useState7, useEffect: useEffect6, useRef: useRef7 } = React;
+  function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
+    const [open, setOpen] = useState7(false);
+    const [editingId, setEditingId] = useState7(null);
+    const [editVal, setEditVal] = useState7("");
+    const editRef = useRef7(null);
+    const btnRef = useRef7(null);
+    const menuRef = useRef7(null);
+    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
+    const projHealth = (p) => {
+      if (!p.tasks.length) return "gray";
+      if (p.tasks.some((t) => t.health === "red")) return "red";
+      if (p.tasks.some((t) => t.health === "yellow")) return "yellow";
+      if (p.tasks.every((t) => t.health === "green")) return "green";
+      return "gray";
+    };
+    const toggle = () => setOpen((o) => !o);
+    useEffect6(() => {
+      if (!open) {
+        setEditingId(null);
+        return;
+      }
+      const down = (e) => {
+        if (!btnRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
+      };
+      document.addEventListener("mousedown", down);
+      return () => document.removeEventListener("mousedown", down);
+    }, [open]);
+    useEffect6(() => {
+      if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
+    }, [editingId]);
+    const cur = activeProjectOf(data);
+    const dot = HEALTH[cur ? projHealth(cur) : "gray"].dot;
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        ref: btnRef,
+        className: "",
+        style: breadcrumb ? {
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 6px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--txt)"
+        } : {
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          background: open ? "#eef2ff" : "transparent",
+          border: `1px solid ${open ? "#c7d2fe" : "transparent"}`,
+          borderRadius: 7,
+          padding: "4px 10px",
+          maxWidth: 230,
+          minWidth: 80,
+          transition: "background .15s,border-color .15s"
+        },
+        onClick: toggle,
+        onMouseEnter: (e) => {
+          if (!breadcrumb && !open) e.currentTarget.style.background = "var(--surf)";
+        },
+        onMouseLeave: (e) => {
+          if (!breadcrumb && !open) e.currentTarget.style.background = "transparent";
+        }
+      },
+      !breadcrumb && /* @__PURE__ */ React.createElement("span", { style: { width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: `0 0 0 3px ${dot}1f` } }),
+      /* @__PURE__ */ React.createElement("span", { style: breadcrumb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" } : {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        flex: 1,
+        textAlign: "left",
+        fontSize: 16,
+        fontWeight: 700,
+        letterSpacing: "-.015em",
+        color: "var(--txt)",
+        lineHeight: 1.1
+      } }, cur?.name),
+      /* @__PURE__ */ React.createElement(
+        "i",
+        {
+          className: "ti ti-chevron-down",
+          "aria-hidden": "true",
+          style: { fontSize: breadcrumb ? 11 : 13, color: "var(--mut)", flexShrink: 0, transition: "transform .15s", transform: open ? "rotate(180deg)" : "none" }
+        }
+      )
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: 4,
+        zIndex: 9999,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        minWidth: 230
+      } }, Object.values(data.projects).map((p) => {
+        const h = projHealth(p);
+        const isActive = p.id === data.aPid;
+        const isEditing = editingId === p.id;
+        const confirmRename = () => {
+          if (editVal.trim()) setData((d) => ({ ...d, projects: { ...d.projects, [p.id]: { ...d.projects[p.id], name: editVal.trim() } } }));
+          setEditingId(null);
+        };
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            key: p.id,
+            onClick: () => {
+              if (!isEditing) {
+                setData((d) => ({ ...d, aPid: p.id }));
+                setOpen(false);
+              }
+            },
+            onContextMenu: (e) => {
+              e.preventDefault();
+              setProjCtx({ id: p.id, x: e.clientX, y: e.clientY });
+              setOpen(false);
+            },
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 8px",
+              borderRadius: 4,
+              cursor: isEditing ? "default" : "pointer",
+              background: isActive ? "var(--surf)" : "transparent",
+              fontFamily: "'Inter',system-ui,sans-serif",
+              fontSize: 12,
+              fontWeight: isActive ? 500 : 400,
+              color: "var(--txt)"
+            },
+            onMouseEnter: (e) => {
+              if (!isActive && !isEditing) e.currentTarget.style.background = "var(--surf)";
+            },
+            onMouseLeave: (e) => {
+              if (!isActive && !isEditing) e.currentTarget.style.background = "transparent";
+            }
+          },
+          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", background: HEALTH[h].dot, flexShrink: 0 } }),
+          isEditing ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              ...NO_AUTOFILL,
+              ref: editRef,
+              value: editVal,
+              onChange: (e) => setEditVal(e.target.value),
+              onClick: (e) => e.stopPropagation(),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") {
+                  e.stopPropagation();
+                  confirmRename();
+                }
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setEditingId(null);
+                }
+              },
+              onBlur: confirmRename,
+              style: {
+                flex: 1,
+                border: "1px solid var(--blue)",
+                borderRadius: 3,
+                padding: "2px 5px",
+                fontSize: 12,
+                fontFamily: "inherit",
+                outline: "none",
+                background: "var(--bg)",
+                color: "var(--txt)"
+              }
+            }
+          ) : /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p)),
+          !isEditing && /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              onClick: (e) => {
+                e.stopPropagation();
+                setEditVal(p.name);
+                setEditingId(p.id);
+              },
+              title: "Rename",
+              style: {
+                opacity: 0,
+                fontSize: 11,
+                color: "var(--mut)",
+                cursor: "pointer",
+                flexShrink: 0,
+                padding: "1px 3px",
+                borderRadius: 3,
+                lineHeight: 1,
+                transition: "opacity .12s"
+              },
+              onMouseEnter: (e) => {
+                e.currentTarget.style.opacity = "1";
+                e.currentTarget.style.color = "var(--amber)";
+                e.currentTarget.style.background = "#eef2ff";
+              },
+              onMouseLeave: (e) => {
+                e.currentTarget.style.opacity = "0";
+                e.currentTarget.style.color = "var(--mut)";
+                e.currentTarget.style.background = "transparent";
+              },
+              ref: (el) => {
+                if (el) {
+                  const row = el.closest("div[style]");
+                  if (row) {
+                    row.addEventListener("mouseenter", () => {
+                      el.style.opacity = "0.4";
+                    });
+                    row.addEventListener("mouseleave", () => {
+                      el.style.opacity = "0";
+                    });
+                  }
+                }
+              }
+            },
+            /* @__PURE__ */ React.createElement("i", { className: "ti ti-pencil", style: { fontSize: 11 } })
+          ),
+          !isEditing && isActive && /* @__PURE__ */ React.createElement("i", { className: "ti ti-check", "aria-hidden": "true", style: { fontSize: 12, color: "var(--amber)", flexShrink: 0 } })
+        );
+      }), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => {
+            addProject();
+            setOpen(false);
+          },
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontFamily: "'Inter',system-ui,sans-serif",
+            fontSize: 12,
+            color: "var(--mut)"
+          },
+          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+        },
+        /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus", "aria-hidden": "true", style: { fontSize: 13 } }),
+        "New project"
+      )),
+      document.body
+    ));
+  }
+  function RenameModal({ name, onConfirm, onClose }) {
+    const [val, setVal] = useState7(name);
+    const inputRef = useRef7(null);
+    useEffect6(() => {
+      inputRef.current?.select();
+    }, []);
+    const confirm = () => {
+      if (val.trim()) onConfirm(val.trim());
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: { position: "fixed", inset: 0, background: "#00000060", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" },
+        onClick: onClose
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--surf)",
+            border: "1px solid var(--bd2)",
+            borderTop: "2px solid var(--amber)",
+            borderRadius: 6,
+            padding: 20,
+            width: 340,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14
+          },
+          onClick: (e) => e.stopPropagation()
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { color: "var(--amber)", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: ".06em" } }, "RENAME PROJECT"),
+        /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            ...NO_AUTOFILL,
+            ref: inputRef,
+            className: "ei",
+            value: val,
+            onChange: (e) => setVal(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === "Enter") confirm();
+              if (e.key === "Escape") onClose();
+            }
+          }
+        ),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { borderColor: "var(--amber)", color: "var(--amber)" }, onClick: confirm }, "Rename"))
+      )
+    );
+  }
+  function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
+    const menuRef = useRef7(null);
+    useEffect6(() => {
+      const down = (e) => {
+        if (!menuRef.current?.contains(e.target)) onClose();
+      };
+      const key = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("mousedown", down);
+      document.addEventListener("keydown", key);
+      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("resize", onClose);
+      return () => {
+        document.removeEventListener("mousedown", down);
+        document.removeEventListener("keydown", key);
+        window.removeEventListener("scroll", onClose, true);
+        window.removeEventListener("resize", onClose);
+      };
+    }, [onClose]);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = 178, mh = canDelete ? 108 : 76;
+    const left = x + mw > vw ? vw - mw - 8 : x;
+    const top = y + mh > vh ? vh - mh - 8 : y;
+    const Item = ({ icon, label, danger, onClick }) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 12px",
+          cursor: "pointer",
+          fontSize: 12,
+          color: danger ? "#dc2626" : "var(--txt)",
+          borderRadius: 4,
+          transition: "background .1s",
+          fontFamily: "'Inter',system-ui,sans-serif"
+        },
+        onMouseEnter: (e) => e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)",
+        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+      },
+      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 14, flexShrink: 0, color: danger ? "#dc2626" : "var(--mut)" }, "aria-hidden": "true" }),
+      label
+    );
+    return ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top,
+        left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: "4px",
+        zIndex: 9999,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.13)",
+        minWidth: mw
+      } }, /* @__PURE__ */ React.createElement(Item, { icon: "ti-pencil", label: "Rename", onClick: onRename }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate", onClick: onDuplicate }), canDelete && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: "Delete", danger: true, onClick: onDelete }))),
+      document.body
+    );
+  }
+  exposeToHarness({
+    ProjDropdown: [() => ProjDropdown],
+    RenameModal: [() => RenameModal],
+    ProjContextMenu: [() => ProjContextMenu]
+  });
+
+  // src/workspaces/scheduler/page/panels/SettingsPanels.jsx
+  var { useState: useState8, useEffect: useEffect7, useRef: useRef8 } = React;
+  function SettingsPanel({ data, setData, onClose, openFile, fileLinked, initialSection, onOpenMeetingCalendars }) {
+    const s = data.settings || DEFAULT_SETTINGS;
+    const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
+    const updHol = (k, v) => setData((d) => {
+      const holidays = { ...d.settings.holidays, [k]: v };
+      setHolidaySet(buildHolidaySet(holidays));
+      const newProjects = {};
+      Object.entries(d.projects || {}).forEach(([pid, proj]) => {
+        let tasks = (proj.tasks || []).map((t) => ({ ...t }));
+        tasks = recomputeSchedule(tasks);
+        newProjects[pid] = { ...proj, tasks };
+      });
+      return { ...d, settings: { ...d.settings, holidays }, projects: newProjects };
+    });
+    const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter((t) => t.pinnedStart).length, 0);
+    const [open, setOpen] = useState8(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
+    const tog = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
+    useEffect7(() => {
+      const onKey = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("keydown", onKey);
+      return () => document.removeEventListener("keydown", onKey);
+    }, [onClose]);
+    useEffect7(() => {
+      if (!initialSection) return;
+      const el = document.querySelector(`[data-section="${initialSection}"]`);
+      if (el) el.scrollIntoView({ block: "start" });
+    }, [initialSection]);
+    const thisYear = (/* @__PURE__ */ new Date()).getFullYear();
+    const holDates = {};
+    HOLIDAY_DEFS.forEach((h) => {
+      const ds = h.fn(thisYear);
+      const d = /* @__PURE__ */ new Date(ds + "T12:00:00");
+      const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      holDates[h.k] = h.rule ? `${h.rule} · ${dateStr}` : dateStr;
+    });
+    const SectionHdr = ({ id, title }) => /* @__PURE__ */ React.createElement("div", { "data-section": id, onClick: () => tog(id), style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "10px 0 7px",
+      borderBottom: "1px solid var(--bd)",
+      marginBottom: open[id] ? 8 : 0,
+      cursor: "pointer",
+      userSelect: "none"
+    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase" } }, title), /* @__PURE__ */ React.createElement("span", { style: {
+      fontSize: 10,
+      color: "var(--mut)",
+      display: "inline-block",
+      transform: open[id] ? "rotate(180deg)" : "rotate(0deg)",
+      transition: "transform .18s",
+      lineHeight: 1
+    } }, "▾"));
+    const Row2 = ({ label, children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", gap: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, label), children);
+    const Toggle2 = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: (e) => {
+      e.stopPropagation();
+      onChange(!on);
+    }, style: {
+      width: 28,
+      height: 15,
+      borderRadius: 8,
+      background: on ? "var(--amber)" : "var(--bd2)",
+      display: "inline-flex",
+      alignItems: "center",
+      cursor: "pointer",
+      flexShrink: 0,
+      transition: "background .15s",
+      padding: "0 2px"
+    } }, /* @__PURE__ */ React.createElement("span", { style: {
+      width: 11,
+      height: 11,
+      borderRadius: "50%",
+      background: "var(--bg)",
+      boxShadow: "0 1px 3px rgba(0,0,0,.2)",
+      transform: on ? "translateX(13px)" : "translateX(0)",
+      transition: "transform .15s",
+      flexShrink: 0
+    } }));
+    const SegBtn2 = ({ options, value, onChange }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 4, overflow: "hidden", flexShrink: 0 } }, options.map((o) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: String(o.v),
+        onClick: () => onChange(o.v),
+        style: {
+          padding: "3px 10px",
+          fontSize: 11,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          background: value === o.v ? "var(--amber)" : "transparent",
+          color: value === o.v ? "#fff" : "var(--mut)",
+          transition: "background .12s,color .12s",
+          fontFamily: "'Inter',system-ui,sans-serif",
+          fontWeight: value === o.v ? 500 : 400
+        }
+      },
+      o.l
+    )));
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          position: "fixed",
+          top: 48,
+          right: 12,
+          width: 300,
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 8,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
+          zIndex: 9999,
+          padding: "0 16px 14px",
+          overflow: "hidden",
+          maxHeight: "calc(100vh - 64px)",
+          overflowY: "auto"
+        },
+        onMouseDown: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 4px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: "var(--txt)" } }, "Settings"), /* @__PURE__ */ React.createElement("span", { onClick: onClose, style: { cursor: "pointer", color: "var(--mut)", fontSize: 16, lineHeight: 1 } }, "✕")),
+      /* @__PURE__ */ React.createElement(SectionHdr, { id: "view", title: "View" }),
+      open.view && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 4 } }, /* @__PURE__ */ React.createElement(Row2, { label: "Default drag mode" }, /* @__PURE__ */ React.createElement(SegBtn2, { options: [{ l: "Snap", v: true }, { l: "Free", v: false }], value: s.snapDefault, onChange: (v) => upd({ snapDefault: v }) })), /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 0 2px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 6 } }, "Default split (grid %)"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: 20, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, height: 4, borderRadius: 2, background: "var(--bd2)", overflow: "hidden", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${(s.defaultSplit - 20) / (82 - 20) * 100}%`, height: "100%", background: "var(--amber)", transition: "width .05s" } })), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "range",
+          min: 20,
+          max: 82,
+          value: s.defaultSplit,
+          onChange: (e) => upd({ defaultSplit: +e.target.value }),
+          style: {
+            width: "100%",
+            appearance: "none",
+            WebkitAppearance: "none",
+            background: "transparent",
+            margin: 0,
+            cursor: "pointer",
+            position: "relative",
+            zIndex: 1
+          }
+        }
+      )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "20%"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--amber)" } }, s.defaultSplit, "% grid"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "82%")))),
+      /* @__PURE__ */ React.createElement("div", { style: { marginTop: open.view ? 6 : 2 } }, /* @__PURE__ */ React.createElement(SectionHdr, { id: "holidays", title: "Holidays" }), open.holidays && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.45, margin: "0 0 6px" } }, "Toggling a holiday recalculates every schedule immediately. Pinned start dates stay put — computed finish dates and downstream tasks shift."), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 4px", paddingBottom: 4 } }, HOLIDAY_DEFS.map((h) => {
+        const on = !!(s.holidays || {})[h.k];
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            key: h.k,
+            onClick: () => updHol(h.k, !on),
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "5px 6px",
+              borderRadius: 4,
+              cursor: "pointer",
+              gap: 4,
+              background: on ? "#f5f3ff" : "transparent",
+              transition: "background .12s"
+            },
+            onMouseEnter: (e) => {
+              if (!on) e.currentTarget.style.background = "var(--surf)";
+            },
+            onMouseLeave: (e) => {
+              e.currentTarget.style.background = on ? "#f5f3ff" : "transparent";
+            }
+          },
+          /* @__PURE__ */ React.createElement("div", { style: { minWidth: 0, flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: {
+            fontSize: 11,
+            color: on ? "var(--txt)" : "var(--mut)",
+            fontWeight: on ? 500 : 400,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            lineHeight: 1.3
+          } }, h.label), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: on ? "#7c6ad6" : "#b0b7c0", lineHeight: 1.3, marginTop: 1 } }, holDates[h.k])),
+          /* @__PURE__ */ React.createElement(Toggle2, { on, onChange: (v) => updHol(h.k, v) })
+        );
+      }))), /* @__PURE__ */ React.createElement(SectionHdr, { id: "meetings", title: "Meeting calendars" }), open.meetings && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.45, margin: "0 0 8px" } }, "External decision bodies (city council, P&Z, commissioners court) whose approvals only happen on a cadence — stored per project. Edited in their own window."), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+        onOpenMeetingCalendars && onOpenMeetingCalendars();
+        onClose();
+      }, style: { fontSize: 11, padding: "5px 11px" } }, (() => {
+        const n = ((activeProjectOf(data) || {}).meetingBodies || []).length;
+        return n ? `Open Meeting calendars (${n}) ↗` : "Set up Meeting calendars ↗";
+      })())), /* @__PURE__ */ React.createElement(SectionHdr, { id: "schedule", title: "Schedule" }), open.schedule && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 8 } }, "Editing a date directly ", /* @__PURE__ */ React.createElement("strong", null, "pins"), " it — the dependency cascade stops moving that task. Recascade removes every pin in every project and recomputes all dates from predecessor logic. A snapshot is saved first, so it can be undone from Version History."), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--txt)", marginBottom: 8 } }, "Currently pinned: ", /* @__PURE__ */ React.createElement("strong", null, pinCount), " task", pinCount === 1 ? "" : "s", " across all projects"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "btn",
+          title: "Strip all pinned dates and recalculate everything from predecessor logic",
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            padding: "4px 11px",
+            borderColor: "#fca5a5",
+            color: "#b91c1c"
+          },
+          onClick: async () => {
+            if (!await askConfirm({
+              title: "Strip all pinned dates and recalculate?",
+              body: "Every project is recalculated from predecessor logic.\n\nA backup snapshot is saved first — you can restore from Version History if needed.",
+              confirmLabel: "Recalculate",
+              danger: true
+            })) return;
+            setData((d) => {
+              try {
+                window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-recascade", skipSanity: true });
+              } catch {
+              }
+              setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
+              const newProjects = {};
+              Object.entries(d.projects).forEach(([pid, proj]) => {
+                let tasks = proj.tasks.map(({ pinnedStart, _pinStart, __wasDirectEdit, ...t }) => t);
+                tasks = recomputeSchedule(tasks);
+                newProjects[pid] = { ...proj, tasks };
+              });
+              return { ...d, _pinnedClean: true, projects: newProjects };
+            });
+            onClose();
+          }
+        },
+        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "23 4 23 10 17 10" }), /* @__PURE__ */ React.createElement("polyline", { points: "1 20 1 14 7 14" }), /* @__PURE__ */ React.createElement("path", { d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" })),
+        "Recascade all projects"
+      )), typeof openFile === "function" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SectionHdr, { id: "backup", title: "Local backup file" }), open.backup && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 8 } }, "Your schedule ", /* @__PURE__ */ React.createElement("strong", null, "auto-saves to the cloud"), " automatically — this is optional. Link a local ", /* @__PURE__ */ React.createElement("strong", null, ".html"), " file (Chrome or Edge) to ALSO keep a copy on this computer, re-written on every save."), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "btn",
+          title: fileLinked ? "A local backup file is linked — click to choose a different file" : "Pick a local .html file to mirror every save into",
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            padding: "4px 11px",
+            borderColor: fileLinked ? "#86efac" : "var(--bd2)",
+            color: fileLinked ? "#16a34a" : "var(--txt)"
+          },
+          onClick: () => {
+            openFile();
+          }
+        },
+        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }), /* @__PURE__ */ React.createElement("polyline", { points: "17 21 17 13 7 13 7 21" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 3 7 8 15 8" })),
+        fileLinked ? "Backup file linked ✓ — choose another" : "Link a local backup file…"
+      ))))
+    );
+  }
+  function FormatPanel({ data, setData, onClose }) {
+    const s = data.settings || {};
+    const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
+    useEffect7(() => {
+      const onKey = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("keydown", onKey);
+      return () => document.removeEventListener("keydown", onKey);
+    }, []);
+    const Toggle2 = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: (e) => {
+      e.stopPropagation();
+      onChange(!on);
+    }, style: { width: 28, height: 15, borderRadius: 8, background: on ? "var(--amber)" : "var(--bd2)", position: "relative", display: "inline-block", cursor: "pointer", transition: "background .15s", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 11, height: 11, borderRadius: "50%", background: "var(--bg)", boxShadow: "0 1px 3px rgba(0,0,0,.2)", position: "absolute", top: 2, left: on ? 15 : 2, transition: "left .15s" } }));
+    const SegBtn2 = ({ options, value, onChange }) => /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", background: "#f0f0f0", borderRadius: 6, padding: 2, gap: 2 } }, options.map((o) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: String(o.v),
+        onClick: () => onChange(o.v),
+        style: {
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 11,
+          fontWeight: 600,
+          padding: "3px 10px",
+          borderRadius: 4,
+          background: value === o.v ? "#fff" : "transparent",
+          color: value === o.v ? "var(--amber)" : "var(--mut)",
+          boxShadow: value === o.v ? "0 1px 2px rgba(0,0,0,.12)" : "none",
+          transition: "all .12s"
+        }
+      },
+      o.l
+    )));
+    const rh = Math.min(34, Math.max(20, s.rowHeight || 24));
+    return /* @__PURE__ */ React.createElement("div", { style: {
+      position: "fixed",
+      top: 48,
+      right: 12,
+      width: 300,
+      background: "var(--bg)",
+      border: "1px solid var(--bd2)",
+      borderRadius: 8,
+      boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
+      zIndex: 9999,
+      padding: "0 16px 14px",
+      maxHeight: "calc(100vh - 70px)",
+      overflowY: "auto",
+      fontFamily: "inherit"
+    } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 8px", borderBottom: "1px solid var(--bd)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)" } }, "Format"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, title: "Close", style: { background: "none", border: "none", cursor: "pointer", fontSize: 15, color: "var(--mut)", padding: "2px 4px", lineHeight: 1 } }, "✕")), /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 0 2px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 6 } }, "Row height — grid & Gantt"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: 20, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, height: 4, borderRadius: 2, background: "var(--bd2)", overflow: "hidden", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${(rh - 20) / (34 - 20) * 100}%`, height: "100%", background: "var(--amber)", transition: "width .05s" } })), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "range",
+        min: 20,
+        max: 34,
+        value: rh,
+        onChange: (e) => upd({ rowHeight: +e.target.value }),
+        style: {
+          width: "100%",
+          appearance: "none",
+          WebkitAppearance: "none",
+          background: "transparent",
+          margin: 0,
+          cursor: "pointer",
+          position: "relative",
+          zIndex: 1
+        }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "20px"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--amber)" } }, rh, "px"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "34px"))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 0 2px", borderTop: "1px solid var(--bd)", marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 5 } }, "Gantt bar labels"), /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", borderBottom: "1px solid var(--bd)", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" } }, "Position"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", borderBottom: "1px solid var(--bd)", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" } }, "Field"))), /* @__PURE__ */ React.createElement("tbody", null, [["left", "Left of bar"], ["right", "Right of bar"]].map(([k, label]) => /* @__PURE__ */ React.createElement("tr", { key: k }, /* @__PURE__ */ React.createElement("td", { style: { padding: "4px 6px", borderBottom: "1px solid var(--bd)", color: "var(--txt)" } }, label), /* @__PURE__ */ React.createElement("td", { style: { padding: "2px 4px", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: (s.barLabels || {})[k] || "none",
+        onChange: (e) => upd({ barLabels: { ...s.barLabels || {}, [k]: e.target.value } }),
+        style: { width: "100%", background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 3, padding: "3px 6px", fontSize: 11, color: "var(--txt)", fontFamily: "inherit", outline: "none", cursor: "pointer" }
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "none" }, "None"),
+      /* @__PURE__ */ React.createElement("option", { value: "start" }, "Start date"),
+      /* @__PURE__ */ React.createElement("option", { value: "end" }, "End date"),
+      /* @__PURE__ */ React.createElement("option", { value: "owner" }, "Owner"),
+      /* @__PURE__ */ React.createElement("option", { value: "pct" }, "% complete")
+    )))))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, "Show year in dates"), /* @__PURE__ */ React.createElement(Toggle2, { on: (s.barLabels || {}).year !== false, onChange: (v) => upd({ barLabels: { ...s.barLabels || {}, year: v } }) })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, "Task name alignment"), /* @__PURE__ */ React.createElement(
+      SegBtn2,
+      {
+        options: [{ l: "Left", v: "left" }, { l: "Center", v: "center" }, { l: "Right", v: "right" }],
+        value: resolveLabelAlign(data.projects?.[data.aPid]),
+        onChange: (v) => writeLabelAlign(setData, data.aPid, v)
+      }
+    )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 6, lineHeight: 1.4 } }, "Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.")));
+  }
+  function RuleColorPicker({ value, onChange }) {
+    const [open, setOpen] = useState8(false);
+    const dotRef = useRef8(null);
+    const menuRef = useRef8(null);
+    const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.right - 110 }), () => setOpen(false));
+    useEffect7(() => {
+      if (!open) return;
+      const onDown = (e) => {
+        if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
+      };
+      document.addEventListener("mousedown", onDown, true);
+      return () => document.removeEventListener("mousedown", onDown, true);
+    }, [open]);
+    const openMenu = () => {
+      setOpen((o) => !o);
+    };
+    const hh = HEALTH[value] || HEALTH.gray;
+    return /* @__PURE__ */ React.createElement("span", { style: { position: "relative", flexShrink: 0 } }, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        ref: dotRef,
+        onClick: openMenu,
+        title: hh.label,
+        "data-rule-color-swatch": "1",
+        style: {
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: hh.dot,
+          border: hh.dot === "#ffffff" ? "1.5px solid #d1d5db" : hh.border,
+          display: "block",
+          cursor: "pointer"
+        }
+      }
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ref: menuRef,
+          ...MENU_STOPS_GRID,
+          "data-rule-color-menu": "1",
+          style: {
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 6,
+            padding: "4px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            zIndex: 1e4,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
+            minWidth: 110
+          }
+        },
+        HK.map((hk) => {
+          const h = HEALTH[hk];
+          return /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              key: hk,
+              onClick: () => {
+                onChange(hk);
+                setOpen(false);
+              },
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 6px",
+                borderRadius: 4,
+                cursor: "pointer",
+                background: hk === value ? "var(--surf)" : "transparent"
+              },
+              onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+              onMouseLeave: (e) => e.currentTarget.style.background = hk === value ? "var(--surf)" : "transparent"
+            },
+            /* @__PURE__ */ React.createElement("span", { style: { width: 9, height: 9, borderRadius: "50%", background: h.dot, border: h.dot === "#ffffff" ? "1.5px solid #d1d5db" : h.border, flexShrink: 0 } }),
+            /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)" } }, h.label)
+          );
+        })
+      ),
+      document.body
+    ));
+  }
+  function ConditionRow({ cond, onChange, onRemove }) {
+    const field = RULE_FIELD_BY_K[cond.field] || RULE_FIELDS[0];
+    const ops = opsForField(field.k);
+    const op = ops.find((o) => o.k === cond.op) || ops[0];
+    const setField = (fk) => {
+      const f = RULE_FIELD_BY_K[fk];
+      const newOp = opsForField(fk)[0];
+      onChange({ field: fk, op: newOp.k, value: newOp.needsValue ? newOp.defaultValue ?? (f.type === "status" ? "red" : "") : void 0 });
+    };
+    const setOp = (ok) => {
+      const newOp = ops.find((o) => o.k === ok);
+      onChange({ op: ok, value: newOp.needsValue ? cond.value ?? newOp.defaultValue ?? (field.type === "status" ? "red" : "") : void 0 });
+    };
+    const selSt = { fontSize: 11, color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", background: "var(--bg)", minWidth: 0 };
+    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("select", { value: field.k, onChange: (e) => setField(e.target.value), style: { ...selSt, flex: "1 1 120px" } }, RULE_FIELDS.map((f) => /* @__PURE__ */ React.createElement("option", { key: f.k, value: f.k }, f.label))), /* @__PURE__ */ React.createElement("select", { value: op?.k, onChange: (e) => setOp(e.target.value), style: { ...selSt, flex: "1 1 130px" } }, ops.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.k, value: o.k }, o.label))), op?.needsValue && field.type === "date" && /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "number",
+        min: 0,
+        value: cond.value ?? op.defaultValue ?? 0,
+        onChange: (e) => onChange({ value: Math.max(0, parseInt(e.target.value, 10) || 0) }),
+        style: { width: 36, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 0 }
+      }
+    ), op?.needsValue && op.valueKind === "status" && /* @__PURE__ */ React.createElement(RuleColorPicker, { value: cond.value || "red", onChange: (hk) => onChange({ value: hk }) }), op?.needsValue && op.valueKind === "text" && /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...NO_AUTOFILL,
+        type: "text",
+        value: cond.value || "",
+        placeholder: "value",
+        onChange: (e) => onChange({ value: e.target.value }),
+        style: { width: 80, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 1, minWidth: 0 }
+      }
+    ), op?.needsValue && op.valueKind === "number" && /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "number",
+        value: cond.value ?? 0,
+        onChange: (e) => onChange({ value: parseFloat(e.target.value) || 0 }),
+        style: { width: 64, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 0 }
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        onClick: onRemove,
+        title: "Remove condition",
+        style: { cursor: "pointer", color: "var(--mut)", fontSize: 12, lineHeight: 1, flexShrink: 0, padding: "0 2px", marginLeft: "auto" }
+      },
+      "✕"
+    ));
+  }
+  function ConditionGroup({ conds, combinator, onChange, addLabel }) {
+    const setConds = (next) => onChange({ conds: next, combinator });
+    const updCond = (i, patch) => setConds(conds.map((c, ci) => ci === i ? { ...c, ...patch } : c));
+    const removeCond = (i) => setConds(conds.filter((_, ci) => ci !== i));
+    const addCond = () => {
+      const op = opsForField(RULE_FIELDS[0].k)[0];
+      setConds([...conds, { field: RULE_FIELDS[0].k, op: op.k, value: op.needsValue ? op.defaultValue : void 0 }]);
+    };
+    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } }, conds.map((c, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, i > 0 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 4 } }, ["AND", "OR"].map((op) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: op,
+        onClick: () => onChange({ conds, combinator: op }),
+        style: {
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: ".03em",
+          cursor: "pointer",
+          padding: "1px 6px",
+          borderRadius: 3,
+          color: combinator === op ? "var(--on-accent)" : "var(--mut)",
+          background: combinator === op ? "var(--blue)" : "var(--surf)"
+        }
+      },
+      op
+    ))), /* @__PURE__ */ React.createElement(ConditionRow, { cond: c, onChange: (patch) => updCond(i, patch), onRemove: () => removeCond(i) }))), /* @__PURE__ */ React.createElement("span", { onClick: addCond, style: { fontSize: 10.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer", alignSelf: "flex-start" } }, "+ ", addLabel));
+  }
+  function AutomationPanel({ data, setData, onClose }) {
+    const s = data.settings || DEFAULT_SETTINGS;
+    const rules = getHealthRules(s);
+    const setRules = (next) => setData((d) => ({ ...d, settings: { ...d.settings, healthRules: next } }));
+    const updRule = (id, patch) => setRules(rules.map((r) => r.id === id ? { ...r, ...patch } : r));
+    const removeRule = (id) => setRules(rules.filter((r) => r.id !== id));
+    const moveRule = (i, dir) => {
+      const j = i + dir;
+      if (j < 0 || j >= rules.length) return;
+      const next = rules.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      setRules(next);
+    };
+    const addRule = () => {
+      const op = opsForField(RULE_FIELDS[0].k)[0];
+      setRules([...rules, {
+        id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+        when: [{ field: RULE_FIELDS[0].k, op: op.k, value: op.needsValue ? op.defaultValue : void 0 }],
+        whenCombinator: "AND",
+        color: "red",
+        unless: [],
+        unlessCombinator: "OR"
+      }]);
+    };
+    const resetDefaults = () => setRules(DEFAULT_HEALTH_RULES.map((r) => ({
+      ...r,
+      id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+      when: r.when.map((c) => ({ ...c })),
+      unless: r.unless.map((c) => ({ ...c }))
+    })));
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          position: "fixed",
+          top: 48,
+          right: 12,
+          width: 440,
+          maxHeight: "calc(100vh - 64px)",
+          overflowY: "auto",
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 8,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
+          zIndex: 9999,
+          padding: "0 16px 14px"
+        },
+        onMouseDown: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 10px", position: "sticky", top: 0, background: "var(--bg)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "var(--amber)", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: "var(--txt)" } }, "Automation")), /* @__PURE__ */ React.createElement("span", { onClick: onClose, style: { cursor: "pointer", color: "var(--mut)", fontSize: 16, lineHeight: 1 } }, "✕")),
+      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid var(--bd)" } }, "First matching rule sets a task's color — IF its conditions are true, THEN it sets the status, UNLESS an exception applies."),
+      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, rules.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", padding: "6px 2px" } }, "No rules yet — a task's status stays exactly what you set it to."), rules.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: { display: "flex", flexDirection: "column", gap: 7, padding: "8px 9px", borderRadius: 6, background: "var(--surf)", border: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--mut)" } }, "Rule ", i + 1), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => moveRule(i, -1),
+          title: "Move up",
+          style: { cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, fontSize: 10, color: "var(--mut)" }
+        },
+        "▲"
+      ), /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => moveRule(i, 1),
+          title: "Move down",
+          style: { cursor: i === rules.length - 1 ? "default" : "pointer", opacity: i === rules.length - 1 ? 0.3 : 1, fontSize: 10, color: "var(--mut)" }
+        },
+        "▼"
+      ), /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => removeRule(r.id),
+          title: "Delete rule",
+          style: { cursor: "pointer", color: "var(--mut)", fontSize: 13, lineHeight: 1 }
+        },
+        "✕"
+      ))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)", marginBottom: 3 } }, "IF"), /* @__PURE__ */ React.createElement(
+        ConditionGroup,
+        {
+          conds: r.when,
+          combinator: r.whenCombinator,
+          onChange: ({ conds, combinator }) => updRule(r.id, { when: conds, whenCombinator: combinator }),
+          addLabel: "Add condition"
+        }
+      )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)" } }, "THEN set status to"), /* @__PURE__ */ React.createElement(RuleColorPicker, { value: r.color, onChange: (hk) => updRule(r.id, { color: hk }) })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)", marginBottom: 3 } }, "UNLESS ", /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 400, textTransform: "none", letterSpacing: 0 } }, "(optional)")), r.unless && r.unless.length > 0 ? /* @__PURE__ */ React.createElement(
+        ConditionGroup,
+        {
+          conds: r.unless,
+          combinator: r.unlessCombinator,
+          onChange: ({ conds, combinator }) => updRule(r.id, { unless: conds, unlessCombinator: combinator }),
+          addLabel: "Add exception"
+        }
+      ) : /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => updRule(r.id, { unless: [{ field: "status", op: "is", value: "green" }] }),
+          style: { fontSize: 10.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer" }
+        },
+        "+ Add exception"
+      ))))),
+      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { onClick: addRule, style: { fontSize: 11.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer" } }, "+ Add rule"), /* @__PURE__ */ React.createElement("span", { onClick: resetDefaults, style: { fontSize: 11, color: "var(--mut)", cursor: "pointer" } }, "Reset to suggested defaults"))
+    );
+  }
+  exposeToHarness({
+    SettingsPanel: [() => SettingsPanel],
+    FormatPanel: [() => FormatPanel],
+    RuleColorPicker: [() => RuleColorPicker],
+    ConditionRow: [() => ConditionRow],
+    ConditionGroup: [() => ConditionGroup],
+    AutomationPanel: [() => AutomationPanel]
+  });
+
+  // src/workspaces/scheduler/page/panels/MeetingCalendars.jsx
+  var { useState: useState9, useEffect: useEffect8, useRef: useRef9 } = React;
+  var MB_WD = [{ v: 0, l: "Sun" }, { v: 1, l: "Mon" }, { v: 2, l: "Tue" }, { v: 3, l: "Wed" }, { v: 4, l: "Thu" }, { v: 5, l: "Fri" }, { v: 6, l: "Sat" }];
+  var MB_POSITIONS = [{ v: 1, l: "1st" }, { v: 2, l: "2nd" }, { v: 3, l: "3rd" }, { v: 4, l: "4th" }, { v: 5, l: "5th" }, { v: -2, l: "2nd-to-last" }, { v: -1, l: "Last" }];
+  var MB_MONTHS = [{ v: 1, l: "Jan" }, { v: 2, l: "Feb" }, { v: 3, l: "Mar" }, { v: 4, l: "Apr" }, { v: 5, l: "May" }, { v: 6, l: "Jun" }, { v: 7, l: "Jul" }, { v: 8, l: "Aug" }, { v: 9, l: "Sep" }, { v: 10, l: "Oct" }, { v: 11, l: "Nov" }, { v: 12, l: "Dec" }];
+  var MB_PATTERN_COLORS = ["#2563eb", "#d97706", "#059669", "#db2777", "#7c3aed", "#0891b2"];
+  var newMeetingBody = () => ({
+    id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: "",
+    jurisdiction: "",
+    recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
+    agendaLead: { type: "offset", n: 10, unit: "business" },
+    cutoffTime: "12:00 PM",
+    sameDayFilingAllowed: false,
+    blackoutDates: [],
+    extraDates: [],
+    sourceUrl: "",
+    verifiedOn: ""
+  });
+  var mbFmt = (iso) => {
+    if (!iso) return "";
+    const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
+    return isNaN(d) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+  var MB_ACTIVE_POPOVER_CLOSE = null;
+  function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
+    const [open, setOpen] = useState9(false);
+    const btnRef = useRef9(null), popRef = useRef9(null);
+    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
+    useEffect8(() => {
+      if (!open) return;
+      const close = () => setOpen(false);
+      MB_ACTIVE_POPOVER_CLOSE = close;
+      const down = (e) => {
+        if (!btnRef.current?.contains(e.target) && !popRef.current?.contains(e.target)) setOpen(false);
+      };
+      document.addEventListener("mousedown", down);
+      return () => {
+        document.removeEventListener("mousedown", down);
+        if (MB_ACTIVE_POPOVER_CLOSE === close) MB_ACTIVE_POPOVER_CLOSE = null;
+      };
+    }, [open]);
+    const isAll = value === allValue;
+    const picked = isAll ? [] : Array.isArray(value) ? value : [];
+    const toggle = (v) => {
+      const has = picked.includes(v);
+      const next = has ? picked.filter((x) => x !== v) : [...picked, v];
+      onChange(next.length ? next : allValue);
+    };
+    const openMenu = (e) => {
+      e.stopPropagation();
+      setOpen((o) => !o);
+    };
+    const chip = (on, extra) => ({ padding: "4px 10px", fontSize: 11.5, borderRadius: 5, cursor: "pointer", border: "1px solid var(--bd2)", background: on ? "var(--amber)" : "#fff", color: on ? "#fff" : "var(--mut)", fontFamily: "inherit", ...extra });
+    const label = isAll ? allButtonLabel : formatSelected ? formatSelected(picked) : joinWithAnd(picked.map((v) => (options.find((o) => o.v === v) || {}).l || String(v)));
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        ref: btnRef,
+        onClick: openMenu,
+        style: { fontSize: 12, padding: "3px 8px", border: "1px solid var(--bd2)", borderRadius: 5, background: "var(--bg)", color: "var(--txt)", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "inherit" }
+      },
+      label,
+      " ",
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 7, opacity: 0.7 } }, "▾")
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ref: popRef,
+          onMouseDown: (e) => e.stopPropagation(),
+          style: { position: "fixed", top: pos.top, left: pos.left, minWidth: 200, maxWidth: 260, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 6, padding: 6, zIndex: 9999, boxShadow: "0 4px 16px rgba(0,0,0,.15)", display: "flex", flexWrap: "wrap", gap: 4 }
+        },
+        /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            role: "checkbox",
+            "aria-checked": isAll,
+            onClick: () => {
+              onChange(allValue);
+              setOpen(false);
+            },
+            style: chip(isAll, { flexBasis: "100%", fontWeight: 700 })
+          },
+          allRowLabel
+        ),
+        options.map((o) => {
+          const on = picked.includes(o.v);
+          return /* @__PURE__ */ React.createElement("button", { type: "button", role: "checkbox", "aria-checked": on, key: String(o.v), onClick: () => toggle(o.v), style: chip(on) }, o.l);
+        })
+      ),
+      document.body
+    ));
+  }
+  function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
+    const [picked, setPicked] = useState9(() => /* @__PURE__ */ new Set());
+    const toggle = (key) => setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    const today = fdLocal(/* @__PURE__ */ new Date());
+    const nextDates = (b) => meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, 3);
+    const alreadyHere = (b) => (existingBodies || []).some((eb) => mbBodiesSameCadence(eb, b));
+    const entries = otherSchedules.flatMap((g2) => g2.bodies.map((b) => ({ key: `${g2.pid}:${b.id}`, g: g2, b })));
+    const byKey = new Map(entries.map((e) => [e.key, e.b]));
+    return /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "9px 18px", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { onClick: onCancel, title: "Back", style: { cursor: "pointer", color: "var(--mut)", fontSize: 13, lineHeight: 1 } }, "←"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, fontWeight: 600, color: "var(--txt)" } }, "Import meeting calendars")), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "12px 18px" } }, otherSchedules.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--mut)", fontStyle: "italic" } }, "No other schedules on this account have meeting calendars yet."), otherSchedules.map((g2) => /* @__PURE__ */ React.createElement("div", { key: g2.pid, style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, g2.schedName), g2.bodies.map((b) => {
+      const key = `${g2.pid}:${b.id}`;
+      const on = picked.has(key);
+      const dup = alreadyHere(b);
+      const dates = nextDates(b);
+      return /* @__PURE__ */ React.createElement("label", { key, style: { display: "flex", alignItems: "flex-start", gap: 8, padding: "7px 8px", borderRadius: 6, cursor: "pointer", background: on ? "var(--surf)" : "transparent" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: on, onChange: () => toggle(key), style: { marginTop: 3, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--txt)" } }, b.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic", fontWeight: 400 } }, "Untitled body"), dup && /* @__PURE__ */ React.createElement("span", { style: { marginLeft: 7, fontSize: 9.5, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".04em" } }, "already here")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", marginTop: 2 } }, cadenceSummary(b)), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", marginTop: 1 } }, dates.length ? dates.map((d) => mbFmt(d)).join(" · ") : "no dates resolve")));
+    })))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--bd)", display: "flex", justifyContent: "flex-end", gap: 8, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onCancel, style: { fontSize: 12, padding: "6px 12px" } }, "Cancel"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "btn",
+        disabled: picked.size === 0,
+        onClick: () => onImport([...picked].map((k) => byKey.get(k)).filter(Boolean)),
+        style: { fontSize: 12, padding: "6px 14px", background: picked.size ? "var(--amber)" : "#eee", color: picked.size ? "#fff" : "var(--mut)", borderColor: picked.size ? "var(--amber)" : "var(--bd2)", cursor: picked.size ? "pointer" : "default" }
+      },
+      "Import",
+      picked.size ? ` ${picked.size}` : ""
+    )));
+  }
+  function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
+    const initial = Array.isArray(bodies) ? bodies : [];
+    const [draft, setDraft] = useState9(() => JSON.parse(JSON.stringify(initial)));
+    const savedRef = useRef9(JSON.stringify(initial));
+    const [savedFlash, setSavedFlash] = useState9(false);
+    const [confirmClose, setConfirmClose] = useState9(false);
+    const list = draft;
+    const dirty = JSON.stringify(draft) !== savedRef.current;
+    const [selId, setSelId] = useState9(() => list[0] && list[0].id || null);
+    const sel = list.find((b) => b.id === selId) || null;
+    const save = () => {
+      onChange(JSON.parse(JSON.stringify(draft)));
+      savedRef.current = JSON.stringify(draft);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1600);
+    };
+    const requestClose = () => {
+      if (dirty) setConfirmClose(true);
+      else onClose();
+    };
+    const backdropRef = useRef9(null);
+    const downOnBackdropRef = useRef9(false);
+    useEffect8(() => {
+      const onKey = (e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        if (MB_ACTIVE_POPOVER_CLOSE) {
+          MB_ACTIVE_POPOVER_CLOSE();
+          MB_ACTIVE_POPOVER_CLOSE = null;
+          return;
+        }
+        if (confirmClose) setConfirmClose(false);
+        else requestClose();
+      };
+      document.addEventListener("keydown", onKey, true);
+      return () => document.removeEventListener("keydown", onKey, true);
+    });
+    const patch = (id, fields) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, ...fields } : b));
+    const rulesOf = (b) => Array.isArray(b.recurrence) && b.recurrence.length ? b.recurrence : [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }];
+    const patchRuleAt = (id, idx, rf) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
+    const addRuleAt = (id) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: [...rulesOf(b), { positions: [1], weekday: 2, months: "all", anchor: null }] } : b));
+    const removeRuleAt = (id, idx) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
+    const patchLead = (id, lf) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, agendaLead: { ...b.agendaLead || {}, ...lf } } : b));
+    const add = () => {
+      const b = newMeetingBody();
+      setDraft((prev) => [...prev, b]);
+      setSelId(b.id);
+    };
+    const remove = (id) => {
+      const rest = list.filter((b) => b.id !== id);
+      setDraft((prev) => prev.filter((b) => b.id !== id));
+      if (selId === id) setSelId(rest[0] && rest[0].id || null);
+    };
+    const [importOpen, setImportOpen] = useState9(false);
+    const importBodies = (sourceBodies) => {
+      const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
+      setDraft(next);
+      if (ids.length) setSelId(ids[ids.length - 1]);
+      setImportOpen(false);
+    };
+    const inp = { fontSize: 12, padding: "5px 8px", border: "1px solid var(--bd2)", borderRadius: 5, background: "var(--bg)", color: "var(--txt)", width: "100%", boxSizing: "border-box", fontFamily: "'Inter',system-ui,sans-serif" };
+    const lbl = { fontSize: 10, fontWeight: 600, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".05em", margin: "0 0 4px", display: "block" };
+    const sect = { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".07em", margin: "18px 0 8px", paddingBottom: 5, borderBottom: "1px solid var(--bd)" };
+    const seg = (opts, val, on) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 5, overflow: "hidden", flexShrink: 0 } }, opts.map((o) => /* @__PURE__ */ React.createElement("span", { key: String(o.v), onClick: () => on(o.v), style: { padding: "4px 10px", fontSize: 11.5, cursor: "pointer", whiteSpace: "nowrap", background: val === o.v ? "var(--amber)" : "transparent", color: val === o.v ? "#fff" : "var(--mut)" } }, o.l)));
+    const today = fdLocal(/* @__PURE__ */ new Date());
+    const preview = (b) => {
+      const rules = rulesOf(b);
+      const n = rules.some((r) => r.positions === "every") ? 8 : 6;
+      const merged = meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, n);
+      return merged.map((date) => {
+        const idx = rules.findIndex((r) => meetingDatesInRange({ recurrence: [r] }, date, date).length > 0);
+        return { date, dot: MB_PATTERN_COLORS[(idx >= 0 ? idx : 0) % MB_PATTERN_COLORS.length] };
+      });
+    };
+    const detail = (b) => {
+      const rules = rulesOf(b);
+      const lead = b.agendaLead || { type: "offset", n: 10, unit: "business" };
+      const dates = preview(b);
+      return /* @__PURE__ */ React.createElement("div", { style: { padding: "16px 20px 20px" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Body name"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.name || "", placeholder: "e.g. Baytown city council", onChange: (e) => patch(b.id, { name: e.target.value }), style: { ...inp, fontWeight: 600 } })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Jurisdiction"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.jurisdiction || "", placeholder: "e.g. Baytown, TX", onChange: (e) => patch(b.id, { jurisdiction: e.target.value }), style: inp })), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => remove(b.id), title: "Remove this meeting body", style: { fontSize: 11, padding: "5px 10px", color: "var(--danger,#d83a3a)" } }, "Remove")), /* @__PURE__ */ React.createElement("div", { style: sect }, "Meets"), rules.map((rule, ri) => {
+        const isEvery = rule.positions === "every";
+        const months = rule.months === "all" || !Array.isArray(rule.months) || !rule.months.length ? "all" : rule.months;
+        const hasAnchor = !!(rule.anchor && rule.anchor.weekday != null && rule.anchor.position != null);
+        const missing = positionMissingReport(rule, today);
+        const ruleDates = meetingDatesInRange({ recurrence: [rule] }, today, addD(today, 366 * 4)).slice(0, 3);
+        const dot = MB_PATTERN_COLORS[ri % MB_PATTERN_COLORS.length];
+        return /* @__PURE__ */ React.createElement("div", { key: ri, style: { border: "1px solid var(--bd)", borderRadius: 6, padding: "10px 12px", marginBottom: 8, background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { title: "This pattern's color in the resolved-dates list below", style: { width: 7, height: 7, marginTop: 6, borderRadius: "50%", background: dot, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, rowGap: 4, alignItems: "center", flexWrap: "wrap", flex: 1, fontSize: 12.5, color: "var(--txt)" } }, /* @__PURE__ */ React.createElement("span", null, "Meets"), !isEvery && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "the"), /* @__PURE__ */ React.createElement(
+          MBMultiPick,
+          {
+            value: isEvery ? "every" : Array.isArray(rule.positions) ? rule.positions : [1],
+            onChange: (v) => patchRuleAt(b.id, ri, v === "every" ? { positions: "every", anchor: null } : { positions: v }),
+            options: MB_POSITIONS,
+            allValue: "every",
+            allRowLabel: "Every week",
+            allButtonLabel: "every",
+            formatSelected: (arr) => joinWithAnd(arr.map((v) => (MB_POSITIONS.find((o) => o.v === v) || {}).l || String(v)))
+          }
+        ), /* @__PURE__ */ React.createElement("select", { value: rule.weekday, onChange: (e) => patchRuleAt(b.id, ri, { weekday: +e.target.value }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l))), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, isEvery ? months === "all" ? "," : "in" : "of"), /* @__PURE__ */ React.createElement(
+          MBMultiPick,
+          {
+            value: months,
+            onChange: (v) => patchRuleAt(b.id, ri, { months: v }),
+            options: MB_MONTHS,
+            allValue: "all",
+            allRowLabel: "Every month",
+            allButtonLabel: isEvery ? "all year" : "every month"
+          }
+        )), rules.length > 1 && /* @__PURE__ */ React.createElement("span", { onClick: () => removeRuleAt(b.id, ri), title: "Remove this pattern", style: { cursor: "pointer", color: "var(--mut)", fontSize: 14, padding: "0 2px", flexShrink: 0 } }, "✕")), !isEvery && /* @__PURE__ */ React.createElement("label", { style: { fontSize: 11.5, color: "var(--txt)", display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", marginTop: 10, paddingLeft: 13 } }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: hasAnchor,
+            style: { marginTop: 2, flexShrink: 0 },
+            onChange: (e) => patchRuleAt(b.id, ri, e.target.checked ? { anchor: { position: 1, weekday: (rule.weekday + 6) % 7 } } : { anchor: null })
+          }
+        ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", null, "counting from after the"), hasAnchor ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("select", { value: rule.anchor.position, onChange: (e) => patchRuleAt(b.id, ri, { anchor: { ...rule.anchor, position: +e.target.value } }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_POSITIONS.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.v, value: o.v }, o.l))), /* @__PURE__ */ React.createElement("select", { value: rule.anchor.weekday, onChange: (e) => patchRuleAt(b.id, ri, { anchor: { ...rule.anchor, weekday: +e.target.value } }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l)))) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "1st Monday (e.g. the U.S. Election Day pattern)"))), !isEvery && missing && missing.missing > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, paddingLeft: 13, fontSize: 11, color: "var(--warn-text,#b45309)" } }, "⚠ ", missing.missing, " of the next ", missing.checked, " picked months have no such meeting."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, paddingTop: 8, paddingLeft: 13, borderTop: "1px dashed var(--bd2)", fontSize: 11.5, lineHeight: 1.5 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "Resolves to "), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "var(--txt)" } }, mbRuleSummary(rule)), ruleDates.length ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, " — next: ", ruleDates.map((d) => mbFmt(d)).join(" · ")) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--warn-text,#b45309)", fontWeight: 600 } }, " — no dates resolve; check the rule")));
+      }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => addRuleAt(b.id), style: { fontSize: 11, padding: "4px 10px" } }, "+ And also…"), /* @__PURE__ */ React.createElement("div", { style: sect }, "Deadline before each meeting ", /* @__PURE__ */ React.createElement("span", { style: { textTransform: "none", fontWeight: 400, letterSpacing: 0 } }, "— file the agenda / call the election by (e.g. 78 calendar days before an election)")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", margin: "0 0 8px", lineHeight: 1.5 } }, "To put this date on the schedule: right-click the bound task → “+ Add deadline row”. The row then always sits this far ahead of the meeting and moves with it."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, seg([{ v: "offset", l: "Days before" }, { v: "weekdayAnchor", l: "Weekday anchor" }], lead.type || "offset", (v) => patchLead(b.id, { type: v })), (lead.type || "offset") === "offset" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { type: "number", min: 0, value: lead.n ?? 10, onChange: (e) => patchLead(b.id, { n: +e.target.value }), style: { ...inp, width: 60 } }), seg([{ v: "business", l: "business" }, { v: "calendar", l: "calendar" }], lead.unit || "business", (v) => patchLead(b.id, { unit: v })), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, color: "var(--mut)" } }, "days before")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { type: "number", min: 0, value: lead.weeksBefore ?? 2, onChange: (e) => patchLead(b.id, { weeksBefore: +e.target.value }), style: { ...inp, width: 52 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, color: "var(--mut)" } }, "weeks before, on"), /* @__PURE__ */ React.createElement("select", { value: lead.weekday ?? 3, onChange: (e) => patchLead(b.id, { weekday: +e.target.value }), style: { ...inp, width: "auto" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l))))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 18, marginTop: 10, alignItems: "flex-end", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Cutoff time"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.cutoffTime || "", placeholder: "12:00 PM", onChange: (e) => patch(b.id, { cutoffTime: e.target.value }), style: { ...inp, width: 100 } })), /* @__PURE__ */ React.createElement("label", { style: { fontSize: 11.5, color: "var(--txt)", display: "flex", alignItems: "center", gap: 6, cursor: "pointer", paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!b.sameDayFilingAllowed, onChange: (e) => patch(b.id, { sameDayFilingAllowed: e.target.checked }) }), " Same-day filing OK")), /* @__PURE__ */ React.createElement("div", { style: sect }, "Exceptions & source"), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Cancelled / blackout dates"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: (b.blackoutDates || []).join(", "), placeholder: "2026-12-22, 2026-12-29", title: "Comma-separated YYYY-MM-DD", onChange: (e) => patch(b.id, { blackoutDates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Special-called / extra dates"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: (b.extraDates || []).join(", "), placeholder: "2026-08-18", title: "Comma-separated YYYY-MM-DD", onChange: (e) => patch(b.id, { extraDates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Published calendar URL"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.sourceUrl || "", placeholder: "https://…/agenda-calendar", onChange: (e) => patch(b.id, { sourceUrl: e.target.value }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Verified on"), /* @__PURE__ */ React.createElement("input", { type: "date", value: b.verifiedOn || "", onChange: (e) => patch(b.id, { verifiedOn: e.target.value }), style: { ...inp, width: "auto" } }))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 18, background: "var(--surf)", border: "1px solid var(--bd)", borderRadius: 8, padding: "10px 14px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "This body meets "), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "var(--txt)" } }, cadenceSummary(b))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".06em" } }, "Next ", dates.length || (rules.some((r) => r.positions === "every") ? 8 : 6), " meetings → file by"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)" } }, b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified")), dates.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--mut)", fontStyle: "italic", marginTop: 4 } }, "No dates resolve — check the recurrence rule."), dates.map(({ date: m, dot }) => /* @__PURE__ */ React.createElement("div", { key: m, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0", color: "var(--txt)", gap: 8, borderTop: "1px dashed var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, fontWeight: 500 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: dot, flexShrink: 0 } }), mbFmt(m)), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "file by ", mbFmt(agendaDeadline(b, m)), b.cutoffTime ? ` · ${b.cutoffTime}` : ""))), b.sourceUrl && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6 } }, /* @__PURE__ */ React.createElement("a", { href: b.sourceUrl, target: "_blank", rel: "noreferrer", style: { fontSize: 10.5, color: "var(--amber)" } }, "published calendar ↗"))));
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref: backdropRef,
+        onMouseDown: (e) => {
+          downOnBackdropRef.current = e.target === backdropRef.current;
+        },
+        onClick: (e) => {
+          const hit = e.target === backdropRef.current && downOnBackdropRef.current;
+          downOnBackdropRef.current = false;
+          if (hit) requestClose();
+        },
+        style: { position: "fixed", inset: 0, background: "rgba(15,23,42,.38)", zIndex: 9e3, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          "data-testid": "meeting-calendars-modal",
+          onMouseDown: (e) => e.stopPropagation(),
+          style: {
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 10,
+            width: "min(860px,96vw)",
+            height: "min(640px,90vh)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            boxShadow: "0 16px 48px rgba(0,0,0,.18)"
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "Meeting calendars"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, projName || "Project")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 14, alignItems: "center", minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10.5, color: "var(--mut)", maxWidth: 380, textAlign: "right", lineHeight: 1.45 } }, "External decision bodies (city council, P&Z, commissioners court). Bind a task to one and its hearing date snaps to the body's calendar."), /* @__PURE__ */ React.createElement("span", { onClick: requestClose, title: "Close (Esc)", style: { cursor: "pointer", color: "var(--mut)", fontSize: 17, lineHeight: 1, flexShrink: 0 } }, "✕"))),
+        importOpen ? /* @__PURE__ */ React.createElement(MeetingImportPicker, { otherSchedules, existingBodies: draft, onCancel: () => setImportOpen(false), onImport: importBodies }) : /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { width: 216, flexShrink: 0, borderRight: "1px solid var(--bd)", display: "flex", flexDirection: "column", background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "8px 0" } }, list.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", fontStyle: "italic", padding: "8px 14px" } }, "No meeting bodies yet."), list.map((b) => {
+          const isSel = b.id === selId;
+          return /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              key: b.id,
+              "data-testid": "meeting-body-row",
+              onClick: () => setSelId(b.id),
+              style: { padding: "8px 12px 8px 13px", cursor: "pointer", borderLeft: `3px solid ${isSel ? "var(--amber)" : "transparent"}`, background: isSel ? "#fff" : "transparent" }
+            },
+            /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, b.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic", fontWeight: 400 } }, "Untitled body")),
+            /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, cadenceSummary(b))
+          );
+        })), /* @__PURE__ */ React.createElement("div", { style: { padding: 10, borderTop: "1px solid var(--bd)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: add, style: { width: "100%", fontSize: 11.5, padding: "6px 10px" } }, "+ Add meeting body"), otherSchedules.length > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setImportOpen(true), style: { width: "100%", fontSize: 11.5, padding: "6px 10px" } }, "Import from another schedule…"))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", minWidth: 0 } }, sel ? detail(sel) : /* @__PURE__ */ React.createElement("div", { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center", padding: "0 48px" } }, /* @__PURE__ */ React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 24 24", fill: "none", stroke: "var(--mut)", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, fontWeight: 600, color: "var(--txt)" } }, "No meeting calendars yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11.5, color: "var(--mut)", lineHeight: 1.55, maxWidth: 380 } }, "Add an external decision body — a city council, P&Z commission, or commissioners court. Bind a task to it (right-click the task) and its hearing date snaps to the body's calendar, with the agenda-filing deadline derived automatically."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 4 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: add, style: { fontSize: 12, padding: "7px 14px" } }, "+ Add meeting body"), otherSchedules.length > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setImportOpen(true), style: { fontSize: 12, padding: "7px 14px" } }, "Import from another schedule…"))))),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderTop: "1px solid var(--bd)", flexShrink: 0, background: "var(--surf)" } }, confirmClose ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--warn-text,#b45309)" } }, "You have unsaved changes."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setConfirmClose(false), style: { fontSize: 12, padding: "6px 12px" } }, "Keep editing"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose, style: { fontSize: 12, padding: "6px 12px", color: "var(--danger,#d83a3a)" } }, "Discard"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+          save();
+          onClose();
+        }, style: { fontSize: 12, padding: "6px 12px", background: "var(--amber)", color: "#fff", borderColor: "var(--amber)" } }, "Save & close"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: dirty ? "var(--warn-text,#b45309)" : savedFlash ? "#15803d" : "var(--mut)" } }, dirty ? "● Unsaved changes — nothing on the schedule has moved yet" : savedFlash ? "✓ Saved — the schedule updated" : "All changes saved"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: requestClose, style: { fontSize: 12, padding: "6px 12px" } }, dirty ? "Cancel" : "Close"), dirty && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: save, style: { fontSize: 12, padding: "6px 14px", background: "var(--amber)", color: "#fff", borderColor: "var(--amber)" } }, "Save changes"))))
+      )
+    );
+  }
+  exposeToHarness({
+    MB_WD: [() => MB_WD],
+    MB_POSITIONS: [() => MB_POSITIONS],
+    MB_MONTHS: [() => MB_MONTHS],
+    MB_PATTERN_COLORS: [() => MB_PATTERN_COLORS],
+    newMeetingBody: [() => newMeetingBody],
+    mbFmt: [() => mbFmt],
+    MB_ACTIVE_POPOVER_CLOSE: [() => MB_ACTIVE_POPOVER_CLOSE, (v) => {
+      MB_ACTIVE_POPOVER_CLOSE = v;
+    }],
+    MBMultiPick: [() => MBMultiPick],
+    MeetingImportPicker: [() => MeetingImportPicker],
+    MeetingCalendarsModal: [() => MeetingCalendarsModal]
+  });
+
+  // src/workspaces/scheduler/page/panels/ContactsHistory.jsx
+  var { useState: useState10, useEffect: useEffect9 } = React;
   function ContactsPanel({ data, setData, onClose }) {
     const contacts = data.settings?.contacts || [];
     const [editId, setEditId] = React.useState(null);
@@ -14441,11 +15900,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ))))));
   }
   function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
-    const [rows, setRows] = useState7(null);
-    const [previewRow, setPreviewRow] = useState7(null);
-    const [previewData, setPreviewData] = useState7(null);
-    const [busy, setBusy] = useState7(false);
-    useEffect6(() => {
+    const [rows, setRows] = useState10(null);
+    const [previewRow, setPreviewRow] = useState10(null);
+    const [previewData, setPreviewData] = useState10(null);
+    const [busy, setBusy] = useState10(false);
+    useEffect9(() => {
       let alive = true;
       (async () => {
         const list = await window.storage.getHistory("hs-v1", 100);
@@ -14669,6 +16128,12 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       )
     );
   }
+  exposeToHarness({
+    ContactsPanel: [() => ContactsPanel],
+    HistoryPanel: [() => HistoryPanel]
+  });
+
+  // src/workspaces/scheduler/page/common/ErrorBoundary.jsx
   var ErrorBoundary = class extends React.Component {
     constructor(props) {
       super(props);
@@ -14696,6 +16161,12 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       return this.props.children;
     }
   };
+  exposeToHarness({
+    ErrorBoundary: [() => ErrorBoundary]
+  });
+
+  // src/workspaces/scheduler/page/suggestions/SuggestionsView.jsx
+  var { useState: useState11, useEffect: useEffect10, useRef: useRef10 } = React;
   var SGQ_HEALTH = {
     gray: { label: "Not Started", dot: "#ffffff", bd: "1.5px solid #d1d5db" },
     yellow: { label: "In Progress", dot: "#c47b00", bd: "none" },
@@ -14848,8 +16319,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
   }
   function InlineDate({ value, onCommit }) {
     const disp = value ? toShortDate(value) : "";
-    const [txt, setTxt] = useState7(disp);
-    useEffect6(() => {
+    const [txt, setTxt] = useState11(disp);
+    useEffect10(() => {
       setTxt(disp);
     }, [disp]);
     const commit = () => {
@@ -14900,21 +16371,21 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     return { body: tidy(head), quoted: qtext, hasQuoted: qtext.length > 0 };
   }
   function SuggestionsView({ data, updateTask, setData, rows, setRows, loading, onClose, gridProps, activeIdx, setActiveIdx }) {
-    const [edits, setEdits] = useState7({});
-    const [view, setView] = useState7("grid");
-    const [split, setSplit] = useState7(50);
-    const [toast, setToast] = useState7(null);
-    const [showPicker, setShowPicker] = useState7(false);
-    const [showQuoted, setShowQuoted] = useState7(false);
-    const bodyRef = useRef7(null), targetRef = useRef7(null), canvasRef = useRef7(null);
-    const toastTimer = useRef7(null), undoRef = useRef7(null);
-    const [mailReaderOpen, setMailReaderOpen] = useState7(false);
-    const [mailOverflow, setMailOverflow] = useState7(false);
-    const mailBodyRef = useRef7(null);
-    useEffect6(() => {
+    const [edits, setEdits] = useState11({});
+    const [view, setView] = useState11("grid");
+    const [split, setSplit] = useState11(50);
+    const [toast, setToast] = useState11(null);
+    const [showPicker, setShowPicker] = useState11(false);
+    const [showQuoted, setShowQuoted] = useState11(false);
+    const bodyRef = useRef10(null), targetRef = useRef10(null), canvasRef = useRef10(null);
+    const toastTimer = useRef10(null), undoRef = useRef10(null);
+    const [mailReaderOpen, setMailReaderOpen] = useState11(false);
+    const [mailOverflow, setMailOverflow] = useState11(false);
+    const mailBodyRef = useRef10(null);
+    useEffect10(() => {
       setActiveIdx((i) => Math.max(0, Math.min(i, rows.length - 1)));
     }, [rows.length]);
-    useEffect6(() => {
+    useEffect10(() => {
       setShowPicker(false);
       setShowQuoted(false);
       setMailReaderOpen(false);
@@ -15249,7 +16720,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     };
     const prev = () => setActiveIdx((i) => Math.max(0, i - 1));
     const next = () => setActiveIdx((i) => Math.min(rows.length - 1, i + 1));
-    useEffect6(() => {
+    useEffect10(() => {
       const h = (e) => {
         const t = e.target;
         if (mailReaderOpen) {
@@ -15293,7 +16764,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("keydown", h);
       return () => window.removeEventListener("keydown", h);
     });
-    useEffect6(() => {
+    useEffect10(() => {
       if (!matched) return;
       const id = setTimeout(() => {
         if (view === "grid" && targetRef.current) targetRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -15304,7 +16775,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }, 60);
       return () => clearTimeout(id);
     }, [activeIdx, view, matched, targetId]);
-    useEffect6(() => {
+    useEffect10(() => {
       if (!(matched && gridProps && gridProps.setSelectedId && targetId != null)) return;
       const id = setTimeout(() => gridProps.setSelectedId(targetId), 60);
       return () => clearTimeout(id);
@@ -15604,218 +17075,1647 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-mailbody", style: { marginTop: 0 } }, ce.body || "(no body)"), ce.hasQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quotewrap" }, /* @__PURE__ */ React.createElement("button", { className: "rev-quote-toggle", onClick: () => setShowQuoted((q) => !q) }, /* @__PURE__ */ React.createElement("i", { className: "ti " + (showQuoted ? "ti-chevron-down" : "ti-chevron-right"), style: { fontSize: 13 } }), showQuoted ? "Hide quoted thread & disclaimers" : "Show quoted thread & disclaimers"), showQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quoted" }, ce.quoted) : null) : null);
     })()))) : null);
   }
-  var VIEW_TAB_KEYS = ["aPid", "view", "section"];
-  var VIEW_PREF_KEYS = [
-    "gridZoom",
-    "gridColWidths",
-    "masterSort",
-    "masterCols",
-    "masterColWidths",
-    "masterGroupBy",
-    "masterLevelFilter",
-    "masterHealthFilter",
-    "masterProjectFilter",
-    "healthColStyle"
-  ];
-  var VIEW_TRANSIENT_KEYS = ["editProjId"];
-  var VIEW_STATE_KEYS = /* @__PURE__ */ new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
-  var VIEW_TAB_STORAGE_KEY = "planar:tabView:v1";
-  var VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
-  function loadTabView() {
-    try {
-      return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveTabView(obj) {
-    try {
-      sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  function loadViewPrefs() {
-    try {
-      return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveViewPrefs(obj) {
-    try {
-      localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  var TASK_FOCUS_STORAGE_KEY = "planar:taskFocus:v1";
-  function loadTaskFocus() {
-    try {
-      const v = JSON.parse(localStorage.getItem(TASK_FOCUS_STORAGE_KEY) || "{}");
-      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-    } catch {
-      return {};
-    }
-  }
-  function saveTaskFocus(obj) {
-    try {
-      localStorage.setItem(TASK_FOCUS_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  function applyTaskFocus(d) {
-    if (!d || typeof d !== "object" || !d.projects || typeof d.projects !== "object") return d;
-    const store = loadTaskFocus();
-    let projects = null;
-    Object.keys(store).forEach((pid) => {
-      const proj = d.projects[pid], ids = store[pid];
-      if (!proj || !Array.isArray(proj.tasks) || !Array.isArray(ids) || !ids.length) return;
-      const want = new Set(ids);
-      let changed = false;
-      const tasks = proj.tasks.map((t) => {
-        if (t && want.has(t.id) && t.focused === void 0) {
-          changed = true;
-          return { ...t, focused: true };
+  exposeToHarness({
+    SGQ_HEALTH: [() => SGQ_HEALTH],
+    SGQ_HKEYS: [() => SGQ_HKEYS],
+    SGQ_AV: [() => SGQ_AV],
+    SGQ_ALLOWED_PATCH: [() => SGQ_ALLOWED_PATCH],
+    SGQ_MONTHS: [() => SGQ_MONTHS],
+    sgqAvatarColor: [() => sgqAvatarColor],
+    sgqInitials: [() => sgqInitials],
+    sgqConfClass: [() => sgqConfClass],
+    sgqFmtDate: [() => sgqFmtDate],
+    SgqDot: [() => SgqDot],
+    sgqChildrenOf: [() => sgqChildrenOf],
+    sgqCrumbOf: [() => sgqCrumbOf],
+    SgqCrumb: [() => SgqCrumb],
+    SgqCascadePicker: [() => SgqCascadePicker],
+    SgqChangeRow: [() => SgqChangeRow],
+    InlineDate: [() => InlineDate],
+    cleanEmailBody: [() => cleanEmailBody],
+    SuggestionsView: [() => SuggestionsView]
+  });
+
+  // src/workspaces/scheduler/page/panels/NotesModal.jsx
+  var { useState: useState12, useEffect: useEffect11, useRef: useRef11 } = React;
+  var SCHED_ACCENT = "#7F77DD";
+  var SCHED_ACCENT_TEXT = "#534AB7";
+  var NOTE_RAIL_W = 54;
+  var noteShortMD = (s) => {
+    if (!s) return "";
+    const [_y, m, d] = String(s).split("-");
+    return m && d ? `${+m}/${+d}` : "";
+  };
+  var noteISO = (s) => parseFlexDate(s) || "";
+  var noteDateInputStyle = {
+    width: 132,
+    background: "var(--bg)",
+    border: `1px solid ${SCHED_ACCENT}`,
+    borderRadius: 5,
+    padding: "3px 6px",
+    fontSize: 12,
+    fontFamily: "inherit",
+    outline: "none",
+    color: "var(--txt)",
+    boxSizing: "border-box"
+  };
+  var noteDateBtnStyle = {
+    background: "transparent",
+    border: "none",
+    padding: "0 2px",
+    cursor: "pointer",
+    color: SCHED_ACCENT_TEXT,
+    fontWeight: 600,
+    fontSize: 12,
+    fontFamily: "inherit",
+    lineHeight: 1.4,
+    whiteSpace: "nowrap"
+  };
+  function NoteRow({
+    note,
+    bodyFs,
+    editingText,
+    editingDate,
+    textValue,
+    dateValue,
+    onTextChange,
+    onDateChange,
+    onStartText,
+    onStartDate,
+    onCommit,
+    onCancel,
+    onDelete
+  }) {
+    const [hover, setHover] = useState12(false);
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onMouseEnter: () => setHover(true),
+        onMouseLeave: () => setHover(false),
+        style: {
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          padding: "9px 2px",
+          borderBottom: "1px solid var(--bd)",
+          position: "relative"
         }
-        return t;
-      });
-      if (!changed) return;
-      if (!projects) projects = { ...d.projects };
-      projects[pid] = { ...proj, tasks };
-    });
-    return projects ? { ...d, projects } : d;
-  }
-  function persistTaskFocus(prev, next) {
-    if (!next || !next.projects || prev && prev.projects === next.projects) return;
-    const store = loadTaskFocus();
-    let dirty = false;
-    Object.entries(next.projects).forEach(([pid, proj]) => {
-      if (!proj || !Array.isArray(proj.tasks) || !proj.tasks.length) return;
-      const before = Array.isArray(store[pid]) ? store[pid] : [];
-      const live = new Set(proj.tasks.map((t) => t && t.id));
-      const set = new Set(before.filter((id) => live.has(id)));
-      proj.tasks.forEach((t) => {
-        if (!t) return;
-        if (t.focused === true) set.add(t.id);
-        else if (t.focused === false) set.delete(t.id);
-      });
-      const after = [...set];
-      if (after.length === before.length && after.every((id, i) => id === before[i])) return;
-      dirty = true;
-      if (after.length) store[pid] = after;
-      else delete store[pid];
-    });
-    if (dirty) saveTaskFocus(store);
-  }
-  function coreChanged(prev, next) {
-    if (prev === next) return false;
-    if (!prev || !next) return true;
-    const keys = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
-    for (const k of keys) {
-      if (VIEW_STATE_KEYS.has(k)) continue;
-      if (prev[k] !== next[k]) return true;
-    }
-    return false;
-  }
-  var TASK_VIEW_FIELDS = ["focused"];
-  function stripTaskViewFields(tasks) {
-    if (!Array.isArray(tasks)) return tasks;
-    return tasks.map((t) => {
-      if (!t || typeof t !== "object") return t;
-      let changed = false;
-      const out = { ...t };
-      TASK_VIEW_FIELDS.forEach((k) => {
-        if (k in out) {
-          delete out[k];
-          changed = true;
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 1 } }, editingDate ? /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "date",
+          autoFocus: true,
+          value: dateValue,
+          onChange: (e) => onDateChange(e.target.value),
+          onBlur: onCommit,
+          onKeyDown: (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onCommit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          },
+          style: noteDateInputStyle
         }
-      });
-      return changed ? out : t;
-    });
+      ) : /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => onStartDate(),
+          style: noteDateBtnStyle,
+          title: "Click to change the date"
+        },
+        noteShortMD(note.date) || "—"
+      )),
+      /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 } }),
+      /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0, paddingRight: 16 } }, editingText ? /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          autoFocus: true,
+          value: textValue,
+          onChange: (e) => onTextChange(e.target.value),
+          onBlur: onCommit,
+          onKeyDown: (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onCommit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              onCancel();
+            }
+          },
+          style: {
+            width: "100%",
+            background: "var(--bg)",
+            border: `1px solid ${SCHED_ACCENT}`,
+            borderRadius: 5,
+            padding: "6px 8px",
+            color: "var(--txt)",
+            fontSize: bodyFs,
+            lineHeight: 1.55,
+            fontFamily: "inherit",
+            resize: "vertical",
+            minHeight: 46,
+            outline: "none"
+          }
+        }
+      ) : /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => onStartText(),
+          style: {
+            color: "var(--txt)",
+            fontSize: bodyFs,
+            lineHeight: 1.55,
+            cursor: "text",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            minHeight: 18
+          }
+        },
+        note.text
+      )),
+      !editingText && !editingDate && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => onDelete(),
+          title: "Delete note",
+          style: {
+            position: "absolute",
+            top: 8,
+            right: 2,
+            cursor: "pointer",
+            fontSize: 13,
+            lineHeight: 1,
+            color: hover ? "#dc2626" : "transparent",
+            transition: "color .12s",
+            userSelect: "none"
+          }
+        },
+        "✕"
+      )
+    );
   }
-  function stripViewState(d) {
-    if (!d || typeof d !== "object") return d;
-    const out = { ...d };
-    VIEW_STATE_KEYS.forEach((k) => {
-      delete out[k];
+  function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
+    const [dateEdit, setDateEdit] = useState12(false);
+    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 } }, dateEdit ? /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "date",
+        autoFocus: true,
+        value: dateISO,
+        onChange: (e) => onDate(e.target.value),
+        onBlur: () => setDateEdit(false),
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === "Escape") {
+            e.preventDefault();
+            setDateEdit(false);
+          }
+        },
+        style: noteDateInputStyle
+      }
+    ) : /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setDateEdit(true),
+        style: noteDateBtnStyle,
+        title: "Click to change the date"
+      },
+      noteShortMD(dateISO) || "—"
+    )), /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 } }, /* @__PURE__ */ React.createElement(
+      "textarea",
+      {
+        ref: bodyRef,
+        value: text,
+        onChange: (e) => onText(e.target.value),
+        placeholder: "Add a note…",
+        onKeyDown: (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            onAdd();
+          }
+        },
+        style: {
+          width: "100%",
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 5,
+          padding: "7px 9px",
+          color: "var(--txt)",
+          fontSize: 13,
+          lineHeight: 1.5,
+          fontFamily: "inherit",
+          resize: "vertical",
+          minHeight: 44,
+          outline: "none",
+          transition: "border-color .15s"
+        },
+        onFocus: (e) => e.target.style.borderColor = SCHED_ACCENT,
+        onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
+      }
+    ), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => onAdd(),
+        style: {
+          padding: "5px 16px",
+          background: SCHED_ACCENT,
+          color: "#fff",
+          border: "none",
+          borderRadius: 6,
+          fontSize: 12,
+          fontWeight: 600,
+          fontFamily: "inherit",
+          cursor: "pointer"
+        }
+      },
+      "Add note"
+    ))));
+  }
+  function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
+    const [draftText, setDraftText] = useState12(() => initChar || "");
+    const [draftDate, setDraftDate] = useState12(() => NOW);
+    const [edit, setEdit] = useState12(null);
+    const [editText, setEditText] = useState12("");
+    const [editDate, setEditDate] = useState12("");
+    const [menuOpen, setMenuOpen] = useState12(false);
+    const [confirmClear, setConfirmClear] = useState12(false);
+    const defSize = (() => {
+      try {
+        return localStorage.getItem("planar_noteSize") || "sm";
+      } catch {
+        return "sm";
+      }
+    })();
+    const noteFs = (n) => NOTE_SIZES.find((s) => s.k === (n.size || defSize))?.px ?? 13;
+    const taRef = useRef11(null);
+    const backdropRef = useRef11(null);
+    const downOnBackdropRef = useRef11(false);
+    const editRef = useRef11(null);
+    useEffect11(() => {
+      editRef.current = edit;
+    }, [edit]);
+    useEffect11(() => {
+      const ta = taRef.current;
+      if (ta) {
+        const len = ta.value.length;
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = len;
+      }
+    }, []);
+    useEffect11(() => {
+      const handler = (e) => {
+        if (e.key !== "Escape") return;
+        if (editRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          editRef.current = null;
+          setEdit(null);
+          return;
+        }
+        const ae = document.activeElement;
+        if (ae && ae.tagName === "INPUT" && ae.type === "date" && backdropRef.current && backdropRef.current.contains(ae)) return;
+        onClose();
+      };
+      document.addEventListener("keydown", handler, true);
+      return () => document.removeEventListener("keydown", handler, true);
+    }, [onClose]);
+    const notes = task.notes || [];
+    const sorted = [...notes].sort((a, b) => {
+      const da = noteISO(a.date) || "", db = noteISO(b.date) || "";
+      if (da !== db) return da < db ? 1 : -1;
+      return (b.id || 0) - (a.id || 0);
     });
-    if (out.projects && typeof out.projects === "object") {
-      const projects = {};
-      Object.entries(out.projects).forEach(([pid, proj]) => {
-        projects[pid] = proj && Array.isArray(proj.tasks) ? { ...proj, tasks: stripTaskViewFields(proj.tasks) } : proj;
-      });
-      out.projects = projects;
+    const addDraft = () => {
+      const v = (draftText || "").trim();
+      if (!v) return;
+      const iso = noteISO(draftDate) || NOW;
+      updateTask(task.id, { notes: [...notes, { id: Date.now(), date: iso, text: v }] }, projectId);
+      setDraftText("");
+      setDraftDate(NOW);
+      if (taRef.current) taRef.current.focus();
+    };
+    const startText = (n) => {
+      editRef.current = { id: n.id, field: "text" };
+      setEdit({ id: n.id, field: "text" });
+      setEditText(n.text || "");
+    };
+    const startDate = (n) => {
+      editRef.current = { id: n.id, field: "date" };
+      setEdit({ id: n.id, field: "date" });
+      setEditDate(noteISO(n.date) || NOW);
+    };
+    const cancelEdit = () => {
+      editRef.current = null;
+      setEdit(null);
+    };
+    const commitEdit = () => {
+      const cur = editRef.current;
+      if (!cur) return;
+      editRef.current = null;
+      setEdit(null);
+      const n = (task.notes || []).find((x) => x.id === cur.id);
+      if (!n) return;
+      if (cur.field === "text") {
+        const v = editText.trim();
+        if (v && v !== n.text) updateTask(task.id, { notes: notes.map((x) => x.id === cur.id ? { ...x, text: v } : x) }, projectId);
+      } else {
+        const iso = noteISO(editDate);
+        if (iso && iso !== n.date) updateTask(task.id, { notes: notes.map((x) => x.id === cur.id ? { ...x, date: iso } : x) }, projectId);
+      }
+    };
+    const del = (id) => {
+      if (editRef.current && editRef.current.id === id) {
+        editRef.current = null;
+        setEdit(null);
+      }
+      updateTask(task.id, { notes: notes.filter((n) => n.id !== id) }, projectId);
+    };
+    const clearAll = () => {
+      updateTask(task.id, { notes: [] }, projectId);
+      setConfirmClear(false);
+      setMenuOpen(false);
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref: backdropRef,
+        onMouseDown: (e) => {
+          downOnBackdropRef.current = e.target === backdropRef.current;
+        },
+        onClick: (e) => {
+          const hit = e.target === backdropRef.current && downOnBackdropRef.current;
+          downOnBackdropRef.current = false;
+          if (hit) onClose();
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          background: "#00000090",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        }
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onMouseDown: (e) => e.stopPropagation(),
+          style: {
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderTop: `2px solid ${SCHED_ACCENT}`,
+            borderRadius: 8,
+            width: 560,
+            maxWidth: "94vw",
+            maxHeight: "78vh",
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: "0 12px 40px rgba(0,0,0,.22)"
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: {
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          padding: "16px 18px 12px",
+          borderBottom: "1px solid var(--bd)"
+        } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { color: SCHED_ACCENT_TEXT, fontWeight: 700, fontSize: 10, letterSpacing: ".08em", marginBottom: 3 } }, "NOTES"), /* @__PURE__ */ React.createElement("div", { style: { color: "var(--txt)", fontSize: 14, fontWeight: 600 } }, task.name)), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, menuOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => {
+          setMenuOpen(false);
+          setConfirmClear(false);
+        } }), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => {
+              setMenuOpen((o) => !o);
+              setConfirmClear(false);
+            },
+            style: {
+              background: menuOpen ? "var(--surf)" : "transparent",
+              border: "none",
+              cursor: "pointer",
+              borderRadius: 5,
+              padding: "3px 7px",
+              fontSize: 16,
+              lineHeight: 1,
+              color: "var(--mut)",
+              fontFamily: "inherit"
+            }
+          },
+          "···"
+        ), menuOpen && /* @__PURE__ */ React.createElement("div", { style: {
+          position: "absolute",
+          top: "calc(100% + 6px)",
+          right: 0,
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 8,
+          boxShadow: "0 4px 18px rgba(0,0,0,.14)",
+          zIndex: 999,
+          minWidth: 200,
+          padding: 6
+        } }, notes.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 10px", fontSize: 12, color: "var(--mut)" } }, "No notes yet.") : confirmClear ? /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 6px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", marginBottom: 8 } }, "Delete all ", notes.length, " notes?"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { onClick: clearAll, style: { flex: 1, padding: "6px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" } }, "Delete all"), /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmClear(false), style: { flex: 1, padding: "6px 0", background: "var(--surf)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" } }, "Cancel"))) : /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            onClick: () => setConfirmClear(true),
+            style: { padding: "8px 10px", cursor: "pointer", fontSize: 12, color: "#dc2626", borderRadius: 5 },
+            onMouseEnter: (e) => e.currentTarget.style.background = "#fff5f5",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          "Clear all notes"
+        ))), /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            onClick: onClose,
+            title: "Close",
+            style: { color: "var(--mut)", cursor: "pointer", fontSize: 17, lineHeight: 1, padding: "2px 4px" }
+          },
+          "✕"
+        ))),
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "0 18px", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement(AddNoteComposer, { text: draftText, onText: setDraftText, dateISO: draftDate, onDate: setDraftDate, onAdd: addDraft, bodyRef: taRef })),
+        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "0 18px 6px" } }, sorted.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { color: "var(--mut)", fontSize: 13, textAlign: "center", padding: "28px 0" } }, "No notes yet — add one above.") : sorted.map((n) => /* @__PURE__ */ React.createElement(
+          NoteRow,
+          {
+            key: n.id,
+            note: n,
+            bodyFs: noteFs(n),
+            editingText: !!edit && edit.id === n.id && edit.field === "text",
+            editingDate: !!edit && edit.id === n.id && edit.field === "date",
+            textValue: editText,
+            dateValue: editDate,
+            onTextChange: setEditText,
+            onDateChange: setEditDate,
+            onStartText: () => startText(n),
+            onStartDate: () => startDate(n),
+            onCommit: commitEdit,
+            onCancel: cancelEdit,
+            onDelete: () => del(n.id)
+          }
+        )))
+      )
+    );
+  }
+  exposeToHarness({
+    SCHED_ACCENT: [() => SCHED_ACCENT],
+    SCHED_ACCENT_TEXT: [() => SCHED_ACCENT_TEXT],
+    NOTE_RAIL_W: [() => NOTE_RAIL_W],
+    noteShortMD: [() => noteShortMD],
+    noteISO: [() => noteISO],
+    noteDateInputStyle: [() => noteDateInputStyle],
+    noteDateBtnStyle: [() => noteDateBtnStyle],
+    NoteRow: [() => NoteRow],
+    AddNoteComposer: [() => AddNoteComposer],
+    NotesModal: [() => NotesModal]
+  });
+
+  // src/workspaces/scheduler/page/panels/formControls.jsx
+  var Toggle = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: () => onChange(!on), style: {
+    width: 28,
+    height: 15,
+    borderRadius: 8,
+    background: on ? "var(--amber)" : "var(--bd2)",
+    display: "inline-flex",
+    alignItems: "center",
+    cursor: "pointer",
+    flexShrink: 0,
+    transition: "background .15s",
+    padding: "0 2px"
+  } }, /* @__PURE__ */ React.createElement("span", { style: {
+    width: 11,
+    height: 11,
+    borderRadius: "50%",
+    background: "var(--bg)",
+    boxShadow: "0 1px 3px rgba(0,0,0,.2)",
+    transform: on ? "translateX(13px)" : "translateX(0)",
+    transition: "transform .15s",
+    flexShrink: 0
+  } }));
+  var SegBtn = ({ options, value, onChange, small }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 4, overflow: "hidden", flexShrink: 0 } }, options.map((o) => /* @__PURE__ */ React.createElement("span", { key: o.v, onClick: () => onChange(o.v), style: {
+    padding: small ? "2px 7px" : "3px 9px",
+    fontSize: 10,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    background: value === o.v ? "var(--amber)" : "transparent",
+    color: value === o.v ? "#fff" : "var(--mut)",
+    transition: "background .12s,color .12s",
+    fontWeight: value === o.v ? 500 : 400
+  } }, o.l)));
+  var Field = ({ value, onChange, placeholder }) => /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      ...NO_AUTOFILL,
+      value,
+      onChange: (e) => onChange(e.target.value),
+      placeholder: placeholder || "",
+      style: {
+        width: "100%",
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 3,
+        padding: "3px 7px",
+        fontSize: 11,
+        color: "var(--txt)",
+        fontFamily: "inherit",
+        outline: "none"
+      },
+      onFocus: (e) => e.target.style.borderColor = "var(--blue)",
+      onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
     }
-    return out;
+  );
+  var Row = ({ label, children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0", gap: 8, minHeight: 26 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)", flexShrink: 0 } }, label), children);
+  exposeToHarness({
+    Toggle: [() => Toggle],
+    SegBtn: [() => SegBtn],
+    Field: [() => Field],
+    Row: [() => Row]
+  });
+
+  // src/workspaces/scheduler/page/panels/PDFExportModal.jsx
+  var { useState: useState13, useEffect: useEffect12, useRef: useRef12, useMemo: useMemo4 } = React;
+  var EXPORT_PREFS_KEY = "planar:exportPrefs:v1";
+  var EXPORT_PERSIST_KEYS = ["orientation", "pageSize", "margins", "columns", "includeGantt", "showToday", "showArrows", "barNames", "labelAlign", "healthFilter", "exhibitLabel", "projectTitle", "preparedBy", "preparedFor", "confidential", "timeUnit", "zoomMul", "panFrac"];
+  function loadExportPrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(EXPORT_PREFS_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
   }
-  function withLastActiveSite(d, siteId, scheduleId) {
-    if (siteId == null || scheduleId == null) return d;
-    if (d.lastActiveBySite && d.lastActiveBySite[siteId] === scheduleId) return d;
-    return { ...d, lastActiveBySite: { ...d.lastActiveBySite || {}, [siteId]: scheduleId } };
+  function saveExportPrefs(obj) {
+    try {
+      localStorage.setItem(EXPORT_PREFS_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
   }
-  function persistViewState(prev, next) {
-    let tabChanged = false, prefsChanged = false;
-    VIEW_TAB_KEYS.forEach((k) => {
-      if (!prev || prev[k] !== next[k]) tabChanged = true;
-    });
-    VIEW_PREF_KEYS.forEach((k) => {
-      if (!prev || prev[k] !== next[k]) prefsChanged = true;
-    });
-    if (tabChanged) {
-      const cur = loadTabView();
-      VIEW_TAB_KEYS.forEach((k) => {
-        cur[k] = next[k];
+  function PDFExportModal({ data, activePid, onClose, setData }) {
+    const projs = Object.values(data.projects);
+    const now = /* @__PURE__ */ new Date();
+    const seedCollapsed = useMemo4(() => {
+      const out = [];
+      Object.values(data.projects).forEach((p) => p.tasks.forEach((t) => {
+        if (p.tasks.some((x) => x.parentId === t.id) && t.isExpanded === false) out.push(p.id + ":" + t.id);
+      }));
+      return out;
+    }, []);
+    const initPrefs = useMemo4(() => loadExportPrefs(), []);
+    const [cfg, setCfg] = useState13(() => {
+      const base = {
+        exhibitLabel: "",
+        projectTitle: "",
+        preparedBy: "",
+        preparedFor: "",
+        docDate: now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+        orientation: "landscape",
+        pageSize: "letter",
+        margins: { top: "0.75", right: "0.75", bottom: "0.75", left: "0.75" },
+        selProjects: activePid ? [String(activePid)] : projs.map((p) => String(p.id)),
+        columns: (() => {
+          const PRINTABLE = /* @__PURE__ */ new Set(["id", "name", "start", "end", "duration", "health", "percentComplete", "responsibleParty", "predecessors"]);
+          const mc = (data.masterCols || []).filter((k) => PRINTABLE.has(k));
+          return mc.length > 0 ? mc : ["id", "name", "start", "end", "duration", "health", "responsibleParty"];
+        })(),
+        includeGantt: true,
+        showToday: true,
+        showArrows: true,
+        barNames: true,
+        // in-chart Gantt names ON by default (B394)
+        labelAlign: resolveLabelAlign(activePid != null ? data.projects?.[activePid] : null),
+        // seed from the on-screen choice
+        healthFilter: "all",
+        confidential: "",
+        collapsedIds: seedCollapsed,
+        detailLevel: seedCollapsed.length ? "custom" : "all",
+        // B392 — per-column width overrides from dragging a column edge in the preview.
+        colWidths: data.exportColWidths || {},
+        // B361 time axis: discrete unit (null = auto-fit), continuous fine multiplier, pan 0..1.
+        timeUnit: null,
+        zoomMul: 1,
+        panFrac: 0
+      };
+      EXPORT_PERSIST_KEYS.forEach((k) => {
+        if (initPrefs[k] !== void 0) base[k] = initPrefs[k];
       });
-      saveTabView(cur);
-    }
-    if (prefsChanged) {
-      const cur = loadViewPrefs();
-      VIEW_PREF_KEYS.forEach((k) => {
-        cur[k] = next[k];
+      return base;
+    });
+    const upd = (patch) => setCfg((c) => ({ ...c, ...patch }));
+    const cfgRef = useRef12(cfg);
+    useEffect12(() => {
+      cfgRef.current = cfg;
+    }, [cfg]);
+    const [headerOpen, setHeaderOpen] = useState13(() => !!initPrefs.headerOpen);
+    const [secOpen, setSecOpen] = useState13(() => initPrefs.secOpen || {});
+    const secIsOpen = (k) => secOpen[k] !== false;
+    useEffect12(() => {
+      const out = {};
+      EXPORT_PERSIST_KEYS.forEach((k) => {
+        out[k] = cfg[k];
       });
-      saveViewPrefs(cur);
+      out.secOpen = secOpen;
+      out.headerOpen = headerOpen;
+      saveExportPrefs(out);
+    }, [cfg, secOpen, headerOpen]);
+    const [previewCfg, setPreviewCfg] = useState13(cfg);
+    useEffect12(() => {
+      const t = setTimeout(() => setPreviewCfg(cfg), 280);
+      return () => clearTimeout(t);
+    }, [cfg]);
+    const applyCollapse = (idsArr, lvl) => {
+      const next = { ...cfg, collapsedIds: idsArr, detailLevel: lvl };
+      setCfg(next);
+      setPreviewCfg(next);
+    };
+    const levelCollapsedIds = (n) => {
+      const out = [];
+      cfg.selProjects.forEach((pidStr) => {
+        const p = data.projects[pidStr];
+        if (!p) return;
+        p.tasks.forEach((t) => {
+          if (!p.tasks.some((x) => x.parentId === t.id)) return;
+          let d = 0, cur = t;
+          while (cur && cur.parentId != null) {
+            d++;
+            cur = p.tasks.find((x) => x.id === cur.parentId);
+          }
+          if (d >= n - 1) out.push(p.id + ":" + t.id);
+        });
+      });
+      return out;
+    };
+    const setDetailLevel = (lvl) => {
+      if (lvl === "all") applyCollapse([], "all");
+      else applyCollapse(levelCollapsedIds(+lvl), String(lvl));
+    };
+    const expandAll = () => setDetailLevel("all");
+    const collapseAll = () => setDetailLevel("1");
+    useEffect12(() => {
+      const onToggle = (e) => {
+        if (e.origin !== window.location.origin) return;
+        if (!e.data || e.data.type !== "planarToggleCollapse") return;
+        const key = e.data.key, c = cfgRef.current, s = new Set(c.collapsedIds || []);
+        if (s.has(key)) s.delete(key);
+        else s.add(key);
+        const next = { ...c, collapsedIds: [...s], detailLevel: "custom" };
+        setCfg(next);
+        setPreviewCfg(next);
+      };
+      window.addEventListener("message", onToggle);
+      return () => window.removeEventListener("message", onToggle);
+    }, []);
+    useEffect12(() => {
+      const onResize = (e) => {
+        if (e.origin !== window.location.origin) return;
+        if (!e.data || e.data.type !== "planarColResize") return;
+        const { key, w } = e.data;
+        if (!key || !(w > 0)) return;
+        const c = cfgRef.current, next = { ...c, colWidths: { ...c.colWidths || {}, [key]: Math.round(w) } };
+        setCfg(next);
+        setPreviewCfg(next);
+        if (setData) setData((d) => ({ ...d, exportColWidths: { ...d.exportColWidths || {}, [key]: Math.round(w) } }));
+      };
+      window.addEventListener("message", onResize);
+      return () => window.removeEventListener("message", onResize);
+    }, []);
+    const hasColOverrides = Object.keys(cfg.colWidths || {}).length > 0;
+    const resetColWidths = () => {
+      const next = { ...cfg, colWidths: {} };
+      setCfg(next);
+      setPreviewCfg(next);
+      if (setData) setData((d) => {
+        const n = { ...d };
+        delete n.exportColWidths;
+        return n;
+      });
+    };
+    const [previewUrl, setPreviewUrl] = useState13(null);
+    useEffect12(() => {
+      const html = buildPDFHtml(previewCfg, data, true);
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }, [previewCfg]);
+    const previewPaneRef = useRef12(null);
+    const [paneW, setPaneW] = useState13(760);
+    const [_paneH, setPaneH] = useState13(520);
+    useEffect12(() => {
+      const el = previewPaneRef.current;
+      if (!el) return;
+      const obs = new ResizeObserver(([e]) => {
+        setPaneW(e.contentRect.width);
+        setPaneH(e.contentRect.height);
+      });
+      obs.observe(el);
+      return () => obs.disconnect();
+    }, []);
+    const _ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
+    const pageW = Math.round((cfg.orientation === "landscape" ? _ps.h : _ps.w) * 96);
+    const pageH = Math.round((cfg.orientation === "landscape" ? _ps.w : _ps.h) * 96);
+    const iframeRef = useRef12(null);
+    const [iframeH, setIframeH] = useState13(pageH);
+    useEffect12(() => {
+      setIframeH(pageH);
+    }, [pageH]);
+    useEffect12(() => {
+      const handler = (e) => {
+        if (e.origin !== window.location.origin) return;
+        if (e.data?.type === "planarPreviewHeight") setIframeH(Math.max(pageH, e.data.h));
+      };
+      window.addEventListener("message", handler);
+      return () => window.removeEventListener("message", handler);
+    }, [pageH]);
+    const fitScale = Math.min(1, (paneW - 48) / pageW);
+    const [previewZoom, setPreviewZoom] = useState13(1);
+    const scale = fitScale * previewZoom;
+    const zoomTo = (z) => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
+    const fitWidth = () => {
+      setPreviewZoom(1);
+      upd({ timeUnit: null, zoomMul: 1, panFrac: 0 });
+    };
+    const setTimeUnit = (u) => upd({ timeUnit: u, zoomMul: 1, panFrac: 0 });
+    const bumpScale = (f) => upd({ zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul || 1) * f)) });
+    const [panMode, setPanMode] = useState13(false);
+    const panRef = useRef12(null);
+    const overlayRef = useRef12(null);
+    const flushRef = useRef12(0);
+    useEffect12(() => {
+      const el = overlayRef.current;
+      if (!el || !panMode) return;
+      const pane = previewPaneRef.current;
+      const PAN_SPAN = 520;
+      const onWheel = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPreviewZoom((z) => Math.min(4, Math.max(0.25, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1))));
+      };
+      const onDown = (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        panRef.current = { x: e.clientX, y: e.clientY, pf: cfgRef.current.panFrac || 0, st: pane ? pane.scrollTop : 0 };
+        el.style.cursor = "grabbing";
+      };
+      const onMove = (e) => {
+        const p = panRef.current;
+        if (!p) return;
+        if (pane) pane.scrollTop = p.st - (e.clientY - p.y);
+        const pf = Math.max(-1.2, Math.min(1.2, p.pf - (e.clientX - p.x) / PAN_SPAN));
+        const next = { ...cfgRef.current, panFrac: pf };
+        setCfg(next);
+        const now2 = Date.now();
+        if (now2 - flushRef.current > 170) {
+          setPreviewCfg(next);
+          flushRef.current = now2;
+        }
+      };
+      const onUp = () => {
+        if (panRef.current) setPreviewCfg(cfgRef.current);
+        panRef.current = null;
+        if (el) el.style.cursor = "grab";
+      };
+      el.addEventListener("wheel", onWheel, { passive: false });
+      el.addEventListener("mousedown", onDown);
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      return () => {
+        el.removeEventListener("wheel", onWheel);
+        el.removeEventListener("mousedown", onDown);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+    }, [panMode]);
+    const COL_OPTS = [
+      { k: "id", label: "ID" },
+      { k: "name", label: "Task Name" },
+      { k: "start", label: "Start" },
+      { k: "end", label: "End" },
+      { k: "duration", label: "Duration" },
+      { k: "health", label: "Status" },
+      { k: "percentComplete", label: "% Done" },
+      { k: "responsibleParty", label: "Owner" },
+      { k: "predecessors", label: "Predecessors" },
+      { k: "cost", label: "Cost" }
+    ];
+    const openPrint = () => {
+      const html = buildPDFHtml(cfg, data);
+      const w = window.open("", "_blank", "width=1100,height=820");
+      w.document.write(html);
+      w.document.close();
+    };
+    const SHdr = ({ title, k }) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick: k ? () => setSecOpen((s) => ({ ...s, [k]: !(s[k] !== false) })) : void 0,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          fontSize: 9,
+          fontWeight: 700,
+          color: "var(--mut)",
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          padding: "9px 0 5px",
+          borderBottom: "1px solid var(--bd)",
+          marginBottom: 5,
+          cursor: k ? "pointer" : "default",
+          userSelect: "none"
+        },
+        onMouseEnter: k ? (e) => e.currentTarget.style.opacity = "0.7" : void 0,
+        onMouseLeave: k ? (e) => e.currentTarget.style.opacity = "1" : void 0
+      },
+      title,
+      k && /* @__PURE__ */ React.createElement("span", { style: {
+        fontSize: 10,
+        color: "var(--mut)",
+        transform: secIsOpen(k) ? "rotate(180deg)" : "rotate(0deg)",
+        transition: "transform .2s",
+        display: "inline-block",
+        lineHeight: 1
+      } }, "▾")
+    );
+    const TB_BTN = { width: 22, height: 20, border: "none", borderRadius: 4, background: "rgba(255,255,255,0.16)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", lineHeight: 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" };
+    const TB_LBL = { height: 20, border: "none", borderRadius: 4, background: "rgba(255,255,255,0.16)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "0 8px", cursor: "pointer", fontFamily: "inherit" };
+    const TB_TAG = { color: "#aab2bd", fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" };
+    const TB_DIV = { width: 1, height: 16, background: "rgba(255,255,255,0.22)", margin: "0 2px" };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: { position: "fixed", inset: 0, background: "#000000a0", zIndex: 2e3, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
+        onClick: onClose
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--surf)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 10,
+            width: "min(98vw,1700px)",
+            height: "min(96vh,960px)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          },
+          onClick: (e) => e.stopPropagation()
+        },
+        /* @__PURE__ */ React.createElement("div", { style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 18px",
+          borderBottom: "1px solid var(--bd)",
+          flexShrink: 0,
+          background: "var(--bg)"
+        } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "EXPORT"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "PDF / Print Exhibit"))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Opens print dialog — choose ", /* @__PURE__ */ React.createElement("strong", null, "Save as PDF")), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            className: "btn",
+            onClick: openPrint,
+            style: { background: "var(--amber)", color: "#fff", borderColor: "var(--amber)", padding: "5px 16px", fontWeight: 600, fontSize: 12 }
+          },
+          "Print / Save as PDF ↗"
+        ))),
+        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { width: 252, flexShrink: 0, borderRight: "1px solid var(--bd)", overflowY: "auto", padding: "0 14px 16px", background: "var(--bg)" } }, /* @__PURE__ */ React.createElement(SHdr, { title: "Projects", k: "projects" }), secIsOpen("projects") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, marginBottom: 4 } }, projs.map((p) => /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            key: p.id,
+            style: { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "3px 4px", borderRadius: 3, transition: "background .1s" },
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              checked: cfg.selProjects.includes(String(p.id)),
+              onChange: (e) => upd({ selProjects: e.target.checked ? [...cfg.selProjects, String(p.id)] : cfg.selProjects.filter((x) => x !== String(p.id)) }),
+              style: { accentColor: "#4f46e5", width: 12, height: 12, flexShrink: 0 }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { fontSize: 11, color: "var(--txt)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p))
+        ))), /* @__PURE__ */ React.createElement(SHdr, { title: "Layout", k: "layout" }), secIsOpen("layout") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Row, { label: "Size" }, /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            value: cfg.pageSize,
+            onChange: (e) => upd({ pageSize: e.target.value }),
+            style: {
+              flex: 1,
+              background: "var(--bg)",
+              border: "1px solid var(--bd2)",
+              borderRadius: 3,
+              padding: "3px 6px",
+              fontSize: 11,
+              color: "var(--txt)",
+              fontFamily: "inherit",
+              outline: "none",
+              cursor: "pointer"
+            },
+            onFocus: (e) => e.target.style.borderColor = "var(--blue)",
+            onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
+          },
+          Object.entries(PAGE_SIZES).map(([k, ps]) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, ps.label))
+        )), /* @__PURE__ */ React.createElement(Row, { label: "Orientation" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Landscape", v: "landscape" }, { l: "Portrait", v: "portrait" }], value: cfg.orientation, onChange: (v) => upd({ orientation: v }) })), /* @__PURE__ */ React.createElement(Row, { label: "Tasks" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "All", v: "all" }, { l: "Active", v: "active" }, { l: "Done", v: "complete" }], value: cfg.healthFilter, onChange: (v) => upd({ healthFilter: v }) })), /* @__PURE__ */ React.createElement(Row, { label: /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 5 } }, "Detail", cfg.detailLevel === "custom" && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#4f46e5", background: "#eef0fe", padding: "1px 5px", borderRadius: 99, letterSpacing: ".03em" } }, "CUSTOM")) }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "All", v: "all" }, { l: "L1", v: "1" }, { l: "1–2", v: "2" }, { l: "1–3", v: "3" }], value: cfg.detailLevel, onChange: setDetailLevel })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, padding: "3px 0 1px" } }, [["Expand all", expandAll], ["Collapse all", collapseAll]].map(([lbl, fn]) => /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            key: lbl,
+            onClick: fn,
+            style: { flex: 1, textAlign: "center", padding: "3px 0", fontSize: 10, cursor: "pointer", borderRadius: 4, border: "1px solid var(--bd2)", color: "var(--mut)", userSelect: "none", transition: "background .12s" },
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          lbl
+        ))), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9.5, color: "var(--mut)", lineHeight: 1.45, padding: "3px 0 1px" } }, "Tip: click \\u25BE on a row in the preview to open or collapse that branch. This only affects the exhibit \\u2014 your live schedule stays as-is."), /* @__PURE__ */ React.createElement(Row, { label: "Gantt" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.includeGantt, onChange: (v) => upd({ includeGantt: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Today line" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.showToday !== false, onChange: (v) => upd({ showToday: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Dep. arrows" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.showArrows !== false, onChange: (v) => upd({ showArrows: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Time scale" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Fit", v: "fit" }, { l: "Qtr", v: "quarters" }, { l: "Mo", v: "months" }, { l: "Wk", v: "weeks" }, { l: "Day", v: "days" }], value: cfg.timeUnit || "fit", onChange: (v) => setTimeUnit(v === "fit" ? null : v) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Bar names" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.barNames !== false, onChange: (v) => upd({ barNames: v }) })), cfg.includeGantt && cfg.barNames !== false && /* @__PURE__ */ React.createElement(Row, { label: "Name align" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Left", v: "left" }, { l: "Center", v: "center" }, { l: "Right", v: "right" }], value: cfg.labelAlign || "right", onChange: (v) => upd({ labelAlign: v }) }))), /* @__PURE__ */ React.createElement(SHdr, { title: "Margins", k: "margins" }), secIsOpen("margins") && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 6 } }, [{ l: "Narrow", v: "0.5" }, { l: "Normal", v: "0.75" }, { l: "Wide", v: "1.0" }].map((p) => {
+          const isActive = cfg.margins.top === p.v && cfg.margins.right === p.v && cfg.margins.bottom === p.v && cfg.margins.left === p.v;
+          return /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              key: p.v,
+              onClick: () => upd({ margins: { top: p.v, right: p.v, bottom: p.v, left: p.v } }),
+              style: {
+                flex: 1,
+                textAlign: "center",
+                padding: "3px 0",
+                fontSize: 10,
+                cursor: "pointer",
+                borderRadius: 3,
+                border: "1px solid var(--bd2)",
+                background: isActive ? "var(--amber)" : "transparent",
+                color: isActive ? "#fff" : "var(--mut)",
+                transition: "background .12s,color .12s"
+              }
+            },
+            p.l
+          );
+        })), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } }, [{ k: "top", l: "Top" }, { k: "right", l: "Right" }, { k: "bottom", l: "Bot." }, { k: "left", l: "Left" }].map(({ k, l }) => /* @__PURE__ */ React.createElement("div", { key: k, style: { display: "flex", alignItems: "center", gap: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", width: 28, flexShrink: 0 } }, l), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", flex: 1, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "number",
+            step: "0.25",
+            min: "0",
+            max: "2",
+            value: cfg.margins[k],
+            onChange: (e) => upd({ margins: { ...cfg.margins, [k]: e.target.value } }),
+            style: {
+              width: "100%",
+              background: "var(--bg)",
+              border: "1px solid var(--bd2)",
+              borderRadius: 3,
+              padding: "3px 22px 3px 6px",
+              fontSize: 11,
+              color: "var(--txt)",
+              fontFamily: "inherit",
+              outline: "none"
+            },
+            onFocus: (e) => e.target.style.borderColor = "var(--blue)",
+            onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
+          }
+        ), /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", right: 5, fontSize: 9, color: "var(--mut)", pointerEvents: "none" } }, "in")))))), /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            onClick: () => setHeaderOpen((o) => !o),
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              cursor: "pointer",
+              padding: "6px 0 5px",
+              borderBottom: "1px solid var(--bd)",
+              marginBottom: 5,
+              userSelect: "none"
+            },
+            onMouseEnter: (e) => e.currentTarget.style.opacity = "0.7",
+            onMouseLeave: (e) => e.currentTarget.style.opacity = "1"
+          },
+          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase" } }, "Header / Cover"),
+          /* @__PURE__ */ React.createElement("span", { style: {
+            fontSize: 10,
+            color: "var(--mut)",
+            transform: headerOpen ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform .2s",
+            display: "inline-block",
+            lineHeight: 1
+          } }, "▾")
+        ), headerOpen && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, marginBottom: 4 } }, /* @__PURE__ */ React.createElement(Row, { label: "Exhibit" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.exhibitLabel, onChange: (v) => upd({ exhibitLabel: v }), placeholder: "Exhibit A" })), /* @__PURE__ */ React.createElement(Row, { label: "Title" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.projectTitle, onChange: (v) => upd({ projectTitle: v }), placeholder: "Schedule title" })), /* @__PURE__ */ React.createElement(Row, { label: "Prep. by" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.preparedBy, onChange: (v) => upd({ preparedBy: v }), placeholder: "Name / company" })), /* @__PURE__ */ React.createElement(Row, { label: "Prep. for" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.preparedFor, onChange: (v) => upd({ preparedFor: v }), placeholder: "Client" })), /* @__PURE__ */ React.createElement(Row, { label: "Date" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.docDate, onChange: (v) => upd({ docDate: v }) })), /* @__PURE__ */ React.createElement(Row, { label: "Conf. tag" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.confidential, onChange: (v) => upd({ confidential: v }), placeholder: "Confidential" }))), /* @__PURE__ */ React.createElement(SHdr, { title: "Columns", k: "columns" }), secIsOpen("columns") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, COL_OPTS.map((c) => /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            key: c.k,
+            style: { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "3px 4px", borderRadius: 3, transition: "background .1s" },
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              checked: cfg.columns.includes(c.k),
+              onChange: (e) => upd({ columns: e.target.checked ? [...cfg.columns, c.k] : cfg.columns.filter((x) => x !== c.k) }),
+              style: { accentColor: "#4f46e5", width: 12, height: 12, flexShrink: 0 }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)" } }, c.label)
+        )), cfg.includeGantt && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.3 } }, "Drag a column's right edge in the preview to resize it."), hasColOverrides && /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            onClick: resetColWidths,
+            title: "Reset all columns to auto-fit",
+            style: { fontSize: 10, fontWeight: 600, color: "#4f46e5", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }
+          },
+          "Reset"
+        )))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, position: "relative", display: "flex", minWidth: 0, background: "#e8eaed" } }, /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            ref: previewPaneRef,
+            style: {
+              flex: 1,
+              overflow: "auto",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: pageW * scale > paneW - 48 ? "flex-start" : "center",
+              padding: 24
+            }
+          },
+          previewUrl && /* @__PURE__ */ React.createElement("div", { style: {
+            width: pageW * scale,
+            height: iframeH * scale,
+            flexShrink: 0,
+            overflow: "hidden",
+            background: "transparent",
+            position: "relative"
+          } }, /* @__PURE__ */ React.createElement(
+            "iframe",
+            {
+              ref: iframeRef,
+              key: previewUrl,
+              src: previewUrl,
+              style: {
+                width: pageW,
+                height: iframeH,
+                border: "none",
+                transformOrigin: "top left",
+                transform: `scale(${scale})`,
+                display: "block"
+              },
+              title: "PDF Preview"
+            }
+          ), /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              ref: overlayRef,
+              style: {
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                background: "transparent",
+                pointerEvents: panMode ? "auto" : "none",
+                cursor: panMode ? "grab" : "default"
+              }
+            }
+          )),
+          !previewUrl && /* @__PURE__ */ React.createElement("div", { style: { color: "#888", fontSize: 12, marginTop: 60 } }, "Generating preview…")
+        ), previewUrl && /* @__PURE__ */ React.createElement("div", { style: {
+          position: "absolute",
+          top: 12,
+          right: 12,
+          zIndex: 30,
+          display: "flex",
+          gap: 5,
+          alignItems: "center",
+          background: "rgba(20,22,26,0.88)",
+          borderRadius: 7,
+          padding: "4px 7px",
+          userSelect: "none",
+          fontFamily: "inherit",
+          boxShadow: "0 2px 10px rgba(0,0,0,0.30)"
+        } }, /* @__PURE__ */ React.createElement("span", { style: TB_TAG }, "Zoom"), /* @__PURE__ */ React.createElement("button", { onClick: () => zoomTo(previewZoom / 1.2), title: "Zoom out — magnify the page less", style: TB_BTN }, "−"), /* @__PURE__ */ React.createElement("span", { onClick: fitWidth, title: "Reset to fit", style: { color: "#fff", fontSize: 10, fontWeight: 600, padding: "0 2px", cursor: "pointer", minWidth: 30, textAlign: "center" } }, Math.round(previewZoom * fitScale * 100), "%"), /* @__PURE__ */ React.createElement("button", { onClick: () => zoomTo(previewZoom * 1.2), title: "Zoom in — magnify the page more", style: TB_BTN }, "+"), cfg.includeGantt && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: TB_DIV }), /* @__PURE__ */ React.createElement("span", { style: TB_TAG }, "Time"), /* @__PURE__ */ React.createElement("button", { onClick: () => bumpScale(1 / 1.25), title: "Compress the time axis — fit more months across the chart", style: TB_BTN }, "−"), /* @__PURE__ */ React.createElement("button", { onClick: () => bumpScale(1.25), title: "Expand the time axis — fewer months, stretched wider", style: TB_BTN }, "+")), /* @__PURE__ */ React.createElement("span", { style: TB_DIV }), /* @__PURE__ */ React.createElement("button", { onClick: fitWidth, title: "Fit the whole timeline & reset zoom", style: TB_LBL }, "Fit"), cfg.includeGantt && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => setPanMode((m) => !m),
+            title: panMode ? "Stop panning (re-enable clicking in the preview)" : "Pan — drag to slide the visible time window left/right",
+            style: { ...TB_LBL, background: panMode ? "var(--amber)" : "rgba(255,255,255,0.16)" }
+          },
+          "✋ Pan"
+        ))))
+      )
+    );
+  }
+  exposeToHarness({
+    EXPORT_PREFS_KEY: [() => EXPORT_PREFS_KEY],
+    EXPORT_PERSIST_KEYS: [() => EXPORT_PERSIST_KEYS],
+    loadExportPrefs: [() => loadExportPrefs],
+    saveExportPrefs: [() => saveExportPrefs],
+    PDFExportModal: [() => PDFExportModal]
+  });
+
+  // src/workspaces/scheduler/page/menus/TaskMenus.jsx
+  var { useState: useState14, useEffect: useEffect13, useRef: useRef13 } = React;
+  var SwatchGrid = ({ current, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 5px", display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: 2, justifyContent: "start" } }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      title: "None (clear)",
+      onClick: () => onPick(null),
+      type: "button",
+      style: {
+        width: 18,
+        height: 18,
+        borderRadius: 2,
+        background: "var(--bg)",
+        cursor: "pointer",
+        padding: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: current == null ? "1.5px solid #4f46e5" : "1px solid #d1d5db"
+      }
+    },
+    /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 10 10" }, /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "1", x2: "9", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "1", x2: "1", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }))
+  ), ROW_COLORS.slice(0, 19).map((rc) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: rc.color,
+      title: rc.label,
+      onClick: () => onPick(rc.color),
+      type: "button",
+      style: {
+        width: 18,
+        height: 18,
+        borderRadius: 2,
+        background: rc.color,
+        cursor: "pointer",
+        padding: 0,
+        border: current === rc.color ? "1.5px solid #111827" : "1px solid #d1d5db",
+        boxShadow: current === rc.color ? "inset 0 0 0 1px #fff" : "none"
+      }
     }
-    persistTaskFocus(prev, next);
+  )));
+  var CaretPopover = ({ children, popRef, openLeft }) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      ref: popRef,
+      onMouseDown: (e) => e.stopPropagation(),
+      style: {
+        position: "absolute",
+        top: "100%",
+        marginTop: 4,
+        ...openLeft ? { right: 0 } : { left: 0 },
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        zIndex: 10002
+      }
+    },
+    children
+  );
+  var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
+    const fb = fmt;
+    const [openCaret, setOpenCaret] = useState14(null);
+    const popRef = useRef13(null);
+    useEffect13(() => {
+      if (!openCaret) return;
+      const down = (e) => {
+        if (popRef.current?.contains(e.target)) return;
+        if (e.target.closest?.("[data-caret-toggle]")) return;
+        setOpenCaret(null);
+      };
+      document.addEventListener("mousedown", down, true);
+      return () => document.removeEventListener("mousedown", down, true);
+    }, [openCaret]);
+    const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
+    const [sizeText, setSizeText] = useState14(sizeDisplay);
+    useEffect13(() => {
+      setSizeText(sizeDisplay);
+    }, [sizeDisplay]);
+    const commitSize = (raw) => {
+      const trimmed = String(raw).trim();
+      if (trimmed === "") {
+        onSetFontSize(null);
+        return;
+      }
+      const n = parseFloat(trimmed);
+      if (!Number.isFinite(n)) {
+        setSizeText(sizeDisplay);
+        return;
+      }
+      onSetFontSize(Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n * 2) / 2)));
+    };
+    const MiniBtn = ({ active, disabled, onClick, title, children, w = 20 }) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        title,
+        onClick: disabled ? void 0 : onClick,
+        disabled,
+        type: "button",
+        style: {
+          width: w,
+          height: 20,
+          borderRadius: 3,
+          padding: 0,
+          cursor: disabled ? "default" : "pointer",
+          flexShrink: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
+          background: active ? "#4f46e5" : "transparent",
+          border: `1px solid ${active ? "#4338ca" : "transparent"}`,
+          opacity: disabled ? 0.5 : 1
+        },
+        onMouseEnter: (e) => {
+          if (!disabled && !active) e.currentTarget.style.background = "#e5e7eb";
+        },
+        onMouseLeave: (e) => {
+          if (!disabled && !active) e.currentTarget.style.background = "transparent";
+        }
+      },
+      children
+    );
+    const Row2 = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2, height: 22 } }, children);
+    const Group = ({ children, style }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, padding: "3px 5px", justifyContent: "center", flexShrink: 0, ...style } }, children);
+    const VRule = () => /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd2)", margin: "3px 0" } });
+    const ColorCaret = ({ kind, icon, current, title, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex", alignItems: "center", gap: 1 } }, /* @__PURE__ */ React.createElement(MiniBtn, { title, onClick: () => {
+    }, w: 22 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1 } }, icon, /* @__PURE__ */ React.createElement("div", { style: { width: 13, height: 2.5, background: current || "transparent", border: current ? "none" : "1px dashed #c0c8d0", borderRadius: 1 } }))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        "data-caret-toggle": true,
+        title: `${title} options`,
+        type: "button",
+        onClick: () => setOpenCaret((c) => c === kind ? null : kind),
+        style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
+      },
+      "▾"
+    ), openCaret === kind && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement(SwatchGrid, { current, onPick: (c) => {
+      onPick(c);
+      setOpenCaret(null);
+    } })));
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref,
+        onMouseDown: (e) => e.stopPropagation(),
+        style: {
+          position: "fixed",
+          top,
+          left,
+          maxWidth,
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 8,
+          boxShadow: "0 6px 20px rgba(0,0,0,0.16)",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "stretch",
+          fontFamily: "'Inter',system-ui,sans-serif",
+          zIndex: 10001,
+          padding: 1
+        }
+      },
+      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ...NO_AUTOFILL,
+          value: sizeText,
+          onChange: (e) => setSizeText(e.target.value),
+          onBlur: (e) => commitSize(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitSize(e.target.value);
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              setSizeText(sizeDisplay);
+              e.currentTarget.blur();
+            }
+          },
+          placeholder: "—",
+          title: "Text size",
+          "aria-label": "Text size",
+          style: { width: 28, height: 20, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 3, textAlign: "center", padding: 0, fontFamily: "'Inter',system-ui,sans-serif" }
+        }
+      ), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          "data-caret-toggle": true,
+          title: "Text size options",
+          type: "button",
+          onClick: () => setOpenCaret((c) => c === "size" ? null : "size"),
+          style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
+        },
+        "▾"
+      ), openCaret === "size" && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement("div", { style: { padding: "2px 0", minWidth: 56, maxHeight: 220, overflow: "auto" } }, FONT_SIZE_STEPS.map((v) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: v,
+          onClick: () => {
+            onSetFontSize(v);
+            setOpenCaret(null);
+          },
+          style: {
+            padding: "4px 10px",
+            fontSize: 11,
+            cursor: "pointer",
+            textAlign: "left",
+            background: fb.size === v ? "var(--surf)" : "transparent",
+            fontWeight: fb.size === v ? 700 : 400
+          }
+        },
+        v
+      ))))), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Shrink text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, -1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A−")), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Grow text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, 1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A+"))), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.bold, onClick: () => onSetBold(!fb.bold), title: "Bold" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 800, fontSize: 12 } }, "B")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.italic, onClick: () => onSetItalic(!fb.italic), title: "Italic" }, /* @__PURE__ */ React.createElement("span", { style: { fontStyle: "italic", fontWeight: 600, fontSize: 12, fontFamily: "Georgia,'Times New Roman',serif" } }, "I")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.underline, onClick: () => onSetUnderline(!fb.underline), title: "Underline" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 12, textDecoration: "underline" } }, "U")))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        ColorCaret,
+        {
+          kind: "color",
+          title: "Text color",
+          current: fb.color,
+          icon: /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 800, lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "A"),
+          onPick: onSetTextColor
+        }
+      )), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        ColorCaret,
+        {
+          kind: "fill",
+          title: "Highlight / fill",
+          current: fb.fill,
+          icon: /* @__PURE__ */ React.createElement("svg", { width: "12", height: "10", viewBox: "0 0 24 20", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" }), /* @__PURE__ */ React.createElement("path", { d: "M5 9h13" })),
+          onPick: onSetFill
+        }
+      ))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center" } }, /* @__PURE__ */ React.createElement(MiniBtn, { title: "Clear formatting", disabled: !fb.hasAny, onClick: onClearFormat, w: 20 }, /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 20H7l-4-4 8-8 12 12-4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M9 11l4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M22 21H7" })))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center", alignItems: "center", minWidth: 52 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)", textAlign: "center", lineHeight: 1.1, userSelect: "none" } }, fb.count, " ", fb.unit), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--mut)", textAlign: "center", userSelect: "none" } }, "Selected"))
+    );
+  });
+  function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
+    const menuRef = useRef13(null);
+    const toolbarRef = useRef13(null);
+    useEffect13(() => {
+      const down = (e) => {
+        if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
+      };
+      const key = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("mousedown", down);
+      document.addEventListener("keydown", key);
+      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("resize", onClose);
+      return () => {
+        document.removeEventListener("mousedown", down);
+        document.removeEventListener("keydown", key);
+        window.removeEventListener("scroll", onClose, true);
+        window.removeEventListener("resize", onClose);
+      };
+    }, [onClose]);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = 220, mh = 460;
+    const left = x + mw > vw ? vw - mw - 8 : x;
+    const top = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
+    const TB_W = 258, TB_H = 54, TB_GAP = 6;
+    const tbMaxWidth = Math.min(TB_W, vw - 16);
+    let tbTop = top - TB_H - TB_GAP;
+    if (tbTop < 8) tbTop = Math.min(top + mh + TB_GAP, vh - TB_H - 8);
+    const tbLeft = Math.min(Math.max(8, left), vw - tbMaxWidth - 8);
+    const Item = ({ icon, label, hint, danger, disabled, onClick, children }) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick: disabled ? void 0 : onClick,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "3px 11px",
+          cursor: disabled ? "default" : "pointer",
+          fontSize: 11,
+          color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--txt)",
+          borderRadius: 4,
+          transition: "background .1s",
+          fontFamily: "'Inter',system-ui,sans-serif",
+          opacity: disabled ? 0.5 : 1
+        },
+        onMouseEnter: (e) => {
+          if (!disabled) e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)";
+        },
+        onMouseLeave: (e) => {
+          e.currentTarget.style.background = "transparent";
+        }
+      },
+      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 12, flexShrink: 0, color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--mut)", width: 14, textAlign: "center" }, "aria-hidden": "true" }),
+      /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, label, children),
+      hint && /* @__PURE__ */ React.createElement("span", { style: { color: "#b0b7c0", fontSize: 9, fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".03em" } }, hint)
+    );
+    const Sep = () => /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } });
+    const fb = fmt || {
+      bold: !!task.bold,
+      italic: !!task.italic,
+      underline: !!task.underline,
+      fill: task.rowColor || null,
+      color: task.textColor || null,
+      size: task.fontSize || null,
+      naturalSize: [13, 12, 11.5, 11][Math.min(task.level || 0, 3)],
+      hasAny: !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize,
+      count: 1,
+      unit: "row",
+      scopeLabel: null
+    };
+    const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
+    const [subMeet, setSubMeet] = useState14(false);
+    const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
+    const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
+    const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
+    const curBodyName = !task.meetingBound ? "" : meetingBody ? meetingBody.name || "Meeting body" : "⚠ calendar missing";
+    const isDeadlineRow = task.deadlineForTaskId != null;
+    const subOpenLeft = left + mw + 210 > vw;
+    const nextMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
+    const prevMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
+    const fmtMeetingStep = (iso) => {
+      const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
+      return isNaN(d) ? "" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    };
+    const SubCaption = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 11px 2px", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", userSelect: "none" } }, children);
+    return ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+        FormatMiniToolbar,
+        {
+          ref: toolbarRef,
+          fmt: fb,
+          top: tbTop,
+          left: tbLeft,
+          maxWidth: tbMaxWidth,
+          onSetBold,
+          onSetItalic,
+          onSetUnderline,
+          onSetTextColor,
+          onSetFill: onSetRowColor,
+          onSetFontSize,
+          onClearFormat
+        }
+      ), /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top,
+        left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: "3px 0",
+        zIndex: 9999,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
+        minWidth: mw
+      } }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-top", label: "Insert Row Above", hint: "Ins", onClick: onInsertAbove }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-bottom", label: "Insert Row Below", onClick: onInsertBelow }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-sitemap", label: "Add Subtask", onClick: onAddSubtask }), /* @__PURE__ */ React.createElement(Sep, null), meetingBody && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-right", label: nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting", disabled: !nextMeetingIso, onClick: () => onStepMeeting(nextMeetingIso) }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-left", label: prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting", disabled: !prevMeetingIso, onClick: () => onStepMeeting(prevMeetingIso) })), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" }, onMouseEnter: () => setSubMeet(true), onMouseLeave: () => setSubMeet(false) }, meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-plus", label: "Add a meeting calendar…", onClick: onAddMeetingCalendar }) : isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: `Deadline for: ${deadlineAnchorName || "(missing task)"}`, hint: "▸" }) : task.meetingBound ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: `Meeting: ${curBodyName}${foreignMatch ? ` — from ${foreignMatch.schedName}` : ""}`, hint: "▸" }) : /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar", hint: "▸" }), subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && /* @__PURE__ */ React.createElement("div", { style: {
+        position: "absolute",
+        top: -4,
+        ...subOpenLeft ? { right: "100%" } : { left: "100%" },
+        minWidth: 200,
+        maxHeight: 320,
+        overflow: "auto",
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        padding: "3px 0",
+        zIndex: 1e4
+      } }, isDeadlineRow ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, "Deadline row for “", deadlineAnchorName || "missing task", "”"), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag-off", label: "Unlink (keep current date)", onClick: onUnlinkDeadline })) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"), /* @__PURE__ */ React.createElement(Item, { icon: !task.meetingBound ? "ti-check" : "ti-circle", label: "— none —", onClick: onUnbindMeeting }), meetingBodies.map((b) => {
+        const isCur = task.meetingBound && task.meetingBodyId === b.id;
+        return /* @__PURE__ */ React.createElement(Item, { key: b.id, icon: isCur ? "ti-check" : "ti-circle", label: b.name || "Meeting body", onClick: () => onBindMeeting(b.id) });
+      }), otherBodies.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "From other schedules"), otherBodies.map((ob) => {
+        const isCur = task.meetingBound && !localBody && task.meetingBodyId === ob.body.id;
+        return /* @__PURE__ */ React.createElement(
+          Item,
+          {
+            key: `${ob.pid}:${ob.body.id}`,
+            icon: isCur ? "ti-check" : "ti-calendar-event",
+            label: `${ob.body.name || "Meeting body"} · ${ob.schedName}${isCur ? " — copy into this schedule" : ""}`,
+            onClick: () => onImportBindMeeting(ob.pid, ob.body.id)
+          }
+        );
+      })), bindCount === 1 && task.meetingBound && !task.hasChildren && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: "+ Add deadline row (call/file-by date)", onClick: onAddDeadlineRow })), bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "Use as deadline row for"), boundTasks.slice(0, 8).map((bt) => /* @__PURE__ */ React.createElement(Item, { key: bt.id, icon: "ti-flag", label: bt.name, onClick: () => onLinkAsDeadline(bt.id) })))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-settings", label: "Manage meeting calendars…", onClick: onAddMeetingCalendar }))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons", label: hasIcons ? "Change icon…" : "Set icon…", onClick: onSetIcon }), hasIcons && /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons-off", label: "Remove icon", onClick: onRemoveIcon }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate Row", onClick: onDuplicate }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-scissors", label: "Cut", hint: "Ctrl+X", onClick: onCutTask }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-files", label: "Copy", hint: "Ctrl+C", onClick: onCopyTaskFull }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-clipboard", label: "Paste Below", hint: "Ctrl+V", onClick: onPasteTask, disabled: !hasClipboard }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-increase", label: "Indent →", hint: "Alt⇧→", onClick: onIndent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-decrease", label: "Outdent ←", hint: "Alt⇧←", onClick: onOutdent, disabled: !canOutdent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-folder-symlink", label: "Move to…", onClick: onMoveTo }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row", danger: true, onClick: onDelete }))),
+      document.body
+    );
   }
-  function pickActivePid(projects, preferred) {
-    if (!projects || typeof projects !== "object") return null;
-    if (preferred != null && projects[preferred]) return preferred;
-    const first = Object.values(projects).find((p) => p && typeof p === "object" && p.id != null);
-    return first ? first.id : null;
+  exposeToHarness({
+    SwatchGrid: [() => SwatchGrid],
+    CaretPopover: [() => CaretPopover],
+    FormatMiniToolbar: [() => FormatMiniToolbar],
+    TaskContextMenu: [() => TaskContextMenu]
+  });
+
+  // src/workspaces/scheduler/page/main.jsx
+  var { useState: useState15, useEffect: useEffect14, useRef: useRef14, useMemo: useMemo5, useCallback: useCallback2 } = React;
+  function removeScheduleFromDoc(d, id) {
+    if (!d || !d.projects || !d.projects[id]) return d;
+    const newProjects = { ...d.projects };
+    delete newProjects[id];
+    const remaining = Object.keys(newProjects).map(Number);
+    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
+    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
   }
-  function resolveViewState(d) {
-    if (!d || typeof d !== "object") return d;
-    const tab = loadTabView();
-    const prefs = loadViewPrefs();
-    const patch = { editProjId: null };
-    VIEW_TAB_KEYS.forEach((k) => {
-      patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k];
-    });
-    VIEW_PREF_KEYS.forEach((k) => {
-      patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k];
-    });
-    if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
-      patch.aPid = pickActivePid(d.projects, d.aPid);
+  function logMergeToastEvent(changedRows, changedPids, projects) {
+    try {
+      if (!window.__sb) return;
+      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
+      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
+      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
+      }, () => {
+      });
+    } catch (e) {
     }
-    const tabPatch = {};
-    VIEW_TAB_KEYS.forEach((k) => {
-      tabPatch[k] = patch[k];
-    });
-    const prefsPatch = {};
-    VIEW_PREF_KEYS.forEach((k) => {
-      prefsPatch[k] = patch[k];
-    });
-    saveTabView({ ...tab, ...tabPatch });
-    saveViewPrefs({ ...prefs, ...prefsPatch });
-    return applyTaskFocus({ ...d, ...patch });
   }
+  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
+  var mkt = (id, name, start, dur, parentId = null, health = "gray", predecessors = []) => {
+    const isBlank2 = !start && (dur === "" || dur === null || dur === void 0);
+    const safeStart = isBlank2 ? "" : start && !isNaN(new Date(start).getTime()) ? start : NOW;
+    const safeDur = isBlank2 ? 0 : dur;
+    return {
+      id,
+      _sid: _mintTaskSid(),
+      name,
+      start: safeStart,
+      end: calcEnd(safeStart, safeDur),
+      duration: safeDur,
+      durUnit: "d",
+      durValue: safeDur,
+      predecessors,
+      health,
+      percentComplete: health === "green" ? 100 : health === "yellow" ? 40 : 0,
+      parentId,
+      responsibleParty: [],
+      cost: "",
+      notes: [],
+      isExpanded: true,
+      meetingBound: false
+      // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
+    };
+  };
+  window.__planarLoadStatus = "loading";
+  function postLoadState(state) {
+    try {
+      if (window.self !== window.top) {
+        window.parent.postMessage({ source: "planar-seq", type: "planar:load-state", state }, window.location.origin);
+      }
+    } catch (_) {
+    }
+  }
+  var LOAD_ATTEMPT_TIMEOUT_MS = 2e4;
+  var LOAD_RETRY_BASE_MS = 2e3;
+  var LOAD_RETRY_MAX_MS = 3e4;
+  var SEED = {
+    nPid: 4,
+    nTid: { 1: 12, 2: 5, 3: 10 },
+    aPid: 3,
+    view: "split",
+    section: "projects",
+    editProjId: null,
+    healthColStyle: "stoplight",
+    settings: { ...DEFAULT_SETTINGS, holidays: { ...DEFAULT_HOLIDAYS } },
+    projects: {
+      1: { id: 1, name: "Hillwood I-10 Logistics", tasks: [
+        mkt(1, "Site Acquisition", "2025-01-06", 30, null, "green", []),
+        mkt(2, "Title Search", "2025-01-06", 14, 1, "green", []),
+        mkt(3, "Environmental Phase I", "2025-01-13", 21, 1, "green", [1]),
+        mkt(4, "Design & Engineering", "2025-02-03", 60, null, "yellow", []),
+        mkt(5, "Schematic Design", "2025-02-03", 21, 4, "green", [1]),
+        mkt(6, "Construction Documents", "2025-02-24", 35, 4, "yellow", [5]),
+        mkt(7, "Permitting", "2025-04-01", 45, null, "yellow", [4]),
+        mkt(8, "Submit Plans", "2025-04-01", 5, 7, "green", [6]),
+        mkt(9, "City Review", "2025-04-07", 30, 7, "yellow", [8]),
+        mkt(10, "Permit Issued", "2025-05-07", 0, 7, "red", [9]),
+        mkt(11, "Construction", "2025-05-08", 180, null, "gray", [7])
+      ] },
+      2: { id: 2, name: "Grand Pkwy Distribution", tasks: [
+        mkt(1, "Site Control", "2025-03-01", 21, null, "green", []),
+        mkt(2, "Due Diligence", "2025-03-22", 30, null, "yellow", [1]),
+        mkt(3, "Design", "2025-04-22", 60, null, "gray", [2]),
+        mkt(4, "Construction", "2025-06-22", 150, null, "gray", [3])
+      ] },
+      3: { id: 3, name: "Sample Project", tasks: [
+        mkt(1, "Project Kick Off", "2025-06-02", 0, null, "gray", []),
+        mkt(2, "Due Diligence", "2025-06-02", 30, null, "green", [1]),
+        mkt(3, "Order Reports", "2025-06-02", 5, 2, "green", []),
+        mkt(4, "Review Reports", "2025-06-09", 15, 2, "yellow", [3]),
+        mkt(5, "Entitlements", "2025-07-14", 60, null, "gray", [2]),
+        mkt(6, "Submit Application", "2025-07-14", 5, 5, "gray", []),
+        mkt(7, "Agency Review", "2025-07-21", 40, 5, "gray", [6]),
+        mkt(8, "Approval", "2025-09-15", 0, 5, "gray", [7]),
+        mkt(9, "Construction", "2025-09-16", 120, null, "gray", [5])
+      ] }
+    }
+  };
+  installRowPointerTypeListener();
   function App() {
-    const [data, setData] = useState7(null);
-    const dataRef = useRef7(null);
-    useEffect6(() => {
+    const [data, setData] = useState15(null);
+    const dataRef = useRef14(null);
+    useEffect14(() => {
       dataRef.current = data;
     }, [data]);
-    const rollToastRef = useRef7(null);
-    useEffect6(() => {
+    const rollToastRef = useRef14(null);
+    useEffect14(() => {
       if (rollToastRef.current) {
         showToast(rollToastRef.current);
         rollToastRef.current = null;
@@ -15833,55 +18733,55 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       return idxs;
     };
     const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
-    const [successorPrompt, setSuccessorPrompt] = useState7(null);
-    const [successorPromptQueue, setSuccessorPromptQueue] = useState7([]);
-    useEffect6(() => {
+    const [successorPrompt, setSuccessorPrompt] = useState15(null);
+    const [successorPromptQueue, setSuccessorPromptQueue] = useState15([]);
+    useEffect14(() => {
       if (!successorPrompt && successorPromptQueue.length > 0) {
         setSuccessorPrompt(successorPromptQueue[0]);
         setSuccessorPromptQueue((q) => q.slice(1));
       }
     }, [successorPrompt, successorPromptQueue]);
-    const [notesCtx, setNotesCtx] = useState7(null);
-    const [isMobile, setIsMobile] = useState7(() => typeof window !== "undefined" && window.innerWidth < 768);
-    const [mobMenuOpen, setMobMenuOpen] = useState7(false);
-    useEffect6(() => {
+    const [notesCtx, setNotesCtx] = useState15(null);
+    const [isMobile, setIsMobile] = useState15(() => typeof window !== "undefined" && window.innerWidth < 768);
+    const [mobMenuOpen, setMobMenuOpen] = useState15(false);
+    useEffect14(() => {
       const h = () => setIsMobile(window.innerWidth < 768);
       window.addEventListener("resize", h);
       return () => window.removeEventListener("resize", h);
     }, []);
-    const [coarsePointer, setCoarsePointer] = useState7(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-    useEffect6(() => {
+    const [coarsePointer, setCoarsePointer] = useState15(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    useEffect14(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
       const mq = window.matchMedia("(pointer: coarse)");
       const h = () => setCoarsePointer(mq.matches);
       mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
       return () => mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h);
     }, []);
-    const [pdfExportOpen, setPdfExportOpen] = useState7(false);
-    const [projCtx, setProjCtx] = useState7(null);
-    const [taskCtx, setTaskCtx] = useState7(null);
-    const [iconPickerCtx, setIconPickerCtx] = useState7(null);
-    const clipboardRef = useRef7(null);
-    const pasteSelectRef = useRef7(null);
-    const [, setClipboardTick] = useState7(0);
-    const [renameModal, setRenameModal] = useState7(null);
-    const [deleteChoice, setDeleteChoice] = useState7(null);
-    const [moveToCtx, setMoveToCtx] = useState7(null);
-    const moveSelectRef = useRef7(null);
-    const [edit, setEdit] = useState7(null);
-    const editLiveRef = useRef7(null);
-    useEffect6(() => {
+    const [pdfExportOpen, setPdfExportOpen] = useState15(false);
+    const [projCtx, setProjCtx] = useState15(null);
+    const [taskCtx, setTaskCtx] = useState15(null);
+    const [iconPickerCtx, setIconPickerCtx] = useState15(null);
+    const clipboardRef = useRef14(null);
+    const pasteSelectRef = useRef14(null);
+    const [, setClipboardTick] = useState15(0);
+    const [renameModal, setRenameModal] = useState15(null);
+    const [deleteChoice, setDeleteChoice] = useState15(null);
+    const [moveToCtx, setMoveToCtx] = useState15(null);
+    const moveSelectRef = useRef14(null);
+    const [edit, setEdit] = useState15(null);
+    const editLiveRef = useRef14(null);
+    useEffect14(() => {
       editLiveRef.current = edit;
     }, [edit]);
-    const focusReselectRef = useRef7(null);
-    const [editStartChar, setEditStartChar] = useState7(null);
-    const [selectedId, setSelectedId] = useState7(null);
-    const [selRange, setSelRange] = useState7(null);
-    const [focusPins, setFocusPins] = useState7(() => /* @__PURE__ */ new Set());
-    const [selectedColIdx, setSelectedColIdx] = useState7(0);
-    const [, setTodayTick] = useState7(0);
-    const [, setHealthTick] = useState7(0);
-    useEffect6(() => {
+    const focusReselectRef = useRef14(null);
+    const [editStartChar, setEditStartChar] = useState15(null);
+    const [selectedId, setSelectedId] = useState15(null);
+    const [selRange, setSelRange] = useState15(null);
+    const [focusPins, setFocusPins] = useState15(() => /* @__PURE__ */ new Set());
+    const [selectedColIdx, setSelectedColIdx] = useState15(0);
+    const [, setTodayTick] = useState15(0);
+    const [, setHealthTick] = useState15(0);
+    useEffect14(() => {
       const refresh = () => {
         const t = fdLocal(/* @__PURE__ */ new Date());
         if (t !== NOW) {
@@ -15907,26 +18807,26 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearInterval(iv);
       };
     }, []);
-    const [goToFocus, setGoToFocus] = useState7(null);
-    const [offlineFallback, setOfflineFallback] = useState7(false);
-    const [authRequired, setAuthRequired] = useState7(false);
-    const [driftNotice, setDriftNotice] = useState7(null);
-    const [ancestorPredNotice, setAncestorPredNotice] = useState7(null);
-    const [staleNotice, setStaleNotice] = useState7(false);
-    const didInitialLoad = useRef7(false);
-    const prevCoreRef = useRef7(null);
-    const [formatOpen, setFormatOpen] = useState7(false);
-    const [settingsOpen, setSettingsOpen] = useState7(false);
-    const [settingsSection, setSettingsSection] = useState7(null);
-    const [meetingCalOpen, setMeetingCalOpen] = useState7(false);
-    const [automationOpen, setAutomationOpen] = useState7(false);
-    const [contactsOpen, setContactsOpen] = useState7(false);
-    const [historyOpen, setHistoryOpen] = useState7(false);
-    const [reviewOpen, setReviewOpen] = useState7(false);
-    const [reviewRows, setReviewRows] = useState7([]);
-    const [reviewLoading, setReviewLoading] = useState7(true);
-    const [reviewIdx, setReviewIdx] = useState7(0);
-    useEffect6(() => {
+    const [goToFocus, setGoToFocus] = useState15(null);
+    const [offlineFallback, setOfflineFallback] = useState15(false);
+    const [authRequired, setAuthRequired] = useState15(false);
+    const [driftNotice, setDriftNotice] = useState15(null);
+    const [ancestorPredNotice, setAncestorPredNotice] = useState15(null);
+    const [staleNotice, setStaleNotice] = useState15(false);
+    const didInitialLoad = useRef14(false);
+    const prevCoreRef = useRef14(null);
+    const [formatOpen, setFormatOpen] = useState15(false);
+    const [settingsOpen, setSettingsOpen] = useState15(false);
+    const [settingsSection, setSettingsSection] = useState15(null);
+    const [meetingCalOpen, setMeetingCalOpen] = useState15(false);
+    const [automationOpen, setAutomationOpen] = useState15(false);
+    const [contactsOpen, setContactsOpen] = useState15(false);
+    const [historyOpen, setHistoryOpen] = useState15(false);
+    const [reviewOpen, setReviewOpen] = useState15(false);
+    const [reviewRows, setReviewRows] = useState15([]);
+    const [reviewLoading, setReviewLoading] = useState15(true);
+    const [reviewIdx, setReviewIdx] = useState15(0);
+    useEffect14(() => {
       const openTo = (e) => {
         if ((e?.detail || null) === "meetings") {
           setMeetingCalOpen(true);
@@ -15942,18 +18842,18 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       document.addEventListener("planar-open-settings", openTo);
       return () => document.removeEventListener("planar-open-settings", openTo);
     }, []);
-    const [ganttPPD, setGanttPPD] = useState7(() => {
+    const [ganttPPD, setGanttPPD] = useState15(() => {
       const ganttW = window.innerWidth * 0.46;
       return Math.max(1, Math.floor(ganttW / 365));
     });
-    const [gridZoom, setGridZoom] = useState7(() => data?.gridZoom ?? 1);
-    useEffect6(() => {
+    const [gridZoom, setGridZoom] = useState15(() => data?.gridZoom ?? 1);
+    useEffect14(() => {
       if (data && typeof data.gridZoom === "number") setGridZoom(data.gridZoom);
     }, [data?.gridZoom]);
-    const hoverZoneRef = useRef7("gantt");
-    const fileHandleRef = useRef7(null);
-    const fileHtmlRef = useRef7(null);
-    useEffect6(() => {
+    const hoverZoneRef = useRef14("gantt");
+    const fileHandleRef = useRef14(null);
+    const fileHtmlRef = useRef14(null);
+    useEffect14(() => {
       const sb = window.__sb;
       if (!sb) {
         setReviewLoading(false);
@@ -15993,19 +18893,19 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }
       };
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!reviewOpen || !data) return;
       const a = reviewRows[reviewIdx];
       if (a && a.project_id != null && data.aPid !== a.project_id && data.projects && data.projects[a.project_id]) setData((d) => ({ ...d, aPid: a.project_id }));
     }, [reviewOpen, reviewIdx, reviewRows, data?.aPid]);
-    const fileSaveTimer = useRef7(null);
-    const [fileLinked, setFileLinked] = useState7(false);
-    const [savePulse, setSavePulse] = useState7(false);
-    const [saveStatus, setSaveStatus] = useState7("saved");
-    const saveSeq = useRef7(0);
-    const latestData = useRef7(null);
-    const saveStatusRef = useRef7("saved");
-    useEffect6(() => {
+    const fileSaveTimer = useRef14(null);
+    const [fileLinked, setFileLinked] = useState15(false);
+    const [savePulse, setSavePulse] = useState15(false);
+    const [saveStatus, setSaveStatus] = useState15("saved");
+    const saveSeq = useRef14(0);
+    const latestData = useRef14(null);
+    const saveStatusRef = useRef14("saved");
+    useEffect14(() => {
       saveStatusRef.current = saveStatus;
     }, [saveStatus]);
     const attemptCloudSave = (d) => {
@@ -16017,14 +18917,14 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         if (saveSeq.current === seq) setSaveStatus("error");
       });
     };
-    const [dlOpen, setDlOpen] = useState7(false);
-    const history = useRef7([]);
-    const future = useRef7([]);
-    const prevData = useRef7(null);
-    const isUndoing = useRef7(false);
-    const isDerivedUpdate = useRef7(false);
-    const flatTasksRef = useRef7([]);
-    const lastSelIdxRef = useRef7(null);
+    const [dlOpen, setDlOpen] = useState15(false);
+    const history = useRef14([]);
+    const future = useRef14([]);
+    const prevData = useRef14(null);
+    const isUndoing = useRef14(false);
+    const isDerivedUpdate = useRef14(false);
+    const flatTasksRef = useRef14([]);
+    const lastSelIdxRef = useRef14(null);
     const viewportTopFlatIdx = (tasks) => {
       const g2 = document.querySelector('[data-grid-scroll="1"]');
       if (!g2) return null;
@@ -16039,11 +18939,11 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       return null;
     };
-    const projIdRef = useRef7(null);
-    const prevHolKey = useRef7(null);
-    const skipHolRecasc = useRef7(false);
-    const prevHealthKey = useRef7(null);
-    useEffect6(() => {
+    const projIdRef = useRef14(null);
+    const prevHolKey = useRef14(null);
+    const skipHolRecasc = useRef14(false);
+    const prevHealthKey = useRef14(null);
+    useEffect14(() => {
       if (!data) return;
       if (isUndoing.current) {
         isUndoing.current = false;
@@ -16061,10 +18961,10 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       prevData.current = data;
     }, [data]);
-    const applyLoadedDataRef = useRef7(null);
-    const [loadTick, setLoadTick] = useState7(0);
-    const loadAttemptRef = useRef7(0);
-    useEffect6(() => {
+    const applyLoadedDataRef = useRef14(null);
+    const [loadTick, setLoadTick] = useState15(0);
+    const loadAttemptRef = useRef14(0);
+    useEffect14(() => {
       let cancelled = false, retryTimer = null;
       (async () => {
         applyLoadedDataRef.current = (parsed) => {
@@ -16183,7 +19083,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(retryTimer);
       };
     }, [loadTick]);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!data) return;
       latestData.current = data;
       persistViewState(prevCoreRef.current, data);
@@ -16249,7 +19149,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }, 700);
       }
     }, [data]);
-    useEffect6(() => {
+    useEffect14(() => {
       let t;
       const onSaved = () => {
         setSavePulse(true);
@@ -16263,7 +19163,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(t);
       };
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       if (saveStatus !== "error") return;
       const retry = () => {
         if (latestData.current) attemptCloudSave(latestData.current);
@@ -16275,7 +19175,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         window.removeEventListener("online", retry);
       };
     }, [saveStatus]);
-    useEffect6(() => {
+    useEffect14(() => {
       let stopped = false;
       const check = async () => {
         if (stopped || !window.storage || !window.storage.checkRemote) return;
@@ -16314,12 +19214,12 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         document.removeEventListener("visibilitychange", check);
       };
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       const onStale = () => setStaleNotice(true);
       window.addEventListener("planar:stale", onStale);
       return () => window.removeEventListener("planar:stale", onStale);
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       const onMerged = (e) => {
         const merged = e && e.detail && e.detail.value;
         const anc = e && e.detail && e.detail.base;
@@ -16346,7 +19246,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("planar:merged", onMerged);
       return () => window.removeEventListener("planar:merged", onMerged);
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       const onBeforeUnload = (e) => {
         if (saveStatusRef.current === "saved") return;
         e.preventDefault();
@@ -16355,8 +19255,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("beforeunload", onBeforeUnload);
       return () => window.removeEventListener("beforeunload", onBeforeUnload);
     }, []);
-    const overlayOpenRef = useRef7(false);
-    useEffect6(() => {
+    const overlayOpenRef = useRef14(false);
+    useEffect14(() => {
       overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal || deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen || reviewOpen || meetingCalOpen);
     }, [
       successorPrompt,
@@ -16374,15 +19274,15 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       reviewOpen,
       meetingCalOpen
     ]);
-    const overlayAtKeyStartRef = useRef7(false);
-    useEffect6(() => {
+    const overlayAtKeyStartRef = useRef14(false);
+    useEffect14(() => {
       const latch = () => {
         overlayAtKeyStartRef.current = overlayOpenRef.current;
       };
       window.addEventListener("keydown", latch, true);
       return () => window.removeEventListener("keydown", latch, true);
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       const onKey = (e) => {
         if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
         const tag = document.activeElement.tagName;
@@ -16693,9 +19593,9 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       if (!(row && row.isExpanded && row.hideableCount > 0))
         showToast(`Focus ${g2.focused ? "off" : "on"} for "${g2.name || "Untitled"}"` + (g2.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
     };
-    const zoomRafRef = useRef7(null);
-    const zoomAccRef = useRef7(0);
-    useEffect6(() => {
+    const zoomRafRef = useRef14(null);
+    const zoomAccRef = useRef14(0);
+    useEffect14(() => {
       let armed = false;
       const arm = (on) => {
         if (on === armed) return;
@@ -17107,7 +20007,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : "Cell"
       };
     };
-    const rowJumpRef = useRef7(false);
+    const rowJumpRef = useRef14(false);
     const goToTask = useCallback2((pid, taskId) => {
       rowJumpRef.current = true;
       setData((d) => {
@@ -17138,8 +20038,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       setSelRange(null);
       setGoToFocus({ taskId, n: Date.now() });
     }, []);
-    const revealRef = useRef7(null);
-    const openNameEditOnReveal = useRef7(false);
+    const revealRef = useRef14(null);
+    const openNameEditOnReveal = useRef14(false);
     const revealInserted = useCallback2(() => {
       const shouldOpenEdit = openNameEditOnReveal.current;
       openNameEditOnReveal.current = false;
@@ -17436,7 +20336,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         setClipboardTick((t) => t + 1);
       }
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       if (pasteSelectRef.current == null) return;
       const id = pasteSelectRef.current;
       pasteSelectRef.current = null;
@@ -17475,7 +20375,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(sorted)) } } };
       });
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       if (moveSelectRef.current == null) return;
       const id = moveSelectRef.current;
       moveSelectRef.current = null;
@@ -17633,13 +20533,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       });
     }, []);
     const inShell = typeof window !== "undefined" && window.self !== window.top;
-    useEffect6(() => {
+    useEffect14(() => {
       if (!data) return;
       const pid = pickActivePid(data.projects, data.aPid);
       if (pid != null && pid !== data.aPid) setData((d) => d && d.aPid !== pid ? { ...d, aPid: pid } : d);
     }, [data && data.aPid, data && data.projects]);
-    const navSigRef = useRef7("");
-    useEffect6(() => {
+    const navSigRef = useRef14("");
+    useEffect14(() => {
       if (!inShell || !data) return;
       const rowLink = rowJumpRef.current;
       rowJumpRef.current = false;
@@ -17660,7 +20560,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       }
     }, [data, inShell]);
     const [, setSiteNamesTick] = React.useState(0);
-    useEffect6(() => {
+    useEffect14(() => {
       const onNames = (e) => {
         if (!e || e.origin !== window.location.origin) return;
         const m = e && e.data;
@@ -17672,7 +20572,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onNames);
       return () => window.removeEventListener("message", onNames);
     }, []);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!inShell) return;
       const onLoadMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -17687,7 +20587,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onLoadMsg);
       return () => window.removeEventListener("message", onLoadMsg);
     }, [inShell]);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!inShell) return;
       const onMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -17795,8 +20695,8 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onMsg);
       return () => window.removeEventListener("message", onMsg);
     }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
-    const tbSigRef = useRef7("");
-    useEffect6(() => {
+    const tbSigRef = useRef14("");
+    useEffect14(() => {
       if (!inShell || !data) return;
       const sec = data.section ?? "projects";
       const section2 = sec === "suggestions" ? "projects" : sec;
@@ -17846,7 +20746,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       formatOpen,
       historyOpen
     ]);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!inShell) return;
       const onCmd = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -17917,7 +20817,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       return () => window.removeEventListener("message", onCmd);
     }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
     const proj = activeProjectOf(data);
-    const flatTasks = useMemo4(() => {
+    const flatTasks = useMemo5(() => {
       if (!proj) return [];
       const settings = data?.settings;
       const childSet = focusGroupIds(proj.tasks);
@@ -18018,13 +20918,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       const i = flatTasks.findIndex((t) => t.id === selectedId);
       if (i >= 0) lastSelIdxRef.current = i;
     }, [selectedId, flatTasks]);
-    useEffect6(() => {
+    useEffect14(() => {
       projIdRef.current = data?.aPid ?? null;
     }, [data]);
-    useEffect6(() => {
+    useEffect14(() => {
       if (!edit) setEditStartChar(null);
     }, [edit]);
-    const succMap = useMemo4(() => {
+    const succMap = useMemo5(() => {
       if (!proj) return {};
       const m = {};
       proj.tasks.forEach((t) => normPreds(t.predecessors).forEach((p) => {
@@ -18117,7 +21017,7 @@ A backup snapshot of the current state is saved first.`,
         "text/html"
       );
     };
-    const rolledHealthMap = useMemo4(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
+    const rolledHealthMap = useMemo5(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
     if (!data) return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", color: "#e6a817", fontFamily: "'Inter',system-ui,sans-serif", fontSize: 14, letterSpacing: ".1em" } }, "LOADING...");
     if (!proj) return /* @__PURE__ */ React.createElement("div", { "data-schedule-empty": "1", style: { height: "100vh", background: "var(--bg)", color: "var(--txt)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "'Inter',system-ui,sans-serif", textAlign: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "No schedules yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, maxWidth: 360, lineHeight: 1.5 } }, "This account has no schedule to show. Create one to start planning — nothing has been removed."), /* @__PURE__ */ React.createElement("button", { onClick: () => addProject(), style: { cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, background: "var(--accent)", color: "var(--on-accent,#fff)", border: "none", borderRadius: 6, padding: "8px 16px" } }, "New schedule"));
     const setHoverZone = (zone) => {
@@ -18888,1655 +21788,6 @@ A backup snapshot of the current state is saved first.`,
       }
     ));
   }
-  function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
-    const [open, setOpen] = useState7(false);
-    const [editingId, setEditingId] = useState7(null);
-    const [editVal, setEditVal] = useState7("");
-    const editRef = useRef7(null);
-    const btnRef = useRef7(null);
-    const menuRef = useRef7(null);
-    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    const projHealth = (p) => {
-      if (!p.tasks.length) return "gray";
-      if (p.tasks.some((t) => t.health === "red")) return "red";
-      if (p.tasks.some((t) => t.health === "yellow")) return "yellow";
-      if (p.tasks.every((t) => t.health === "green")) return "green";
-      return "gray";
-    };
-    const toggle = () => setOpen((o) => !o);
-    useEffect6(() => {
-      if (!open) {
-        setEditingId(null);
-        return;
-      }
-      const down = (e) => {
-        if (!btnRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
-      };
-      document.addEventListener("mousedown", down);
-      return () => document.removeEventListener("mousedown", down);
-    }, [open]);
-    useEffect6(() => {
-      if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
-    }, [editingId]);
-    const cur = activeProjectOf(data);
-    const dot = HEALTH[cur ? projHealth(cur) : "gray"].dot;
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        ref: btnRef,
-        className: "",
-        style: breadcrumb ? {
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "3px 6px",
-          borderRadius: 4,
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--txt)"
-        } : {
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          cursor: "pointer",
-          fontFamily: "inherit",
-          background: open ? "#eef2ff" : "transparent",
-          border: `1px solid ${open ? "#c7d2fe" : "transparent"}`,
-          borderRadius: 7,
-          padding: "4px 10px",
-          maxWidth: 230,
-          minWidth: 80,
-          transition: "background .15s,border-color .15s"
-        },
-        onClick: toggle,
-        onMouseEnter: (e) => {
-          if (!breadcrumb && !open) e.currentTarget.style.background = "var(--surf)";
-        },
-        onMouseLeave: (e) => {
-          if (!breadcrumb && !open) e.currentTarget.style.background = "transparent";
-        }
-      },
-      !breadcrumb && /* @__PURE__ */ React.createElement("span", { style: { width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: `0 0 0 3px ${dot}1f` } }),
-      /* @__PURE__ */ React.createElement("span", { style: breadcrumb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" } : {
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        flex: 1,
-        textAlign: "left",
-        fontSize: 16,
-        fontWeight: 700,
-        letterSpacing: "-.015em",
-        color: "var(--txt)",
-        lineHeight: 1.1
-      } }, cur?.name),
-      /* @__PURE__ */ React.createElement(
-        "i",
-        {
-          className: "ti ti-chevron-down",
-          "aria-hidden": "true",
-          style: { fontSize: breadcrumb ? 11 : 13, color: "var(--mut)", flexShrink: 0, transition: "transform .15s", transform: open ? "rotate(180deg)" : "none" }
-        }
-      )
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top: pos.top,
-        left: pos.left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: 4,
-        zIndex: 9999,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-        minWidth: 230
-      } }, Object.values(data.projects).map((p) => {
-        const h = projHealth(p);
-        const isActive = p.id === data.aPid;
-        const isEditing = editingId === p.id;
-        const confirmRename = () => {
-          if (editVal.trim()) setData((d) => ({ ...d, projects: { ...d.projects, [p.id]: { ...d.projects[p.id], name: editVal.trim() } } }));
-          setEditingId(null);
-        };
-        return /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            key: p.id,
-            onClick: () => {
-              if (!isEditing) {
-                setData((d) => ({ ...d, aPid: p.id }));
-                setOpen(false);
-              }
-            },
-            onContextMenu: (e) => {
-              e.preventDefault();
-              setProjCtx({ id: p.id, x: e.clientX, y: e.clientY });
-              setOpen(false);
-            },
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "5px 8px",
-              borderRadius: 4,
-              cursor: isEditing ? "default" : "pointer",
-              background: isActive ? "var(--surf)" : "transparent",
-              fontFamily: "'Inter',system-ui,sans-serif",
-              fontSize: 12,
-              fontWeight: isActive ? 500 : 400,
-              color: "var(--txt)"
-            },
-            onMouseEnter: (e) => {
-              if (!isActive && !isEditing) e.currentTarget.style.background = "var(--surf)";
-            },
-            onMouseLeave: (e) => {
-              if (!isActive && !isEditing) e.currentTarget.style.background = "transparent";
-            }
-          },
-          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", background: HEALTH[h].dot, flexShrink: 0 } }),
-          isEditing ? /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              ...NO_AUTOFILL,
-              ref: editRef,
-              value: editVal,
-              onChange: (e) => setEditVal(e.target.value),
-              onClick: (e) => e.stopPropagation(),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") {
-                  e.stopPropagation();
-                  confirmRename();
-                }
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  setEditingId(null);
-                }
-              },
-              onBlur: confirmRename,
-              style: {
-                flex: 1,
-                border: "1px solid var(--blue)",
-                borderRadius: 3,
-                padding: "2px 5px",
-                fontSize: 12,
-                fontFamily: "inherit",
-                outline: "none",
-                background: "var(--bg)",
-                color: "var(--txt)"
-              }
-            }
-          ) : /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p)),
-          !isEditing && /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              onClick: (e) => {
-                e.stopPropagation();
-                setEditVal(p.name);
-                setEditingId(p.id);
-              },
-              title: "Rename",
-              style: {
-                opacity: 0,
-                fontSize: 11,
-                color: "var(--mut)",
-                cursor: "pointer",
-                flexShrink: 0,
-                padding: "1px 3px",
-                borderRadius: 3,
-                lineHeight: 1,
-                transition: "opacity .12s"
-              },
-              onMouseEnter: (e) => {
-                e.currentTarget.style.opacity = "1";
-                e.currentTarget.style.color = "var(--amber)";
-                e.currentTarget.style.background = "#eef2ff";
-              },
-              onMouseLeave: (e) => {
-                e.currentTarget.style.opacity = "0";
-                e.currentTarget.style.color = "var(--mut)";
-                e.currentTarget.style.background = "transparent";
-              },
-              ref: (el) => {
-                if (el) {
-                  const row = el.closest("div[style]");
-                  if (row) {
-                    row.addEventListener("mouseenter", () => {
-                      el.style.opacity = "0.4";
-                    });
-                    row.addEventListener("mouseleave", () => {
-                      el.style.opacity = "0";
-                    });
-                  }
-                }
-              }
-            },
-            /* @__PURE__ */ React.createElement("i", { className: "ti ti-pencil", style: { fontSize: 11 } })
-          ),
-          !isEditing && isActive && /* @__PURE__ */ React.createElement("i", { className: "ti ti-check", "aria-hidden": "true", style: { fontSize: 12, color: "var(--amber)", flexShrink: 0 } })
-        );
-      }), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onClick: () => {
-            addProject();
-            setOpen(false);
-          },
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 10px",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontFamily: "'Inter',system-ui,sans-serif",
-            fontSize: 12,
-            color: "var(--mut)"
-          },
-          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-        },
-        /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus", "aria-hidden": "true", style: { fontSize: 13 } }),
-        "New project"
-      )),
-      document.body
-    ));
-  }
-  function RenameModal({ name, onConfirm, onClose }) {
-    const [val, setVal] = useState7(name);
-    const inputRef = useRef7(null);
-    useEffect6(() => {
-      inputRef.current?.select();
-    }, []);
-    const confirm = () => {
-      if (val.trim()) onConfirm(val.trim());
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        style: { position: "fixed", inset: 0, background: "#00000060", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" },
-        onClick: onClose
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--surf)",
-            border: "1px solid var(--bd2)",
-            borderTop: "2px solid var(--amber)",
-            borderRadius: 6,
-            padding: 20,
-            width: 340,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14
-          },
-          onClick: (e) => e.stopPropagation()
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { color: "var(--amber)", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: ".06em" } }, "RENAME PROJECT"),
-        /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            ...NO_AUTOFILL,
-            ref: inputRef,
-            className: "ei",
-            value: val,
-            onChange: (e) => setVal(e.target.value),
-            onKeyDown: (e) => {
-              if (e.key === "Enter") confirm();
-              if (e.key === "Escape") onClose();
-            }
-          }
-        ),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { borderColor: "var(--amber)", color: "var(--amber)" }, onClick: confirm }, "Rename"))
-      )
-    );
-  }
-  function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
-    const menuRef = useRef7(null);
-    useEffect6(() => {
-      const down = (e) => {
-        if (!menuRef.current?.contains(e.target)) onClose();
-      };
-      const key = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("mousedown", down);
-      document.addEventListener("keydown", key);
-      window.addEventListener("scroll", onClose, true);
-      window.addEventListener("resize", onClose);
-      return () => {
-        document.removeEventListener("mousedown", down);
-        document.removeEventListener("keydown", key);
-        window.removeEventListener("scroll", onClose, true);
-        window.removeEventListener("resize", onClose);
-      };
-    }, [onClose]);
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const mw = 178, mh = canDelete ? 108 : 76;
-    const left = x + mw > vw ? vw - mw - 8 : x;
-    const top = y + mh > vh ? vh - mh - 8 : y;
-    const Item = ({ icon, label, danger, onClick }) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onClick,
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 12px",
-          cursor: "pointer",
-          fontSize: 12,
-          color: danger ? "#dc2626" : "var(--txt)",
-          borderRadius: 4,
-          transition: "background .1s",
-          fontFamily: "'Inter',system-ui,sans-serif"
-        },
-        onMouseEnter: (e) => e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)",
-        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-      },
-      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 14, flexShrink: 0, color: danger ? "#dc2626" : "var(--mut)" }, "aria-hidden": "true" }),
-      label
-    );
-    return ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top,
-        left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: "4px",
-        zIndex: 9999,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.13)",
-        minWidth: mw
-      } }, /* @__PURE__ */ React.createElement(Item, { icon: "ti-pencil", label: "Rename", onClick: onRename }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate", onClick: onDuplicate }), canDelete && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: "Delete", danger: true, onClick: onDelete }))),
-      document.body
-    );
-  }
-  var SwatchGrid = ({ current, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 5px", display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: 2, justifyContent: "start" } }, /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      title: "None (clear)",
-      onClick: () => onPick(null),
-      type: "button",
-      style: {
-        width: 18,
-        height: 18,
-        borderRadius: 2,
-        background: "var(--bg)",
-        cursor: "pointer",
-        padding: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: current == null ? "1.5px solid #4f46e5" : "1px solid #d1d5db"
-      }
-    },
-    /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 10 10" }, /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "1", x2: "9", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "1", x2: "1", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }))
-  ), ROW_COLORS.slice(0, 19).map((rc) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: rc.color,
-      title: rc.label,
-      onClick: () => onPick(rc.color),
-      type: "button",
-      style: {
-        width: 18,
-        height: 18,
-        borderRadius: 2,
-        background: rc.color,
-        cursor: "pointer",
-        padding: 0,
-        border: current === rc.color ? "1.5px solid #111827" : "1px solid #d1d5db",
-        boxShadow: current === rc.color ? "inset 0 0 0 1px #fff" : "none"
-      }
-    }
-  )));
-  var CaretPopover = ({ children, popRef, openLeft }) => /* @__PURE__ */ React.createElement(
-    "div",
-    {
-      ref: popRef,
-      onMouseDown: (e) => e.stopPropagation(),
-      style: {
-        position: "absolute",
-        top: "100%",
-        marginTop: 4,
-        ...openLeft ? { right: 0 } : { left: 0 },
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-        zIndex: 10002
-      }
-    },
-    children
-  );
-  var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
-    const fb = fmt;
-    const [openCaret, setOpenCaret] = useState7(null);
-    const popRef = useRef7(null);
-    useEffect6(() => {
-      if (!openCaret) return;
-      const down = (e) => {
-        if (popRef.current?.contains(e.target)) return;
-        if (e.target.closest?.("[data-caret-toggle]")) return;
-        setOpenCaret(null);
-      };
-      document.addEventListener("mousedown", down, true);
-      return () => document.removeEventListener("mousedown", down, true);
-    }, [openCaret]);
-    const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
-    const [sizeText, setSizeText] = useState7(sizeDisplay);
-    useEffect6(() => {
-      setSizeText(sizeDisplay);
-    }, [sizeDisplay]);
-    const commitSize = (raw) => {
-      const trimmed = String(raw).trim();
-      if (trimmed === "") {
-        onSetFontSize(null);
-        return;
-      }
-      const n = parseFloat(trimmed);
-      if (!Number.isFinite(n)) {
-        setSizeText(sizeDisplay);
-        return;
-      }
-      onSetFontSize(Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n * 2) / 2)));
-    };
-    const MiniBtn = ({ active, disabled, onClick, title, children, w = 20 }) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        title,
-        onClick: disabled ? void 0 : onClick,
-        disabled,
-        type: "button",
-        style: {
-          width: w,
-          height: 20,
-          borderRadius: 3,
-          padding: 0,
-          cursor: disabled ? "default" : "pointer",
-          flexShrink: 0,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
-          background: active ? "#4f46e5" : "transparent",
-          border: `1px solid ${active ? "#4338ca" : "transparent"}`,
-          opacity: disabled ? 0.5 : 1
-        },
-        onMouseEnter: (e) => {
-          if (!disabled && !active) e.currentTarget.style.background = "#e5e7eb";
-        },
-        onMouseLeave: (e) => {
-          if (!disabled && !active) e.currentTarget.style.background = "transparent";
-        }
-      },
-      children
-    );
-    const Row2 = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2, height: 22 } }, children);
-    const Group = ({ children, style }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, padding: "3px 5px", justifyContent: "center", flexShrink: 0, ...style } }, children);
-    const VRule = () => /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd2)", margin: "3px 0" } });
-    const ColorCaret = ({ kind, icon, current, title, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex", alignItems: "center", gap: 1 } }, /* @__PURE__ */ React.createElement(MiniBtn, { title, onClick: () => {
-    }, w: 22 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1 } }, icon, /* @__PURE__ */ React.createElement("div", { style: { width: 13, height: 2.5, background: current || "transparent", border: current ? "none" : "1px dashed #c0c8d0", borderRadius: 1 } }))), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        "data-caret-toggle": true,
-        title: `${title} options`,
-        type: "button",
-        onClick: () => setOpenCaret((c) => c === kind ? null : kind),
-        style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
-      },
-      "▾"
-    ), openCaret === kind && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement(SwatchGrid, { current, onPick: (c) => {
-      onPick(c);
-      setOpenCaret(null);
-    } })));
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref,
-        onMouseDown: (e) => e.stopPropagation(),
-        style: {
-          position: "fixed",
-          top,
-          left,
-          maxWidth,
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 8,
-          boxShadow: "0 6px 20px rgba(0,0,0,0.16)",
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "stretch",
-          fontFamily: "'Inter',system-ui,sans-serif",
-          zIndex: 10001,
-          padding: 1
-        }
-      },
-      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...NO_AUTOFILL,
-          value: sizeText,
-          onChange: (e) => setSizeText(e.target.value),
-          onBlur: (e) => commitSize(e.target.value),
-          onKeyDown: (e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitSize(e.target.value);
-              e.currentTarget.blur();
-            } else if (e.key === "Escape") {
-              setSizeText(sizeDisplay);
-              e.currentTarget.blur();
-            }
-          },
-          placeholder: "—",
-          title: "Text size",
-          "aria-label": "Text size",
-          style: { width: 28, height: 20, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 3, textAlign: "center", padding: 0, fontFamily: "'Inter',system-ui,sans-serif" }
-        }
-      ), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          "data-caret-toggle": true,
-          title: "Text size options",
-          type: "button",
-          onClick: () => setOpenCaret((c) => c === "size" ? null : "size"),
-          style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
-        },
-        "▾"
-      ), openCaret === "size" && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement("div", { style: { padding: "2px 0", minWidth: 56, maxHeight: 220, overflow: "auto" } }, FONT_SIZE_STEPS.map((v) => /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          key: v,
-          onClick: () => {
-            onSetFontSize(v);
-            setOpenCaret(null);
-          },
-          style: {
-            padding: "4px 10px",
-            fontSize: 11,
-            cursor: "pointer",
-            textAlign: "left",
-            background: fb.size === v ? "var(--surf)" : "transparent",
-            fontWeight: fb.size === v ? 700 : 400
-          }
-        },
-        v
-      ))))), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Shrink text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, -1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A−")), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Grow text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, 1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A+"))), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.bold, onClick: () => onSetBold(!fb.bold), title: "Bold" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 800, fontSize: 12 } }, "B")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.italic, onClick: () => onSetItalic(!fb.italic), title: "Italic" }, /* @__PURE__ */ React.createElement("span", { style: { fontStyle: "italic", fontWeight: 600, fontSize: 12, fontFamily: "Georgia,'Times New Roman',serif" } }, "I")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.underline, onClick: () => onSetUnderline(!fb.underline), title: "Underline" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 12, textDecoration: "underline" } }, "U")))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        ColorCaret,
-        {
-          kind: "color",
-          title: "Text color",
-          current: fb.color,
-          icon: /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 800, lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "A"),
-          onPick: onSetTextColor
-        }
-      )), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        ColorCaret,
-        {
-          kind: "fill",
-          title: "Highlight / fill",
-          current: fb.fill,
-          icon: /* @__PURE__ */ React.createElement("svg", { width: "12", height: "10", viewBox: "0 0 24 20", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" }), /* @__PURE__ */ React.createElement("path", { d: "M5 9h13" })),
-          onPick: onSetFill
-        }
-      ))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center" } }, /* @__PURE__ */ React.createElement(MiniBtn, { title: "Clear formatting", disabled: !fb.hasAny, onClick: onClearFormat, w: 20 }, /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 20H7l-4-4 8-8 12 12-4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M9 11l4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M22 21H7" })))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center", alignItems: "center", minWidth: 52 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)", textAlign: "center", lineHeight: 1.1, userSelect: "none" } }, fb.count, " ", fb.unit), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--mut)", textAlign: "center", userSelect: "none" } }, "Selected"))
-    );
-  });
-  function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
-    const menuRef = useRef7(null);
-    const toolbarRef = useRef7(null);
-    useEffect6(() => {
-      const down = (e) => {
-        if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
-      };
-      const key = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("mousedown", down);
-      document.addEventListener("keydown", key);
-      window.addEventListener("scroll", onClose, true);
-      window.addEventListener("resize", onClose);
-      return () => {
-        document.removeEventListener("mousedown", down);
-        document.removeEventListener("keydown", key);
-        window.removeEventListener("scroll", onClose, true);
-        window.removeEventListener("resize", onClose);
-      };
-    }, [onClose]);
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const mw = 220, mh = 460;
-    const left = x + mw > vw ? vw - mw - 8 : x;
-    const top = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
-    const TB_W = 258, TB_H = 54, TB_GAP = 6;
-    const tbMaxWidth = Math.min(TB_W, vw - 16);
-    let tbTop = top - TB_H - TB_GAP;
-    if (tbTop < 8) tbTop = Math.min(top + mh + TB_GAP, vh - TB_H - 8);
-    const tbLeft = Math.min(Math.max(8, left), vw - tbMaxWidth - 8);
-    const Item = ({ icon, label, hint, danger, disabled, onClick, children }) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onClick: disabled ? void 0 : onClick,
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          padding: "3px 11px",
-          cursor: disabled ? "default" : "pointer",
-          fontSize: 11,
-          color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--txt)",
-          borderRadius: 4,
-          transition: "background .1s",
-          fontFamily: "'Inter',system-ui,sans-serif",
-          opacity: disabled ? 0.5 : 1
-        },
-        onMouseEnter: (e) => {
-          if (!disabled) e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)";
-        },
-        onMouseLeave: (e) => {
-          e.currentTarget.style.background = "transparent";
-        }
-      },
-      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 12, flexShrink: 0, color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--mut)", width: 14, textAlign: "center" }, "aria-hidden": "true" }),
-      /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, label, children),
-      hint && /* @__PURE__ */ React.createElement("span", { style: { color: "#b0b7c0", fontSize: 9, fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".03em" } }, hint)
-    );
-    const Sep = () => /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } });
-    const fb = fmt || {
-      bold: !!task.bold,
-      italic: !!task.italic,
-      underline: !!task.underline,
-      fill: task.rowColor || null,
-      color: task.textColor || null,
-      size: task.fontSize || null,
-      naturalSize: [13, 12, 11.5, 11][Math.min(task.level || 0, 3)],
-      hasAny: !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize,
-      count: 1,
-      unit: "row",
-      scopeLabel: null
-    };
-    const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
-    const [subMeet, setSubMeet] = useState7(false);
-    const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
-    const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
-    const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
-    const curBodyName = !task.meetingBound ? "" : meetingBody ? meetingBody.name || "Meeting body" : "⚠ calendar missing";
-    const isDeadlineRow = task.deadlineForTaskId != null;
-    const subOpenLeft = left + mw + 210 > vw;
-    const nextMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
-    const prevMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
-    const fmtMeetingStep = (iso) => {
-      const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
-      return isNaN(d) ? "" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    };
-    const SubCaption = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 11px 2px", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", userSelect: "none" } }, children);
-    return ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-        FormatMiniToolbar,
-        {
-          ref: toolbarRef,
-          fmt: fb,
-          top: tbTop,
-          left: tbLeft,
-          maxWidth: tbMaxWidth,
-          onSetBold,
-          onSetItalic,
-          onSetUnderline,
-          onSetTextColor,
-          onSetFill: onSetRowColor,
-          onSetFontSize,
-          onClearFormat
-        }
-      ), /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top,
-        left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: "3px 0",
-        zIndex: 9999,
-        boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
-        minWidth: mw
-      } }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-top", label: "Insert Row Above", hint: "Ins", onClick: onInsertAbove }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-bottom", label: "Insert Row Below", onClick: onInsertBelow }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-sitemap", label: "Add Subtask", onClick: onAddSubtask }), /* @__PURE__ */ React.createElement(Sep, null), meetingBody && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-right", label: nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting", disabled: !nextMeetingIso, onClick: () => onStepMeeting(nextMeetingIso) }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-left", label: prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting", disabled: !prevMeetingIso, onClick: () => onStepMeeting(prevMeetingIso) })), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" }, onMouseEnter: () => setSubMeet(true), onMouseLeave: () => setSubMeet(false) }, meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-plus", label: "Add a meeting calendar…", onClick: onAddMeetingCalendar }) : isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: `Deadline for: ${deadlineAnchorName || "(missing task)"}`, hint: "▸" }) : task.meetingBound ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: `Meeting: ${curBodyName}${foreignMatch ? ` — from ${foreignMatch.schedName}` : ""}`, hint: "▸" }) : /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar", hint: "▸" }), subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && /* @__PURE__ */ React.createElement("div", { style: {
-        position: "absolute",
-        top: -4,
-        ...subOpenLeft ? { right: "100%" } : { left: "100%" },
-        minWidth: 200,
-        maxHeight: 320,
-        overflow: "auto",
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-        padding: "3px 0",
-        zIndex: 1e4
-      } }, isDeadlineRow ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, "Deadline row for “", deadlineAnchorName || "missing task", "”"), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag-off", label: "Unlink (keep current date)", onClick: onUnlinkDeadline })) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"), /* @__PURE__ */ React.createElement(Item, { icon: !task.meetingBound ? "ti-check" : "ti-circle", label: "— none —", onClick: onUnbindMeeting }), meetingBodies.map((b) => {
-        const isCur = task.meetingBound && task.meetingBodyId === b.id;
-        return /* @__PURE__ */ React.createElement(Item, { key: b.id, icon: isCur ? "ti-check" : "ti-circle", label: b.name || "Meeting body", onClick: () => onBindMeeting(b.id) });
-      }), otherBodies.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "From other schedules"), otherBodies.map((ob) => {
-        const isCur = task.meetingBound && !localBody && task.meetingBodyId === ob.body.id;
-        return /* @__PURE__ */ React.createElement(
-          Item,
-          {
-            key: `${ob.pid}:${ob.body.id}`,
-            icon: isCur ? "ti-check" : "ti-calendar-event",
-            label: `${ob.body.name || "Meeting body"} · ${ob.schedName}${isCur ? " — copy into this schedule" : ""}`,
-            onClick: () => onImportBindMeeting(ob.pid, ob.body.id)
-          }
-        );
-      })), bindCount === 1 && task.meetingBound && !task.hasChildren && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: "+ Add deadline row (call/file-by date)", onClick: onAddDeadlineRow })), bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "Use as deadline row for"), boundTasks.slice(0, 8).map((bt) => /* @__PURE__ */ React.createElement(Item, { key: bt.id, icon: "ti-flag", label: bt.name, onClick: () => onLinkAsDeadline(bt.id) })))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-settings", label: "Manage meeting calendars…", onClick: onAddMeetingCalendar }))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons", label: hasIcons ? "Change icon…" : "Set icon…", onClick: onSetIcon }), hasIcons && /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons-off", label: "Remove icon", onClick: onRemoveIcon }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate Row", onClick: onDuplicate }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-scissors", label: "Cut", hint: "Ctrl+X", onClick: onCutTask }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-files", label: "Copy", hint: "Ctrl+C", onClick: onCopyTaskFull }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-clipboard", label: "Paste Below", hint: "Ctrl+V", onClick: onPasteTask, disabled: !hasClipboard }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-increase", label: "Indent →", hint: "Alt⇧→", onClick: onIndent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-decrease", label: "Outdent ←", hint: "Alt⇧←", onClick: onOutdent, disabled: !canOutdent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-folder-symlink", label: "Move to…", onClick: onMoveTo }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row", danger: true, onClick: onDelete }))),
-      document.body
-    );
-  }
-  var MB_WD = [{ v: 0, l: "Sun" }, { v: 1, l: "Mon" }, { v: 2, l: "Tue" }, { v: 3, l: "Wed" }, { v: 4, l: "Thu" }, { v: 5, l: "Fri" }, { v: 6, l: "Sat" }];
-  var MB_POSITIONS = [{ v: 1, l: "1st" }, { v: 2, l: "2nd" }, { v: 3, l: "3rd" }, { v: 4, l: "4th" }, { v: 5, l: "5th" }, { v: -2, l: "2nd-to-last" }, { v: -1, l: "Last" }];
-  var MB_MONTHS = [{ v: 1, l: "Jan" }, { v: 2, l: "Feb" }, { v: 3, l: "Mar" }, { v: 4, l: "Apr" }, { v: 5, l: "May" }, { v: 6, l: "Jun" }, { v: 7, l: "Jul" }, { v: 8, l: "Aug" }, { v: 9, l: "Sep" }, { v: 10, l: "Oct" }, { v: 11, l: "Nov" }, { v: 12, l: "Dec" }];
-  var MB_PATTERN_COLORS = ["#2563eb", "#d97706", "#059669", "#db2777", "#7c3aed", "#0891b2"];
-  var newMeetingBody = () => ({
-    id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    name: "",
-    jurisdiction: "",
-    recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
-    agendaLead: { type: "offset", n: 10, unit: "business" },
-    cutoffTime: "12:00 PM",
-    sameDayFilingAllowed: false,
-    blackoutDates: [],
-    extraDates: [],
-    sourceUrl: "",
-    verifiedOn: ""
-  });
-  var mbFmt = (iso) => {
-    if (!iso) return "";
-    const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
-    return isNaN(d) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  };
-  var MB_ACTIVE_POPOVER_CLOSE = null;
-  function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
-    const [open, setOpen] = useState7(false);
-    const btnRef = useRef7(null), popRef = useRef7(null);
-    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect6(() => {
-      if (!open) return;
-      const close = () => setOpen(false);
-      MB_ACTIVE_POPOVER_CLOSE = close;
-      const down = (e) => {
-        if (!btnRef.current?.contains(e.target) && !popRef.current?.contains(e.target)) setOpen(false);
-      };
-      document.addEventListener("mousedown", down);
-      return () => {
-        document.removeEventListener("mousedown", down);
-        if (MB_ACTIVE_POPOVER_CLOSE === close) MB_ACTIVE_POPOVER_CLOSE = null;
-      };
-    }, [open]);
-    const isAll = value === allValue;
-    const picked = isAll ? [] : Array.isArray(value) ? value : [];
-    const toggle = (v) => {
-      const has = picked.includes(v);
-      const next = has ? picked.filter((x) => x !== v) : [...picked, v];
-      onChange(next.length ? next : allValue);
-    };
-    const openMenu = (e) => {
-      e.stopPropagation();
-      setOpen((o) => !o);
-    };
-    const chip = (on, extra) => ({ padding: "4px 10px", fontSize: 11.5, borderRadius: 5, cursor: "pointer", border: "1px solid var(--bd2)", background: on ? "var(--amber)" : "#fff", color: on ? "#fff" : "var(--mut)", fontFamily: "inherit", ...extra });
-    const label = isAll ? allButtonLabel : formatSelected ? formatSelected(picked) : joinWithAnd(picked.map((v) => (options.find((o) => o.v === v) || {}).l || String(v)));
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        type: "button",
-        ref: btnRef,
-        onClick: openMenu,
-        style: { fontSize: 12, padding: "3px 8px", border: "1px solid var(--bd2)", borderRadius: 5, background: "var(--bg)", color: "var(--txt)", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "inherit" }
-      },
-      label,
-      " ",
-      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 7, opacity: 0.7 } }, "▾")
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          ref: popRef,
-          onMouseDown: (e) => e.stopPropagation(),
-          style: { position: "fixed", top: pos.top, left: pos.left, minWidth: 200, maxWidth: 260, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 6, padding: 6, zIndex: 9999, boxShadow: "0 4px 16px rgba(0,0,0,.15)", display: "flex", flexWrap: "wrap", gap: 4 }
-        },
-        /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            type: "button",
-            role: "checkbox",
-            "aria-checked": isAll,
-            onClick: () => {
-              onChange(allValue);
-              setOpen(false);
-            },
-            style: chip(isAll, { flexBasis: "100%", fontWeight: 700 })
-          },
-          allRowLabel
-        ),
-        options.map((o) => {
-          const on = picked.includes(o.v);
-          return /* @__PURE__ */ React.createElement("button", { type: "button", role: "checkbox", "aria-checked": on, key: String(o.v), onClick: () => toggle(o.v), style: chip(on) }, o.l);
-        })
-      ),
-      document.body
-    ));
-  }
-  function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
-    const [picked, setPicked] = useState7(() => /* @__PURE__ */ new Set());
-    const toggle = (key) => setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-    const today = fdLocal(/* @__PURE__ */ new Date());
-    const nextDates = (b) => meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, 3);
-    const alreadyHere = (b) => (existingBodies || []).some((eb) => mbBodiesSameCadence(eb, b));
-    const entries = otherSchedules.flatMap((g2) => g2.bodies.map((b) => ({ key: `${g2.pid}:${b.id}`, g: g2, b })));
-    const byKey = new Map(entries.map((e) => [e.key, e.b]));
-    return /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "9px 18px", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { onClick: onCancel, title: "Back", style: { cursor: "pointer", color: "var(--mut)", fontSize: 13, lineHeight: 1 } }, "←"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, fontWeight: 600, color: "var(--txt)" } }, "Import meeting calendars")), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "12px 18px" } }, otherSchedules.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--mut)", fontStyle: "italic" } }, "No other schedules on this account have meeting calendars yet."), otherSchedules.map((g2) => /* @__PURE__ */ React.createElement("div", { key: g2.pid, style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, g2.schedName), g2.bodies.map((b) => {
-      const key = `${g2.pid}:${b.id}`;
-      const on = picked.has(key);
-      const dup = alreadyHere(b);
-      const dates = nextDates(b);
-      return /* @__PURE__ */ React.createElement("label", { key, style: { display: "flex", alignItems: "flex-start", gap: 8, padding: "7px 8px", borderRadius: 6, cursor: "pointer", background: on ? "var(--surf)" : "transparent" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: on, onChange: () => toggle(key), style: { marginTop: 3, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--txt)" } }, b.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic", fontWeight: 400 } }, "Untitled body"), dup && /* @__PURE__ */ React.createElement("span", { style: { marginLeft: 7, fontSize: 9.5, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".04em" } }, "already here")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", marginTop: 2 } }, cadenceSummary(b)), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", marginTop: 1 } }, dates.length ? dates.map((d) => mbFmt(d)).join(" · ") : "no dates resolve")));
-    })))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--bd)", display: "flex", justifyContent: "flex-end", gap: 8, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onCancel, style: { fontSize: 12, padding: "6px 12px" } }, "Cancel"), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "btn",
-        disabled: picked.size === 0,
-        onClick: () => onImport([...picked].map((k) => byKey.get(k)).filter(Boolean)),
-        style: { fontSize: 12, padding: "6px 14px", background: picked.size ? "var(--amber)" : "#eee", color: picked.size ? "#fff" : "var(--mut)", borderColor: picked.size ? "var(--amber)" : "var(--bd2)", cursor: picked.size ? "pointer" : "default" }
-      },
-      "Import",
-      picked.size ? ` ${picked.size}` : ""
-    )));
-  }
-  function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
-    const initial = Array.isArray(bodies) ? bodies : [];
-    const [draft, setDraft] = useState7(() => JSON.parse(JSON.stringify(initial)));
-    const savedRef = useRef7(JSON.stringify(initial));
-    const [savedFlash, setSavedFlash] = useState7(false);
-    const [confirmClose, setConfirmClose] = useState7(false);
-    const list = draft;
-    const dirty = JSON.stringify(draft) !== savedRef.current;
-    const [selId, setSelId] = useState7(() => list[0] && list[0].id || null);
-    const sel = list.find((b) => b.id === selId) || null;
-    const save = () => {
-      onChange(JSON.parse(JSON.stringify(draft)));
-      savedRef.current = JSON.stringify(draft);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1600);
-    };
-    const requestClose = () => {
-      if (dirty) setConfirmClose(true);
-      else onClose();
-    };
-    const backdropRef = useRef7(null);
-    const downOnBackdropRef = useRef7(false);
-    useEffect6(() => {
-      const onKey = (e) => {
-        if (e.key !== "Escape") return;
-        e.stopPropagation();
-        if (MB_ACTIVE_POPOVER_CLOSE) {
-          MB_ACTIVE_POPOVER_CLOSE();
-          MB_ACTIVE_POPOVER_CLOSE = null;
-          return;
-        }
-        if (confirmClose) setConfirmClose(false);
-        else requestClose();
-      };
-      document.addEventListener("keydown", onKey, true);
-      return () => document.removeEventListener("keydown", onKey, true);
-    });
-    const patch = (id, fields) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, ...fields } : b));
-    const rulesOf = (b) => Array.isArray(b.recurrence) && b.recurrence.length ? b.recurrence : [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }];
-    const patchRuleAt = (id, idx, rf) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
-    const addRuleAt = (id) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: [...rulesOf(b), { positions: [1], weekday: 2, months: "all", anchor: null }] } : b));
-    const removeRuleAt = (id, idx) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
-    const patchLead = (id, lf) => setDraft((prev) => prev.map((b) => b.id === id ? { ...b, agendaLead: { ...b.agendaLead || {}, ...lf } } : b));
-    const add = () => {
-      const b = newMeetingBody();
-      setDraft((prev) => [...prev, b]);
-      setSelId(b.id);
-    };
-    const remove = (id) => {
-      const rest = list.filter((b) => b.id !== id);
-      setDraft((prev) => prev.filter((b) => b.id !== id));
-      if (selId === id) setSelId(rest[0] && rest[0].id || null);
-    };
-    const [importOpen, setImportOpen] = useState7(false);
-    const importBodies = (sourceBodies) => {
-      const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
-      setDraft(next);
-      if (ids.length) setSelId(ids[ids.length - 1]);
-      setImportOpen(false);
-    };
-    const inp = { fontSize: 12, padding: "5px 8px", border: "1px solid var(--bd2)", borderRadius: 5, background: "var(--bg)", color: "var(--txt)", width: "100%", boxSizing: "border-box", fontFamily: "'Inter',system-ui,sans-serif" };
-    const lbl = { fontSize: 10, fontWeight: 600, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".05em", margin: "0 0 4px", display: "block" };
-    const sect = { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".07em", margin: "18px 0 8px", paddingBottom: 5, borderBottom: "1px solid var(--bd)" };
-    const seg = (opts, val, on) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 5, overflow: "hidden", flexShrink: 0 } }, opts.map((o) => /* @__PURE__ */ React.createElement("span", { key: String(o.v), onClick: () => on(o.v), style: { padding: "4px 10px", fontSize: 11.5, cursor: "pointer", whiteSpace: "nowrap", background: val === o.v ? "var(--amber)" : "transparent", color: val === o.v ? "#fff" : "var(--mut)" } }, o.l)));
-    const today = fdLocal(/* @__PURE__ */ new Date());
-    const preview = (b) => {
-      const rules = rulesOf(b);
-      const n = rules.some((r) => r.positions === "every") ? 8 : 6;
-      const merged = meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, n);
-      return merged.map((date) => {
-        const idx = rules.findIndex((r) => meetingDatesInRange({ recurrence: [r] }, date, date).length > 0);
-        return { date, dot: MB_PATTERN_COLORS[(idx >= 0 ? idx : 0) % MB_PATTERN_COLORS.length] };
-      });
-    };
-    const detail = (b) => {
-      const rules = rulesOf(b);
-      const lead = b.agendaLead || { type: "offset", n: 10, unit: "business" };
-      const dates = preview(b);
-      return /* @__PURE__ */ React.createElement("div", { style: { padding: "16px 20px 20px" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Body name"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.name || "", placeholder: "e.g. Baytown city council", onChange: (e) => patch(b.id, { name: e.target.value }), style: { ...inp, fontWeight: 600 } })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Jurisdiction"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.jurisdiction || "", placeholder: "e.g. Baytown, TX", onChange: (e) => patch(b.id, { jurisdiction: e.target.value }), style: inp })), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => remove(b.id), title: "Remove this meeting body", style: { fontSize: 11, padding: "5px 10px", color: "var(--danger,#d83a3a)" } }, "Remove")), /* @__PURE__ */ React.createElement("div", { style: sect }, "Meets"), rules.map((rule, ri) => {
-        const isEvery = rule.positions === "every";
-        const months = rule.months === "all" || !Array.isArray(rule.months) || !rule.months.length ? "all" : rule.months;
-        const hasAnchor = !!(rule.anchor && rule.anchor.weekday != null && rule.anchor.position != null);
-        const missing = positionMissingReport(rule, today);
-        const ruleDates = meetingDatesInRange({ recurrence: [rule] }, today, addD(today, 366 * 4)).slice(0, 3);
-        const dot = MB_PATTERN_COLORS[ri % MB_PATTERN_COLORS.length];
-        return /* @__PURE__ */ React.createElement("div", { key: ri, style: { border: "1px solid var(--bd)", borderRadius: 6, padding: "10px 12px", marginBottom: 8, background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { title: "This pattern's color in the resolved-dates list below", style: { width: 7, height: 7, marginTop: 6, borderRadius: "50%", background: dot, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, rowGap: 4, alignItems: "center", flexWrap: "wrap", flex: 1, fontSize: 12.5, color: "var(--txt)" } }, /* @__PURE__ */ React.createElement("span", null, "Meets"), !isEvery && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "the"), /* @__PURE__ */ React.createElement(
-          MBMultiPick,
-          {
-            value: isEvery ? "every" : Array.isArray(rule.positions) ? rule.positions : [1],
-            onChange: (v) => patchRuleAt(b.id, ri, v === "every" ? { positions: "every", anchor: null } : { positions: v }),
-            options: MB_POSITIONS,
-            allValue: "every",
-            allRowLabel: "Every week",
-            allButtonLabel: "every",
-            formatSelected: (arr) => joinWithAnd(arr.map((v) => (MB_POSITIONS.find((o) => o.v === v) || {}).l || String(v)))
-          }
-        ), /* @__PURE__ */ React.createElement("select", { value: rule.weekday, onChange: (e) => patchRuleAt(b.id, ri, { weekday: +e.target.value }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l))), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, isEvery ? months === "all" ? "," : "in" : "of"), /* @__PURE__ */ React.createElement(
-          MBMultiPick,
-          {
-            value: months,
-            onChange: (v) => patchRuleAt(b.id, ri, { months: v }),
-            options: MB_MONTHS,
-            allValue: "all",
-            allRowLabel: "Every month",
-            allButtonLabel: isEvery ? "all year" : "every month"
-          }
-        )), rules.length > 1 && /* @__PURE__ */ React.createElement("span", { onClick: () => removeRuleAt(b.id, ri), title: "Remove this pattern", style: { cursor: "pointer", color: "var(--mut)", fontSize: 14, padding: "0 2px", flexShrink: 0 } }, "✕")), !isEvery && /* @__PURE__ */ React.createElement("label", { style: { fontSize: 11.5, color: "var(--txt)", display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", marginTop: 10, paddingLeft: 13 } }, /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "checkbox",
-            checked: hasAnchor,
-            style: { marginTop: 2, flexShrink: 0 },
-            onChange: (e) => patchRuleAt(b.id, ri, e.target.checked ? { anchor: { position: 1, weekday: (rule.weekday + 6) % 7 } } : { anchor: null })
-          }
-        ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", null, "counting from after the"), hasAnchor ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("select", { value: rule.anchor.position, onChange: (e) => patchRuleAt(b.id, ri, { anchor: { ...rule.anchor, position: +e.target.value } }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_POSITIONS.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.v, value: o.v }, o.l))), /* @__PURE__ */ React.createElement("select", { value: rule.anchor.weekday, onChange: (e) => patchRuleAt(b.id, ri, { anchor: { ...rule.anchor, weekday: +e.target.value } }), style: { ...inp, width: "auto", display: "inline-block" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l)))) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "1st Monday (e.g. the U.S. Election Day pattern)"))), !isEvery && missing && missing.missing > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, paddingLeft: 13, fontSize: 11, color: "var(--warn-text,#b45309)" } }, "⚠ ", missing.missing, " of the next ", missing.checked, " picked months have no such meeting."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, paddingTop: 8, paddingLeft: 13, borderTop: "1px dashed var(--bd2)", fontSize: 11.5, lineHeight: 1.5 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "Resolves to "), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "var(--txt)" } }, mbRuleSummary(rule)), ruleDates.length ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, " — next: ", ruleDates.map((d) => mbFmt(d)).join(" · ")) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--warn-text,#b45309)", fontWeight: 600 } }, " — no dates resolve; check the rule")));
-      }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => addRuleAt(b.id), style: { fontSize: 11, padding: "4px 10px" } }, "+ And also…"), /* @__PURE__ */ React.createElement("div", { style: sect }, "Deadline before each meeting ", /* @__PURE__ */ React.createElement("span", { style: { textTransform: "none", fontWeight: 400, letterSpacing: 0 } }, "— file the agenda / call the election by (e.g. 78 calendar days before an election)")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10.5, color: "var(--mut)", margin: "0 0 8px", lineHeight: 1.5 } }, "To put this date on the schedule: right-click the bound task → “+ Add deadline row”. The row then always sits this far ahead of the meeting and moves with it."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, seg([{ v: "offset", l: "Days before" }, { v: "weekdayAnchor", l: "Weekday anchor" }], lead.type || "offset", (v) => patchLead(b.id, { type: v })), (lead.type || "offset") === "offset" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { type: "number", min: 0, value: lead.n ?? 10, onChange: (e) => patchLead(b.id, { n: +e.target.value }), style: { ...inp, width: 60 } }), seg([{ v: "business", l: "business" }, { v: "calendar", l: "calendar" }], lead.unit || "business", (v) => patchLead(b.id, { unit: v })), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, color: "var(--mut)" } }, "days before")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { type: "number", min: 0, value: lead.weeksBefore ?? 2, onChange: (e) => patchLead(b.id, { weeksBefore: +e.target.value }), style: { ...inp, width: 52 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, color: "var(--mut)" } }, "weeks before, on"), /* @__PURE__ */ React.createElement("select", { value: lead.weekday ?? 3, onChange: (e) => patchLead(b.id, { weekday: +e.target.value }), style: { ...inp, width: "auto" } }, MB_WD.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.v, value: w.v }, w.l))))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 18, marginTop: 10, alignItems: "flex-end", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Cutoff time"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.cutoffTime || "", placeholder: "12:00 PM", onChange: (e) => patch(b.id, { cutoffTime: e.target.value }), style: { ...inp, width: 100 } })), /* @__PURE__ */ React.createElement("label", { style: { fontSize: 11.5, color: "var(--txt)", display: "flex", alignItems: "center", gap: 6, cursor: "pointer", paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!b.sameDayFilingAllowed, onChange: (e) => patch(b.id, { sameDayFilingAllowed: e.target.checked }) }), " Same-day filing OK")), /* @__PURE__ */ React.createElement("div", { style: sect }, "Exceptions & source"), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Cancelled / blackout dates"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: (b.blackoutDates || []).join(", "), placeholder: "2026-12-22, 2026-12-29", title: "Comma-separated YYYY-MM-DD", onChange: (e) => patch(b.id, { blackoutDates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Special-called / extra dates"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: (b.extraDates || []).join(", "), placeholder: "2026-08-18", title: "Comma-separated YYYY-MM-DD", onChange: (e) => patch(b.id, { extraDates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Published calendar URL"), /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, value: b.sourceUrl || "", placeholder: "https://…/agenda-calendar", onChange: (e) => patch(b.id, { sourceUrl: e.target.value }), style: inp })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: lbl }, "Verified on"), /* @__PURE__ */ React.createElement("input", { type: "date", value: b.verifiedOn || "", onChange: (e) => patch(b.id, { verifiedOn: e.target.value }), style: { ...inp, width: "auto" } }))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 18, background: "var(--surf)", border: "1px solid var(--bd)", borderRadius: 8, padding: "10px 14px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "This body meets "), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "var(--txt)" } }, cadenceSummary(b))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".06em" } }, "Next ", dates.length || (rules.some((r) => r.positions === "every") ? 8 : 6), " meetings → file by"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)" } }, b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified")), dates.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--mut)", fontStyle: "italic", marginTop: 4 } }, "No dates resolve — check the recurrence rule."), dates.map(({ date: m, dot }) => /* @__PURE__ */ React.createElement("div", { key: m, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0", color: "var(--txt)", gap: 8, borderTop: "1px dashed var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, fontWeight: 500 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: dot, flexShrink: 0 } }), mbFmt(m)), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, "file by ", mbFmt(agendaDeadline(b, m)), b.cutoffTime ? ` · ${b.cutoffTime}` : ""))), b.sourceUrl && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6 } }, /* @__PURE__ */ React.createElement("a", { href: b.sourceUrl, target: "_blank", rel: "noreferrer", style: { fontSize: 10.5, color: "var(--amber)" } }, "published calendar ↗"))));
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref: backdropRef,
-        onMouseDown: (e) => {
-          downOnBackdropRef.current = e.target === backdropRef.current;
-        },
-        onClick: (e) => {
-          const hit = e.target === backdropRef.current && downOnBackdropRef.current;
-          downOnBackdropRef.current = false;
-          if (hit) requestClose();
-        },
-        style: { position: "fixed", inset: 0, background: "rgba(15,23,42,.38)", zIndex: 9e3, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          "data-testid": "meeting-calendars-modal",
-          onMouseDown: (e) => e.stopPropagation(),
-          style: {
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 10,
-            width: "min(860px,96vw)",
-            height: "min(640px,90vh)",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            boxShadow: "0 16px 48px rgba(0,0,0,.18)"
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "Meeting calendars"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, projName || "Project")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 14, alignItems: "center", minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10.5, color: "var(--mut)", maxWidth: 380, textAlign: "right", lineHeight: 1.45 } }, "External decision bodies (city council, P&Z, commissioners court). Bind a task to one and its hearing date snaps to the body's calendar."), /* @__PURE__ */ React.createElement("span", { onClick: requestClose, title: "Close (Esc)", style: { cursor: "pointer", color: "var(--mut)", fontSize: 17, lineHeight: 1, flexShrink: 0 } }, "✕"))),
-        importOpen ? /* @__PURE__ */ React.createElement(MeetingImportPicker, { otherSchedules, existingBodies: draft, onCancel: () => setImportOpen(false), onImport: importBodies }) : /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { width: 216, flexShrink: 0, borderRight: "1px solid var(--bd)", display: "flex", flexDirection: "column", background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "8px 0" } }, list.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", fontStyle: "italic", padding: "8px 14px" } }, "No meeting bodies yet."), list.map((b) => {
-          const isSel = b.id === selId;
-          return /* @__PURE__ */ React.createElement(
-            "div",
-            {
-              key: b.id,
-              "data-testid": "meeting-body-row",
-              onClick: () => setSelId(b.id),
-              style: { padding: "8px 12px 8px 13px", cursor: "pointer", borderLeft: `3px solid ${isSel ? "var(--amber)" : "transparent"}`, background: isSel ? "#fff" : "transparent" }
-            },
-            /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, b.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic", fontWeight: 400 } }, "Untitled body")),
-            /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, cadenceSummary(b))
-          );
-        })), /* @__PURE__ */ React.createElement("div", { style: { padding: 10, borderTop: "1px solid var(--bd)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: add, style: { width: "100%", fontSize: 11.5, padding: "6px 10px" } }, "+ Add meeting body"), otherSchedules.length > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setImportOpen(true), style: { width: "100%", fontSize: 11.5, padding: "6px 10px" } }, "Import from another schedule…"))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", minWidth: 0 } }, sel ? detail(sel) : /* @__PURE__ */ React.createElement("div", { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center", padding: "0 48px" } }, /* @__PURE__ */ React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 24 24", fill: "none", stroke: "var(--mut)", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, fontWeight: 600, color: "var(--txt)" } }, "No meeting calendars yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11.5, color: "var(--mut)", lineHeight: 1.55, maxWidth: 380 } }, "Add an external decision body — a city council, P&Z commission, or commissioners court. Bind a task to it (right-click the task) and its hearing date snaps to the body's calendar, with the agenda-filing deadline derived automatically."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 4 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: add, style: { fontSize: 12, padding: "7px 14px" } }, "+ Add meeting body"), otherSchedules.length > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setImportOpen(true), style: { fontSize: 12, padding: "7px 14px" } }, "Import from another schedule…"))))),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderTop: "1px solid var(--bd)", flexShrink: 0, background: "var(--surf)" } }, confirmClose ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--warn-text,#b45309)" } }, "You have unsaved changes."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setConfirmClose(false), style: { fontSize: 12, padding: "6px 12px" } }, "Keep editing"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose, style: { fontSize: 12, padding: "6px 12px", color: "var(--danger,#d83a3a)" } }, "Discard"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
-          save();
-          onClose();
-        }, style: { fontSize: 12, padding: "6px 12px", background: "var(--amber)", color: "#fff", borderColor: "var(--amber)" } }, "Save & close"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: dirty ? "var(--warn-text,#b45309)" : savedFlash ? "#15803d" : "var(--mut)" } }, dirty ? "● Unsaved changes — nothing on the schedule has moved yet" : savedFlash ? "✓ Saved — the schedule updated" : "All changes saved"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: requestClose, style: { fontSize: 12, padding: "6px 12px" } }, dirty ? "Cancel" : "Close"), dirty && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: save, style: { fontSize: 12, padding: "6px 14px", background: "var(--amber)", color: "#fff", borderColor: "var(--amber)" } }, "Save changes"))))
-      )
-    );
-  }
-  function SettingsPanel({ data, setData, onClose, openFile, fileLinked, initialSection, onOpenMeetingCalendars }) {
-    const s = data.settings || DEFAULT_SETTINGS;
-    const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    const updHol = (k, v) => setData((d) => {
-      const holidays = { ...d.settings.holidays, [k]: v };
-      setHolidaySet(buildHolidaySet(holidays));
-      const newProjects = {};
-      Object.entries(d.projects || {}).forEach(([pid, proj]) => {
-        let tasks = (proj.tasks || []).map((t) => ({ ...t }));
-        tasks = recomputeSchedule(tasks);
-        newProjects[pid] = { ...proj, tasks };
-      });
-      return { ...d, settings: { ...d.settings, holidays }, projects: newProjects };
-    });
-    const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter((t) => t.pinnedStart).length, 0);
-    const [open, setOpen] = useState7(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
-    const tog = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
-    useEffect6(() => {
-      const onKey = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("keydown", onKey);
-      return () => document.removeEventListener("keydown", onKey);
-    }, [onClose]);
-    useEffect6(() => {
-      if (!initialSection) return;
-      const el = document.querySelector(`[data-section="${initialSection}"]`);
-      if (el) el.scrollIntoView({ block: "start" });
-    }, [initialSection]);
-    const thisYear = (/* @__PURE__ */ new Date()).getFullYear();
-    const holDates = {};
-    HOLIDAY_DEFS.forEach((h) => {
-      const ds = h.fn(thisYear);
-      const d = /* @__PURE__ */ new Date(ds + "T12:00:00");
-      const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      holDates[h.k] = h.rule ? `${h.rule} · ${dateStr}` : dateStr;
-    });
-    const SectionHdr = ({ id, title }) => /* @__PURE__ */ React.createElement("div", { "data-section": id, onClick: () => tog(id), style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: "10px 0 7px",
-      borderBottom: "1px solid var(--bd)",
-      marginBottom: open[id] ? 8 : 0,
-      cursor: "pointer",
-      userSelect: "none"
-    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase" } }, title), /* @__PURE__ */ React.createElement("span", { style: {
-      fontSize: 10,
-      color: "var(--mut)",
-      display: "inline-block",
-      transform: open[id] ? "rotate(180deg)" : "rotate(0deg)",
-      transition: "transform .18s",
-      lineHeight: 1
-    } }, "▾"));
-    const Row2 = ({ label, children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", gap: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, label), children);
-    const Toggle2 = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: (e) => {
-      e.stopPropagation();
-      onChange(!on);
-    }, style: {
-      width: 28,
-      height: 15,
-      borderRadius: 8,
-      background: on ? "var(--amber)" : "var(--bd2)",
-      display: "inline-flex",
-      alignItems: "center",
-      cursor: "pointer",
-      flexShrink: 0,
-      transition: "background .15s",
-      padding: "0 2px"
-    } }, /* @__PURE__ */ React.createElement("span", { style: {
-      width: 11,
-      height: 11,
-      borderRadius: "50%",
-      background: "var(--bg)",
-      boxShadow: "0 1px 3px rgba(0,0,0,.2)",
-      transform: on ? "translateX(13px)" : "translateX(0)",
-      transition: "transform .15s",
-      flexShrink: 0
-    } }));
-    const SegBtn2 = ({ options, value, onChange }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 4, overflow: "hidden", flexShrink: 0 } }, options.map((o) => /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        key: String(o.v),
-        onClick: () => onChange(o.v),
-        style: {
-          padding: "3px 10px",
-          fontSize: 11,
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-          background: value === o.v ? "var(--amber)" : "transparent",
-          color: value === o.v ? "#fff" : "var(--mut)",
-          transition: "background .12s,color .12s",
-          fontFamily: "'Inter',system-ui,sans-serif",
-          fontWeight: value === o.v ? 500 : 400
-        }
-      },
-      o.l
-    )));
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        style: {
-          position: "fixed",
-          top: 48,
-          right: 12,
-          width: 300,
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 8,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
-          zIndex: 9999,
-          padding: "0 16px 14px",
-          overflow: "hidden",
-          maxHeight: "calc(100vh - 64px)",
-          overflowY: "auto"
-        },
-        onMouseDown: (e) => e.stopPropagation()
-      },
-      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 4px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: "var(--txt)" } }, "Settings"), /* @__PURE__ */ React.createElement("span", { onClick: onClose, style: { cursor: "pointer", color: "var(--mut)", fontSize: 16, lineHeight: 1 } }, "✕")),
-      /* @__PURE__ */ React.createElement(SectionHdr, { id: "view", title: "View" }),
-      open.view && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 4 } }, /* @__PURE__ */ React.createElement(Row2, { label: "Default drag mode" }, /* @__PURE__ */ React.createElement(SegBtn2, { options: [{ l: "Snap", v: true }, { l: "Free", v: false }], value: s.snapDefault, onChange: (v) => upd({ snapDefault: v }) })), /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 0 2px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 6 } }, "Default split (grid %)"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: 20, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, height: 4, borderRadius: 2, background: "var(--bd2)", overflow: "hidden", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${(s.defaultSplit - 20) / (82 - 20) * 100}%`, height: "100%", background: "var(--amber)", transition: "width .05s" } })), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          type: "range",
-          min: 20,
-          max: 82,
-          value: s.defaultSplit,
-          onChange: (e) => upd({ defaultSplit: +e.target.value }),
-          style: {
-            width: "100%",
-            appearance: "none",
-            WebkitAppearance: "none",
-            background: "transparent",
-            margin: 0,
-            cursor: "pointer",
-            position: "relative",
-            zIndex: 1
-          }
-        }
-      )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "20%"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--amber)" } }, s.defaultSplit, "% grid"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "82%")))),
-      /* @__PURE__ */ React.createElement("div", { style: { marginTop: open.view ? 6 : 2 } }, /* @__PURE__ */ React.createElement(SectionHdr, { id: "holidays", title: "Holidays" }), open.holidays && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.45, margin: "0 0 6px" } }, "Toggling a holiday recalculates every schedule immediately. Pinned start dates stay put — computed finish dates and downstream tasks shift."), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 4px", paddingBottom: 4 } }, HOLIDAY_DEFS.map((h) => {
-        const on = !!(s.holidays || {})[h.k];
-        return /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            key: h.k,
-            onClick: () => updHol(h.k, !on),
-            style: {
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "5px 6px",
-              borderRadius: 4,
-              cursor: "pointer",
-              gap: 4,
-              background: on ? "#f5f3ff" : "transparent",
-              transition: "background .12s"
-            },
-            onMouseEnter: (e) => {
-              if (!on) e.currentTarget.style.background = "var(--surf)";
-            },
-            onMouseLeave: (e) => {
-              e.currentTarget.style.background = on ? "#f5f3ff" : "transparent";
-            }
-          },
-          /* @__PURE__ */ React.createElement("div", { style: { minWidth: 0, flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: {
-            fontSize: 11,
-            color: on ? "var(--txt)" : "var(--mut)",
-            fontWeight: on ? 500 : 400,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            lineHeight: 1.3
-          } }, h.label), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: on ? "#7c6ad6" : "#b0b7c0", lineHeight: 1.3, marginTop: 1 } }, holDates[h.k])),
-          /* @__PURE__ */ React.createElement(Toggle2, { on, onChange: (v) => updHol(h.k, v) })
-        );
-      }))), /* @__PURE__ */ React.createElement(SectionHdr, { id: "meetings", title: "Meeting calendars" }), open.meetings && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.45, margin: "0 0 8px" } }, "External decision bodies (city council, P&Z, commissioners court) whose approvals only happen on a cadence — stored per project. Edited in their own window."), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
-        onOpenMeetingCalendars && onOpenMeetingCalendars();
-        onClose();
-      }, style: { fontSize: 11, padding: "5px 11px" } }, (() => {
-        const n = ((activeProjectOf(data) || {}).meetingBodies || []).length;
-        return n ? `Open Meeting calendars (${n}) ↗` : "Set up Meeting calendars ↗";
-      })())), /* @__PURE__ */ React.createElement(SectionHdr, { id: "schedule", title: "Schedule" }), open.schedule && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 8 } }, "Editing a date directly ", /* @__PURE__ */ React.createElement("strong", null, "pins"), " it — the dependency cascade stops moving that task. Recascade removes every pin in every project and recomputes all dates from predecessor logic. A snapshot is saved first, so it can be undone from Version History."), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--txt)", marginBottom: 8 } }, "Currently pinned: ", /* @__PURE__ */ React.createElement("strong", null, pinCount), " task", pinCount === 1 ? "" : "s", " across all projects"), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          className: "btn",
-          title: "Strip all pinned dates and recalculate everything from predecessor logic",
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            padding: "4px 11px",
-            borderColor: "#fca5a5",
-            color: "#b91c1c"
-          },
-          onClick: async () => {
-            if (!await askConfirm({
-              title: "Strip all pinned dates and recalculate?",
-              body: "Every project is recalculated from predecessor logic.\n\nA backup snapshot is saved first — you can restore from Version History if needed.",
-              confirmLabel: "Recalculate",
-              danger: true
-            })) return;
-            setData((d) => {
-              try {
-                window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-recascade", skipSanity: true });
-              } catch {
-              }
-              setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
-              const newProjects = {};
-              Object.entries(d.projects).forEach(([pid, proj]) => {
-                let tasks = proj.tasks.map(({ pinnedStart, _pinStart, __wasDirectEdit, ...t }) => t);
-                tasks = recomputeSchedule(tasks);
-                newProjects[pid] = { ...proj, tasks };
-              });
-              return { ...d, _pinnedClean: true, projects: newProjects };
-            });
-            onClose();
-          }
-        },
-        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "23 4 23 10 17 10" }), /* @__PURE__ */ React.createElement("polyline", { points: "1 20 1 14 7 14" }), /* @__PURE__ */ React.createElement("path", { d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" })),
-        "Recascade all projects"
-      )), typeof openFile === "function" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SectionHdr, { id: "backup", title: "Local backup file" }), open.backup && /* @__PURE__ */ React.createElement("div", { style: { paddingBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 8 } }, "Your schedule ", /* @__PURE__ */ React.createElement("strong", null, "auto-saves to the cloud"), " automatically — this is optional. Link a local ", /* @__PURE__ */ React.createElement("strong", null, ".html"), " file (Chrome or Edge) to ALSO keep a copy on this computer, re-written on every save."), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          className: "btn",
-          title: fileLinked ? "A local backup file is linked — click to choose a different file" : "Pick a local .html file to mirror every save into",
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            padding: "4px 11px",
-            borderColor: fileLinked ? "#86efac" : "var(--bd2)",
-            color: fileLinked ? "#16a34a" : "var(--txt)"
-          },
-          onClick: () => {
-            openFile();
-          }
-        },
-        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }), /* @__PURE__ */ React.createElement("polyline", { points: "17 21 17 13 7 13 7 21" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 3 7 8 15 8" })),
-        fileLinked ? "Backup file linked ✓ — choose another" : "Link a local backup file…"
-      ))))
-    );
-  }
-  function FormatPanel({ data, setData, onClose }) {
-    const s = data.settings || {};
-    const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    useEffect6(() => {
-      const onKey = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("keydown", onKey);
-      return () => document.removeEventListener("keydown", onKey);
-    }, []);
-    const Toggle2 = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: (e) => {
-      e.stopPropagation();
-      onChange(!on);
-    }, style: { width: 28, height: 15, borderRadius: 8, background: on ? "var(--amber)" : "var(--bd2)", position: "relative", display: "inline-block", cursor: "pointer", transition: "background .15s", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 11, height: 11, borderRadius: "50%", background: "var(--bg)", boxShadow: "0 1px 3px rgba(0,0,0,.2)", position: "absolute", top: 2, left: on ? 15 : 2, transition: "left .15s" } }));
-    const SegBtn2 = ({ options, value, onChange }) => /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", background: "#f0f0f0", borderRadius: 6, padding: 2, gap: 2 } }, options.map((o) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        key: String(o.v),
-        onClick: () => onChange(o.v),
-        style: {
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 11,
-          fontWeight: 600,
-          padding: "3px 10px",
-          borderRadius: 4,
-          background: value === o.v ? "#fff" : "transparent",
-          color: value === o.v ? "var(--amber)" : "var(--mut)",
-          boxShadow: value === o.v ? "0 1px 2px rgba(0,0,0,.12)" : "none",
-          transition: "all .12s"
-        }
-      },
-      o.l
-    )));
-    const rh = Math.min(34, Math.max(20, s.rowHeight || 24));
-    return /* @__PURE__ */ React.createElement("div", { style: {
-      position: "fixed",
-      top: 48,
-      right: 12,
-      width: 300,
-      background: "var(--bg)",
-      border: "1px solid var(--bd2)",
-      borderRadius: 8,
-      boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
-      zIndex: 9999,
-      padding: "0 16px 14px",
-      maxHeight: "calc(100vh - 70px)",
-      overflowY: "auto",
-      fontFamily: "inherit"
-    } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 8px", borderBottom: "1px solid var(--bd)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)" } }, "Format"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, title: "Close", style: { background: "none", border: "none", cursor: "pointer", fontSize: 15, color: "var(--mut)", padding: "2px 4px", lineHeight: 1 } }, "✕")), /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 0 2px" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 6 } }, "Row height — grid & Gantt"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: 20, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, height: 4, borderRadius: 2, background: "var(--bd2)", overflow: "hidden", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${(rh - 20) / (34 - 20) * 100}%`, height: "100%", background: "var(--amber)", transition: "width .05s" } })), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "range",
-        min: 20,
-        max: 34,
-        value: rh,
-        onChange: (e) => upd({ rowHeight: +e.target.value }),
-        style: {
-          width: "100%",
-          appearance: "none",
-          WebkitAppearance: "none",
-          background: "transparent",
-          margin: 0,
-          cursor: "pointer",
-          position: "relative",
-          zIndex: 1
-        }
-      }
-    )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "20px"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--amber)" } }, rh, "px"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "34px"))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 0 2px", borderTop: "1px solid var(--bd)", marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", display: "block", marginBottom: 5 } }, "Gantt bar labels"), /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", borderBottom: "1px solid var(--bd)", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" } }, "Position"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", borderBottom: "1px solid var(--bd)", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" } }, "Field"))), /* @__PURE__ */ React.createElement("tbody", null, [["left", "Left of bar"], ["right", "Right of bar"]].map(([k, label]) => /* @__PURE__ */ React.createElement("tr", { key: k }, /* @__PURE__ */ React.createElement("td", { style: { padding: "4px 6px", borderBottom: "1px solid var(--bd)", color: "var(--txt)" } }, label), /* @__PURE__ */ React.createElement("td", { style: { padding: "2px 4px", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement(
-      "select",
-      {
-        value: (s.barLabels || {})[k] || "none",
-        onChange: (e) => upd({ barLabels: { ...s.barLabels || {}, [k]: e.target.value } }),
-        style: { width: "100%", background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 3, padding: "3px 6px", fontSize: 11, color: "var(--txt)", fontFamily: "inherit", outline: "none", cursor: "pointer" }
-      },
-      /* @__PURE__ */ React.createElement("option", { value: "none" }, "None"),
-      /* @__PURE__ */ React.createElement("option", { value: "start" }, "Start date"),
-      /* @__PURE__ */ React.createElement("option", { value: "end" }, "End date"),
-      /* @__PURE__ */ React.createElement("option", { value: "owner" }, "Owner"),
-      /* @__PURE__ */ React.createElement("option", { value: "pct" }, "% complete")
-    )))))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, "Show year in dates"), /* @__PURE__ */ React.createElement(Toggle2, { on: (s.barLabels || {}).year !== false, onChange: (v) => upd({ barLabels: { ...s.barLabels || {}, year: v } }) })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, "Task name alignment"), /* @__PURE__ */ React.createElement(
-      SegBtn2,
-      {
-        options: [{ l: "Left", v: "left" }, { l: "Center", v: "center" }, { l: "Right", v: "right" }],
-        value: resolveLabelAlign(data.projects?.[data.aPid]),
-        onChange: (v) => writeLabelAlign(setData, data.aPid, v)
-      }
-    )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 6, lineHeight: 1.4 } }, "Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.")));
-  }
-  function RuleColorPicker({ value, onChange }) {
-    const [open, setOpen] = useState7(false);
-    const dotRef = useRef7(null);
-    const menuRef = useRef7(null);
-    const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.right - 110 }), () => setOpen(false));
-    useEffect6(() => {
-      if (!open) return;
-      const onDown = (e) => {
-        if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
-      };
-      document.addEventListener("mousedown", onDown, true);
-      return () => document.removeEventListener("mousedown", onDown, true);
-    }, [open]);
-    const openMenu = () => {
-      setOpen((o) => !o);
-    };
-    const hh = HEALTH[value] || HEALTH.gray;
-    return /* @__PURE__ */ React.createElement("span", { style: { position: "relative", flexShrink: 0 } }, /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        ref: dotRef,
-        onClick: openMenu,
-        title: hh.label,
-        "data-rule-color-swatch": "1",
-        style: {
-          width: 16,
-          height: 16,
-          borderRadius: "50%",
-          background: hh.dot,
-          border: hh.dot === "#ffffff" ? "1.5px solid #d1d5db" : hh.border,
-          display: "block",
-          cursor: "pointer"
-        }
-      }
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          ref: menuRef,
-          ...MENU_STOPS_GRID,
-          "data-rule-color-menu": "1",
-          style: {
-            position: "fixed",
-            top: pos.top,
-            left: pos.left,
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 6,
-            padding: "4px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            zIndex: 1e4,
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
-            minWidth: 110
-          }
-        },
-        HK.map((hk) => {
-          const h = HEALTH[hk];
-          return /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              key: hk,
-              onClick: () => {
-                onChange(hk);
-                setOpen(false);
-              },
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "3px 6px",
-                borderRadius: 4,
-                cursor: "pointer",
-                background: hk === value ? "var(--surf)" : "transparent"
-              },
-              onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-              onMouseLeave: (e) => e.currentTarget.style.background = hk === value ? "var(--surf)" : "transparent"
-            },
-            /* @__PURE__ */ React.createElement("span", { style: { width: 9, height: 9, borderRadius: "50%", background: h.dot, border: h.dot === "#ffffff" ? "1.5px solid #d1d5db" : h.border, flexShrink: 0 } }),
-            /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)" } }, h.label)
-          );
-        })
-      ),
-      document.body
-    ));
-  }
-  function ConditionRow({ cond, onChange, onRemove }) {
-    const field = RULE_FIELD_BY_K[cond.field] || RULE_FIELDS[0];
-    const ops = opsForField(field.k);
-    const op = ops.find((o) => o.k === cond.op) || ops[0];
-    const setField = (fk) => {
-      const f = RULE_FIELD_BY_K[fk];
-      const newOp = opsForField(fk)[0];
-      onChange({ field: fk, op: newOp.k, value: newOp.needsValue ? newOp.defaultValue ?? (f.type === "status" ? "red" : "") : void 0 });
-    };
-    const setOp = (ok) => {
-      const newOp = ops.find((o) => o.k === ok);
-      onChange({ op: ok, value: newOp.needsValue ? cond.value ?? newOp.defaultValue ?? (field.type === "status" ? "red" : "") : void 0 });
-    };
-    const selSt = { fontSize: 11, color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", background: "var(--bg)", minWidth: 0 };
-    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("select", { value: field.k, onChange: (e) => setField(e.target.value), style: { ...selSt, flex: "1 1 120px" } }, RULE_FIELDS.map((f) => /* @__PURE__ */ React.createElement("option", { key: f.k, value: f.k }, f.label))), /* @__PURE__ */ React.createElement("select", { value: op?.k, onChange: (e) => setOp(e.target.value), style: { ...selSt, flex: "1 1 130px" } }, ops.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.k, value: o.k }, o.label))), op?.needsValue && field.type === "date" && /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "number",
-        min: 0,
-        value: cond.value ?? op.defaultValue ?? 0,
-        onChange: (e) => onChange({ value: Math.max(0, parseInt(e.target.value, 10) || 0) }),
-        style: { width: 36, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 0 }
-      }
-    ), op?.needsValue && op.valueKind === "status" && /* @__PURE__ */ React.createElement(RuleColorPicker, { value: cond.value || "red", onChange: (hk) => onChange({ value: hk }) }), op?.needsValue && op.valueKind === "text" && /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...NO_AUTOFILL,
-        type: "text",
-        value: cond.value || "",
-        placeholder: "value",
-        onChange: (e) => onChange({ value: e.target.value }),
-        style: { width: 80, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 1, minWidth: 0 }
-      }
-    ), op?.needsValue && op.valueKind === "number" && /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "number",
-        value: cond.value ?? 0,
-        onChange: (e) => onChange({ value: parseFloat(e.target.value) || 0 }),
-        style: { width: 64, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 4, padding: "3px 4px", flexShrink: 0 }
-      }
-    ), /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        onClick: onRemove,
-        title: "Remove condition",
-        style: { cursor: "pointer", color: "var(--mut)", fontSize: 12, lineHeight: 1, flexShrink: 0, padding: "0 2px", marginLeft: "auto" }
-      },
-      "✕"
-    ));
-  }
-  function ConditionGroup({ conds, combinator, onChange, addLabel }) {
-    const setConds = (next) => onChange({ conds: next, combinator });
-    const updCond = (i, patch) => setConds(conds.map((c, ci) => ci === i ? { ...c, ...patch } : c));
-    const removeCond = (i) => setConds(conds.filter((_, ci) => ci !== i));
-    const addCond = () => {
-      const op = opsForField(RULE_FIELDS[0].k)[0];
-      setConds([...conds, { field: RULE_FIELDS[0].k, op: op.k, value: op.needsValue ? op.defaultValue : void 0 }]);
-    };
-    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } }, conds.map((c, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, i > 0 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 4 } }, ["AND", "OR"].map((op) => /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        key: op,
-        onClick: () => onChange({ conds, combinator: op }),
-        style: {
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: ".03em",
-          cursor: "pointer",
-          padding: "1px 6px",
-          borderRadius: 3,
-          color: combinator === op ? "var(--on-accent)" : "var(--mut)",
-          background: combinator === op ? "var(--blue)" : "var(--surf)"
-        }
-      },
-      op
-    ))), /* @__PURE__ */ React.createElement(ConditionRow, { cond: c, onChange: (patch) => updCond(i, patch), onRemove: () => removeCond(i) }))), /* @__PURE__ */ React.createElement("span", { onClick: addCond, style: { fontSize: 10.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer", alignSelf: "flex-start" } }, "+ ", addLabel));
-  }
-  function AutomationPanel({ data, setData, onClose }) {
-    const s = data.settings || DEFAULT_SETTINGS;
-    const rules = getHealthRules(s);
-    const setRules = (next) => setData((d) => ({ ...d, settings: { ...d.settings, healthRules: next } }));
-    const updRule = (id, patch) => setRules(rules.map((r) => r.id === id ? { ...r, ...patch } : r));
-    const removeRule = (id) => setRules(rules.filter((r) => r.id !== id));
-    const moveRule = (i, dir) => {
-      const j = i + dir;
-      if (j < 0 || j >= rules.length) return;
-      const next = rules.slice();
-      [next[i], next[j]] = [next[j], next[i]];
-      setRules(next);
-    };
-    const addRule = () => {
-      const op = opsForField(RULE_FIELDS[0].k)[0];
-      setRules([...rules, {
-        id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-        when: [{ field: RULE_FIELDS[0].k, op: op.k, value: op.needsValue ? op.defaultValue : void 0 }],
-        whenCombinator: "AND",
-        color: "red",
-        unless: [],
-        unlessCombinator: "OR"
-      }]);
-    };
-    const resetDefaults = () => setRules(DEFAULT_HEALTH_RULES.map((r) => ({
-      ...r,
-      id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-      when: r.when.map((c) => ({ ...c })),
-      unless: r.unless.map((c) => ({ ...c }))
-    })));
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        style: {
-          position: "fixed",
-          top: 48,
-          right: 12,
-          width: 440,
-          maxHeight: "calc(100vh - 64px)",
-          overflowY: "auto",
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 8,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
-          zIndex: 9999,
-          padding: "0 16px 14px"
-        },
-        onMouseDown: (e) => e.stopPropagation()
-      },
-      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0 10px", position: "sticky", top: 0, background: "var(--bg)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "var(--amber)", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: "var(--txt)" } }, "Automation")), /* @__PURE__ */ React.createElement("span", { onClick: onClose, style: { cursor: "pointer", color: "var(--mut)", fontSize: 16, lineHeight: 1 } }, "✕")),
-      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", lineHeight: 1.5, marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid var(--bd)" } }, "First matching rule sets a task's color — IF its conditions are true, THEN it sets the status, UNLESS an exception applies."),
-      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, rules.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", padding: "6px 2px" } }, "No rules yet — a task's status stays exactly what you set it to."), rules.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: { display: "flex", flexDirection: "column", gap: 7, padding: "8px 9px", borderRadius: 6, background: "var(--surf)", border: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--mut)" } }, "Rule ", i + 1), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => moveRule(i, -1),
-          title: "Move up",
-          style: { cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, fontSize: 10, color: "var(--mut)" }
-        },
-        "▲"
-      ), /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => moveRule(i, 1),
-          title: "Move down",
-          style: { cursor: i === rules.length - 1 ? "default" : "pointer", opacity: i === rules.length - 1 ? 0.3 : 1, fontSize: 10, color: "var(--mut)" }
-        },
-        "▼"
-      ), /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => removeRule(r.id),
-          title: "Delete rule",
-          style: { cursor: "pointer", color: "var(--mut)", fontSize: 13, lineHeight: 1 }
-        },
-        "✕"
-      ))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)", marginBottom: 3 } }, "IF"), /* @__PURE__ */ React.createElement(
-        ConditionGroup,
-        {
-          conds: r.when,
-          combinator: r.whenCombinator,
-          onChange: ({ conds, combinator }) => updRule(r.id, { when: conds, whenCombinator: combinator }),
-          addLabel: "Add condition"
-        }
-      )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)" } }, "THEN set status to"), /* @__PURE__ */ React.createElement(RuleColorPicker, { value: r.color, onChange: (hk) => updRule(r.id, { color: hk }) })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: "var(--mut)", marginBottom: 3 } }, "UNLESS ", /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 400, textTransform: "none", letterSpacing: 0 } }, "(optional)")), r.unless && r.unless.length > 0 ? /* @__PURE__ */ React.createElement(
-        ConditionGroup,
-        {
-          conds: r.unless,
-          combinator: r.unlessCombinator,
-          onChange: ({ conds, combinator }) => updRule(r.id, { unless: conds, unlessCombinator: combinator }),
-          addLabel: "Add exception"
-        }
-      ) : /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => updRule(r.id, { unless: [{ field: "status", op: "is", value: "green" }] }),
-          style: { fontSize: 10.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer" }
-        },
-        "+ Add exception"
-      ))))),
-      /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { onClick: addRule, style: { fontSize: 11.5, color: "var(--amber)", fontWeight: 600, cursor: "pointer" } }, "+ Add rule"), /* @__PURE__ */ React.createElement("span", { onClick: resetDefaults, style: { fontSize: 11, color: "var(--mut)", cursor: "pointer" } }, "Reset to suggested defaults"))
-    );
-  }
   function SplitView(props) {
     return props.isMobile ? /* @__PURE__ */ React.createElement(PhoneSplitView, { ...props }) : /* @__PURE__ */ React.createElement(DesktopSplitView, { ...props });
   }
@@ -20547,24 +21798,24 @@ A backup snapshot of the current state is saved first.`,
   }
   function DesktopSplitView(props) {
     const settings = props.data?.settings || DEFAULT_SETTINGS;
-    const gridRef = useRef7(null);
-    const ganttRef = useRef7(null);
-    const [split, setSplit] = useState7(() => settings.defaultSplit || 60);
-    const containerRef = useRef7(null);
-    const divDragging = useRef7(false);
-    const [snapMode, setSnapMode] = useState7(() => settings.snapDefault !== false);
-    const [dragging, setDragging] = useState7(false);
-    const [_hintY, setHintY] = useState7(0);
-    const snapModeRef = useRef7(settings.snapDefault !== false);
-    useEffect6(() => {
+    const gridRef = useRef14(null);
+    const ganttRef = useRef14(null);
+    const [split, setSplit] = useState15(() => settings.defaultSplit || 60);
+    const containerRef = useRef14(null);
+    const divDragging = useRef14(false);
+    const [snapMode, setSnapMode] = useState15(() => settings.snapDefault !== false);
+    const [dragging, setDragging] = useState15(false);
+    const [_hintY, setHintY] = useState15(0);
+    const snapModeRef = useRef14(settings.snapDefault !== false);
+    useEffect14(() => {
       snapModeRef.current = snapMode;
     }, [snapMode]);
-    useEffect6(() => {
+    useEffect14(() => {
       const v = settings.snapDefault !== false;
       setSnapMode(v);
       snapModeRef.current = v;
     }, [settings.snapDefault]);
-    const echo = useRef7({ grid: null, gantt: null });
+    const echo = useRef14({ grid: null, gantt: null });
     const sync = (src) => (e) => {
       const st = e.currentTarget.scrollTop, dst = src === "grid" ? "gantt" : "grid";
       if (echo.current[src] === st) {
@@ -20583,7 +21834,7 @@ A backup snapshot of the current state is saved first.`,
         }));
       }
     };
-    const liveColWidths = useRef7(null);
+    const liveColWidths = useRef14(null);
     const onDividerDown = (e) => {
       e.preventDefault();
       divDragging.current = true;
@@ -20693,1090 +21944,6 @@ A backup snapshot of the current state is saved first.`,
     ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "hidden", display: "flex" } }, /* @__PURE__ */ React.createElement(GanttView, { tasks: props.tasks, updateTask: props.updateTask, pxPerDay: props.ganttPPD, onZoomChange: props.setGanttPPD, scrollRef: ganttRef, onScroll: sync("gantt"), rolledHealthMap: props.rolledHealthMap, proj: props.proj, onMouseEnter: () => props.setHoverZone?.("gantt"), selectedId: props.selectedId, setSelectedId: props.setSelectedId, settings: props.data?.settings, rowZoom: props.gridZoom || 1 })));
   }
   installProjectOrderListener();
-  var Toggle = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: () => onChange(!on), style: {
-    width: 28,
-    height: 15,
-    borderRadius: 8,
-    background: on ? "var(--amber)" : "var(--bd2)",
-    display: "inline-flex",
-    alignItems: "center",
-    cursor: "pointer",
-    flexShrink: 0,
-    transition: "background .15s",
-    padding: "0 2px"
-  } }, /* @__PURE__ */ React.createElement("span", { style: {
-    width: 11,
-    height: 11,
-    borderRadius: "50%",
-    background: "var(--bg)",
-    boxShadow: "0 1px 3px rgba(0,0,0,.2)",
-    transform: on ? "translateX(13px)" : "translateX(0)",
-    transition: "transform .15s",
-    flexShrink: 0
-  } }));
-  var SegBtn = ({ options, value, onChange, small }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", border: "1px solid var(--bd2)", borderRadius: 4, overflow: "hidden", flexShrink: 0 } }, options.map((o) => /* @__PURE__ */ React.createElement("span", { key: o.v, onClick: () => onChange(o.v), style: {
-    padding: small ? "2px 7px" : "3px 9px",
-    fontSize: 10,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    background: value === o.v ? "var(--amber)" : "transparent",
-    color: value === o.v ? "#fff" : "var(--mut)",
-    transition: "background .12s,color .12s",
-    fontWeight: value === o.v ? 500 : 400
-  } }, o.l)));
-  var Field = ({ value, onChange, placeholder }) => /* @__PURE__ */ React.createElement(
-    "input",
-    {
-      ...NO_AUTOFILL,
-      value,
-      onChange: (e) => onChange(e.target.value),
-      placeholder: placeholder || "",
-      style: {
-        width: "100%",
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 3,
-        padding: "3px 7px",
-        fontSize: 11,
-        color: "var(--txt)",
-        fontFamily: "inherit",
-        outline: "none"
-      },
-      onFocus: (e) => e.target.style.borderColor = "var(--blue)",
-      onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
-    }
-  );
-  var Row = ({ label, children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0", gap: 8, minHeight: 26 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)", flexShrink: 0 } }, label), children);
-  var EXPORT_PREFS_KEY = "planar:exportPrefs:v1";
-  var EXPORT_PERSIST_KEYS = ["orientation", "pageSize", "margins", "columns", "includeGantt", "showToday", "showArrows", "barNames", "labelAlign", "healthFilter", "exhibitLabel", "projectTitle", "preparedBy", "preparedFor", "confidential", "timeUnit", "zoomMul", "panFrac"];
-  function loadExportPrefs() {
-    try {
-      return JSON.parse(localStorage.getItem(EXPORT_PREFS_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveExportPrefs(obj) {
-    try {
-      localStorage.setItem(EXPORT_PREFS_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  function PDFExportModal({ data, activePid, onClose, setData }) {
-    const projs = Object.values(data.projects);
-    const now = /* @__PURE__ */ new Date();
-    const seedCollapsed = useMemo4(() => {
-      const out = [];
-      Object.values(data.projects).forEach((p) => p.tasks.forEach((t) => {
-        if (p.tasks.some((x) => x.parentId === t.id) && t.isExpanded === false) out.push(p.id + ":" + t.id);
-      }));
-      return out;
-    }, []);
-    const initPrefs = useMemo4(() => loadExportPrefs(), []);
-    const [cfg, setCfg] = useState7(() => {
-      const base = {
-        exhibitLabel: "",
-        projectTitle: "",
-        preparedBy: "",
-        preparedFor: "",
-        docDate: now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-        orientation: "landscape",
-        pageSize: "letter",
-        margins: { top: "0.75", right: "0.75", bottom: "0.75", left: "0.75" },
-        selProjects: activePid ? [String(activePid)] : projs.map((p) => String(p.id)),
-        columns: (() => {
-          const PRINTABLE = /* @__PURE__ */ new Set(["id", "name", "start", "end", "duration", "health", "percentComplete", "responsibleParty", "predecessors"]);
-          const mc = (data.masterCols || []).filter((k) => PRINTABLE.has(k));
-          return mc.length > 0 ? mc : ["id", "name", "start", "end", "duration", "health", "responsibleParty"];
-        })(),
-        includeGantt: true,
-        showToday: true,
-        showArrows: true,
-        barNames: true,
-        // in-chart Gantt names ON by default (B394)
-        labelAlign: resolveLabelAlign(activePid != null ? data.projects?.[activePid] : null),
-        // seed from the on-screen choice
-        healthFilter: "all",
-        confidential: "",
-        collapsedIds: seedCollapsed,
-        detailLevel: seedCollapsed.length ? "custom" : "all",
-        // B392 — per-column width overrides from dragging a column edge in the preview.
-        colWidths: data.exportColWidths || {},
-        // B361 time axis: discrete unit (null = auto-fit), continuous fine multiplier, pan 0..1.
-        timeUnit: null,
-        zoomMul: 1,
-        panFrac: 0
-      };
-      EXPORT_PERSIST_KEYS.forEach((k) => {
-        if (initPrefs[k] !== void 0) base[k] = initPrefs[k];
-      });
-      return base;
-    });
-    const upd = (patch) => setCfg((c) => ({ ...c, ...patch }));
-    const cfgRef = useRef7(cfg);
-    useEffect6(() => {
-      cfgRef.current = cfg;
-    }, [cfg]);
-    const [headerOpen, setHeaderOpen] = useState7(() => !!initPrefs.headerOpen);
-    const [secOpen, setSecOpen] = useState7(() => initPrefs.secOpen || {});
-    const secIsOpen = (k) => secOpen[k] !== false;
-    useEffect6(() => {
-      const out = {};
-      EXPORT_PERSIST_KEYS.forEach((k) => {
-        out[k] = cfg[k];
-      });
-      out.secOpen = secOpen;
-      out.headerOpen = headerOpen;
-      saveExportPrefs(out);
-    }, [cfg, secOpen, headerOpen]);
-    const [previewCfg, setPreviewCfg] = useState7(cfg);
-    useEffect6(() => {
-      const t = setTimeout(() => setPreviewCfg(cfg), 280);
-      return () => clearTimeout(t);
-    }, [cfg]);
-    const applyCollapse = (idsArr, lvl) => {
-      const next = { ...cfg, collapsedIds: idsArr, detailLevel: lvl };
-      setCfg(next);
-      setPreviewCfg(next);
-    };
-    const levelCollapsedIds = (n) => {
-      const out = [];
-      cfg.selProjects.forEach((pidStr) => {
-        const p = data.projects[pidStr];
-        if (!p) return;
-        p.tasks.forEach((t) => {
-          if (!p.tasks.some((x) => x.parentId === t.id)) return;
-          let d = 0, cur = t;
-          while (cur && cur.parentId != null) {
-            d++;
-            cur = p.tasks.find((x) => x.id === cur.parentId);
-          }
-          if (d >= n - 1) out.push(p.id + ":" + t.id);
-        });
-      });
-      return out;
-    };
-    const setDetailLevel = (lvl) => {
-      if (lvl === "all") applyCollapse([], "all");
-      else applyCollapse(levelCollapsedIds(+lvl), String(lvl));
-    };
-    const expandAll = () => setDetailLevel("all");
-    const collapseAll = () => setDetailLevel("1");
-    useEffect6(() => {
-      const onToggle = (e) => {
-        if (e.origin !== window.location.origin) return;
-        if (!e.data || e.data.type !== "planarToggleCollapse") return;
-        const key = e.data.key, c = cfgRef.current, s = new Set(c.collapsedIds || []);
-        if (s.has(key)) s.delete(key);
-        else s.add(key);
-        const next = { ...c, collapsedIds: [...s], detailLevel: "custom" };
-        setCfg(next);
-        setPreviewCfg(next);
-      };
-      window.addEventListener("message", onToggle);
-      return () => window.removeEventListener("message", onToggle);
-    }, []);
-    useEffect6(() => {
-      const onResize = (e) => {
-        if (e.origin !== window.location.origin) return;
-        if (!e.data || e.data.type !== "planarColResize") return;
-        const { key, w } = e.data;
-        if (!key || !(w > 0)) return;
-        const c = cfgRef.current, next = { ...c, colWidths: { ...c.colWidths || {}, [key]: Math.round(w) } };
-        setCfg(next);
-        setPreviewCfg(next);
-        if (setData) setData((d) => ({ ...d, exportColWidths: { ...d.exportColWidths || {}, [key]: Math.round(w) } }));
-      };
-      window.addEventListener("message", onResize);
-      return () => window.removeEventListener("message", onResize);
-    }, []);
-    const hasColOverrides = Object.keys(cfg.colWidths || {}).length > 0;
-    const resetColWidths = () => {
-      const next = { ...cfg, colWidths: {} };
-      setCfg(next);
-      setPreviewCfg(next);
-      if (setData) setData((d) => {
-        const n = { ...d };
-        delete n.exportColWidths;
-        return n;
-      });
-    };
-    const [previewUrl, setPreviewUrl] = useState7(null);
-    useEffect6(() => {
-      const html = buildPDFHtml(previewCfg, data, true);
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }, [previewCfg]);
-    const previewPaneRef = useRef7(null);
-    const [paneW, setPaneW] = useState7(760);
-    const [_paneH, setPaneH] = useState7(520);
-    useEffect6(() => {
-      const el = previewPaneRef.current;
-      if (!el) return;
-      const obs = new ResizeObserver(([e]) => {
-        setPaneW(e.contentRect.width);
-        setPaneH(e.contentRect.height);
-      });
-      obs.observe(el);
-      return () => obs.disconnect();
-    }, []);
-    const _ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
-    const pageW = Math.round((cfg.orientation === "landscape" ? _ps.h : _ps.w) * 96);
-    const pageH = Math.round((cfg.orientation === "landscape" ? _ps.w : _ps.h) * 96);
-    const iframeRef = useRef7(null);
-    const [iframeH, setIframeH] = useState7(pageH);
-    useEffect6(() => {
-      setIframeH(pageH);
-    }, [pageH]);
-    useEffect6(() => {
-      const handler = (e) => {
-        if (e.origin !== window.location.origin) return;
-        if (e.data?.type === "planarPreviewHeight") setIframeH(Math.max(pageH, e.data.h));
-      };
-      window.addEventListener("message", handler);
-      return () => window.removeEventListener("message", handler);
-    }, [pageH]);
-    const fitScale = Math.min(1, (paneW - 48) / pageW);
-    const [previewZoom, setPreviewZoom] = useState7(1);
-    const scale = fitScale * previewZoom;
-    const zoomTo = (z) => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
-    const fitWidth = () => {
-      setPreviewZoom(1);
-      upd({ timeUnit: null, zoomMul: 1, panFrac: 0 });
-    };
-    const setTimeUnit = (u) => upd({ timeUnit: u, zoomMul: 1, panFrac: 0 });
-    const bumpScale = (f) => upd({ zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul || 1) * f)) });
-    const [panMode, setPanMode] = useState7(false);
-    const panRef = useRef7(null);
-    const overlayRef = useRef7(null);
-    const flushRef = useRef7(0);
-    useEffect6(() => {
-      const el = overlayRef.current;
-      if (!el || !panMode) return;
-      const pane = previewPaneRef.current;
-      const PAN_SPAN = 520;
-      const onWheel = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setPreviewZoom((z) => Math.min(4, Math.max(0.25, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1))));
-      };
-      const onDown = (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        panRef.current = { x: e.clientX, y: e.clientY, pf: cfgRef.current.panFrac || 0, st: pane ? pane.scrollTop : 0 };
-        el.style.cursor = "grabbing";
-      };
-      const onMove = (e) => {
-        const p = panRef.current;
-        if (!p) return;
-        if (pane) pane.scrollTop = p.st - (e.clientY - p.y);
-        const pf = Math.max(-1.2, Math.min(1.2, p.pf - (e.clientX - p.x) / PAN_SPAN));
-        const next = { ...cfgRef.current, panFrac: pf };
-        setCfg(next);
-        const now2 = Date.now();
-        if (now2 - flushRef.current > 170) {
-          setPreviewCfg(next);
-          flushRef.current = now2;
-        }
-      };
-      const onUp = () => {
-        if (panRef.current) setPreviewCfg(cfgRef.current);
-        panRef.current = null;
-        if (el) el.style.cursor = "grab";
-      };
-      el.addEventListener("wheel", onWheel, { passive: false });
-      el.addEventListener("mousedown", onDown);
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-      return () => {
-        el.removeEventListener("wheel", onWheel);
-        el.removeEventListener("mousedown", onDown);
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-    }, [panMode]);
-    const COL_OPTS = [
-      { k: "id", label: "ID" },
-      { k: "name", label: "Task Name" },
-      { k: "start", label: "Start" },
-      { k: "end", label: "End" },
-      { k: "duration", label: "Duration" },
-      { k: "health", label: "Status" },
-      { k: "percentComplete", label: "% Done" },
-      { k: "responsibleParty", label: "Owner" },
-      { k: "predecessors", label: "Predecessors" },
-      { k: "cost", label: "Cost" }
-    ];
-    const openPrint = () => {
-      const html = buildPDFHtml(cfg, data);
-      const w = window.open("", "_blank", "width=1100,height=820");
-      w.document.write(html);
-      w.document.close();
-    };
-    const SHdr = ({ title, k }) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onClick: k ? () => setSecOpen((s) => ({ ...s, [k]: !(s[k] !== false) })) : void 0,
-        style: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: 9,
-          fontWeight: 700,
-          color: "var(--mut)",
-          letterSpacing: ".08em",
-          textTransform: "uppercase",
-          padding: "9px 0 5px",
-          borderBottom: "1px solid var(--bd)",
-          marginBottom: 5,
-          cursor: k ? "pointer" : "default",
-          userSelect: "none"
-        },
-        onMouseEnter: k ? (e) => e.currentTarget.style.opacity = "0.7" : void 0,
-        onMouseLeave: k ? (e) => e.currentTarget.style.opacity = "1" : void 0
-      },
-      title,
-      k && /* @__PURE__ */ React.createElement("span", { style: {
-        fontSize: 10,
-        color: "var(--mut)",
-        transform: secIsOpen(k) ? "rotate(180deg)" : "rotate(0deg)",
-        transition: "transform .2s",
-        display: "inline-block",
-        lineHeight: 1
-      } }, "▾")
-    );
-    const TB_BTN = { width: 22, height: 20, border: "none", borderRadius: 4, background: "rgba(255,255,255,0.16)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", lineHeight: 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" };
-    const TB_LBL = { height: 20, border: "none", borderRadius: 4, background: "rgba(255,255,255,0.16)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "0 8px", cursor: "pointer", fontFamily: "inherit" };
-    const TB_TAG = { color: "#aab2bd", fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" };
-    const TB_DIV = { width: 1, height: 16, background: "rgba(255,255,255,0.22)", margin: "0 2px" };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        style: { position: "fixed", inset: 0, background: "#000000a0", zIndex: 2e3, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
-        onClick: onClose
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--surf)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 10,
-            width: "min(98vw,1700px)",
-            height: "min(96vh,960px)",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden"
-          },
-          onClick: (e) => e.stopPropagation()
-        },
-        /* @__PURE__ */ React.createElement("div", { style: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 18px",
-          borderBottom: "1px solid var(--bd)",
-          flexShrink: 0,
-          background: "var(--bg)"
-        } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "EXPORT"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "PDF / Print Exhibit"))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Opens print dialog — choose ", /* @__PURE__ */ React.createElement("strong", null, "Save as PDF")), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            className: "btn",
-            onClick: openPrint,
-            style: { background: "var(--amber)", color: "#fff", borderColor: "var(--amber)", padding: "5px 16px", fontWeight: 600, fontSize: 12 }
-          },
-          "Print / Save as PDF ↗"
-        ))),
-        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { width: 252, flexShrink: 0, borderRight: "1px solid var(--bd)", overflowY: "auto", padding: "0 14px 16px", background: "var(--bg)" } }, /* @__PURE__ */ React.createElement(SHdr, { title: "Projects", k: "projects" }), secIsOpen("projects") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, marginBottom: 4 } }, projs.map((p) => /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            key: p.id,
-            style: { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "3px 4px", borderRadius: 3, transition: "background .1s" },
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              type: "checkbox",
-              checked: cfg.selProjects.includes(String(p.id)),
-              onChange: (e) => upd({ selProjects: e.target.checked ? [...cfg.selProjects, String(p.id)] : cfg.selProjects.filter((x) => x !== String(p.id)) }),
-              style: { accentColor: "#4f46e5", width: 12, height: 12, flexShrink: 0 }
-            }
-          ),
-          /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { fontSize: 11, color: "var(--txt)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p))
-        ))), /* @__PURE__ */ React.createElement(SHdr, { title: "Layout", k: "layout" }), secIsOpen("layout") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Row, { label: "Size" }, /* @__PURE__ */ React.createElement(
-          "select",
-          {
-            value: cfg.pageSize,
-            onChange: (e) => upd({ pageSize: e.target.value }),
-            style: {
-              flex: 1,
-              background: "var(--bg)",
-              border: "1px solid var(--bd2)",
-              borderRadius: 3,
-              padding: "3px 6px",
-              fontSize: 11,
-              color: "var(--txt)",
-              fontFamily: "inherit",
-              outline: "none",
-              cursor: "pointer"
-            },
-            onFocus: (e) => e.target.style.borderColor = "var(--blue)",
-            onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
-          },
-          Object.entries(PAGE_SIZES).map(([k, ps]) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, ps.label))
-        )), /* @__PURE__ */ React.createElement(Row, { label: "Orientation" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Landscape", v: "landscape" }, { l: "Portrait", v: "portrait" }], value: cfg.orientation, onChange: (v) => upd({ orientation: v }) })), /* @__PURE__ */ React.createElement(Row, { label: "Tasks" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "All", v: "all" }, { l: "Active", v: "active" }, { l: "Done", v: "complete" }], value: cfg.healthFilter, onChange: (v) => upd({ healthFilter: v }) })), /* @__PURE__ */ React.createElement(Row, { label: /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 5 } }, "Detail", cfg.detailLevel === "custom" && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#4f46e5", background: "#eef0fe", padding: "1px 5px", borderRadius: 99, letterSpacing: ".03em" } }, "CUSTOM")) }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "All", v: "all" }, { l: "L1", v: "1" }, { l: "1–2", v: "2" }, { l: "1–3", v: "3" }], value: cfg.detailLevel, onChange: setDetailLevel })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, padding: "3px 0 1px" } }, [["Expand all", expandAll], ["Collapse all", collapseAll]].map(([lbl, fn]) => /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            key: lbl,
-            onClick: fn,
-            style: { flex: 1, textAlign: "center", padding: "3px 0", fontSize: 10, cursor: "pointer", borderRadius: 4, border: "1px solid var(--bd2)", color: "var(--mut)", userSelect: "none", transition: "background .12s" },
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          lbl
-        ))), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9.5, color: "var(--mut)", lineHeight: 1.45, padding: "3px 0 1px" } }, "Tip: click \\u25BE on a row in the preview to open or collapse that branch. This only affects the exhibit \\u2014 your live schedule stays as-is."), /* @__PURE__ */ React.createElement(Row, { label: "Gantt" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.includeGantt, onChange: (v) => upd({ includeGantt: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Today line" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.showToday !== false, onChange: (v) => upd({ showToday: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Dep. arrows" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.showArrows !== false, onChange: (v) => upd({ showArrows: v }) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Time scale" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Fit", v: "fit" }, { l: "Qtr", v: "quarters" }, { l: "Mo", v: "months" }, { l: "Wk", v: "weeks" }, { l: "Day", v: "days" }], value: cfg.timeUnit || "fit", onChange: (v) => setTimeUnit(v === "fit" ? null : v) })), cfg.includeGantt && /* @__PURE__ */ React.createElement(Row, { label: "Bar names" }, /* @__PURE__ */ React.createElement(Toggle, { on: cfg.barNames !== false, onChange: (v) => upd({ barNames: v }) })), cfg.includeGantt && cfg.barNames !== false && /* @__PURE__ */ React.createElement(Row, { label: "Name align" }, /* @__PURE__ */ React.createElement(SegBtn, { small: true, options: [{ l: "Left", v: "left" }, { l: "Center", v: "center" }, { l: "Right", v: "right" }], value: cfg.labelAlign || "right", onChange: (v) => upd({ labelAlign: v }) }))), /* @__PURE__ */ React.createElement(SHdr, { title: "Margins", k: "margins" }), secIsOpen("margins") && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 6 } }, [{ l: "Narrow", v: "0.5" }, { l: "Normal", v: "0.75" }, { l: "Wide", v: "1.0" }].map((p) => {
-          const isActive = cfg.margins.top === p.v && cfg.margins.right === p.v && cfg.margins.bottom === p.v && cfg.margins.left === p.v;
-          return /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              key: p.v,
-              onClick: () => upd({ margins: { top: p.v, right: p.v, bottom: p.v, left: p.v } }),
-              style: {
-                flex: 1,
-                textAlign: "center",
-                padding: "3px 0",
-                fontSize: 10,
-                cursor: "pointer",
-                borderRadius: 3,
-                border: "1px solid var(--bd2)",
-                background: isActive ? "var(--amber)" : "transparent",
-                color: isActive ? "#fff" : "var(--mut)",
-                transition: "background .12s,color .12s"
-              }
-            },
-            p.l
-          );
-        })), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } }, [{ k: "top", l: "Top" }, { k: "right", l: "Right" }, { k: "bottom", l: "Bot." }, { k: "left", l: "Left" }].map(({ k, l }) => /* @__PURE__ */ React.createElement("div", { key: k, style: { display: "flex", alignItems: "center", gap: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", width: 28, flexShrink: 0 } }, l), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", flex: 1, display: "flex", alignItems: "center" } }, /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "number",
-            step: "0.25",
-            min: "0",
-            max: "2",
-            value: cfg.margins[k],
-            onChange: (e) => upd({ margins: { ...cfg.margins, [k]: e.target.value } }),
-            style: {
-              width: "100%",
-              background: "var(--bg)",
-              border: "1px solid var(--bd2)",
-              borderRadius: 3,
-              padding: "3px 22px 3px 6px",
-              fontSize: 11,
-              color: "var(--txt)",
-              fontFamily: "inherit",
-              outline: "none"
-            },
-            onFocus: (e) => e.target.style.borderColor = "var(--blue)",
-            onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
-          }
-        ), /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", right: 5, fontSize: 9, color: "var(--mut)", pointerEvents: "none" } }, "in")))))), /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            onClick: () => setHeaderOpen((o) => !o),
-            style: {
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              cursor: "pointer",
-              padding: "6px 0 5px",
-              borderBottom: "1px solid var(--bd)",
-              marginBottom: 5,
-              userSelect: "none"
-            },
-            onMouseEnter: (e) => e.currentTarget.style.opacity = "0.7",
-            onMouseLeave: (e) => e.currentTarget.style.opacity = "1"
-          },
-          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase" } }, "Header / Cover"),
-          /* @__PURE__ */ React.createElement("span", { style: {
-            fontSize: 10,
-            color: "var(--mut)",
-            transform: headerOpen ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform .2s",
-            display: "inline-block",
-            lineHeight: 1
-          } }, "▾")
-        ), headerOpen && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, marginBottom: 4 } }, /* @__PURE__ */ React.createElement(Row, { label: "Exhibit" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.exhibitLabel, onChange: (v) => upd({ exhibitLabel: v }), placeholder: "Exhibit A" })), /* @__PURE__ */ React.createElement(Row, { label: "Title" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.projectTitle, onChange: (v) => upd({ projectTitle: v }), placeholder: "Schedule title" })), /* @__PURE__ */ React.createElement(Row, { label: "Prep. by" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.preparedBy, onChange: (v) => upd({ preparedBy: v }), placeholder: "Name / company" })), /* @__PURE__ */ React.createElement(Row, { label: "Prep. for" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.preparedFor, onChange: (v) => upd({ preparedFor: v }), placeholder: "Client" })), /* @__PURE__ */ React.createElement(Row, { label: "Date" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.docDate, onChange: (v) => upd({ docDate: v }) })), /* @__PURE__ */ React.createElement(Row, { label: "Conf. tag" }, /* @__PURE__ */ React.createElement(Field, { value: cfg.confidential, onChange: (v) => upd({ confidential: v }), placeholder: "Confidential" }))), /* @__PURE__ */ React.createElement(SHdr, { title: "Columns", k: "columns" }), secIsOpen("columns") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, COL_OPTS.map((c) => /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            key: c.k,
-            style: { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "3px 4px", borderRadius: 3, transition: "background .1s" },
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              type: "checkbox",
-              checked: cfg.columns.includes(c.k),
-              onChange: (e) => upd({ columns: e.target.checked ? [...cfg.columns, c.k] : cfg.columns.filter((x) => x !== c.k) }),
-              style: { accentColor: "#4f46e5", width: 12, height: 12, flexShrink: 0 }
-            }
-          ),
-          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)" } }, c.label)
-        )), cfg.includeGantt && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", lineHeight: 1.3 } }, "Drag a column's right edge in the preview to resize it."), hasColOverrides && /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            onClick: resetColWidths,
-            title: "Reset all columns to auto-fit",
-            style: { fontSize: 10, fontWeight: 600, color: "#4f46e5", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }
-          },
-          "Reset"
-        )))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, position: "relative", display: "flex", minWidth: 0, background: "#e8eaed" } }, /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            ref: previewPaneRef,
-            style: {
-              flex: 1,
-              overflow: "auto",
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: pageW * scale > paneW - 48 ? "flex-start" : "center",
-              padding: 24
-            }
-          },
-          previewUrl && /* @__PURE__ */ React.createElement("div", { style: {
-            width: pageW * scale,
-            height: iframeH * scale,
-            flexShrink: 0,
-            overflow: "hidden",
-            background: "transparent",
-            position: "relative"
-          } }, /* @__PURE__ */ React.createElement(
-            "iframe",
-            {
-              ref: iframeRef,
-              key: previewUrl,
-              src: previewUrl,
-              style: {
-                width: pageW,
-                height: iframeH,
-                border: "none",
-                transformOrigin: "top left",
-                transform: `scale(${scale})`,
-                display: "block"
-              },
-              title: "PDF Preview"
-            }
-          ), /* @__PURE__ */ React.createElement(
-            "div",
-            {
-              ref: overlayRef,
-              style: {
-                position: "absolute",
-                inset: 0,
-                zIndex: 2,
-                background: "transparent",
-                pointerEvents: panMode ? "auto" : "none",
-                cursor: panMode ? "grab" : "default"
-              }
-            }
-          )),
-          !previewUrl && /* @__PURE__ */ React.createElement("div", { style: { color: "#888", fontSize: 12, marginTop: 60 } }, "Generating preview…")
-        ), previewUrl && /* @__PURE__ */ React.createElement("div", { style: {
-          position: "absolute",
-          top: 12,
-          right: 12,
-          zIndex: 30,
-          display: "flex",
-          gap: 5,
-          alignItems: "center",
-          background: "rgba(20,22,26,0.88)",
-          borderRadius: 7,
-          padding: "4px 7px",
-          userSelect: "none",
-          fontFamily: "inherit",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.30)"
-        } }, /* @__PURE__ */ React.createElement("span", { style: TB_TAG }, "Zoom"), /* @__PURE__ */ React.createElement("button", { onClick: () => zoomTo(previewZoom / 1.2), title: "Zoom out — magnify the page less", style: TB_BTN }, "−"), /* @__PURE__ */ React.createElement("span", { onClick: fitWidth, title: "Reset to fit", style: { color: "#fff", fontSize: 10, fontWeight: 600, padding: "0 2px", cursor: "pointer", minWidth: 30, textAlign: "center" } }, Math.round(previewZoom * fitScale * 100), "%"), /* @__PURE__ */ React.createElement("button", { onClick: () => zoomTo(previewZoom * 1.2), title: "Zoom in — magnify the page more", style: TB_BTN }, "+"), cfg.includeGantt && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: TB_DIV }), /* @__PURE__ */ React.createElement("span", { style: TB_TAG }, "Time"), /* @__PURE__ */ React.createElement("button", { onClick: () => bumpScale(1 / 1.25), title: "Compress the time axis — fit more months across the chart", style: TB_BTN }, "−"), /* @__PURE__ */ React.createElement("button", { onClick: () => bumpScale(1.25), title: "Expand the time axis — fewer months, stretched wider", style: TB_BTN }, "+")), /* @__PURE__ */ React.createElement("span", { style: TB_DIV }), /* @__PURE__ */ React.createElement("button", { onClick: fitWidth, title: "Fit the whole timeline & reset zoom", style: TB_LBL }, "Fit"), cfg.includeGantt && /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            onClick: () => setPanMode((m) => !m),
-            title: panMode ? "Stop panning (re-enable clicking in the preview)" : "Pan — drag to slide the visible time window left/right",
-            style: { ...TB_LBL, background: panMode ? "var(--amber)" : "rgba(255,255,255,0.16)" }
-          },
-          "✋ Pan"
-        ))))
-      )
-    );
-  }
-  var SCHED_ACCENT = "#7F77DD";
-  var SCHED_ACCENT_TEXT = "#534AB7";
-  var NOTE_RAIL_W = 54;
-  var noteShortMD = (s) => {
-    if (!s) return "";
-    const [_y, m, d] = String(s).split("-");
-    return m && d ? `${+m}/${+d}` : "";
-  };
-  var noteISO = (s) => parseFlexDate(s) || "";
-  var noteDateInputStyle = {
-    width: 132,
-    background: "var(--bg)",
-    border: `1px solid ${SCHED_ACCENT}`,
-    borderRadius: 5,
-    padding: "3px 6px",
-    fontSize: 12,
-    fontFamily: "inherit",
-    outline: "none",
-    color: "var(--txt)",
-    boxSizing: "border-box"
-  };
-  var noteDateBtnStyle = {
-    background: "transparent",
-    border: "none",
-    padding: "0 2px",
-    cursor: "pointer",
-    color: SCHED_ACCENT_TEXT,
-    fontWeight: 600,
-    fontSize: 12,
-    fontFamily: "inherit",
-    lineHeight: 1.4,
-    whiteSpace: "nowrap"
-  };
-  function NoteRow({
-    note,
-    bodyFs,
-    editingText,
-    editingDate,
-    textValue,
-    dateValue,
-    onTextChange,
-    onDateChange,
-    onStartText,
-    onStartDate,
-    onCommit,
-    onCancel,
-    onDelete
-  }) {
-    const [hover, setHover] = useState7(false);
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onMouseEnter: () => setHover(true),
-        onMouseLeave: () => setHover(false),
-        style: {
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 10,
-          padding: "9px 2px",
-          borderBottom: "1px solid var(--bd)",
-          position: "relative"
-        }
-      },
-      /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 1 } }, editingDate ? /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          type: "date",
-          autoFocus: true,
-          value: dateValue,
-          onChange: (e) => onDateChange(e.target.value),
-          onBlur: onCommit,
-          onKeyDown: (e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              onCommit();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onCancel();
-            }
-          },
-          style: noteDateInputStyle
-        }
-      ) : /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => onStartDate(),
-          style: noteDateBtnStyle,
-          title: "Click to change the date"
-        },
-        noteShortMD(note.date) || "—"
-      )),
-      /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 } }),
-      /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0, paddingRight: 16 } }, editingText ? /* @__PURE__ */ React.createElement(
-        "textarea",
-        {
-          autoFocus: true,
-          value: textValue,
-          onChange: (e) => onTextChange(e.target.value),
-          onBlur: onCommit,
-          onKeyDown: (e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              e.stopPropagation();
-              onCommit();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              onCancel();
-            }
-          },
-          style: {
-            width: "100%",
-            background: "var(--bg)",
-            border: `1px solid ${SCHED_ACCENT}`,
-            borderRadius: 5,
-            padding: "6px 8px",
-            color: "var(--txt)",
-            fontSize: bodyFs,
-            lineHeight: 1.55,
-            fontFamily: "inherit",
-            resize: "vertical",
-            minHeight: 46,
-            outline: "none"
-          }
-        }
-      ) : /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onClick: () => onStartText(),
-          style: {
-            color: "var(--txt)",
-            fontSize: bodyFs,
-            lineHeight: 1.55,
-            cursor: "text",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            minHeight: 18
-          }
-        },
-        note.text
-      )),
-      !editingText && !editingDate && /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => onDelete(),
-          title: "Delete note",
-          style: {
-            position: "absolute",
-            top: 8,
-            right: 2,
-            cursor: "pointer",
-            fontSize: 13,
-            lineHeight: 1,
-            color: hover ? "#dc2626" : "transparent",
-            transition: "color .12s",
-            userSelect: "none"
-          }
-        },
-        "✕"
-      )
-    );
-  }
-  function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
-    const [dateEdit, setDateEdit] = useState7(false);
-    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 } }, dateEdit ? /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "date",
-        autoFocus: true,
-        value: dateISO,
-        onChange: (e) => onDate(e.target.value),
-        onBlur: () => setDateEdit(false),
-        onKeyDown: (e) => {
-          if (e.key === "Enter" || e.key === "Escape") {
-            e.preventDefault();
-            setDateEdit(false);
-          }
-        },
-        style: noteDateInputStyle
-      }
-    ) : /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => setDateEdit(true),
-        style: noteDateBtnStyle,
-        title: "Click to change the date"
-      },
-      noteShortMD(dateISO) || "—"
-    )), /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 } }, /* @__PURE__ */ React.createElement(
-      "textarea",
-      {
-        ref: bodyRef,
-        value: text,
-        onChange: (e) => onText(e.target.value),
-        placeholder: "Add a note…",
-        onKeyDown: (e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            onAdd();
-          }
-        },
-        style: {
-          width: "100%",
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 5,
-          padding: "7px 9px",
-          color: "var(--txt)",
-          fontSize: 13,
-          lineHeight: 1.5,
-          fontFamily: "inherit",
-          resize: "vertical",
-          minHeight: 44,
-          outline: "none",
-          transition: "border-color .15s"
-        },
-        onFocus: (e) => e.target.style.borderColor = SCHED_ACCENT,
-        onBlur: (e) => e.target.style.borderColor = "var(--bd2)"
-      }
-    ), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => onAdd(),
-        style: {
-          padding: "5px 16px",
-          background: SCHED_ACCENT,
-          color: "#fff",
-          border: "none",
-          borderRadius: 6,
-          fontSize: 12,
-          fontWeight: 600,
-          fontFamily: "inherit",
-          cursor: "pointer"
-        }
-      },
-      "Add note"
-    ))));
-  }
-  function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
-    const [draftText, setDraftText] = useState7(() => initChar || "");
-    const [draftDate, setDraftDate] = useState7(() => NOW);
-    const [edit, setEdit] = useState7(null);
-    const [editText, setEditText] = useState7("");
-    const [editDate, setEditDate] = useState7("");
-    const [menuOpen, setMenuOpen] = useState7(false);
-    const [confirmClear, setConfirmClear] = useState7(false);
-    const defSize = (() => {
-      try {
-        return localStorage.getItem("planar_noteSize") || "sm";
-      } catch {
-        return "sm";
-      }
-    })();
-    const noteFs = (n) => NOTE_SIZES.find((s) => s.k === (n.size || defSize))?.px ?? 13;
-    const taRef = useRef7(null);
-    const backdropRef = useRef7(null);
-    const downOnBackdropRef = useRef7(false);
-    const editRef = useRef7(null);
-    useEffect6(() => {
-      editRef.current = edit;
-    }, [edit]);
-    useEffect6(() => {
-      const ta = taRef.current;
-      if (ta) {
-        const len = ta.value.length;
-        ta.focus();
-        ta.selectionStart = ta.selectionEnd = len;
-      }
-    }, []);
-    useEffect6(() => {
-      const handler = (e) => {
-        if (e.key !== "Escape") return;
-        if (editRef.current) {
-          e.preventDefault();
-          e.stopPropagation();
-          editRef.current = null;
-          setEdit(null);
-          return;
-        }
-        const ae = document.activeElement;
-        if (ae && ae.tagName === "INPUT" && ae.type === "date" && backdropRef.current && backdropRef.current.contains(ae)) return;
-        onClose();
-      };
-      document.addEventListener("keydown", handler, true);
-      return () => document.removeEventListener("keydown", handler, true);
-    }, [onClose]);
-    const notes = task.notes || [];
-    const sorted = [...notes].sort((a, b) => {
-      const da = noteISO(a.date) || "", db = noteISO(b.date) || "";
-      if (da !== db) return da < db ? 1 : -1;
-      return (b.id || 0) - (a.id || 0);
-    });
-    const addDraft = () => {
-      const v = (draftText || "").trim();
-      if (!v) return;
-      const iso = noteISO(draftDate) || NOW;
-      updateTask(task.id, { notes: [...notes, { id: Date.now(), date: iso, text: v }] }, projectId);
-      setDraftText("");
-      setDraftDate(NOW);
-      if (taRef.current) taRef.current.focus();
-    };
-    const startText = (n) => {
-      editRef.current = { id: n.id, field: "text" };
-      setEdit({ id: n.id, field: "text" });
-      setEditText(n.text || "");
-    };
-    const startDate = (n) => {
-      editRef.current = { id: n.id, field: "date" };
-      setEdit({ id: n.id, field: "date" });
-      setEditDate(noteISO(n.date) || NOW);
-    };
-    const cancelEdit = () => {
-      editRef.current = null;
-      setEdit(null);
-    };
-    const commitEdit = () => {
-      const cur = editRef.current;
-      if (!cur) return;
-      editRef.current = null;
-      setEdit(null);
-      const n = (task.notes || []).find((x) => x.id === cur.id);
-      if (!n) return;
-      if (cur.field === "text") {
-        const v = editText.trim();
-        if (v && v !== n.text) updateTask(task.id, { notes: notes.map((x) => x.id === cur.id ? { ...x, text: v } : x) }, projectId);
-      } else {
-        const iso = noteISO(editDate);
-        if (iso && iso !== n.date) updateTask(task.id, { notes: notes.map((x) => x.id === cur.id ? { ...x, date: iso } : x) }, projectId);
-      }
-    };
-    const del = (id) => {
-      if (editRef.current && editRef.current.id === id) {
-        editRef.current = null;
-        setEdit(null);
-      }
-      updateTask(task.id, { notes: notes.filter((n) => n.id !== id) }, projectId);
-    };
-    const clearAll = () => {
-      updateTask(task.id, { notes: [] }, projectId);
-      setConfirmClear(false);
-      setMenuOpen(false);
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref: backdropRef,
-        onMouseDown: (e) => {
-          downOnBackdropRef.current = e.target === backdropRef.current;
-        },
-        onClick: (e) => {
-          const hit = e.target === backdropRef.current && downOnBackdropRef.current;
-          downOnBackdropRef.current = false;
-          if (hit) onClose();
-        },
-        style: {
-          position: "fixed",
-          inset: 0,
-          background: "#00000090",
-          zIndex: 100,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        }
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onMouseDown: (e) => e.stopPropagation(),
-          style: {
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderTop: `2px solid ${SCHED_ACCENT}`,
-            borderRadius: 8,
-            width: 560,
-            maxWidth: "94vw",
-            maxHeight: "78vh",
-            display: "flex",
-            flexDirection: "column",
-            boxShadow: "0 12px 40px rgba(0,0,0,.22)"
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: {
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          padding: "16px 18px 12px",
-          borderBottom: "1px solid var(--bd)"
-        } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { color: SCHED_ACCENT_TEXT, fontWeight: 700, fontSize: 10, letterSpacing: ".08em", marginBottom: 3 } }, "NOTES"), /* @__PURE__ */ React.createElement("div", { style: { color: "var(--txt)", fontSize: 14, fontWeight: 600 } }, task.name)), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, menuOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => {
-          setMenuOpen(false);
-          setConfirmClear(false);
-        } }), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            onClick: () => {
-              setMenuOpen((o) => !o);
-              setConfirmClear(false);
-            },
-            style: {
-              background: menuOpen ? "var(--surf)" : "transparent",
-              border: "none",
-              cursor: "pointer",
-              borderRadius: 5,
-              padding: "3px 7px",
-              fontSize: 16,
-              lineHeight: 1,
-              color: "var(--mut)",
-              fontFamily: "inherit"
-            }
-          },
-          "···"
-        ), menuOpen && /* @__PURE__ */ React.createElement("div", { style: {
-          position: "absolute",
-          top: "calc(100% + 6px)",
-          right: 0,
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 8,
-          boxShadow: "0 4px 18px rgba(0,0,0,.14)",
-          zIndex: 999,
-          minWidth: 200,
-          padding: 6
-        } }, notes.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 10px", fontSize: 12, color: "var(--mut)" } }, "No notes yet.") : confirmClear ? /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 6px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", marginBottom: 8 } }, "Delete all ", notes.length, " notes?"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { onClick: clearAll, style: { flex: 1, padding: "6px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" } }, "Delete all"), /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmClear(false), style: { flex: 1, padding: "6px 0", background: "var(--surf)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" } }, "Cancel"))) : /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            onClick: () => setConfirmClear(true),
-            style: { padding: "8px 10px", cursor: "pointer", fontSize: 12, color: "#dc2626", borderRadius: 5 },
-            onMouseEnter: (e) => e.currentTarget.style.background = "#fff5f5",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          "Clear all notes"
-        ))), /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            onClick: onClose,
-            title: "Close",
-            style: { color: "var(--mut)", cursor: "pointer", fontSize: 17, lineHeight: 1, padding: "2px 4px" }
-          },
-          "✕"
-        ))),
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "0 18px", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement(AddNoteComposer, { text: draftText, onText: setDraftText, dateISO: draftDate, onDate: setDraftDate, onAdd: addDraft, bodyRef: taRef })),
-        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "0 18px 6px" } }, sorted.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { color: "var(--mut)", fontSize: 13, textAlign: "center", padding: "28px 0" } }, "No notes yet — add one above.") : sorted.map((n) => /* @__PURE__ */ React.createElement(
-          NoteRow,
-          {
-            key: n.id,
-            note: n,
-            bodyFs: noteFs(n),
-            editingText: !!edit && edit.id === n.id && edit.field === "text",
-            editingDate: !!edit && edit.id === n.id && edit.field === "date",
-            textValue: editText,
-            dateValue: editDate,
-            onTextChange: setEditText,
-            onDateChange: setEditDate,
-            onStartText: () => startText(n),
-            onStartDate: () => startDate(n),
-            onCommit: commitEdit,
-            onCancel: cancelEdit,
-            onDelete: () => del(n.id)
-          }
-        )))
-      )
-    );
-  }
   (function() {
     const SUPABASE_URL = "https://lyeqzkuiwngunutlkkmi.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5ZXF6a3Vpd25ndW51dGxra21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzNjc0NjMsImV4cCI6MjA5Njk0MzQ2M30.1jyFWeEPWDR4-YYu5azWbWQN8P48cgyZCBqfOwrAnlk";
@@ -22732,118 +22899,15 @@ A backup snapshot of the current state is saved first.`,
   exposeToHarness({
     removeScheduleFromDoc: [() => removeScheduleFromDoc],
     logMergeToastEvent: [() => logMergeToastEvent],
-    ROW_COLORS: [() => ROW_COLORS],
-    SAFE_COLOR_RE: [() => SAFE_COLOR_RE],
-    isValidColor: [() => isValidColor],
-    FONT_SIZE_STEPS: [() => FONT_SIZE_STEPS],
-    FONT_SIZE_MIN: [() => FONT_SIZE_MIN],
-    FONT_SIZE_MAX: [() => FONT_SIZE_MAX],
-    isValidFontSize: [() => isValidFontSize],
-    stepFontSize: [() => stepFontSize],
-    askConfirm: [() => askConfirm],
     mkt: [() => mkt],
     postLoadState: [() => postLoadState],
     LOAD_ATTEMPT_TIMEOUT_MS: [() => LOAD_ATTEMPT_TIMEOUT_MS],
     LOAD_RETRY_BASE_MS: [() => LOAD_RETRY_BASE_MS],
     LOAD_RETRY_MAX_MS: [() => LOAD_RETRY_MAX_MS],
     SEED: [() => SEED],
-    celebrateTaskComplete: [() => celebrateTaskComplete],
-    notifyRowsDeleted: [() => notifyRowsDeleted],
-    FOOTER_BTN_STYLE: [() => FOOTER_BTN_STYLE],
-    SuccessorPromptModal: [() => SuccessorPromptModal],
-    DeleteChildrenModal: [() => DeleteChildrenModal],
-    MoveToModal: [() => MoveToModal],
-    ContactsPanel: [() => ContactsPanel],
-    HistoryPanel: [() => HistoryPanel],
-    ErrorBoundary: [() => ErrorBoundary],
-    SGQ_HEALTH: [() => SGQ_HEALTH],
-    SGQ_HKEYS: [() => SGQ_HKEYS],
-    SGQ_AV: [() => SGQ_AV],
-    SGQ_ALLOWED_PATCH: [() => SGQ_ALLOWED_PATCH],
-    SGQ_MONTHS: [() => SGQ_MONTHS],
-    sgqAvatarColor: [() => sgqAvatarColor],
-    sgqInitials: [() => sgqInitials],
-    sgqConfClass: [() => sgqConfClass],
-    sgqFmtDate: [() => sgqFmtDate],
-    SgqDot: [() => SgqDot],
-    sgqChildrenOf: [() => sgqChildrenOf],
-    sgqCrumbOf: [() => sgqCrumbOf],
-    SgqCrumb: [() => SgqCrumb],
-    SgqCascadePicker: [() => SgqCascadePicker],
-    SgqChangeRow: [() => SgqChangeRow],
-    InlineDate: [() => InlineDate],
-    cleanEmailBody: [() => cleanEmailBody],
-    SuggestionsView: [() => SuggestionsView],
-    VIEW_TAB_KEYS: [() => VIEW_TAB_KEYS],
-    VIEW_PREF_KEYS: [() => VIEW_PREF_KEYS],
-    VIEW_TRANSIENT_KEYS: [() => VIEW_TRANSIENT_KEYS],
-    VIEW_STATE_KEYS: [() => VIEW_STATE_KEYS],
-    VIEW_TAB_STORAGE_KEY: [() => VIEW_TAB_STORAGE_KEY],
-    VIEW_PREFS_STORAGE_KEY: [() => VIEW_PREFS_STORAGE_KEY],
-    loadTabView: [() => loadTabView],
-    saveTabView: [() => saveTabView],
-    loadViewPrefs: [() => loadViewPrefs],
-    saveViewPrefs: [() => saveViewPrefs],
-    TASK_FOCUS_STORAGE_KEY: [() => TASK_FOCUS_STORAGE_KEY],
-    loadTaskFocus: [() => loadTaskFocus],
-    saveTaskFocus: [() => saveTaskFocus],
-    applyTaskFocus: [() => applyTaskFocus],
-    persistTaskFocus: [() => persistTaskFocus],
-    coreChanged: [() => coreChanged],
-    TASK_VIEW_FIELDS: [() => TASK_VIEW_FIELDS],
-    stripTaskViewFields: [() => stripTaskViewFields],
-    stripViewState: [() => stripViewState],
-    withLastActiveSite: [() => withLastActiveSite],
-    persistViewState: [() => persistViewState],
-    pickActivePid: [() => pickActivePid],
-    resolveViewState: [() => resolveViewState],
     App: [() => App],
-    ProjDropdown: [() => ProjDropdown],
-    RenameModal: [() => RenameModal],
-    ProjContextMenu: [() => ProjContextMenu],
-    SwatchGrid: [() => SwatchGrid],
-    CaretPopover: [() => CaretPopover],
-    FormatMiniToolbar: [() => FormatMiniToolbar],
-    TaskContextMenu: [() => TaskContextMenu],
-    MB_WD: [() => MB_WD],
-    MB_POSITIONS: [() => MB_POSITIONS],
-    MB_MONTHS: [() => MB_MONTHS],
-    MB_PATTERN_COLORS: [() => MB_PATTERN_COLORS],
-    newMeetingBody: [() => newMeetingBody],
-    mbFmt: [() => mbFmt],
-    MB_ACTIVE_POPOVER_CLOSE: [() => MB_ACTIVE_POPOVER_CLOSE, (v) => {
-      MB_ACTIVE_POPOVER_CLOSE = v;
-    }],
-    MBMultiPick: [() => MBMultiPick],
-    MeetingImportPicker: [() => MeetingImportPicker],
-    MeetingCalendarsModal: [() => MeetingCalendarsModal],
-    SettingsPanel: [() => SettingsPanel],
-    FormatPanel: [() => FormatPanel],
-    RuleColorPicker: [() => RuleColorPicker],
-    ConditionRow: [() => ConditionRow],
-    ConditionGroup: [() => ConditionGroup],
-    AutomationPanel: [() => AutomationPanel],
     SplitView: [() => SplitView],
     PhoneSplitView: [() => PhoneSplitView],
-    DesktopSplitView: [() => DesktopSplitView],
-    Toggle: [() => Toggle],
-    SegBtn: [() => SegBtn],
-    Field: [() => Field],
-    Row: [() => Row],
-    EXPORT_PREFS_KEY: [() => EXPORT_PREFS_KEY],
-    EXPORT_PERSIST_KEYS: [() => EXPORT_PERSIST_KEYS],
-    loadExportPrefs: [() => loadExportPrefs],
-    saveExportPrefs: [() => saveExportPrefs],
-    PDFExportModal: [() => PDFExportModal],
-    SCHED_ACCENT: [() => SCHED_ACCENT],
-    SCHED_ACCENT_TEXT: [() => SCHED_ACCENT_TEXT],
-    NOTE_RAIL_W: [() => NOTE_RAIL_W],
-    noteShortMD: [() => noteShortMD],
-    noteISO: [() => noteISO],
-    noteDateInputStyle: [() => noteDateInputStyle],
-    noteDateBtnStyle: [() => noteDateBtnStyle],
-    NoteRow: [() => NoteRow],
-    AddNoteComposer: [() => AddNoteComposer],
-    NotesModal: [() => NotesModal]
+    DesktopSplitView: [() => DesktopSplitView]
   });
 })();
