@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_1284 source files mapped._
+_1462 source files mapped._
 
 ## infra
 
@@ -23,6 +23,8 @@ _1284 source files mapped._
   - _exports_: `default (AccountControl)`
 - **`src/app/AuthLinkLanding.jsx`** — the page the emailed sign-in / password-reset link opens (NEW-1, 2026-11-02).
   - _exports_: `default (AuthLinkLanding)`
+- **`src/app/authPanelChunk.js`** — The one door to the sign-in panel's code (B329408). AuthPanel.jsx (~15 KB) is its own chunk so the entry bundle every route downloads does not carry a panel that only opens on request.
+  - _exports_: `loadAuthPanel`, `warmAuthPanel`
 - **`src/app/buildSkew.js`** — Notices when this tab is running an older deploy than the one the server is serving, and says so without reloading anything itself
   - _exports_: `fetchServedBuild`, `fetchServedMeta`, `installBuildSkewWatch`, `isBuildSkewed`, `isLoadedBuildUnsafe`, `LOADED_BUILD`, `shouldEscalate`, `shouldOfferReload`, `SKEW_FIRST_CHECK_MS`, `SKEW_POLL_MS`, `VERSION_URL`
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
@@ -38,7 +40,7 @@ _1284 source files mapped._
 - **`src/app/InviteLanding.jsx`** — what happens when someone opens the button in a team-invite email (NEW-2, 2026-10-29; reworked NEW-1, 2026-11-02).
   - _exports_: `default (InviteLanding)`
 - **`src/app/lastRoute.js`** — "Open where I left off": last {module,projectId,cross} pointer written on every navigate; pickBootRoute/seedBootRoute seed an empty-hash boot pre-render (deep links win)
-  - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `shouldPersistRoute`, `writeLastRoute`
+  - _exports_: `pickBootRoute`, `pointerForRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `shouldPersistRoute`, `writeLastRoute`
 - **`src/app/modulePrefetch.js`** — Warm a non-active workspace chunk (and the heavy /sequence/ Gantt iframe doc) on NAVIGATION INTENT only — tab hover/pointerdown, never at boot (NEW-9) — so tab switches feel instant without taxing a Site-only session
   - _exports_: `HOVER_QUIET_MAX_TRIES`, `HOVER_QUIET_RETRY_MS`, `pageIsBusyLoading`, `prefetchModule`, `prefetchModuleWhenQuiet`
 - **`src/app/pageTitle.js`** — Browser tab title "Planyr — <module>" from the SAME label table the nav tabs read (moduleTabLabel.js); bare "Planyr" for a module with no nav tab (Food) or the unlisted /admin surface
@@ -84,7 +86,7 @@ _1284 source files mapped._
 - **`src/workspaces/admin/lib/adminFormat.js`** — Shared date / number formatting for the admin page (NEW-1). Dates are RELATIVE with the exact time on hover (`exactTime`) — never a raw ISO string.
   - _exports_: `exactTime`, `fmtDate`, `niceTicks`, `shortDay`
 - **`src/workspaces/admin/lib/adminIssues.js`** — Issues grouping (NEW-2): one bug is one row, and the expected after-deploy chunk miss is ONE collapsed line instead of a hundred.
-  - _exports_: `chunkFile`, `FIRST_PAGE`, `foldIssues`, `isDeployReload`, `ISSUE_SORTS`, `normalizeMessage`, `PAGE_STEP`, `searchIssues`, `sortIssues`, `splitDeployReloads`, `visibleCount`
+  - _exports_: `chunkFile`, `FIRST_PAGE`, `foldIssues`, `isDeployReload`, `normalizeMessage`, `PAGE_STEP`, `searchIssues`, `sortIssues`, `splitDeployReloads`, `visibleCount`
 - **`src/workspaces/admin/lib/adminPanels.js`** — Admin panels — RPC wrappers + row shaping for Usage / Issues / Support / Ops (B711905–B711908).
   - _exports_: `ago`, `callAdminRpc`, `DIGEST_STALE_MS`, `digestStamp`, `fetchErrorGroupRows`, `fetchErrorGroups`, `fetchOps`, `fetchRecentErrorsForUser`, `fetchSupportReports`, `fetchUsage`, `groupRowArgs`, `ISSUE_KINDS`, `ISSUE_WINDOWS`, `parseStillOpen`, `recordSessionSweep`, `setReportStatus`, `shapeErrorGroups`, `shapeOps`, `shapeTickets`, `shapeUsage`, `ticketFrom`, `USAGE_CANNOT_ANSWER`
 - **`src/workspaces/admin/lib/adminRoute.js`** — Admin sub-routing (NEW-1): the selected section lives in the hash — `#/admin/<section>` — so reload and back/forward keep it, and bare `#/admin` opens Overview.
@@ -144,7 +146,7 @@ _1284 source files mapped._
 - **`src/workspaces/dashboard/lib/buildingYield.js`** — Dependency-free gross building SF sum from raw element rows (the Pursuits card's Yield column).
   - _exports_: `buildingCountBySite`, `grossBuildingSqft`, `yieldBySite`
 - **`src/workspaces/dashboard/lib/compsCardModel.js`** — pure model behind the Dashboard's Comps card (NEW-COMPS-CARD).
-  - _exports_: `bandSentenceLabel`, `buildCompsCardData`, `buildPeerSet`, `compHeadlineRate`, `compScaleKey`, `compScaleLayout`, `compSizeSf`, `countyEntry`, `countyLabel`, `countyNameWords`, `DEFAULT_LEASE_PERIOD`, `formatRateValue`, `leaseRateUnit`, `MIN_PEERS_FOR_SCALE`, `mostRecentlyAddedComp`, `peerComparisonSentence`, `periodWords`, `relativeTimeLabel`, `scaleLabel`, `SIZE_BANDS`, `sizeBandFor`, `TYPE_LABEL`
+  - _exports_: `bandSentenceLabel`, `buildCompsCardData`, `buildPeerSet`, `compHeadlineRate`, `compScaleKey`, `compScaleLayout`, `compSizeSf`, `countyEntry`, `countyLabel`, `countyNameWords`, `DEFAULT_LEASE_PERIOD`, `formatRateValue`, `leaseRateUnit`, `MIN_PEERS_FOR_SCALE`, `mostRecentlyAddedComp`, `peerComparisonSentence`, `relativeTimeLabel`, `scaleLabel`, `SIZE_BANDS`, `sizeBandFor`, `TYPE_LABEL`
 - **`src/workspaces/dashboard/lib/dashboardCompsFetch.js`** — the one minimal `comps` read (type counts) the Comps summary card needs.
   - _exports_: `fetchAllCompsForCard`, `fetchCompsForMap`
 - **`src/workspaces/dashboard/lib/dashboardCompsRecentFetch.js`** — the comps the "Since you were last here" card needs: comps ADDED since a given moment, with enough fields to state their rate and size (never just "a comp was added").
@@ -250,7 +252,7 @@ _1284 source files mapped._
 - **`src/workspaces/food/lib/draftStore.js`** — keeps a half-typed Food form alive when the CARD CHANGES PARENT (rotate the phone).
   - _exports_: `createDraftStore`, `DraftStoreContext`, `useDraftField`, `useDraftStore`
 - **`src/workspaces/food/lib/foodLists.js`** — the PURE logic behind named restaurant lists (NEW-1 / B2088288).
-  - _exports_: `addDecision`, `cleanListName`, `DEFAULT_LIST_COLOR`, `emphasisKeys`, `findItem`, `identityKey`, `isPaletteColor`, `itemIdentity`, `itemKey`, `itemsOfList`, `LIST_COLORS`, `LIST_NAME_MAX`, `listIdsFor`, `listNameKey`, `memberRecords`, `nextListColor`, `nextListPosition`, `pickerRows`, `statusOf`, `toListIdentity`, `validateListName`
+  - _exports_: `addDecision`, `cleanListName`, `emphasisKeys`, `findItem`, `identityKey`, `isPaletteColor`, `itemIdentity`, `itemKey`, `itemsOfList`, `LIST_COLORS`, `LIST_NAME_MAX`, `listIdsFor`, `listNameKey`, `memberRecords`, `nextListColor`, `nextListPosition`, `pickerRows`, `statusOf`, `toListIdentity`, `validateListName`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
   - _exports_: `addDishWishlist`, `addListItem`, `addWishlist`, `avgRatingByPlaceId`, `BROWSE_ERROR_MESSAGE`, `createList`, `deleteDish`, `deleteList`, `deleteVisit`, `dishWishlistByManualKey`, `dishWishlistByPlaceId`, `fetchAllDishes`, `fetchAllDishWishlist`, `fetchAllListItems`, `fetchAllLists`, `fetchAllPlacePrefs`, `fetchAllVisits`, `fetchAllWishlist`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertDish`, `insertVisit`, `loggedPlaceIds`, `manualGroupKey`, `manualPinKey`, `manualPinsFromVisits`, `manualWishlistFromRows`, `markDishDone`, `mergeNameAndAddressRows`, `removeDishWishlist`, `removeListItem`, `removeWishlist`, `reportAddressSearchError`, `reportBrowseError`, `reportSheetSideways`, `reportSheetStuck`, `searchPlacesByName`, `supabaseConfigured`, `updateDish`, `updateDishes`, `updateList`, `updateVisit`, `upsertPlacePref`, `wishlistedPlaceIds`
 - **`src/workspaces/food/lib/foodType.js`** — the ONE type scale and spacing step for the /food place card, visit form and list view (NEW-1, 2026-10-27, owner on his iPhone looking at a place card: "look at the text here.
@@ -282,7 +284,7 @@ _1284 source files mapped._
 - **`src/workspaces/food/lib/searchSession.js`** — the request side of the Food search box (NEW-1 perf, 2026-10-04).
   - _exports_: `CACHE_MAX`, `carryOverRows`, `createSearchSession`, `searchKey`
 - **`src/workspaces/food/lib/sliderScrollGuard.js`** — a finger that lands on a rating slider and then SWIPES VERTICALLY is scrolling the card, not rating the dish.
-  - _exports_: `isVerticalScroll`, `SCROLL_SLOP_PX`, `useScrollSafeSlider`
+  - _exports_: `isHorizontalDrag`, `isVerticalScroll`, `SCROLL_SLOP_PX`, `useScrollSafeSlider`
 - **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)
   - _exports_: `supabase`, `SUPABASE_ORIGIN`, `supabaseConfigured`
 - **`src/workspaces/food/lib/textEntry.js`** — "does focusing this element put a keyboard (or a picker wheel) on screen?" (NEW-6, 2026-10-23).
@@ -293,34 +295,18 @@ _1284 source files mapped._
   - _exports_: `warmSearchPath`
 - **`src/workspaces/model/components/CommandPalette.jsx`** — Model workspace command palette (Ctrl/Cmd+K, fuzzy search over commandRegistry.js, arrow keys + Enter, no mouse required)
   - _exports_: `default (CommandPalette)`
-- **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
-  - _exports_: `default (ContextMenu)`
 - **`src/workspaces/model/components/FileBar.jsx`** — The strip that tells the person what Spreadsheet is showing when it is a Library FILE (NEW-1, "open an uploaded Excel in Spreadsheet"): which file, where its edits go, anything the file…
   - _exports_: `FileBar`, `FileLoading`, `FileNotes`, `FileProblem`
 - **`src/workspaces/model/components/FileMenu.jsx`** — The Excel round-trip entry point in row-1's toolbar: Download/Import as .xlsx (primary) and CSV (deliberately secondary).
   - _exports_: `default`
-- **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
-  - _exports_: `default (FindReplaceBar)`
-- **`src/workspaces/model/components/FormulaBar.jsx`** — The formula bar: shows the active cell's underlying formula/raw text (never the displayed value) and commits edits the same way as the in-cell editor.
-  - _exports_: `default`
 - **`src/workspaces/model/components/InconsistencyPanel.jsx`** — Floating panel listing every non-dismissed inconsistent-formula flag on the active sheet, with Go-to + Dismiss per row.
   - _exports_: `default (InconsistencyPanel)`
-- **`src/workspaces/model/components/KeyTipOverlay.jsx`** — Model workspace — what the screen shows while an Alt key-tip sequence is open (Excel's "press Alt, then letters").
-  - _exports_: `default (KeyTipOverlay)`
 - **`src/workspaces/model/components/NameManager.jsx`** — The Name Manager panel: list/search/jump-to-target named ranges, plus a fast-path "New name" row bound live to the current selection.
   - _exports_: `default (NameManager)`
 - **`src/workspaces/model/components/OrgWorkbookPicker.jsx`** — the landing list for the Spreadsheet workspace at ORGANIZATION scope (NEW-1, B1912209).
   - _exports_: `default (OrgWorkbookPicker)`
-- **`src/workspaces/model/components/Ribbon.jsx`** — The Home-tab ribbon (Clipboard/Font/Borders/Alignment/Number/Cells/Sort & Filter), responsive via ribbonLayout.js — every group collapses into its own "…" popover as the container narrows.
-  - _exports_: `AuditGroup`, `default (Ribbon)`
-- **`src/workspaces/model/components/SheetView.jsx`** — The virtualised sheet grid: row virtualization, rectangular selection, keyboard nav and the inline cell editor, mechanism lifted from the Schedule module's GridView.
-  - _exports_: `default`, `HEADER_H`, `ROW_H`
-- **`src/workspaces/model/components/ShortcutDialog.jsx`** — Model workspace — the small prompt behind the Excel shortcuts that need one value: Column width… (Alt H O W), Row height… (Alt H O H), Number format… (Ctrl+1, Alt H N) and the insert /…
-  - _exports_: `default (ShortcutDialog)`
-- **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
-  - _exports_: `default`, `TAB_STRIP_HEIGHT`
 - **`src/workspaces/model/components/univerFramework.js`** — Model workspace — building the Univer framework instance, and building ONE AHEAD OF TIME (NEW-1, B2604xxx — docs/SPREADSHEET-UNIVER-SPIKE.md "Load time").
-  - _exports_: `buildFramework`, `EXPIRE_MS`, `isDark`, `noteGridMounted`, `noteGridUnmounted`, `prewarmFramework`, `prewarmWaiting`, `readTokens`, `RIBBON_TYPE`, `takePrewarmed`
+  - _exports_: `buildFramework`, `EXPIRE_MS`, `isDark`, `noteGridMounted`, `noteGridUnmounted`, `prewarmFramework`, `readTokens`, `RIBBON_TYPE`, `takePrewarmed`
 - **`src/workspaces/model/components/univerIcons.jsx`** — Curved undo / redo arrows for the Univer grid (NEW-2, B2574353).
   - _exports_: `CURVED_ICONS`, `CurvedRedoIcon`, `CurvedUndoIcon`
 - **`src/workspaces/model/components/UniverSheet.jsx`** — Model workspace — the Univer grid: THE grid on the Spreadsheet tab for every account (docs/SPREADSHEET-UNIVER-SPIKE.md).
@@ -329,26 +315,14 @@ _1284 source files mapped._
   - _exports_: `default (UniverToolPanels)`
 - **`src/workspaces/model/lib/activeFile.js`** — Which Library file the Spreadsheet is showing, per place (NEW-1, "open an uploaded Excel in Spreadsheet").
   - _exports_: `onActiveFileChanged`, `readActiveFile`, `scopeKeyFor`, `setActiveFile`
-- **`src/workspaces/model/lib/autofit.js`** — Model workspace — autofit column width / row height (double-click a header border, the header right-click menu, and Alt H O I / Alt H O A).
-  - _exports_: `autofitColumnWidth`, `autofitRowHeight`, `canvasMeasure`, `CELL_FONT`, `fontFor`, `wrappedLineCount`
-- **`src/workspaces/model/lib/cellEditHistory.js`** — Model workspace — the in-cell editor's OWN undo history (NEW-1, 2026-10-29).
-  - _exports_: `createEditHistory`, `recordEdit`, `redoEdit`, `undoEdit`
 - **`src/workspaces/model/lib/cellTextLayout.js`** — Where a cell's text starts, and whether it may spill — the ONE definition (NEW-1).
   - _exports_: `canSpill`, `CELL_PAD_PX`, `cellPadding`, `INDENT_STEP_PX`, `spillSpanWidth`
-- **`src/workspaces/model/lib/clipboardIO.js`** — Model workspace — the REAL clipboard (Ctrl+C / Ctrl+X / Ctrl+V), pure and DOM-free.
-  - _exports_: `applyClip`, `buildClip`, `CLIP_MARK`, `clipFromHtml`, `clipFromPlanyrHtml`, `clipFromText`, `clipIsEmpty`, `clipToHtml`, `clipToText`, `cssColorToHex`, `lookFromDecls`, `msoFormatToToken`, `parseClipboard`, `parseTsv`, `pasteGeometry`, `pasteMoveSameSheet`
 - **`src/workspaces/model/lib/commandRegistry.js`** — the ONE list of every Model workspace action, shared by the command palette and the Ribbon so neither can drift from what the other does
   - _exports_: `COMMAND_GROUPS`, `COMMANDS`, `fuzzyScore`, `isCommandDisabled`, `resolveLabel`, `runCommandById`, `searchCommands`, `toggleBoldPatch`, `toggleItalicPatch`, `toggleStrikePatch`, `toggleUnderlinePatch`, `toggleWrapPatch`
 - **`src/workspaces/model/lib/csvIO.js`** — CSV round-trip: values-only export of the active sheet (via displayFor), import as a new appended sheet. Dependency-free.
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/deviceUser.js`** — Model workspace — "who is signed in on this device?", answered SYNCHRONOUSLY from the stored session (NEW-1, B2607857).
   - _exports_: `deviceUserId`
-- **`src/workspaces/model/lib/dragAutoscroll.js`** — Model workspace — pure math for drag-select AUTOSCROLL (B2452528, NEW-1).
-  - _exports_: `axisIndexAt`, `axisVelocity`, `EDGE_SLOP`, `MAX_SPEED`, `MIN_SPEED`, `SPEED_PER_PX`
-- **`src/workspaces/model/lib/editorFallback.js`** — the in-cell editor's keystroke fallback: applies a keydown that reached the grid container (never the in-cell input) directly to `editValue`, so a slow-to-focus render can never silently drop a typed character.
-  - _exports_: `applyFallbackEdit`, `editorHasFocus`, `fallbackEditAction`
-- **`src/workspaces/model/lib/editShortcuts.js`** — Model workspace — the text-editing half of the Excel shortcuts: the keys that act INSIDE the in-cell editor (Alt+Enter new line, F4 reference cycling, Ctrl+; / Ctrl+Shift+; / Ctrl+'…
-  - _exports_: `cycleReferenceAtCaret`, `insertAtCaret`, `timeText`, `todayIso`
 - **`src/workspaces/model/lib/evalValues.js`** — Model workspace — the computed values of a workbook as PLAIN data (NEW-1, one formula engine).
   - _exports_: `circularNotice`, `evalFromPlain`, `evalToPlain`
 - **`src/workspaces/model/lib/excelErrors.js`** — The error codes Excel itself can store in a cell.
@@ -361,12 +335,6 @@ _1284 source files mapped._
   - _exports_: `libraryFileIO`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
-- **`src/workspaces/model/lib/formulaMove.js`** — Model workspace — "references follow a moved block" (Excel's cut-and-paste semantics).
-  - _exports_: `rewriteFormulaForMove`
-- **`src/workspaces/model/lib/generalFit.js`** — Excel-style General-format column-width fit: narrows displayed precision (never the stored value) as a column narrows, falling back to a "#" fill when even a bare/scientific form won't fit.
-  - _exports_: `fitGeneralNumber`
-- **`src/workspaces/model/lib/gridChoice.js`** — Model workspace — which grid the Spreadsheet tab shows (NEW-1, 2026-10-31, cutover steps 8–9a — owner decision 2026-10-30: "It should just be the new grid.").
-  - _exports_: `chooseGrid`, `LEGACY_UNIVER_KEY`, `migrateLegacyGridChoice`, `readRegularGrid`, `REGULAR_GRID_KEY`, `subscribeRegularGrid`, `writeRegularGrid`
 - **`src/workspaces/model/lib/keymap.js`** — Model workspace (user-facing "Spreadsheet") — Excel for Windows' keyboard shortcuts, as DATA.
   - _exports_: `chordCommand`, `CHORDS`, `EDIT_MODE_CHORDS`, `navAction`
 - **`src/workspaces/model/lib/keyTips.js`** — Model workspace — Excel's Alt "key-tip" sequences (press and release Alt, then letters).
@@ -384,9 +352,7 @@ _1284 source files mapped._
 - **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
   - _exports_: `decreaseDecimals`, `formatLabelFor`, `increaseDecimals`, `NUMBER_FORMATS`, `toggleThousands`
 - **`src/workspaces/model/lib/orgWorkbookOps.js`** — what the Organization workbook LIST does with a cloud result (NEW-3).
-  - _exports_: `ORG_NOT_PROVISIONED_NOTICE`, `orgCloudOutcome`
-- **`src/workspaces/model/lib/pendingEntry.js`** — Model workspace — "is there typed-but-uncommitted text?" rules shared by the sheet-change paths.
-  - _exports_: `hasPendingFormulaText`
+  - _exports_: `mergeOrgWorkbookLists`, `ORG_NOT_PROVISIONED_NOTICE`, `orgCloudOutcome`
 - **`src/workspaces/model/lib/planRowsSource.js`** — where the Model workspace gets a SIGNED-IN plan's real geometry (B1953797, H2).
   - _exports_: `fetchPlanRowsForModel`, `PLAN_ROWS_KINDS`, `planRowsError`, `planRowsLoading`, `planRowsReady`, `rowsSignature`, `siteFromRows`
 - **`src/workspaces/model/lib/planyrSyntax.js`** — Model workspace — Planyr-only formula SYNTAX → Excel syntax Univer understands (NEW-1, cutover step 7).
@@ -397,20 +363,12 @@ _1284 source files mapped._
   - _exports_: `buildProjectNames`, `openConceptName`, `openPlanId`, `RESERVED_NAME_PREFIXES`
 - **`src/workspaces/model/lib/ribbonLayout.js`** — Pure, DOM-free math deciding which ribbon groups fit inline vs. collapse into a "More ▾" popover at a given container width.
   - _exports_: `computeRibbonLayout`, `MORE_BUTTON_WIDTH`, `RIBBON_GROUPS`
-- **`src/workspaces/model/lib/rowLayout.js`** — Pure variable-row-height offset/search math behind SheetView's virtualized window (cumulative offsets + binary search), DOM-free for unit testing.
-  - _exports_: `buildRowOffsets`, `rowAtOffset`, `visibleRowRange`
-- **`src/workspaces/model/lib/selection.js`** — Model workspace — THE selection model for whole rows, whole columns and the whole sheet.
-  - _exports_: `clampSelection`, `columnHeaderLabel`, `currentRegion`, `extendFromHeader`, `lastCol`, `lastRow`, `parseWholeAddress`, `rowHeaderLabel`, `selectAllStep`, `selectionKind`, `wholeColumns`, `wholeRows`, `wholeSelectionLabel`, `wholeSheet`
-- **`src/workspaces/model/lib/selectionModel.js`** — The Spreadsheet's selection model now lives in src/shared/selection/rangeSelection.js so the Schedule grid (inlined by scripts/sync-sequence-selection.mjs) and the Notes tables share the…
-  - _exports_: `* (../../../shared/selection/rangeSelection.js)`
 - **`src/workspaces/model/lib/sheetColorMode.js`** — The input/formula/cross-sheet-link auto-colour toggle's per-project view preference (localStorage, like sheetZoom.js).
   - _exports_: `DEFAULT_AUTO_COLOR`, `readAutoColor`, `writeAutoColor`
 - **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates a per-CELL dependency graph (A1 grid refs + same-row `[Column]` refs), and renders each cell's display/formula-bar text.
   - _exports_: `cellAddressText`, `cellColorKind`, `displayColorFor`, `displayFor`, `displayKindFor`, `evaluateSheet`, `evaluateWorkbook`, `formulaBarText`, `formulaSource`, `kindOf`, `literalTypedValue`
 - **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
   - _exports_: `activeSheetEntry`, `activeSheetIndex`, `addColumn`, `addSheet`, `addSheetWithContent`, `adjustIndent`, `applyBorder`, `applyPaintedStyle`, `applyToActiveSheet`, `blankRange`, `canonicalJson`, `cellKey`, `clearCellRange`, `clearFormatting`, `colAt`, `colLetterName`, `columnIndexByName`, `commitCellText`, `createSheet`, `createWorkbook`, `DEFAULT_ROW_H`, `deleteColumn`, `deleteRowAt`, `deleteSheet`, `duplicateSheet`, `ensureColumnCount`, `formatAt`, `insertColumnAt`, `insertRowAt`, `isColumnHidden`, `isFormulaText`, `isInconsistencyDismissed`, `isRowHidden`, `MAX_INDENT`, `mergeAt`, `mergeRange`, `migrateSheet`, `migrateWorkbook`, `padRowCount`, `paintedStyleAt`, `rawAt`, `removeMergesIn`, `renameColumn`, `renameSheet`, `reorderSheet`, `rowHeightAt`, `setActiveSheet`, `setCellLooks`, `setCellStyle`, `setColumnsHidden`, `setColumnWidth`, `setFreeze`, `setInconsistencyDismissed`, `setNumberFormat`, `setRaw`, `setRowHeight`, `setRowsHidden`, `SHEET_VERSION`, `sheetsDiverge`, `sortRange`, `styleAt`, `unmergeAt`, `unsupportedFormulaAt`, `usedRangeEnd`, `WORKBOOK_VERSION`, `workbookDeleteColumn`, `workbookDeleteRowAt`, `workbookHasContent`, `workbookInsertColumnAt`, `workbookInsertRowAt`
-- **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
-  - _exports_: `autoSumPlan`, `copyRange`, `ctrlArrowTarget`, `fillDown`, `fillRight`, `fillSelectionWith`, `fillTextToCells`, `findMatches`, `parseNameBoxAddress`, `pasteRange`, `relocateText`, `replaceAll`, `replaceInCellText`
 - **`src/workspaces/model/lib/sheetZoom.js`** — The sheet's own Ctrl/Cmd+wheel zoom level: pure clamp/step math plus per-project localStorage persistence (a view preference, never sheet data).
   - _exports_: `clampZoom`, `DEFAULT_ZOOM`, `MAX_ZOOM`, `MIN_ZOOM`, `readZoom`, `writeZoom`, `zoomFromWheelDelta`, `zoomStepButton`
 - **`src/workspaces/model/lib/spreadsheetClient.js`** — Main-thread half of the spreadsheet worker (NEW-1). `parseSpreadsheetInWorker` and `exportWorkbookInWorker` post a job to lib/spreadsheetWorker.js and resolve its answer; every failure — a…
@@ -423,18 +381,16 @@ _1284 source files mapped._
   - _exports_: _(none)_
 - **`src/workspaces/model/lib/traceAudit.js`** — Pure level-at-a-time trace precedents/dependents stepping + render model over sheetEngine.js's own dependency graph.
   - _exports_: `beginOrStepTrace`, `cellKey`, `parseCellKey`, `renderableTrace`, `stepTrace`, `TRACE_STEP_CAP`
-- **`src/workspaces/model/lib/undoKeyScope.js`** — Model workspace — WHO OWNS Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z right now (NEW-1, 2026-10-29).
-  - _exports_: `CELL_EDITING_ATTR`, `undoKeyKind`, `undoKeyOwner`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/lib/univerBridge.js`** — Model workspace — the Univer bridge (spike, owner-only; docs/SPREADSHEET-UNIVER-SPIKE.md).
-  - _exports_: `BRIDGE_VERSION`, `canonicalRaw`, `hasRichFormatting`, `inferLiteralPattern`, `PLANYR_NAME_ID_PREFIX`, `PROJECT_NAME_ID_PREFIX`, `projectNamesToDefinedNames`, `rectToRefString`, `refStringToRect`, `sameWorkbook`, `sidecarAfterStructure`, `typedDate`, `typeLiteral`, `univerToWorkbook`, `workbookToUniver`
+  - _exports_: `BRIDGE_VERSION`, `canonicalRaw`, `hasRichFormatting`, `inferLiteralPattern`, `PLANYR_NAME_ID_PREFIX`, `PROJECT_NAME_ID_PREFIX`, `projectNamesToDefinedNames`, `rectToRefString`, `refStringToRect`, `sidecarAfterStructure`, `typedDate`, `typeLiteral`, `univerToWorkbook`, `workbookToUniver`
 - **`src/workspaces/model/lib/univerCalcCache.js`** — Model workspace — the CALCULATION CACHE: formula results remembered ON THIS DEVICE so the grid's first paint does not wait on a recalculation (NEW-1, B2604xxx…
   - _exports_: `cacheUnsafe`, `CALC_KEY_PREFIX`, `calcCacheSettled`, `calcHash`, `collectValues`, `countValues`, `cyrb53`, `entryFits`, `MAX_ENTRY_CHARS`, `peekCalc`, `primeCalcCache`, `PROJECT_NAME_RE`, `seedValues`, `SPILL_RE`, `VOLATILE_RE`, `writeCalc`
 - **`src/workspaces/model/lib/univerEval.js`** — Model workspace — THE formula evaluator: Univer's engine, run headless (NEW-1, cutover step 7 of docs/SPREADSHEET-UNIVER-SPIKE.md).
   - _exports_: `evaluateForExport`, `evaluateWorkbookUniver`, `toEvalRecord`, `univerDataFor`
 - **`src/workspaces/model/lib/univerExcelKeys/actions.js`** — Model workspace — what each Excel key DOES on the Univer grid (NEW-1, 2026-10-30).
-  - _exports_: `createActions`, `UNIVER_COMMAND_IDS`
+  - _exports_: `createActions`
 - **`src/workspaces/model/lib/univerExcelKeys/bindings.js`** — Model workspace — the Excel keys the free Univer build lacks (NEW-1, 2026-10-30), as DATA.
   - _exports_: `bindingOf`, `CHORD_BINDINGS`, `chordCoverage`, `chordMatches`, `dateSerial`, `DELETE_CHOICES`, `INSERT_CHOICES`, `META`, `NAV_ACTIONS`, `navPlan`, `NUMFMT_FOR`, `SCOPE`, `structureKind`, `TIME_PATTERN`, `timeFraction`, `TODAY_PATTERN`, `UNIVER_NATIVE_CHORDS`, `UNIVER_UNSUPPORTED_CHORDS`, `wholeLineRanges`
 - **`src/workspaces/model/lib/univerExcelKeys/dialogs.js`** — Model workspace — the two tiny prompts the Excel keys need on the Univer grid: Excel's Insert / Delete "shift cells" radio dialog, and a one-number prompt (Column width / Row height).
@@ -453,8 +409,6 @@ _1284 source files mapped._
   - _exports_: `clampIndent`, `INDENT_COMMAND_IDS`, `INDENT_ICONS`, `indentOfStyle`, `indentPadding`, `indentPatch`, `installUniverIndent`, `stepIndent`, `storedIndentStyle`, `styleForRender`, `UNIVER_BASE_PAD_PX`, `UNIVER_MAX_INDENT`
 - **`src/workspaces/model/lib/univerSave.js`** — Model workspace — the Univer grid's SAVE CONTROLLER (NEW-2, 2026-10-30; docs/SPREADSHEET-UNIVER-SPIKE.md "Save path").
   - _exports_: `createSaveController`, `SAVE_DEBOUNCE_MS`
-- **`src/workspaces/model/lib/univerSwitch.js`** — Model workspace — which grid the Spreadsheet tab shows, as a hook (NEW-1, 2026-10-31; was the owner-only "Try the new grid" switch of the Univer spike, docs/SPREADSHEET-UNIVER-SPIKE.md).
-  - _exports_: `useUniverSwitch`
 - **`src/workspaces/model/lib/univerTheme.js`** — Model workspace — Univer theme from Planyr's own tokens (spike; docs/SPREADSHEET-UNIVER-SPIKE.md).
   - _exports_: `buildUniverTheme`, `scaleFrom`, `THEME_TOKEN_VARS`
 - **`src/workspaces/model/lib/univerTools/index.js`** — Model workspace — the Planyr-only Spreadsheet tools ON the Univer grid (NEW-1, cutover step 6 of docs/SPREADSHEET-UNIVER-SPIKE.md).
@@ -466,7 +420,7 @@ _1284 source files mapped._
 - **`src/workspaces/model/lib/univerUnitPrep.js`** — Model workspace — turning a Planyr workbook into everything Univer needs to build its unit, WITHOUT touching Univer (NEW-1, B2607857 — docs/SPREADSHEET-UNIVER-SPIKE.md "Load time, round 3").
   - _exports_: `prepareUnit`
 - **`src/workspaces/model/lib/univerWarm.js`** — Warm the Univer grid's chunk before the Spreadsheet tab is clicked (NEW-1, B2587264 — docs/SPREADSHEET-UNIVER-SPIKE.md step 4; made unconditional by the cutover, NEW-1 2026-10-31).
-  - _exports_: `univerWantedHere`, `warmUniver`
+  - _exports_: `forgetRetiredGridKeys`, `RETIRED_GRID_KEYS`, `warmUniver`
 - **`src/workspaces/model/lib/useFileWorkbook.js`** — the React side of "a Library spreadsheet file open in Spreadsheet" (NEW-1).
   - _exports_: `FILE_SAVE_DEBOUNCE_MS`, `useFileWorkbook`
 - **`src/workspaces/model/lib/xlsxInspect.js`** — Spreadsheet file inspection — what a dropped file REALLY is, and what it contains that the Spreadsheet module cannot show (NEW-1, "open an uploaded Excel in Spreadsheet").
@@ -481,10 +435,18 @@ _1284 source files mapped._
   - _exports_: `default (ConflictReview)`
 - **`src/workspaces/notes/components/ConflictSideBySide.jsx`** — the two-card side-by-side conflict comparison, now the secondary view inside ConflictReview
   - _exports_: `default (ConflictSideBySide)`
+- **`src/workspaces/notes/components/DocMenu.jsx`** — The document right-click menu (rows, table section, placement), moved verbatim out of NoteEditor.jsx (audit batch L1; module scope, MODULE-SCOPE-COMPONENTS).
+  - _exports_: `DocMenu`, `placeMenu`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
-  - _exports_: `default (IntegrityBanner)`
+  - _exports_: `default (IntegrityBanner)`, `LIST_MAX_PX`
+- **`src/workspaces/notes/components/MiniBar.jsx`** — The horizontal formatting mini-toolbar of the right-click menu, moved verbatim out of NoteEditor.jsx (audit batch L1; module scope, MODULE-SCOPE-COMPONENTS).
+  - _exports_: `MiniBar`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
   - _exports_: `default`, `noteTitleFontPx`, `placeMenu`
+- **`src/workspaces/notes/components/NoteEditorBars.jsx`** — The find bar, zoom pill, page-setup popover and find-and-replace bar, moved verbatim out of NoteEditor.jsx (audit batch L1; module scope, MODULE-SCOPE-COMPONENTS).
+  - _exports_: `EditorStyles`, `FindBar`, `FindReplaceBar`, `PageSetupPopover`, `ZoomPill`
+- **`src/workspaces/notes/components/noteEditorCss.js`** — The editor surface stylesheet, moved verbatim out of NoteEditor.jsx (audit batch L1).
+  - _exports_: `EDITOR_CSS`, `NOTE_BODY_FONT_PX`
 - **`src/workspaces/notes/components/NoteHistory.jsx`** — Version-history pane: earlier snapshots of the open page, with a preview and Restore.
   - _exports_: `default (NoteHistory)`
 - **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
@@ -499,12 +461,18 @@ _1284 source files mapped._
   - _exports_: `default (NoteToolbar)`
 - **`src/workspaces/notes/components/PasteIcons.jsx`** — THE PASTE-OPTIONS DRAWINGS (NEW-1, owner approved the "Office-style" mockup 2026-10-29).
   - _exports_: `ClipboardGlyph`, `PASTE_GLYPH_MODES`, `PASTE_ICON_CSS`, `PasteGlyph`
+- **`src/workspaces/notes/components/PasteOptions.jsx`** — The Word/Excel-style paste-options flyout, moved verbatim out of NoteEditor.jsx (audit batch L1; module scope, MODULE-SCOPE-COMPONENTS).
+  - _exports_: `pasteMenuHasFocus`, `PasteOptions`
 - **`src/workspaces/notes/components/QuickOpen.jsx`** — Ctrl/⌘+K palette: fuzzy title jump falling through to the full-text index.
   - _exports_: `default (QuickOpen)`
 - **`src/workspaces/notes/components/TemplateManager.jsx`** — "Manage templates". Create, rename, edit the body, duplicate and delete the account's page templates.
   - _exports_: `default (TemplateManager)`
+- **`src/workspaces/notes/components/useNoteE2EHook.js`** — The `window.__noteEditor` read/seed instrument, moved verbatim out of NoteEditor.jsx (audit batch L1).
+  - _exports_: `useNoteE2EHook`
+- **`src/workspaces/notes/lib/notesAnchorNest.js`** — A BOX IS NEVER INSIDE ANOTHER BOX (NEW-1, B2671237, owner report 2026-11-12: "pasting a line into a box makes it overlap the box below").
+  - _exports_: `unnestDoc`, `unnestTr`
 - **`src/workspaces/notes/lib/notesAnchorNode.js`** — the `noteAnchor` schema node: a block that stays where it was double-clicked. Position is two numbers ON the node (unscaled document pixels), so it cannot crawl, cannot leak alignment, leaves no padding paragraphs, and rides the document into storage, sync and the PDF. Plus the pure `clampAnchor`.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentLeft`, `anchorExtentTop`, `anchorExtentX`, `anchorPosAtSelection`, `default`, `fitAnchorBox`, `fitAnchorWidth`, `nextAnchorSpot`, `NoteAnchor`, `placeAnchor`, `selectionInsideAnchor`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentLeft`, `anchorExtentTop`, `anchorExtentX`, `anchorPosAtSelection`, `default`, `fitAnchorBox`, `nextAnchorSpot`, `NoteAnchor`, `placeAnchor`, `selectionInsideAnchor`
 - **`src/workspaces/notes/lib/notesAnchorPrune.js`** — an anchored block with nothing in it is PROVISIONAL: the one definition of "empty", used by the screen and by the storage seam, so an abandoned press never reaches the disk or the cloud
   - _exports_: `anchorIsEmpty`, `countEmptyAnchors`, `pruneEmptyAnchors`
 - **`src/workspaces/notes/lib/notesArrows.js`** — PURE decisions for arrows BETWEEN RICH-TEXT BOXES (NEW-2, 2026-09-22, superseding sketch mode's own boxes-and-arrows canvas).
@@ -517,14 +485,26 @@ _1284 source files mapped._
   - _exports_: `BLOCK_KEYS_PRIORITY`, `blockStartAction`, `default`
 - **`src/workspaces/notes/lib/notesBlockMerge.js`** — PER-PARAGRAPH concurrent-edit merge (NEW-1, "like we do on the site planner… if I'm editing and someone else is editing, both the edits go in").
   - _exports_: `mergeNoteDocs`
+- **`src/workspaces/notes/lib/notesBoxClear.js`** — WHEN A BOX GROWS FROM ITS OWN WORDS AND LANDS ON ANOTHER, WHAT IT NOW COVERS GETS OUT OF THE WAY (NEW-1 / NEW-2, B2671237 + B2671238; NARROWED by NEW-2 of 2026-11-15).
+  - _exports_: `changedIds`, `GAP_DEFAULT`, `GAP_MAX`, `GAP_MIN`, `planClear`, `rectsOverlap`
+- **`src/workspaces/notes/lib/notesBoxClearPlugin.js`** — The live half of `notesBoxClear.js` (NEW-1 / NEW-2, B2671237 + B2671238).
+  - _exports_: `BOX_CLEAR_META`, `boxClearPlugin`, `placedBetween`
+- **`src/workspaces/notes/lib/notesBoxClipboard.js`** — COPYING A BOX IS NOT COPYING TEXT (NEW-1, owner 2026-11-15: "it must be obvious when he is copying a BOX as opposed to TEXT, the way Excel shows a copied cell").
+  - _exports_: `BOX_ATTR`, `boxesForCopy`, `carriesBoxCopy`, `copyScopePlugin`, `decodeBoxPayload`, `encodeBoxPayload`, `MAX_PASTE_BOXES`, `MAX_PAYLOAD_CHARS`, `mediaRefs`, `mintBoxId`, `mintToken`, `nextRepeat`, `PASTE_STEP`, `planBoxPaste`, `remapMedia`, `unwrapCopiedSlice`
 - **`src/workspaces/notes/lib/notesBoxResize.js`** — The placed box's geometry: the floors, the edge pad, and the pure rule for resizing one from any of its eight handles (corners hold the ratio, edges stretch, Shift inverts, the edges you are not holding never move). Also decides which handles a box may offer, read off its content.
   - _exports_: `ANCHOR_BOX_PAD_X`, `ANCHOR_EDGE_PAD`, `ANCHOR_FIT_MIN`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_START_MAX`, `ANCHOR_START_MIN`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentLeft`, `anchorExtentTop`, `anchorExtentX`, `anchorStartPreferred`, `default`, `fitWidthFor`, `growWidthFor`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
 - **`src/workspaces/notes/lib/notesCalloutNode.js`** — The `noteCallout` schema node: a coloured block storing a TONE NAME, never a colour.
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
+- **`src/workspaces/notes/lib/notesCaretSnapback.js`** — DID A CLICK IN THE TEXT LEAVE THE CARET SOMEWHERE ELSE? (NEW-3, owner report 2026-11-12 1:43 PM: after pasting an Outlook list, "I click the line above the caret and the caret jumps right…
+  - _exports_: `blockAt`, `listDepthAt`, `snapbackReport`, `snapbackVerdict`
+- **`src/workspaces/notes/lib/notesChipPlace.js`** — WHERE THE PASTE-OPTIONS TAB GOES SO IT COVERS NO TEXT (NEW-1, B2671237).
+  - _exports_: `CHIP_GAP`, `coveredArea`, `placeChip`, `TEXT_PAD`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
-  - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
+  - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
 - **`src/workspaces/notes/lib/notesConflictDiff.js`** — Pure word-level diff behind ConflictCompare, with a line-level then a linear prefix/suffix fallback so it never builds an unbounded table on an outsized document.
   - _exports_: `diffHasChanges`, `diffNoteText`, `lcsAlign`, `sideOps`
+- **`src/workspaces/notes/lib/notesControls.js`** — The ONE Notes-side mirror of the shared control radius scale (audit Batch I8).
+  - _exports_: `RADIUS`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
 - **`src/workspaces/notes/lib/notesDuplicates.js`** — pure detector for THE SAME NOTE LIVING IN TWO PROJECTS: word-pair Dice similarity over normalised text, same-project and empty pages deliberately excluded, groups (not pairs) out.
@@ -532,7 +512,7 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesEnterInherit.js`** — Enter carries the line's formatting to the new line: the pure decision about when to claim the press (only a collapsed caret at the end of a non-empty textblock) and the handler that runs the split it displaces and repairs it in the same transaction.
   - _exports_: `default`, `enterInheritHandler`, `enterShouldInherit`, `inheritedAttrs`
 - **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set (incl. images, the empty-page placeholder and search marking), the empty-document constant, and the per-page configured variant.
-  - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `noteExtensions`
+  - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `noteExtensions`, `NoteTableView`
 - **`src/workspaces/notes/lib/notesFakeBullets.js`** — A NOTE PASTED BEFORE THE OFFICE-LIST FIX HOLDS "BULLETS" THAT ARE JUST TEXT.
   - _exports_: `normalizeFakeBullets`, `readMarker`
 - **`src/workspaces/notes/lib/notesFileMeta.js`** — How an attached file is described in words — size, type badge, safe name — shared by the chip, the export and the print sheet.
@@ -564,9 +544,11 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesMixedSelection.js`** — PURE: does a text selection agree on one font size/block style, or is it MIXED (`getAttributes`/`isActive` only ever answer for a caret's single position, not a range that can honestly disagree with itself) — and what a toolbar control should display for either case.
   - _exports_: `formatDisplayValue`, `MIXED`, `selectionAlignments`, `selectionBlockShapes`, `selectionFontFamilies`, `selectionFontSizes`, `selectionLineHeights`, `selectionListKinds`, `selectionMarkAttrs`, `selectionMarkPresence`, `togglePressed`, `uniformValue`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
-  - _exports_: `addPage`, `adoptDeletedOrphans`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageTree`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `ORG_GROUP_LABEL`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_ORG`, `SCOPE_PROJECT`, `searchTitles`, `setPageOrgScope`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `unfiledPages`, `walkPages`, `withTombstones`
+  - _exports_: `addPage`, `adoptDeletedOrphans`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageTree`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `ORG_GROUP_LABEL`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_ORG`, `SCOPE_PROJECT`, `searchTitles`, `setPageOrgScope`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `unfiledPages`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOfficeLists.js`** — A WORD / ONENOTE OUTLINE ARRIVES AS A REAL NESTED LIST, WITH ITS TABLE UNDER THE BULLET IT SAT UNDER (NEW-1 / NEW-2, owner report 2026-10-30: a bulleted soft-cost outline with a small table…
-  - _exports_: `classifyMarker`, `convertOfficeLists`, `isBlankText`, `lengthIn`, `listFormatMap`, `parseMsoList`, `planOutline`, `splitTabRow`, `tabRuns`
+  - _exports_: `classifyMarker`, `convertOfficeLists`, `isBlankText`, `lengthIn`, `listFormatMap`, `marginLeftIn`, `parseMsoList`, `planOutline`, `splitTabRow`, `tabRuns`
+- **`src/workspaces/notes/lib/notesOfficeStyle.js`** — OFFICE'S OTHER SPELLINGS OF TEXT FORMATTING, TURNED INTO THE INLINE MARKUP THE EDITOR'S PARSER READS (NEW-1, 2026-11-05; found by the Notes paste bank, ui-audit/lib/pasteBank.mjs, red on…
+  - _exports_: `highlightOf`, `marksByClass`, `normalizeOfficeStyle`
 - **`src/workspaces/notes/lib/notesOrphanPlan.js`** — PURE: what to do with every body that has no node (NEW-1, 2026-10-16).
   - _exports_: `planOrphanResolution`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
@@ -576,7 +558,7 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesPageWidth.js`** — SET A NOTE PAGE'S OWN WIDTH BY HAND (NEW-1, owner report 2026-09-11).
   - _exports_: `dragWidthFromDelta`, `FULL_WIDTH_FLOOR`, `FULL_WIDTH_GUTTER`, `leftEdgeDrag`, `normalizePageMargin`, `PAGE_COL_MIN`, `PAGE_WIDTH_MAX`, `PAGE_WIDTH_MIN`, `PAGE_WIDTH_PRESETS`, `pageWidthLabel`, `pageWidthPresetId`, `resolvePinnedBaseWidth`, `resolvePresetPx`, `rightEdgeDrag`, `sheetWidthFor`
 - **`src/workspaces/notes/lib/notesPasteInherit.js`** — A PASTED RUN INHERITS THE FONT ITS SOURCE GAVE IT (NEW-5) ⛔ HIS REPORT: *"one bullet, 'Jerry Hayley Kandice Cabets' — first half carries font-family: Calibri, second half carries none and…
-  - _exports_: `inheritedStyle`, `pushDownInherited`
+  - _exports_: `DEFAULT_INK`, `inheritedStyle`, `pushDownInherited`
 - **`src/workspaces/notes/lib/notesPasteModes.js`** — WORD'S AND EXCEL'S PASTE OPTIONS, AS PURE TRANSFORMS OVER THE JUST-PASTED RANGE (NEW-1, owner approved "Office-style" 2026-10-29).
   - _exports_: `analyzePaste`, `applyColumnWidths`, `applyPasteModeToTr`, `fillAt`, `flattenCell`, `formattingOnlyTable`, `mapTableCells`, `modeForKey`, `modesOfSet`, `newTablePositions`, `PASTE_MODE_META`, `pasteSetFor`, `revertToBase`, `transposeTable`, `valuesFormatTable`, `valuesTable`, `withSourceFills`
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
@@ -601,6 +583,8 @@ _1284 source files mapped._
   - _exports_: `createdAtFromId`, `duplicateKey`, `scanNoteDuplicates`, `scanOrphanBodies`, `unreachableNotes`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
   - _exports_: `default`, `findSearchMatches`, `NoteSearchHighlight`, `noteSearchKey`
+- **`src/workspaces/notes/lib/notesSelectAll.js`** — CTRL+A BELONGS TO THE THING YOU ARE IN (NEW-1, owner 2026-11-15: "approved PowerPoint behaviour").
+  - _exports_: `NoteSelectAll`, `selectAllScope`, `selectAllTarget`
 - **`src/workspaces/notes/lib/notesSketchModel.js`** — PURE sketch decisions: THE CANVAS OWNS EVERYTHING — a box carries its own text and its own position, arrows are an explicit list, `removeBox` is the ONE place a box is destroyed (and where the arrow cascade runs), plus the layout and the migration off the superseded outline shape.
   - _exports_: `BODY_LINE_H`, `BODY_WRAP`, `BOX_MIN_H`, `BOX_W`, `boxSize`, `edgePoint`, `LABEL_WRAP`, `layoutSketch`, `LINE_H`, `MARGIN`, `MIN_CANVAS_H`, `MIN_CANVAS_W`, `normalizeSketch`, `PAD_Y`, `SLACK_X`, `SLACK_Y`, `wrapText`
 - **`src/workspaces/notes/lib/notesSlashMenu.js`** — The slash-menu trigger rule (never mid-word), the command catalogue, and the extension that owns the arrows, Enter and Escape.
@@ -608,19 +592,19 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesSpacing.js`** — how far apart the lines are: a BLOCK property (paragraph/heading), written into the markup so it saves, syncs and prints with no second stylesheet
   - _exports_: `BLOCK_SPACES`, `blockFontSize`, `COMFORTABLE_LINE`, `DEFAULT_DENSITY`, `DENSITIES`, `densityFor`, `densityStyle`, `fontSizePx`, `LINE_SPACINGS`, `SINGLE`, `SPACE_AFTER_DEFAULT`, `SPACE_BEFORE_DEFAULT`, `SPACING_LINE_OPTIONS`, `SPACING_PRESETS`, `spacingFromElement`, `spacingGlyphFor`, `spacingLabel`, `spacingStyle`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
-  - _exports_: `applyExternalToOpenNote`, `clearNotesStorageError`, `collectBinFacts`, `copyNoteAssets`, `createPage`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `duplicatePageTree`, `ignoreDuplicate`, `knownBinnedPages`, `lastNotesStorageError`, `legacyViewPurgeFailure`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictKeptLine`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `PAGE_KEY_BASE`, `pageKey`, `purgeLegacyViews`, `purgePages`, `putNoteFile`, `putNoteImage`, `readActivePageId`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNoteTemplates`, `readNoteView`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `TREE_KEY_BASE`, `treeKey`, `writeActivePageId`, `writeNoteTemplates`, `writeNoteView`, `writePage`, `writeTree`
+  - _exports_: `activeProjectKey`, `applyExternalToOpenNote`, `clearNotesStorageError`, `collectBinFacts`, `copyNoteAssets`, `createPage`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `duplicatePageTree`, `ignoreDuplicate`, `knownBinnedPages`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictKeptLine`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `PAGE_KEY_BASE`, `pageKey`, `purgeLegacyViews`, `purgePages`, `putNoteFile`, `putNoteImage`, `readActivePageId`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNoteTemplates`, `readNoteView`, `readPage`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `TREE_KEY_BASE`, `treeKey`, `writeActivePageId`, `writeNoteTemplates`, `writeNoteView`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
   - _exports_: `default`, `TAB_CHAR`, `TAB_PRIORITY`
 - **`src/workspaces/notes/lib/notesTableClipboard.js`** — A TABLE THAT IS ALREADY ON A NOTES PAGE COPIES, CUTS AND PASTES (NEW-1, owner report 2026-10-06: "I'm trying to copy a table that's already in the notebook module, and I can't paste it.")…
   - _exports_: `cellToTsv`, `clipboardTextForSlice`, `contentOfBoxes`, `default`, `NoteTableClipboard`, `tableClipboardKey`, `tableToTsv`, `wholeTableSelection`
 - **`src/workspaces/notes/lib/notesTableColumns.js`** — THE EDITOR-SIDE HALF OF notesTableWidth.js: reading a live table's per-column widths off the real ProseMirror node, and writing normalized ones back.
-  - _exports_: `applyTableColumnNormalization`, `default`, `normalizeTableColumnWidths`, `NoteTableColumns`, `NoteTableView`, `tableColumnWidths`
+  - _exports_: `applyTableColumnNormalization`, `default`, `normalizeTableColumnWidths`, `NoteTableColumns`, `tableColumnWidths`
 - **`src/workspaces/notes/lib/notesTableFill.js`** — HEADER ROWS ON ANY ROW, AND CELL FILL (NEW-1 / NEW-2, owner report 2026-10-28).
   - _exports_: `BOLD_TITLE`, `BOLD_TITLE_IN_HEADER`, `boldTruth`, `chosenFill`, `currentFill`, `FILL_NONE`, `fillForCell`, `headerRowsState`, `normalizeFill`, `NoteTableFill`, `selectionInHeaderCells`, `setCellFill`, `TABLE_FILLS`, `tableTarget`, `toggleHeaderRows`
 - **`src/workspaces/notes/lib/notesTableMultiSelect.js`** — CTRL+CLICK ADDS CELLS TO A NOTES TABLE'S SELECTION (B2530690, owner report 2026-10-29: "Using Control to click multiple cells doesn't work.
   - _exports_: `ctrlClickSelection`, `isMultiCell`, `modelOf`, `MULTI_SELECTION_MESSAGE`, `multiCellPositions`, `MultiCellSelection`, `NOTES_NOTICE_EVENT`, `NoteTableMultiSelect`, `refuseMultiCell`, `selectionFromModel`
 - **`src/workspaces/notes/lib/notesTablePaste.js`** — A TABLE COPIED FROM ONENOTE / WORD / EXCEL / SHEETS / OUTLOOK ARRIVES AS A REAL NOTES TABLE, WHEREVER THE PASTE LANDS (NEW-1, owner report 2026-10-05: "I tried copying a table from OneNote…
-  - _exports_: `clipboardHasTable`, `cssLengthPx`, `fillEmptyCells`, `fillFromDeclarations`, `fillsByClass`, `htmlHasTable`, `isBorderedTable`, `isMarkerColumn`, `isSingleColumn`, `normalizeTableMarkup`, `parseTabular`, `readSourceTables`, `repairTableFragment`, `rowsToTableHtml`, `sourceFill`, `TABLE_BOX_CAP_MIN`, `tableBoxWidth`, `tableGridsOf`, `tableOwnsClipboard`, `tableRowsToText`, `tableShape`, `tableShapeOfNode`, `tabularFromClipboard`
+  - _exports_: `classRules`, `clipboardHasTable`, `cssLengthPx`, `fillEmptyCells`, `fillFromDeclarations`, `fillsByClass`, `htmlHasTable`, `isBorderedTable`, `isMarkerColumn`, `isSingleColumn`, `normalizeTableMarkup`, `parseTabular`, `readSourceTables`, `repairTableFragment`, `rowsToTableHtml`, `sourceFill`, `TABLE_BOX_CAP_MIN`, `tableBoxWidth`, `tableGridsOf`, `tableOwnsClipboard`, `tableRowsToText`, `tableShape`, `tableShapeOfNode`, `tabularFromClipboard`
 - **`src/workspaces/notes/lib/notesTablePicture.js`** — "PASTE AS PICTURE" FOR A TABLE (Excel's Paste Options ▸ Picture, NEW-1).
   - _exports_: `prepareTablePicture`, `renderTableToPng`, `TABLE_PICTURE_MAX_SIDE`
 - **`src/workspaces/notes/lib/notesTableRowHeight.js`** — DRAG THE LINE UNDER A ROW TO CHANGE ITS HEIGHT (NEW-3, owner report 2026-11-05: "it doesn't let me change row height").
@@ -636,9 +620,11 @@ _1284 source files mapped._
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
   - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
 - **`src/workspaces/notes/lib/notesToggleNode.js`** — The `noteToggle` / `noteToggleTitle` schema nodes — a foldable section built on the browser's own details element.
-  - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
+  - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `toggleClickKey`
 - **`src/workspaces/notes/lib/notesToolbarDiag.js`** — Read-only, call-time-gated diagnostic for B831600 ×3 (the table-toolbar-jump bug): records every `applyToolbarDelta` call so the owner can capture the real production call sequence. Off by default, no telemetry leaves the browser.
   - _exports_: `isToolbarDiagArmed`, `latchToolbarDiag`, `recordToolbarDiag`, `TOOLBAR_DIAG_LOG_KEY`, `TOOLBAR_DIAG_PARAM`, `TOOLBAR_DIAG_STORAGE_KEY`
+- **`src/workspaces/notes/lib/notesUndoCarry.js`** — lib/notesUndoCarry.js — EACH NOTES PAGE KEEPS ITS OWN UNDO HISTORY WHEN YOU SWITCH PAGES (NEW-1, 2026-11-13).
+  - _exports_: `captureHistory`, `carriedPages`, `CARRY_BYTES`, `CARRY_EVENTS`, `CARRY_PAGES`, `clearCarry`, `docFingerprint`, `forgetOutside`, `hasCarry`, `historyPluginOf`, `planRestore`
 - **`src/workspaces/notes/lib/notesVersionOrder.js`** — PURE: orders a conflict's two copies by recency (never by which browser window they came from), telling the caller whether that ordering is actually known.
   - _exports_: `orderConflictVersions`
 - **`src/workspaces/notes/lib/notesVersions.js`** — PURE version-history policy: when a snapshot is due, which are kept, and the restore plan that never destroys history.
@@ -650,6 +636,8 @@ _1284 source files mapped._
 
 ## shared lib
 
+- **`src/shared/auth/apiAuth.js`** — The ONE way the browser calls our own /api/* with the signed-in person's token (NEW-1, 2026-11-09).
+  - _exports_: `apiErrorText`, `authedFetch`, `authedFetchResponse`, `FAIL_SIGNED_OUT`, `FAIL_UNREACHABLE`, `getApiToken`, `isSignInAnswer`, `NEAR_EXPIRY_MS`, `SignInError`, `signInMessage`
 - **`src/shared/auth/authErrors.js`** — ONE place that turns an auth failure into words a person can act on (NEW-1, follow-up to B2619760).
   - _exports_: `AUTH_ERROR_KINDS`, `authErrorAction`, `classifyAuthError`, `FIELD_COPY`, `friendlyAuthError`, `MIN_PASSWORD_LENGTH`, `recoveryErrorText`, `SUPPORT_EMAIL`, `validateAuthFields`
 - **`src/shared/auth/authLink.js`** — the pure rules for "Planyr emails you a sign-in / reset link".
@@ -658,6 +646,8 @@ _1284 source files mapped._
   - _exports_: `authReturn`, `authReturnNotice`, `parseAuthReturn`, `stripAuthErrorParams`
 - **`src/shared/auth/authTelemetry.js`** — Auth telemetry — ONE helper every sign-in / sign-up / forgot-password / email-link code path reports through (NEW-1, 2026-11-02, after B2619760: sign-in was dead for every signed-out person…
   - _exports_: `AUTH_EVENT`, `classifyAuthError`, `cleanExtra`, `emailDomain`, `observeAuthCall`, `reportAuthEvent`, `reportAuthOutcome`
+- **`src/shared/auth/panelDismiss.js`** — When the sign-in panel may close, and what survives if it goes away anyway (NEW-1, 2026-11-08).
+  - _exports_: `backdropMayClose`, `clearDraft`, `DRAFT_KEY`, `DRAFT_MAX_AGE_MS`, `draftStorage`, `escapeMayClose`, `readDraft`, `saveDraft`
 - **`src/shared/auth/rateLimitCopy.js`** — The one message fragment shared between the Postgres signup-rate-limit trigger and the client code that detects it for best-effort telemetry
   - _exports_: `SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT`
 - **`src/shared/auth/recoveryPending.js`** — "this person arrived by a password-reset link and has not chosen the new password yet".
@@ -665,7 +655,9 @@ _1284 source files mapped._
 - **`src/shared/auth/sessionIntent.js`** — Did the person sign out, or did the session die under them? (NEW-1, follow-up to B2619760) supabase-js emits SIGNED_OUT for BOTH: a person pressing Sign out, and a refresh token that the…
   - _exports_: `authEventMeta`, `bootHadStoredSession`, `clearSignOutIntent`, `currentAuthEventMeta`, `hasStoredSessionKey`, `markDeliberateSignOut`, `SIGNED_OUT_NOTICE`, `signOutWasDeliberate`
 - **`src/shared/auth/signinHealth.js`** — Sign-in health — the ONE place that decides whether sign-in is broken, whether the owner is told, and what the email says (NEW-1, 2026-11-02, after B2619760: sign-in was dead for every…
-  - _exports_: `ageWords`, `buildSnapshot`, `CHECK_LABELS`, `CHECK_NAMES`, `COVERAGE_GAP_TEXT`, `coverageGaps`, `decide`, `effectiveHistory`, `evaluateStops`, `EVENT_BUCKETS`, `EVENT_PREFIX`, `failStreak`, `isUncovered`, `mergeLatestChecks`, `overallOf`, `rateAlarm`, `snapshotHealth`, `SOURCE_LABELS`, `SOURCES`, `staleLimitMin`, `STATUSES`, `summariseEvents`, `sweepLine`, `THRESHOLDS`, `unknownStreak`
+  - _exports_: `ageWords`, `buildSnapshot`, `CHECK_LABELS`, `COVERAGE_GAP_TEXT`, `coverageGaps`, `decide`, `effectiveHistory`, `evaluateStops`, `EVENT_BUCKETS`, `failStreak`, `isUncovered`, `mergeLatestChecks`, `overallOf`, `rateAlarm`, `snapshotHealth`, `SOURCE_LABELS`, `SOURCES`, `staleLimitMin`, `STATUSES`, `summariseEvents`, `sweepLine`, `THRESHOLDS`, `unknownStreak`
+- **`src/shared/auth/signInText.js`** — The words for a dead sign-in (NEW-1, 2026-11-10) — a dependency-free leaf, so a pure module (driveSyncRun, a parser) can use it without pulling in supabase.
+  - _exports_: `apiErrorText`, `isSignInAnswer`, `signInMessage`
 - **`src/shared/basemaps/basemaps.js`** — Shared aerial basemap SOURCE registry (B693) — the single list of free aerial imagery sources, used by BOTH surfaces: the map finder's Imagery dropdown and the planner's Basemap control…
   - _exports_: `basemapAttribution`, `BASEMAPS`, `basemapTileLayers`, `densityTileOptions`, `FALLBACK_LABELS_ATTR`, `FINDER_BASEMAP_CHOICES`, `FOOD_BASEMAP_CHOICES`, `HYBRID_BASEMAP`, `IMAGERY_GRADE`, `PLACE_NAMES_TILES`, `PLANNER_BASEMAP_CHOICES`, `resolveBasemapChoice`, `ROAD_NAMES_FROM`, `ROAD_NAMES_TILES`, `SATELLITE_BASEMAP`, `SITE_PLAN_BASEMAP`, `SITE_ROADS_FROM`, `siteStack`, `VECTOR_SOURCE`, `VECTOR_ZOOM_OFFSET`
 - **`src/shared/basemaps/placeNamesData.js`** — City-name data + selection rules — PURE, no Leaflet, no DOM (NEW-2, 2026-09-29).
@@ -689,7 +681,7 @@ _1284 source files mapped._
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
 - **`src/shared/cloud/writeFailureLog.js`** — Durable (localStorage) record of a cloud write that failed, surviving a same-event auto-reload that can outrun an in-memory banner before it paints
-  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `inferEntryKind`, `PRE_FIX_RETRY`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`, `retryCloudWriteFailures`, `WHAT_DATES`, `WHAT_RENAME`, `WHAT_STATUS`
+  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `clearCloudWriteFailuresFor`, `inferEntryKind`, `PRE_FIX_RETRY`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`, `retryCloudWriteFailures`, `WHAT_DATES`, `WHAT_PLAN_RENAME`, `WHAT_RENAME`, `WHAT_STATUS`
 - **`src/shared/cloud/writeSerializer.js`** — per-key async write queue; stops a rapid second write for the same id from racing an unsettled first one
   - _exports_: `createWriteSerializer`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
@@ -709,7 +701,9 @@ _1284 source files mapped._
 - **`src/shared/comps/lib/compDrafts.js`** — pure row<->model mapping for public.comp_import_drafts (B849233), mirroring comps.js's rowToComp/compToRow shape
   - _exports_: `dismissDraftNotice`, `draftTitleFor`, `importDraftToInsertRow`, `isLoneDealWord`, `resolveImportTitle`, `rowToImportDraft`
 - **`src/shared/comps/lib/compDraftsStore.js`** — Supabase CRUD for public.comp_import_drafts (owner-only, no team visibility); promoteDraft is the moment comps' strict constraints get enforced, writing the reason back onto the row on failure
-  - _exports_: `deleteDraft`, `fetchMyDrafts`, `insertDrafts`, `promoteDraft`, `updateDraftProposed`
+  - _exports_: `deleteDraft`, `fetchMyDrafts`, `insertDrafts`, `promoteDraft`
+- **`src/shared/comps/lib/compFocus.js`** — The ONE decision for "a request arrived to focus comp X" (NEW-1, 2026-11-15).
+  - _exports_: `COMP_FOCUS_MISSING_NOTICE`, `resolveCompFocus`
 - **`src/shared/comps/lib/compLocationText.js`** — pure Location-cell identity text per anchor kind: an APN (or "N parcels · County") for a parcel, a site-plan overlay's own title for a site_plan point, and the synchronous County/coords fallback for a pin while its reverse geocode is pending
   - _exports_: `compLocationFor`, `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
@@ -717,17 +711,17 @@ _1284 source files mapped._
 - **`src/shared/comps/lib/compMobileLayout.js`** — pure model behind the mobile transposed sheet: which fields show in which section per comp type (filtered off SHEET_COLUMNS' own appliesTo), the pinned "needed to save" fields, and a row's short status text
   - _exports_: `isRequiredColEmpty`, `MOBILE_BREAKPOINT_PX`, `mobileLabel`, `mobileSections`, `neededToSaveColumns`, `neededToSaveRemaining`, `rowStatusText`
 - **`src/shared/comps/lib/compMobileSheetModel.js`** — pure model behind the REVIEW-FIRST phone comp sheet (NEW-2, 2026-10-05).
-  - _exports_: `compDateLabel`, `flipBasis`, `flipPeriod`, `flipTermUnit`, `footerReadback`, `guessPeriod`, `hugWidthCh`, `mobileCol`, `mobilePartyLabels`, `MORE_AFFIX`, `moreDetailFields`, `moreFieldHasValue`, `partyNameFallback`, `periodGuessStep`, `priceReadback`, `rowBlocker`, `rowBlockerInfo`, `rowFieldState`, `saveState`, `saveTapPlan`, `SF_PER_ACRE`, `TERM_UNIT_SHORT`, `TERM_UNITS`, `termForDisplay`, `termOtherReading`, `termToMonths`, `withTitleFallback`
+  - _exports_: `compDateLabel`, `flipBasis`, `flipPeriod`, `flipTermUnit`, `footerReadback`, `guessPeriod`, `hugWidthCh`, `mobileCol`, `mobilePartyLabels`, `MORE_AFFIX`, `moreDetailFields`, `moreFieldHasValue`, `partyNameFallback`, `periodGuessStep`, `priceReadback`, `rowBlocker`, `rowBlockerInfo`, `rowFieldState`, `saveState`, `saveTapPlan`, `SF_PER_ACRE`, `TERM_UNIT_SHORT`, `termForDisplay`, `termOtherReading`, `termToMonths`, `withTitleFallback`
 - **`src/shared/comps/lib/compParse.js`** — comp entry parsing (B849232): prose-line + tab-delimited spreadsheet block parsing into typed draft rows, with blocking-vs-soft uncertainty flags per cell (a lease rate with no period blocks; a k/m-suffixed number never does)
   - _exports_: `correctHeaderWord`, `detectCompType`, `detectPasteShape`, `findDateToken`, `looksLikeSpreadsheetPaste`, `matchHeaderCell`, `parseLatLonPair`, `parseMagnitudeNumber`, `parsePaste`, `parsePasteBlock`, `parseProseLine`, `parseSingleRecord`, `rowHasBlockingFlags`, `splitPasteLines`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compBadgeLabel`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compRecordSections`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseRateDisplayFor`, `leaseRateForPeriod`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `opexNormalizedRate`, `parseLeaseTermYears`, `partyLabels`, `powerLabel`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `AV_KINDS`, `avKindLabel`, `buildingPricePerSf`, `COMP_TYPES`, `compBadgeLabel`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compRecordSections`, `compsSummaryBits`, `compToDraft`, `compToRow`, `CONVERT_TARGETS`, `convertDeliveredComp`, `convertTargetsFor`, `draftToComp`, `emptyDraft`, `isCompType`, `isRateCompType`, `isSupplyType`, `isUnderConstruction`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseRateDisplayFor`, `leaseRateForPeriod`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `opexNormalizedRate`, `parseLeaseTermYears`, `partyLabels`, `powerLabel`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `SUPPLY_TYPES`, `UC_DELIVERY_KINDS`, `UC_STATUSES`, `ucKindLabel`, `ucStatusLabel`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSavePrep.js`** — the ONE pre-insert step every comp save path runs (NEW-2, owner report 2026-10-16).
   - _exports_: `prepareCompForSave`
 - **`src/shared/comps/lib/compsChanged.js`** — "a comp was written" signal. Deliberately dependency-free (no comps.js, no Supabase) so the Model workspace can subscribe without pulling the comps chunk (see…
   - _exports_: `COMPS_CHANGED_KEY`, `notifyCompsChanged`, `onCompsChanged`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
-  - _exports_: `absorbPasteIntoSheet`, `activeCellFlags`, `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `groupLabelIsRedundant`, `GROUPS`, `isUnfilledRow`, `matchOption`, `NOTES_COLUMN`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
+  - _exports_: `absorbPasteIntoSheet`, `activeCellFlags`, `applyCellEdit`, `AV_KIND_OPTIONS`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `draftWithType`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `groupLabelIsRedundant`, `GROUPS`, `isUnfilledRow`, `matchOption`, `NOTES_COLUMN`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UC_KIND_OPTIONS`, `UC_STATUS_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
 - **`src/shared/comps/lib/compSiteMatch.js`** — pure exact-title-or-nearest-within-radius matching rule for attaching a comp to an existing site instead of creating a duplicate
   - _exports_: `findMatchingSite`, `milesBetween`, `SITE_MATCH_MILES`
 - **`src/shared/comps/lib/compsQuery.js`** — the pure search / filter / sort engine behind the Records list (NEW-1).
@@ -755,7 +749,7 @@ _1284 source files mapped._
 - **`src/shared/coordinates/statePlane.js`** — NEW-3 multi-zone state plane: the zone registry (TX South Central 2278 · CO North 2231 · CO Central 2232), per-county assignment incl. the documented Broomfield decision, a generic Lambert engine that reproduces the hardcoded EPSG:2278 path bit-for-bit, and the LCC grid scale factor
   - _exports_: `* (./statePlaneCore.js)`, `COUNTY_ZONE`, `gridConvergenceDeg`, `resolveZone`, `zoneForCounty`
 - **`src/shared/coordinates/statePlaneCore.js`** — the LEAN half of the state-plane engine (NEW-1 STATE-PLANE-AUDIT, B2478960): the zone registry, the three projections, units, the coarse POINT resolver and the site-local frame.
-  - _exports_: `alaskaZoneId`, `CA_ISLAND_ZONE6`, `caIslandOf`, `gridConvergenceDegIn`, `gridScaleFactor`, `hasPointZoneLocator`, `hawaiiZoneId`, `localFrameZone`, `projectToZone`, `setPointZoneLocator`, `SINGLE_ZONE_STATE`, `SP_ZONES`, `stateCode`, `UNIT_M`, `unitInUsFt`, `WA_GRANT_SPLIT_LAT`, `withZone`, `ZONE_IDS`, `zoneById`, `zoneForPoint`, `zoneToProject`
+  - _exports_: `alaskaZoneId`, `CA_ISLAND_ZONE6`, `caIslandOf`, `gridConvergenceDegIn`, `gridScaleFactor`, `hasPointZoneLocator`, `hawaiiZoneId`, `localFrameZone`, `projectToZone`, `setPointZoneLocator`, `SINGLE_ZONE_STATE`, `SP_ZONES`, `stateCode`, `UNIT_M`, `unitInUsFt`, `WA_GRANT_SPLIT_LAT`, `withZone`, `zoneById`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/coordinates/statePlaneCounties.js`** — GENERATED by scripts/gen-state-plane-zones.py from the EPSG database (pyproj 3.8.0, PROJ 9.8.1).
   - _exports_: `COUNTY_ALIASES`, `COUNTY_TABLE`, `DECIDED_COUNTIES`, `SPLIT_COUNTIES`, `STATUTE_OVERRIDES`
 - **`src/shared/coordinates/statePlaneInput.js`** — THE UNIT-EXPLICIT BOUNDARY for a state plane coordinate that a PERSON typed, pasted or imported (NEW-1, B2528672).
@@ -810,10 +804,12 @@ _1284 source files mapped._
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
 - **`src/shared/files/middleTruncate.js`** — split a label into head + pinned tail so middle-ellipsis keeps the distinguishing end (NEW-4).
   - _exports_: `middleEllipsis`, `splitLabel`
+- **`src/shared/files/ocrAssets.js`** — Where the Tesseract OCR engine's files come from (audit batch A, 2026-11-23).
+  - _exports_: `OCR_CORE_PATH`, `OCR_LANG_PATH`, `OCR_WORKER_PATH`, `selfHostedEngine`, `selfHostedEngineWithLang`
 - **`src/shared/files/ocrConfidence.js`** — Pure: locates Tesseract per-word confidence inside OCR'd deed text and correlates a bad closure with the specific likely-culprit courses (the OCR closure safety net)
   - _exports_: `culpritCalls`, `locateWordSpans`, `lowConfidenceSpans`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
-  - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
+  - _exports_: `framePointToPage`, `recoverMatchLines`
 - **`src/shared/files/pdfRaster.js`** — Browser-only PDF page → canvas ImageData render at a target DPI, for OCR only (a separate pdf.js setup from pdfText.js's text-extraction path)
   - _exports_: `pdfPageCount`, `renderPdfPageToImageData`
 - **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
@@ -823,7 +819,7 @@ _1284 source files mapped._
 - **`src/shared/files/rasterDiff.js`** — Pure raster diff engine: classifies each pixel unchanged/removed/added with tolerance dilation and clusters changed pixels into navigable change regions for compare-versions
   - _exports_: `classifyDiff`, `clusterChanges`, `DIFF_ADDED`, `DIFF_BG`, `DIFF_REMOVED`, `DIFF_SAME`, `diffRasters`, `dilate2D`
 - **`src/shared/files/rasterRegister.js`** — Pure raster registration for revision compare: layered coarse-translation and ink-bbox similarity fits scored by ink agreement, plus manual 2-point rotation-recovering fallback
-  - _exports_: `coarseOffset`, `detectAnchors`, `inkBBox`, `manualRegister`, `registerRasters`
+  - _exports_: `coarseOffset`, `inkBBox`, `manualRegister`, `registerRasters`
 - **`src/shared/files/scaleBarRead.js`** — Pure graphic scale-bar reader: clusters horizontal bar segments + nearby numeric ticks into a feet-per-unit calibration when no scale text exists
   - _exports_: `clusterBars`, `readScaleBar`, `tickLinearity`, `ticksNearBar`
 - **`src/shared/files/sheetGroups.js`** — Pure auto-grouping of pages into logical sheets by contiguous sheet-code runs + shared plan type, with adjacent-duplicate-number cleanup
@@ -848,6 +844,8 @@ _1284 source files mapped._
   - _exports_: `buildSeedRows`, `childrenOf`, `countTemplate`, `descendantIds`, `displayLabel`, `flattenTemplate`, `liveRows`, `matchDropPathToFolder`, `nextOrder`, `padPrefix`, `resolveDrawingTarget`, `stripPrefix`, `subtreeIds`, `suggestNextNumberedName`, `treeify`, `validateFolderName`, `wouldCreateCycle`
 - **`src/shared/formula/formula.js`** — Excel-style formula engine (tokenize/parse/evaluate) powering scheduler user-defined columns; no eval, structured [Column] refs, byte-synced into the Sequence iframe
   - _exports_: `BLANK`, `colLettersToNum`, `colNumToLetters`, `compareValues`, `DEFAULT_CALENDAR`, `dropFormulaSheetRefs`, `errVal`, `evaluateFormula`, `extractRefs`, `formatValue`, `formatValueColor`, `FORMULA_ERRORS`, `FormulaError`, `FUNCTION_HELP`, `FUNCTION_NAMES`, `FUNCTIONS`, `isBlank`, `isDate`, `isErrVal`, `isFormulaError`, `isoToSerial`, `makeDate`, `MAX_COL`, `MAX_ROW`, `numToGeneralStr`, `parse`, `parseFormula`, `parseLooseDate`, `parseRefText`, `planFormulaColumns`, `rewriteFormulaForCopy`, `rewriteFormulaForSheetRename`, `rewriteFormulaForStructuralShift`, `serialToISO`, `serialToYMD`, `toBool`, `toDateSerial`, `tokenize`, `toNumber`, `toStr`, `weekdayOf`, `ymdToSerial`
+- **`src/shared/geocode.js`** — Shared address geocoder (B384) — one pipeline for both surfaces.
+  - _exports_: `geocodeAddress`, `reverseGeocodeLatLon`
 - **`src/shared/geometry/pasteGeom.js`** — Pure paste-at-cursor placement math: bbox center plus translate so a pasted copy drops centered under the cursor, shared by both canvases
   - _exports_: `bboxCenter`, `centerOn`
 - **`src/shared/geometry/similarityTransform.js`** — best-fit 2D similarity transform (uniform scale + rotation + translation) over N≥2 point pairs, shared by the Site Planner overlay aligner and the site-plan-overlay georeferencer
@@ -855,7 +853,7 @@ _1284 source files mapped._
 - **`src/shared/gis/countyKeys.js`** — county ROUTING-KEY normalisation (`normCountyKey`) + the case-insensitive map/set wrappers every county-keyed lookup goes through
   - _exports_: `byCountyKey`, `countyKeySet`, `countyLookup`, `countyNameSlug`, `normCountyKey`, `sameCounty`
 - **`src/shared/gis/floodTiles.js`** — baked FEMA NFHL flood tiles — the pure model: per-county archive naming, the drop rule, the tiles-vs-live source decision, and the NFHL vintage stamp
-  - _exports_: `FLOOD_MANIFEST_URL`, `FLOOD_TILE_ABSENCE_NOTE`, `FLOOD_TILE_COUNTIES`, `FLOOD_TILE_DIR`, `FLOOD_TILE_FIELDS`, `FLOOD_TILE_LAYER_NAME`, `FLOOD_TILE_MAX_ZOOM`, `FLOOD_TILE_MIN_ZOOM`, `floodAbsenceKindFor`, `floodArchiveName`, `floodArchiveUrl`, `floodTileCountyKeys`, `floodTilesEnabled`, `floodVintageStamp`, `formatVintage`, `hasFloodTiles`, `keepInTiles`, `manifestCounty`, `resolveFloodSource`, `TILE_DROP_RULE`, `TILE_DROPPED_VARIANTS`
+  - _exports_: `FLOOD_MANIFEST_URL`, `FLOOD_TILE_COUNTIES`, `FLOOD_TILE_DIR`, `FLOOD_TILE_FIELDS`, `FLOOD_TILE_LAYER_NAME`, `FLOOD_TILE_MAX_ZOOM`, `FLOOD_TILE_MIN_ZOOM`, `floodAbsenceKindFor`, `floodArchiveName`, `floodArchiveUrl`, `floodTileCountyKeys`, `floodTilesEnabled`, `floodVintageStamp`, `formatVintage`, `hasFloodTiles`, `keepInTiles`, `manifestCounty`, `resolveFloodSource`, `TILE_DROP_RULE`, `TILE_DROPPED_VARIANTS`
 - **`src/shared/gis/giscloudAdapter.js`** — a GIS Cloud ↔ ArcGIS-REST adapter (pure: no network, no globals, no DOM; runs in the Pages Function and in tests).
   - _exports_: `arcError`, `arcQueryToGc`, `featureToArc`, `GC_API`, `GC_LAYER_ID`, `GC_MAPS`, `GC_MAX_RECORDS`, `gcFeaturesUrl`, `gcLayerUrl`, `gcToArcQuery`, `layerMetadata`, `parseGcPath`, `ringsContain`, `translateWhere`
 - **`src/shared/gis/gisProxyCore.js`** — Pure shared core for the same-origin GIS imagery cache proxy: host allowlist, base64url service-URL packing, cache-key hashing, TTL freshness
@@ -867,21 +865,73 @@ _1284 source files mapped._
 - **`src/shared/gis/parcelSnapshotBuild.js`** — Pure county parcel snapshot transforms: strip to UI-read fields and quantize polygon coordinates into a compact gzippable GeoJSON FeatureCollection
   - _exports_: `buildSnapshotFC`, `esriRingsToGeoJsonGeometry`, `KEEP_FIELDS`, `leanFeature`, `leanProps`, `quantizeGeometry`
 - **`src/shared/gis/sourceFixtures.js`** — the GIS registry's coverage fixtures + prose, split OFF the app bundle (assertions and documentation the running app never reads, so they don't ride the Site route)
-  - _exports_: `docsFor`, `fixturesFor`, `SOURCE_DOCS`, `SOURCE_FIXTURES`
+  - _exports_: `docsFor`, `fixturesFor`, `parcelFixtures`, `SOURCE_DOCS`, `SOURCE_FIXTURES`
 - **`src/shared/gis/sourceFixturesFlorida.js`** — the coverage FIXTURES + DOCS for the Florida rows in `sourcesFlorida.js`, spread into `SOURCE_FIXTURES` / `SOURCE_DOCS` (sourceFixtures.js).
   - _exports_: `FLORIDA_DOCS`, `FLORIDA_FIXTURES`
+- **`src/shared/gis/sourceFixturesFortBend.js`** — The VERIFICATION payload of the Fort Bend registry rows (`sourcesFortBend.js`), off the app bundle exactly like every other row's fixtures (see sourceFixtures.js).
+  - _exports_: `FORTBEND_DOCS`, `FORTBEND_FIXTURES`
+- **`src/shared/gis/sourceFixturesHoustonMetro.js`** — NEW-1 / NEW-2 / NEW-3 (Houston-metro sweep, 2026-11-12) — the coverage FIXTURES + DOCS for the three rows in `sourcesHoustonMetro.js`, spread into `SOURCE_FIXTURES` / `SOURCE_DOCS`…
+  - _exports_: `HOUSTON_METRO_DOCS`, `HOUSTON_METRO_FIXTURES`
+- **`src/shared/gis/sourceFixturesNashville.js`** — NEW-1 / NEW-3 (Metro Nashville zoning sweep, 2026-11-12) — the VERIFICATION payload of the Nashville registry rows (`sourcesNashville.js`), off the app bundle exactly like every other row's…
+  - _exports_: `NASHVILLE_DOCS`, `NASHVILLE_FIXTURES`
+- **`src/shared/gis/sourceFixturesNashvilleBuffers.js`** — NEW-1 / NEW-2 (Nashville buffers + Metro pending flood maps, 2026-11-12) — the VERIFICATION payload of the Metro Nashville registry rows (`sourcesNashvilleBuffers.js`), off the app bundle…
+  - _exports_: `NASHVILLE_BUFFER_DOCS`, `NASHVILLE_BUFFER_FIXTURES`
 - **`src/shared/gis/sourceFixturesOk.js`** — the VERIFICATION payload of the Oklahoma registry rows (`sourcesOk.js`), off the app bundle exactly like every other row's fixtures (see sourceFixtures.js).
   - _exports_: `OK_DOCS`, `OK_FIXTURES`
+- **`src/shared/gis/sourceFixturesParcels.js`** — PARCEL FIXTURES: known lots the nightly parcel health job re-queries BY ID.
+  - _exports_: `PARCEL_FIXTURES`
+- **`src/shared/gis/sourceFixturesRutherford.js`** — The VERIFICATION payload of the Rutherford zoning rows (`sourcesRutherford.js`), off the app bundle exactly like every other row's fixtures.
+  - _exports_: `RUTHERFORD_DOCS`, `RUTHERFORD_FIXTURES`
 - **`src/shared/gis/sourceFixturesSugarLand.js`** — the VERIFICATION payload of the Sugar Land registry rows (`sourcesSugarLand.js`), off the app bundle exactly like every other row's fixtures (see sourceFixtures.js).
   - _exports_: `SUGARLAND_DOCS`, `SUGARLAND_FIXTURES`
+- **`src/shared/gis/sourceFixturesTxCityZoning.js`** — NEW-1 / NEW-2 (Texas city zoning, 2026-11-12; Webster 2026-11-15) — the VERIFICATION payload of the city zoning rows (`sourcesTxCityZoning.js`), off the app bundle like every other row's…
+  - _exports_: `TX_CITY_ZONING_DOCS`, `TX_CITY_ZONING_FIXTURES`
+- **`src/shared/gis/sourceFixturesWaller.js`** — The VERIFICATION payload of the Waller registry rows (`sourcesWaller.js`), off the app bundle exactly like every other row's fixtures (see sourceFixtures.js).
+  - _exports_: `WALLER_DOCS`, `WALLER_FIXTURES`
+- **`src/shared/gis/sourcePackIndex.generated.js`** — GENERATED by `npm run source-pack-index` (scripts/build-source-pack-index.mjs) — do not edit by hand.
+  - _exports_: `SOURCE_KEY_ORDER`, `SOURCE_PACK_KEYS`, `SOURCE_REACH_ORDER`
+- **`src/shared/gis/sourcePackIndexBuild.js`** — Computes the source-pack index from the REAL pack files (used by scripts/build-source-pack-index.mjs and the drift test — never by the app).
+  - _exports_: `buildSourcePackIndex`, `renderSourcePackIndex`
+- **`src/shared/gis/sourcePacks.js`** — The GIS source PACKS load ON DEMAND (batch K stage 3, 2026-11-23, B2671306) — NOT in the Site route's first download.
+  - _exports_: `ensureSourcePacks`, `ensureSourcePacksForKeys`, `loadAllSourcePacks`, `packsForKeys`, `SOURCE_PACK_IDS`, `SOURCE_PACKS`
+- **`src/shared/gis/sourcePacksAll.js`** — Every source pack imported STATICALLY, as `{ id: { sources, reach } }` — shared by sourcesAll.js (tooling) and the vitest preload helper.
+  - _exports_: `PACKS_ALL`
+- **`src/shared/gis/sourcePacksPreload.js`** — PRODUCTION: nothing is preloaded — every source pack loads on demand (sourcePacks.js, with the lazy layer file that reads it).
+  - _exports_: `PRELOADED`
 - **`src/shared/gis/sources.js`** — Versioned GIS source registry: per-layer service URLs, fields, coverage, production/exception tier, and known-truth fixtures with CI tier/shape audits
-  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `EIA_PIPELINE_KEYS`, `FIXTURE_REACH_CLASSES`, `fixtureCount`, `fixturePoints`, `fixtureReachClassFor`, `fixtureReachProblems`, `fixtureSpreadKm`, `GIS_SOURCES`, `gisSource`, `haversineKm`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `outOfStateDisposition`, `SOURCE_FIXTURE_REACH`, `SOURCE_FIXTURE_REACH_PENDING`, `SOURCE_OUT_OF_STATE`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
+  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `EIA_PIPELINE_KEYS`, `FIXTURE_REACH_CLASSES`, `fixtureCount`, `fixturePoints`, `fixtureReachClassFor`, `fixtureReachProblems`, `fixtureSpreadKm`, `GIS_SOURCES`, `gisSource`, `haversineKm`, `JURISDICTION_KEYS`, `loadedSourcePacks`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `outOfStateDisposition`, `registerSourcePack`, `SOURCE_FIXTURE_REACH`, `SOURCE_FIXTURE_REACH_PENDING`, `SOURCE_OUT_OF_STATE`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `sourcePackLoaded`, `sourcePackOfKey`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
+- **`src/shared/gis/sourcesAll.js`** — TOOLING / NODE SCRIPTS ONLY — the FULL registry. Imports every source pack statically and merges it, then re-exports everything sources.js does.
+  - _exports_: `* (./sources.js)`
+- **`src/shared/gis/sourcesColorado.js`** — Colorado (CDPHE / ECMC / MHFD / CPW / Weld / Adams / Aurora) — GIS source rows, split out of sources.js (batch K stage 3, 2026-11-23, B2671306).
+  - _exports_: `COLORADO_FIXTURE_REACH`, `COLORADO_SOURCES`
 - **`src/shared/gis/sourcesFlorida.js`** — THE FLORIDA DUE-DILIGENCE ROWS of the GIS source registry, spread into `GIS_SOURCES` (sources.js).
   - _exports_: `FLORIDA_FIXTURE_REACH`, `FLORIDA_SOURCES`
+- **`src/shared/gis/sourcesFortBend.js`** — THE FORT BEND COUNTY GIS REGISTRY ROWS. Every row is `states: ["TX"]`, production tier, probed 2026-11-12 against the county's PUBLIC ArcGIS Server (gisportal.fortbendcountytx.gov, 11.3).
+  - _exports_: `FORTBEND_FIXTURE_REACH`, `FORTBEND_SOURCES`
+- **`src/shared/gis/sourcesGeorgia.js`** — Georgia (GA EPD / DNR / MRPA / county zoning) — GIS source rows, split out of sources.js (batch K stage 3, 2026-11-23, B2671306).
+  - _exports_: `GEORGIA_FIXTURE_REACH`, `GEORGIA_SOURCES`
+- **`src/shared/gis/sourcesHoustonMetro.js`** — NEW-1 / NEW-2 / NEW-3 (Houston-metro sweep, 2026-11-12) — THE THREE GIS REGISTRY ROWS of the "where people are working" sweep, spread into `GIS_SOURCES` (sources.js) with one line, exactly…
+  - _exports_: `HARRIS_MTFP_WHERE`, `HOUSTON_METRO_FIXTURE_REACH`, `HOUSTON_METRO_SOURCES`
+- **`src/shared/gis/sourcesMississippi.js`** — Mississippi (MDEQ / MS OGB / DeSoto County) — GIS source rows, split out of sources.js (batch K stage 3, 2026-11-23, B2671306).
+  - _exports_: `MISSISSIPPI_FIXTURE_REACH`, `MISSISSIPPI_SOURCES`
+- **`src/shared/gis/sourcesNashville.js`** — NEW-1 / NEW-3 (Metro Nashville zoning sweep, 2026-11-12) — THE METRO NASHVILLE & DAVIDSON COUNTY GIS REGISTRY ROWS.
+  - _exports_: `NASHVILLE_FIXTURE_REACH`, `NASHVILLE_SOURCES`
+- **`src/shared/gis/sourcesNashvilleBuffers.js`** — NEW-1 / NEW-2 (Nashville stream / pond / wetland buffers + Metro pending flood maps, 2026-11-12) — THE METRO NASHVILLE GIS REGISTRY ROWS.
+  - _exports_: `NASHVILLE_BUFFER_FIXTURE_REACH`, `NASHVILLE_BUFFER_SOURCES`
 - **`src/shared/gis/sourcesOk.js`** — THE OKLAHOMA GIS REGISTRY ROWS. Every row is `states: ["OK"]`, production tier, probed 2026-10-29.
   - _exports_: `OK_FIXTURE_REACH`, `OK_SOURCES`
+- **`src/shared/gis/sourcesRegistryOnly.js`** — Registry rows no map layer or screen reads at runtime (kept for the weekly drift verifier and the audits) — GIS source rows, split out of sources.js (batch K stage 3, 2026-11-23, B2671306).
+  - _exports_: `REGISTRY_ONLY_FIXTURE_REACH`, `REGISTRY_ONLY_SOURCES`
+- **`src/shared/gis/sourcesRutherford.js`** — THE RUTHERFORD ZONING GIS REGISTRY ROWS. Four governments, four token-free ArcGIS Online feature services (CORS-open, read straight from the browser), every count and edit date MEASURED…
+  - _exports_: `RUTHERFORD_FIXTURE_REACH`, `RUTHERFORD_SOURCES`
 - **`src/shared/gis/sourcesSugarLand.js`** — THE SUGAR LAND GIS REGISTRY ROWS. Every row is `states: ["TX"]`, production tier, probed 2026-11-02.
   - _exports_: `SUGARLAND_FIXTURE_REACH`, `SUGARLAND_SOURCES`
+- **`src/shared/gis/sourcesTennessee.js`** — Tennessee (TDEC / THC / state screening rows; Rutherford zoning lives in sourcesRutherford.js) — GIS source rows, split out of sources.js (batch K stage 3, 2026-11-23, B2671306).
+  - _exports_: `TENNESSEE_FIXTURE_REACH`, `TENNESSEE_SOURCES`
+- **`src/shared/gis/sourcesTxCityZoning.js`** — NEW-1 / NEW-2 (Texas city zoning — Richmond, Fulshear, Stafford, Webster; 2026-11-12, Webster measured 2026-11-15; Katy 2026-11-24) — THE GIS REGISTRY ROWS of the Texas city zoning layers…
+  - _exports_: `TX_CITY_ZONING_FIXTURE_REACH`, `TX_CITY_ZONING_SOURCES`
+- **`src/shared/gis/sourcesWaller.js`** — THE WALLER COUNTY GIS REGISTRY ROWS. Every row is `states: ["TX"]`, read from the county's own ArcGIS Online org (services1.arcgis.com/BqVKz0o32DERqyE4), CORS-open, so nothing rides the…
+  - _exports_: `WALLER_FIXTURE_REACH`, `WALLER_SOURCES`
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/keyboard/bareLetterGate.js`** — WHEN IS A BARE LETTER A GLOBAL COMMAND? (NEW-1, 2026-10-29) The only bare-letter command the app shell owns is `f` → fullscreen (AppHeader's window keydown).
@@ -893,13 +943,13 @@ _1284 source files mapped._
 - **`src/shared/keyboard/shortcutsData.js`** — THE ONE LIST OF EVERY KEYBOARD SHORTCUT THIS APP REGISTERS, and the source the Keyboard Shortcuts page (src/app/ShortcutsPage.jsx) reads.
   - _exports_: `ALL_SHORTCUT_ITEMS`, `SHORTCUT_SECTIONS`
 - **`src/shared/keyboard/shortcutsPageBus.js`** — the open/close signal for the Keyboard Shortcuts page. The page is mounted once, at the app Shell (same shape as HelpReportControl), but it needs to be OPENABLE from anywhere: the Shell's…
-  - _exports_: `closeShortcutsPage`, `isShortcutsPageOpen`, `openShortcutsPage`, `subscribeShortcutsPage`
+  - _exports_: `closeShortcutsPage`, `openShortcutsPage`, `subscribeShortcutsPage`
 - **`src/shared/library/libraryChanged.js`** — "the Library's file list just changed" (B2084480). Review writes a file (save / save-as-new / refile / delete) and the Library tab, which stays mounted and only refetches when it is…
   - _exports_: `notifyLibraryChanged`, `subscribeLibraryChanged`
 - **`src/shared/map/freePinchZoom.js`** — free pinch zoom for the browse maps (Map Finder, Dashboard locations map, Food map).
   - _exports_: `attachFreeWheelZoom`, `FREE_ZOOM_OPTIONS`, `isPinchWheel`, `notchLevels`, `PINCH_LEVELS_PER_DELTA_PX`, `pinchLevels`, `WHEEL_DEBOUNCE_MS`
 - **`src/shared/map/locateButtonState.js`** — The locate button's state machine, pure. idle — not tracking (outline arrow, normal gray) locating — first fix in flight (spinner) following — map centred on and tracking the user (solid…
-  - _exports_: `LOCATE_STATES`, `nextLocateState`, `tapAction`
+  - _exports_: `nextLocateState`, `tapAction`
 - **`src/shared/map/locateControl.js`** — The ONE "my location" control for every Leaflet map in the app (NEW-1/NEW-2).
   - _exports_: `addLocateControl`
 - **`src/shared/map/locateGeometry.js`** — Pure geometry for the my-location marker.
@@ -915,11 +965,11 @@ _1284 source files mapped._
 - **`src/shared/mapNotes/components/MapNoteEditor.jsx`** — the small card that opens on a map note: read it, edit it, delete it.
   - _exports_: `default (MapNoteEditor)`
 - **`src/shared/mapNotes/lib/mapNoteMarkerIcon.js`** — the map marker for a map note. Pure (no Leaflet import), so it is unit-testable; the caller wraps the returned HTML in `L.divIcon`.
-  - _exports_: `mapNoteMarkerSize`, `mapNoteMarkerSvg`, `NOTE_MARKER_COLOR`, `NOTE_MARKER_INK`
+  - _exports_: `mapNoteMarkerSize`, `mapNoteMarkerSvg`, `NOTE_MARKER_COLOR`
 - **`src/shared/mapNotes/lib/mapNotes.js`** — the pure shape of a map note: row <-> object mapping, display text, and validation.
   - _exports_: `emptyMapNote`, `mapNoteHasText`, `mapNoteHeadline`, `mapNoteToRow`, `NOTE_BODY_MAX`, `NOTE_TITLE_MAX`, `rowToMapNote`, `sortMapNotesByRecency`, `validateMapNote`
 - **`src/shared/mapNotes/lib/mapNotesStore.js`** — the one seam between the map-notes UI and Supabase's `public.map_notes` table.
-  - _exports_: `deleteMapNote`, `fetchAllMapNotes`, `fetchDeletedMapNotes`, `insertMapNote`, `permanentlyDeleteMapNote`, `restoreMapNote`, `supabase`, `updateMapNote`
+  - _exports_: `deleteMapNote`, `fetchAllMapNotes`, `insertMapNote`, `permanentlyDeleteMapNote`, `restoreMapNote`, `supabase`, `updateMapNote`
 - **`src/shared/mapNotes/lib/mapPinSymbol.js`** — the ONE "symbol circle" every site pin and every note pin is drawn from (NEW-1, owner-approved mockup 2026-09-29, row "C · Symbol circle, revised").
   - _exports_: `NOTE_PIN_COLOR`, `notePinSvg`, `PIN_CENTER`, `PIN_DISC_R`, `PIN_HAIRLINE_R`, `PIN_HIT_H`, `PIN_HIT_W`, `PIN_KEYLINE_R`, `PIN_RING_COLOR_W`, `PIN_RING_R`, `PIN_RING_WHITE_W`, `PIN_VIEWBOX`, `pinHitBox`, `pinHtml`, `pinSvgBox`, `sitePinSvg`
 - **`src/shared/mapNotes/lib/noteTarget.js`** — what a map note is being attached TO, and where the map must put it so it stays visible while the composer is open.
@@ -969,7 +1019,7 @@ _1284 source files mapped._
 - **`src/shared/placement/fitToBoundary.js`** — Fit-to-boundary solver: one similarity transform (Procrustes correspondence or OBB fallback) landing a drawing ring on held survey feet with RMS-fraction confidence
   - _exports_: `CONFIDENT_FRAC`, `fitToBoundary`
 - **`src/shared/placement/placementFacts.js`** — Placement-readiness facts contract: empty/merge helpers + longest-dimension picker for facts captured at filing time so the cascade never reopens the file
-  - _exports_: `emptyPlacementFacts`, `longestDimension`, `mergePlacementFacts`, `PLACEMENT_FLAG_KEYS`
+  - _exports_: `emptyPlacementFacts`, `longestDimension`, `mergePlacementFacts`
 - **`src/shared/placement/placeOnMap.js`** — Place-on-map cascade: walks embedded/fit-boundary/measure/manual rungs best-to-fallback, choosing a method from facts and surfacing every skipped rung's reason
   - _exports_: `choosePlacement`, `METHOD`, `RUNGS`
 - **`src/shared/placement/verifyPlacement.js`** — Placement calibration + auto-verification: derive feet-per-unit from a labeled dimension, grade measured-vs-label percent off, and cross-check two scales for non-uniform stretch
@@ -983,7 +1033,7 @@ _1284 source files mapped._
 - **`src/shared/profile/orgNameStore.js`** — the ONE home of "what is the organization called", read everywhere through `useOrgName()` and never copied into component state (the names / shared-data single-source rules in CLAUDE.md).
   - _exports_: `getOrgName`, `setOrgName`, `subscribeOrgName`, `useOrgName`
 - **`src/shared/profile/profileRowCache.js`** — Session-scoped cache for a signed-in user's ONE `public.profiles` row (NEW-1 — a project-open perf report measured this table's `prefs` column alone fetched 5-8 times on a single cold load…
-  - _exports_: `getProfileRow`, `invalidateProfileRow`
+  - _exports_: `getProfileRow`, `invalidateProfileRow`, `updateProfilePrefs`
 - **`src/shared/profile/useProfile.js`** — useProfile hook: load signed-in user's profiles row and expose a never-blank display name / first name / org / initial fallback chain plus save+reload
   - _exports_: `default`, `displayNameFor`, `firstNameFor`, `initialFor`, `orgFor`, `useProfile`
 - **`src/shared/projects/docProjectLiveness.js`** — B1340368, "the Last document card offers a document filed under a project that no longer exists." Shared by any surface that offers/lists a `doc_reviews` row filed under a project: never…
@@ -1000,6 +1050,30 @@ _1284 source files mapped._
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/reports/reportsStore.js`** — problem-report context + submit/queue/retry model behind `HelpReportControl.jsx` (B842866).
   - _exports_: `buildReportContext`, `queuedReportCount`, `reportSessionId`, `retryQueuedReports`, `submitReport`
+- **`src/shared/schedule/engine/calendar.js`** — src/shared/schedule/engine/calendar.js Dates and the working-day calendar: date strings, holidays, business-day math, the live "today", default settings.
+  - _exports_: `addBD`, `addD`, `buildHolidaySet`, `DEFAULT_HOLIDAYS`, `DEFAULT_SETTINGS`, `dif`, `difBD`, `fd`, `fdLocal`, `HOLIDAY_DEFS`, `HOLIDAY_SET`, `MAX_BD_STEPS`, `NOW`, `nthWeekday`, `pd`, `setHolidaySet`, `setNOW`, `subBD`
+- **`src/shared/schedule/engine/cascade.js`** — src/shared/schedule/engine/cascade.js The cascade: pushing a changed start/end through predecessors, rolling parents up, the recompute passes, drift detection and repair.
+  - _exports_: `ancestorIdsOf`, `applyMeetingBinding`, `cascadeDates`, `detectCascadeDrift`, `recascadeWithDrift`, `RECOMPUTE_PASS_CAP`, `recomputeAfterStructureChange`, `recomputeSchedule`, `rollupParentDates`, `SCHEDULE_INPUT_KEYS`, `stripAncestorPredecessors`, `touchesSchedule`
+- **`src/shared/schedule/engine/health.js`** — src/shared/schedule/engine/health.js Task status (health) display and roll-up, on top of healthEngine.js (rules, completion).
+  - _exports_: `computeDisplayHealth`, `computeRolledHealth`, `HEALTH_PRIO`, `reconcileNeedsAttention`
+- **`src/shared/schedule/engine/index.js`** — Every pure Schedule-engine export in one import, for tests and tools.
+  - _exports_: `* (../healthEngine.js)`, `* (../scheduleOwnership.js)`, `* (./calendar.js)`, `* (./cascade.js)`, `* (./health.js)`, `* (./meetings.js)`, `* (./merge.js)`, `* (./normalize.js)`, `* (./owners.js)`, `* (./predecessors.js)`, `* (./tasks.js)`
+- **`src/shared/schedule/engine/meetings.js`** — src/shared/schedule/engine/meetings.js Meeting bodies (the governmental meeting calendars a task can be bound to): recurrence, agenda deadlines, bound-date resolution, pins and pin…
+  - _exports_: `adjacentMeetingDate`, `agendaDeadline`, `agendaLeadSummary`, `boundEditNotice`, `cadenceSummary`, `copyMeetingBodyWithNewId`, `dropDuplicateLagPatch`, `dropStep`, `findMeetingBodyElsewhere`, `importMeetingBodies`, `importMeetingBody`, `joinWithAnd`, `MB_MONTH_NAMES`, `MB_SETPOS_LABEL`, `MB_WD_FULL`, `MB_WD_NAMES`, `mbBodiesSameCadence`, `mbMonthsPhrase`, `mbOrdinal`, `mbPositionsPhrase`, `mbRecurrenceSignature`, `mbRuleSignature`, `mbRuleSummary`, `MEETING_BODY_INDEX`, `meetingBindingTrace`, `meetingBoundInfo`, `meetingCostDays`, `meetingDatesInRange`, `meetingDoubleLagFlag`, `meetingFloatBD`, `newPinConflicts`, `nextEligibleMeeting`, `nthWeekdayOfMonth`, `occurrencesInMonth`, `otherScheduleMeetingBodies`, `pickOrdinal`, `pinConflictNotice`, `pinConflictsOf`, `positionMissingReport`, `rebuildMeetingBodyIndex`, `resolveBoundEdit`, `resolveMeetingForward`, `setMeetingBodyIndex`, `settleBoundNotice`, `startIsPinned`, `unpinStartPatch`
+- **`src/shared/schedule/engine/merge.js`** — src/shared/schedule/engine/merge.js Cloud merge and row-level diffing: three-way document merge, task fingerprints, the dual-write decomposition, merge-toast wording.
+  - _exports_: `_deepClone`, `_mEq`, `_mIdArr`, `_mIsObj`, `_mKeyOf`, `_mStripRev`, `_taskFingerprint`, `_taskKey`, `_taskSidMap`, `changedProjectIds`, `countChangedTaskRows`, `decomposeForDualWrite`, `mergeCloudDoc`, `mergeLocationPhrase`, `recomposeFromRows`
+- **`src/shared/schedule/engine/normalize.js`** — src/shared/schedule/engine/normalize.js The load-time migrations of the Schedule document (v6 inclusive end dates, v7 duration model, v8 meeting index stamp, meeting-cadence rule shape…
+  - _exports_: `ensureContacts`, `ensureHolidays`, `loadDocument`, `migrateRecurrenceRule`, `normalizeIds`, `normalizeMeetingCadence`, `normalizeToV6`, `normalizeToV7`, `normalizeToV8`
+- **`src/shared/schedule/engine/omit.js`** — A copy of an object without the named keys (the "destructure and discard" idiom, minus the unused locals).
+  - _exports_: `omitKeys`
+- **`src/shared/schedule/engine/owners.js`** — src/shared/schedule/engine/owners.js Task owners: the ordered owner list, the owner↔contact name link, rename/remove cascades.
+  - _exports_: `normalizeOwnerLists`, `OWNER_CAP`, `OWNER_JOIN`, `ownerDisplayParts`, `ownerHas`, `ownerJoin`, `ownerKey`, `ownerListOf`, `removeOwnerFrom`, `renameOwnerIn`
+- **`src/shared/schedule/engine/pageEntry.js`** — src/shared/schedule/engine/pageEntry.js Imported FIRST by the Schedule page's own entry (src/workspaces/scheduler/page/main.jsx).
+  - _exports_: _(none)_
+- **`src/shared/schedule/engine/predecessors.js`** — src/shared/schedule/engine/predecessors.js Predecessors and durations: parsing/validating the predecessor text, lag, constrained starts, duration units, task spans.
+  - _exports_: `addCalendarMonths`, `calcEnd`, `constrainedStartFrom`, `DUR_UNIT_ALIASES`, `DUR_WD_FACTOR`, `durTooltip`, `fmtPreds`, `fmtTaskDuration`, `normPreds`, `parseDurationInput`, `parsePreds`, `resolveDuration`, `resolveTaskSpan`, `rollForwardToWorkday`, `startForEnd`, `taskDurUnit`, `taskDurValue`, `validatePredEdit`, `workdaysBetween`
+- **`src/shared/schedule/engine/tasks.js`** — src/shared/schedule/engine/tasks.js Task-list structure: renumbering, visual order, indent/outdent/move, the row-drag drop rules (owner constraint #36), grouping by schedule.
+  - _exports_: `_mintTaskSid`, `_sidSeq`, `defaultStartFor`, `flatOrderWithLevel`, `fmtD`, `groupRowsByProject`, `idPressMovesRows`, `indentSelection`, `insertRowAbove`, `moveSelectionToDestination`, `outdentSelection`, `parseFlexDate`, `promoteChildrenAndDelete`, `renumberTasks`, `resolveDropParent`, `ROW_DRAG_THRESHOLD`, `ROW_NEST_BAND`, `rowDragArmed`, `rowDragThreshold`, `rowDropIntent`, `rowDropZone`, `rowFloatAtPointer`, `scheduleExportName`, `scheduleRowPrefix`, `sortByVisualOrder`, `toShortDate`
 - **`src/shared/schedule/healthEngine.js`** — src/shared/schedule/healthEngine.js B1953795 (S2/S4/S5) — the Scheduler's task-health rule engine + the ONE "is it complete / what %" answer, as a real ES module the Dashboard can import.
   - _exports_: `cascadeDelta`, `completionDelta`, `DEFAULT_HEALTH_RULES`, `displayHealth`, `effectivePercentComplete`, `evalConditionGroup`, `evalFieldCondition`, `evalHealthCondition`, `evalHealthRules`, `evalRule`, `getHealthRules`, `HEALTH_CONDITION_BY_KEY`, `HEALTH_CONDITIONS`, `isCompleteTask`, `leafPercent`, `LEGACY_RULE_FIELD_MAP`, `migrateCfRulesToHealthRules`, `migrateRule`, `opsForField`, `rolledPercentMap`, `RULE_COMPLETE_PAUSED_GUARD`, `RULE_FIELD_BY_K`, `RULE_FIELDS`, `RULE_OPS`
 - **`src/shared/schedule/liveScheduleIndex.js`** — src/shared/schedule/liveScheduleIndex.js NEW-2 (2026-10-05) — the app's one in-memory answer to "which schedules are live right now", published by whoever just read the schedules (the…
@@ -1047,11 +1121,11 @@ _1284 source files mapped._
 - **`src/shared/sitePlans/lib/overlaySiteMatch.js`** — matches a placed site plan to an existing site by footprint containment (not the comp radius), falling back to an exact title match
   - _exports_: `findMatchingSiteForOverlay`, `SITE_MATCH_BUFFER_FT`
 - **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — pure data model for a site-plan overlay (an uploaded flyer page anchored to the map, referencing its whole file in the existing Review/Library document store)
-  - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`, `validOverlayUpload`
+  - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`
 - **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — the Supabase CRUD seam for `public.site_plan_overlays`, mirroring `comps/lib/compsStore.js`'s `{data, error}` shape
   - _exports_: `commitOverlayPlacementWithComps`, `countLiveOverlaysForProject`, `deleteOverlay`, `fetchAllOverlays`, `fetchDeletedOverlays`, `fetchOverlayCompPoints`, `insertOverlay`, `permanentlyDeleteOverlay`, `restoreOverlay`, `updateOverlay`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
-  - _exports_: `deleteOriginKey`, `deleteOriginPrefix`, `originStoreAvailable`, `putOriginRecord`, `walkOriginStore`
+  - _exports_: `deleteOriginKey`, `deleteOriginPrefix`, `putOriginRecord`, `walkOriginStore`
 - **`src/shared/storage/sitesRawView.js`** — "what the old whole-library entry would hold", reconstructed from the per-plan entries (B2200384).
   - _exports_: `installSitesRawView`, `sitesObject`, `sitesRaw`
 - **`src/shared/storage/storageCensus.js`** — Per-tier, per-class storage census: localStorage byte census + navigator.storage.estimate, key→class registry with a declared rehydration source, tier-labelled telemetry facts; the two tiers are never summed
@@ -1060,18 +1134,24 @@ _1284 source files mapped._
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/style/hatchPatterns.js`** — pure hatch-pattern catalog (key → tile spec); shared appearance primitive, first wired to easement/encumbrance fills
   - _exports_: `HATCH_OPTIONS`, `hatchSpec`, `isHatchKey`
+- **`src/shared/supabase/client.js`** — Supabase backend — PHASE 1: connection only. This file ONLY establishes (and lets us test) a connection to Supabase.
+  - _exports_: `connectionInfo`, `currentAccessToken`, `pfSupabaseExposed`, `supabase`, `supabaseConfigured`, `supabaseRest`, `testConnection`
+- **`src/shared/supabase/teams.js`** — Team workspaces I/O (team feature) — read/write teams, membership, and invites in public.teams / public.team_members / public.team_invites (see db/teams.sql).
+  - _exports_: `cancelInvite`, `createTeam`, `currentIdentity`, `deleteTeam`, `inviteByEmail`, `leaveTeam`, `listInvites`, `listMembers`, `listMyTeams`, `removeMember`, `renameTeam`, `resendInvite`, `sendInviteEmail`, `setRole`
 - **`src/shared/teams/inviteLandingModel.js`** — Invite LINK landing — the pure half (NEW-2, 2026-10-29; reworked NEW-1, 2026-11-02).
   - _exports_: `INVITE_PARAM`, `inviteIdFromSearch`, `inviteLandingPlan`, `isInviteId`, `sameAddress`, `signupCardProblem`, `signupFailure`, `stripInviteParam`
 - **`src/shared/teams/teamInviteModel.js`** — Team-invite inbox — the pure half (NEW-1, 2026-10-28). No React, no I/O, no imports — Node-testable.
   - _exports_: `answerNote`, `badgeLabel`, `inviteLine`, `mapInviteRows`, `redeemNote`, `resendNote`, `roleWord`, `splitInvites`, `TEAMS_CHANGED_EVENT`, `waitingLine`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `networkReportSuppression`, `PERFCAP_RATE_MAX`, `PERFCAP_SESSION_MAX`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `SUPPRESSED_AUTOMATED`, `TAB_ID`, `telemetryDelivery`
+- **`src/shared/telemetry/diagArm.js`** — ⛔ AN INSTRUMENT BUILT TO ANSWER "WHY DID IT FAIL ON HIS MACHINE" HAS TO BE ARMABLE ON HIS MACHINE (B280403).
+  - _exports_: `DIAG_KEY`, `DIAG_PARAM`, `isDiagArmed`, `latchDiagArm`
 - **`src/shared/telemetry/gestureTelemetry.js`** — Pinch-gesture telemetry: sampled event:pinch rows (surface, touch/pointer source, finger count, completed/cancelled/anomaly, cancel reason) via reportClientEvent
-  - _exports_: `PINCH_COMPLETE_SAMPLE_RATE`, `PINCH_OUTCOMES`, `pinchEventDetail`, `recordPinchGesture`, `shouldLogPinch`
+  - _exports_: `PINCH_COMPLETE_SAMPLE_RATE`, `pinchEventDetail`, `recordPinchGesture`, `shouldLogPinch`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
   - _exports_: `assertCaptureClean`, `attributionLabel`, `BOOT_TRIGGER_VOCAB`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `decodeSupplements`, `encodeCapture`, `encodeFrames`, `encodeSupplements`, `frameStats`, `frameWindowAroundWorst`, `FREEZE_VIA_VOCAB`, `hash32`, `NOTE_VOCAB`, `PART_VOCAB`, `safePlanId`, `sanitizeAttribution`, `SUPPLEMENT_MAX_CHARS`, `SUPPLEMENT_MAX_ROWS`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
-  - _exports_: `CAPTURE_PREFIX`, `listCaptureKeys`, `MAX_CAPTURES`, `readPerfCaptures`, `savePerfCapture`
+  - _exports_: `CAPTURE_PREFIX`, `listCaptureKeys`, `MAX_CAPTURES`, `savePerfCapture`
 - **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
   - _exports_: `__resetPerfInstrument`, `buildPerfRow`, `decidePerfSend`, `inpFrom`, `installPerfInstrument`, `isEnrolled`, `notePerfEdit`, `PERF_LONGTASK_MS`, `PERF_MAX_ROWS`, `PERF_MIN_GAP_MS`, `PERF_SAMPLE_MS`, `PERF_SAMPLE_RATE`, `perfSnapshot`, `phaseAt`, `readScene`, `ROUTE_MOUNT_MS`, `routeLane`
 - **`src/shared/telemetry/perfRecorder.js`** — The always-on performance recorder: interaction-gated frame loop, long-animation-frame observer, periodic scene counters, and the capture path. Lazy-loaded from main.jsx; never on any route’s critical path.
@@ -1086,6 +1166,8 @@ _1284 source files mapped._
   - _exports_: `readScene`
 - **`src/shared/telemetry/perfTrigger.js`** — The self-calibrating trigger: a baseline median taken from the window right after a load, then a sustained-deviation test (level × slow-fraction × perceptibility floor) over a time-qualified window.
   - _exports_: `createTrigger`, `feedBootTask`, `feedFrame`, `feedFreeze`, `feedSlowRun`, `inSlowRun`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`, `worstWindow`
+- **`src/shared/telemetry/planIdSafe.js`** — The non-reversible plan-id sanitiser, as a LEAF (B329408). `safePlanId` / `hash32` used to live in perfCapture.js (a ~15 KB recorder module).
+  - _exports_: `hash32`, `safePlanId`
 - **`src/shared/theme/familyInk.js`** — the default ink of each drawn family + the rule that keeps them perceptually apart (a measurement and a markup shared #c2410c, so the number vanished into the shape)
   - _exports_: `CALLOUT_DEFAULT_FILL`, `ELEMENT_DEFAULT_PAINT`, `FAMILY_DEFAULT_INK`, `INK_DISTINCT_MIN_DE`, `MEASURE_INK`, `parseHex`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
@@ -1115,11 +1197,11 @@ _1284 source files mapped._
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
-  - _exports_: `placeMenu`
+  - _exports_: `placeAtPoint`, `placeMenu`
 - **`src/shared/ui/AppHeader.jsx`** — Shared two-row chrome: Row1 brand/breadcrumb/cloud-badge/auth, Row2 module tabs+toolbar, fullscreen F-key, phone sideways-scroll, cross-tab conflict banner
-  - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
+  - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
 - **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
-  - _exports_: `currentBottomSheetHeight`, `currentSideDockWidth`, `publishBottomSheetHeight`, `publishSideDockWidth`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`, `useSideDockWidth`
+  - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `publishSideDockWidth`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`, `useSideDockWidth`
 - **`src/shared/ui/breadcrumbFit.js`** — the pure decision behind the phone-narrow breadcrumb's middle-crumb collapse.
   - _exports_: `CRUMB_SEP_W`, `crumbNeedsCompact`
 - **`src/shared/ui/Chip.jsx`** — a compact one-line status chip (≤6 words) that condenses a formerly-inline sentence: a tone-colored pill carries the short label, and a ⓘ opens a real popover (RowInfo — the same "Basis"…
@@ -1143,11 +1225,13 @@ _1284 source files mapped._
 - **`src/shared/ui/contextMenuPlacement.js`** — Pure viewport-placement math for `ContextMenu` (B915): flip-up-if-bottom-overflow, flip-left-if-right-overflow, hard-clamp to a margin on all four edges, and a viewport max-height. Unit-tested without a DOM.
   - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
-  - _exports_: `Button`, `CONTROL_RADIUS`, `Field`, `FloatingToolbar`, `FloatingToolButton`, `FloatingToolDivider`, `FONT`, `IconButton`, `listboxRowStyle`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `pinDragCursor`, `RangeFields`, `RangeRow`, `ROTATE_CURSOR`, `Section`, `SegmentedControl`, `SIZE`, `Switch`, `Tab`, `ToggleChip`, `useListboxNav`
+  - _exports_: `Button`, `CONTROL_RADIUS`, `Dialog`, `DIALOG_FOCUSABLE`, `dialogBackdropShouldClose`, `dialogTabTarget`, `Field`, `FloatingToolbar`, `FloatingToolButton`, `FloatingToolDivider`, `FloatingToolLabel`, `FONT`, `IconButton`, `listboxRowStyle`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `pinDragCursor`, `RangeFields`, `RangeRow`, `ROTATE_CURSOR`, `Section`, `SegmentedControl`, `SIZE`, `Switch`, `Tab`, `ToggleChip`, `useListboxNav`
 - **`src/shared/ui/cornerClearance.js`** — measures the real DOM to tell a fixed bottom-right control how far to clear (a Leaflet map's corner controls, or anything marked `data-canvas-corner`), instead of reserving a worst-case constant on every route.
   - _exports_: `cornerClearanceFromBottom`
 - **`src/shared/ui/crumbScope.js`** — NEW-1/NEW-2 (header breadcrumb): the two pure rules behind the trailing crumb.
   - _exports_: `crumbFloor`, `MODULES_WITH_TRAILING_CRUMB`, `trailingCrumbAllowed`, `trailingCrumbFor`
+- **`src/shared/ui/dashboardAccess.js`** — The Dashboard is OWNER-ONLY (owner request 2026-11-24: "get rid of the dashboard for everyone else but me").
+  - _exports_: `DASHBOARD_HASH`, `dashboardCopy`, `dashboardGate`, `dashboardTarget`, `dashboardWord`, `getDashboardOwner`, `MAP_HASH`, `setDashboardOwner`, `useDashboardOwner`
 - **`src/shared/ui/dashboardNav.js`** — Pure wordmark/crumb Dashboard action+tooltip split (B1128272), so Schedule's header can leave-vs-stay differently.
   - _exports_: `crumbDashboardTitle`, `logoDashboardAction`
 - **`src/shared/ui/DeletedProjectNotice.jsx`** — Shell.jsx's blocked-route screen for a soft-deleted or missing project (Restore / Dashboard-only), swapped in for the workspace so no editor is ever mounted to write through.
@@ -1176,6 +1260,8 @@ _1284 source files mapped._
   - _exports_: `BinBackRow`, `MENU_COLUMN_PANEL`, `MenuFooter`, `MenuScroll`
 - **`src/shared/ui/menuLayers.js`** — WHICH OVERLAY A PRESS BELONGS TO, when two portal menus are open at once.
   - _exports_: `layersOf`, `MENU_LAYER_ATTR`, `pressBelongsToHigherMenu`, `pressIsAboveLayer`
+- **`src/shared/ui/menuRoving.js`** — The keyboard rule for a menu's rows (audit M2): ArrowDown / ArrowUp move focus to the next / previous enabled row and WRAP at the ends; Home / End jump to the first / last.
+  - _exports_: `MENU_ROW_SELECTOR`, `nextMenuIndex`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
   - _exports_: `default (MiddleTruncate)`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
@@ -1221,15 +1307,17 @@ _1284 source files mapped._
 - **`src/shared/ui/strictScale.js`** — dev-mode-only Proxy guard for a token "scale" object (RADIUS/SPACE/FONT_SIZE/CONTROL_H): throws on an unknown key instead of silently returning undefined; zero cost in production
   - _exports_: `strictScale`
 - **`src/shared/ui/Toast.jsx`** — reusable non-blocking toast stack (B673): auto-dismiss with hover-hold, action slot, cap + "+n more", theme tokens; pure pushToastPure/visibleToasts for tests
-  - _exports_: `countByDedupeKey`, `pushToastPure`, `TOAST_CAP`, `TOAST_TTL_MS`, `ToastHost`, `useToasts`, `visibleToasts`
+  - _exports_: `AppToastHost`, `countByDedupeKey`, `pushToastPure`, `resetAppToasts`, `TOAST_CAP`, `TOAST_TTL_MS`, `ToastHost`, `useNoticeToast`, `useToast`, `useToasts`, `visibleToasts`
 - **`src/shared/ui/toolbarPlan.js`** — the PURE half of the shared priority toolbar (NEW-2, 2026-10-05).
-  - _exports_: `buildLadder`, `HYSTERESIS_PX`, `MORE_WIDTH`, `nextStep`, `planToolbar`, `stateAt`, `stepFor`, `tabItems`, `TOOLBAR_GAP`, `widthAt`
+  - _exports_: `buildLadder`, `HYSTERESIS_PX`, `MORE_WIDTH`, `nextStep`, `planToolbar`, `stateAt`, `stepFor`, `TOOLBAR_GAP`, `widthAt`
 - **`src/shared/ui/ToolRail.jsx`** — Shared Bluebeam-style vertical icon rail: presentational items list (tool/header/divider/spacer/node), active-tool accent highlight, theme-token chrome
   - _exports_: `default (ToolRail)`, `RailButton`
 - **`src/shared/units/areaUnits.js`** — how an area unit is spelled: AC / SF / AC-FT, one place, so every surface agrees
   - _exports_: `AC`, `AC_FT`, `CF_PER_ACFT`, `fmtAc`, `fmtAcFromSf`, `fmtSf`, `SF`, `SQFT_PER_ACRE`
+- **`src/shared/units/dateFormat.js`** — HOW A MOMENT IS SPELLED — one home for the relative-time ("5m ago") formatters (audit batch I5, 2026-11-23).
+  - _exports_: `ageWordsLong`, `agoMinHr`, `agoMinHrShort`, `cacheAge`, `dashboardShort`, `daysAgoWords`, `notesRelative`, `presenceAgo`, `relCompact`, `shortDateWithYear`, `shortMonthDay`
 - **`src/shared/units/numberFormat.js`** — HOW A NUMBER IS ROUNDED AND SPELLED — one home for the formatters (NEW-1, refactor).
-  - _exports_: `commaDec1`, `commaDec2`, `commaDec2OrZero`, `commaInt`, `commaIntOrZero`, `fixedDec1`, `plainDec1`, `plainDec2`, `trimDec1`, `trimInt`, `usInt`
+  - _exports_: `acresTiered`, `acresTwoOrBlank`, `commaDec1`, `commaDec2`, `commaDec2OrZero`, `commaInt`, `commaIntOrZero`, `fixedDec1`, `plainDec1`, `plainDec2`, `trimDec1`, `trimInt`, `usdFixed`, `usdUpTo2`, `usdWhole`, `usInt`
 - **`src/shared/viewport/viewAnchor.js`** — the ANCHORED RENDER: the one group transform (`translate(tx ty) scale(k)`) that carries geometry emitted at a held view to where the live view wants it, the drift cap that decides when to re-bake, and the proportional wheel→zoom factor. Pure; the exactness is proved in `test/viewAnchor.test.js`.
   - _exports_: `ANCHOR_K_EPS`, `ANCHOR_MAX_K`, `anchoredEqualsDirect`, `anchorHolds`, `anchorInverseCss`, `anchorTransform`, `anchorTransformAttr`, `WHEEL_MAX_NOTCHES`, `WHEEL_NOTCH_LINES`, `WHEEL_NOTCH_PAGES`, `WHEEL_NOTCH_PX`, `wheelNotches`, `wheelZoomFactor`, `ZOOM_PER_NOTCH`, `ZOOM_SETTLE_MS`
 - **`src/shared/viewport/viewportTransform.js`** — Pure shared pan/zoom engine for both canvases: world<->screen, cursor-anchored zoom, fitView, NaN-safe clamps, pinch, Bluebeam pan/tool collision rule
@@ -1241,32 +1329,50 @@ _1284 source files mapped._
   - _exports_: `default (ActionLink)`
 - **`src/workspaces/site-planner/components/AuthPanel.jsx`** — Account modal: signed-out sign-in/sign-up/reset + set-new-password, signed-in Profile/Team/Settings tabs, focus-trapped
   - _exports_: `default (AuthPanel)`
+- **`src/workspaces/site-planner/components/BuildingInspectorSections.jsx`** — @planner-extract — the building Properties body, split by SECTION (audit batch G2, behaviour-identical move): the number-conflict dialog and the Footprint · Docks & walls · Structure ·…
+  - _exports_: `BuildingAppearanceSection`, `BuildingFootprintSection`, `BuildingLoadingSection`, `BuildingNumberConflict`, `BuildingStructureSection`
 - **`src/workspaces/site-planner/components/Collapse.jsx`** — FINAL UI SPEC collapsible section primitive (title · count · closed-state summary · chevron) with per-sectionId localStorage open/closed persistence; header is a keyboard-toggleable button
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
 - **`src/workspaces/site-planner/components/DealDatesForm.jsx`** — Inline popover form for a pursuit's feasibility/LOI/closing dates.
   - _exports_: `default (DealDatesForm)`
+- **`src/workspaces/site-planner/components/DeedInspector.jsx`** — @planner-extract — the metes-and-bounds (deed / title tract) Properties panel, NEW-1 2026-11-24.
+  - _exports_: `DeedInspector`
+- **`src/workspaces/site-planner/components/drainageBlocks.jsx`** — buildDrainageBlocks — the Detention / Mitigation / FFE verdict groups of the Drainage panel, moved verbatim out of DrainagePanel's render body (audit batch L3).
+  - _exports_: `buildDrainageBlocks`
+- **`src/workspaces/site-planner/components/ElementInspectors.jsx`** — @planner-extract — the dock, multi-select, callout, measurement and ramp blocks of the Properties inspector (audit batch G5c, behaviour-identical move).
+  - _exports_: `CalloutInspector`, `DockLayerInspector`, `DriveInRampInspector`, `MeasureInspector`, `MultiStyleInspector`
 - **`src/workspaces/site-planner/components/elementMenuIcons.jsx`** — the B845584 element context-menu rebuild's own 14px/stroke-1.3 icon family (a finer, denser idiom than icons.jsx's 24px/stroke-2 set, matching the owner-approved mockup); every row in the rebuilt menu gets one in a 16px gutter
   - _exports_: `AlignRotationIcon`, `AttachIcon`, `BringForwardIcon`, `BringToFrontIcon`, `BumpOutIcon`, `CopyIcon`, `DeleteIcon`, `DetachIcon`, `DockZonesIcon`, `DuplicateIcon`, `GroupIcon`, `LabelIcon`, `LockIcon`, `PondSettingsIcon`, `PondSizingIcon`, `PropertiesIcon`, `ResetFootprintIcon`, `ReshapeIcon`, `RoadBranchIcon`, `SendBackwardIcon`, `SendToBackIcon`, `SplitRowsIcon`, `SwapIcon`, `UngroupIcon`
 - **`src/workspaces/site-planner/components/elementRender.jsx`** — The plan element renderer — `ElNode` / `renderElPx` and the per-element helpers beside it — extracted from SitePlanner.jsx (B1064 step 1).
-  - _exports_: `dimSlideFor`, `dockDoorRun`, `ElNode`, `rampSpansOnSide`, `resolveElNeighbors`
+  - _exports_: `dimSlideFor`, `dockDoorRun`, `ElNode`, `rampDoorRunOf`, `rampSpansOnSide`, `resolveElNeighbors`
 - **`src/workspaces/site-planner/components/EmailLinkSent.jsx`** — what the person sees AFTER Planyr has emailed them a link: where to look, what it is called, how long it lasts, a "Send again" that respects the send cap and says when it can be pressed…
   - _exports_: `default (EmailLinkSent)`
 - **`src/workspaces/site-planner/components/GisIdentifyCard.jsx`** — The planner canvas's layer CLICK CARD (B2507062, owner constraint #45).
   - _exports_: `default (GisIdentifyCard)`
+- **`src/workspaces/site-planner/components/Grading3DViewer.jsx`** — The full-screen 3D cut-and-fill viewer (owner-only grading layer; NEW-1, 2026-11-11, from the owner-approved mockups: Option A "ghost the existing ground" as the default view, plus Option…
+  - _exports_: `default (Grading3DViewer)`, `DEFAULT_STRETCH`, `STRETCHES`
 - **`src/workspaces/site-planner/components/GradingController.jsx`** — the brain of the grading layer. Renders NOTHING. It owns the hooks the grading surfaces share and publishes ONE `model` object up to SitePlanner through `onModel`, which hands it to the…
   - _exports_: `default (GradingController)`, `PAPER_MARGIN_FT`
 - **`src/workspaces/site-planner/components/GradingPanels.jsx`** — Grading panels (owner-only; loaded on demand — see lib/gradingGate.js).
-  - _exports_: `GradingCanvas`, `GradingHeaderActions`, `GradingPanel`, `GroundSection`, `LABELS_MIN_PX`, `OFF_LINE`
+  - _exports_: `fitBreakWords`, `FitBuildingRow`, `fitNetWords`, `fitNoFitWords`, `GradingCanvas`, `GradingHeaderActions`, `GradingPanel`, `GroundSection`, `LABELS_MIN_PX`, `OFF_LINE`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `ChevronRightIcon`, `CloseXIcon`, `CompIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `MoreIcon`, `NoteIcon`, `PadlockIcon`, `PeopleIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SitePlanIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
+  - _exports_: `ChevronRightIcon`, `CloseXIcon`, `CompIcon`, `CubeIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `MoreIcon`, `NoteIcon`, `PadlockIcon`, `PeopleIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SitePlanIcon`, `SupplyIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
+- **`src/workspaces/site-planner/components/InspectorHeaders.jsx`** — @planner-extract — the building and road headers of the Properties inspector (audit batch G5c, behaviour-identical move).
+  - _exports_: `BuildingInspectorHeader`, `RoadInspectorHeader`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/LazyPanel.jsx`** — Scaffold every lazily-loaded planner panel mounts behind: a height-reserving Suspense fallback (so a deferred panel cannot jump in) plus a per-panel error boundary that contains a failed chunk to that panel and offers the cache-busting reload on a stale deploy.
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
+- **`src/workspaces/site-planner/components/LeftPanelBody.jsx`** — @planner-extract — the left panel body (every docked or floating panel) (audit batch G6, behaviour-identical move).
+  - _exports_: `LeftPanelBody`
+- **`src/workspaces/site-planner/components/MarkupInspector.jsx`** — @planner-extract — the markup blocks of the Properties inspector (audit batch G5b, behaviour-identical move).
+  - _exports_: `EasementInspector`, `NeutralMarkupInspector`
+- **`src/workspaces/site-planner/components/MultiPropsInspector.jsx`** — Bulk-edit PROPERTIES for a multi-selection (NEW-1). Renders the type's fields from `lib/multiProps.js` with the SAME Field / NumInput primitives the single-element panels use: a field every…
+  - _exports_: `MultiPropsInspector`
 - **`src/workspaces/site-planner/components/NumEditField.jsx`** — the ONE canvas inline numeric editor: chip-scale field, no native spinners, Enter/Escape/blur commit, Arrow nudge
   - _exports_: `default (NumEditField)`
 - **`src/workspaces/site-planner/components/NumInput.jsx`** — the planner's edit-on-commit number field, extracted from SitePlanner.jsx (B1064 step 1) so the panels moved out of it (YieldDrainagePanels.jsx) and the planner component share ONE…
@@ -1283,8 +1389,6 @@ _1284 source files mapped._
   - _exports_: `default (ParcelContextMenu)`
 - **`src/workspaces/site-planner/components/ParcelCopyNote.jsx`** — The "this lot came from a COPY of the county's data" line (NEW-1, owner request 2026-10-29: "use the copy, but then just state that it's a copy and state the date that it came from.
   - _exports_: `default (ParcelCopyNote)`
-- **`src/workspaces/site-planner/components/ParcelDataPanel.jsx`** — The selected lot's county record + taxing units, lazily loaded: an Owner headline that never repeats as a row, three short rows, and the rest (incl. the height-capped Legal description) behind one closed fold — the row split shared with the map-search card
-  - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/ParcelPage.jsx`** — A parcel's OWN PAGE inside the Parcels panel (Parcels panel rework — NEW-2).
@@ -1292,19 +1396,27 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/components/ParcelRequestLink.jsx`** — "Email Michael to request it" — the one link every no-parcel-data message carries (NEW-1, owner request 2026-10-21).
   - _exports_: `default (ParcelRequestLink)`
 - **`src/workspaces/site-planner/components/ParcelsPanel.jsx`** — The Land tab's Parcels LIST (Parcels panel rework — NEW-1; the parcel's own page is ParcelPage.jsx).
-  - _exports_: `CloseIcon`, `default (ParcelsPanel)`, `EyeIcon`, `EyeOffIcon`, `fmt`, `groupKeyOf`, `groupRows`, `GROUPS`, `Ico`, `iconBtn`, `LINE`, `LockGlyph`, `MoreIcon`, `overlapAcres`, `OverlapIcon`, `overlapNamesOf`, `PencilIcon`, `rowText`, `slotWidth`, `SplitIcon`, `textBtn`, `TrashIcon`, `UnlockGlyph`, `ZoomIcon`
+  - _exports_: `CloseIcon`, `default (ParcelsPanel)`, `EyeIcon`, `EyeOffIcon`, `fmt`, `groupKeyOf`, `groupRows`, `GROUPS`, `Ico`, `iconBtn`, `LINE`, `LockGlyph`, `MoreIcon`, `overlapAcres`, `OverlapIcon`, `overlapNamesOf`, `PencilIcon`, `rowText`, `slotWidth`, `textBtn`, `TrashIcon`, `UnlockGlyph`, `ZoomIcon`
 - **`src/workspaces/site-planner/components/ParcelStylePanel.jsx`** — Line & label style (NEW-2) — the Parcel page's style panel for the three styleable objects: the parcel BOUNDARY, the SETBACK line and the side-length DIMENSION LABELS.
   - _exports_: `default (ParcelStylePanel)`
 - **`src/workspaces/site-planner/components/PlaceSearchField.jsx`** — B831779 (NEW-4) the map toolbar's address field: a live-suggestion combobox (role=combobox + listbox) replacing the old "Go" button — debounced/abortable, Enter always works, LOUD-FAILURE no-match row
   - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PlanMenu.jsx`** — The plan menu (the plan crumb's dropdown) — NEW-1, 2026-11-04, redrawn to the owner-approved mockup.
   - _exports_: `default (PlanMenu)`, `PLAN_MENU_WIDTH`
+- **`src/workspaces/site-planner/components/PlannerContextMenus.jsx`** — @planner-extract — the planner right-click menus (audit batch G6b, behaviour-identical move).
+  - _exports_: `MapContextMenu`, `OverlayContextMenu`, `ParcelMenuHost`
+- **`src/workspaces/site-planner/components/PlannerIcons.jsx`** — @planner-extract — AUDIT BATCH G1: the planner's icon tables (tool + rail glyphs), the shared dash <option> list and the hatch pattern def, moved verbatim out of SitePlanner.jsx.
+  - _exports_: `DASH_OPTIONS`, `HatchPatternDef`, `RailIcon`, `ToolIcon`
+- **`src/workspaces/site-planner/components/PondInspector.jsx`** — @planner-extract — the pond block of the Properties inspector (audit batch G5, behaviour-identical move).
+  - _exports_: `default`, `PondInspector`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/PresenceChip.jsx`** — the header's "who's here" chip: a two-person silhouette + other real users' initials (capped, "+N" overflow, full breakdown on hover/tap), never counting this account's own extra tabs as people (those render as a bare tab count instead)
   - _exports_: `default (PresenceChip)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
   - _exports_: `default (PrintCompose)`
+- **`src/workspaces/site-planner/components/PropFields.jsx`** — @planner-extract — AUDIT BATCH G1: the Properties-panel field primitives (Section, Field, PairedField, RotationField, the dock layer panels and friends), moved verbatim out of…
+  - _exports_: `AisleSideCard`, `AlignIcon`, `BuildingNumberField`, `DockLayerPanel`, `DriveInRampPanel`, `Field`, `InspectorMoreMenu`, `LineSample`, `LoadingWallPicker`, `PairedField`, `PairedFieldHead`, `PercentField`, `ROAD_GUTTER_W`, `ROAD_SELECT_STYLE`, `RotationField`, `Section`, `StdSubLabel`, `VAlignIcon`, `withoutStyleOverrides`
 - **`src/workspaces/site-planner/components/railGlyphs.js`** — Rail-icon artwork that is too fiddly to live inline in SitePlanner.jsx's RAIL_ICONS table (NEW-1, B2591568).
   - _exports_: `GRADING_GLYPH`
 - **`src/workspaces/site-planner/components/RailMenus.jsx`** — NEW-1 / NEW-2 (owner-approved 2026-10-11). The two right-rail flyouts that were plain text lists: PARCEL TOOLS (a sorted list with icons, hints and a "This parcel" switches section) and…
@@ -1315,6 +1427,8 @@ _1284 source files mapped._
   - _exports_: `default (RegradeBanner)`, `useRegradeBanner`
 - **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — The "Design road cross-section" dialog: a row-per-band editor with a live to-scale plan-view preview, dimension strings, running totals, and named presets
   - _exports_: `default (RoadCrossSectionDialog)`
+- **`src/workspaces/site-planner/components/RoadInspectorSections.jsx`** — @planner-extract — the road Properties body, split by SECTION (audit batch G2, behaviour-identical move): Road · Cross-section · Label · Intersection · Taper, and the hidden min-radius…
+  - _exports_: `RoadCurveAtVertex`, `RoadIntersectionSection`, `RoadLabelSection`, `RoadRadiusWarning`, `RoadSizeSection`, `RoadTaperSection`, `RoadXSectionSection`
 - **`src/workspaces/site-planner/components/RoadPanelParts.jsx`** — Presentational pieces of the redesigned ROAD Properties panel (NEW-1).
   - _exports_: `RoadGlyph`, `RoadStripCaption`, `RoadXSectionStrip`
 - **`src/workspaces/site-planner/components/SetbackSections.jsx`** — The parcel page's SETBACKS section (Parcels rework — NEW-3; compacted by NEW-1, B2191xxx): a small sketch of the parcel's own outline split into its few main sections…
@@ -1325,8 +1439,6 @@ _1284 source files mapped._
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
   - _exports_: `SiteReviewModal`
-- **`src/workspaces/site-planner/components/SourcesLegend.jsx`** — B895 one-time "Sources ⓘ" popover in the Yield-panel header decoding the six SourceTag colors (keyboard-reachable, AnchoredMenu-based)
-  - _exports_: `default (SourcesLegend)`
 - **`src/workspaces/site-planner/components/SourceTag.jsx`** — B895 the reusable per-figure provenance tag (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED) + its Basis popover (built on RowInfo)
   - _exports_: `default (SourceTag)`
 - **`src/workspaces/site-planner/components/StandardsBar.jsx`** — the Standards panel's sticky footer: ONE scope (Project / All) + ONE Apply for the whole panel
@@ -1335,32 +1447,48 @@ _1284 source files mapped._
   - _exports_: `default (TeamPanel)`
 - **`src/workspaces/site-planner/components/useGroundElevation.js`** — B706 hook: cursor ground-elevation readout as a STATE, never silence (bilinear from the cached terrain grid; warms the cursor lattice tile whatever the layer toggles/zoom say; one debounced 3DEP point sample meanwhile; aborts superseded requests)
   - _exports_: `GROUND_EL_TITLE`, `useGroundElevation`
+- **`src/workspaces/site-planner/components/View3dButton.jsx`** — The map's "3D" button (NEW-2, B2671227, 2026-11-11; amends B2671220).
+  - _exports_: `default (View3dButton)`
+- **`src/workspaces/site-planner/components/View3dMount.jsx`** — The planner-side door to the 3D grading viewer (owner-only; NEW-1, 2026-11-11).
+  - _exports_: `default (View3dMount)`
 - **`src/workspaces/site-planner/components/ViewMenu.jsx`** — On-canvas View (eye) menu card (B653): show/hide toggles (docks, column grid, dims, areas) + grid size & snap — snap's single interactive home
   - _exports_: `default (ViewMenu)`
 - **`src/workspaces/site-planner/components/WallKindIcon.jsx`** — Building panel v3 (NEW-4). The ONE set of six 16×16 icons for the "Docks & walls" strip: a truck cab (court), a box trailer on landing gear (trailer), a sedan (car parking), two trees on a…
-  - _exports_: `default (WallKindIcon)`, `WALL_KIND_ICONS`
+  - _exports_: `default (WallKindIcon)`
+- **`src/workspaces/site-planner/components/WallRows.jsx`** — @planner-extract — AUDIT BATCH G1: the loading-wall rows editor (WallRows and its helpers), moved verbatim out of SitePlanner.jsx.
+  - _exports_: `PadElevRow`, `WallRows`
 - **`src/workspaces/site-planner/components/WatchOutChip.jsx`** — B895 the one consistent ⚠ item-specific-risk chip (Atlas-14, datum, berm/floodplain, haul/compaction, …) — never the generic disclaimer
   - _exports_: `default (WatchOutChip)`
 - **`src/workspaces/site-planner/components/YieldDrainagePanels.jsx`** — The Yield and Drainage left-rail panels (and their private helpers), extracted from SitePlanner.jsx (B1064 step 1).
   - _exports_: `CostDisclosure`, `DesignChangeSummaryCard`, `DrainagePanel`, `ProvenanceLegend`, `YieldPanel`
 - **`src/workspaces/site-planner/components/YieldFooterDisclaimer.jsx`** — B895 the ONE persistent Yield-panel screening disclaimer, replacing ~7 inline "confirm with your engineer" variants
   - _exports_: `default (YieldFooterDisclaimer)`
+- **`src/workspaces/site-planner/components/yieldPanelParts.jsx`** — The Yield and Drainage panels' shared module-scope pieces (palette, chips, disclosure, bars, change-summary card, row helpers), moved verbatim out of YieldDrainagePanels.jsx (audit batch…
+  - _exports_: `barAria`, `barFill`, `BulletBar`, `CHIP_FILL`, `CostDisclosure`, `DesignChangeSummaryCard`, `FlashValue`, `groupHead`, `InlineDisclosure`, `note`, `ProvenanceLegend`, `row`, `segFill`, `StatusChip`, `YIELD_PAL`
 - **`src/workspaces/site-planner/lib/accessScreen.js`** — PHASE 6 access-tier screening (pure): turns three public access datasets near the parcel into info findings — TxDOT AADT (nearest counted road's traffic as an access/visibility proxy), BTS/FRA rail lines (nearest line + owner; a crossing/abutting line flags a potential rail-served siding), and FAA airports (distance as a Part 77 height-restriction proxy, with a Form-7460 caution near a public-use airport); expands railroad reporting marks + FAA type codes to plain labels
   - _exports_: `airportTypeLabel`, `railroadName`, `summarizeAadt`, `summarizeAirports`, `summarizeRail`
 - **`src/workspaces/site-planner/lib/activeParcelBoundary.js`** — pure geometry for the Map view's "draw the record's own active parcel boundary alongside the pin at close zoom" feature (see MapFinder.jsx).
   - _exports_: `activeDrawParcels`, `PARCEL_ZOOM`, `reprojectParcelRing`, `showActiveParcelAt`
 - **`src/workspaces/site-planner/lib/activeUser.js`** — B927105: which account the shared project store is bound to — split out of storage.js so a caller that only needs to read/set it doesn't load the whole site-model/cloud-sync engine
   - _exports_: `activeUid`, `cloudSitesKey`, `isCloudActive`, `setActiveUser`
+- **`src/workspaces/site-planner/lib/adamsCoTax.js`** — Adams County, Colorado: a lot's taxing authorities + mill levy, from the COUNTY'S OWN tables (NEW-1, 2026-11-24).
+  - _exports_: `_resetAdamsCache`, `ADAMS_DISTRICTS_URL`, `ADAMS_TAX_CAPTION`, `ADAMS_TAX_SOURCE`, `ADAMS_TAX_SOURCE_URL`, `ADAMS_VALUES_URL`, `adamsTableFrom`, `dedupeValues`, `fetchAdamsTable`
 - **`src/workspaces/site-planner/lib/addressSnap.js`** — Snap a geocoded address that landed in the road to the lot it belongs to (NEW-1, TN non-state counties, 2026-10-21).
   - _exports_: `houseAndStreet`, `pickAddressSnap`
+- **`src/workspaces/site-planner/lib/addrParts.js`** — The DECLARED per-county situs shape — a leaf module (no imports) so `appraisal.js` (the card), `parcelQuery.js` (the search) and the nightly registry health check can all read ONE…
+  - _exports_: `ADDR_PART_ROLES`, `declaredColumns`, `findColumn`, `hasAddrParts`, `leafOf`, `missingDeclaredColumns`
 - **`src/workspaces/site-planner/lib/adminBoundaryData.js`** — Pure decoder for the wide-zoom boundary asset (delta ints → lat/lng rings) plus the inner half of the zoom band (states join countries from zoom 5).
   - _exports_: `ADMIN1_DETAIL_MIN_ZOOM`, `ADMIN1_MIN_ZOOM`, `admin1Style`, `adminBoundaryLevels`, `COUNTRY_MAX_ZOOM`, `decodeAsset`, `decodeRing`, `EMPHASIS_STATE_STYLE`
 - **`src/workspaces/site-planner/lib/adminBoundaryGate.js`** — The wide-zoom gate as a leaf module (imports nothing): the zoom ceiling for political boundaries, and the cached dynamic import that keeps the layer off the boot bundle.
   - _exports_: `ADMIN_BOUNDARY_MAX_ZOOM`, `adminBoundariesVisible`, `attachAdminBoundaries`, `getStateLineEmphasis`, `setStateLineEmphasis`, `subscribeStateLineEmphasis`
 - **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
   - _exports_: `attachAdminBoundaries`
+- **`src/workspaces/site-planner/lib/aerialSnapshot.js`** — WHERE the stored map snapshot ("Aerial backdrop", `fromMap: true`) is drawn on a LOCATED plan (NEW-1, 2026-11-05, owner: "Zoning and Future Land Use fills are cut out around the site on the…
+  - _exports_: `snapshotBounds`, `snapshotDrawnInCanvas`, `snapshotHostedInMap`
 - **`src/workspaces/site-planner/lib/aerialVisibility.js`** — persisted aerial-backdrop visibility (`settings.aerialHidden`) and whether the live basemap tile layer should render, gating both the static underlay image and the Leaflet aerial on one fact so Hide/Remove actually take effect and persist.
   - _exports_: `aerialWantedOnSheet`, `isAerialTileActive`, `isAerialVisible`, `wantBasemapSrc`, `withAerialVisible`
+- **`src/workspaces/site-planner/lib/agUseRules.js`** — Ag-use valuation (Texas "1-d-1") — the rollback-tax line on a county parcel page (NEW-1, sweep 2026-11-12).
+  - _exports_: `AG_USE_CLASS`, `AG_USE_RULES`, `agMoney`, `agUseLine`, `agUseOf`, `validAgUseRule`
 - **`src/workspaces/site-planner/lib/alabamaParcels.js`** — ALABAMA county parcel sources. Alabama has NO free statewide parcel service (AGOL, Hub, ADOR / AGIC / GSA searched; only commercial resellers carry one — not used), so each county is wired…
   - _exports_: `AL_ROWS`, `alMap`, `alRaw`
 - **`src/workspaces/site-planner/lib/alabamaProvenance.js`** — verification record for the Alabama county parcel sources (build-time documentation, see countiesProvenance.js).
@@ -1368,17 +1496,19 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/annotationExtract.js`** — the DOM half of the "editable markups" PDF export (NEW-1, 2026-10-05; site elements 2026-10-20).
   - _exports_: `domToTree`, `elementSubject`, `extractMarkupAnnotations`, `MARKUP_SITE_SUBJECT`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
-  - _exports_: `acreageKey`, `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `countyRecord`, `findAttr`, `isPlaceholderValue`, `leafKey`, `MAILING_KEY_RE`, `mailingAddressValues`, `OWNER_FALLBACK_RE`, `OWNER_KEY_ID_RE`, `OWNER_KEY_MI_RE`, `OWNER_KEY_PA_RE`, `OWNER_KEY_RE`, `ownerKey`, `ownerName`, `ownerWithFirstName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelFallbackName`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`, `streetFromParts`, `tidyAddressLabel`
+  - _exports_: `acreageKey`, `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `composeSitus`, `countyRecord`, `findAttr`, `isPlaceholderValue`, `leafKey`, `MAILING_KEY_RE`, `mailingAddressValues`, `OWNER_FALLBACK_RE`, `OWNER_KEY_ID_RE`, `OWNER_KEY_MI_RE`, `OWNER_KEY_PA_RE`, `OWNER_KEY_RE`, `ownerKey`, `ownerName`, `ownerWithFirstName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelFallbackName`, `parcelPanelRows`, `prettyKey`, `shapeDeedAcres`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`, `streetFromParts`, `tidyAddressLabel`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
   - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
-  - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `deepenZoomFor`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelDetailed`, `identifyParcelEager`, `isPaginationUnsupportedError`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveGisUrl`, `resolveLayerUrl`
+  - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `deepenZoomFor`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelDetailed`, `identifyParcelEager`, `isPaginationUnsupportedError`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryDistinctValues`, `queryFeatures`, `resolveGisUrl`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeAcrossBands`, `arrangeBandFlags`, `arrangeFlags`, `calloutAtAbsoluteFront`, `calloutFrontForceZ`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
   - _exports_: `assemblyDigest`, `compareIds`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
+- **`src/workspaces/site-planner/lib/assemblyOps.js`** — @planner-extract — AUDIT BATCH G3: the dock / wall-kid / ramp assembly engine that used to sit inside the SitePlanner component (zone chains, wall strips, side parking, dog-ears, relayout +…
+  - _exports_: `baseZone`, `buildNextZoneIn`, `bumpAlongOnSide`, `chainFromHead`, `chainKindOf`, `courtBumpOpts`, `dockChainOnSide`, `findBufferIn`, `findCourtIn`, `findHeadIn`, `findTrailerIn`, `findZoneIn`, `fitDogEar`, `fitKid`, `isDockLayerEl`, `isDockZone`, `isSideParkPad`, `isWallStrip`, `isWallTrailer`, `killSetWithChildren`, `makeBufferZoneIn`, `makeChainZoneIn`, `makeCourtZoneIn`, `makeDogEar`, `makeStrip`, `makeTrailerZoneIn`, `nextInChain`, `OPP_TRAILER_W`, `outwardUnit`, `ownedFlushKid`, `ownedSidePark`, `ownedWallStrip`, `rampsOnHost`, `refitChildrenIn`, `relayoutAllSidesIn`, `relayoutBumpSidewalks`, `relayoutSideIn`, `relayoutWallKids`, `removeWithChildren`, `resyncBondedRot`, `SIDE_N`, `SIDE_PARK_ANGLE`, `SIDE_PARK_PAD_TYPES`, `sideOfKid`, `sideOuterPerp`, `sideParkSideOf`, `SIDEWALK_W`, `sidewalkFullRunPatch`, `stackCountIn`, `swSideOn`, `WALL_KID_TYPES`, `wallExtentCtx`, `wallOutermostExtent`, `zoneDepthOfIn`, `zoneIndexOf`, `zoneSideOf`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
   - _exports_: `getUser`, `onAuthChange`, `signIn`, `signOut`, `signOutEverywhere`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/authMail.js`** — The one source of truth for who auth email comes from, and the confirmation / password-reset copy generated from it
@@ -1387,8 +1517,14 @@ _1284 source files mapped._
   - _exports_: `AZ_ROWS`, `azMap`, `azRaw`
 - **`src/workspaces/site-planner/lib/azProvenance.js`** — verification record for the Arizona county parcel sources (build-time documentation, see countiesProvenance.js).
   - _exports_: `ARIZONA_VERIFICATION`
+- **`src/workspaces/site-planner/lib/bandSetter.js`** — AUDIT BATCH G1 — the ONE cross-band move for a drawn annotation (markup / callout / measurement): "Send behind the plan" / "Bring above the plan".
+  - _exports_: `bandSetter`
+- **`src/workspaces/site-planner/lib/bartowZoningNames.js`** — Bartow County GA zoning — THE DISTRICT NAME behind a zone code (NEW-1, 2026-11-12; owner constraints #45 / #46 / #50).
+  - _exports_: `BARTOW_ORDINANCE_CITATION`, `BARTOW_ORDINANCE_URL`, `BARTOW_ZONING_NAMES`, `bartowLegend`, `bartowModifierWords`, `bartowZoneName`, `bartowZoneTitle`, `MODIFIER_WORDS`, `parseBartowCode`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
   - _exports_: `* (../../../shared/basemaps/basemaps.js)`
+- **`src/workspaces/site-planner/lib/baytownZoning.js`** — City of Baytown zoning (B2671240, 2026-11-12) — the pure half: how a zoning polygon is read, classed, painted, worded.
+  - _exports_: `adoptedDate`, `BAYTOWN_CITATION`, `BAYTOWN_VINTAGE_SHORT`, `BT_ZONE_NAMES`, `legendItemsOf`, `normalizeZone`, `ordinanceNumber`, `ZONE_COLORS`, `zoneClass`, `zoneColor`, `zoneLabelText`, `zoneName`, `zoneWithName`, `zoningCard`, `zoningLegend`, `zoningStyle`
 - **`src/workspaces/site-planner/lib/bondRemap.js`** — The ONE id-bearing bond inventory + remap rule shared by every copy path (B1124): a reference inside the copied set is remapped to the new id, one outside it is dropped, never left dangling to a foreign element.
   - _exports_: `carryHostRoleTags`, `HOST_ROLE_TAGS`, `ID_BOND_TAGS`, `remapBondRefs`
 - **`src/workspaces/site-planner/lib/bootFramingDeadline.js`** — HOW LONG HAS *THIS PLAN* BEEN TRYING TO GET ITS FIRST FRAMING?
@@ -1397,18 +1533,20 @@ _1284 source files mapped._
   - _exports_: `initialBootResolved`, `mayReconcileUrl`, `mayResumeLastSite`, `mayWriteRouteProject`, `pickResumeTarget`, `resumeTargetAfterSignIn`, `routeChangeNeedsDefer`, `routeProjectAvailability`, `routeProjectJustChanged`, `userLeftOnSignOut`
 - **`src/workspaces/site-planner/lib/boundaryLabels.js`** — Pure label-placement math for boundary overlays: shoelace ring centroid, one anchor per name, greedy collision-drop by on-screen area, zoom gate (Leaflet-free, node-tested)
   - _exports_: `declutterBoxes`, `featureAnchor`, `labelAnchors`, `labelsVisible`, `placeLabels`, `ringAreaCentroid`, `titleCaseName`
+- **`src/workspaces/site-planner/lib/boundaryPaint.js`** — HOW A COUNTIES & CITIES FEATURE IS PAINTED (NEW-1, owner 2026-11-05).
+  - _exports_: `colorFeatures`, `createColorBook`, `geometryBox`, `placeKey`, `placeStyle`, `sharedColorBook`
 - **`src/workspaces/site-planner/lib/boundarySections.js`** — Boundary SECTIONS — the few, named stretches a parcel outline is edited in (NEW-1).
-  - _exports_: `abutStats`, `boundarySections`, `CORNER_TURN_DEG`, `CURVE_EDGE_MAX_FT`, `CURVE_MAX_EDGE_FRAC`, `CURVE_MAX_TURN_DEG`, `CURVE_MIN_TURN_DEG`, `ESCALATE_FLOOR_FRACS`, `LONG_EDGE_CORNER_DEG`, `LONG_EDGE_FT`, `MIN_SECTION_FT`, `MIN_SECTION_PERIM_FRAC`, `NEIGHBOUR_COINCIDENT_FT`, `sectionLabel`, `sectionOfEdge`, `sectionsSummary`, `setSectionSetback`, `shiftBreaksOnDelete`, `shiftBreaksOnInsert`, `SMOOTH_CORNER_DEG`, `SMOOTH_MAX_FT`, `SMOOTH_MIN_FT`, `SMOOTH_PERIM_FRAC`, `TARGET_SECTIONS`, `toggleBreak`
+  - _exports_: `abutStats`, `boundarySections`, `CORNER_PIECE_MIN_GAP_DEG`, `CORNER_PIECE_MIN_TURN_DEG`, `CORNER_PIECE_WOBBLE_DEG`, `CORNER_TURN_DEG`, `CURVE_EDGE_MAX_FT`, `CURVE_MAX_EDGE_FRAC`, `CURVE_MAX_TURN_DEG`, `CURVE_MIN_TURN_DEG`, `ESCALATE_FLOOR_FRACS`, `FACING_TIE_DEG`, `LONG_EDGE_CORNER_DEG`, `LONG_EDGE_FT`, `MIN_SECTION_FT`, `MIN_SECTION_PERIM_FRAC`, `NEIGHBOUR_COINCIDENT_FT`, `sectionLabel`, `sectionOfEdge`, `sectionsSummary`, `setSectionSetback`, `shiftBreaksOnDelete`, `shiftBreaksOnInsert`, `SMOOTH_CORNER_DEG`, `SMOOTH_MAX_FT`, `SMOOTH_MIN_FT`, `SMOOTH_PERIM_FRAC`, `TARGET_SECTIONS`, `toggleBreak`
 - **`src/workspaces/site-planner/lib/boundaryStyle.js`** — The look of the Counties & Cities lines (B2507065 / NEW-10, owner constraint #47) — three ranks of line that never read as the same thing: cities a bolder outline + a light tint inside…
-  - _exports_: `BOUNDARY_FALLBACK_INK`, `CITY_LINE_MIN_WEIGHT`, `CITY_TINT_OPACITY`, `CLICK_HIGHLIGHT_COLOR`, `CLICK_HIGHLIGHT_WEIGHT`, `COUNTY_LINE_COLOR`, `COUNTY_LINE_DASH`, `COUNTY_LINE_WEIGHT`, `STATE_LINE_CASING`, `STATE_LINE_CORE`
+  - _exports_: `BOUNDARY_FALLBACK_INK`, `CITY_LINE_MIN_WEIGHT`, `CITY_TINT_OPACITY`, `CLICK_HIGHLIGHT_COLOR`, `CLICK_HIGHLIGHT_WEIGHT`, `COUNTY_LINE_COLOR`, `COUNTY_LINE_DASH`, `COUNTY_LINE_WEIGHT`, `ETJ_LINE_DASH`, `ETJ_LINE_WEIGHT`, `ETJ_TINT_OPACITY`, `PLACE_LABEL_INK`, `PLACE_LABEL_SHADOW`, `PLACE_PALETTE`, `PLACE_PILL_ETJ_BG`, `PLACE_PILL_SHADOW`, `STATE_LINE_CASING`, `STATE_LINE_CORE`
 - **`src/workspaces/site-planner/lib/buildability.js`** — B710 buildability pathway: editable per-jurisdiction required-FFE rules (0.2% WSE + 2 ft seeds, verified-flagged), fill-to-elevate pathway flags, LOMR-F + wetlands-§404 copy flags
   - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `OUTSIDE_FLOODPLAIN_FFE_NOTE`, `requiredFfe`, `SITE_BASED_FFE_NOTE`, `siteBasisFfe`, `suggestedFfe`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildableClient.js`** — Buildable-ground client (NEW-1/NEW-2, owner-only grading layer) — the main-thread half.
-  - _exports_: `boundsForRings`, `buildableMaskJob`, `groundSummaryJob`, `siteDem`, `sweepKey`
+  - _exports_: `boundsForRings`, `buildableMaskJob`, `fitBuildingJob`, `groundSummaryJob`, `siteDem`, `sweepKey`
 - **`src/workspaces/site-planner/lib/buildableEnvelope.js`** — PR-G buildable envelope: the hard limits a detention pond must live inside (drainage cap · floodway no-fill · outfall/tailwater) + a soft excavation screen; gates the Optimize solver and the green verdict. Exports `rimCapElevFt`, `assessBuildability`, `unbuildableHeading`, `makeItBuildableOptions`, `unbuildableNote`, `DEFAULT_MAX_EXCAV_DEPTH_FT`.
   - _exports_: `assessBuildability`, `DEFAULT_MAX_EXCAV_DEPTH_FT`, `ENVELOPE_TOL_FT`, `makeItBuildableOptions`, `NO_RISE_CERT_DEF`, `requirementNote`, `rimCapElevFt`, `unbuildableHeading`, `unbuildableNote`
 - **`src/workspaces/site-planner/lib/buildableGround.js`** — Buildable-ground sweep engine (NEW-1, owner-only grading layer) — "how much of this parcel can be ONE level pad at elevation E with no retaining walls?" Pure, no DOM, no imports — it runs…
-  - _exports_: `buildLattice`, `cachedMaskAt`, `CELL_FT`, `clearSweepCache`, `DEFAULT_MAX_DEPTH_FT`, `DEFAULT_SLOPE`, `groundSummary`, `latticeZAt`, `maskAt`, `parcelRelief`, `prepareSweep`, `ringAreaSf`, `severityOfShare`, `SQFT_PER_ACRE`, `summarizeCtx`, `sweep`
+  - _exports_: `blockByBoundary`, `buildLattice`, `cachedMaskAt`, `CELL_FT`, `clearSweepCache`, `DEFAULT_MAX_DEPTH_FT`, `DEFAULT_SLOPE`, `groundSummary`, `latticeZAt`, `maskAt`, `parcelRelief`, `prepareSweep`, `ringAreaSf`, `severityOfShare`, `SQFT_PER_ACRE`, `summarizeCtx`, `sweep`
 - **`src/workspaces/site-planner/lib/buildableLattice.js`** — Buildable-ground lattice glue (NEW-1) — turns the B808 site DEM grid (the `fetchSiteGrid` result: LERC-decoded FEET values + validity mask + its request) into the 10-ft feet-frame lattice…
   - _exports_: `latticeFromDem`, `sweepBBox`
 - **`src/workspaces/site-planner/lib/buildingButtons.js`** — WHERE a selected building's edit buttons sit (NEW-5, owner 2026-10-30: "the grey ramp buttons sit exactly on top of the grading corner tags").
@@ -1439,6 +1577,8 @@ _1284 source files mapped._
   - _exports_: `CANVAS_GUESS_KEY`, `geometryOf`, `readCanvasGuess`, `writeCanvasGuess`
 - **`src/workspaces/site-planner/lib/ccnClassify.js`** — Pure water/sewer CCN screening classifier (PHASE 1): infers the utility KIND (city/MUD/WSC/…) from the provider name and turns a CCN /query result into an `info` finding (who is certificated to serve, or an honest well/septic flag when none)
   - _exports_: `CCN_UTILITY_TYPES`, `ccnHolders`, `classifyCcn`, `describeHolder`, `inferUtilityType`
+- **`src/workspaces/site-planner/lib/chambersLayers.js`** — Chambers County, TX — the regional GIS layer rows (B2671240, 2026-11-12): the City of Mont Belvieu's zoning, water, sewer, storm and Master Drainage Plan, and the City of Baytown's zoning…
+  - _exports_: `BAYTOWN_AGOL`, `CHAMBERS_LAYERS`, `CHAMBERS_MERGE_GROUPS`, `CHAMBERS_VINTAGE`, `CMB_RELAY`, `diameterLabel`, `materialLabel`, `ownerLabel`
 - **`src/workspaces/site-planner/lib/channelSection.js`** — Cuts a ground cross-section across the channel from the existing 3DEP DEM grid (pixel-space bilinear sampling), plus the channel's flow bearing, longitudinal slope, the site mask, and the watershed-truncation guard. The missing fourth input to the screening-BFE engine; same terrain source as the berm-height sampler, indexed as a line rather than as points.
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cityLimitClass.js`** — What KIND of city limit a polygon is, kept as a named class and never collapsed to a boolean: full purpose · limited purpose · strip annexation · unknown, each carrying whether it governs fully and a plain-English gloss. Baytown's one layer mixes all three, and a limited-purpose area does not carry a city's ordinances the way full-purpose limits do. `declaredLimitClassing` is the registry contract — a city-limits source must declare its class field + value map OR declare `fullPurposeOnly`, and one that declares neither fails its own fixture rather than answering; `classifyCityLimit` never upgrades an unknown to full.
@@ -1450,13 +1590,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/clipBridge.js`** — the canvas clipboard's presence on the SYSTEM clipboard (NEW-1, B2382272).
   - _exports_: `CLIP_MARK`, `CLIP_VERSION`, `parseClip`, `resetBridge`, `serializeClip`, `systemWriteFailed`, `writeSystemClip`
 - **`src/workspaces/site-planner/lib/cloudGeometry.js`** — Revision-cloud markup geometry: `cloudScallopPath` turns a closed vertex ring + an arc radius into the scalloped SVG outline (arcs evenly distributed per edge, remainder absorbed rather than left as a stunted last arc), `edgeScallopCount`/`clampCloudArcFt` the supporting math, `simplifyPath` a Ramer–Douglas–Peucker reducer for a freehand-drawn outline, `cloudMetaDefaults` the Bluebeam-parity metadata (Subject/Comment/Author/Created/Modified/Status/Label/Layer) stamped on a new cloud.
-  - _exports_: `clampCloudArcFt`, `CLOUD_ARC_DEFAULT_FT`, `CLOUD_ARC_MAX_FT`, `CLOUD_ARC_MIN_FT`, `CLOUD_ARC_PRESETS`, `CLOUD_ARC_STEP_FT`, `CLOUD_STATUS_OPTIONS`, `cloudMetaDefaults`, `cloudScallopPath`, `edgeScallopCount`, `simplifyPath`
+  - _exports_: `clampCloudArcFt`, `CLOUD_ARC_DEFAULT_FT`, `CLOUD_ARC_MAX_FT`, `CLOUD_ARC_MIN_FT`, `CLOUD_ARC_MIN_PX`, `CLOUD_ARC_PRESETS`, `CLOUD_ARC_STEP_FT`, `CLOUD_ARC_TARGET_PX`, `CLOUD_STATUS_OPTIONS`, `cloudArcPx`, `cloudDefaultArcFt`, `cloudMetaDefaults`, `cloudScallopPath`, `edgeScallopCount`, `simplifyPath`
 - **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
 - **`src/workspaces/site-planner/lib/cloudRole.js`** — Dynamic-import-only cloud write that flips a site group's role (tracked/pursuit/etc.) atomically via the `set_site_group_role` RPC, with a per-row fallback.
   - _exports_: `cloudSetSiteRole`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
-  - _exports_: `_headerBase`, `_lastHeaderSig`, `_pulledHeader`, `_siteVersions`, `clearSiteVersions`, `cloudCheckDeleted`, `cloudDelete`, `cloudDeletedRows`, `cloudDeleteGroup`, `cloudElementRecency`, `cloudHardDelete`, `cloudList`, `cloudParcelRows`, `cloudPurgeManifest`, `cloudPurgeOnePlan`, `cloudRestore`, `cloudRowsPresent`, `cloudUpsert`, `fetchSiteForReconcile`, `hasAnyLiveSites`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `refreshHeaderFromCloud`, `siteRowFor`, `slimForCloud`
+  - _exports_: `_headerBase`, `_lastHeaderSig`, `_pulledHeader`, `_siteVersions`, `clearSiteVersions`, `cloudCheckDeleted`, `cloudDelete`, `cloudDeletedRows`, `cloudDeleteGroup`, `cloudElementRecency`, `cloudHardDelete`, `cloudList`, `cloudParcelRows`, `cloudPurgeManifest`, `cloudPurgeOnePlan`, `cloudRestore`, `cloudRowsPresent`, `cloudUpsert`, `fetchSiteForReconcile`, `hasAnyLiveSites`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `onSiteSynced`, `refreshHeaderFromCloud`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/coloradoLayers.js`** — Colorado due-diligence layers (B2528688, 2026-10-29) — the layers an industrial developer checks on day one of a Colorado land deal that Planyr did not have.
   - _exports_: `ADAMS_FILL`, `ADAMS_ZONE_COLORS`, `adamsAviationStyle`, `adamsFillLabel`, `adamsLandfillStyle`, `adamsZoneKind`, `adamsZoningStyle`, `APZ_COLORS`, `apzKind`, `AURORA_ZONE_COLORS`, `auroraApzStyle`, `auroraNoiseStyle`, `auroraZoningClass`, `auroraZoningStyle`, `AVIATION_COLORS`, `AVIATION_LABEL`, `COLORADO_LAYERS`, `COLORADO_VINTAGE`, `EAGLE_STATUS`, `eagleStyle`, `FACILITY_STATUS`, `facilityStatusLabel`, `facilityStyle`, `FLOWLINE_COLORS`, `FLOWLINE_OUT`, `flowlineIsOut`, `flowlineStyle`, `landfillStyle`, `LOCATION_STATUS`, `locationStatusLabel`, `locationStyle`, `nice`, `NOISE_COLORS`, `noiseBand`, `PRAIRIE_DOG`, `prairieDogStyle`, `rcraStyle`, `relayUrl`, `rowVacated`, `SUPERFUND_STATUS`, `superfundStatusLabel`, `SWIS_CLASSES`, `swisClassOf`, `swisStyle`, `tidy`, `WELD_TOWN_COLOR`, `WELD_ZONE_COLORS`, `weldInTown`, `weldOglaStyle`, `weldRowStyle`, `weldZoningStyle`, `WELL_CLASSES`, `WELL_STATUS`, `wellClassOf`, `wellStatusLabel`, `wellStyle`
 - **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
@@ -1484,13 +1624,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `CITY_SCOPE_COUNTIES`, `COUNTIES`, `COUNTIES_MAP`, `countyBboxIntersectsView`, `countyForView`, `countyIdentity`, `countyKeyForName`, `countyKeysForState`, `countyPolygonsReady`, `detectField`, `displayFloorForPoint`, `displayFloorForView`, `displayMinZoomForUrl`, `displayMinZoomOf`, `displaySourcesForView`, `ensureCountyGeometryAt`, `FEET_WKID`, `IDENTIFY_ONLY_LAYER_URLS`, `isIdentifyOnlyLayerUrl`, `isPointViaEnvelopeLayerUrl`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `LINE_NEIGHBOUR_DEG`, `lineNeighbourKeysForPoint`, `loadCountyPolygons`, `lotNumberFieldForUrl`, `noParcelSourceNote`, `POINT_ORDER_BY_LAYERS`, `POINT_VIA_ENVELOPE_LAYER_URLS`, `pointOrderByForUrl`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `silentServerPhrase`, `SNAPSHOT_COUNTIES`, `SNAPSHOT_LOT_NUMBER_FIELD`, `snapshotLotNumberField`, `sourceDisplayName`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideBackupScope`, `statewideCountyName`, `statewideExcludesCounty`, `statewideFallbackFor`, `statewideKeysForState`, `TAX_RATE_SOURCES`, `trimLayerUrl`
+  - _exports_: `candidateCountiesForPoint`, `CITY_SCOPE_COUNTIES`, `COUNTIES`, `COUNTIES_MAP`, `countyBboxIntersectsView`, `countyForView`, `countyIdentity`, `countyKeyForName`, `countyKeyForNameLoaded`, `countyKeysForState`, `countyPolygonsReady`, `detectField`, `displayFloorForPoint`, `displayFloorForView`, `displayMinZoomForUrl`, `displayMinZoomOf`, `displaySourcesForView`, `ensureCountyGeometryAt`, `ensureParcelStatesForKeys`, `ensureParcelStatesForView`, `FEET_WKID`, `IDENTIFY_ONLY_LAYER_URLS`, `isIdentifyOnlyLayerUrl`, `isLazyParcelState`, `isPointViaEnvelopeLayerUrl`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `LINE_NEIGHBOUR_DEG`, `lineNeighbourKeysForPoint`, `loadAllParcelStates`, `loadCountyPolygons`, `lotNumberFieldForUrl`, `noParcelSourceNote`, `onParcelTablesLoaded`, `parcelStateLoaded`, `parcelTablesVersion`, `POINT_ORDER_BY_LAYERS`, `POINT_VIA_ENVELOPE_LAYER_URLS`, `POINT_WHERE_LAYERS`, `pointOrderByForUrl`, `pointWhereForUrl`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `silentServerPhrase`, `SNAPSHOT_COUNTIES`, `SNAPSHOT_LOT_NUMBER_FIELD`, `snapshotLotNumberField`, `sourceDisplayName`, `STACK_RULE_LAYERS`, `stackRuleForCounty`, `stackRuleForUrl`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideBackupScope`, `statewideCountyName`, `statewideExcludesCounty`, `statewideFallbackFor`, `statewideKeysForState`, `TAX_RATE_SOURCES`, `trimLayerUrl`
 - **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
   - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
 - **`src/workspaces/site-planner/lib/countyLineLabels.js`** — COUNTY NAMES ALONG THE LINE, ON EACH SIDE (B2507065 / NEW-10, owner constraint #47).
   - _exports_: `countyLabelText`, `countyLineLabels`
 - **`src/workspaces/site-planner/lib/countyPolygons.js`** — B209502 point-in-polygon county resolution: decoder + ray-cast test over the committed `public/geo/county-polygons.json` asset, so a bounding box can narrow the candidates but never decide which county a point is in
-  - _exports_: `__resetCountyPolygons`, `countiesNearPoint`, `countyPolygonsReady`, `countyRoster`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
+  - _exports_: `__resetCountyPolygons`, `countiesNearPoint`, `countyPolygonsReady`, `countyPolygonsUrl`, `countyRoster`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
 - **`src/workspaces/site-planner/lib/countyPolygonsCore.js`** — B209502 the county resolver's working half (delta decode, ray-cast containment, edge distance), split off the boot path and dynamic-imported by `countyPolygons.js` so the Site route's largest chunk isn't charged for it
   - _exports_: `buildIndex`, `countiesNearIn`, `decodeRing`, `distToRings`, `NEAR_EDGE_DEG`, `pointInRing`, `resolveIn`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
@@ -1503,14 +1643,20 @@ _1284 source files mapped._
   - _exports_: `compositeCn`, `COVER_CN`, `excessRainfallSeries`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
 - **`src/workspaces/site-planner/lib/cutFillBalance.js`** — NEW-10 site cut-vs-fill balance with a configurable shrink factor, plus the borrow-driven-vs-hydraulic classification of a detention storage surplus (and the fill import a naive right-sizing would create)
   - _exports_: `assessCutFill`, `BALANCE_EXPLAINS_TOL`, `classifyStorageSurplus`, `cutFillBalance`, `DEFAULT_SHRINK_FACTOR`, `padFillDemandCf`
+- **`src/workspaces/site-planner/lib/davidsonParcel.js`** — Davidson County, TN (Metro Nashville) — the parcel card's extra rows (NEW-2, 2026-11-12).
+  - _exports_: `ASSESSOR_PORTAL`, `assessorZoningText`, `councilText`, `davidsonRows`, `isDavidsonRecord`, `isOutOfCountyPlaceholder`, `METRO_POINT_WHERE`, `OUT_OF_COUNTY_FEATURETYPES`, `taxDistrictText`
 - **`src/workspaces/site-planner/lib/decideBar.js`** — THE DECIDE BAR'S PURE DECISIONS. The map toolbar stopped asking "what are you making?" before the user had pointed at any ground.
   - _exports_: `decideTargetOf`, `escapeClearsDecideBar`, `orderVerbs`, `verbLabel`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
+- **`src/workspaces/site-planner/lib/deedCourses.js`** — Metes-and-bounds COURSES — pure helpers behind the deed Properties panel (NEW-1, 2026-11-24).
+  - _exports_: `bearingText`, `COURSE_LABEL_SIZE_DEFAULT`, `COURSE_PLACES`, `courseEditable`, `courseLabelLayout`, `courseLabelPlaceOf`, `courseLabelText`, `courseParts`, `deedClosureFacts`, `drawnOffsetDeg`, `fmtCourseDist`, `nameAnchor`, `nameAtOf`, `nameShown`, `parseBearing`, `retrace`, `retraceWithEdit`
 - **`src/workspaces/site-planner/lib/deedGap.js`** — Deed misclosure — draw a metes-and-bounds description EXACTLY as written, and show the gap.
   - _exports_: `DEED_GAP_NOISE_FT`, `deedClosure`, `deedGapText`, `deedMissPhrase`, `deedPlotWarning`, `deedQueueClosure`, `deedReaderSummary`, `deedTrace`
 - **`src/workspaces/site-planner/lib/deedLazy.js`** — The ONE on-demand entry point to the deed workflow's code (cached dynamic import of deedParse + deedAlign, plus a synchronous accessor for the title reader's live preview); nothing on the boot path may static-import either
   - _exports_: `_resetDeed`, `deedNow`, `loadDeed`
+- **`src/workspaces/site-planner/lib/deedOverlay.js`** — Turn a plotted deed (metes and bounds, kind "encumbrance") into a picture that rides the ordinary OVERLAYS list, so it can be hidden, dimmed, locked, reordered and cropped like any other…
+  - _exports_: `DEED_OVERLAY_MAX_PX`, `DEED_OVERLAY_PAD_PX`, `deedOverlayPlan`, `deedOverlayRecord`, `drawDeedOverlay`, `restoredDeedMarkups`
 - **`src/workspaces/site-planner/lib/deedParse.js`** — Deed / metes-and-bounds parser (split out of metesAndBounds.js so it could be deferred): bearing+distance calls, curve courses, SAVE-AND-EXCEPT tracts, dead-reckoned path, closure and misclosure
   - _exports_: `arcChordPoints`, `callsToPath`, `misclosure`, `parseCalls`, `parseTracts`, `pathCloses`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/deletePlan.js`** — The ONE pure decision behind every planner delete entry point: resolves what a delete targets (union of `multi` and `sel`, any count, each ref checked against the live model), expands a building to its bonded assembly, and returns a reason + owner-facing message whenever nothing is removed — so a delete can never fail in silence.
@@ -1524,15 +1670,15 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/desotoProviders.js`** — DeSoto County MS — WHO SERVES THIS SITE, by provider name (B2507057).
   - _exports_: `_setProviders`, `ensureProviders`, `PROVIDER_LAYERS`, `providerCardAt`, `providerName`, `providerRows`, `providersFrom`, `providersReady`, `providerUrl`
 - **`src/workspaces/site-planner/lib/desotoZoning.js`** — DeSoto County MS zoning (B2507058) — the pure half: how a zoning polygon is classed, painted, worded and linked.
-  - _exports_: `approvalDate`, `ordinanceRef`, `ZONE_CLASS_LABEL`, `ZONE_COLORS`, `zoneClass`, `zoneLabelText`, `zoningRows`, `zoningStyle`, `zoningTitle`
+  - _exports_: `approvalDate`, `ordinanceRef`, `ZONE_COLORS`, `zoneClass`, `zoneLabelText`, `zoningRows`, `zoningStyle`, `zoningTitle`
 - **`src/workspaces/site-planner/lib/desotoZoningNames.js`** — DeSoto County MS zoning — THE DISTRICT NAME behind a zone code (B2507063 / NEW-8, owner constraint #46).
   - _exports_: `displayCode`, `zoneName`, `zoneWithName`, `ZONING_CITATIONS`, `ZONING_NAMES`, `zoningLegend`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
-  - _exports_: `bkddMaintBermWidthFt`, `coincidentStormPolicy`, `CRITERIA_JUR_KEYS`, `criteriaAuthorityShort`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `pumpAllowance`, `requiredStormsFor`, `saveCriteriaOverrides`
+  - _exports_: `bkddMaintBermWidthFt`, `coincidentStormPolicy`, `CRITERIA_JUR_KEYS`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `pumpAllowance`, `requiredStormsFor`, `saveCriteriaOverrides`
 - **`src/workspaces/site-planner/lib/detentionMethod.js`** — Rational-vs-NRCS method-by-area guardrail (B904): picks the runoff method by tributary area against a criteria-configurable ceiling (default 200 ac) and flags when NRCS is indicated but the routing pass still rides the Rational proxy.
   - _exports_: `DEFAULT_RATIONAL_METHOD_MAX_ACRES`, `selectDetentionMethod`
 - **`src/workspaces/site-planner/lib/detentionRules.js`** — Houston-MSA detention criteria as versioned rule-records + drainage-authority resolver, analysis-tier / hydraulic-regime assessors, and pond auto-size solvers; no volume ships without its rule record
-  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `designStorm24hrDepthIn`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
+  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `CITY_NOTES`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `designStorm24hrDepthIn`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
 - **`src/workspaces/site-planner/lib/deviceShape.js`** — pointer-aware "is this device phone-shaped" test (B1447443).
   - _exports_: `isPhoneShape`
 - **`src/workspaces/site-planner/lib/diagArm.js`** — arms the planner's READ-ONLY resolution diagnostics on a live tab: the gate is read at CALL time (never at mount, which is what made the hooks unreachable in production) from `window.__PLANYR_E2E`, a session key, or `?planyrDiag=1`, which latches so an in-app plan switch keeps it
@@ -1553,6 +1699,8 @@ _1284 source files mapped._
   - _exports_: `resolveDraftStepBack`
 - **`src/workspaces/site-planner/lib/dragGate.js`** — The click-vs-drag gate: a press writes nothing until the pointer travels past the shared slop (TRAVEL only, never duration), and the point is rebased on arming so a real drag starts without a jump (opt-out for point drags).
   - _exports_: `DRAG_SLOP_PX`, `dragArmed`, `dragTravelPx`, `gatedPoint`, `makeDragGate`, `stepDragGate`
+- **`src/workspaces/site-planner/lib/drainageSignature.js`** — The drainage check's INVALIDATION SIGNATURE — pure (audit batch G2 step 4, B2671311; moved verbatim out of SitePlanner.jsx).
+  - _exports_: `drainCentroidOf`, `drainElsSignature`, `drainSignature`
 - **`src/workspaces/site-planner/lib/drainageTiming.js`** — NEW-4 per-leg timings for the flood/drainage check (elevation, each county WSE raster, each FEMA pull, the app's own calc, the cloud save), built from a leg-name ALLOWLIST and reported through the production telemetry sink with its delivery outcome kept (no silent sink)
   - _exports_: `__resetDrainageTiming`, `armDrainageSaveLeg`, `buildDrainageTimingRow`, `createDrainageTimer`, `DRAIN_LEG_KEYS`, `drainageTimingDelivery`, `drainageTimingRecent`, `MAX_LEGS`, `noteDrainageSave`, `reportDrainageTiming`, `SAVE_ATTRIBUTION_MS`, `WSE_LEG_PREFIX`, `wseLegName`
 - **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
@@ -1561,8 +1709,10 @@ _1284 source files mapped._
   - _exports_: `allowableReleaseCfs`, `assessDrawdown`, `DEFAULT_DRAWDOWN_MAX_HR`, `drawdownHours`, `drawdownTone`, `fmtDrawdown`
 - **`src/workspaces/site-planner/lib/driveFollow.js`** — lib/driveFollow.js — A DRIVE FOLLOWS THE PARKING FIELD (OR TRUCK COURT) IT IS CONNECTED TO ON A SMALL MOVE, AND LETS GO ON A BIG ONE (B2498961).
   - _exports_: `DRIVE_FOLLOW_HAIRPIN_DEG`, `DRIVE_FOLLOW_MAX_FT`, `followDrives`
+- **`src/workspaces/site-planner/lib/driveGrade.js`** — lib/driveGrade.js (NEW-1, 2026-11-11, owner-only grading layer, constraint #25) — A DRIVE TIES INTO THE ROAD'S GRADE AT THE PROPERTY LINE.
+  - _exports_: `clipRingToRings`, `DRIVE_SERVE_REACH_FT`, `DRIVE_SNAP_FT`, `DRIVE_TARGET_REACH_FT`, `driveDiagnose`, `driveFenceFor`, `driveLabelPoints`, `driveProfile`, `driveRingOnSite`, `driveTieOf`, `driveZAt`, `driveZNear`, `GRADING_DRIVE_DEFAULTS`, `propertyLineRings`, `roadLimitRings`
 - **`src/workspaces/site-planner/lib/driveInRamp.js`** — Drive-in ramp on a dock wall (NEW-1, owner 2026-10-30: "add drive-in ramps as a feature to these [buildings], not necessarily part of the grading … maybe just add another little plus button…
-  - _exports_: `displacedDoors`, `DOCK_HEIGHT_IN_DEFAULT`, `dockHeightInOf`, `DOOR_SIZES`, `DOOR_TOUCH_FT`, `doorsAfterRamps`, `doorSizeOf`, `fitAlongTheWall`, `gradeText`, `isRampSide`, `MARKER_DEPTH_FT`, `moduleStops`, `newRampRecord`, `RAMP_DEFAULTS`, `RAMP_FLAG`, `RAMP_LAYOUTS`, `RAMP_MAX_GRADE_PCT`, `RAMP_MAX_WIDTH_FT`, `RAMP_MIN_GRADE_PCT`, `RAMP_MIN_WIDTH_FT`, `rampBeltSpans`, `rampBox`, `rampDir`, `rampFlags`, `rampGeometry`, `rampGradePct`, `rampLabel`, `rampLayout`, `rampLengthFt`, `rampParts`, `rampPlane`, `rampRing`, `rampRiseFt`, `rampSpan`, `rampWidthFt`, `rampZAt`, `refitRamps`, `ringsOverlapInset`, `snapToModule`, `wallFrame`
+  - _exports_: `displacedDoors`, `DOCK_HEIGHT_IN_DEFAULT`, `dockHeightInOf`, `DOOR_SIZES`, `DOOR_TOUCH_FT`, `doorsAfterRamps`, `doorSizeOf`, `fitAlongTheWall`, `gradeText`, `isRampSide`, `MARKER_DEPTH_FT`, `moduleStops`, `newRampRecord`, `pickRampSpot`, `RAMP_DEFAULTS`, `RAMP_FLAG`, `RAMP_LAYOUTS`, `RAMP_MAX_GRADE_PCT`, `RAMP_MAX_WIDTH_FT`, `RAMP_MIN_GRADE_PCT`, `RAMP_OVERLAP_FT`, `rampBeltSpans`, `rampBox`, `rampDir`, `rampFitRange`, `rampFlags`, `rampGeometry`, `rampGradePct`, `rampLabel`, `rampLayout`, `rampLengthFt`, `rampParts`, `rampPlane`, `rampRing`, `rampRiseFt`, `rampSpan`, `rampWidthFt`, `rampZAt`, `refitRamps`, `reseatRamps`, `ringsOverlapInset`, `snapToModule`, `wallFrame`, `wallLengthOf`
 - **`src/workspaces/site-planner/lib/driveTarget.js`** — lib/driveTarget.js — the LEAF half of road → parking/paving drive junctions: "can a road connect to this?" and "is this road END touching that target?".
   - _exports_: `bestHitAgainst`, `DRIVE_TEE_SNAP_FT`, `drivePaveTargets`, `driveTargetKindOf`, `targetEdges`
 - **`src/workspaces/site-planner/lib/dxf/dxfGeom.js`** — B747 pure DXF geometry primitives (bulge/arc/ellipse flattening, INSERT affine composition, $INSUNITS→feet); no imports, worker-safe, unit-tested.
@@ -1598,13 +1748,15 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/elementJournal.js`** — persisted pending-edit journal (NEW-F4): quota-safe per-site localStorage of un-committed element ops (+ baseRev) so a reload after a failed commit re-folds instead of reverting
   - _exports_: `clearJournal`, `journalSessionId`, `ORPHAN_ADOPT_MS`, `readJournal`, `sweepJournals`, `writeJournal`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
-  - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `foldJournal`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `reconcileSeedRows`, `rowsToModel`, `Z_GAP`
+  - _exports_: `byRowOrder`, `explodeModel`, `FIELD_TO_KIND`, `foldJournal`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `reconcileSeedRows`, `rowsToModel`, `Z_GAP`
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
   - _exports_: `createElementSync`, `isOwnWrite`, `nextOpForStatus`, `RETRYABLE_UNCHANGED`, `semanticallyEqual`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
   - _exports_: `DEFAULT_INTERPOLATION`, `DEP_SERVICE_LABEL`, `DEP_URL`, `ditchStats`, `M_TO_FT`, `profileQuery`, `samplePoint`, `sampleProfile`
 - **`src/workspaces/site-planner/lib/elsProof.js`** — "this exact stored plan text, under this exact build, needs no bonded-element repair" remembered across page loads (B2236000, round 6).
   - _exports_: `_resetElsProofForTest`, `ELS_PROOF_KEY`, `elsProven`, `recordElsProof`, `textHash`
+- **`src/workspaces/site-planner/lib/elsSeam.js`** — AUDIT BATCH G2 — THE ONE SEAM every element write goes through (named, so it has a home and a unit test).
+  - _exports_: `seamElements`
 - **`src/workspaces/site-planner/lib/emailLinkClient.js`** — the browser half of "Planyr emails you a link": ask the route to send one, and later turn the link's token into a session.
   - _exports_: `recallLinkEmail`, `recordMailboxProof`, `rememberLinkEmail`, `requestEmailLink`, `verifyAuthLink`
 - **`src/workspaces/site-planner/lib/emailLinkCopy.js`** — every sentence the "email me a link" flow shows, and the cooldown arithmetic, as pure functions.
@@ -1616,7 +1768,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/etjNames.js`** — ONE reader for "which cities does this ETJ feature name?". Leaf, pure, no imports.
   - _exports_: `etjNamesOf`
 - **`src/workspaces/site-planner/lib/etjNet.js`** — B2472945. The DRAWN ETJ layer, netted against city limits: the same rule the header applies (B2472944), applied to the same two layers, so the map never shades an ETJ over ground a city's…
-  - _exports_: `cityPolysFromGeoJson`, `netEtjFeatures`
+  - _exports_: `cityPolysFromGeoJson`, `cutEtjBy`, `netEtjFeatures`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
   - _exports_: `bedrockLayer`, `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
 - **`src/workspaces/site-planner/lib/exportLabelScale.js`** — The scale the LABEL tier reasons at on an export pass: the sheet's own px-per-foot (framed extent vs plan box), so declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper, never of the live zoom.
@@ -1644,19 +1796,25 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `evalSteps`, `ffeDualDisplay`, `solveBalanceFfe`, `solveBalanceFfeSteps`
 - **`src/workspaces/site-planner/lib/ffeSuggest.js`** — FFE suggestion (owner-only grading layer, round 2) — the finished-floor elevation is always SUGGESTED, never asked for.
-  - _exports_: `balanceClause`, `composeBasis`, `courtReport`, `cutFillCentroids`, `depthClause`, `DOCK_UPHILL_MIN_FT`, `dockClause`, `floorClause`, `fmtCyShort`, `fourWay`, `netWord`, `OPPOSITE`, `padDepths`, `padSpotWord`, `ROCK_CLEARANCE_FT`, `ROCK_SCAN_CHUNK`, `rockClause`, `rockDepthLookup`, `rockViolation`, `rockViolationSteps`, `SOFT_DEPTH_FT`, `suggestFfe`
+  - _exports_: `balanceClause`, `composeBasis`, `courtReport`, `cutFillCentroids`, `depthClause`, `DOCK_UPHILL_MIN_FT`, `dockClause`, `floorClause`, `fmtCyShort`, `fourWay`, `netWord`, `OPPOSITE`, `padDepths`, `padSpotWord`, `ROCK_CLEARANCE_FT`, `ROCK_SCAN_CHUNK`, `rockClause`, `rockDepthLookup`, `rockViolation`, `rockViolationSteps`, `suggestFfe`
+- **`src/workspaces/site-planner/lib/fitBuilding.js`** — Fit the biggest building (NEW-1, owner-only grading layer) — the INVERSE of the forward grading problem: given the parcel, the limits of disturbance and the grading rules, how big a…
+  - _exports_: `candidateGeometry`, `contourAxisDeg`, `depthLadder`, `deriveGrid`, `estimateEarthwork`, `FIT_DEFAULTS`, `fitBaseAngles`, `fitBuildingSteps`, `longAxisDeg`, `prepareFit`, `rotatedGrid`, `roundSf`, `runFitSync`
+- **`src/workspaces/site-planner/lib/fitTemplate.js`** — Fit the biggest building — the TEMPLATE side (NEW-1, owner-only grading layer).
+  - _exports_: `cornersOf`, `defaultTemplate`, `fitAssemblyEls`, `frontageDegOf`, `lengthAxisDeg`, `lengthDepthOf`, `syntheticAssemblyEls`, `templateFromBuilding`
 - **`src/workspaces/site-planner/lib/flatLabel.js`** — a map LABEL must not be its own compositor layer (NEW-1, 2026-10-30, owner: "panning is jumpy with the water and sewer layers on").
   - _exports_: `flattenTooltip`, `flatTransform`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
   - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
 - **`src/workspaces/site-planner/lib/floodArchiveSource.js`** — adaptive PMTiles byte source: ranged reads where the host honours Range, whole-file-once where it does not (Cloudflare Pages does not)
   - _exports_: `FloodArchiveSource`
+- **`src/workspaces/site-planner/lib/floodFootprintMemo.js`** — @planner-extract — AUDIT BATCH G1: the flood-footprint memo helpers (mitigationForFootprint, pondFloodFacts), moved verbatim out of SitePlanner.jsx.
+  - _exports_: `FM_FILL_TYPES`, `mitigationForFootprint`, `pondFloodFacts`, `ringHash`
 - **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
-  - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
+  - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
 - **`src/workspaces/site-planner/lib/floodManifest.js`** — one cached fetch of `public/flood/manifest.json`, so the panel can state which edition of the NFHL the baked tiles are
   - _exports_: `loadFloodManifest`, `resetFloodManifest`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `LIMITED_PURPOSE_SCOPE`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `patchFloodplainRule`, `ruleSignature`, `saveFloodplainRules`, `subscribeFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/floodTileDecode.js`** — the Leaflet-free half of the flood tile layer — MVT decode, even-odd point-in-rings hit test, and the canvas paint
@@ -1675,6 +1833,8 @@ _1284 source files mapped._
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/footprintEdit.js`** — Building footprint reshape (NEW-1/B872): rect→polygon promotion + dock-frame preservation — pins loaded walls as fixed lines, projects/clips vertex drags, recomputes the dock-frame bbox, and repoints doors/grid to the true wall (pure geometry)
   - _exports_: `clipSegmentToRing`, `convertBuildingToPolygon`, `distToLine`, `dockEdgeLine`, `dockLineAt`, `dockLinesFor`, `dockSegExtent`, `frameBBox`, `pointInRing`, `projectOntoLine`, `rectRing`, `rotateDockLines`, `translateDockLines`
+- **`src/workspaces/site-planner/lib/fortBendLayers.js`** — Fort Bend County (TX) — the county's own GIS layer rows (NEW-1, 2026-11-12).
+  - _exports_: `agreementCard`, `floodplainCard`, `FORTBEND_COLORS`, `FORTBEND_LAYERS`, `FORTBEND_MERGE_GROUPS`, `FORTBEND_VINTAGE`, `inundationCard`, `leveeCard`, `lidCard`, `mmdCard`, `monthYear`, `mtpProposedCard`, `soft`, `STUDY_STATUS`, `tirzCard`
 - **`src/workspaces/site-planner/lib/gaMrpaReach.js`** — GENERATED by scripts/build-ga-mrpa-reach.mjs on 2026-10-30 — do not hand-edit.
   - _exports_: `GA_MRPA_REACH`, `GA_MRPA_REACH_BBOX`, `GA_MRPA_REACH_SCALE`
 - **`src/workspaces/site-planner/lib/gaParcels.js`** — GEORGIA county parcel sources added after the three 2026-09 passes (those 60 rows stay hand-written in counties.js).
@@ -1684,11 +1844,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/gaTidalReaches.js`** — GENERATED by scripts/build-ga-tidal-reaches.mjs on 2026-10-30 — do not hand-edit.
   - _exports_: `GA_TIDAL_CELL_DEG`, `GA_TIDAL_CELLS`
 - **`src/workspaces/site-planner/lib/geocode.js`** — Shared address geocoder (Esri World primary, Nominatim fallback) with honest hit/not-found/service-down return contract, used by map and planner
-  - _exports_: `geocodeAddress`, `reverseGeocodeLatLon`
+  - _exports_: `* (../../../shared/geocode.js)`
 - **`src/workspaces/site-planner/lib/georgiaJurisdiction.js`** — Georgia jurisdiction facts — the pure, network-free half (NEW-1, the Colorado `countyCo` precedent).
-  - _exports_: `GA_CONSOLIDATED`, `GA_CONSOLIDATED_NOTE`, `GA_COUNTY_GOVERNS_NOTE`, `GA_DETENTION_DETAIL`, `GA_DETENTION_HEADLINE`, `GA_ENVELOPE`, `GA_ENVELOPE_BOX`, `GA_JURISDICTION_SOURCE_NAME`, `georgiaConsolidatedFor`, `inGeorgiaEnvelope`, `jurisdictionSourceName`, `TX_JURISDICTION_SOURCE_NAME`
+  - _exports_: `GA_CONSOLIDATED`, `GA_CONSOLIDATED_NOTE`, `GA_COUNTY_GOVERNS_NOTE`, `GA_DETENTION_DETAIL`, `GA_DETENTION_HEADLINE`, `GA_ENVELOPE`, `GA_ENVELOPE_BOX`, `GA_JURISDICTION_SOURCE_NAME`, `georgiaConsolidatedFor`, `jurisdictionSourceName`, `TX_JURISDICTION_SOURCE_NAME`
 - **`src/workspaces/site-planner/lib/georgiaLayers.js`** — Georgia — the due-diligence layers a Georgia industrial land deal checks on day one (NEW-1, 2026-10-29).
-  - _exports_: `BARTOW_CLASS_LABEL`, `BARTOW_COLORS`, `bartowStyle`, `bartowZoneClass`, `CAUSE_WORDS`, `causeWords`, `CONSERVATION_COLORS`, `conservationKind`, `conservationStyle`, `DAM_CLASS`, `FEDERAL_STATUS`, `GEORGIA_LAYERS`, `GEORGIA_MERGE_GROUPS`, `GEORGIA_VINTAGE`, `IMPAIRED_CATEGORY`, `impairedCategories`, `JTC_COLORS`, `jtcStyle`, `known`, `relayUrl`, `ROAD_OWNER_COLORS`, `ROAD_OWNER_WORDS`, `roadOwnerGroup`, `roadOwnerStyle`, `sentence`, `solidWasteType`, `SPALDING_CLASS_LABEL`, `SPALDING_COLORS`, `spaldingCode`, `spaldingStyle`, `spaldingZoneClass`, `STATE_STATUS`, `SUSCEPTIBILITY_COLORS`, `SUSCEPTIBILITY_LABEL`, `susceptibilityClass`, `susceptibilityStyle`, `washStyle`
+  - _exports_: `ALLATOONA_CLASS_LABEL`, `ALLATOONA_COLORS`, `ALLATOONA_FLOWAGE`, `ALLATOONA_RULE`, `allatoonaClass`, `allatoonaStyle`, `BARTOW_CLASS_LABEL`, `BARTOW_COLORS`, `BARTOW_MAX_LABELS`, `BARTOW_UTILITY_SCOPE`, `BARTOW_WATER_COLORS`, `bartowPipeLabel`, `bartowSewerStyle`, `bartowStyle`, `bartowWaterStyle`, `bartowZoneClass`, `CAUSE_WORDS`, `causeWords`, `CONSERVATION_COLORS`, `conservationKind`, `conservationStyle`, `DAM_CLASS`, `FEDERAL_STATUS`, `GEORGIA_LAYERS`, `GEORGIA_MERGE_GROUPS`, `GEORGIA_VINTAGE`, `IMPAIRED_CATEGORY`, `impairedCategories`, `isForceMain`, `JTC_COLORS`, `jtcStyle`, `known`, `PIPE_MATERIAL_WORDS`, `relayUrl`, `ROAD_OWNER_COLORS`, `ROAD_OWNER_WORDS`, `roadOwnerGroup`, `roadOwnerStyle`, `sentence`, `solidWasteType`, `SPALDING_CLASS_LABEL`, `SPALDING_COLORS`, `spaldingCode`, `spaldingStyle`, `spaldingZoneClass`, `STATE_STATUS`, `SUSCEPTIBILITY_COLORS`, `SUSCEPTIBILITY_LABEL`, `susceptibilityClass`, `susceptibilityStyle`, `washStyle`
+- **`src/workspaces/site-planner/lib/georgiaMillage.js`** — A Georgia county lot's taxing-unit table from a county tax-district CODE (NEW-1, Bartow).
+  - _exports_: `districtCodeOf`, `districtGap`, `isPilotLot`, `millageTableFor`, `pendingDistricts`
 - **`src/workspaces/site-planner/lib/georgiaRiverExclusions.js`** — Georgia protected rivers — WHERE THE 100-FT RULE DOES NOT APPLY (NEW-1 review of B2535200, 2026-10-30).
   - _exports_: `inMrpaReach`, `inMrpaReachBox`, `inRingIndex`, `inTidalReach`, `makeRingIndex`, `MRPA_EDGE_DEG`, `MRPA_REACH_BOX`, `nearRingIndexes`, `riverExclusionAt`
 - **`src/workspaces/site-planner/lib/georgiaScreens.js`** — Georgia screening cards — the PURE interpretation half (Georgia screening, Part B).
@@ -1702,7 +1864,21 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/gisCache.js`** — Browser-local stale-while-revalidate cache for GIS responses: synchronous L1 memo over a byte-capped, oldest-evicted IndexedDB tier (moved off localStorage so cache can't crowd out saved plans), age-aware, injectable disk/clock
   - _exports_: `createGisCache`, `formatAge`, `gisCache`, `IDB_INDEX_KEY`, `IDB_NS`, `isStale`, `NS`, `purgeLegacyLocalStorage`
 - **`src/workspaces/site-planner/lib/gisFetch.js`** — Resilient ArcGIS fetch substrate: honest error taxonomy, timeout plus jittered-backoff retry, auto GET-to-POST for long geometry, pLimit concurrency pool
-  - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
+  - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `fetchWithRetry`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
+- **`src/workspaces/site-planner/lib/grading3d/buildModel.js`** — The 3D viewer's MODEL BUILD (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `buildModelSteps`
+- **`src/workspaces/site-planner/lib/grading3d/colors.js`** — The 3D cut-and-fill viewer's palette (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `CUT_RGB`, `EARTH_DEEP_RGB`, `EARTH_TOP_RGB`, `earthRgb`, `FILL_RGB`, `FULL_DEPTH_FT`, `GHOST_BRIGHT_RGB`, `GHOST_DIM_RGB`, `ghostRgb`, `groundRgb`, `HANDLE_HEX`, `MIN_TINT`, `NEUTRAL_RGB`, `NORTH_HEX`, `OUTLINE_RGB`, `STRATA_RGB`, `toUnit`, `VOID_HEX`
+- **`src/workspaces/site-planner/lib/grading3d/compass.js`** — The 3D viewer's CARDINAL DIRECTIONS (owner-only grading layer; B2671226, NEW-1 2026-11-11, amends B2671220).
+  - _exports_: `cardinalHeadings`, `headingToOffset`, `MARKER_SIZE_K`, `markerFramingFactor`, `northHeadingDeg`, `northMarkerSpec`
+- **`src/workspaces/site-planner/lib/grading3d/field.js`** — The 3D viewer's HEIGHTFIELD (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `boundsOfRings`, `cellFor`, `exactSampler`, `FIELD_DEFAULTS`, `fieldAt`, `insideMask`, `pointInRegions`, `regionRings`, `sampleFieldSteps`
+- **`src/workspaces/site-planner/lib/grading3d/meshBuild.js`** — The 3D viewer's MESH BUILDERS (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `BASE_PAD_MIN_FT`, `BASE_PAD_RELIEF`, `baseElevation`, `buildGhost`, `buildingFootprints`, `buildOutlineRibbons`, `buildSlice`, `buildTopSurface`, `buildWalls`, `defaultSliceLine`, `densifyRing`, `GHOST_SPACING_FT`, `lineFrom`, `lineIntervals`, `nodeNormals`, `OUTLINE_DASH_FT`, `shiftLine`, `SLICE_DASH_FT`, `SLICE_STRATA_FT`, `slideRange`, `strataStep`, `topSurfaceSteps`, `triangulate`, `wallsSteps`
+- **`src/workspaces/site-planner/lib/grading3d/orbit.js`** — The 3D viewer's CAMERA (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `boundsOf`, `cameraPosition`, `clampState`, `DEFAULT_AZ`, `EL_MAX`, `EL_MIN`, `FOV_DEG`, `frame`, `orbitBy`, `panBy`, `zoomBy`
+- **`src/workspaces/site-planner/lib/grading3d/threeScene.js`** — The 3D viewer's SCENE (owner-only grading layer; NEW-1, 2026-11-11).
+  - _exports_: `createViewerScene`, `liveStats`
 - **`src/workspaces/site-planner/lib/gradingBase.js`** — Grading layer — the small ALWAYS-LOADED glue (owner-only; see gradingGate.js).
   - _exports_: `demSampler`, `GRADING_DEFAULTS`, `gradingCfg`, `gradingPack`, `gradingSetback`, `hostIdMap`, `parcelsSig`, `SLOPE_RATIOS`, `useGradingBase`, `useGradingDem`
 - **`src/workspaces/site-planner/lib/gradingDock.js`** — The owner-only Grading item in the left dock (NEW-1, amends B2315856: grading left the Site Analysis panel).
@@ -1716,7 +1892,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/gradingPaint.js`** — Grading layers — painting (owner-only; loaded on demand). PURE: every picture is a RGBA pixel buffer on the engine's own lattice (one pixel per lattice cell) plus a vector outline traced…
   - _exports_: `BAND_CORE_FT`, `BAND_SNAP`, `BAND_TINT`, `bandField`, `bandRingsToFeet`, `cellPaint`, `cellsLattice`, `cellsOutlinePath`, `cellsPixels`, `CONTOUR_DRAW`, `CONTOUR_LABEL_PX`, `CONTOUR_PROPOSED_INDEX_RGB`, `CONTOUR_PROPOSED_RGB`, `contourLinesToFeet`, `contourMultiple`, `CUT_RGB`, `EDGE_EPS_FT`, `FILL_RGB`, `GRADING_PAPER_OPACITY`, `GRADING_PAPER_RGB`, `HATCH_ALPHA`, `HATCH_BAND_FT`, `HATCH_SS`, `hexToRgb`, `LIMIT_LINE_DASH`, `maskDistance`, `maskHatchPixels`, `maskOutlinePath`, `maskTightBox`, `maskVisualCentre`, `OUT_RGB`, `pixelsToDataUrl`, `placeContourLabels`, `planContourDraw`, `ringsPathD`, `ringsToLatticePx`, `slopeOnly`, `surfaceValuesLattice`, `traceEdges`, `VOID_RGB`
 - **`src/workspaces/site-planner/lib/gradingPanelModel.js`** — The Grading panel's view model — what the panel shows, as data, so it is testable without a DOM (NEW-1).
-  - _exports_: `BALANCE_TOL_CY_PANEL`, `cutTile`, `depthFlags`, `depthSentence`, `EMPTY_LINE`, `ffePillText`, `fillTile`, `FLOOR_NAMES`, `FLOOR_SAME_FT`, `floorRows`, `floorStatsOf`, `gradingPanelView`, `gridDepthStats`, `groundNumbers`, `HAUL_SPAN_FT`, `HAUL_STEP_FT`, `haulCurve`, `haulTile`, `haulWords`, `haulZeroFloor`, `interpolateHaul`, `LIMIT_INSIDE_MAX_FT`, `LIMIT_PAST_MAX_FT`, `limitBasisPhrase`, `limitCrossPlace`, `limitFlagSentence`, `limitOffsetFt`, `limitOffsetWord`, `LOADING_LINE`, `marginFromOffset`, `placePhrase`, `rockFlag`, `seamFlags`, `shortestSlopesFloor`, `sweepFloors`, `sweepFloorStats`
+  - _exports_: `BALANCE_TOL_CY_PANEL`, `cutTile`, `depthFlags`, `depthSentence`, `driveFlags`, `EMPTY_LINE`, `ffePillText`, `fillTile`, `FLOOR_NAMES`, `FLOOR_SAME_FT`, `floorRows`, `floorStatsOf`, `gradingPanelView`, `gridDepthStats`, `groundNumbers`, `HAUL_SPAN_FT`, `HAUL_STEP_FT`, `haulCurve`, `haulTile`, `haulWords`, `haulZeroFloor`, `interpolateHaul`, `LIMIT_INSIDE_MAX_FT`, `LIMIT_PAST_MAX_FT`, `limitBasisPhrase`, `limitCrossPlace`, `limitFlagSentence`, `limitOffsetFt`, `limitOffsetWord`, `LOADING_LINE`, `marginFromOffset`, `placePhrase`, `rockFlag`, `seamFlags`, `shortestSlopesFloor`, `sweepFloors`, `sweepFloorStats`
 - **`src/workspaces/site-planner/lib/gradingPicture.js`** — Grading picture — ROUND 9 (B2500224 ×2): ONE LIMIT, READ BY EVERY LAYER OF THE PICTURE.
   - _exports_: `existingClipFeet`, `limitRingsOf`, `limitSigOf`, `publishedBand`, `publishedContours`, `tracedOnLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
@@ -1745,8 +1921,12 @@ _1284 source files mapped._
   - _exports_: `skipWhileHidden`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
+- **`src/workspaces/site-planner/lib/historyCarry.js`** — Undo history that SURVIVES LEAVING A PLAN (NEW-1, 2026-11-13 — owner: "Do I lose the ability to do the control Z whenever I get out of the page?
+  - _exports_: `CARRY_LIMITS`, `carryKeyOf`, `clearMemory`, `decodeCarry`, `encodeCarry`, `graftOverlaySrc`, `hashString`, `loadDisk`, `memoryPlanCount`, `persistDisk`, `stashMemory`, `takeMemory`
 - **`src/workspaces/site-planner/lib/historyLabel.js`** — Names an undo/redo step by diffing the whole-canvas snapshots either side of it (added/removed/changed per collection, Moved/Resized/Rotated for a single changed element) instead of trusting a hand-typed label at each of ~190 `pushHistory()` call sites; feeds the history dropdown's per-row labels and its "Undo N Actions" footer.
   - _exports_: `describeHistoryStep`, `describeHistorySteps`, `historyRunLabel`
+- **`src/workspaces/site-planner/lib/houstonMetroLayers.js`** — Houston-metro sweep layers (NEW-1 / NEW-2 / NEW-3, 2026-11-12) — three map layers the weekly "where people are working" sweep found missing around Houston: · harris_mtfp — the City of…
+  - _exports_: `AIRPORT_ORDINANCE`, `AIRPORT_ORDINANCE_URL`, `AIRPORTS`, `decodePlanCode`, `EVAC_ZONE_COLORS`, `evacCard`, `evacLegend`, `evacStyle`, `evacZoneKey`, `evacZoneWords`, `HOUSTON_METRO_LAYERS`, `HOUSTON_METRO_VINTAGE`, `HOUSTON_ROW_STANDARDS`, `MTFP_CLASSES`, `MTFP_ORDER`, `MTFP_STATUS_WORDS`, `mtfpCard`, `mtfpClassKey`, `mtfpLegend`, `mtfpOwner`, `mtfpStatusKey`, `mtfpStyle`, `mtfpWhere`, `parseTier`, `planCodeWords`, `tierCard`, `tierLegend`, `tierStyle`
 - **`src/workspaces/site-planner/lib/hyetograph.js`** — NRCS Type III design-storm hyetograph (B904, CE roadmap #2 stage 1): dimensionless Gulf Coast 24-hr mass-curve lookup, scaled to a total design-storm depth + duration to produce a time-distributed rainfall series feeding the pond routing pass.
   - _exports_: `buildTypeIIIHyetograph`, `TYPE_III_MASS_CURVE`, `typeIIIFraction`
 - **`src/workspaces/site-planner/lib/iaParcels.js`** — IOWA county parcel sources. Iowa has NO current free statewide parcel service (the HSEMD statewide layer, mirrored as Iowa_Parcels_2017, is frozen at November 2017 and says so itself), so…
@@ -1772,9 +1952,11 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `cityAreasFromFeaturesAsync`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `DFW_ZONE`, `distanceMiles`, `ETJ_SOURCES`, `etjCoverageFor`, `etjPointCoverage`, `etjSourceCovers`, `etjSourcesForPoint`, `fetchCityClipOut`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `inDfwZone`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `SHARE_SLICE_MS`, `SHARE_WINDOW_PAD_M`, `shareQueryRing`, `simplifyRing`, `tnFuncClassNumber`, `VERTEX_LADDER`
+  - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `cityAreasFromFeaturesAsync`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `DFW_ZONE`, `distanceMiles`, `ETJ_SOURCES`, `etjCoverageFor`, `etjFallbackSourcesForPoint`, `etjPointCoverage`, `etjSourceCovers`, `etjSourcesForPoint`, `etjUpstreamUrl`, `fetchCityClipOut`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `inDfwZone`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `MONT_BELVIEU_RELAY`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `SHARE_SLICE_MS`, `SHARE_WINDOW_PAD_M`, `shareQueryRing`, `simplifyRing`, `supersededSourceIds`, `tnFuncClassNumber`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
   - _exports_: `abbreviateJurisdiction`, `governingIdentity`, `jurisdictionRungs`, `jurisdictionSegments`
+- **`src/workspaces/site-planner/lib/jurisdictionCard.js`** — THE ONE CLICK CARD FOR COUNTIES & CITIES (NEW-1, owner 2026-11-05: "Click on any shape shows a clean card: city, limits or ETJ, county").
+  - _exports_: `boundaryRoleOf`, `combineJurisdictionHits`, `COUNTIES_CITIES_GROUP`, `foldBoundaryItems`
 - **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `LIMIT_CLASS_NOUN`, `PEER_SEP`, `shareNote`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
@@ -1812,33 +1994,43 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `buildGroupSlots`, `combineLayerStatus`, `mergeGroupInfoSections`, `mergeSlotAnyOn`, `mergeSlotOpacity`, `rowInfoSections`
 - **`src/workspaces/site-planner/lib/layerPanelModel.js`** — Imagery & Layers panel — the PURE rules behind the two-pane redesign (owner-approved mockup, round 3, 2026-10-20).
-  - _exports_: `availableEntries`, `boundaryKey`, `CONTOUR_INDEX_EVERY`, `CONTOUR_INTERVALS`, `contourIndexFt`, `contourIntervalLabel`, `contourRowValue`, `CORRIDOR_WIDTH_CHOICES`, `corridorWidthOptions`, `DEFAULT_CONTOUR_INTERVAL`, `distanceMiles`, `drawnOverlaysOf`, `dropdownPlan`, `groupEntriesFor`, `inRegion`, `layerAvailableHere`, `legendFor`, `normalizeContourInterval`, `OPACITY_MAX`, `OPACITY_MIN`, `opacityFromPercent`, `PANEL_GROUP_KEYS`, `PANEL_GROUPS`, `panelGroupOf`, `percentOf`, `pickGroup`, `rampGradient`, `REGION_ZONES`, `rowSwatch`
+  - _exports_: `availableEntries`, `boundaryKey`, `CONTOUR_INTERVALS`, `contourIntervalLabel`, `contourRowValue`, `CORRIDOR_WIDTH_CHOICES`, `corridorWidthOptions`, `DEFAULT_CONTOUR_INTERVAL`, `distanceMiles`, `drawnOverlaysOf`, `dropdownPlan`, `groupEntriesFor`, `inRegion`, `layerAvailableHere`, `legendFor`, `normalizeContourInterval`, `OPACITY_MAX`, `OPACITY_MIN`, `opacityFromPercent`, `PANEL_GROUPS`, `panelGroupOf`, `percentOf`, `pickGroup`, `rampGradient`, `REGION_ZONES`, `rowSwatch`
 - **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel memory (NEW-1): project the app-shared overlays to/from two sparse per-site maps — on/off overrides and the "Show above plan" lift set — restored on open, persisted on toggle, each with its own undo signature
   - _exports_: `aboveFromOverlays`, `aboveSig`, `applyAboveOverrides`, `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerAbove`, `sanitizeLayerOverrides`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
   - _exports_: `countVertices`, `dynamicLayerOptions`, `FEATURE_VERTEX_BUDGET`, `FEATURE_VERTEX_TOTAL`, `featureBaseStyle`, `featureLayerOptions`, `featureRetryDecision`, `identifyCapable`, `imageLayerOptions`, `isTransientStatus`, `lineLabelText`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
-  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `buildFeatureLayerForTest`, `DEFAULT_LAYER_OPACITY`, `defaultOverlayState`, `etjVintageText`, `EVIDENCE`, `fetchWithRetry`, `floodArchiveState`, `floodSourceFor`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerAbout`, `layerVintage`, `liveRefFeatureCount`, `liveRefOpacities`, `markFloodArchiveMissing`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `releaseOverlayRef`, `resetFloodArchiveState`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
+  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `buildFeatureLayerForTest`, `DEFAULT_LAYER_OPACITY`, `defaultOverlayState`, `ensureAllLayerFiles`, `ensureLayerFiles`, `ensureLayersForOverlays`, `etjVintageText`, `EVIDENCE`, `fetchWithRetry`, `floodArchiveState`, `floodSourceFor`, `gisProxyEnabled`, `identifyOverlaysAt`, `isLayerId`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerAbout`, `layerDefaultOpacity`, `layerIdCanLift`, `layerRegistryVersion`, `layerVintage`, `lazyFileOf`, `lazyFilesForIds`, `lazyFilesForStates`, `liveRefFeatureCount`, `liveRefOpacities`, `markFloodArchiveMissing`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `releaseOverlayRef`, `resetFloodArchiveState`, `STATEWIDE`, `subscribeLayerRegistry`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/layerSchedule.js`** — GIS overlay load ORDER + staging policy so the map is interactive before the overlay fan-out starts
   - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/layerWeight.js`** — the visual-hierarchy model — per-layer decision-impact tier (constraint / reference / context) with enforced opacity + weight ceilings, so reference data recedes and the plan stays the subject
   - _exports_: `defaultOpacityFor`, `defaultWeightFor`, `EXEMPT_IDS`, `hierarchyProblems`, `isExempt`, `LAYER_TIER`, `sweepableLayerIds`, `TIER_MAX_OPACITY`, `TIER_MAX_WEIGHT`, `tierOf`, `TIERS`, `unpinnedDynamicLayers`
 - **`src/workspaces/site-planner/lib/layerZoomGate.js`** — The ONE zoom-gate model: which zoom each layer starts drawing at, and the four live row states (off / drawing / dormant-zoom / dormant-blank) the Layers panel reports.
   - _exports_: `combineVisibility`, `DORMANT_BLANK_LINE`, `dormantZoomLine`, `ESRI_FEATURE_DEFAULT_MIN_ZOOM`, `GATE_CLEARANCE`, `layerMinZoom`, `layerVisibility`, `levelsToGate`, `MAPILLARY_MIN_ZOOM`, `OSM_MIN_ZOOM`, `PLACE_NAMES_MIN_ZOOM`, `SOIL_BEDROCK_MIN_ZOOM`, `TERRAIN_MIN_ZOOM`
+- **`src/workspaces/site-planner/lib/lazyLayerFiles.js`** — The per-state layer files that load ON DEMAND (batch K stage 1, 2026-11-23) — NOT in the Site route's first download.
+  - _exports_: `LAZY_LAYER_FILES`
+- **`src/workspaces/site-planner/lib/lazyLayerIndex.generated.js`** — GENERATED by `npm run layer-index` (scripts/build-lazy-layer-index.mjs) — do not edit by hand.
+  - _exports_: `LAZY_LAYER_INDEX`
+- **`src/workspaces/site-planner/lib/lazyLayerIndexBuild.js`** — Computes the lazy-layer index from the REAL layer files (used by scripts/build-lazy-layer-index.mjs and by the drift test — never by the app).
+  - _exports_: `buildLazyLayerIndex`, `renderIndexModule`
+- **`src/workspaces/site-planner/lib/lazyLayerPreload.js`** — PRODUCTION: nothing is preloaded — every lazy layer file loads on demand (lazyLayerFiles.js).
+  - _exports_: `PRELOADED`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
 - **`src/workspaces/site-planner/lib/lercGrid.js`** — LERC payload decode (`decodeGrid`), split out of demGrid.js (B1042) so the `lerc` codec stays off the Site route's boot bundle; static-imported by the terrain worker, dynamic-imported on the main thread
   - _exports_: `decodeGrid`
+- **`src/workspaces/site-planner/lib/limitLineFlags.js`** — A SITE THAT TOUCHES OR CROSSES A CITY-LIMITS / ETJ LINE SAYS SO (NEW-1, owner 2026-11-05: "when the open site touches or crosses a limits/ETJ line, flag it on the site, so the header…
+  - _exports_: `limitLineFlags`, `limitLineNote`, `limitLineSentence`
 - **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
   - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
 - **`src/workspaces/site-planner/lib/loadingWalls.js`** — the Building panel's LOADING wall picker, as pure functions.
-  - _exports_: `bumpOutCap`, `compassLabelForBearing`, `loadedWallCompass`, `loadedWallsLabel`, `loadingSummary`, `loadingTypeLabel`, `OPPOSITE_WALL`, `strandedBumpIds`, `wallAxis`, `wallClickPatch`, `wallClickTitle`, `wallPickerLayout`, `WALLS`, `withLoadingPatch`
+  - _exports_: `bumpOutCap`, `compassLabelForBearing`, `loadedWallCompass`, `loadedWallsLabel`, `loadingSummary`, `loadingTypeLabel`, `OPPOSITE_WALL`, `strandedBumpIds`, `wallClickPatch`, `wallClickTitle`, `wallPickerLayout`, `WALLS`, `withLoadingPatch`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix/forEachByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; large-but-finite durable home for the version-history ring, cached rasters and the GIS cache
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbForEachByPrefix`, `idbGet`, `idbPersist`, `idbPut`, `idbPutVerified`
 - **`src/workspaces/site-planner/lib/locateMe.js`** — "Locate me" pure decisions: accuracy-circle honesty threshold, feet/mile accuracy formatting, GeolocationPositionError → owner-facing message
   - _exports_: `* (../../../shared/map/locateMe.js)`
 - **`src/workspaces/site-planner/lib/mapChromeStack.js`** — the ONE map-overlay stacking model (an open panel outranks map chrome — Leaflet controls, scale bar) plus the available-room panel height
-  - _exports_: `COMPS_TOGGLE_CLEARANCE_PX`, `EDGE_TAB_TOP_PX`, `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `MAP_OVERLAY_BAR_H_PX`, `MAP_OVERLAY_CHIP_H_PX`, `MAP_OVERLAY_TOP_PX`, `panelMaxHeight`, `SCALE_BAR_CLEARANCE_PX`, `SITES_RAIL_MIN_H_PX`, `sitesRailMaxHeight`, `TOOLS_TAB_RESERVE_PX`, `TOOLS_TAB_WIDTH_PX`, `TOP_RIGHT_ROW_NARROW_RIGHT_PX`, `TOP_RIGHT_ROW_RESERVE_PX`, `ZOOM_CONTROL_CLEARANCE_PX`, `zoomStackBottomPx`
+  - _exports_: `COMPS_TOGGLE_CLEARANCE_PX`, `EDGE_TAB_TOP_PX`, `LEAFLET_CONTROL_Z`, `LEFT_RAIL_W`, `LEFT_RAIL_W_TOUCH`, `MAP_CHROME_Z`, `MAP_OVERLAY_BAR_H_PX`, `MAP_OVERLAY_CHIP_H_PX`, `MAP_OVERLAY_TOP_PX`, `panelMaxHeight`, `SCALE_BAR_CLEARANCE_PX`, `SITES_RAIL_MIN_H_PX`, `sitesRailMaxHeight`, `TOOLS_TAB_RESERVE_PX`, `TOOLS_TAB_WIDTH_PX`, `TOP_RIGHT_ROW_NARROW_RIGHT_PX`, `TOP_RIGHT_ROW_RESERVE_PX`, `ZOOM_CONTROL_CLEARANCE_PX`, `zoomStackBottomPx`
 - **`src/workspaces/site-planner/lib/mapCorners.js`** — WHERE the Site canvas's passive/active corner furniture sits, decided in ONE place.
   - _exports_: `cornerGroupWidth`, `CURSOR_CHIP_MIN_W_PX`, `cursorChipFit`, `MAP_CORNER_GAP_PX`, `MAP_CORNER_PX`, `paneInsetFor`, `rectInside`, `rectOf`, `rectOverlap`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
@@ -1846,13 +2038,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
   - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `hasRegisterableContainer`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mapBoxCenterX`, `mapBoxInset`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `resolvedLayoutInputs`, `sanitizeShift`, `tileNwFeet`, `viewValuesEqual`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → LIFTED GIS area fills → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the per-layer "Show above plan" lift (the escape hatch opacity cannot be) with its band pane names + rebuild key, the three export bands, and the audit that fails the build on an unclassified GIS source
-  - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `lineHostZ`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `PANE_PARCEL_PICK`, `PANE_PARCEL_PICK_LABEL`, `panesForLayer`, `panesForRole`, `PARCEL_PICK_BAND_ATTR`, `PARCEL_TIER_ATTR`, `PARCEL_TIER_SLOT_ATTR`, `parcelsOnTop`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
+  - _exports_: `AREA_BAND_ATTR`, `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `lineHostZ`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `PANE_PARCEL_PICK`, `PANE_PARCEL_PICK_LABEL`, `PANE_SNAPSHOT`, `PANE_SNAPSHOT_Z`, `panesForLayer`, `panesForRole`, `PARCEL_PICK_BAND_ATTR`, `PARCEL_TIER_ATTR`, `PARCEL_TIER_SLOT_ATTR`, `parcelsOnTop`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `SVG_TIERS`, `tierForLayer`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
   - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
-  - _exports_: `boxCorners`, `closedMarkupSize`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `openMarkupLength`, `pointInRing`, `ringArea`
+  - _exports_: `boxCorners`, `closedMarkupSize`, `distToPolyline`, `distToRing`, `ellipseRing`, `grabsWholeBody`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `openMarkupLength`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
-  - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`
+  - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measureGrabsInterior`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureLabel.js`** — How a measurement presents its numbers: one dominant headline + a subordinate detail line, the headline area unit chosen by magnitude (sf below an acre, ac above), one feet convention (the prime mark), and the per-edge segment dimensions
   - _exports_: `ACRE_LEAD_MIN_SF`, `fmt2`, `fmtAcres`, `fmtFeet`, `fmtInt`, `fmtSf`, `headlineIndex`, `measureChipLines`, `measureLabelModel`, `measureSegments`, `SQFT_PER_ACRE`
 - **`src/workspaces/site-planner/lib/measureSheet.js`** — How a measurement renders on an EXPORT sheet rather than the canvas: drafting terminators in place of the editing discs, and the enforced invariant that a measurement never prints its geometry without its value.
@@ -1875,20 +2067,38 @@ _1284 source files mapped._
   - _exports_: `BAND_TOL_CF`, `bandLedger`, `bandSpans`, `createdBands`, `DEFAULT_BAND_FT`
 - **`src/workspaces/site-planner/lib/mitigationHeatmap.js`** — Fill-depth heat map (B809): bins/ramp/hatch classing, legend, tie-out totals, hover lookup, and the one-canvas painter over the engine-retained cells (engine truth — never re-derives)
   - _exports_: `binIndex`, `cellAt`, `cellPaint`, `CUT_RAMP`, `cutFillLegend`, `cutFillPaint`, `cutFillTotals`, `DEPTH_BIN_FT`, `FILL_RAMP`, `FLOODWAY_FILL`, `HEAT_RAMP`, `heatmapBBox`, `heatmapLegend`, `heatmapTotals`, `paintHeatmap`, `UNKNOWN_FILL`, `ZERO_BAND_FT`
+- **`src/workspaces/site-planner/lib/montBelvieuZoning.js`** — City of Mont Belvieu zoning (B2671240, 2026-11-12) — the pure half: how a zoning polygon is read, classed, painted and worded.
+  - _exports_: `legendItemsOf`, `MB_CITATION`, `MB_VINTAGE_SHORT`, `MB_ZONE_NAMES`, `updatedDate`, `ZONE_COLORS`, `zoneClass`, `zoneColor`, `zoneLabelText`, `zoneName`, `zoningCard`, `zoningLegend`, `zoningStyle`
 - **`src/workspaces/site-planner/lib/moParcels.js`** — MISSOURI county parcel sources. Missouri has NO free statewide parcel service (the state GIS office's only parcel layer, gis.mo.gov FMDCrealEstate, is the state's OWN land; MSDIS, the AGOL…
   - _exports_: `MO_ROWS`, `moMap`, `moRaw`
 - **`src/workspaces/site-planner/lib/moProvenance.js`** — verification record for the Missouri county parcel sources (build-time documentation, see countiesProvenance.js).
   - _exports_: `MISSOURI_VERIFICATION`
+- **`src/workspaces/site-planner/lib/multiProps.js`** — bulk-edit PROPERTIES across a same-type multi-selection (Site Planner).
+  - _exports_: `applyBulk`, `fieldsFor`, `readShared`, `selectionKinds`
 - **`src/workspaces/site-planner/lib/multiStyle.js`** — B740 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
 - **`src/workspaces/site-planner/lib/nameGroupIntegrity.js`** — THE detector for the data-integrity holes this module exists to close permanently.
   - _exports_: `auditRows`, `columnGroupKeyOf`, `groupKeyMismatch`, `jsonbGroupKeyOf`, `nameMismatch`, `scheduleNameDrift`, `scheduleNameStaleAgainstLive`, `unstampedRow`
+- **`src/workspaces/site-planner/lib/nashvilleBufferCards.js`** — Metro Nashville stormwater buffers + pending / preliminary flood maps (NEW-1 / NEW-2, 2026-11-12) — the PURE click-card wording.
+  - _exports_: `feetText`, `floodwayBufferCard`, `MAP_STATE`, `pendingFloodCard`, `pondBufferCard`, `streamBufferCard`, `SWMM_CITATION`, `wetlandBufferCard`, `ZONE_WORDS`, `zoneWords`
+- **`src/workspaces/site-planner/lib/nashvilleBufferLayers.js`** — Metro Nashville & Davidson County — water-quality buffers + pending / preliminary flood maps (NEW-1 / NEW-2, 2026-11-12).
+  - _exports_: `NASHVILLE_BUFFER_LAYER_IDS`, `NASHVILLE_BUFFER_LAYERS`, `NASHVILLE_BUFFER_MERGE_GROUPS`
+- **`src/workspaces/site-planner/lib/nashvilleJurisdiction.js`** — Metro Nashville & Davidson County — WHICH GOVERNMENT ZONES A POINT (NEW-1, 2026-11-12; owner constraints #41 / #46).
+  - _exports_: `_setSatellites`, `cityName`, `ensureSatellites`, `satelliteCityAt`, `satelliteFrom`, `SATELLITES_URL`, `satellitesReady`
+- **`src/workspaces/site-planner/lib/nashvilleLayers.js`** — Metro Nashville & Davidson County — the regional GIS layer rows (NEW-1 / NEW-3, 2026-11-12).
+  - _exports_: `NASHVILLE_LAYERS`, `NASHVILLE_RELAY`, `NASHVILLE_VINTAGE`, `relayed`
+- **`src/workspaces/site-planner/lib/nashvilleZoning.js`** — Metro Nashville & Davidson County zoning — the pure half (NEW-1, 2026-11-12): how a zoning / overlay / downtown-code / PUD / policy polygon is classed, painted, worded and listed.
+  - _exports_: `ccmCard`, `ccmLabelText`, `ccmLegend`, `ccmStyle`, `DTC_COLOR`, `dtcCard`, `dtcLabelText`, `dtcStyle`, `isSatelliteCode`, `legendItemsOf`, `METRO`, `overlayCard`, `overlayColor`, `overlayLegend`, `overlayName`, `overlayStyle`, `policyCode`, `policyName`, `PUD_COLOR`, `pudCard`, `pudStyle`, `SATELLITE_CODE`, `soft`, `ZONE_CLASS_ORDER`, `ZONE_COLORS`, `zoneClass`, `zoneCode`, `zoneColor`, `zoneLabelText`, `zoneWithName`, `ZONING_CITATION`, `zoningCard`, `zoningLegend`, `zoningRows`, `zoningStyle`, `zoningTitle`
+- **`src/workspaces/site-planner/lib/nashvilleZoningNames.js`** — Metro Nashville & Davidson County — district NAMES for the zoning codes (NEW-1, 2026-11-12; owner constraint #46).
+  - _exports_: `NASH_ZONE_NAMES`, `NASH_ZONING_CITATION`, `nashZoneName`
 - **`src/workspaces/site-planner/lib/newProjectSharing.js`** — Which team a NEWLY CREATED project is born shared with (B326416/B326418): the pure fail-closed resolution over (account preference, your teams) plus the cached runtime half the two creation entry points await. Every ambiguity denies; a solo user resolves to private through the first branch. The real scope guarantee is in the DB (`db/team_share_default.sql`).
   - _exports_: `DEFAULT_SHARE_PREF`, `defaultShareTeam`, `normalizeSharePref`, `primeShareContext`, `resetShareContext`, `resolveNewPlanTeam`, `resolveNewProjectTeam`, `SHARE_REASONS`
 - **`src/workspaces/site-planner/lib/nhdFlowline.js`** — USGS NHD hydrography decoding (B1072, pure): FType code → plain English (canal/ditch, stream/river…), watercourse title/summary, and the standing inventory-not-a-regulatory-product caveat
   - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
+- **`src/workspaces/site-planner/lib/niceCase.js`** — ALL-CAPS agency text → words (Florida layers).
+  - _exports_: `niceCase`
 - **`src/workspaces/site-planner/lib/njnyJurisdiction.js`** — New Jersey + New York jurisdiction facts — the pure, network-free half (NEW-1, the Georgia / California precedent).
   - _exports_: `inNewJerseyEnvelope`, `inNewYorkEnvelope`, `inNjNyEnvelope`, `isNewYorkCity`, `isNjNyState`, `MUNICIPAL_TYPES`, `municipalDisplayName`, `municipalName`, `municipalType`, `NJ_JURISDICTION_SOURCE_NAME`, `NJ_MUNICIPAL_NOTE`, `NJ_OUTLINE`, `NJNY_DETENTION_DETAIL`, `NJNY_DETENTION_HEADLINE`, `NJNY_NOT_WIRED_FLAGS`, `njnyStateAt`, `NY_COUNTY_DISPLAY`, `NY_JURISDICTION_SOURCE_NAME`, `NY_MUNICIPAL_NOTE`, `NY_OUTLINE`, `NYC_BOROUGH_BY_COUNTY`, `nycBoroughOf`, `sortMunicipalNames`
 - **`src/workspaces/site-planner/lib/nmParcels.js`** — NEW MEXICO county parcel sources beyond the one row already hand-written in counties.js (nm_bernalillo, Albuquerque's layer).
@@ -1901,8 +2111,12 @@ _1284 source files mapped._
   - _exports_: `NY_ROWS`, `NY_UNCOVERED`, `nyMap`, `nyRaw`
 - **`src/workspaces/site-planner/lib/nyProvenance.js`** — verification record for the New York county parcel sources (build-time documentation, see countiesProvenance.js).
   - _exports_: `NEW_YORK_VERIFICATION`
+- **`src/workspaces/site-planner/lib/nyUncovered.js`** — The 24 New York counties the statewide public layer does NOT hold (measured; see nyParcels.js).
+  - _exports_: `NY_UNCOVERED`
 - **`src/workspaces/site-planner/lib/oklahomaLayers.js`** — THE OKLAHOMA MAP LAYERS. "In all the states that our users have planned sites … think of the stuff that's really obvious that industrial developers check for." Real Oklahoma sites today…
   - _exports_: `clean`, `CLEANUP`, `DAM_CLASSES`, `damHazardOf`, `IMPAIRED`, `IMPAIRED_OTHER`, `OK_LAYER_TIERS`, `OK_LAYERS`, `OK_MERGE_GROUPS`, `OK_VECTOR_SOURCES`, `OK_VINTAGE`, `OSAGE_COURTS`, `registryUrl`, `RELEASE_CLOSED`, `RELEASE_OTHER`, `ROAD_CLASSES`, `roadClassKeyOf`, `SPECIAL_WS`, `SPECIAL_WS_OTHER`, `tc`, `TRIBAL_COURTS`, `urlFor`, `viaRelay`, `WELL_CLASSES`, `wellClassOf`
+- **`src/workspaces/site-planner/lib/oklahomaStatic.js`** — Oklahoma rows that eager modules need WITHOUT loading oklahomaLayers.js (the lazy per-state layer file, batch K): the volume tiers (layerWeight.js) and the two vector boundary sources…
+  - _exports_: `OK_LAYER_TIERS`, `OK_VECTOR_SOURCES`
 - **`src/workspaces/site-planner/lib/okParcels.js`** — OKLAHOMA county parcel sources beyond the two hand-written rows in counties.js (ok_oklahoma, ok_tulsa).
   - _exports_: `OK_ROWS`, `okMap`, `okRaw`
 - **`src/workspaces/site-planner/lib/okProvenance.js`** — verification record for the Oklahoma county parcel sources (build-time documentation, see countiesProvenance.js).
@@ -1928,13 +2142,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayStorage.js`** — Supabase Storage I/O for overlay/parcel-drawing/aerial-underlay source files (uid-first RLS keys, upload/download/delete), fallback-safe to inline raster when logged-out/oversize/error
-  - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `probeOverlayObject`, `uploadOverlayFile`
+  - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `probeOverlayObject`, `uploadOverlayFile`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
-  - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriLineLabels`, `esriPolygonFeatures`, `esriPrintFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
+  - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriLineLabels`, `esriPolygonFeatures`, `esriPrintFeatures`, `esriZoneLabels`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/padCornerTag.js`** — Where a pad-corner spot tag ("fill 22.1" / "cut 9.1") sits — owner 2026-10-30 (B2571041, then NEW-5 the same day).
   - _exports_: `boxInsideQuad`, `CORNER_TAG_PILL_H`, `pillWidth`, `placeCornerTag`
 - **`src/workspaces/site-planner/lib/paintOrder.js`** — the paint-order ladder + every ordered pair of drawn families, and the ONE name for the cross-band command
-  - _exports_: `CROSS_BAND`, `CROSS_BAND_BEHIND`, `CROSS_BAND_FRONT`, `defaultRelation`, `defaultRung`, `FAMILIES`, `orderedPairs`, `PAINT_LADDER`, `reversal`, `rungsFor`
+  - _exports_: `CROSS_BAND`, `CROSS_BAND_BEHIND`, `CROSS_BAND_FRONT`, `defaultRelation`, `defaultRung`, `FAMILIES`, `orderedPairs`, `PAINT_LADDER`, `reversal`
 - **`src/workspaces/site-planner/lib/paintSchedule.js`** — pure time-sliced batch runner (B802400 round 5): splits a big Leaflet paint diff into budget-bounded chunks so no single frame blocks for anywhere near the reported multi-second freeze
   - _exports_: `drainBudgeted`, `PAINT_FRAME_BUDGET_MS`, `runBudgeted`
 - **`src/workspaces/site-planner/lib/panelWidth.js`** — the docked left panel's width, and the width it RESERVES in the layout.
@@ -1954,13 +2168,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelAtPoint.js`** — WHICH LOT A DOUBLE-CLICK ON EMPTY LAND IS ABOUT. A parcel is grabbable only by its boundary line (B420): its interior is pointer-inert so a press inside a lot reaches whatever is drawn…
   - _exports_: `parcelAtPoint`
 - **`src/workspaces/site-planner/lib/parcelCopies.js`** — RUNTIME record of every county parcel row whose publisher is NOT the county and NOT the state: a copy someone else published (a consultant, a city, a regional commission, an…
-  - _exports_: `formatCopyAsOf`, `PARCEL_COPIES`, `PARCEL_COPY_ASK`, `PARCEL_COPY_EXEMPT`, `parcelCopyLine`, `parcelCopyNotice`, `parcelCopyOf`
+  - _exports_: `_resetLiveCopyAsOf`, `asOfFromEditDate`, `formatCopyAsOf`, `hasLiveCopyDate`, `PARCEL_COPIES`, `PARCEL_COPY_ASK`, `PARCEL_COPY_EXEMPT`, `PARCEL_COPY_LIVE_DATE`, `parcelCopyLine`, `parcelCopyNotice`, `parcelCopyOf`, `readLiveCopyAsOf`
 - **`src/workspaces/site-planner/lib/parcelDelete.js`** — The ONE parcel delete (NEW-1, 2026-10-22; owner-approved mockup "one menu, one behaviour, Undo everywhere").
   - _exports_: `deleteToastText`, `NOTHING_MESSAGE`, `PARCEL_DELETE_ENTRIES`, `planParcelDelete`, `STALE_MESSAGE`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelAdaptiveLayer`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `PARCEL_VECTOR_MINZOOM`, `parcelDisplayIsImageOnly`, `parcelDisplayRegimeForZoom`, `parcelUrlSupportsImageExport`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelDisplayZoom.js`** — lib/parcelDisplayZoom.js — NEW-1. ⛔ AMENDED 2026-10-04 (NEW-1, owner decision after the Grand Port follow-up) — PLANYR OWNS THE OUTLINES.
-  - _exports_: `layerInDrawRange`, `MAPSERVER_LAYER_RE`, `outlineFieldsFor`, `PARCEL_MINZOOM`, `PARCEL_OUTLINE_COLOR`, `PARCEL_OUTLINE_RGB`, `PARCEL_OUTLINE_WEIGHT`, `PARCEL_VECTOR_MINZOOM`, `parcelDisplayRegimeForZoom`, `parcelUrlSupportsImageExport`, `parcelVectorFloorFor`, `plainOutlineDynamicLayers`
+  - _exports_: `layerInDrawRange`, `MAPSERVER_LAYER_RE`, `outlineFieldsFor`, `PARCEL_MINZOOM`, `PARCEL_OUTLINE_COLOR`, `PARCEL_OUTLINE_RGB`, `PARCEL_OUTLINE_WEIGHT`, `PARCEL_VECTOR_MINZOOM`, `parcelDisplayRegimeForZoom`, `parcelUrlSupportsImageExport`, `plainOutlineDynamicLayers`
 - **`src/workspaces/site-planner/lib/parcelFallbacks.js`** — COUNTY FIRST, THE STATE'S LAYER WHEN THE COUNTY DOES NOT ANSWER.
   - _exports_: `countiesWithFallback`, `COUNTY_EXTRA_FALLBACKS`, `fallbackCandidates`, `fallbackNoticeText`, `fallbackSpecsFor`, `stateLayerCoversCounty`, `stateLayerKeysFor`, `stateLayerPhrase`
 - **`src/workspaces/site-planner/lib/parcelGaps.js`** — WHY A COUNTY HAS NO PARCEL DATA IN PLANYR — and the one-click way to ask for it (NEW-1, owner request 2026-10-21: "for counties that aren't wired up, I'd like it to provide info to people…
@@ -1976,7 +2190,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelListOverflow.js`** — READ-ONLY: what, if anything, makes the Parcels panel's scrolling body wider than its box.
   - _exports_: `measureListOverflow`, `scrollerOf`
 - **`src/workspaces/site-planner/lib/parcelLook.js`** — Parcel & setback LOOK (NEW-2) — the pure rules behind the "Line & label style" panel.
-  - _exports_: `coalesceEdits`, `hasParcelOverride`, `LOOK_BUILTIN`, `LOOK_LIMITS`, `lookStrokePx`, `normalizeHex`, `normalizeLook`, `parcelLookKeys`, `parcelPatchFor`, `parcelResetPatch`, `patchLook`, `ptToPx`, `resolveParcelLook`, `validateLook`
+  - _exports_: `hasParcelOverride`, `LOOK_BUILTIN`, `LOOK_LIMITS`, `normalizeHex`, `normalizeLook`, `parcelLookKeys`, `parcelPatchFor`, `parcelResetPatch`, `patchLook`, `ptToPx`, `resolveParcelLook`, `validateLook`
 - **`src/workspaces/site-planner/lib/parcelLookPersist.js`** — Persisting the workspace parcel-look default (NEW-2) — the account write behind a debounced burst of edits.
   - _exports_: `persistLookBatch`
 - **`src/workspaces/site-planner/lib/parcelLotLabelLayer.js`** — lib/parcelLotLabelLayer.js — NEW-1 (owner decision 2026-10-04): the Leaflet half of Planyr's own lot NUMBERS.
@@ -1985,10 +2199,12 @@ _1284 source files mapped._
   - _exports_: `clipRingToRect`, `layoutLotNumbers`, `LOT_NO_FONT_PX`, `LOT_NO_MAX_LABELS`, `lotBoxCanHost`, `lotNumberItem`, `lotNumberText`, `resolveLotNumberField`, `solveLotNumberItems`
 - **`src/workspaces/site-planner/lib/parcelMenu.js`** — The ONE parcel menu (NEW-1, 2026-10-22): the same items in the same order on the panel row's ⋯, on a right-click of a panel row, and on a right-click of the parcel on the map.
   - _exports_: `combinedLotCount`, `isRenameable`, `parcelMenuItems`
+- **`src/workspaces/site-planner/lib/parcelNumberShape.js`** — A LEAF (no imports) so the Map's search box can ask "is this typed text a parcel number?" without loading the county tables or the lookup code (those load lazily, only when it is).
+  - _exports_: `looksLikeParcelNumber`
 - **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test
   - _exports_: `lineIntersect`, `offsetPolygon`, `outsetPolygon`, `setbackEnvelope`, `setbackRingArea`
 - **`src/workspaces/site-planner/lib/parcelOpacityGuard.js`** — split out of parcelDisplay.js for the same reason `terrainGate.js`/`adminBoundaryData.js`/`floodTileDecode.js` were split from their Leaflet-glue siblings: this module touches only the…
-  - _exports_: `guardRasterOpacity`
+  - _exports_: `guardRasterErrors`, `guardRasterOpacity`
 - **`src/workspaces/site-planner/lib/parcelOps.js`** — ONE combine and ONE split for parcels — the panel and the map toolbar both call these.
   - _exports_: `buildParcelRows`, `deedAcresSummed`, `includedAcres`, `LOCKED_PARCELS_MAY_COMBINE`, `nextTractName`, `planCombine`, `planRestoreCombined`, `planRestoreSplit`, `planSplit`
 - **`src/workspaces/site-planner/lib/parcelOrigin.js`** — WHERE A PARCEL CAME FROM, in the words the Parcels list and the parcel page use (NEW-2).
@@ -1996,11 +2212,11 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelOutageGate.js`** — WHEN MAY A PARCEL-SOURCE OUTAGE / "SLOW" BANNER BE RAISED. Owner report 2026-10-15: on the plain Site map (no project, metro zoom, Select parcels never used) the banner "That county's…
   - _exports_: `countyOutageMessage`, `isLiveDisplayLayer`, `parcelNoticeMayRaise`
 - **`src/workspaces/site-planner/lib/parcelOutlineSet.js`** — which parcel-outline layers the Site planner's "Click a lot on the map" mode keeps on the basemap, and when it swaps one for another.
-  - _exports_: `createOutlineSet`, `OUTLINE_LOAD_TIMEOUT_MS`, `outlineKeysForView`
+  - _exports_: `createOutlineSet`, `layerReach`, `lotAtPoint`, `OUTLINE_LOAD_TIMEOUT_MS`, `outlineKeysForView`
 - **`src/workspaces/site-planner/lib/parcelPrune.js`** — release outline features esri-leaflet would hold forever.
   - _exports_: `pruneToLiveCells`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
-  - _exports_: `buildParcelWhere`, `idAttrFor`, `isDefaultLookupUrl`, `lookupParcels`, `lookupParcelsWhere`, `okField`, `resolveSearchField`
+  - _exports_: `addressWhereFromParts`, `buildParcelWhere`, `idAttrFor`, `idLikePattern`, `isDefaultLookupUrl`, `lookupParcels`, `lookupParcelsWhere`, `okField`, `resolveSearchField`, `situsFor`
 - **`src/workspaces/site-planner/lib/parcelQueryTransport.js`** — the main-thread half of the parcel-outline query WORKER transport (parcelQueryWire.js says why).
   - _exports_: `fetchEsriFeatures`, `routeQueryThroughWorker`
 - **`src/workspaces/site-planner/lib/parcelQueryWire.js`** — the pure half of the parcel-outline query WORKER transport: what goes on the wire, and how an ArcGIS answer becomes GeoJSON.
@@ -2009,6 +2225,8 @@ _1284 source files mapped._
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/parcelRecord.js`** — the parcel RECORD's vocabulary: provenance (county / deed / drawn) and the typed-field list. Read only by the lazy panel; the AREA tier lives in parcelArea.js.
   - _exports_: `acreageComparison`, `cleanText`, `PARCEL_FIELDS`, `PARCEL_SOURCES`, `parcelExceptSqft`, `parcelGrossSqft`, `parcelNetSqft`, `parcelProvenance`, `parseAcres`, `PROVENANCE_LABEL`, `provenanceLabel`, `SQFT_PER_ACRE`
+- **`src/workspaces/site-planner/lib/parcelReshape.js`** — PARCEL CORNER EDIT — the ONE place a parcel's per-edge data follows a control point being inserted or deleted.
+  - _exports_: `parcelAfterDelete`, `parcelAfterInsert`
 - **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
   - _exports_: `extendMergeSelection`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
@@ -2019,8 +2237,14 @@ _1284 source files mapped._
   - _exports_: `chunkFeatures`, `legacySnapshotKey`, `readStoredSnapshot`, `SNAPSHOT_CHUNK`, `snapshotChunkKey`, `snapshotMetaKey`, `writeStoredSnapshot`
 - **`src/workspaces/site-planner/lib/parcelSnapshotWorker.js`** — where a county's whole-county parcel SAVED COPY (B629) lives in the browser: in this worker, never on the main thread.
   - _exports_: _(none)_
+- **`src/workspaces/site-planner/lib/parcelStack.js`** — The ONE answer to "this layer returned several rows for one lot; which lot is it?" (NEW-1/2/3, 2026-11-12).
+  - _exports_: `attrValue`, `collapseStacked`, `featureRingArea`, `pickAtPoint`, `rekeyStackedOutlines`, `stackKeyOf`, `stackKindOf`, `stackNote`
+- **`src/workspaces/site-planner/lib/parcelStateTables.js`** — The per-state county parcel TABLES load ON DEMAND (batch K stage 2, 2026-11-23, B2671306) — NOT in the Site route's first download.
+  - _exports_: `_resetParcelStateTablesForTest`, `ensureParcelState`, `ensureParcelStatesForKeys`, `ensureParcelStatesForPoint`, `ensureParcelStatesForView`, `isLazyParcelState`, `kickParcelState`, `LAZY_PARCEL_STATES`, `LAZY_ROW_ORDER`, `LAZY_ROWS_AFTER_KEY`, `lazyStateOfKey`, `lazyStatesForView`, `loadAllParcelStates`, `onParcelTablesLoaded`, `PARCEL_STATE_FILES`, `parcelStateLoaded`, `parcelTablesReadyForView`, `parcelTablesVersion`, `setParcelTableReporter`, `setParcelTableSink`
 - **`src/workspaces/site-planner/lib/parcelSummary.js`** — B849344: groups flat `site_elements` parcel rows by site_id and dissolves each site's true acreage via `dissolvedParcelSqft`, feeding the Sites panel/map pin's canonical boundary read
   - _exports_: `summarizeParcelRows`, `summarizeParcelRowsAsync`
+- **`src/workspaces/site-planner/lib/parcelTablesPreload.js`** — PRODUCTION: nothing is preloaded — every per-state county table loads on demand (parcelStateTables.js).
+  - _exports_: `PRELOADED`
 - **`src/workspaces/site-planner/lib/parcelTileLayer.js`** — draw the Select-parcels outlines into per-TILE cached canvases instead of one map-sized canvas that reprojects every held lot on every settle.
   - _exports_: `drawParcelTile`, `geometryBBox`, `geometryLines`, `PARCEL_OUTLINE_STYLE`, `ParcelIndex`, `prepareParcel`, `tileLngLatBounds`
 - **`src/workspaces/site-planner/lib/parcelWideEngine.js`** — lib/parcelWideEngine.js — NEW-1 (Select parcels, wide view): WHEN tile requests go out, and when they do not.
@@ -2035,18 +2259,24 @@ _1284 source files mapped._
   - _exports_: `AISLE_SNAP_EXTRA_FT`, `aisleSnapFor`, `aislesOf`, `driveCorridorsOf`, `effectiveStallCount`, `END_FACE_TOL_FT`, `fieldInsidesOf`, `isRectParking`, `keptRuns`, `MIN_AISLE_GAP_FT`, `MIN_ROW_CROSS_SIN`, `overlapFraction`, `PERIMETER_PARALLEL_DEG`, `perimeterMouthsOf`, `rectFrame`, `ROW_FACE_TOL_FT`, `SNAP_MAX_TURN_DEG`, `snapToAisle`, `STALL_HIT_FRACTION`, `stallClipOf`, `stallLayoutOf`, `throughDrivesOf`
 - **`src/workspaces/site-planner/lib/pasteImage.js`** — Ctrl+V a clipboard image onto the Site Planner as a new overlay.
   - _exports_: `imageFileFromClipboard`, `PASTED_IMAGE_BASE`, `pastedImageName`
+- **`src/workspaces/site-planner/lib/pavingSetback.js`** — PAVING SETBACK (NEW-1, owner-approved mockup 2026-11-09) — a second per-edge setback beside the building one.
+  - _exports_: `conflictSig`, `hasPaving`, `limitedByPaving`, `newPaving`, `PAVING_TYPES`, `pavingAll`, `pavingConflicts`, `pavingRing`, `pavingValues`, `sectionValue`, `setPavingSection`, `shiftPavingOnDelete`, `shiftPavingOnInsert`
 - **`src/workspaces/site-planner/lib/pdfAnnotations.js`** — turn the MARKUPS on an exported site sheet into native PDF annotations (NEW-1, 2026-10-05; owner: "the recipient should be able to move, delete or edit my markups in Bluebeam or Acrobat").
-  - _exports_: `annotationDict`, `arcToBeziers`, `BASE_FONTS`, `buildAnnotations`, `cloudIntensity`, `cloudPitch`, `compose`, `DA_FONT_NAMES`, `flattenTree`, `helvWidth`, `intersectBox`, `itemBBox`, `itemsToStream`, `measureDictFor`, `measureDictString`, `MIDDLE_BASELINE_DY`, `MUPDF_CLOUD_PITCH_PER_I`, `parseColor`, `parsePathD`, `parseTransform`, `pathVertices`, `patternStream`, `pdfTextString`, `unionBox`, `viewportEntry`, `winAnsi`
+  - _exports_: `annotationDict`, `arcToBeziers`, `BASE_FONTS`, `buildAnnotations`, `cloudIntensity`, `cloudPitch`, `compose`, `DA_FONT_NAMES`, `flattenTree`, `helvWidth`, `intersectBox`, `itemBBox`, `itemsToStream`, `measureDictFor`, `measureDictString`, `MIDDLE_BASELINE_DY`, `MUPDF_CLOUD_PITCH_PER_I`, `parseColor`, `parsePathD`, `parseTransform`, `pathVertices`, `patternStream`, `unionBox`, `viewportEntry`, `winAnsi`
 - **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage
   - _exports_: `parsePfdsText`, `pfdsDepthFor`, `WSE02_PROVIDER_NOTES`
 - **`src/workspaces/site-planner/lib/pfdsClient.js`** — NOAA Atlas-14 PFDS client (NEW-B5): bounded-fetch (via the same-origin proxy functions/api/pfds.js) → parse → design-storm rainfall depth. Endpoint live-verified reachable. Pure client (injectable fetch).
   - _exports_: `buildPfdsUrl`, `designStormDepthIn`, `PFDS_PROXY_PATH`, `resolvePfds`
 - **`src/workspaces/site-planner/lib/pinCluster.js`** — pins that sit on the SAME ground must not hide each other. A parcel-anchored comp, a map note on that parcel and the site's own pin all resolve to the parcel's centre, so their markers land…
-  - _exports_: `pinClusterOffsets`, `pinOffsetsSig`, `slotOffset`
+  - _exports_: `isStackBadgePress`, `pinClusterOffsets`, `pinOffsetsSig`, `pinPlacement`, `pinStackHtml`, `pinStacks`, `pinStacksSig`, `placedAnchor`, `slotOffset`
 - **`src/workspaces/site-planner/lib/pipelineCommodity.js`** — Pure RRC pipeline commodity crosswalk + fixed map symbology (B751): free-text COMMODITY_DESCRIPTION → six hazard-ranked buckets (color/weight/dash), high-hazard outliers routed to the red HVL style, Leaflet style + panel legend
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
+- **`src/workspaces/site-planner/lib/pipeSizeLabel.js`** — DeSoto / Olive Branch pipe-size label — split out of desotoLayers.js (a lazy per-state layer file) so layerRequest.js stays eager-light.
+  - _exports_: `pipeSizeLabel`
+- **`src/workspaces/site-planner/lib/placeLabelAnchors.js`** — WHERE A PLACE NAME GOES, AT ANY ZOOM (NEW-1, owner 2026-11-05).
+  - _exports_: `clipRingToRect`, `labelBoxPx`, `labelFontPx`, `placeNames`, `viewAnchors`
 - **`src/workspaces/site-planner/lib/placeNamesData.js`** — Moved to src/shared/basemaps (NEW-1/B2018608: /food draws the SAME city-name layer as the Site map, and food may not import from site-planner).
   - _exports_: `* (../../../shared/basemaps/placeNamesData.js)`
 - **`src/workspaces/site-planner/lib/placeNamesGate.js`** — Moved to src/shared/basemaps (NEW-1/B2018608: /food draws the SAME city-name layer as the Site map, and food may not import from site-planner).
@@ -2060,13 +2290,17 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/placeSuggestRows.js`** — B831779 (NEW-4) the pure combobox decision layer: which rows render + what Enter/a click on them does — the provable half of PlaceSearchField.jsx
   - _exports_: `buildPlaceRows`, `resolvePlaceEnter`, `resolvePlaceRowCommit`
 - **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved; plus `resolveClipFrame`, the coordinate decision for a paste that crosses into a plan anchored elsewhere.
-  - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipPlacement`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
+  - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipCalloutTips`, `clipPlacement`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
 - **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
   - _exports_: `clearClipboard`, `getCanvasClip`, `getOverlayClip`, `hasAnyClip`, `hasCanvasClip`, `hasOverlayClip`, `setCanvasClip`, `setOverlayClip`
 - **`src/workspaces/site-planner/lib/planMenuModel.js`** — The plan menu's rules, pure (NEW-1, 2026-11-04 — the plan crumb dropdown redesigned to the owner-approved mockup).
   - _exports_: `deletedCount`, `deletedEntries`, `deletedLine`, `filterPlans`, `FIND_MIN_PLANS`, `otherPlans`, `planMenuItems`, `showFind`
 - **`src/workspaces/site-planner/lib/planMint.js`** — what happens when the app tries to CREATE a plan (duplicate / new plan on the same parcel / new site from the map) and the device refuses to store it.
   - _exports_: `describePushFailure`, `isQuotaReason`, `mintRefusedMessage`, `PUSH_MISSING`, `runMint`, `saveRefusedMessage`
+- **`src/workspaces/site-planner/lib/plannerChunk.js`** — The ONE door to the plan editor's code (B329408, owner decision 2026-11-09: slim the Site route, never raise its limit).
+  - _exports_: `loadPlanner`, `prefetchPlanner`
+- **`src/workspaces/site-planner/lib/plannerConstants.js`** — @planner-extract — AUDIT BATCH G1: the module-scope constants and small pure helpers that used to sit above the component in SitePlanner.jsx (tool tables, selection/markup constants…
+  - _exports_: `BOOT_FRAMING_RETRY_MS`, `CALLOUT_BORDER_BAND_PX`, `CANVAS_IDENTIFY_SLOP_PX`, `cleanText`, `COLOR_SEED`, `dashArray`, `DEFAULT_ROAD_WIDTH`, `DEFAULT_SETTINGS`, `detachClone`, `DRAIN_AUTO_IDLE_TIMEOUT_MS`, `DRAW_TYPES`, `EASE_LABEL_BASE_PX`, `easementInsetOpts`, `edgeSnapCenter`, `ENCUMBER_LABEL_BASE_PX`, `ensureIdAbove`, `expandPolygon`, `FEAT_BTN_MIN_PX`, `FT_PER_DEG_MIN`, `GEO_REG_DEPS`, `GEO_REG_EFFECT`, `hexA`, `INK_HALO`, `journalSid`, `labelInk`, `LEFT_PANEL_SURFACE`, `loadSnapPref`, `MARKUP_TOOLS`, `MAX_DIM`, `measMode`, `measPts`, `MEASURE_HINTS`, `MEASURE_MODES`, `measureModeLabel`, `MK_BOX_KINDS`, `MK_CLOUD_DEFAULT`, `MK_DEFAULT`, `MK_HIT_PX`, `MK_VERTEX_KINDS`, `mkMinPts`, `mkPts`, `MOD_LABEL`, `MONO_FONT`, `nearestOnSeg`, `NEUTRAL_MARKUP_KINDS`, `PANEL_SHIFT_DEPS`, `PANEL_SHIFT_EFFECT`, `PARCEL_CLICK_MS`, `PARCEL_CLICK_SLOP_PX`, `PARCEL_FILL_DEFAULT`, `pathLen`, `polySelfIntersects`, `POND_ADD_MIN_SF`, `projToSeg`, `resizeCursor`, `ROAD_CONNECT_MAX_FT`, `ROAD_FIX_MAX_EXTEND_FT`, `ROAD_FIX_MAX_NUDGE_FT`, `ROAD_FLAG_LABEL_PPF`, `roadCenterlineLength`, `roadRadiusStatus`, `roadWidthPresets`, `ROW4`, `ROW6`, `saveSnapPref`, `SEL_BLUE`, `SEL_HANDLE_FILL`, `SEL_OUTLINE_GAP_PX`, `setMkPts`, `shiftEl`, `snap45`, `strokeZoom`, `TOOLS`, `uid`, `ZERO_REG_SHIFT`
 - **`src/workspaces/site-planner/lib/plannerCursors.js`** — Site Planner cursor vocabulary (owner-approved convention, 2026-10-20) — ONE place, pure, so the canvas, the Map view and the panels all answer "what does the pointer look like here?" the…
   - _exports_: `bodyCursor`, `canvasRootCursor`, `controlCursor`, `deferTask`, `dragCursorFor`, `dragCursorPinned`, `gripCursor`, `installPlannerCursorStyle`, `parcelBodyCursor`, `pinDragCursor`, `plannerCursorCss`, `resizeCursorForVector`, `ROTATE_CURSOR`, `setMapCursor`, `unpinDragCursor`
 - **`src/workspaces/site-planner/lib/plannerPerf.js`** — `window.__plannerPerf()`, the ONE call that says what filled the planner's frames.
@@ -2080,7 +2314,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/planStore.js`** — WHERE THE DEVICE COPY OF EVERY PLAN LIVES (B2165120; legacy entry retired by B2200384).
   - _exports_: `_drainMigration`, `_learnedCap`, `_resetForTest`, `_resetRoomForTest`, `changeStamp`, `clearStore`, `configure`, `describe`, `has`, `HEADROOM_AFTER_CHARS`, `jsonOf`, `lastRefusal`, `LS_CAP_CHARS`, `plainCopy`, `readBack`, `readFresh`, `readShared`, `refusalReason`, `removeOne`, `requestRoom`, `retireLegacy`, `retryMigration`, `textOf`, `writeMap`, `writeOne`, `writeStamp`, `writeStillCurrent`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
-  - _exports_: `byZ`, `elRingFeet`, `elStyle`, `elToRingFeet`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `WALL_KIND_INK`, `WALL_PIECE_EDGE`, `WALL_PIECE_TEXT`, `zOrder`
+  - _exports_: `byZ`, `elRingFeet`, `elStyle`, `elToRingFeet`, `getAccountStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `WALL_KIND_INK`, `WALL_PIECE_EDGE`, `WALL_PIECE_TEXT`, `zOrder`
 - **`src/workspaces/site-planner/lib/planThumbnail.js`** — a pure, DOM-free SVG-string render of a plan's drawn geometry, built for the Dashboard's "Recent plans" thumbnail card (NEW-1, 2026-09-08).
   - _exports_: `planThumbnailSvg`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/pointZoneLocator.js`** — the point → county → state-plane-zone locator, installed into the lean coordinate core.
@@ -2150,7 +2384,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/propsPanelTitle.js`** — ONE source for the Properties panel's title (B-NEW-1, owner 2026-10-08).
   - _exports_: `kindTitle`, `measureTitle`, `propsPanelTitle`
 - **`src/workspaces/site-planner/lib/provenance.js`** — B895 pure six-word SourceTag vocabulary (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED) + color-token map + classifiers from existing engine signals
-  - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAG_ORDER`, `SOURCE_TAGS`, `sourceTag`
+  - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAGS`, `sourceTag`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `planeFor`, `planeForRings`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
 - **`src/workspaces/site-planner/lib/pureCache.js`** — the two pure caches behind VIEW-INDEPENDENT-ONCE: a bounded string-signature cache, a WeakMap identity cache, and a point-list signature builder
@@ -2173,8 +2407,10 @@ _1284 source files mapped._
   - _exports_: `__resetForTest`, `__setClockForTest`, `__snapshotForTest`, `bannerStep`, `bannerWake`, `begin`, `cancel`, `computeProgress`, `createBannerDriver`, `end`, `expectStages`, `FADE_MS`, `getProgress`, `getVersion`, `IDLE`, `isActive`, `isOpen`, `MIN_VISIBLE_MS`, `progress`, `PROGRESS_THROTTLE_MS`, `SETTLE_MS`, `SHOW_AFTER_MS`, `STAGE_WEIGHTS`, `subscribe`
 - **`src/workspaces/site-planner/lib/releaseCanvas.js`** — hand an offscreen canvas's backing store (renderer/GPU memory the GC tracks poorly) back once its pixels have been consumed
   - _exports_: `releaseCanvas`
+- **`src/workspaces/site-planner/lib/renameSyncNotice.js`** — What the person is told when a RENAME reached this device but not the cloud (NEW-1, B2671215 follow-up, owner 2026-11-11): "If it fails to save to the cloud, then I should get a warning…
+  - _exports_: `isAuthExpiredError`, `isRenameEntry`, `PLAN_RENAME_TEXT`, `PROJECT_RENAME_TEXT`, `renameBannerText`
 - **`src/workspaces/site-planner/lib/ringMath.js`** — The one even-odd point-in-ring test and the one absolute shoelace area for `{x,y}` feet-space rings (import-free leaf; folds eight and four duplicated copies)
-  - _exports_: `pointInRing`, `projectOntoSegment`, `ringArea`
+  - _exports_: `distToSegment`, `distToSegmentXY`, `extentOfPairRings`, `extentOfRings`, `pointInPairRing`, `pointInRing`, `projectOntoSegment`, `ringArea`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadCrossSection.js`** — A road's cross-section as an ordered list of typed bands (travel lane, median, turn lane, shoulder, parking, bike, sidewalk, etc.), curb-to-curb/paved/ROW width derivations, lane-striping seams, and built-in presets
@@ -2182,7 +2418,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/roadDeco.js`** — where a road's DECORATION (cross-section band fills, lane seams, texture) is allowed to paint, as a pure function of the junctions.
   - _exports_: `distToRings`, `junctionMouthCuts`, `snapPieceEnd`, `splitEdgeByOwner`, `stripeRunsNearOutline`, `trimPolylineOutsideRings`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
-  - _exports_: `canRemoveRoadVertex`, `cardinalTeePoint`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `legShares`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `PAD_EDGE_COLLINEAR_TOL_DEG`, `planRoadConnect`, `polygonContainsPoint`, `polygonDepthBehind`, `polygonEdgeRunFrom`, `polygonEdges`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectContainsPoint`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadBearingDeg`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadEdgeCrossing`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `slideTeeNode`, `SOFT_TANGENT_FT`, `TEE_CARDINAL_STEP_DEG`, `teeGeometry`, `teeNodeIndex`, `weldCoverPolygon`
+  - _exports_: `canRemoveRoadVertex`, `cardinalTeePoint`, `concatRoads`, `convexHull`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `legShares`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `PAD_EDGE_COLLINEAR_TOL_DEG`, `planRoadConnect`, `polygonContainsPoint`, `polygonDepthBehind`, `polygonEdgeRunFrom`, `polygonEdges`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectContainsPoint`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadBearingDeg`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadEdgeCrossing`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `slideTeeNode`, `SOFT_TANGENT_FT`, `TEE_CARDINAL_STEP_DEG`, `teeGeometry`, `teeNodeIndex`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadJunctions.js`** — lib/roadJunctions.js — road → paving/parking DRIVE junctions (B955/NEW-1, extracted B1703666).
   - _exports_: `armStraightRun`, `BUILDING_CLEAR_FT`, `buildingRunLimit`, `DRIVE_RETURN_SEED`, `DRIVE_TEE_SNAP_FT`, `driveJunctionsOf`, `driveTargetKindOf`, `roadRunFrom`, `roadTangentNoise`, `SKIM_MAX_PHI_DEG`, `SOFT_BEND_DEG`, `STRAIGHT_THROUGH_DEG`, `teeJunctionsOf`, `teeNodeIndicesOf`, `VERTEX_NOISE_FT`
 - **`src/workspaces/site-planner/lib/roadNamesPref.js`** — Road names on the planner canvas — the DEVICE-LEVEL on/off + opacity memory (NEW-1).
@@ -2195,6 +2431,8 @@ _1284 source files mapped._
   - _exports_: `labelSummary`, `roadPanelSubtitle`, `roadPanelTitle`, `STRIP_ASPHALT`, `STRIP_CURB`, `xsButtonLabel`, `xsCaption`, `xsStripBands`, `xsSummary`
 - **`src/workspaces/site-planner/lib/roadRadiusFeature.js`** — lib/roadRadiusFeature.js — the ONE switch for the road minimum-radius review feature (NEW-3, owner 2026-10-16: "it should just let me be wrong; it's not good enough yet, keep it in the…
   - _exports_: `ROAD_RADIUS_REVIEW_KEY`, `roadRadiusReviewOn`
+- **`src/workspaces/site-planner/lib/roadTaper.js`** — lib/roadTaper.js — TAPER WHERE TWO ROADS OF DIFFERENT WIDTHS MEET END TO END (NEW-1, owner choice 2026-11-10).
+  - _exports_: `resolveTaper`, `roadTapersOf`, `TAPER_MAX_FT`, `TAPER_MIN_FT`, `TAPER_RATIO`, `taperedOffset`, `taperedOffsetScaled`, `taperedStripRing`, `taperJointCover`
 - **`src/workspaces/site-planner/lib/rotatedImageLayer.js`** — renders a raster image georeferenced by three corners on a real Leaflet map via a CSS `transform: matrix(...)`-driven `<img>` in its own pane
   - _exports_: `createRotatedImageLayer`
 - **`src/workspaces/site-planner/lib/rotationDial.js`** — the pure half of the Overlays panel's ROTATION DIAL (NEW-1, 2026-10-21).
@@ -2203,6 +2441,10 @@ _1284 source files mapped._
   - _exports_: `annulusSectors`, `circleRing`, `circulatoryWidthFt`, `legReturnWedges`, `legTrimFor`, `normalizeRoundaboutD`, `ROUNDABOUT_BANDS`, `ROUNDABOUT_MAX_D`, `ROUNDABOUT_MIN_D`, `roundaboutArea`, `roundaboutBandFor`, `roundaboutDiameterFor`, `roundaboutGeometry`, `roundaboutIslandArea`, `roundaboutNodes`, `trimPolylineEnds`
 - **`src/workspaces/site-planner/lib/runChunked.js`** — a LEAF (no imports): drive a step generator off the main thread's critical path.
   - _exports_: `FRAME_GAP_MS`, `FRAME_WAIT_MS`, `runChunked`
+- **`src/workspaces/site-planner/lib/rutherfordJurisdiction.js`** — Rutherford County TN — WHICH GOVERNMENT A POINT FALLS IN (NEW-1, 2026-11-12; the DeSoto precedent, desotoJurisdiction.js).
+  - _exports_: `_setLimits`, `CITY_NAMES`, `ensureLimits`, `jurisdictionAt`, `jurisdictionFrom`, `LIMITS_URL`
+- **`src/workspaces/site-planner/lib/rutherfordZoning.js`** — Rutherford County TN zoning (NEW-1, 2026-11-12) — the pure half: how a zoning polygon from each of FOUR governments' own layers is read, classed, painted, worded and linked.
+  - _exports_: `CLASS_ORDER`, `colorOf`, `COUNTY`, `COUNTY_NAMES`, `COUNTY_WHERE`, `DEDUPE_KEY`, `isCountyHole`, `JURISDICTION`, `LABEL_FIELD`, `labelFormat`, `labelOf`, `LAVERGNE_NAMES`, `memberLegend`, `MEMBERS`, `MURFREESBORO_CLASSES`, `MURFREESBORO_NAMES`, `MURFREESBORO_WHERE`, `murfreesboroOrdinanceHref`, `NAME_SOURCE`, `ORDINANCE_LINK`, `readZone`, `SMYRNA_DISTRICTS`, `SMYRNA_MAP_WORD`, `SMYRNA_ZONE_ID_CODES`, `stackedZones`, `titleName`, `UNINCORPORATED`, `ZONE_COLORS`, `zoneClass`, `zoneText`, `zoningCard`, `zoningStyleFor`
 - **`src/workspaces/site-planner/lib/saveDedupe.js`** — "is this exactly the record I last wrote?" and "whose store is this?" (B2233521).
   - _exports_: `mayWriteForAccount`, `sameSaveRecord`, `SAVE_RECORD_KEYS`, `writeIsRedundant`
 - **`src/workspaces/site-planner/lib/scParcels.js`** — SOUTH CAROLINA county parcel sources: all 46 counties. Greenville stays hand-written in counties.js (sc_greenville, wired 2026-09-11); the other 45 are here.
@@ -2226,13 +2468,13 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/serviceAreaData.js`** — GENERATED by scripts/build-service-areas.mjs on 2026-11-02 — do not hand-edit.
   - _exports_: `SERVICE_AREAS`
 - **`src/workspaces/site-planner/lib/serviceAreas.js`** — SERVICE AREAS — where a source actually serves (B2436066, Imagery & Layers NEW-3).
-  - _exports_: `_setServiceAreas`, `areaContains`, `ensureServiceAreas`, `hasServiceArea`, `PROBE_DEG`, `serviceAreasReady`, `subscribeServiceAreas`
+  - _exports_: `_setServiceAreas`, `areaContains`, `ensureServiceAreas`, `PROBE_DEG`, `serviceAreasReady`, `subscribeServiceAreas`
 - **`src/workspaces/site-planner/lib/setbackChips.js`** — groups parcel edges into one LABELLED setback run per side (shared value + direction spread), so a digitized curve reads as a handful of chips, not one per segment
-  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `chipRunOfEdge`, `setbackChipRuns`, `setbackChipsVisible`
+  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `setbackChipRuns`, `setbackChipsVisible`
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
   - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
 - **`src/workspaces/site-planner/lib/setbackSketch.js`** — The Setbacks section's COMPACT summary + the sketch's label placement (NEW-1, B2191xxx).
-  - _exports_: `layoutSectionLabels`, `pointOnPolyline`, `summarizeSetbacks`
+  - _exports_: `DOT_MIN_GAP`, `DOT_MIN_TURN_DEG`, `layoutSectionLabels`, `pickVertexDots`, `pointOnPolyline`, `summarizeSetbacks`
 - **`src/workspaces/site-planner/lib/settingsForm.js`** — Settings → Profile form model (NEW-1, B2026000-block). Pure, so the "is Save allowed?" rule is unit-tested without a DOM.
   - _exports_: `profileDirty`, `savedProfileValues`
 - **`src/workspaces/site-planner/lib/sharedAssetRefs.js`** — Who else is using this source file? The one cross-plan ref-count for shared overlay/underlay assets (cloud object + device raster), so a delete in one plan can never destroy bytes another plan still renders from.
@@ -2276,7 +2518,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/siteMetrics.js`** — Pure site yield/coverage metrics (siteSqft, bldg, coverage %, FAR, ...) as ONE function, extracted from SitePlanner.jsx's render body so a future module (e.g. a financial model) can read them
   - _exports_: `siteMetrics`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
-  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumberHolder`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `DEFAULT_ROLE`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `elsListIsClean`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `normRole`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelNumbers`, `parcelOutline`, `parcelsOf`, `parcelSplitNames`, `quarterOffset`, `READ_NORMALIZE`, `rectRoadEndpoints`, `renumberBuilding`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `ROLE_META`, `roleOf`, `ROLES`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `stampParcelNumbers`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withLockSemantics`, `withShareMirror`
+  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumberHolder`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `DEFAULT_ROLE`, `developableArea`, `dropRetiredMarkups`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `elsListIsClean`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `normRole`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelNumbers`, `parcelOutline`, `parcelsOf`, `parcelSplitNames`, `quarterOffset`, `READ_NORMALIZE`, `rectRoadEndpoints`, `renumberBuilding`, `RESTORED_STRIP_W_FT`, `RETIRED_MARKUP_KINDS`, `roadStripBBox`, `roadTravelWidth`, `ROLE_META`, `roleOf`, `ROLES`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `SITE_MODEL_VERSION`, `stampParcelNumbers`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `toMs`, `withLockSemantics`, `withShareMirror`
 - **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).
   - _exports_: `normalizeOrigin`, `nudgeOrigin`, `originAtOffset`, `parseLatLon`, `rotPt`, `sameOrigin`
 - **`src/workspaces/site-planner/lib/sitePlacementRotate.js`** — rotating a WHOLE plan rigidly about its body centre. Loaded on demand.
@@ -2284,7 +2526,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/siteRecency.js`** — When a project was really last EDITED (max site_elements.updated_at across a group's plans), never sites.updated_at — B845089
   - _exports_: `groupRecencyMs`, `lastEditedLabel`, `pickRepresentativePlan`, `planRecencyMs`, `summarizeElementRecency`
 - **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
-  - _exports_: `isCalifornia`, `isColorado`, `isGeorgia`, `isNewJersey`, `isNewYork`, `isTennessee`, `realBoundaryRings`, `realStateAt`, `siteState`, `STATE_ENVELOPES`, `STATE_POLYGONS`, `TEXAS_OUTLINE`, `TUNED_REACHES`, `US_STATE_CODES`, `US_STATE_NAMES`
+  - _exports_: `isColorado`, `realBoundaryRings`, `realStateAt`, `siteState`, `STATE_ENVELOPES`, `STATE_POLYGONS`, `TEXAS_OUTLINE`, `TUNED_REACHES`, `US_STATE_CODES`, `US_STATE_NAMES`
 - **`src/workspaces/site-planner/lib/siteScreen.js`** — Site Analysis — the orchestrator for the redesigned panel (NEW-1, 2026-10-05).
   - _exports_: `legacyFindings`, `LINE_LAYERS`, `roadRings`, `runSiteScreen`, `TRUSTED_CHECKS`
 - **`src/workspaces/site-planner/lib/sitesSnapshot.js`** — the parsed device store, held with the EXACT string it was parsed from.
@@ -2304,7 +2546,7 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/spotLabelPlacement.js`** — Where the grading's court / lot labels sit — "dock 784.5", "curb 786.0", "784.5" (the far edge), "1.5% fall" — owner 2026-11-04 (NEW-1): "no grading label is ever drawn under an edit…
   - _exports_: `boxHitsBox`, `boxHitsDisc`, `boxHitsRect`, `boxInView`, `buildingControlObstacles`, `LABEL_PAD_PX`, `layoutLabelSet`, `LEADER_FROM_PX`, `placeLabels`, `pointInView`, `SEARCH_REACH_PX`, `segHitsBox`, `VIEW_MARGIN_PX`
 - **`src/workspaces/site-planner/lib/ssurgoBedrock.js`** — SHALLOW-ROCK ZONES from USDA NRCS SSURGO (depth to bedrock), national.
-  - _exports_: `BEDROCK_CLASSES`, `BEDROCK_PAINT_MAX_IN`, `buildBedrockQuery`, `buildWfsUrl`, `classifyDepthCm`, `depthInchesFromCm`, `fetchBedrockView`, `joinBedrock`, `parseBedrockRows`, `parseMapunitGml`, `SDA_TABULAR_URL`, `SDA_WFS_URL`, `WFS_MAX_FEATURES`
+  - _exports_: `BEDROCK_CLASSES`, `buildBedrockQuery`, `buildWfsUrl`, `classifyDepthCm`, `fetchBedrockView`, `joinBedrock`, `parseBedrockRows`, `parseMapunitGml`, `SDA_TABULAR_URL`, `SDA_WFS_URL`, `WFS_MAX_FEATURES`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
@@ -2312,41 +2554,45 @@ _1284 source files mapped._
 - **`src/workspaces/site-planner/lib/stateReachData.js`** — GENERATED by scripts/build-state-reaches.mjs — never hand-edit.
   - _exports_: `REACH_RINGS`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_flushHistoryIdbForTest`, `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `advanceHeaderBase`, `AUTOSAVE_KEY`, `backupNow`, `backupNowVerified`, `binOrphanedTrackedSite`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `ensureProjectRow`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `hasAnyLocalSites`, `headerBaseOf`, `historyIdbOnly`, `historyRingJson`, `historySeedAddsTo`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `lastSaveRefusal`, `legacySitesList`, `listDeletedPlansInGroup`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `makeRoomForPlanStore`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `notifySiteModelChanged`, `notifySitesListChanged`, `onSiteModelChanged`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `purgeOnePlanFromLiveGroup`, `pushModelToCloud`, `pushSiteToCloud`, `readBackSite`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `refreshPlanHeaderFromCloud`, `relocateHistoryToIdb`, `renameSiteGroup`, `repairSplitProjectNames`, `requestPlanStoreRoom`, `resolveOrCreateTrackedSiteForComp`, `resolveOrCreateTrackedSiteForOverlay`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleHistoryHydration`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteExistsLocally`, `siteNameOf`, `sitesWriteStamp`, `sitesWriteStillCurrent`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_flushHistoryIdbForTest`, `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `advanceHeaderBase`, `AUTOSAVE_KEY`, `backupNow`, `backupNowVerified`, `binOrphanedTrackedSite`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `ensureProjectRow`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `hasAnyLocalSites`, `headerBaseOf`, `historyIdbOnly`, `historyRingJson`, `historySeedAddsTo`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `lastSaveRefusal`, `legacySitesList`, `listDeletedPlansInGroup`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `makeRoomForPlanStore`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `notifySiteModelChanged`, `notifySitesListChanged`, `onSiteModelChanged`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `purgeOnePlanFromLiveGroup`, `pushModelToCloud`, `pushSiteToCloud`, `readBackSite`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `refreshPlanHeaderFromCloud`, `relocateHistoryToIdb`, `renameSiteGroup`, `repairSplitProjectNames`, `reportPullFailed`, `requestPlanStoreRoom`, `resolveOrCreateTrackedSiteForComp`, `resolveOrCreateTrackedSiteForOverlay`, `restoreDeletedProject`, `saveSite`, `scheduleHistoryHydration`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteExistsLocally`, `siteNameOf`, `sitesWriteStamp`, `sitesWriteStillCurrent`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
   - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.
   - _exports_: `problems`, `SUBSIDENCE_DISTRICTS`, `subsidenceFlag`, `subsidenceFor`
 - **`src/workspaces/site-planner/lib/sugarLandLayers.js`** — City of Sugar Land (Fort Bend County, TX) — the city's own GIS layer rows (NEW-1, 2026-11-02).
-  - _exports_: `AIRPORT_AREAS`, `AIRPORT_CODE_URL`, `airportCard`, `airportStyle`, `availableSiteCard`, `CASE_COLORS`, `CIP_WHERE`, `cipCard`, `cityHref`, `cupCard`, `devProjectCard`, `exceptionCard`, `fluCard`, `fluColor`, `fluLegend`, `fluStyle`, `hydrantCard`, `money`, `normalizeZone`, `relayed`, `rowLandCard`, `soft`, `SUGARLAND_LAYERS`, `SUGARLAND_MERGE_GROUPS`, `SUGARLAND_RELAY`, `SUGARLAND_UTILITY_NOTE`, `SUGARLAND_VINTAGE`, `sugarLandGroupNote`, `THOROUGHFARE_WHERE`, `tirzCard`, `UTILITY_MAP_REQUEST_URL`, `varianceCard`
+  - _exports_: `AIRPORT_AREAS`, `AIRPORT_CODE_URL`, `airportCard`, `airportStyle`, `availableSiteCard`, `CASE_COLORS`, `CIP_WHERE`, `cipCard`, `cityHref`, `cupCard`, `devProjectCard`, `exceptionCard`, `fluCard`, `fluColor`, `fluLegend`, `fluStyle`, `hydrantCard`, `money`, `normalizeZone`, `relayed`, `rowLandCard`, `soft`, `SUGARLAND_LAYERS`, `SUGARLAND_MERGE_GROUPS`, `SUGARLAND_RELAY`, `SUGARLAND_VINTAGE`, `THOROUGHFARE_WHERE`, `tirzCard`, `UTILITY_MAP_REQUEST_URL`, `UTILITY_REQUEST_LINK`, `varianceCard`
 - **`src/workspaces/site-planner/lib/sugarLandThoroughfare.js`** — City of Sugar Land Master Thoroughfare Plan (NEW-1, 2026-11-02) — the pure half: which segments the map draws, how each class is painted, what the click card says.
   - _exports_: `classInfo`, `classKey`, `hasPlannedSectionOnly`, `plannedSectionDiffers`, `SECTION_CLASSIFICATION`, `sectionClassification`, `sectionCode`, `sectionWithClass`, `streetName`, `THOROUGHFARE_CLASSES`, `THOROUGHFARE_ORDER`, `THOROUGHFARE_WHERE`, `thoroughfareCard`, `thoroughfareLegend`, `thoroughfareStyle`
+- **`src/workspaces/site-planner/lib/sugarLandUtilities.js`** — City of Sugar Land WATER and SEWER network (NEW-1, 2026-11-06) — the pure half: where it comes from, what date it carries, how each line / point is painted, what the click card says.
+  - _exports_: `asOfRows`, `carriesText`, `cleanoutCard`, `controlValveCard`, `FORCE_WHERE`, `forceMainCard`, `GRAVITY_WHERE`, `gravityMainCard`, `installYear`, `isAbandoned`, `lateralCard`, `lifecycle`, `liftStationCard`, `manholeCard`, `materialText`, `operatorText`, `pipeWeight`, `POINT_COLORS`, `SEWER_COLORS`, `SEWER_LEGEND`, `sewerStyle`, `sizeInches`, `taggedLabel`, `UTILITY_CAVEAT_TEXT`, `UTILITY_DATA_AS_OF`, `UTILITY_LAYER_EDITED`, `UTILITY_PUBLISHER`, `UTILITY_TAG`, `utilitySource`, `utilityVintage`, `WATER_COLORS`, `WATER_LEGEND`, `WATER_WHERE`, `waterKind`, `waterLineCard`, `waterPlantCard`, `waterStyle`, `waterValveCard`, `wellCard`, `wwtpCard`
 - **`src/workspaces/site-planner/lib/sugarLandZoning.js`** — City of Sugar Land zoning (NEW-1, 2026-11-02) — the pure half: how a zoning polygon is read, classed, painted, worded and linked.
   - _exports_: `adoptedDate`, `codeFromDefinition`, `definitionText`, `legendItemsOf`, `normalizeZone`, `pdfHref`, `SL_ZONE_NAMES`, `titleWords`, `ZONE_COLORS`, `zoneClass`, `zoneCode`, `zoneColor`, `zoneLabelText`, `zoneName`, `zoneWithName`, `ZONING_CITATION`, `zoningCard`, `zoningLegend`, `zoningStyle`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push
-  - _exports_: `connectionInfo`, `currentAccessToken`, `supabase`, `supabaseConfigured`, `supabaseRest`, `testConnection`
+  - _exports_: `* (../../../shared/supabase/client.js)`
 - **`src/workspaces/site-planner/lib/tailwaterSource.js`** — PR-N/O5 outfall tailwater source ladder (district channel → FEMA InFRM est-BFE → USGS gauge → normal-depth → terrain channel-flowline), NEVER site grade: `deriveTailwater` priority pick with a grade-placeholder guard, `normalDepthWse` (Manning), `channelTerrainWse` (below-grade flowline), `resolveTailwater` async orchestrator (injectable, graceful degradation), all EST + source-tagged
   - _exports_: `channelTerrainWse`, `deriveTailwater`, `GRADE_PLACEHOLDER_EPS_FT`, `normalDepthWse`, `resolveTailwater`, `TAILWATER_SOURCES`, `tailwaterNote`
 - **`src/workspaces/site-planner/lib/taxRates.js`** — per-account taxing-unit rate table ("Taxing unit \| Rate per $100" + Total).
-  - _exports_: `DATA_LOADERS`, `loadTaxTable`, `r6`, `TAX_COVERAGE`, `taxTableFor`, `taxTableForCombined`
+  - _exports_: `DATA_LOADERS`, `loadTaxTable`, `MILLAGE_DATA`, `r6`, `TAX_COVERAGE`, `taxTableFor`, `taxTableForCombined`
+- **`src/workspaces/site-planner/lib/taxRollStale.js`** — The ops signal for "the indexed tax-unit answer is behind a newer HCAD roll".
+  - _exports_: `_resetStaleNotes`, `noteStaleRoll`
 - **`src/workspaces/site-planner/lib/taxUnitsClient.js`** — the browser half of the per-account tax table (B2158065). `/api/taxunits` (functions/api/taxunits.js) answers, for ONE CAD account, the COMPLETE list of taxing units the CAD itself assigns…
   - _exports_: `_resetTaxUnitsCache`, `accountOf`, `acctKey`, `fetchTaxUnits`, `tableFromUnits`, `TAX_UNIT_COUNTIES`
 - **`src/workspaces/site-planner/lib/teamRoster.js`** — Pure roster model for Settings › Team (NEW-1, 2026-10-03). Role is shown by WHICH SECTION a person sits in, so this is the one place that decides the grouping.
   - _exports_: `canManage`, `countsLine`, `createRosterLoader`, `groupRoster`, `initialsOf`, `RESEND_WINDOW_MS`, `resendCooldownMs`
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths
-  - _exports_: `cancelInvite`, `createTeam`, `currentIdentity`, `deleteTeam`, `inviteByEmail`, `leaveTeam`, `listInvites`, `listMembers`, `listMyTeams`, `removeMember`, `renameTeam`, `resendInvite`, `sendInviteEmail`, `setRole`
+  - _exports_: `* (../../../shared/supabase/teams.js)`
 - **`src/workspaces/site-planner/lib/tennesseeCards.js`** — Tennessee industrial due-diligence layers (B2521584) — the PURE click-card wording.
   - _exports_: `ATTAINMENT_WORDS`, `certDate`, `critHabitatCard`, `DOR_PROGRAMS`, `dorProgramWords`, `dorSiteCard`, `drycleanerCard`, `drycleanerStatus`, `isImpairedAttainment`, `isThreatenedAttainment`, `landfillCard`, `ms4Card`, `nrhpBoundaryCard`, `nrhpPointCard`, `pwsCard`, `scenicCard`, `snaCard`, `thcSiteCard`, `titleCase`, `wqaCard`, `ymd`
 - **`src/workspaces/site-planner/lib/tennesseeJurisdiction.js`** — Tennessee jurisdiction facts — the pure, network-free half (NEW-1, the Georgia / New Jersey precedent).
-  - _exports_: `inTennesseeEnvelope`, `inTennesseeOutline`, `SHELBY_UDC_NOTE`, `shelbyUdcApplies`, `tennesseeConsolidatedFor`, `TN_CONSOLIDATED`, `TN_CONSOLIDATED_NOTE`, `TN_COUNTY_GOVERNS_NOTE`, `TN_DETENTION_DETAIL`, `TN_DETENTION_HEADLINE`, `TN_ENVELOPE`, `TN_ENVELOPE_BOX`, `TN_JURISDICTION_SOURCE_NAME`, `TN_NOT_WIRED_FLAG`, `TN_OUTLINE`, `tnRoadAuthority`
+  - _exports_: `inTennesseeEnvelope`, `inTennesseeOutline`, `SHELBY_UDC_NOTE`, `shelbyUdcApplies`, `tennesseeConsolidatedFor`, `TN_CONSOLIDATED`, `TN_CONSOLIDATED_NOTE`, `TN_COUNTY_GOVERNS_NOTE`, `TN_DETENTION_DETAIL`, `TN_DETENTION_HEADLINE`, `TN_ENVELOPE`, `TN_JURISDICTION_SOURCE_NAME`, `TN_NOT_WIRED_FLAG`, `TN_OUTLINE`, `tnRoadAuthority`
 - **`src/workspaces/site-planner/lib/tennesseeLayers.js`** — Tennessee — the industrial due-diligence layer rows (B2521584, 2026-10-29).
-  - _exports_: `TN_LAYER_IDS`, `TN_LAYERS`, `viaRelay`, `wqaStyle`
+  - _exports_: `TN_LAYER_IDS`, `TN_LAYERS`, `TN_MERGE_GROUPS`, `viaRelay`, `wqaStyle`
 - **`src/workspaces/site-planner/lib/tennesseeStreamBuffers.js`** — Tennessee stream buffers — the PURE half (B2521584). No Leaflet, no DOM, no network.
   - _exports_: `bufferLegendTn`, `isBufferedWaterTn`, `streamBufferBandsTn`, `TN_BUFFER_TIERS`
 - **`src/workspaces/site-planner/lib/terrainGate.js`** — the terrain zoom gate alone in a leaf module, so the layer registry can read it without static-importing the on-demand pipeline
   - _exports_: `TERRAIN_MIN_ZOOM`
 - **`src/workspaces/site-planner/lib/terrainLayers.js`** — Main-thread terrain glue (B704/B705/B706): view-driven contour + drainage-arrow layerGroups (canvas renderer, swr last-good, proxy-direct fallback), singleton terrain worker with crash rebuild, shared grid LRU sampled by the hover readout
-  - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `LABEL_CLIP_CLEAR_PX`, `LABEL_VIEW_MARGIN`, `runBandOutlineJob`, `runBuildableJob`, `runProposedContoursJob`, `sampleTerrainGrids`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
+  - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `LABEL_CLIP_CLEAR_PX`, `LABEL_VIEW_MARGIN`, `runBandOutlineJob`, `runBuildableJob`, `runFitJob`, `runProposedContoursJob`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
 - **`src/workspaces/site-planner/lib/terrainLazy.js`** — the ONE on-demand loader for the terrain pipeline: `loadTerrain()` (cached import, retries after a failure) + the synchronous `terrainNow()` the per-move cursor sample reads + the `contourHover` router
   - _exports_: `__resetTerrainLazy`, `contourHover`, `loadTerrain`, `retryDelayMs`, `terrainNow`
 - **`src/workspaces/site-planner/lib/terrainTileStatus.js`** — pure `isPartialCover`/`paintStatus` helpers deciding when the terrain layer's onStatus must report "loading" instead of "loaded" for a partially-cached view (B802400)
@@ -2365,6 +2611,8 @@ _1284 source files mapped._
   - _exports_: `fileToBase64`, `getKey`, `KEY_LS`, `readTitlePDF`, `setKey`
 - **`src/workspaces/site-planner/lib/tnParcelId.js`** — Tennessee parcel-ID search — what a person types into the Site search box, turned into lookups on the counties that publish their own parcels (NEW-2, TN non-state counties, 2026-10-21).
   - _exports_: `countyHintOf`, `davidsonLetteredId`, `digitsOnlyId`, `linkForms`, `linkMatch`, `linkWhere`, `looksLikeTnParcelId`, `normalizeIdFor`, `parseControlMapId`, `parseStoredLink`, `pickIdMatch`, `shelbyPaid`, `storedPartsFromColumns`, `stripIdLabel`, `TN_COUNTY_BY_ID`, `TN_ID_SOURCES`, `tnParcelIdPlan`
+- **`src/workspaces/site-planner/lib/tnTaxUnits.js`** — Tennessee taxing units + certified rates for the parcel page's "Tax rates" table (Rutherford County and Nashville / Davidson County).
+  - _exports_: `isTnTaxCounty`, `leadCode`, `TN_RATE_YEAR`, `TN_RATES`, `TN_SOURCE`, `TN_SOURCE_URL`, `TN_TAX_COUNTIES`, `tnTaxTableFor`
 - **`src/workspaces/site-planner/lib/toolRailModel.js`** — the pure half of "show each tool's current size in the rail without opening its menu".
   - _exports_: `buildingPill`, `DOCK_WORDS`, `dockGlyphKind`, `fmtFeet`, `fmtStall`, `headingInkGaps`, `parkingPill`, `RAIL`, `roadPill`
 - **`src/workspaces/site-planner/lib/trailerOverRoads.js`** — TRAILER PARKING ALWAYS DRAWS ABOVE ROADS (NEW-1, owner order 2026-11-05).
@@ -2375,14 +2623,44 @@ _1284 source files mapped._
   - _exports_: `createTrailingWriter`
 - **`src/workspaces/site-planner/lib/twdbWells.js`** — TWDB Groundwater Database observation-wells interface (NEW-B6): field-map-driven nearest-well depth-to-water parser + bounded-fetch client; endpoint pending live confirmation (honest "pending", never fabricated). Pure parser.
   - _exports_: `parseNearestWell`, `resolveNearestWell`, `TWDB_WELLS_SOURCE`
+- **`src/workspaces/site-planner/lib/txCityZoning.js`** — Texas CITY zoning layers other than Sugar Land (NEW-1 / NEW-2, 2026-11-12) — the pure half: how a zoning polygon of Richmond, Fulshear, Stafford (and Webster) is read, classed, painted…
+  - _exports_: `dateFromMs`, `docHref`, `FULSHEAR`, `FULSHEAR_NEWER`, `KATY`, `KATY_FLU`, `KATY_FLU_CLASSES`, `KATY_FLU_WHERE`, `KATY_TP`, `KATY_TP_CLASSES`, `KATY_TP_WHERE`, `makeCityZoning`, `nameWords`, `normalizeCode`, `RICHMOND`, `STAFFORD`, `TX_CITY_ZONING`, `WEBSTER`, `WEBSTER_PD`, `WEBSTER_ZONE_NAMES`, `withName`, `ZONE_COLORS`
+- **`src/workspaces/site-planner/lib/txCityZoningLayers.js`** — Texas CITY zoning layer rows (NEW-1 / NEW-2, 2026-11-12) — Richmond, Fulshear (two layers), Stafford, Webster (two layers: base districts and planned developments) and Katy (zoning, future…
+  - _exports_: `relayedUrl`, `TX_CITY_ZONING_LAYERS`, `TX_CITY_ZONING_VINTAGE`
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
+- **`src/workspaces/site-planner/lib/useCalibrationMarkers.js`** — Draws the calibration clicks on the map (drawing points in the comp accent, their map spots in a contrasting ring, joined by a line); moved verbatim out of MapFinder.jsx (audit batch L2).
+  - _exports_: `useCalibrationMarkers`
+- **`src/workspaces/site-planner/lib/useCriteriaRequest.js`** — @planner-extract — the ONE copy of the "Request criteria for this county" UI status (audit batch L3).
+  - _exports_: `useCriteriaRequest`
+- **`src/workspaces/site-planner/lib/useDrainageCheck.js`** — @planner-extract — the drainage CHECK flow of the Site Planner as a hook (audit batch G2 step 4a, B2671311, behaviour-identical move; Verify: live).
+  - _exports_: `useDrainageCheck`
 - **`src/workspaces/site-planner/lib/useDrawnOverlays.js`** — The overlay state a MAP SURFACE DRAWS FROM (NEW-1, Imagery & Layers redesign).
   - _exports_: `useDrawnOverlays`
 - **`src/workspaces/site-planner/lib/useGradeSurface.js`** — WHERE the planner's proposed surface (`gradeSurface`, the B826 engine) is built.
   - _exports_: `buildSurfaceOffRender`, `DRAG_POLL_MS`, `newGradeBuildStats`, `useGradeSurface`
+- **`src/workspaces/site-planner/lib/useLatest.js`** — AUDIT BATCH G2 — "the latest value, readable from a callback that closed over an older render".
+  - _exports_: `useLatestEffect`, `useLatestRender`
 - **`src/workspaces/site-planner/lib/useLayerHiddenToast.js`** — the React half of the "layer hidden at this zoom" toast, shared by the project canvas (SitePlanner) and the Map/Select-a-project overview (MapFinder) so the two surfaces cannot hold two…
   - _exports_: `LAYER_HIDDEN_SETTLE_MS`, `LAYER_HIDDEN_TOAST_KEY`, `useLayerHiddenToast`
+- **`src/workspaces/site-planner/lib/useLayerRegistry.js`** — React side of the lazy per-state layer files (batch K stage 1 — see lazyLayerFiles.js and the machinery in layers.js).
+  - _exports_: `loadLayerFilesLoudly`, `useEnsureLayerFiles`, `useLayerRegistryVersion`
+- **`src/workspaces/site-planner/lib/useMapEscapeKeys.js`** — Escape closes the project menu, the comp-marker menu, leaves calibration, and leaves a site plan's manipulation mode; moved verbatim out of MapFinder.jsx (audit batch L2).
+  - _exports_: `useMapEscapeKeys`
+- **`src/workspaces/site-planner/lib/useMapFileDrop.js`** — Dragging a brochure / site-plan file straight onto the portfolio map (window-level dragover + drop, the shared file-drag tracker and the rejected-file message), moved verbatim out of…
+  - _exports_: `useMapFileDrop`
+- **`src/workspaces/site-planner/lib/useMapFocusRequests.js`** — A request arriving from outside MapFinder (a comp pin dropped, a comp marker clicked, the Dashboard's "missing locations" card) switches the rail to the relevant tab and opens the panel…
+  - _exports_: `useMapFocusRequests`
+- **`src/workspaces/site-planner/lib/useMyTeams.js`** — Who is signed in, which teams they belong to, and the account's Sites-panel arrangement load; moved verbatim out of MapFinder.jsx (audit batch L2).
+  - _exports_: `useMyTeams`
+- **`src/workspaces/site-planner/lib/useParcelIdentify.js`** — @planner-extract — the "pick a county lot" (parcel identify) flow of the Site Planner, as a TWO-PHASE hook (audit batch G2 step 3, B2671311, behaviour-identical move).
+  - _exports_: `useParcelIdentify`, `useParcelIdentifyState`
+- **`src/workspaces/site-planner/lib/useParcelTablesVersion.js`** — A component that reads COUNTIES / COUNTIES_MAP while it renders subscribes here, so it re-renders when a state's county table lands (batch K stage 2, parcelStateTables.js) instead of…
+  - _exports_: `useParcelTablesVersion`
+- **`src/workspaces/site-planner/lib/usePlannerDiagnostics.js`** — @planner-extract — AUDIT BATCH G4: the planner's `window.__planner*` diagnostic / E2E hooks (view changes, layers, hit target, foreign overlays, grading readout, export sheet, road network…
+  - _exports_: `usePlannerDiagnostics`
+- **`src/workspaces/site-planner/lib/usePrintCompose.js`** — @planner-extract — the print / compose flow of the Site Planner, as a TWO-PHASE hook (audit batch G2 step 2, B2671311, behaviour-identical move).
+  - _exports_: `usePrintHandlers`, `usePrintState`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
   - _exports_: `_normalizePrefs`, `applyPrefs`, `applyPrefsLocal`, `EMPTY_PREFS`, `getPrefsSnapshot`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setExportPref`, `setParcelLookPref`, `setSitesPanelPref`, `setStandardPref`, `subscribePrefs`, `updateUserPrefs`
 - **`src/workspaces/site-planner/lib/userPrefsStore.js`** — Account-level user preferences — the STORE half, split out of userPrefs.js (NEW-3/NEW-4, the header project switcher's pin-to-top feature).
@@ -2391,12 +2669,14 @@ _1284 source files mapped._
   - _exports_: `useServiceAreas`
 - **`src/workspaces/site-planner/lib/useSitePlanOverlayLayers.js`** — keeps one `rotatedImageLayer` per visible site-plan overlay in sync with MapFinder's `overlays` list (mount/update/teardown)
   - _exports_: `useSitePlanOverlayLayers`
+- **`src/workspaces/site-planner/lib/useVersionHistory.js`** — @planner-extract — AUDIT BATCH G4: version history + plan activity (the automatic-backups dialog state, the Activity tab fetch, open/restore) that used to be state and handlers inside the…
+  - _exports_: `useVersionHistory`
 - **`src/workspaces/site-planner/lib/usStatesData.js`** — GENERATED by scripts/build-us-states.mjs — do not hand-edit.
   - _exports_: `US_STATES_ENCODED`, `US_STATES_SCALE`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
-  - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `isCityLimitsId`, `isCountyLinesId`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
+  - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `hitFeatures`, `identifyRows`, `isCityLimitsId`, `isCountyLinesId`, `pickTier`, `PLACE_LABEL_MAX_ZOOM`, `placeLabelZoom`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
-  - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedStreamBufferLayer`, `cachedTnStreamBufferLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
+  - _exports_: `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedStreamBufferLayer`, `cachedTnStreamBufferLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
 - **`src/workspaces/site-planner/lib/viewChangeRecorder.js`** — Records every `setView` with its before/after view, call stack and whether a TRUSTED gesture authorised it, on one timeline with visibility/freeze/resume/network/long-task events. Diag-armed, read-only.
   - _exports_: `attachTimeline`, `classifyChange`, `createViewChangeRecorder`, `FRAME_GAP_MS`, `FRAME_WATCH_MS`, `GESTURE_EVENTS`, `GESTURE_WINDOW_MS`, `MAX_CHANGES`, `MAX_EVENTS`, `topAppFrame`, `watchFrames`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
@@ -2405,14 +2685,18 @@ _1284 source files mapped._
   - _exports_: `createViewFramingGate`
 - **`src/workspaces/site-planner/lib/viewLegendStore.js`** — A tiny store for LEGENDS THAT DEPEND ON THE VIEW (B2507063): the Zoning dropdown lists the zone codes visible right now, which only the layer knows.
   - _exports_: `_resetViewLegends`, `clearViewLegend`, `getViewLegends`, `setViewLegend`, `subscribeViewLegends`, `useViewLegends`
+- **`src/workspaces/site-planner/lib/viewParcelId.js`** — A typed PARCEL NUMBER finds its lot in the county the MAP IS LOOKING AT, for every county that declares an `idField`.
+  - _exports_: `looksLikeParcelNumber`, `resolveViewParcelId`, `viewIdCounties`, `viewParcelIdMessage`
+- **`src/workspaces/site-planner/lib/wallerLayers.js`** — Waller County (TX) — the county's own GIS layer rows (NEW-1, 2026-11-24).
+  - _exports_: `acresText`, `BUFFER_STATUS`, `ccnCard`, `cpcEasementCard`, `cpcOwnedCard`, `floodwayBufferCard`, `mudCard`, `soft`, `thoroughfareCard`, `WALLER_COLORS`, `WALLER_LAYERS`, `WALLER_VINTAGE`
 - **`src/workspaces/site-planner/lib/wallRows.js`** — Building panel v2/v3 — the "Docks & walls" section's per-wall rows, as pure functions.
-  - _exports_: `ADD_GROUP`, `addGroupWidth`, `addOptions`, `applyDockPieceRemoval`, `applyZonePatch`, `areaWithBumps`, `bumpEndLabel`, `bumpEnds`, `bumpSummary`, `chipLabel`, `clampTrailerRows`, `inheritExtentFields`, `KIND_CATALOG_KEY`, `KIND_LABEL`, `KIND_NAME`, `KIND_ORDER`, `layerExtentPatch`, `legendKinds`, `orderedAddOptions`, `pieceLabel`, `pieceShowsIcon`, `pieceTooltip`, `planDockPieceRemoval`, `planTrailerRowAdd`, `removalCount`, `resolveLayerExtent`, `storedRowDepths`, `STRIP`, `stripPlan`, `TRAILER_MAX_ROWS`, `TRAILER_MIN_ROW_DEPTH`, `trailerCfg`, `trailerPatchAisle`, `trailerPatchRowDepth`, `trailerPatchRows`, `trailerRowDepth`, `trailerSpec`, `trailerTotalDepth`, `trailerTotalDepthOf`, `wallRowPlan`, `wallTotalDepth`, `zdAfterAisle`, `zdAfterRowChange`, `zdAfterRowDepth`
+  - _exports_: `ADD_GROUP`, `addGroupWidth`, `addOptions`, `applyDockPieceRemoval`, `applyZonePatch`, `areaWithBumps`, `bumpEndLabel`, `bumpEnds`, `bumpSummary`, `chipLabel`, `clampTrailerRows`, `inheritExtentFields`, `KIND_LABEL`, `KIND_NAME`, `KIND_ORDER`, `layerExtentPatch`, `legendKinds`, `orderedAddOptions`, `pieceLabel`, `pieceShowsIcon`, `pieceTooltip`, `planDockPieceRemoval`, `planTrailerRowAdd`, `removalCount`, `resolveLayerExtent`, `storedRowDepths`, `STRIP`, `stripPlan`, `TRAILER_MAX_ROWS`, `TRAILER_MIN_ROW_DEPTH`, `trailerCfg`, `trailerPatchAisle`, `trailerPatchRowDepth`, `trailerPatchRows`, `trailerRowDepth`, `trailerSpec`, `trailerTotalDepth`, `trailerTotalDepthOf`, `wallRowPlan`, `wallTotalDepth`, `zdAfterAisle`, `zdAfterRowChange`, `zdAfterRowDepth`
 - **`src/workspaces/site-planner/lib/waParcels.js`** — WASHINGTON county parcel sources. Washington has a statewide parcel mosaic (WAGeoservices "Current Parcels" / the WDFW copy) but its own licence text restricts some counties' parcels to…
   - _exports_: `WA_ROWS`, `waMap`, `waRaw`
 - **`src/workspaces/site-planner/lib/waProvenance.js`** — verification record for the Washington county parcel sources (build-time documentation, see countiesProvenance.js).
   - _exports_: `WASHINGTON_VERIFICATION`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
-  - _exports_: `classifyWell`, `summarizeWells`
+  - _exports_: `classifyWell`, `STORAGE_WELL_CAVEAT`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
   - _exports_: `resolveEstimatedWse`, `WSE_PROVIDERS`, `wseProviderMeta`
 - **`src/workspaces/site-planner/lib/wseSensitivity.js`** — flood-level sensitivity ladder: sweeps the caller-injected `evalAtWse` (the SAME evaluator the live panel uses) across a criteria-configurable set of steps above the governing flood surface, returning absolute-delta rows for the mitigation requirement, credited storage and FFE verdict.
@@ -2423,6 +2707,10 @@ _1284 source files mapped._
   - _exports_: `yieldToMain`
 - **`src/workspaces/site-planner/lib/yieldVerdicts.js`** — FINAL UI SPEC Part B pure Yield-panel verdict strip (B1.1) + number format (B2/B3): maps the drainage object to up-to-four one-line detention/mitigation/buildability verdicts, and `fmtAcFt` (1 decimal, signed-zero collapsed so −0.00 never renders)
   - _exports_: `DEFAULT_MARGIN_PCT_FLOOR_ACFT`, `DEFAULT_THIN_PCT`, `fmtAcFt`, `fmtMargin`, `fmtProvidedOfRequired`, `fmtSignedAcFt`, `marginFor`, `THIN_PCT_BY_CHECK`, `thinThresholdFor`, `TRACE_ACFT`, `yieldVerdictStrip`
+- **`src/workspaces/site-planner/lib/zoneLabelLayer.js`** — The Leaflet half of the zone-code labels (B2573312 NEW-3) — loaded lazily by `layers.buildFeatureLayer` for a row whose `lineLabel.polygon` is set, so it is off the boot bundle.
+  - _exports_: `attachZoneLabels`
+- **`src/workspaces/site-planner/lib/zoneLabels.js`** — Zone-code labels for an area layer (B2573312 NEW-3, DeSoto / Olive Branch zoning) — the pure half, shared by the screen (`zoneLabelLayer.js`) and the printed sheet (`exportSheet.js`) so the…
+  - _exports_: `labelFits`, `labelSpotOf`, `layoutZoneLabels`, `partsOf`, `rectInside`, `textBox`
 - **`src/workspaces/site-planner/lib/zoomTracker.js`** — Moved to src/shared/basemaps (NEW-1/B2018608: /food draws the SAME city-name layer as the Site map, and food may not import from site-planner).
   - _exports_: `* (../../../shared/basemaps/zoomTracker.js)`
 - **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
@@ -2437,7 +2725,7 @@ _1284 source files mapped._
 ## Schedule
 
 - **`public/sequence/index.html`** — Self-contained Sequence/Schedule iframe app: spreadsheet with an Excel-like formula engine, dependency-graph task scheduling, Gantt + PDF export, Supabase cloud-save/history, suggestions review queue, site-linked
-  - _exports_: `_cpMeasure`, `_deepClone`, `_formulaBuiltinMap`, `_mEq`, `_mIdArr`, `_mintTaskSid`, `_mIsObj`, `_mKeyOf`, `_mStripRev`, `_pfCostRef`, `_pfDateRef`, `_pfNumOrBlank`, `_taskFingerprint`, `_taskKey`, `_taskSidMap`, `activeEffectiveCols`, `activeProjectOf`, `activeRect`, `addBD`, `addCalendarMonths`, `addD`, `addMonths`, `AddNoteComposer`, `addRange`, `addWorkdays`, `adjacentMeetingDate`, `agendaDeadline`, `agendaLeadSummary`, `ancestorIdsOf`, `anchorHidden`, `anchorSurroundings`, `App`, `applyMeetingBinding`, `applyTaskFocus`, `applyToRanges`, `approxTextPx`, `AutomationPanel`, `avatarColor`, `axisVelocity`, `balOf`, `barLabelText`, `boundEditNotice`, `buildFormulaRowColumns`, `buildGanttSVG`, `buildHolidaySet`, `buildPDFHtml`, `cadenceSummary`, `calcEnd`, `CaretPopover`, `cascadeDates`, `cascadeDelta`, `celebrateTaskComplete`, `Cell`, `cellsOf`, `changedProjectIds`, `cleanEmailBody`, `colArray`, `colLabel`, `collapse`, `collectCountable`, `collectNonBlank`, `collectNums`, `collectNumsKind`, `collectRefs`, `colLettersToNum`, `colNumToLetters`, `compareValues`, `compareValuesSafe`, `completionDelta`, `computeDisplayHealth`, `computeFormulaValues`, `computeRolledHealth`, `ConditionGroup`, `ConditionRow`, `constrainedStartFrom`, `contactField`, `ContactPicker`, `ContactsPanel`, `copyMeetingBodyWithNewId`, `coreChanged`, `countChangedTaskRows`, `crossScheduleLabel`, `ctrlJumpIndex`, `cumArgs`, `datedif`, `decomposeForDualWrite`, `defaultStartFor`, `DeleteChildrenModal`, `depAnchors`, `DepCell`, `depCellFullTitle`, `depCellNarrowNext`, `DesktopSplitView`, `detectCascadeDrift`, `dif`, `difBD`, `dropDuplicateLagPatch`, `dropFormulaSheetRefs`, `dropStep`, `durTooltip`, `effectiveColsOf`, `effectivePercentComplete`, `ErrorBoundary`, `errVal`, `escapeHtml`, `escapeRegExp`, `estLabelWidth`, `evalBinary`, `evalCall`, `evalConditionGroup`, `evalFieldCondition`, `evalHealthCondition`, `evalHealthRules`, `evalNode`, `evalRule`, `evaluateFormula`, `extractColorTag`, `extractRefs`, `extraHolidaySet`, `fd`, `fdLocal`, `ferr`, `Field`, `findMeetingBodyElsewhere`, `findSignChange`, `finishCallResult`, `fitCaptionFs`, `flatOrderWithLevel`, `flattenArgs`, `fmtBarDate`, `fmtD`, `fmtPreds`, `fmtTaskDuration`, `focusChipTitle`, `focusGroupIds`, `focusReselectTarget`, `focusToggleTarget`, `formatDateToken`, `formatNumberSection`, `formatNumberToken`, `FormatPanel`, `formatSheetQualifier`, `formatValue`, `formatValueColor`, `formulaCalendar`, `formulaColsOf`, `formulaColToColDef`, `FormulaColumnEditor`, `formulaColumnNames`, `FormulaError`, `formulaToday`, `fvOf`, `ganttCaptionHalf`, `ganttCaptionNeed`, `ganttLeafGeom`, `ganttMilestoneGeom`, `ganttNameSize`, `ganttNameWeight`, `ganttSummaryGeom`, `GanttView`, `getHealthRules`, `getInitials`, `gridCellBlank`, `GridColumnsChooser`, `gridCtrlArrowTarget`, `GridHeaderMenu`, `GridView`, `GroupOrderMenu`, `groupRowsByProject`, `HealthColHeader`, `HealthColHeaderIcon`, `HealthDropMenu`, `HealthPicker`, `HistoryPanel`, `idPressMovesRows`, `importMeetingBodies`, `importMeetingBody`, `indentSelection`, `InlineDate`, `insertRowAbove`, `ipmtOf`, `irrOf`, `isBlank`, `isBuiltinFormulaName`, `isCallInvariant`, `isCompleteTask`, `isDate`, `isErrVal`, `isFormulaError`, `isLeap`, `isMulti`, `isOrgOwned`, `isoToSerial`, `isoWeekNum`, `isRangeArg`, `isRowInvariant`, `isSiteOwned`, `isValidColor`, `isValidFontSize`, `isWorkingSerial`, `joinWithAnd`, `layoutExhibitCols`, `leafPercent`, `liveSiteName`, `loadExportPrefs`, `loadTabView`, `loadTaskFocus`, `loadViewPrefs`, `logMergeToastEvent`, `looksLikeDateFormat`, `looseEqual`, `makeDate`, `makeSelection`, `MasterView`, `matchesCriteria`, `matchIndex`, `matchRefToken`, `mbBodiesSameCadence`, `mbFmt`, `mbMonthsPhrase`, `MBMultiPick`, `mbOrdinal`, `mbPositionsPhrase`, `mbRecurrenceSignature`, `mbRuleSignature`, `mbRuleSummary`, `measuredColWidth`, `meetingBindingTrace`, `meetingBoundInfo`, `MeetingCalendarsModal`, `meetingCostDays`, `meetingDatesInRange`, `meetingDoubleLagFlag`, `meetingFloatBD`, `MeetingImportPicker`, `mergeCloudDoc`, `mergeLocationPhrase`, `migrateCfRulesToHealthRules`, `migrateRule`, `migrateScheduleOwnership`, `mirrOf`, `mkt`, `moveSelectionToDestination`, `MoveToModal`, `nameCollision`, `need`, `networkDays`, `newMeetingBody`, `newPinConflicts`, `nextEligibleMeeting`, `normalizeName`, `normalizeOwnerLists`, `normalizeScheduleOwnership`, `normPreds`, `normRect`, `noteISO`, `NoteRow`, `NotesColHeader`, `noteShortMD`, `NotesModal`, `notifyRowsDeleted`, `nperOf`, `nthWeekday`, `nthWeekdayOfMonth`, `num1`, `numberFormatColorFor`, `numToGeneralStr`, `occurrencesInMonth`, `opsForField`, `otherScheduleMeetingBodies`, `outdentSelection`, `ownerDisplayParts`, `ownerHas`, `ownerJoin`, `ownerKey`, `ownerKeyOf`, `ownerListOf`, `ownerOf`, `parse`, `parseCriteriaOperand`, `parseDurationInput`, `parseFlexDate`, `parseFormula`, `parseFormulaUncached`, `parseLooseDate`, `parsePreds`, `parseRefText`, `partitionSchedules`, `pd`, `PDFExportModal`, `persistTaskFocus`, `persistViewState`, `PhoneSplitView`, `pickActivePid`, `pickOrdinal`, `pinConflictNotice`, `pinConflictsOf`, `pinnedFillLayers`, `placeGanttLabel`, `planFormulaColumns`, `pmtOf`, `positionMissingReport`, `postLoadState`, `postToShell`, `PredEditor`, `predLagPlainEnglish`, `ProjContextMenu`, `ProjDropdown`, `promoteChildrenAndDelete`, `pruneOrphanScheduleRefs`, `pruneScheduleRefs`, `pvOf`, `raiseIfErr`, `rangeArray`, `rangeGrid`, `rangesOf`, `rateOf`, `readGridCell`, `readGridCfg`, `rebuildHEALTH`, `rebuildMeetingBodyIndex`, `recascadeWithDrift`, `recomposeFromRows`, `recomputeAfterStructureChange`, `recomputeSchedule`, `reconcileNeedsAttention`, `rectHas`, `refToText`, `removeOwnerFrom`, `removeScheduleFromDoc`, `RenameModal`, `renameOwnerIn`, `renumberTasks`, `reportFacetCounts`, `reportFilterCount`, `reportFilterPhrase`, `ReportMenu`, `reportProjectKeys`, `reportProjectPasses`, `reportProjectToggle`, `reportStatusKeys`, `reportStatusOptions`, `reportStatusPasses`, `reportStatusToggle`, `resolveBoundEdit`, `resolveDropParent`, `resolveDuration`, `resolveLabelAlign`, `resolveMeetingForward`, `resolveNamedRange`, `resolveSheetGrid`, `resolveTaskSpan`, `resolveViewState`, `rewriteFormulaForCopy`, `rewriteFormulaForSheetRename`, `rewriteFormulaForStructuralShift`, `rolledPercentMap`, `rollForwardToWorkday`, `rollupParentDates`, `roundAwayFromZero`, `Row`, `rowCanFocus`, `rowDragArmed`, `rowDragThreshold`, `rowDropIntent`, `rowDropZone`, `rowFloatAtPointer`, `rowWindow`, `rowWindowTop`, `RuleColorPicker`, `sameFamily`, `saveExportPrefs`, `saveTabView`, `saveTaskFocus`, `saveViewPrefs`, `scheduleLabelParts`, `scheduleList`, `scheduleRowPrefix`, `schedulesForOwner`, `sectionForSign`, `SegBtn`, `selContains`, `selEdgesAt`, `selIsRange`, `selRowsOf`, `selTouchesCol`, `selTouchesRow`, `serialToISO`, `serialToYMD`, `setSiteNameResolver`, `SettingsPanel`, `settleBoundNotice`, `sgqAvatarColor`, `SgqCascadePicker`, `SgqChangeRow`, `sgqChildrenOf`, `sgqConfClass`, `SgqCrumb`, `sgqCrumbOf`, `SgqDot`, `sgqFmtDate`, `sgqInitials`, `sheetQualifierAt`, `showToast`, `solveRoot`, `sortByVisualOrder`, `splitFormatSections`, `SplitView`, `startForEnd`, `startIsPinned`, `StatusHeaderDropdown`, `StatusPicker`, `stepFontSize`, `stepGridRow`, `stepVisibleColIdx`, `stripAncestorPredecessors`, `stripFormatLiterals`, `stripTaskViewFields`, `stripViewState`, `subBD`, `subtractCell`, `SuccessorPromptModal`, `SuggestionsView`, `suggestScheduleName`, `SwatchGrid`, `TaskContextMenu`, `taskDurUnit`, `taskDurValue`, `textFormat`, `toBool`, `toDateSerial`, `Toggle`, `toggleCellOut`, `tokenize`, `toNumber`, `toShortDate`, `toStr`, `touchesSchedule`, `TYPE_RANK`, `unpinStartPatch`, `useAnchoredPopover`, `useProjectOrder`, `validateNewSchedule`, `validatePredEdit`, `valueFamily`, `weekdayOf`, `weekNum`, `wildcardToRegExp`, `withActive`, `withLastActiveSite`, `workdaysBetween`, `writeGridCfg`, `writeLabelAlign`, `xirrOf`, `xnpvPairs`, `yearFrac`, `ymdToSerial`
+  - _exports_: _(none)_
 - **`src/workspaces/scheduler/components/AgendaView.jsx`** — The org-scoped agenda body (date/recurrence-only operational items, no Gantt dependencies) — native write-through controls, no dialog box.
   - _exports_: `default (AgendaView)`
 - **`src/workspaces/scheduler/components/LinkSchedulePanel.jsx`** — Suggest-and-confirm panel to create-or-link a schedule to an unlinked Site Planner project; never auto-links
@@ -2462,12 +2750,72 @@ _1284 source files mapped._
   - _exports_: `ctrlJumpIndex`, `gridCellBlank`, `gridCtrlArrowTarget`
 - **`src/workspaces/scheduler/lib/gridRowNav.js`** — Scheduler grid — Up/Down arrow row navigation that never throws the cursor to the first or last row.
   - _exports_: `stepGridRow`
+- **`src/workspaces/scheduler/lib/modifierForward.js`** — "i want ctrl zoom to always work if im hovering over the schedule".
+  - _exports_: `installModifierForward`
 - **`src/workspaces/scheduler/lib/navState.js`** — Pure null-safe parse/sanitize of the embedded scheduler's postMessage nav-state and derive current/site-linked project for the breadcrumb
   - _exports_: `dashboardNavActions`, `deriveCurrentProject`, `findAllBySiteId`, `findBySiteId`, `isGridMismatched`, `isPickShowing`, `needsArrivalSelect`, `needsScheduleCarryIn`, `newProjectAction`, `parseLoadState`, `parseNavState`, `resolveReportRowNavigation`, `sanitizeProjects`, `SCHEDULE_FAIL_MS`, `SCHEDULE_SLOW_MS`, `scheduleListState`, `shouldAdoptLinkedSiteIntoRoute`, `shouldNeutralizeToReports`, `shouldShowLinkPanel`
 - **`src/workspaces/scheduler/lib/saveState.js`** — Pure map of the embedded Gantt's reported save status (saving/error/offline/synced) onto the shared CloudSyncBadge, never a false-green
   - _exports_: `scheduleSaveState`
 - **`src/workspaces/scheduler/lib/scheduleDeleteVerify.js`** — a schedule delete verifies its own result. The shell posts `planar:nav-delete` to the embedded app and has no reply channel for it, so a delete the embedded app refused (or lost) used to…
   - _exports_: `DELETE_VERIFY_MS`, `deleteFailureMessage`, `deleteStillPresent`
+- **`src/workspaces/scheduler/page/common.jsx`** — Module exporting anchorHidden, anchorSurroundings, avatarColor, BASE_HK (+13 more).
+  - _exports_: `anchorHidden`, `anchorSurroundings`, `avatarColor`, `BASE_HK`, `contactField`, `ContactPicker`, `DepCell`, `getInitials`, `HDARK`, `HEALTH`, `HK`, `measuredColWidth`, `MENU_STOPS_GRID`, `NO_AUTOFILL`, `rebuildHEALTH`, `showToast`, `useAnchoredPopover`
+- **`src/workspaces/scheduler/page/common/ErrorBoundary.jsx`** — ── ErrorBoundary ───────────────────────────────────────── Catches render errors in Gantt/Split view and shows a recovery UI instead of a white screen.
+  - _exports_: `ErrorBoundary`
+- **`src/workspaces/scheduler/page/common/formatConsts.js`** — Excel-style fill palette: 5 columns x 4 rows = 20 swatches. Top rows = pastel tints (read well on light grid rows + leave room for text); bottom rows = stronger fills (work well as…
+  - _exports_: `FONT_SIZE_MIN`, `FONT_SIZE_STEPS`, `isValidColor`, `isValidFontSize`, `ROW_COLORS`, `stepFontSize`
+- **`src/workspaces/scheduler/page/dialogs/confirm.jsx`** — Local "today"; refreshed live by App (focus / midnight rollover)
+  - _exports_: `askConfirm`
+- **`src/workspaces/scheduler/page/dialogs/taskDialogs.jsx`** — ── Task-complete celebration ("Ring & Spark" toast) ────── A small toast rises from the bottom-center when a task transitions to Complete: the green dot pops in, the check draws itself, a…
+  - _exports_: `celebrateTaskComplete`, `DeleteChildrenModal`, `MoveToModal`, `notifyRowsDeleted`, `SuccessorPromptModal`
+- **`src/workspaces/scheduler/page/gantt/GanttView.jsx`** — Module exporting depAnchors, estLabelWidth, fitCaptionFs, GANTT_INK (+11 more).
+  - _exports_: `depAnchors`, `estLabelWidth`, `fitCaptionFs`, `GANTT_INK`, `GANTT_PROFILES`, `ganttCaptionHalf`, `ganttLeafGeom`, `ganttMilestoneGeom`, `ganttNameSize`, `ganttNameWeight`, `ganttSummaryGeom`, `GanttView`, `placeGanttLabel`, `resolveLabelAlign`, `writeLabelAlign`
+- **`src/workspaces/scheduler/page/gantt/pdfExport.jsx`** — ── PDF helpers ──────────────────────────────────────────
+  - _exports_: `buildPDFHtml`, `PAGE_SIZES`
+- **`src/workspaces/scheduler/page/grid/Cell.jsx`** — Module exporting Cell.
+  - _exports_: `Cell`
+- **`src/workspaces/scheduler/page/grid/columns.js`** — Which kind of pointer made the press that is being handled: React's onMouseDown cannot say (a MouseEvent has no pointerType), but the pointerdown that precedes every mousedown — a tap's…
+  - _exports_: `activeEffectiveCols`, `activeProjectOf`, `buildFormulaRowColumns`, `COL_BY_K`, `colLabel`, `COLS`, `computeFormulaValues`, `DEFAULT_GRID_COLS`, `effectiveColsOf`, `formulaCalendar`, `formulaColsOf`, `formulaColumnNames`, `formulaToday`, `installRowPointerTypeListener`, `isBuiltinFormulaName`, `lastRowPointerType`, `readGridCfg`, `writeGridCfg`
+- **`src/workspaces/scheduler/page/grid/gridNav.js`** — Keyboard column navigation steps through the VISIBLE columns in DISPLAY ORDER so the cell cursor (a COLS/master index) never lands on a hidden, non-rendered column (which would make the…
+  - _exports_: `focusChipTitle`, `focusGroupIds`, `focusReselectTarget`, `focusToggleTarget`, `gridCellBlank`, `gridCtrlArrowTarget`, `rowCanFocus`, `stepGridRow`, `stepVisibleColIdx`
+- **`src/workspaces/scheduler/page/grid/gridStyle.js`** — THE one cell-line rule for every grid cell, ID and TASK included: a faint solid line on the right (column divider) and bottom (row line), same token everywhere.
+  - _exports_: `GRID_LINE`, `GRID_LINE_RANGE`, `pinnedFillLayers`
+- **`src/workspaces/scheduler/page/grid/GridView.jsx`** — Module exporting GridView.
+  - _exports_: `GridView`
+- **`src/workspaces/scheduler/page/grid/headers.jsx`** — Module exporting FormulaColumnEditor, GridColumnsChooser, GridHeaderMenu, HealthColHeader (+3 more).
+  - _exports_: `FormulaColumnEditor`, `GridColumnsChooser`, `GridHeaderMenu`, `HealthColHeader`, `NOTE_SIZES`, `NotesColHeader`, `StatusHeaderDropdown`
+- **`src/workspaces/scheduler/page/grid/pickers.jsx`** — Module exporting HealthPicker, PhaseIconSummary, PredEditor, predLagPlainEnglish (+4 more).
+  - _exports_: `HealthPicker`, `PhaseIconSummary`, `PredEditor`, `predLagPlainEnglish`, `StatusPicker`, `TaskIconPickerHost`, `TaskIconSlot`, `taskIconsW`
+- **`src/workspaces/scheduler/page/harnessGlobals.js`** — Harness compatibility for the Schedule page. Until audit batch J3 the page was ONE classic <script>, so every top-level function was a property of `window` and every top-level…
+  - _exports_: `exposeToHarness`
+- **`src/workspaces/scheduler/page/layout.js`** — ── Constants ─────────────────────────────────────────────
+  - _exports_: `barLabelText`, `escapeHtml`, `GANTT_SCROLL_MEMO`, `GRID_SCROLL_MEMO`, `PPD`, `ROW_H`, `rowWindow`, `rowWindowTop`, `setRowH`
+- **`src/workspaces/scheduler/page/main.jsx`** — Side-effect module (main.jsx), no exports.
+  - _exports_: _(none)_
+- **`src/workspaces/scheduler/page/menus/ProjectMenus.jsx`** — Module exporting ProjContextMenu, ProjDropdown, RenameModal.
+  - _exports_: `ProjContextMenu`, `ProjDropdown`, `RenameModal`
+- **`src/workspaces/scheduler/page/menus/TaskMenus.jsx`** — Module exporting TaskContextMenu.
+  - _exports_: `TaskContextMenu`
+- **`src/workspaces/scheduler/page/panels/ContactsHistory.jsx`** — Module exporting ContactsPanel, HistoryPanel.
+  - _exports_: `ContactsPanel`, `HistoryPanel`
+- **`src/workspaces/scheduler/page/panels/formControls.jsx`** — ── PDFExportModal ──────────────────────────────────────── PDFExportModal presentational helpers, hoisted to module scope so React keeps a STABLE component identity across renders.
+  - _exports_: `Field`, `Row`, `SegBtn`, `Toggle`
+- **`src/workspaces/scheduler/page/panels/MeetingCalendars.jsx`** — Module exporting MeetingCalendarsModal.
+  - _exports_: `MeetingCalendarsModal`
+- **`src/workspaces/scheduler/page/panels/NotesModal.jsx`** — Module exporting NotesModal.
+  - _exports_: `NotesModal`
+- **`src/workspaces/scheduler/page/panels/PDFExportModal.jsx`** — Module exporting PDFExportModal.
+  - _exports_: `PDFExportModal`
+- **`src/workspaces/scheduler/page/panels/SettingsPanels.jsx`** — Module exporting AutomationPanel, FormatPanel, SettingsPanel.
+  - _exports_: `AutomationPanel`, `FormatPanel`, `SettingsPanel`
+- **`src/workspaces/scheduler/page/pinCursor.js`** — pinSchedCursor(cursor, { onExit }) — the scheduler iframe's own copy of src/shared/ui/controls.jsx `pinDragCursor` (this standalone page cannot import from src/).
+  - _exports_: `installPinSchedCursor`
+- **`src/workspaces/scheduler/page/suggestions/SuggestionsView.jsx`** — Module exporting SuggestionsView.
+  - _exports_: `SuggestionsView`
+- **`src/workspaces/scheduler/page/taskReport/TaskReport.jsx`** — Module exporting installProjectOrderListener, MasterView.
+  - _exports_: `installProjectOrderListener`, `MasterView`
+- **`src/workspaces/scheduler/page/viewState.js`** — The 13 per-tab / per-browser VIEW-state keys that must NEVER live in the versioned hs-v1 cloud document.
+  - _exports_: `applyTaskFocus`, `coreChanged`, `persistViewState`, `pickActivePid`, `resolveViewState`, `stripViewState`, `withLastActiveSite`
 - **`src/workspaces/scheduler/Scheduler.jsx`** — Scheduler workspace root: embeds the standalone Gantt iframe, bridges nav/toolbar/save/link over postMessage into the shell header
   - _exports_: `default (Scheduler)`
 
@@ -2490,7 +2838,7 @@ _1284 source files mapped._
 - **`src/workspaces/doc-review/docEditor/docExtensions.js`** — The Tiptap extension set for the Review document editor.
   - _exports_: `docExtensions`
 - **`src/workspaces/doc-review/docEditor/docKind.js`** — Which Review files open in the DOCUMENT editor instead of the drawing canvas.
-  - _exports_: `asDocxName`, `DOC_ACCEPT`, `docKindOf`, `isEditableDocName`, `stripDocExt`
+  - _exports_: `asDocxName`, `docKindOf`, `stripDocExt`
 - **`src/workspaces/doc-review/docEditor/docModel.js`** — Pure open/save for the document editor — no React, no DOM, no network, so Node can test it.
   - _exports_: `buildSave`, `DOCX_MIME`, `emptyAttrs`, `loadModel`
 - **`src/workspaces/doc-review/docEditor/trackChanges.js`** — Track Changes for the document editor — pure ProseMirror, no DOM.
@@ -2512,7 +2860,7 @@ _1284 source files mapped._
 - **`src/workspaces/doc-review/lib/deleteOutcome.js`** — the ONE reading of `deleteReview`'s result (NEW-1, LOUD-FAILURE).
   - _exports_: `deleteFailureEvent`, `deleteReviewOutcome`
 - **`src/workspaces/doc-review/lib/docVersions.js`** — Earlier saved versions of one Library file (B2022929, NEW-1 "Version history").
-  - _exports_: `canOpenEarlier`, `copyFileName`, `demote`, `earlierVersionLabel`, `fmtVersionSize`, `newVersionEntry`, `packSource`, `restoreVersion`, `saveVersion`, `SOURCE_FIELDS`, `versionDateLabel`, `versionList`
+  - _exports_: `canOpenEarlier`, `copyFileName`, `demote`, `earlierVersionLabel`, `fmtVersionSize`, `newVersionEntry`, `packSource`, `restoreVersion`, `saveVersion`, `versionDateLabel`, `versionList`
 - **`src/workspaces/doc-review/lib/fileIndex.js`** — Pure auto-filing file-facts view-model: filing decision to Postgres index row, and merge stored placement/needs-filing facts onto review rows
   - _exports_: `DUPLICATE_RAPID_REPEAT_MS`, `factsRowToPatch`, `findDuplicateReview`, `isRapidRepeatUpload`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
@@ -2532,7 +2880,7 @@ _1284 source files mapped._
 - **`src/workspaces/doc-review/lib/parseLength.js`** — parseFeet: validate a human-typed real-world length to feet for manual Calibrate, rejecting scale ratios and bare fractions instead of coercing
   - _exports_: `parseFeet`
 - **`src/workspaces/doc-review/lib/pdf.js`** — pdf.js setup + load/render helpers for doc-review: asset wiring, polyfill, text/positioned-item extraction, double-buffered region render, OCR/stitch/compare raster
-  - _exports_: `extractAllPagesText`, `extractPageItems`, `extractPageText`, `firstPagesText`, `loadPdf`, `renderInto`, `renderPageToImage`, `renderPageToImageData`, `renderPageToOcrCanvas`
+  - _exports_: `extractAllPagesText`, `extractPageItems`, `extractPageText`, `loadPdf`, `renderInto`, `renderPageToImage`, `renderPageToImageData`, `renderPageToOcrCanvas`
 - **`src/workspaces/doc-review/lib/pdfSplit.js`** — Byte-level PDF split by filing plan: lazily use pdf-lib to carve one clean per-discipline PDF from a combined set, no page dropped
   - _exports_: `partFileName`, `splitPdfByPlan`
 - **`src/workspaces/doc-review/lib/releaseCanvas.js`** — the Review workspace's byte-identical copy of the site planner's canvas-release helper (deliberately duplicated, not shared: a cross-route module becomes its own chunk)
@@ -2546,7 +2894,7 @@ _1284 source files mapped._
 - **`src/workspaces/doc-review/lib/reviewStore.js`** — Document Review cloud persistence I/O: Supabase doc_reviews + file-facts index, Drive-first byte storage, filing/re-filing, localStorage flush mirror
   - _exports_: `BUCKET`, `buildDriveKey`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `driveStreamSource`, `factsPatchFor`, `fetchFileFacts`, `fetchProjects`, `fetchReviews`, `fileNewReview`, `filingSignature`, `fillEmptyFromFacts`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listDeletedReviews`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `mayPurgeReview`, `mergeOntoStored`, `newReviewId`, `newSourceId`, `OVERLAY_BLOCK_MESSAGE`, `overlayReferencesReview`, `purgeExpiredDeleted`, `purgeReview`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `rememberFiledSignature`, `rememberStoredReview`, `restoreReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `shouldDeleteBytes`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `syncFileFactsForReview`, `unfileReviewsForDeletedProject`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/reviewTabs.js`** — Review tabs (NEW-1, 2026-10-04) — the PURE model behind the Bluebeam-style tab strip.
-  - _exports_: `applyRemote`, `buildSyncDoc`, `cleanTabState`, `closeTab`, `droppedNotice`, `findOpenTab`, `MAX_RESTORED_TABS`, `mergeLiveRecord`, `mergeRestored`, `moveTab`, `parseSyncDoc`, `parseTabs`, `serializeTabs`, `srcKeyOf`, `syncSig`, `syncState`, `tabKindOf`, `TABS_STORE_KEY`, `tabTitle`, `upsertTab`, `withKnownKeys`
+  - _exports_: `applyRemote`, `buildSyncDoc`, `cleanTabState`, `closeTab`, `droppedNotice`, `findOpenTab`, `MAX_RESTORED_TABS`, `mergeLiveRecord`, `mergeRestored`, `moveTab`, `normSrcKey`, `parseSyncDoc`, `parseTabs`, `serializeTabs`, `srcKeyOf`, `syncSig`, `syncState`, `tabKindOf`, `TABS_STORE_KEY`, `tabTitle`, `upsertTab`, `withKnownKeys`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
 - **`src/workspaces/doc-review/lib/sheetOpenState.js`** — the Review "Opening <sheet>…" chip's three-way decision: opening / failed / backstop-expired (NEW-6).
@@ -2571,6 +2919,12 @@ _1284 source files mapped._
   - _exports_: `useBelowHeader`
 - **`src/workspaces/doc-review/lib/usePersistence.js`** — useReviewPersistence hook: first-edit debounced cloud save + synchronous localStorage mirror, honest save badge, conflict/read-only lockout, unload flush
   - _exports_: `canCloudSave`, `docSaveState`, `useReviewPersistence`
+- **`src/workspaces/doc-review/lib/useReviewHistory.js`** — Undo / redo of the editable doc state (markups + per-sheet calibration), moved verbatim out of DocReview.jsx (audit batch L4).
+  - _exports_: `useReviewHistory`
+- **`src/workspaces/doc-review/lib/useReviewPinch.js`** — The two-finger pinch zoom (throttled to one frame) and its telemetry, moved verbatim out of DocReview.jsx (audit batch L4).
+  - _exports_: `useReviewPinch`
+- **`src/workspaces/doc-review/lib/useReviewRail.js`** — The sheet rail's width / collapsed state, the takeoff panel's open state, and the VIEWPORT-STABLE compensation that keeps the drawing from skipping sideways when the rail moves; moved…
+  - _exports_: `useReviewRail`
 - **`src/workspaces/doc-review/Stitcher.jsx`** — Multi-sheet stitcher: load PDFs onto one world canvas, two-point assisted align, auto-stitch/calibrate/crop, cross-seam measure, undo, cloud-persisted review
   - _exports_: `default (Stitcher)`
 
@@ -2579,11 +2933,11 @@ _1284 source files mapped._
 - **`src/workspaces/library/components/FileBrowser.jsx`** — Library main surface: category tree + facet row + badged file list, drop-to-autofile queue with discipline split, needs-filing triage, delete and Drive share-link
   - _exports_: `default (FileBrowser)`
 - **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete via a right-click context menu (B677; double-click opens+expands a folder) + the enumerated delete-safety modal + Drive-mirror status.
-  - _exports_: `default (FolderTree)`
+  - _exports_: `default (FolderTree)`, `DriveBadge`
 - **`src/workspaces/library/components/LibraryHome.jsx`** — Library landing Home: Pinned folder/file cards (loud missing-target state), Recent drawings, project card grid; import stays per-project
   - _exports_: `default (LibraryHome)`, `FileCard`, `UnfiledCard`
 - **`src/workspaces/library/components/ReviewTrash.jsx`** — the ONE implementation of "delete a Library file → Recently deleted → restore / delete forever".
-  - _exports_: `DeleteButton`, `FileTypeIcon`, `RecentlyDeletedList`, `TrashNotice`, `UndoToast`, `useReviewTrash`
+  - _exports_: `DeleteButton`, `FileTypeIcon`, `RecentlyDeletedList`, `TrashNotice`, `UndoToast`, `useReviewTrash`, `useUndoToast`
 - **`src/workspaces/library/lib/driveSyncRun.js`** — Library › folder rail — one background Google Drive mirror run, TAGGED with the project it belongs to.
   - _exports_: `runDriveSync`
 - **`src/workspaces/library/lib/fileIntoProject.js`** — fileReviewIntoProject — the ONE implementation of "put this existing Library file into a project" (B217's refile, shared since NEW-2 so the Library Home's Unfiled "Move to project…" and the…
@@ -2595,7 +2949,9 @@ _1284 source files mapped._
 - **`src/workspaces/library/lib/folderLoadDecision.js`** — what the folder tree shows after a read (NEW-4, LOUD-FAILURE).
   - _exports_: `applyFolderRead`, `FOLDER_READ_FAILED_PREFIX`, `templatePreviewAllowed`
 - **`src/workspaces/library/lib/folders.js`** — Client folder-index store (B650): Supabase tree CRUD (own-row RLS) + idempotent template seed + the one-way Drive-mirror trigger via /api/folders.
-  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `migrateAllProjects`, `migrateProjectFiles`, `moveDriveFileToFolder`, `moveFolder`, `planFolderDelete`, `purgeProjectFolders`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
+  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `migrateAllProjects`, `migrateProjectFiles`, `moveDriveFileToFolder`, `moveFolder`, `ORGANIZER_SIGNIN_EXPIRED`, `ORGANIZER_UNREACHABLE`, `organizerFailureMessage`, `planFolderDelete`, `purgeProjectFolders`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
+- **`src/workspaces/library/lib/organizerRun.js`** — One run of the Library's one-time folder organizer (B663), as a pure-ish function so its outcome — and above all WHEN the done-marker is written — can be asserted without rendering the…
+  - _exports_: `runOrganizer`
 - **`src/workspaces/library/lib/renameFile.js`** — the ONE "rename a file's display title" write (NEW-2). The title is `doc_reviews.title`; the Library list, the Review header and Home's pins all read it from there (pins keep only a…
   - _exports_: `renameReviewTitle`
 - **`src/workspaces/library/lib/trackedSites.js`** — NEW-2 (record-only sites) + the "this row cannot open" state.
