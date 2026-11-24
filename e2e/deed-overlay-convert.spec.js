@@ -32,6 +32,13 @@ test("locked deed opens its panel on double-click; convert to overlay and back",
   await page.mouse.click(x, y); await page.waitForTimeout(250); await page.mouse.click(x, y, { clickCount: 2 });
   await expect(page.getByTestId("deed-inspector")).toBeVisible({ timeout: 20_000 });   // LOCKED, and it still opens
 
+  // And a double-click a few pixels OUTSIDE the thin outline (the fat grab band every closed markup has) still finds the deed.
+  await page.getByTestId("deed-inspector").getByRole("button", { name: "Unlock" }).click();
+  await page.mouse.click(5, 5); await page.waitForTimeout(400);
+  const left = await page.evaluate(() => { const p = document.querySelector('[data-feature="markup:mkA"] polygon[data-testid]'); const m = p.getScreenCTM(); const [[x0, y0], , , [x3, y3]] = p.getAttribute("points").split(" ").map((s) => s.split(",").map(Number)); return { x: m.a * x0 + m.e - 3, y: m.d * ((y0 + y3) / 2) + m.f }; });
+  await page.mouse.click(left.x, left.y); await page.waitForTimeout(250); await page.mouse.click(left.x, left.y, { clickCount: 2 });
+  await expect(page.getByTestId("deed-inspector")).toBeVisible({ timeout: 20_000 });
+
   await page.getByTestId("deed-to-overlay").click();
   await expect.poll(async () => ((await rec(page))?.sheetOverlays || []).length, { timeout: 20_000 }).toBe(1);
   await expect.poll(async () => ((await rec(page))?.markups || []).length).toBe(0);
