@@ -5,7 +5,7 @@
 import { freeParkStack, relayoutFreeStack } from "./parking.js";
 import { bondedChildRot } from "./siteModel.js";
 import { rot2, CURB, isCenterlineRoad } from "./siteGeometry.js";
-import { dogEarGeom, dogEarSize, sidewalkSpanForBumps, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, flushKidBoxFor, sideParkStack } from "./dogEar.js";
+import { dogEarGeom, dogEarSize, sidewalkSpanForBumps, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, flushKidBoxFor, sideParkStack, repackAllFlushLayers } from "./dogEar.js";
 import { dockSidesFor, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, withDockAxis } from "./dockZones.js";
 import { clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch } from "./wallRows.js";
 import { dockSegExtent } from "./footprintEdit.js";
@@ -622,7 +622,7 @@ export const relayoutWallKids = (arr, b, sideRef = b, { pinFrom = null } = {}) =
       sideParkStack(b, s, pads, sd).forEach((r) => gapById.set(r.el.id, r.gap));
     });
   }
-  const placed = arr.map((x) => {
+  const laid = arr.map((x) => {
     if (ownedWallStrip(x, b)) return sidewalkFullRunPatch(arr, b, x, sideRef);
     // B2268801 — a rear / end wall's Road or Trailer layer with its own along extent re-derives its length + position
     // from it (a layer with none is left exactly as before: its stored box, scaled with the wall on a resize).
@@ -649,6 +649,9 @@ export const relayoutWallKids = (arr, b, sideRef = b, { pinFrom = null } = {}) =
     else if (res.stamp) out.sideParkFit = res.stamp;
     return out;
   });
+  // B2671304 (×2) — the buffer / road / wall trailer row beyond the derived layers is re-packed FLUSH against them,
+  // both ways (a shrink pulls it back in, not only a grow pushing it out). One shared pack (lib/dogEar).
+  const placed = repackAllFlushLayers(laid, b, sideRef);
   // Preserve object identity when nothing actually moved (no dirty flag / no cloud re-save
   // churn on a plan that is already correct — the same idempotency contract as dogEarGeom).
   const near = (p, q) => Math.abs(p - q) <= 1e-6;
