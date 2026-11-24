@@ -233,6 +233,53 @@ export function inboardReach(b, side, others) {
   return reach;
 }
 
+/* B2671304 (×2) — THE ONE PACK OF A WALL'S FLUSH LAYERS (buffer / road / wall trailer row).
+ *
+ * A flush layer is bonded to the EDGE of whatever is inboard of it (the wall face, a sidewalk, side parking), so its
+ * perpendicular position is DERIVED, both ways: it starts exactly where the inboard layers end. The old rule
+ * (`wallStripBoxFor`'s "pushed out … never pulled in") was one-directional, so growing a building or its parking
+ * pushed the buffer out and shrinking it back left the buffer stranded where it had been pushed — the owner's
+ * "expanding the building moves the buffer out, shrinking doesn't bring it back". Every refit (`relayoutWallKids`),
+ * the load-time heal (`siteModel.normalizeWallKids`) and every panel edit (`SitePlanner.repackFlushBeyond`) now ends
+ * here, so no path can leave a gap and an already-detached buffer snaps back on open.
+ *
+ * Several flush layers on one wall keep their outward ORDER (sorted by their current offset) and pack contiguously.
+ * Only the perpendicular axis moves; length / position along the wall are resolved elsewhere. A wall that carries a
+ * dock-chain member (court / trailer / chain buffer, laid out by `relayoutSide`) is left alone. `sideRef` is the box
+ * used to infer an untagged child's side (the PRE-resize host during a resize). Returns the SAME array when nothing
+ * moves. */
+export const isFlushPackLayer = (x) => !!x && !x.points && !x.noFit
+  && ((x.type === "landscape" && !x.sidewalkSide) || x.type === "road" || (x.type === "trailer" && !!x.wallTrailer));
+const isChainMember = (x) => !!(x.noFit || x.truckCourt || x.forCourt || x.forTrailer || x.prevZone);
+export function repackFlushLayers(arr, b, side, sideRef = b) {
+  if (!b || !SIDE_N[side] || !Array.isArray(arr)) return arr;
+  const fin = (x) => ["cx", "cy", "w", "h"].every((k) => Number.isFinite(x[k]));
+  const sideOf = (x) => x.sidewalkSide || x.sideParkSide || sideOfBondedBox(sideRef, x);
+  const kids = arr.filter((x) => x && x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && fin(x) && sideOf(x) === side);
+  const flush = kids.filter((x) => isFlushPackLayer(x));
+  if (!flush.length || kids.some(isChainMember)) return arr;
+  const isVert = side === "left" || side === "right";
+  const [nx, ny] = SIDE_N[side];
+  const sg = isVert ? nx : ny;
+  const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -(b.rot || 0));
+  const perp = (x) => { const l = local(x); return sg * (isVert ? l.x : l.y); };
+  const depth = (x) => { const e = hostAxisExtents(b, x); return isVert ? e.dimBX : e.dimBY; };
+  let run = inboardReach(b, side, kids.filter((x) => !isFlushPackLayer(x)));
+  const moves = new Map();
+  flush.sort((p, q) => perp(p) - perp(q)).forEach((x) => {
+    const d = depth(x), want = run + d / 2;
+    if (Math.abs(perp(x) - want) > 1e-6) {
+      const l = local(x);
+      const off = rot2(isVert ? sg * want : l.x, isVert ? l.y : sg * want, b.rot || 0);
+      moves.set(x.id, { cx: b.cx + off.x, cy: b.cy + off.y });
+    }
+    run += d;
+  });
+  return moves.size ? arr.map((x) => (x && moves.has(x.id) ? { ...x, ...moves.get(x.id) } : x)) : arr;
+}
+export const repackAllFlushLayers = (arr, b, sideRef = b) =>
+  ["top", "bottom", "left", "right"].reduce((acc, s) => repackFlushLayers(acc, b, s, sideRef), arr);
+
 /* ---- NEW-1/NEW-2: a wall's side parking is a STACK, not a single field ------------------------
  *
  * Exploding a parking field ("Split rows/aisles") replaces ONE 60 ft double-loaded module with

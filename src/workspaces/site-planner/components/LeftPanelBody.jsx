@@ -15,7 +15,7 @@ import ActionLink from "./ActionLink.jsx";
 import WatchOutChip from "./WatchOutChip.jsx";
 import YieldFooterDisclaimer from "./YieldFooterDisclaimer.jsx";
 import Collapse from "./Collapse.jsx";
-import { roadClassesOf, classMinRadius, ROAD_CLASS_SEEDS } from "../lib/roadClasses.js";
+import { roadClassesOf, classMinRadius, classParkSetback, ROAD_CLASS_SEEDS } from "../lib/roadClasses.js";
 import { SQFT_PER_ACRE } from "../lib/siteGeometry.js";
 import { costRollup } from "../lib/costTakeoff.js";
 import { DIM_CALLOUT_MIN_PPF } from "../lib/labelLayout.js";
@@ -1037,6 +1037,8 @@ export const LeftPanelBody = memo(function LeftPanelBody({
                           <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
                         )}
                         <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
+                        {/* NEW-1 (road-traced parking) — how far parking keeps back from this class of road (from its right-of-way line when one is set, else the back of curb). A road can override it in its own panel. */}
+                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Parking keeps back <NumInput style={{ ...numInput, width: 48 }} value={Math.round(classParkSetback(c))} min={0} onCommit={(n) => setRCC(c.key, { parkSetback: n })} />′</label>
                       </div>
                     </div>
                   ))}

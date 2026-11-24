@@ -354,7 +354,7 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack, repackFlushLayers } from "./lib/dogEar.js";
 import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth } from "./lib/roadCrossSection.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, normDeg } from "./lib/easementLabelPull.js";
@@ -521,7 +521,7 @@ import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components
 import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
 import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
 import { MultiPropsInspector } from "./components/MultiPropsInspector.jsx";
-import { selectionKinds, fieldsFor, applyBulk } from "./lib/multiProps.js";
+import { selectionKinds, fieldsFor, applyBulk, stallTotals } from "./lib/multiProps.js";
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
 import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
 import { useDrainageCheck } from "./lib/useDrainageCheck.js";
@@ -15441,6 +15441,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
+  // B2671333 — where a NEW print frame is centred: the development AND the visible property lines together,
+  // so the site (boundary + elements) lands in the middle of the sheet. devExtent itself is untouched (export crop).
+  const printSeedExtent = () => {
+    const dev = devExtent();
+    const pts = [];
+    if (dev) pts.push({ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 });
+    visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
+    if (!pts.length) return null;
+    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
+    const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
+    return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+  };
   const printMetricPairs = () => {
     const pairs = [
       ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} AC (${f0(siteSqft)} SF)`],
@@ -15566,7 +15578,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     printAspectRef, printAspect, refreshPrintAspect, fitFrame, enterPrintMode, overlayPrintable, mapLayersPrintable, buildingsTablePrintable, startPrintMove, startPrintResize, recomputeCompose, composeKey, composeTodayStamp, enterCompose, setPrintOrientTouched, setPrintFitToFramePageTouched, setPrintScaleTouched, exitToReposition, cancelPrint, flattenMarkupsPref, doPrint,
   } = usePrintHandlers({
     setPrintMode, printFrame, setPrintFrame, printPaper, printOrient, setPrintOrient, printOverlay, setPrintOverlay, printMapLayers, composeMode, setComposeMode, printScale, setPrintScale, setFitWarning, printFitToFramePage, setPrintFitToFramePage, composePageOverride, setComposePageOverride, setComposeBoxIn, setComposePreviewUrl, setComposePreviewLoading, setComposeDownloading, pickedFrameRef, orientTouchedRef, composePreviewUrlRef, preCanvasDisplayRef,
-    devExtent, drag, els, exportPDF, loadExportSheet, overlays, p2f, getP2fStatic: () => p2fStatic, printMetricPairs, printStormwaterBars,
+    devExtent, drag, els, exportPDF, loadExportSheet, overlays, p2f, getP2fStatic: () => p2fStatic, printMetricPairs, printSeedExtent, printStormwaterBars,
     setExportMenu, setSel, setSettings, settings, sheetOverlays, showAerial, size, startGate, svgRef, withExportSheet,
   });
 
@@ -15865,7 +15877,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
         // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
         const tc = cfgOf(el);
-        const count = poly ? estTrailers(area, tc) : trailerStalls(el.w, el.h, tc).count;
+        const count = poly ? estTrailers(area, tc) : (metrics.trimmedCounts && metrics.trimmedCounts.get(el.id)) ?? trailerStalls(el.w, el.h, tc).count;   // NEW-1 (2026-11-24) — a road-trimmed row counts only the trailers it keeps
         // NEW-1 — the COUNT is the line a too-shallow row keeps (keepLine): a 50′ row used to lose its count
         // first and read as unlabelled beside the deeper row under it.
         ({ lines, keepLine } = trailerRowLabel({ depthFt: tc.trailerL, count, est: poly, name, rowDepths: poly ? null : tc.trailerRowDepths }));
@@ -18438,30 +18450,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // parking field are derived by relayoutWallKids; a buffer / road is placed flush when added and does not
   // move on its own, so a change to the layers inside it (parking rows, a removed sidewalk) closes here.
   // Returns the SAME array when nothing moves (no dirty churn).
-  const repackFlushBeyond = (arr, b, side) => {
-    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
-    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
-    const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
-    const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
-    const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
-    const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road" || isWallTrailer(x);
-    let run = (isH ? b.h : b.w) / 2;
-    const moves = new Map();
-    // Derived layers (sidewalk, parking) keep their place; flush layers (buffer, road) pack beyond ALL of them.
-    const byPerp = (a, c) => perp(a) - perp(c);
-    [...kids.filter((x) => !flush(x)).sort(byPerp), ...kids.filter(flush).sort(byPerp)].forEach((x) => {
-      const d = depth(x);
-      if (flush(x)) {
-        const want = run + d / 2, l = local(x);
-        if (Math.abs(perp(x) - want) > 0.01) {
-          const off = rot2(isH ? l.x : sg * want, isH ? sg * want : l.y, b.rot);
-          moves.set(x.id, { cx: b.cx + off.x, cy: b.cy + off.y });
-        }
-      }
-      run += d;
-    });
-    return moves.size ? arr.map((x) => (moves.has(x.id) ? { ...x, ...moves.get(x.id) } : x)) : arr;
-  };
+  // B2671304 (×2) — ONE shared pack (lib/dogEar `repackFlushLayers`), the same one every refit and the load heal run.
+  const repackFlushBeyond = (arr, b, side) => repackFlushLayers(arr, b, side);
   // Is every side in `sides` a loaded dock wall?
   const sidesAreDock = (b, sides) => { const ds = dockSidesOf(b).dockSides; return sides.length > 0 && sides.every((s) => ds.includes(s)); };
   // Type a layer's DEPTH (a trailer's is ONE row's depth; a road's is its travel width).
@@ -18907,6 +18897,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const next = { ...x.xsection };
       if (Number.isFinite(+ft) && +ft > 0) next.rowDesignFt = +ft; else delete next.rowDesignFt;
       return { ...x, xsection: next };
+    }));
+  };
+  /* NEW-1 (road-traced parking, 2026-11-24) — this road's own parking keep-back (ft), beating its class default from Standards → Roads
+     (lib/parkingRoadTrim.js parkSetbackFor). 0 is a real answer ("parking may come right up to this road"); a cleared box (null) removes the key so the
+     road follows its class again. The trim itself is derived from this at render time, never stored. */
+  const setRoadParkSetback = (el, ft) => {
+    const want = ft != null && Number.isFinite(+ft) && +ft >= 0;
+    const cur = el.parkSetbackFt != null && Number.isFinite(+el.parkSetbackFt) ? +el.parkSetbackFt : null;
+    if (!want && cur == null) return;                     // nothing to clear — no history frame for a no-op
+    if (want && cur === +ft) return;
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id) return x;
+      if (want) return { ...x, parkSetbackFt: +ft };
+      const { parkSetbackFt: _drop, ...rest } = x;
+      return rest;
     }));
   };
   /* NEW-1 (2026-11-10) — the owner's own length for the taper at one end of a road that meets a narrower (or wider) one end to end
@@ -20643,6 +20649,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* the body is lib/roadNetBuild.js `roadNetSteps` (round 5, B2233521) — the SAME steps the plan-open warm-up drives in slices; hidden roads are filtered THERE (`elHidden(hiddenGroups, x)`) */
     return driveSteps(roadNetSteps({ els, settings, hiddenGroups, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts }));
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
+  // Total car / trailer stalls across the selected fields, via the same counters the single panel and the on-plan label use.
+  const multiStalls = multiKinds && multiKinds.members.length > 1 ? stallTotals(multiKinds.members, {
+    carCount: (el) => { const pc = cfgOf(el); if (el.points) return { count: estStalls(polyArea(el.points), settings), est: true }; return { count: ((roadNet.stallClips && roadNet.stallClips.get(el.id)) || carStalls(el.w, el.h, pc)).count }; },
+    trailerCount: (el) => { const tc = cfgOf(el); return el.points ? { count: estTrailers(polyArea(el.points), tc), est: true } : { count: ((roadNet.stallClips && roadNet.stallClips.get(el.id)) || trailerStalls(el.w, el.h, tc)).count }; },
+  }) : null;
+  const multiStallsShown = !!(multiStalls && (multiStalls.car || multiStalls.trailer));
   /* NEW-1 (B1783376 ×3) — the cluster's OUTLINE is one path in the WIDEST road's style, but each road's face-of-curb stripes are drawn in that road's OWN (this
    * file's stripe pass), so a drive narrower than — or styled differently from — the trunk it joins had its arc outline and its arc stripe in two different weights /
    * colours: the owner's "the right-hand arc is crisper/heavier than the straight edge". When the roads of a cluster do not all share one edge style, each piece of the
@@ -24076,11 +24088,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}
-          {multiStyleable && multiPropFields.length > 0 && <MultiPropsInspector
+          {multiStyleable && (multiPropFields.length > 0 || multiStallsShown) && <MultiPropsInspector
                   members={multiKinds.members}
                   type={multiKinds.type}
                   fields={multiPropFields}
                   ctx={multiPropCtx}
+                  stalls={multiStalls}
                   onWrite={writeMultiProp}
                   muted={PAL.muted}
                 />}
@@ -24429,7 +24442,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
+                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadParkSetback={setRoadParkSetback} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
                       {cl && <RoadXSectionSection roadCurbOf={roadCurbOf} roadTravel={roadTravel} selEl={selEl} setXsDialog={setXsDialog} travelFt={travelFt} />}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
@@ -24678,7 +24691,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} SF) → <b style={{ color: PAL.ink }}>{f0(area + ba)} SF</b> total<br /></span>;
                     })()}
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || carStalls(selEl.w, selEl.h, cfgOf(selEl))).count)}</b>{poly ? " (est.)" : <> @ {cfgOf(selEl).stallW}′×{cfgOf(selEl).stallDepth}′ {cfgOf(selEl).parkAngle}°, {cfgOf(selEl).aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
-                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
+                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || trailerStalls(selEl.w, selEl.h, tc)).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
                       // (B568/B569): doors fall between columns, so the count reflects the column
