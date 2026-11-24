@@ -143,13 +143,13 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
    * also have been rounded. */
   const note = invalidReason || altered;
   const input = (
-    <input {...NO_AUTOFILL} style={boxed ? (muted ? { ...NUMBOX_INPUT_STYLE, color: "var(--text-secondary)" } : NUMBOX_INPUT_STYLE) : style} data-numbox-input={boxed ? "1" : undefined} data-muted={muted ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+    <input {...NO_AUTOFILL} style={boxed ? (muted ? { ...NUMBOX_INPUT_STYLE, color: "var(--text-secondary)" } : NUMBOX_INPUT_STYLE) : style} data-numbox-input={boxed ? "1" : undefined} data-num-pristine={dirtyRef.current ? undefined : "1"} data-muted={muted ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       aria-invalid={invalidReason ? "true" : undefined}
       /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
        * carries the non-error "Using 614" note, which is not an error message at all. */
       aria-describedby={note ? msgId : undefined}
-      onFocus={() => { editing.current = true; }}
-      onChange={(e) => { setAltered(null); setDraft(e.target.value); dirtyRef.current = true; }}
+      onFocus={(e) => { editing.current = true; e.currentTarget.setAttribute("data-num-pristine", "1"); }}
+      onChange={(e) => { setAltered(null); setDraft(e.target.value); dirtyRef.current = true; e.target.removeAttribute("data-num-pristine"); /* B-Q-FIRST-PRESS: set synchronously, never from a render, so a key right after Enter sees it */ }}
       onBlur={commit}
       onKeyDown={(e) => {
         /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
@@ -165,6 +165,7 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
         if (e.key === "Enter" || e.key === "Escape") {
           e.preventDefault();
           if (e.key === "Enter") commit(); else setDraft(value == null ? "" : String(value));
+          e.currentTarget.setAttribute("data-num-pristine", "1"); // committed (or abandoned): nothing unsaved in the box, so a tool letter may pass through
           /* Still focused, so we are still editing — `commit()` clears this flag for the blur
            * path, and leaving it cleared would let an incoming `value` change overwrite what the
            * user types next. */

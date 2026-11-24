@@ -21,6 +21,7 @@ import { bandTypeOf, hasXSection, bandLayout, bandStripeMarksWithWidth, BAND_FIL
 import { offsetPolyline } from "../lib/metesAndBounds.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { keptRuns } from "../lib/parkingApproach.js";
+import { ringsPathD, ringMinusTrim } from "../lib/parkingRoadTrim.js";
 import { roadTravelWidth } from "../lib/siteModel.js";
 import { roadRowLabelPlace } from "../lib/roadRowLabel.js";
 import { CURB_STROKE_MIN_PX, GRID_FLEX, GRID_LINE, GRID_WALL, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, inlineLabelEls, labelPlaceOf, ringMinSpanFt } from "../lib/planRenderHelpers.jsx";
@@ -724,24 +725,47 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // so the entrance reads as one continuous curb instead of a line ruled across the opening.
   const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
   const rectStrokeW = st.cartoWater ? cartoStrokeW : el.type === "road" ? (st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)) /* B719: legacy rect road border to scale; NEW-8 an explicit outline width wins */ : (isSel ? st.weight + 0.75 : st.weight);
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
-    stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeOpacity={st.strokeOpacity} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
-  if (outlineCut) {
-    // NEW-1 — rectOutlineCutSegments returns WORLD feet with el.rot ALREADY BAKED into the corners,
-    // but this whole branch renders inside a `rotate(el.rot, c)` group (see the return at the end of
-    // renderElPx), so the segments MUST be counter-rotated or the rotation lands twice. At rot 90/270
-    // the doubled 540° ≡ 180° redrew a w×h field as h×w about its own centre: stray element-coloured
-    // lines projecting out over bare aerial, and — because outlineCut also blanks the plain rect's own
-    // stroke above — the field's real edge missing entirely. Same counter-rotate the pond baseline
-    // ghost and the stage contours already apply for exactly this reason.
-    const segs = rectOutlineCutSegments(el, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
-    if (segs.length) parts.push(
-      <g key="olcut" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="rect-outline-cut" data-el-id={el.id}>
-        {segs.map((seg, i) => (
-          <polyline key={`ol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
-            fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
-        ))}
-      </g>);
+  /* NEW-1 (2026-11-24) — a car / trailer field a road CUTS is trimmed to the road (lib/parkingRoadTrim.js): its pavement, its planted islands and its outline are
+   * the trim's rings (field-local feet, drawn in this branch's rotated frame), never the full rect. Untrimmed fields draw exactly as before. */
+  const roadTrim = (el.type === "parking" || el.type === "trailer") && roadNet && roadNet.parkTrims ? roadNet.parkTrims.get(el.id) : null;
+  const lpx = (p) => ({ x: tl.x + p.x * ppf, y: tl.y + p.y * ppf });
+  if (roadTrim) {
+    const landStyle = elStyle({ type: "landscape" }, settings);
+    parts.push(<path key="trimPave" data-testid="park-trim-paved" d={ringsPathD(roadTrim.paved, lpx)} fill={st.fill} fillOpacity={waterOp} fillRule="evenodd" stroke="none" />);
+    if (roadTrim.islands.length) parts.push(<path key="trimIsl" data-testid="park-trim-island" d={ringsPathD(roadTrim.islands, lpx)} fill={landStyle.fill} fillRule="evenodd" stroke={landStyle.stroke} strokeWidth={0.6} />);
+    const mouthsT = roadNet.mouths && roadNet.mouths.get(el.id);
+    if (outlineCut || (mouthsT && mouthsT.length)) {
+      const f = (q) => { const r = (el.rot || 0) * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r), dx = q.x - el.w / 2, dy = q.y - el.h / 2; return { x: el.cx + dx * cs - dy * sn, y: el.cy + dx * sn + dy * cs }; };
+      const segs = roadTrim.lot.flatMap((ring) => polygonOutlineCutSegments({ points: ring.map(f) }, outlineCut || [], mouthsT));
+      parts.push(
+        <g key="trimOl" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="park-trim-outline" data-el-id={el.id}>
+          {segs.map((seg, i) => (
+            <polyline key={i} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
+          ))}
+        </g>);
+    } else {
+      parts.push(<path key="trimOl" data-testid="park-trim-outline" d={ringsPathD(roadTrim.lot, lpx)} fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={rectStrokeW} pointerEvents="none" />);
+    }
+  } else {
+    parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
+      stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeOpacity={st.strokeOpacity} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
+    if (outlineCut) {
+      // NEW-1 — rectOutlineCutSegments returns WORLD feet with el.rot ALREADY BAKED into the corners,
+      // but this whole branch renders inside a `rotate(el.rot, c)` group (see the return at the end of
+      // renderElPx), so the segments MUST be counter-rotated or the rotation lands twice. At rot 90/270
+      // the doubled 540° ≡ 180° redrew a w×h field as h×w about its own centre: stray element-coloured
+      // lines projecting out over bare aerial, and — because outlineCut also blanks the plain rect's own
+      // stroke above — the field's real edge missing entirely. Same counter-rotate the pond baseline
+      // ghost and the stage contours already apply for exactly this reason.
+      const segs = rectOutlineCutSegments(el, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
+      if (segs.length) parts.push(
+        <g key="olcut" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="rect-outline-cut" data-el-id={el.id}>
+          {segs.map((seg, i) => (
+            <polyline key={`ol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
+              fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
+          ))}
+        </g>);
+    }
   }
   // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
   if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);
@@ -799,26 +823,34 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       });
     });
     if (segs.length) parts.push(<path key="bdiv" d={segmentsPath(segs)} fill="none" stroke={st.stroke} strokeWidth={0.5} />);
-    cs.aisles.forEach((a, i) =>
+    if (roadTrim) roadTrim.lines.forEach(([a, b], i) => { const A = lpx(a), B = lpx(b); parts.push(<line key={`a${i}`} x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="6 5" />); });
+    else cs.aisles.forEach((a, i) =>
       parts.push(<line key={`a${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="6 5" />));
   }
   if (el.type === "trailer") {
     const ts = trailerStalls(el.w, el.h, el.cfg ? { ...settings, ...el.cfg } : settings);
     const collapse = !stallStripesExplicit(ts.tw * ppf, lfK);
     const segs = [];
+    const tClip = roadNet && roadNet.stallClips && roadNet.stallClips.get(el.id) ? roadNet.stallClips.get(el.id).set : null;   // NEW-1 (2026-11-24) — the trailers a road trims out
     ts.bands.forEach((b, i) => {
-      const bandW = b.n * ts.tw;
-      parts.push(bandOutline(`tb${i}`, { x: 0, y: b.y, w: bandW, h: b.depth },
-        <rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
-      for (let k = 1; k < b.n; k++) {
-        const x = tl.x + k * ts.tw * ppf;
-        const seg = [x, tl.y + b.y * ppf, x, tl.y + (b.y + b.depth) * ppf];
-        if (collapse) segs.push(seg);
-        else parts.push(<line key={`tb${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.55} />);
-      }
+      const runs = tClip && tClip.size ? keptRuns(b.n, tClip, i) : [{ k0: 0, k1: b.n - 1 }];
+      runs.forEach(({ k0, k1 }, ri) => {
+        if (k1 < k0) return;
+        const bandX = k0 * ts.tw, bandW = (k1 - k0 + 1) * ts.tw;
+        const key = runs.length === 1 && k0 === 0 ? `tb${i}` : `tb${i}r${ri}`;
+        parts.push(bandOutline(key, { x: bandX, y: b.y, w: bandW, h: b.depth },
+          <rect key={key} x={tl.x + bandX * ppf} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
+        for (let k = k0 + 1; k <= k1; k++) {
+          const x = tl.x + k * ts.tw * ppf;
+          const seg = [x, tl.y + b.y * ppf, x, tl.y + (b.y + b.depth) * ppf];
+          if (collapse) segs.push(seg);
+          else parts.push(<line key={`tb${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.55} />);
+        }
+      });
     });
     if (segs.length) parts.push(<path key="tbdiv" d={segmentsPath(segs)} fill="none" stroke={st.stroke} strokeWidth={0.55} />);
-    ts.aisles.forEach((a, i) =>
+    if (roadTrim) roadTrim.lines.forEach(([a, b], i) => { const A = lpx(a), B = lpx(b); parts.push(<line key={`ta${i}`} x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />); });
+    else ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
   }
   // Derived curbs: thin bands on the terminal / sidewalk-transition edges. Always
@@ -831,6 +863,12 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const bw = e.axis === "x" ? cpx : w, bh = e.axis === "y" ? cpx : h;
     // NEW-1 (B1783376 ×3) — a drive's mouth is a CURB CUT: the band is interrupted where the drive meets the field (otherwise its stroke ruled a line across the mouth)
     const mouths = outlineCut && roadNet.mouths ? roadNet.mouths.get(el.id) : null;
+    if (roadTrim) {   // NEW-1 (2026-11-24) — a trimmed field's curb stops where the road's keep-out begins
+      const lw = bw / ppf, lh = bh / ppf, lx = (x - tl.x) / ppf, ly = (y - tl.y) / ppf;
+      const pieces = ringMinusTrim([{ x: lx, y: ly }, { x: lx + lw, y: ly }, { x: lx + lw, y: ly + lh }, { x: lx, y: ly + lh }], roadTrim);
+      if (pieces.length) parts.push(<path key={`curb${i}`} d={ringsPathD(pieces, lpx)} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
+      return;
+    }
     if (!mouths || !mouths.length) {
       parts.push(<rect key={`curb${i}`} x={x} y={y} width={bw} height={bh} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
       return;

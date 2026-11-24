@@ -23,6 +23,7 @@
  */
 import { carStalls } from "./siteGeometry.js";
 import { pointInRing as pointInPoly } from "./ringMath.js";
+import { roadTrimOf, isRectStallField, stallFieldLayout } from "./parkingRoadTrim.js";
 
 export const AISLE_SNAP_EXTRA_FT = 6;      // a landing within (half the aisle + 6 ft) of an aisle's centreline snaps to it
 export const END_FACE_TOL_FT = 1.0;        // "on the end face": within this of local x = 0 or x = w
@@ -269,24 +270,37 @@ export function perimeterMouthsOf(el, settings, roads, halfOf) {
 /** ⛔ THE ONE ANSWER to "what does each car field do about the roads around it?" — read by the renderer's road network (roadNetBuild) AND by the Yield total
  * (siteMetrics), so the stalls drawn and the stalls counted cannot disagree.
  *   `junctions` — `driveJunctionsOf(els, settings)`;  `roads` — the centerline roads that count (the caller has already dropped hidden ones);
- *   `stripOf(road)` — the road's pavement ring;  `halfOf(road)` — centreline → back-of-curb;  `isHidden(el)` — a hidden field is not part of the picture.
+ *   `stripOf(road)` — the road's pavement ring;  `halfOf(road)` — centreline → back-of-curb;  `isHidden(el)` — a hidden field is not part of the picture;
+ *   `rowOf(road)` — its designated right-of-way band or null (parkingRoadTrim.rowRingOf).
  * Returns Map<fieldId, { clip (stallClipOf | null), through:[{roadId,removed}], perimeter:[{a,b,roadId}] }> for the fields where something happens. */
-export function fieldInsidesOf({ els, settings, junctions, roads, stripOf, halfOf, isHidden }) {
+export function fieldInsidesOf({ els, settings, junctions, roads, stripOf, halfOf, isHidden, rowOf }) {
   const out = new Map();
   for (const T of els || []) {
-    if (!isRectParking(T) || (isHidden && isHidden(T))) continue;
+    if (isHidden && isHidden(T)) continue;
+    /* NEW-1 (2026-11-24) — a road that CUTS a car or trailer field trims it to the road (lib/parkingRoadTrim.js): whole stalls only, the edge traces the road,
+     * a connecting aisle where an aisle is cut off. Its dropped stalls join the clip below, so the count, the drawing and the Yield read one answer. */
+    const trim = isRectStallField(T) ? roadTrimOf(T, settings, roads, stripOf, rowOf) : null;
+    if (T.type === "trailer") {
+      if (!trim) continue;
+      const L = stallFieldLayout(T, settings);
+      const set = new Set(trim.removed.map((r) => `${r.band}:${r.k}`));
+      out.set(T.id, { clip: { base: L.count, removed: trim.removed, count: Math.max(0, L.count - set.size), set, corridors: [] }, through: [], perimeter: [], trim });
+      continue;
+    }
+    if (!isRectParking(T)) continue;
     const js = (junctions || []).filter((dj) => dj.targetId === T.id);
     const through = throughDrivesOf(T, settings, roads, stripOf);
     const perimeter = perimeterMouthsOf(T, settings, roads, halfOf);
-    if (!js.length && !through.length && !perimeter.length) continue;
-    out.set(T.id, { clip: js.length || through.length ? stallClipOf(T, settings, js, through) : null, through, perimeter });
+    if (!js.length && !through.length && !perimeter.length && !trim) continue;
+    const extra = trim ? [{ removed: trim.removed }] : [];
+    out.set(T.id, { clip: js.length || through.length || trim ? stallClipOf(T, settings, js, [...through, ...extra]) : null, through, perimeter, trim });
   }
   return out;
 }
 
-/** the number of stalls the plan's car field `el` really has once its drives are cut through it (a free-drawn ring has only an estimate: null) */
+/** the number of stalls (car) or trailers the plan's rect field `el` really has once roads are cut through it (a free-drawn ring has only an estimate: null) */
 export const effectiveStallCount = (inside, el, settings) => {
-  const L = stallLayoutOf(el, settings);
+  const L = el && el.type === "trailer" ? stallFieldLayout(el, settings) : stallLayoutOf(el, settings);
   if (!L) return null;
   const r = inside && inside.get(el.id);
   return r && r.clip ? r.clip.count : L.count;
