@@ -127,21 +127,24 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     expect(after, "an arrow key meant for the number nudged the building").toEqual(before);
   });
 
-  /* ── AND ENTER LEAVES YOU WHERE YOU WERE. The `blur()` it used to do is the ROOT of the data
-   * loss (focus → <body>, building still selected, next Backspace fatal) and is half of "it's not
-   * letting me input the depth" on its own. ─────────────────────────────────────────────────── */
-  test("Enter commits the value IN PLACE and keeps the caret in the field", async ({ page }) => {
+  /* ── ENTER COMMITS AND LEAVES THE BOX (owner 2026-11-24, B2671335: "if I hit enter there, that should
+   * take me out of that input box, and I should be able to hit Q normally"). This REVERSES the earlier
+   * "keep the caret" cut. The data-loss hazard that cut guarded against stays closed by the keyboard
+   * latch: after leaving the box, Backspace/Delete are still refused until the drawing is touched
+   * (see "Enter commits the field" in the arms table above and the Delete-after-Enter test below). ─── */
+  test("Enter commits the value and LEAVES the box; Backspace afterwards still cannot delete the building", async ({ page }) => {
     await boot(page);
     const d = await depthField(page, await buildingWithProps(page));
     await d.click(); await page.keyboard.press("Control+A"); await page.keyboard.type("400");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
 
-    expect(await page.evaluate(() => document.activeElement.tagName), "Enter threw the user out of the field").toBe("INPUT");
+    expect(await page.evaluate(() => document.activeElement.tagName), "Enter left the cursor in the box").not.toBe("INPUT");
     expect(await d.inputValue()).toBe("400");
-    // The value is selected, so the next digits retype it rather than appending to it.
-    await page.keyboard.type("350");
-    expect(await d.inputValue()).toBe("350");
+    const before = await buildings(page);
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(300);
+    expect(await buildings(page), "Backspace after Enter deleted the building").toBe(before);
   });
 
   /* ── THE CONTROLS. Every one of these must still delete. ───────────────────────────────────── */

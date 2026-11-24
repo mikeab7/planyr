@@ -510,10 +510,7 @@ export function BuildingNumberField({ id, value, onAttempt, onCancelConflict, st
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          commit();
-          editing.current = true; // stays focused — see the NumInput note on why Enter never blurs
-          const el = e.currentTarget;
-          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+          e.currentTarget.blur(); // B2671335 — Enter commits (through onBlur, once) and leaves the box, so the next tool letter works
         } else if (e.key === "Escape") {
           e.preventDefault();
           // ⛔ Never blur() here — a synchronous blur fires `onBlur` before this `setDraft` has
