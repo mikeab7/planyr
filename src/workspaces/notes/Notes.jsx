@@ -23,6 +23,7 @@
  * at delete time and every id in it is still cleared, just later and only once.
  */
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNoticeToast } from "../../shared/ui/Toast.jsx";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
 import { notesSaveState } from "./lib/notesSaveState.js";
@@ -49,7 +50,7 @@ const reportPurgeFailure = (e) => reportClientEvent("notes-purge-failed", String
 import {
   clearNotesStorageError, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  collectBinFacts, ignoreDuplicate, listStoredPageIds, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
+  activeProjectKey, collectBinFacts, ignoreDuplicate, listStoredPageIds, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
   sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, writeActivePageId, writeNoteTemplates, writePage, writeTree,
@@ -286,33 +287,6 @@ function StorageBanner({ error, onDismiss }) {
   );
 }
 
-/** Names what a Markdown export could not carry. An export that quietly drops a merged
- *  cell is the same lie as a save that didn't save, just slower to notice. */
-function ExportNotice({ note, onDismiss }) {
-  if (!note) return null;
-  return (
-    <div
-      role="status"
-      data-testid="notes-export-notice"
-      style={{
-        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
-        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0 }}>{note}</span>
-      <button
-        type="button" onClick={onDismiss}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >Dismiss</button>
-    </div>
-  );
-}
-
 /** The way back from a delete, offered at the moment the delete happens.
  *
  *  A bin nobody can find is not an undo. This is deliberately NOT a dialog (house rule) and
@@ -471,7 +445,7 @@ export default function Notes({
   const noteEditorRef = useRef(null);
   const [status, setStatus] = useState("saved");
   const [storageError, setStorageError] = useState(null);
-  const [exportNote, setExportNote] = useState(null);
+  const setExportNote = useNoticeToast("notes-export-notice", { testId: "notes-export-notice" }); // one notice line, shown as an app toast (audit M2)
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState("");
   const [deleted, setDeleted] = useState(null);
@@ -503,9 +477,14 @@ export default function Notes({
    * the user actually had open instead of always landing on the tree's first page. An effect
    * that resolves its own fallback id (the visibility guard, the cloud seed) writes through
    * itself inline, since it needs the resolved value before this wrapper ever sees it. */
+  /* PER-PROJECT: the remembered page is keyed by the route's project (see activeProjectKey), kept
+   * in a ref assigned during render so the stable callbacks below always write under the project
+   * the person is standing in, never a stale closure's. */
+  const projectKeyRef = useRef("all");
+  projectKeyRef.current = activeProjectKey(projectId, orgScope);
   const goToPage = useCallback((id) => {
     setActivePageId(id);
-    writeActivePageId(id);
+    writeActivePageId(id, undefined, projectKeyRef.current);
     setHistoryOpen(false);
     setPageSetupOpen(false);
     setFindReplaceOpen(false);
@@ -608,10 +587,10 @@ export default function Notes({
      * A stored id naming a page that no longer exists (deleted, or a stale cross-account
      * leftover) falls back exactly as before. `noteIntent`, if present, wins over this — its
      * own effect below runs after this one settles the tree and overrides unconditionally. */
-    const storedActive = readActivePageId();
+    const storedActive = readActivePageId(undefined, projectKeyRef.current);
     const initialActive = storedActive && findPage(loaded, storedActive) ? storedActive : firstPageId(loaded);
     setActivePageId(initialActive);
-    writeActivePageId(initialActive);
+    writeActivePageId(initialActive, undefined, projectKeyRef.current);
     setQuery("");
     setHighlight("");
     setDeleted(null);
@@ -631,13 +610,13 @@ export default function Notes({
         setTree(next);
         setActivePageId((cur) => {
           const resolved = cur && findPage(next, cur) ? cur : firstPageId(next);
-          writeActivePageId(resolved);
+          writeActivePageId(resolved, undefined, projectKeyRef.current);
           return resolved;
         });
       },
     });
     return () => { live = false; stopNotesSync(); };
-  }, [userId]);
+  }, [userId, setExportNote]);
 
   // LOUD-FAILURE, the cloud half: the footer line is whatever the store says is TRUE.
   useEffect(() => onNotesSyncState(() => setStorageLine(notesStorageLine())), []);
@@ -835,7 +814,12 @@ export default function Notes({
     if (!tree.pages.length) return;
     const roots = pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT));
     const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
-    if (!activePageId || !visible.has(activePageId)) goToPage(roots[0]?.id || null);
+    if (!activePageId || !visible.has(activePageId)) {
+      /* PER-PROJECT RESTORE: the page this project last had open, if it still exists and is still
+       * filed here (a deleted or moved page fails `visible` and falls to the default). */
+      const remembered = readActivePageId(undefined, projectKeyRef.current);
+      goToPage(remembered && visible.has(remembered) ? remembered : (roots[0]?.id || null));
+    }
   }, [projectId, orgScope, tree, activePageId, goToPage]);
 
   /* B1366384 — honor a cross-workspace "open this exact page" request (Shell's `noteIntent`,
@@ -1174,7 +1158,7 @@ export default function Notes({
     const { list } = templateFromDoc(templatesNow(), { label, doc });
     persistTemplates(list);
     setExportNote(`Saved "${label}" as a template — find it under the ▾ beside ＋ Page.`);
-  }, [treeNow, templatesNow, persistTemplates]);
+  }, [treeNow, templatesNow, persistTemplates, setExportNote]);
 
   /** A page UNDER another page — the whole point of the collapse, and reachable by direct
    *  action (the row's menu) rather than by a mode. */
@@ -1205,7 +1189,7 @@ export default function Notes({
     setExportNote(r.missing
       ? `Copied ${what}. ${r.missing} picture${r.missing === 1 ? " was" : "s were"} already missing from the original, so ${r.missing === 1 ? "it shows" : "they show"} as missing in the copy too.`
       : `Copied ${what}.`);
-  }, [persistTree, treeNow, goToPage]);
+  }, [persistTree, treeNow, goToPage, setExportNote]);
 
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
@@ -1299,7 +1283,7 @@ export default function Notes({
     persistTree(next);               // that named no pages, or the purge cannot survive a merge
     purgePages(ids).catch(reportPurgeFailure);
     setExportNote(`${entryIds.length} empty ${entryIds.length === 1 ? "note" : "notes"} deleted for good. Nothing that had words in it was touched.`);
-  }, [tree, persistTree]);
+  }, [tree, persistTree, setExportNote]);
 
   const handlePurgeAll = useCallback(() => {
     let next = tree;
@@ -1422,7 +1406,7 @@ export default function Notes({
     }
     const res = await resolveNotesConflict(pageId, choice);
     if (!res.ok) setExportNote(res.error || "That copy could not be saved — nothing was changed.");
-  }, [tree, persistTree]);
+  }, [tree, persistTree, setExportNote]);
 
   /* ---- the integrity findings, acted on (NEW-4) ------------------------------------------ */
 
@@ -1445,7 +1429,7 @@ export default function Notes({
     goToPage(target.pageId);
     setQuery("");
     setMobileShowList(false);
-  }, [projectId, onNavigate, goToPage]);
+  }, [projectId, onNavigate, goToPage, setExportNote]);
 
   /* ⛔ AUTO-ADOPTION: A BODY WITH NO NODE IS GIVEN ONE, ON SIGHT (NEW-1).
    *
@@ -1517,7 +1501,7 @@ export default function Notes({
     persistTree(next);
     setDupeTick((n) => n + 1);
     setExportNote(`Kept one copy. The ${binned.length === 1 ? "other is" : "others are"} in the bin for 30 days, so this is undoable.`);
-  }, [tree, persistTree]);
+  }, [tree, persistTree, setExportNote]);
 
   /** …and the third: they are both meant to be there. Remembered, so it stops asking. */
   const handleKeepBoth = useCallback(async (group) => {
@@ -1525,7 +1509,7 @@ export default function Notes({
     ignoreDuplicate(scan.duplicateKey(group));
     setDupeTick((n) => n + 1);
     setExportNote("Kept both. I won't mention that pair again.");
-  }, []);
+  }, [setExportNote]);
 
   /** File a recovered note into a project — or leave it loose, which is a real place with a
    *  name and not a shrug. A recovered page is already at the top level, so this is the one
@@ -1541,7 +1525,7 @@ export default function Notes({
     // into "under <X>" without producing a phrase inside a phrase).
     const filedLine = pid == null ? "Kept unfiled." : `Filed under ${projects.find((p) => p.id === pid)?.name || "that project"}.`;
     setExportNote(`${filedLine} You can rename it from the row's menu — its original name was lost with its entry.`);
-  }, [persistTree, projects, treeNow]);
+  }, [persistTree, projects, treeNow, setExportNote]);
 
   /** …and the other honest answer: they did not want it. Bins it like any other note, with
    *  the same undo and the same 30 days. */
@@ -1557,7 +1541,7 @@ export default function Notes({
     setExportNote(lossy.length
       ? `Exported. Markdown can't carry ${lossy.length === 1 ? lossy[0] : `${lossy.slice(0, -1).join(", ")} and ${lossy[lossy.length - 1]}`} — those parts were written as HTML so they still display.`
       : null);
-  }, []);
+  }, [setExportNote]);
 
   /** Export a page AND EVERYTHING UNDER IT. Nesting rides out as heading depth — see
    *  `pageToMarkdown`, which is where the one degradation (past six levels) is named. */
@@ -1623,7 +1607,7 @@ export default function Notes({
     });
     const r = await printHtmlDocument(html);
     if (!r.ok) setExportNote(r.error);
-  }, [tree]);
+  }, [tree, setExportNote]);
 
   const scopeLabel = notesScopeLabel();
 
@@ -1683,7 +1667,6 @@ export default function Notes({
       />
 
       <StorageBanner error={storageError} onDismiss={() => { clearNotesStorageError(); setStorageError(null); }} />
-      <ExportNotice note={exportNote} onDismiss={() => setExportNote(null)} />
       <UndoBar deleted={deleted} onUndo={() => handleRestore(deleted.id)} onDismiss={() => setDeleted(null)} />
       {conflict ? (
         <Suspense fallback={null}>

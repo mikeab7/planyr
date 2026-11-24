@@ -43,6 +43,18 @@ describe("measureHit · geometry primitives", () => {
   });
 });
 
+describe("2026-11-24 · an area with its fill turned off is hit on its outline only", () => {
+  const sq = (extra) => ({ mode: "area", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }], ...extra });
+  it("fill off → interior click passes through; edge still hits", () => {
+    expect(measuresUnderPoint([sq({ fillOpacity: 0 })], { x: 50, y: 50 }, 2)).toEqual([]);
+    expect(measuresUnderPoint([sq({ fillOpacity: 0 })], { x: 50, y: 1 }, 2)).toEqual([0]);
+  });
+  it("any fill (and the default fill) keeps the interior", () => {
+    expect(measuresUnderPoint([sq({ fillOpacity: 0.05 })], { x: 50, y: 50 }, 2)).toEqual([0]);
+    expect(measuresUnderPoint([sq({})], { x: 50, y: 50 }, 2)).toEqual([0]);
+  });
+});
+
 describe("measuresUnderPoint · which measurements a click lands on", () => {
   const big = { mode: "area", pts: sq(0, 0, 100) };      // 10,000 SF, index 0
   const small = { mode: "area", pts: sq(40, 40, 10) };   // 100 SF,   index 1 (stacked on top)
