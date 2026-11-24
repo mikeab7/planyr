@@ -10,6 +10,7 @@ import {
 import { teeJunctionsOf, driveJunctionsOf } from "./roadJunctions.js";
 import { roadTapersOf, taperJointCover } from "./roadTaper.js";
 import { fieldInsidesOf } from "./parkingApproach.js";
+import { rowRingOf } from "./parkingRoadTrim.js";
 import { junctionMouthCuts, stripeRunsNearOutline, trimPolylineOutsideRings, snapPieceEnd } from "./roadDeco.js";
 import { roadRowGeometry } from "./roadRowBand.js";
 import {
@@ -98,7 +99,7 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { rows: new Map(), regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { rows: new Map(), regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), parkTrims: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   /* NEW-1 (2026-11-10) — a taper narrows INTO the road it meets; a partner that is hidden is not on the drawing, so that end keeps its width. */
   const trimFor = (r) => {
@@ -113,7 +114,7 @@ export function* roadNetSteps(inp) {
   for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), trimFor(r))); yield; }
   /* NEW-1 (road → parking) — what each car field does about the roads around it (lib/parkingApproach.js): the stalls a drive takes, a road through the field, a
    * drive running ALONG its aisle-mouth face. Decided once here (VIEW-INDEPENDENT-ONCE); `stallClips` / the outline cuts / the mouths below are read from it. */
-  const inside = fieldInsidesOf({ els, settings, junctions: driveJunctions.filter((dj) => byId.has(dj.sideId)), roads, stripOf: (r) => strip.get(r.id), halfOf: roadOuterHalf, isHidden: (T) => elHidden(hiddenGroups, T) });
+  const inside = fieldInsidesOf({ els, settings, junctions: driveJunctions.filter((dj) => byId.has(dj.sideId)), roads, stripOf: (r) => strip.get(r.id), halfOf: roadOuterHalf, isHidden: (T) => elHidden(hiddenGroups, T), rowOf: (r) => rowRingOf(r, settings, sharpFor(r), trimFor(r)) });
   // Extra pavement contributed by each junction, indexed by the road that owns the junction.
   const extra = new Map(roads.map((r) => [r.id, []]));
   // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -336,9 +337,10 @@ export function* roadNetSteps(inp) {
   /* NEW-1 (road → parking) — THE FIELD'S OWN INSIDE (lib/parkingApproach.js): the stalls a drive takes, the field's outline where a road crosses it or runs along
    * its aisle-mouth face. All of it is a function of (els, settings) — decided here, ONCE per model change, never per frame (VIEW-INDEPENDENT-ONCE).
    * `stallClips` Map<fieldId, { base, count, removed, set, corridors }> — what `renderElPx` skips when it draws the stalls and what the Yield total subtracts. */
-  const stallClips = new Map();
+  const stallClips = new Map(), parkTrims = new Map();
   for (const [fid, r] of inside) {
     if (r.clip) stallClips.set(fid, r.clip);
+    if (r.trim) parkTrims.set(fid, r.trim);   // NEW-1 (2026-11-24) — the field's road-traced edge, islands and connecting aisle (lib/parkingRoadTrim.js)
     if (r.through.length) {
       const cutters = fullRegions.filter((reg) => r.through.some((t) => reg.ids.includes(t.roadId))).map((reg) => reg.region.outer).filter(Boolean);
       outlineCuts.set(fid, [...(outlineCuts.get(fid) || []), ...cutters]);
@@ -357,7 +359,7 @@ export function* roadNetSteps(inp) {
     pavingOf: (r) => strip.get(r.id),
   });
   yield;
-  return { rows, regions, stripes, outlineCuts, bandCuts, stallClips, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  return { rows, regions, stripes, outlineCuts, bandCuts, stallClips, parkTrims, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 

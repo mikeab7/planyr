@@ -1,0 +1,13 @@
+# Owner product constraint #63
+
+63. **(2026-11-24) A parking or trailer field drawn over a road keeps its full rectangle and TRACES the road.**
+
+Michael, on the Goose Creek plan: "I like where the parking expansion feature goes, where it just doesn't populate over an existing road. However, I would like it to like you still show the full rectangle, but then just omit the parking spots. I'd like it to kind of curve off like and trace the road, if that makes sense, to where it just becomes like a proper design as opposed to whatever this is."
+
+Follow-ups the same day, each now part of the rule:
+- "there needs to be a connecting road. If the main road is blocking it off … we would have the aisles connecting to each other, kind of at the bottom" → a connecting aisle across the dead ends (one per side, snapped to the stall pitch, spanning the first aisle to the last).
+- "there's no way to get into two of those spots … make sure it accounts for the road's right of way, not just the road itself" → every kept stall must face an aisle run that reaches a field end or a live connecting aisle; the designated ROW band is part of the keep-out.
+- "HOW WOULD A CIVIL OR ARCHITECT DESIGN THIS BOTTOM SECTION, ITERATE A TON OVER THIS SO ITS NOT JUST THIS SCENARIO" → whole stalls only; min run of 3 cars / 2 trailers in a band the trim breaks; aisle stubs past the last stall planted; islands rounded with a curb nose; stranded scraps across the road dropped. A 14-layout gallery (`/mnt/project-files/mockups/parking-trace-road-v3-scenarios.png`) was the iteration.
+- "parking should never really be like right against the roads … you would have overhang … would it be a setting within the road or a setting within the parking module? Like a default setting with both." → a keep-back strip, a property of the ROAD (every lot along one road gets the same strip): per road class in Standards → Roads (seeds: public / truck / custom 10 ft, fire lane 5 ft, auto drive aisle none, since parking on an aisle is what an aisle is for), overridable on the road's own panel ("Parking back"); measured from the ROW line when one is set, else the back of curb. Seed values are starting points awaiting his confirmation; changing a seed is not a new decision, changing where the setting lives is.
+
+Implementation: derived at read time, never stored (`lib/parkingRoadTrim.js` `roadTrimOf`, fed by `roadNetBuild` `parkTrims` and `siteMetrics`); the canvas, the stall / trailer counts, the Yield paved SF and the editable PDF read the same answer. Guard: `test/parkingRoadTrim.test.js`. Backlog B2671336, live check V2671306.

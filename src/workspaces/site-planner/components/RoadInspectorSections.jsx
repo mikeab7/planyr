@@ -5,7 +5,7 @@ import { memo } from "react";
 import { Button as UiButton } from "../../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
 import { commaInt as f0 } from "../../../shared/units/numberFormat.js";
-import { DEFAULT_ROAD_CLASS, classReturnRadius, roadClassOf, roadClassesOf } from "../lib/roadClasses.js";
+import { DEFAULT_ROAD_CLASS, classParkSetback, classReturnRadius, roadClassOf, roadClassesOf } from "../lib/roadClasses.js";
 import { rowWidth } from "../lib/roadCrossSection.js";
 import { labelSummary as roadLabelSummary, xsButtonLabel, xsCaption, xsStripBands, xsSummary } from "../lib/roadPanelModel.js";
 import { roadDefaultRadius } from "../lib/siteGeometry.js";
@@ -15,7 +15,7 @@ import { Field, ROAD_GUTTER_W, ROAD_SELECT_STYLE } from "./PropFields.jsx";
 import { RoadStripCaption, RoadXSectionStrip } from "./RoadPanelParts.jsx";
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
-export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, jumpToStandards, setRoadClass, setRoadLength, stepBox, settings, linkBtn, travelFt, roadLengthOf, designed, selEl, showRow, cl, setRoadRowFt, setRoadRowSide, rowSideInfo, setRoadTravel, mutedEll }) {
+export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, jumpToStandards, setRoadClass, setRoadLength, stepBox, settings, linkBtn, travelFt, roadLengthOf, designed, selEl, showRow, cl, setRoadRowFt, setRoadRowSide, rowSideInfo, setRoadTravel, setRoadParkSetback, mutedEll }) {
   return (
     <Collapse sectionId="road-size" title="Road" defaultOpen>
       <Field gutter={ROAD_GUTTER_W} oneLine label="Length">
@@ -60,6 +60,16 @@ export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, j
           </span>
         </Field>
       )}
+      {/* NEW-1 (road-traced parking) — how far parking keeps back from THIS road. Blank = its class default (Standards → Roads), shown as the placeholder. */}
+      {cl && setRoadParkSetback && (() => {
+        const clsFt = Math.round(classParkSetback(roadClassOf(settings, selEl.roadClass)));
+        const own = selEl.parkSetbackFt != null && Number.isFinite(+selEl.parkSetbackFt) ? Math.round(+selEl.parkSetbackFt) : null;
+        return (
+          <Field gutter={ROAD_GUTTER_W} oneLine label="Parking back" title={`How far parking keeps back from this road (from its right-of-way line when one is set, else the back of curb), so no car overhangs it. Blank = the class default (${clsFt} ft), set in Standards → Roads.`}>
+            {stepBox({ ariaLabel: "Parking keep-back from this road", testid: "road-park-setback", placeholder: String(clsFt), value: own, seed: clsFt, min: 0, step: 1, coarse: 5, allowClear: true, onCommit: (n) => setRoadParkSetback(selEl, n) })}
+          </Field>
+        );
+      })()}
     </Collapse>
   );
 });
