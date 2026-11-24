@@ -126,6 +126,8 @@ export const DECLARATIONS = Object.freeze([
     why: "B494050 — the sheet's CROP. Its primary branch reads the visibility-aware `devExtent`; its fallback branch (a plan with no development yet) reads the collections directly and asks the predicate for itself." },
   { name: "buildComposedSheet", verdict: U,
     why: "NEW-1 (B2127664) — the editable-markups PDF reads `markups`/`callouts`/`measures` ONLY to look up metadata (subject, author, dates) for nodes that already exist in the cloned `<svg>`; a hidden group has no node, so it can never become an annotation." },
+  { name: "convertDeedToOverlay", verdict: U,
+    why: "Converting a deed to an overlay is a model edit on the ONE tract the person chose (its boundary plus its own exceptions, found by deedGroup); it is a record operation, not a picture or a count, so a hide toggle has no say in it." },
   { name: "buildExportSvgRaw", verdict: U,
     why: "Clones the live `<svg>`. Hidden content is not in the DOM, so it cannot reach the sheet — parity by construction, asserted on the real artefact by verify-content-visibility." },
 ]);
