@@ -9503,235 +9503,13 @@ ${resizeScript}
     buildPDFHtml: [() => buildPDFHtml]
   });
 
-  // src/workspaces/scheduler/page/main.jsx
-  var { useState: useState4, useEffect: useEffect3, useRef: useRef4, useMemo: useMemo3, useCallback: useCallback2 } = React;
-  function removeScheduleFromDoc(d, id) {
-    if (!d || !d.projects || !d.projects[id]) return d;
-    const newProjects = { ...d.projects };
-    delete newProjects[id];
-    const remaining = Object.keys(newProjects).map(Number);
-    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
-    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
-  }
-  function logMergeToastEvent(changedRows, changedPids, projects) {
-    try {
-      if (!window.__sb) return;
-      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
-      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
-      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
-      }, () => {
-      });
-    } catch (e) {
-    }
-  }
-  var GRID_LINE = "1px solid var(--bd)";
-  var GRID_LINE_RANGE = "1px solid #93c5fd";
-  var ROW_COLORS = [
-    { color: "#fef3c7", label: "Yellow tint" },
-    { color: "#ffedd5", label: "Orange tint" },
-    { color: "#fee2e2", label: "Red tint" },
-    { color: "#fce7f3", label: "Pink tint" },
-    { color: "#f3e8ff", label: "Purple tint" },
-    { color: "#fde68a", label: "Yellow" },
-    { color: "#fed7aa", label: "Orange" },
-    { color: "#fecaca", label: "Red" },
-    { color: "#fbcfe8", label: "Pink" },
-    { color: "#e9d5ff", label: "Purple" },
-    { color: "#d9f99d", label: "Lime" },
-    { color: "#bbf7d0", label: "Green" },
-    { color: "#a5f3fc", label: "Cyan" },
-    { color: "#bfdbfe", label: "Blue" },
-    { color: "#c7d2fe", label: "Indigo" },
-    { color: "#ecfccb", label: "Lime tint" },
-    { color: "#d1fae5", label: "Green tint" },
-    { color: "#cffafe", label: "Cyan tint" },
-    { color: "#dbeafe", label: "Blue tint" },
-    { color: "#e0e7ff", label: "Indigo tint" }
-  ];
-  var pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map((f) => `linear-gradient(${f},${f})`).join(",");
-  var SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
-  var isValidColor = (v) => v == null || SAFE_COLOR_RE.test(v);
-  var FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
-  var FONT_SIZE_MIN = FONT_SIZE_STEPS[0];
-  var FONT_SIZE_MAX = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
-  var isValidFontSize = (n) => typeof n === "number" && Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX;
-  var stepFontSize = (cur, dir) => {
-    const base = typeof cur === "number" ? cur : 12;
-    if (dir > 0) {
-      const next = FONT_SIZE_STEPS.find((v) => v > base);
-      return next != null ? next : FONT_SIZE_MAX;
-    }
-    const prev = FONT_SIZE_STEPS.filter((v) => v < base);
-    return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
-  };
-  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
-  var askConfirm = /* @__PURE__ */ (() => {
-    let _open = null;
-    return ({ title, body = "", confirmLabel = "Continue", danger = false } = {}) => new Promise((resolve) => {
-      if (_open) _open(false);
-      const prevFocus = document.activeElement;
-      const back = document.createElement("div");
-      back.setAttribute("data-testid", "schedule-confirm");
-      Object.assign(back.style, { position: "fixed", inset: "0", background: "rgba(0,0,0,.45)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-      const card = document.createElement("div");
-      card.setAttribute("role", "alertdialog");
-      card.setAttribute("aria-modal", "true");
-      Object.assign(card.style, { background: "var(--bg)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: "10px", boxShadow: "0 12px 40px rgba(0,0,0,.35)", width: "min(440px, 100%)", padding: "18px 20px 14px", fontFamily: "'Inter', system-ui, sans-serif" });
-      const h = document.createElement("div");
-      h.textContent = title || "Are you sure?";
-      Object.assign(h.style, { fontSize: "14px", fontWeight: "600", marginBottom: body ? "8px" : "14px", lineHeight: "1.4" });
-      card.appendChild(h);
-      if (body) {
-        const b = document.createElement("div");
-        b.textContent = body;
-        Object.assign(b.style, { fontSize: "12.5px", color: "var(--mut)", lineHeight: "1.55", whiteSpace: "pre-wrap", marginBottom: "16px" });
-        card.appendChild(b);
-      }
-      const row = document.createElement("div");
-      Object.assign(row.style, { display: "flex", justifyContent: "flex-end", gap: "8px" });
-      const mk = (label, primary) => {
-        const x = document.createElement("button");
-        x.type = "button";
-        x.textContent = label;
-        Object.assign(x.style, {
-          font: "inherit",
-          fontSize: "12.5px",
-          fontWeight: "600",
-          padding: "7px 14px",
-          borderRadius: "7px",
-          cursor: "pointer",
-          border: primary ? "1px solid transparent" : "1px solid var(--bd2)",
-          background: primary ? danger ? "#b42318" : "var(--amber)" : "var(--surf)",
-          color: primary ? danger || document.documentElement.dataset.theme !== "dark" ? "#fff" : "#14171C" : "var(--txt)"
-        });
-        return x;
-      };
-      const no = mk("Cancel", false), yes = mk(confirmLabel, true);
-      row.appendChild(no);
-      row.appendChild(yes);
-      card.appendChild(row);
-      back.appendChild(card);
-      let done = false;
-      const finish = (v) => {
-        if (done) return;
-        done = true;
-        _open = null;
-        document.removeEventListener("keydown", onKey, true);
-        back.remove();
-        try {
-          prevFocus && prevFocus.focus && prevFocus.focus();
-        } catch {
-        }
-        resolve(v);
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();
-          finish(false);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          e.stopPropagation();
-          finish(document.activeElement === no ? false : true);
-        } else if (e.key === "Tab") {
-          e.preventDefault();
-          (document.activeElement === yes ? no : yes).focus();
-        }
-      };
-      _open = finish;
-      no.onclick = () => finish(false);
-      yes.onclick = () => finish(true);
-      back.addEventListener("mousedown", (e) => {
-        if (e.target === back) finish(false);
-      });
-      document.addEventListener("keydown", onKey, true);
-      document.body.appendChild(back);
-      (danger ? no : yes).focus();
-    });
-  })();
-  var mkt = (id, name, start, dur, parentId = null, health = "gray", predecessors = []) => {
-    const isBlank2 = !start && (dur === "" || dur === null || dur === void 0);
-    const safeStart = isBlank2 ? "" : start && !isNaN(new Date(start).getTime()) ? start : NOW;
-    const safeDur = isBlank2 ? 0 : dur;
-    return {
-      id,
-      _sid: _mintTaskSid(),
-      name,
-      start: safeStart,
-      end: calcEnd(safeStart, safeDur),
-      duration: safeDur,
-      durUnit: "d",
-      durValue: safeDur,
-      predecessors,
-      health,
-      percentComplete: health === "green" ? 100 : health === "yellow" ? 40 : 0,
-      parentId,
-      responsibleParty: [],
-      cost: "",
-      notes: [],
-      isExpanded: true,
-      meetingBound: false
-      // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
-    };
-  };
-  window.__planarLoadStatus = "loading";
-  function postLoadState(state) {
-    try {
-      if (window.self !== window.top) {
-        window.parent.postMessage({ source: "planar-seq", type: "planar:load-state", state }, window.location.origin);
-      }
-    } catch (_) {
-    }
-  }
-  var LOAD_ATTEMPT_TIMEOUT_MS = 2e4;
-  var LOAD_RETRY_BASE_MS = 2e3;
-  var LOAD_RETRY_MAX_MS = 3e4;
-  var SEED = {
-    nPid: 4,
-    nTid: { 1: 12, 2: 5, 3: 10 },
-    aPid: 3,
-    view: "split",
-    section: "projects",
-    editProjId: null,
-    healthColStyle: "stoplight",
-    settings: { ...DEFAULT_SETTINGS, holidays: { ...DEFAULT_HOLIDAYS } },
-    projects: {
-      1: { id: 1, name: "Hillwood I-10 Logistics", tasks: [
-        mkt(1, "Site Acquisition", "2025-01-06", 30, null, "green", []),
-        mkt(2, "Title Search", "2025-01-06", 14, 1, "green", []),
-        mkt(3, "Environmental Phase I", "2025-01-13", 21, 1, "green", [1]),
-        mkt(4, "Design & Engineering", "2025-02-03", 60, null, "yellow", []),
-        mkt(5, "Schematic Design", "2025-02-03", 21, 4, "green", [1]),
-        mkt(6, "Construction Documents", "2025-02-24", 35, 4, "yellow", [5]),
-        mkt(7, "Permitting", "2025-04-01", 45, null, "yellow", [4]),
-        mkt(8, "Submit Plans", "2025-04-01", 5, 7, "green", [6]),
-        mkt(9, "City Review", "2025-04-07", 30, 7, "yellow", [8]),
-        mkt(10, "Permit Issued", "2025-05-07", 0, 7, "red", [9]),
-        mkt(11, "Construction", "2025-05-08", 180, null, "gray", [7])
-      ] },
-      2: { id: 2, name: "Grand Pkwy Distribution", tasks: [
-        mkt(1, "Site Control", "2025-03-01", 21, null, "green", []),
-        mkt(2, "Due Diligence", "2025-03-22", 30, null, "yellow", [1]),
-        mkt(3, "Design", "2025-04-22", 60, null, "gray", [2]),
-        mkt(4, "Construction", "2025-06-22", 150, null, "gray", [3])
-      ] },
-      3: { id: 3, name: "Sample Project", tasks: [
-        mkt(1, "Project Kick Off", "2025-06-02", 0, null, "gray", []),
-        mkt(2, "Due Diligence", "2025-06-02", 30, null, "green", [1]),
-        mkt(3, "Order Reports", "2025-06-02", 5, 2, "green", []),
-        mkt(4, "Review Reports", "2025-06-09", 15, 2, "yellow", [3]),
-        mkt(5, "Entitlements", "2025-07-14", 60, null, "gray", [2]),
-        mkt(6, "Submit Application", "2025-07-14", 5, 5, "gray", []),
-        mkt(7, "Agency Review", "2025-07-21", 40, 5, "gray", [6]),
-        mkt(8, "Approval", "2025-09-15", 0, 5, "gray", [7]),
-        mkt(9, "Construction", "2025-09-16", 120, null, "gray", [5])
-      ] }
-    }
-  };
+  // src/workspaces/scheduler/page/grid/columns.js
   var lastRowPointerType = "mouse";
-  window.addEventListener("pointerdown", (ev) => {
-    lastRowPointerType = ev.pointerType || "mouse";
-  }, true);
+  var installRowPointerTypeListener = () => {
+    window.addEventListener("pointerdown", (ev) => {
+      lastRowPointerType = ev.pointerType || "mouse";
+    }, true);
+  };
   var COLS = [
     { k: "id", l: "ID", w: 30, e: false },
     { k: "name", l: "Task", w: 220, e: true },
@@ -9928,6 +9706,43 @@ ${resizeScript}
     });
     return out;
   };
+  function activeProjectOf(d) {
+    if (!d || typeof d !== "object" || !d.projects) return null;
+    const p = d.aPid != null ? d.projects[d.aPid] : null;
+    return p && typeof p === "object" ? p : null;
+  }
+  exposeToHarness({
+    lastRowPointerType: [() => lastRowPointerType, (v) => {
+      lastRowPointerType = v;
+    }],
+    installRowPointerTypeListener: [() => installRowPointerTypeListener],
+    COLS: [() => COLS],
+    TOTAL_W: [() => TOTAL_W],
+    COL_BY_K: [() => COL_BY_K],
+    DEFAULT_GRID_COLS: [() => DEFAULT_GRID_COLS],
+    formulaColsOf: [() => formulaColsOf],
+    readGridCfg: [() => readGridCfg],
+    writeGridCfg: [() => writeGridCfg],
+    COL_LABELS: [() => COL_LABELS],
+    colLabel: [() => colLabel],
+    formulaColToColDef: [() => formulaColToColDef],
+    effectiveColsOf: [() => effectiveColsOf],
+    activeEffectiveCols: [() => activeEffectiveCols],
+    _pfDateRef: [() => _pfDateRef],
+    _pfNumOrBlank: [() => _pfNumOrBlank],
+    _pfCostRef: [() => _pfCostRef],
+    FORMULA_BUILTIN_REFS: [() => FORMULA_BUILTIN_REFS],
+    formulaCalendar: [() => formulaCalendar],
+    formulaToday: [() => formulaToday],
+    _formulaBuiltinMap: [() => _formulaBuiltinMap],
+    buildFormulaRowColumns: [() => buildFormulaRowColumns],
+    formulaColumnNames: [() => formulaColumnNames],
+    isBuiltinFormulaName: [() => isBuiltinFormulaName],
+    computeFormulaValues: [() => computeFormulaValues],
+    activeProjectOf: [() => activeProjectOf]
+  });
+
+  // src/workspaces/scheduler/page/grid/gridNav.js
   function stepVisibleColIdx(visIdxs, curIdx, dir) {
     if (!visIdxs || !visIdxs.length) return curIdx;
     const pos = visIdxs.indexOf(curIdx);
@@ -10086,6032 +9901,31 @@ ${resizeScript}
     }
     return null;
   }
-  function celebrateTaskComplete(taskName) {
-    try {
-      document.getElementById("planar-celebrate-toast")?.remove();
-      document.getElementById("planar-delete-toast")?.remove();
-      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const toast = document.createElement("div");
-      toast.id = "planar-celebrate-toast";
-      toast.style.cssText = "position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:100002;pointer-events:none;";
-      const card = document.createElement("div");
-      card.style.cssText = "display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid #d0d7de;border-radius:10px;padding:10px 16px 10px 13px;box-shadow:0 6px 24px rgba(27,31,36,.16),0 1px 3px rgba(27,31,36,.08);font-family:'Inter',system-ui,-apple-system,sans-serif;";
-      toast.appendChild(card);
-      const dotWrap = document.createElement("span");
-      dotWrap.style.cssText = "position:relative;width:20px;height:20px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;";
-      const ring = document.createElement("span");
-      ring.style.cssText = "position:absolute;left:50%;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:2px solid #16a34a;opacity:0;";
-      const dot = document.createElement("span");
-      dot.style.cssText = "position:relative;width:20px;height:20px;border-radius:50%;background:#16a34a;display:inline-flex;align-items:center;justify-content:center;";
-      dot.innerHTML = '<svg width="12" height="12" viewBox="0 0 13 13" fill="none"><path d="M3 6.7 L5.5 9.2 L10 3.8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray:14;stroke-dashoffset:14;"/></svg>';
-      dotWrap.appendChild(ring);
-      dotWrap.appendChild(dot);
-      card.appendChild(dotWrap);
-      const text = document.createElement("span");
-      const nameEl = document.createElement("div");
-      nameEl.style.cssText = "font-size:12.5px;font-weight:600;color:#1f2328;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35;";
-      nameEl.textContent = (taskName || "Task").toString();
-      const subEl = document.createElement("div");
-      subEl.style.cssText = "font-size:11px;font-weight:500;color:#15803d;line-height:1.35;";
-      subEl.textContent = "Marked complete";
-      text.appendChild(nameEl);
-      text.appendChild(subEl);
-      card.appendChild(text);
-      document.body.appendChild(toast);
-      const chk = dot.querySelector("path");
-      const LIFE = 2300;
-      const exit = (dur) => {
-        toast.animate(
-          [
-            { transform: "translateX(-50%) translateY(0)", opacity: 1 },
-            { transform: "translateX(-50%) translateY(10px)", opacity: 0 }
-          ],
-          { duration: dur, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }
-        );
-        setTimeout(() => toast.remove(), dur + 30);
-      };
-      if (reduce) {
-        if (chk) chk.style.strokeDashoffset = "0";
-        toast.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: "forwards" });
-        setTimeout(() => exit(200), LIFE);
-        return;
-      }
-      toast.animate(
-        [
-          { transform: "translateX(-50%) translateY(16px)", opacity: 0 },
-          { transform: "translateX(-50%) translateY(-2px)", opacity: 1, offset: 0.7 },
-          { transform: "translateX(-50%) translateY(0)", opacity: 1 }
-        ],
-        { duration: 300, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
-      );
-      dot.animate(
-        [{ transform: "scale(.4)" }, { transform: "scale(1.28)", offset: 0.55 }, { transform: "scale(.95)", offset: 0.8 }, { transform: "scale(1)" }],
-        { duration: 420, delay: 90, easing: "cubic-bezier(.34,1.56,.64,1)", fill: "backwards" }
-      );
-      if (chk) {
-        chk.animate([{ strokeDashoffset: 14 }, { strokeDashoffset: 0 }], { duration: 320, delay: 200, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
-        setTimeout(() => {
-          chk.style.strokeDashoffset = "0";
-        }, 540);
-      }
-      ring.animate(
-        [{ transform: "scale(.9)", opacity: 0.55 }, { transform: "scale(2.6)", opacity: 0 }],
-        { duration: 620, delay: 160, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
-      );
-      const colors = ["#16a34a", "#22c55e", "#4f46e5", "#16a34a", "#34d399", "#4f46e5"];
-      const N = 6;
-      for (let i = 0; i < N; i++) {
-        const s = document.createElement("span");
-        s.style.cssText = `position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;border-radius:50%;background:${colors[i % colors.length]};opacity:0;`;
-        dotWrap.appendChild(s);
-        const ang = (-90 + (i / (N - 1) - 0.5) * 150) * Math.PI / 180;
-        const dist = 22 + Math.random() * 14;
-        const dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist;
-        s.animate(
-          [
-            { transform: "translate(0,0) scale(1)", opacity: 1 },
-            { transform: `translate(${dx * 0.55}px,${dy * 0.55}px) scale(.7)`, opacity: 1, offset: 0.4 },
-            { transform: `translate(${dx}px,${dy}px) scale(.35)`, opacity: 0 }
-          ],
-          { duration: 580, delay: 170, easing: "cubic-bezier(.18,.7,.3,1)", fill: "forwards" }
-        );
-      }
-      setTimeout(() => exit(240), LIFE);
-    } catch (e) {
-    }
-  }
-  function notifyRowsDeleted(rowCount, totalCount) {
-    try {
-      document.getElementById("planar-delete-toast")?.remove();
-      document.getElementById("planar-celebrate-toast")?.remove();
-      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const toast = document.createElement("div");
-      toast.id = "planar-delete-toast";
-      toast.style.cssText = "position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:100002;pointer-events:none;";
-      const card = document.createElement("div");
-      card.style.cssText = "display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid #d0d7de;border-radius:10px;padding:10px 16px 10px 13px;box-shadow:0 6px 24px rgba(27,31,36,.16),0 1px 3px rgba(27,31,36,.08);font-family:'Inter',system-ui,-apple-system,sans-serif;";
-      toast.appendChild(card);
-      const dot = document.createElement("span");
-      dot.style.cssText = "width:20px;height:20px;border-radius:50%;background:#dc2626;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;";
-      dot.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.4 H10"/><path d="M4.6 3.4 V2.4 A.7 .7 0 0 1 5.3 1.7 H6.7 A.7 .7 0 0 1 7.4 2.4 V3.4"/><path d="M3.1 3.4 L3.7 9.9 A.8 .8 0 0 0 4.5 10.6 H7.5 A.8 .8 0 0 0 8.3 9.9 L8.9 3.4"/><path d="M5.1 5.4 V8.6 M6.9 5.4 V8.6"/></svg>';
-      card.appendChild(dot);
-      const text = document.createElement("span");
-      const nameEl = document.createElement("div");
-      nameEl.style.cssText = "font-size:12.5px;font-weight:600;color:#1f2328;line-height:1.35;";
-      nameEl.textContent = rowCount === 1 ? "1 row deleted" : `${rowCount} rows deleted`;
-      const subEl = document.createElement("div");
-      subEl.style.cssText = "font-size:11px;font-weight:500;color:#57606a;line-height:1.35;";
-      subEl.textContent = (totalCount > rowCount ? `${totalCount} tasks removed including subtasks · ` : "") + "Ctrl+Z to undo";
-      text.appendChild(nameEl);
-      text.appendChild(subEl);
-      card.appendChild(text);
-      document.body.appendChild(toast);
-      const LIFE = 2600;
-      const exit = (dur) => {
-        toast.animate(
-          [
-            { transform: "translateX(-50%) translateY(0)", opacity: 1 },
-            { transform: "translateX(-50%) translateY(10px)", opacity: 0 }
-          ],
-          { duration: dur, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }
-        );
-        setTimeout(() => toast.remove(), dur + 30);
-      };
-      if (reduce) {
-        toast.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: "forwards" });
-        setTimeout(() => exit(200), LIFE);
-        return;
-      }
-      toast.animate(
-        [
-          { transform: "translateX(-50%) translateY(16px)", opacity: 0 },
-          { transform: "translateX(-50%) translateY(-2px)", opacity: 1, offset: 0.7 },
-          { transform: "translateX(-50%) translateY(0)", opacity: 1 }
-        ],
-        { duration: 280, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
-      );
-      setTimeout(() => exit(240), LIFE);
-    } catch (e) {
-    }
-  }
-  var FOOTER_BTN_STYLE = {
-    fontSize: 12,
-    width: 150,
-    height: 34,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 6,
-    fontFamily: "inherit",
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid #e5e7eb",
-    background: "var(--bg)",
-    color: "#374151"
-  };
-  function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
-    const { completedTask, projId, projName, successors } = prompt;
-    const readyToStart = successors.filter((t) => t.health === "gray");
-    const alreadyActive = successors.filter((t) => t.health !== "gray");
-    const [pending, setPending] = React.useState(() => {
-      const m = {};
-      successors.forEach((t) => {
-        m[t.id] = t.health === "gray" ? "yellow" : null;
-      });
-      return m;
-    });
-    const changeCount = Object.values(pending).filter((v) => v !== null).length;
-    function apply() {
-      Object.entries(pending).forEach(([tid, hk]) => {
-        if (hk !== null) updateTask(Number(tid), { health: hk }, projId);
-      });
-      onClose();
-    }
-    function StatusPills({ task }) {
-      const opts = [
-        { k: "gray", label: "Not Started" },
-        { k: "yellow", label: "In Progress" },
-        { k: "red", label: "Needs Attn." },
-        { k: "green", label: "Complete" }
-      ];
-      const cur = pending[task.id];
-      const isGray = task.health === "gray";
-      return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 6 } }, !isGray && /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          "data-successor-pill": "nochange",
-          onClick: () => setPending((p) => ({ ...p, [task.id]: null })),
-          style: {
-            fontSize: 10,
-            padding: "3px 8px",
-            borderRadius: 12,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            border: cur === null ? "1.5px solid #6366f1" : "1px solid #d1d5db",
-            background: cur === null ? "#eef2ff" : "#f9fafb",
-            color: cur === null ? "#4f46e5" : "#6b7280",
-            fontWeight: cur === null ? 600 : 400
-          }
-        },
-        "No change"
-      ), opts.map((o) => {
-        const h = HEALTH[o.k] || HEALTH.gray;
-        const sel = pending[task.id] === o.k;
-        return /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            key: o.k,
-            "data-successor-pill": o.k,
-            onClick: () => setPending((p) => ({ ...p, [task.id]: o.k })),
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 10,
-              padding: "3px 9px",
-              borderRadius: 12,
-              fontFamily: "inherit",
-              cursor: "pointer",
-              border: sel ? `1.5px solid ${h.dot === "#ffffff" ? "#d1d5db" : h.dot}` : "1px solid #e5e7eb",
-              background: sel ? h.bar : "#f9fafb",
-              color: sel ? HDARK[o.k] : "#6b7280",
-              fontWeight: sel ? 600 : 400
-            }
-          },
-          /* @__PURE__ */ React.createElement("span", { style: {
-            width: 7,
-            height: 7,
-            borderRadius: "50%",
-            flexShrink: 0,
-            background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
-          } }),
-          o.label
-        );
-      }));
-    }
-    function TaskRow({ task, accent }) {
-      const h = HEALTH[task.health] || HEALTH.gray;
-      return /* @__PURE__ */ React.createElement("div", { "data-successor-row": task.id, style: {
-        padding: "10px 14px",
-        borderRadius: 7,
-        marginBottom: 8,
-        background: accent ? "#fafbff" : "#f9fafb",
-        border: `1px solid ${accent ? "#e0e4f8" : "#e5e7eb"}`
-      } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: {
-        fontWeight: 500,
-        fontSize: 13,
-        color: "#1f2328",
-        flex: 1,
-        minWidth: 0,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }, title: task.name }, task.name), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: {
-        width: 7,
-        height: 7,
-        borderRadius: "50%",
-        background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
-      } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" } }, h.label))), /* @__PURE__ */ React.createElement(StatusPills, { task }), onOpenTask && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 7 } }, /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => onOpenTask(projId, task.id),
-          style: { fontSize: 11, color: "#4f46e5", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 500 }
-        },
-        "Open in Projects",
-        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "9 18 15 12 9 6" }))
-      )));
-    }
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        "data-successor-modal": true,
-        onMouseDown: (e) => {
-          if (e.target === e.currentTarget) onClose();
-        },
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 4e3,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "rgba(15,23,42,.35)"
-        }
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--bg)",
-            borderRadius: 12,
-            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
-            width: 480,
-            maxWidth: "94vw",
-            maxHeight: "82vh",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden"
-          },
-          tabIndex: -1,
-          ref: (el) => el?.focus(),
-          onKeyDown: (e) => {
-            if (e.key === "Escape") {
-              onClose();
-              return;
-            }
-            if (e.key === "Enter" && changeCount > 0) apply();
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: {
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          background: "#dcfce7",
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        } }, /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#16a34a", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "20 6 9 17 4 12" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "#16a34a", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 } }, "Task Completed"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: completedTask.name }, completedTask.name))), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            onClick: onClose,
-            style: { background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, padding: "4px", borderRadius: 4, lineHeight: 1, flexShrink: 0 },
-            onMouseEnter: (e) => e.currentTarget.style.color = "#374151",
-            onMouseLeave: (e) => e.currentTarget.style.color = "#9ca3af"
-          },
-          "✕"
-        )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#6b7280", marginTop: 8, paddingLeft: 42 } }, projName, " · ", successors.length, " successor", successors.length !== 1 ? "s" : "", " to review")),
-        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "14px 20px" } }, readyToStart.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: "#6366f1" } }), " Ready to Start"), readyToStart.map((t) => /* @__PURE__ */ React.createElement(TaskRow, { key: t.id, task: t, accent: true }))), alreadyActive.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 8, marginTop: readyToStart.length ? 12 : 0, display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: "#9ca3af" } }), " Already Active"), alreadyActive.map((t) => /* @__PURE__ */ React.createElement(TaskRow, { key: t.id, task: t, accent: false })))),
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, background: "#f9fafb", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#9ca3af", marginRight: "auto" } }, changeCount > 0 ? `${changeCount} update${changeCount !== 1 ? "s" : ""} pending` : "No changes"), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            "data-successor-apply": "skip",
-            onClick: onClose,
-            style: FOOTER_BTN_STYLE,
-            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
-            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
-          },
-          "Skip"
-        ), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            "data-successor-apply": "update",
-            onClick: apply,
-            disabled: !changeCount,
-            title: "Applies the status picked for each row above · Enter",
-            style: {
-              ...FOOTER_BTN_STYLE,
-              cursor: changeCount ? "pointer" : "default",
-              border: changeCount ? "1px solid #4f46e5" : "1px solid #e5e7eb",
-              background: changeCount ? "#4f46e5" : "#f3f4f6",
-              color: changeCount ? "#fff" : "#9ca3af"
-            }
-          },
-          "Update Successors"
-        ))
-      )
-    );
-  }
-  function DeleteChildrenModal({ rowCount, totalCount, onCascade, onPromote, onCancel }) {
-    const subtaskCount = totalCount - rowCount;
-    const title = rowCount > 1 ? `Delete ${rowCount} tasks?` : "Delete this task?";
-    const body = rowCount > 1 ? `${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""} would come with ${rowCount > 1 ? "them" : "it"}.` : `This task has ${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""}.`;
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        "data-delete-children-modal": true,
-        onMouseDown: (e) => {
-          if (e.target === e.currentTarget) onCancel();
-        },
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 4e3,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "rgba(15,23,42,.35)"
-        }
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--bg)",
-            borderRadius: 12,
-            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
-            width: 460,
-            maxWidth: "94vw",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden"
-          },
-          tabIndex: -1,
-          ref: (el) => el?.focus(),
-          onKeyDown: (e) => {
-            if (e.key === "Escape") onCancel();
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328" } }, title), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#6b7280", marginTop: 6 } }, body, " Delete them too, or keep them — they'll move up to this task's parent, in the same order.")),
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, background: "#f9fafb" } }, /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            "data-delete-children-choice": "cancel",
-            onClick: onCancel,
-            style: FOOTER_BTN_STYLE,
-            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
-            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
-          },
-          "Cancel"
-        ), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            "data-delete-children-choice": "promote",
-            onClick: onPromote,
-            style: FOOTER_BTN_STYLE,
-            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
-            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
-          },
-          "Keep subtasks"
-        ), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            "data-delete-children-choice": "cascade",
-            onClick: onCascade,
-            style: { ...FOOTER_BTN_STYLE, border: "1px solid #dc2626", background: "#dc2626", color: "#fff" }
-          },
-          "Delete all ",
-          totalCount
-        ))
-      )
-    );
-  }
-  function MoveToModal({ tasks, sourceIds, onCommit, onCancel }) {
-    const [query, setQuery] = React.useState("");
-    const [hi, setHi] = React.useState(0);
-    const inputRef = React.useRef(null);
-    React.useEffect(() => {
-      inputRef.current?.focus();
-    }, []);
-    const blocked = React.useMemo(() => {
-      const b = new Set(sourceIds);
-      let grew = true;
-      while (grew) {
-        grew = false;
-        tasks.forEach((t) => {
-          if (t.parentId != null && b.has(t.parentId) && !b.has(t.id)) {
-            b.add(t.id);
-            grew = true;
-          }
-        });
-      }
-      return b;
-    }, [tasks, sourceIds]);
-    const options = React.useMemo(() => {
-      const kidsBy = /* @__PURE__ */ new Map();
-      tasks.forEach((t) => {
-        const p = t.parentId ?? null;
-        if (!kidsBy.has(p)) kidsBy.set(p, []);
-        kidsBy.get(p).push(t);
-      });
-      const out = [];
-      const walk = (parentId, level) => (kidsBy.get(parentId) || []).forEach((t) => {
-        if (!blocked.has(t.id)) out.push({ id: t.id, name: t.name || `Task ${t.id}`, level });
-        walk(t.id, level + 1);
-      });
-      walk(null, 0);
-      const q = query.trim().toLowerCase();
-      const filtered = q ? out.filter((o) => o.name.toLowerCase().includes(q)) : out;
-      return [{ id: null, name: "— Top level —", level: 0 }, ...filtered];
-    }, [tasks, blocked, query]);
-    const commit = (id) => {
-      if (id !== void 0) onCommit(id, "end");
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        "data-move-to-modal": true,
-        onMouseDown: (e) => {
-          if (e.target === e.currentTarget) onCancel();
-        },
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 4e3,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "rgba(15,23,42,.35)"
-        }
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--bg)",
-            borderRadius: 12,
-            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
-            width: 420,
-            maxWidth: "94vw",
-            maxHeight: "70vh",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden"
-          },
-          tabIndex: -1,
-          onKeyDown: (e) => {
-            if (e.key === "Escape") {
-              onCancel();
-              return;
-            }
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setHi((h) => Math.min(options.length - 1, h + 1));
-              return;
-            }
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setHi((h) => Math.max(0, h - 1));
-              return;
-            }
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit(options[hi]?.id);
-              return;
-            }
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 16px 10px", borderBottom: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328", marginBottom: 8 } }, "Move ", sourceIds.length > 1 ? `${sourceIds.length} tasks` : "task", " to…"), /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            ...NO_AUTOFILL,
-            ref: inputRef,
-            value: query,
-            onChange: (e) => {
-              setQuery(e.target.value);
-              setHi(0);
-            },
-            placeholder: "Search tasks…",
-            style: {
-              width: "100%",
-              boxSizing: "border-box",
-              fontSize: 13,
-              padding: "7px 9px",
-              border: "1px solid #d1d5db",
-              borderRadius: 6,
-              outline: "none",
-              fontFamily: "inherit"
-            }
-          }
-        )),
-        /* @__PURE__ */ React.createElement("div", { style: { overflow: "auto", flex: 1, padding: "4px 0" } }, options.length === 1 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", fontSize: 12, color: "#9ca3af" } }, "No matching tasks"), options.map((o, i) => /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            key: o.id ?? "__top",
-            "data-move-to-option": o.id ?? "top",
-            onMouseEnter: () => setHi(i),
-            onClick: () => commit(o.id),
-            style: {
-              padding: "6px 14px",
-              paddingLeft: 14 + o.level * 16,
-              fontSize: 13,
-              cursor: "pointer",
-              background: i === hi ? "#eff6ff" : "transparent",
-              color: o.id === null ? "#4b5563" : "#1f2328",
-              fontStyle: o.id === null ? "italic" : "normal",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis"
-            }
-          },
-          o.name
-        ))),
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", display: "flex", justifyContent: "flex-end", gap: 8, background: "#f9fafb", borderTop: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            onClick: onCancel,
-            style: FOOTER_BTN_STYLE,
-            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
-            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
-          },
-          "Cancel"
-        ))
-      )
-    );
-  }
-  function ContactsPanel({ data, setData, onClose }) {
-    const contacts = data.settings?.contacts || [];
-    const [editId, setEditId] = React.useState(null);
-    const [editName, setEditName] = React.useState("");
-    const [editEmail, setEditEmail] = React.useState("");
-    const [addMode, setAddMode] = React.useState(false);
-    const [newName, setNewName] = React.useState("");
-    const [newEmail, setNewEmail] = React.useState("");
-    function saveContacts(updated) {
-      setData((d) => ({ ...d, settings: { ...d.settings, contacts: updated } }));
-    }
-    function startEdit(c) {
-      setEditId(c.id);
-      setEditName(c.name);
-      setEditEmail(c.email || "");
-      setAddMode(false);
-    }
-    function commitEdit() {
-      const nm = editName.trim();
-      if (!nm) return;
-      const oldName = (contacts.find((c) => c.id === editId) || {}).name;
-      setData((d) => {
-        const settings = { ...d.settings, contacts: (d.settings?.contacts || []).map((c) => c.id === editId ? { ...c, name: nm, email: editEmail.trim() } : c) };
-        let projects = d.projects;
-        if (oldName && oldName !== nm) {
-          projects = {};
-          Object.entries(d.projects).forEach(([pid, proj]) => {
-            projects[pid] = { ...proj, tasks: (proj.tasks || []).map((t) => {
-              const list = ownerListOf(t);
-              if (!ownerHas(list, oldName)) return t;
-              return { ...t, responsibleParty: renameOwnerIn(list, oldName, nm) };
-            }) };
-          });
-        }
-        return { ...d, settings, projects };
-      });
-      setEditId(null);
-    }
-    function del(id) {
-      const goneName = (contacts.find((c) => c.id === id) || {}).name;
-      setData((d) => {
-        const settings = { ...d.settings, contacts: (d.settings?.contacts || []).filter((c) => c.id !== id) };
-        let projects = d.projects;
-        if (goneName) {
-          projects = {};
-          Object.entries(d.projects).forEach(([pid, proj]) => {
-            projects[pid] = { ...proj, tasks: (proj.tasks || []).map((t) => {
-              const list = ownerListOf(t);
-              if (!ownerHas(list, goneName)) return t;
-              return { ...t, responsibleParty: removeOwnerFrom(list, goneName) };
-            }) };
-          });
-        }
-        return { ...d, settings, projects };
-      });
-    }
-    function addContact() {
-      if (!newName.trim()) return;
-      const id = Date.now();
-      saveContacts([...contacts, { id, name: newName.trim(), email: newEmail.trim() }]);
-      setNewName("");
-      setNewEmail("");
-      setAddMode(false);
-    }
-    return /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 3e3, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.32)" } }, /* @__PURE__ */ React.createElement("div", { style: { background: "var(--bg)", borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,.18)", width: 420, maxWidth: "94vw", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "16px 20px 12px", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 15, fontWeight: 600, color: "var(--txt)" } }, "Contacts"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", marginTop: 2 } }, contacts.length, " contact", contacts.length !== 1 ? "s" : "")), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: onClose,
-        style: { background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 18, lineHeight: 1, padding: "4px 6px", borderRadius: 5 },
-        onMouseEnter: (e) => e.currentTarget.style.background = "#f0f0f0",
-        onMouseLeave: (e) => e.currentTarget.style.background = "none"
-      },
-      "✕"
-    )), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "8px 0" } }, contacts.length === 0 && !addMode && /* @__PURE__ */ React.createElement("div", { style: { padding: "24px 20px", textAlign: "center", color: "var(--mut)", fontSize: 13 } }, "No contacts yet. Add one below."), contacts.map((c) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        key: c.id,
-        style: { display: "flex", alignItems: "center", gap: 10, padding: "8px 20px", transition: "background .1s" },
-        onMouseEnter: (e) => e.currentTarget.style.background = "#f8f9fa",
-        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-      },
-      editId === c.id ? /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", gap: 6, alignItems: "center" } }, /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...contactField("name"),
-          value: editName,
-          onChange: (e) => setEditName(e.target.value),
-          autoFocus: true,
-          placeholder: "Name *",
-          style: { flex: 1, fontSize: 12, border: "1px solid var(--blue)", borderRadius: 4, padding: "4px 7px", fontFamily: "inherit", outline: "none" },
-          onKeyDown: (e) => {
-            if (e.key === "Enter") commitEdit();
-            if (e.key === "Escape") setEditId(null);
-          }
-        }
-      ), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...contactField("email"),
-          value: editEmail,
-          onChange: (e) => setEditEmail(e.target.value),
-          placeholder: "Email",
-          style: { flex: 1, fontSize: 12, border: "1px solid var(--bd2)", borderRadius: 4, padding: "4px 7px", fontFamily: "inherit", outline: "none" },
-          onFocus: (e) => e.target.style.borderColor = "var(--blue)",
-          onBlur: (e) => e.target.style.borderColor = "var(--bd2)",
-          onKeyDown: (e) => {
-            if (e.key === "Enter") commitEdit();
-            if (e.key === "Escape") setEditId(null);
-          }
-        }
-      ), /* @__PURE__ */ React.createElement("button", { onClick: commitEdit, style: { fontSize: 11, padding: "4px 9px", borderRadius: 4, border: "1px solid var(--amber)", background: "#eef2ff", color: "var(--amber)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" } }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: () => setEditId(null), style: { fontSize: 11, padding: "4px 7px", borderRadius: 4, border: "1px solid var(--bd2)", background: "none", color: "var(--mut)", cursor: "pointer", fontFamily: "inherit" } }, "✕")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: {
-        width: 32,
-        height: 32,
-        borderRadius: "50%",
-        background: avatarColor(c.name),
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 11,
-        fontWeight: 700,
-        color: "#fff",
-        flexShrink: 0
-      } }, getInitials(c.name)), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, c.name), c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.email), !c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--bd2)" } }, "No email")), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => startEdit(c),
-          style: { background: "none", border: "none", cursor: "pointer", color: "var(--mut)", padding: "4px 6px", borderRadius: 4, fontSize: 11, fontFamily: "inherit" },
-          onMouseEnter: (e) => e.currentTarget.style.background = "#e8eaf0",
-          onMouseLeave: (e) => e.currentTarget.style.background = "none"
-        },
-        "Edit"
-      ), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => del(c.id),
-          style: { background: "none", border: "none", cursor: "pointer", color: "#f85149", padding: "4px 6px", borderRadius: 4, fontSize: 16, lineHeight: 1 },
-          onMouseEnter: (e) => e.currentTarget.style.background = "#fef2f2",
-          onMouseLeave: (e) => e.currentTarget.style.background = "none"
-        },
-        "×"
-      ))
-    ))), /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", padding: "12px 20px", flexShrink: 0 } }, !addMode ? /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => setAddMode(true),
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 12,
-          color: "var(--blue)",
-          fontWeight: 500,
-          background: "none",
-          border: "1px dashed var(--bd2)",
-          borderRadius: 6,
-          padding: "7px 14px",
-          cursor: "pointer",
-          width: "100%",
-          justifyContent: "center",
-          fontFamily: "inherit"
-        },
-        onMouseEnter: (e) => e.currentTarget.style.borderColor = "var(--blue)",
-        onMouseLeave: (e) => e.currentTarget.style.borderColor = "var(--bd2)"
-      },
-      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, lineHeight: 1 } }, "+"),
-      " Add Contact"
-    ) : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...contactField("name"),
-        autoFocus: true,
-        value: newName,
-        onChange: (e) => setNewName(e.target.value),
-        placeholder: "Full name *",
-        style: { flex: 1, fontSize: 12, border: "1px solid var(--blue)", borderRadius: 5, padding: "6px 9px", fontFamily: "inherit", outline: "none" },
-        onKeyDown: (e) => {
-          if (e.key === "Enter") addContact();
-          if (e.key === "Escape") setAddMode(false);
-        }
-      }
-    ), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...contactField("email"),
-        value: newEmail,
-        onChange: (e) => setNewEmail(e.target.value),
-        placeholder: "Email (optional)",
-        style: { flex: 1, fontSize: 12, border: "1px solid var(--bd2)", borderRadius: 5, padding: "6px 9px", fontFamily: "inherit", outline: "none" },
-        onFocus: (e) => e.target.style.borderColor = "var(--blue)",
-        onBlur: (e) => e.target.style.borderColor = "var(--bd2)",
-        onKeyDown: (e) => {
-          if (e.key === "Enter") addContact();
-          if (e.key === "Escape") setAddMode(false);
-        }
-      }
-    )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { onClick: addContact, style: {
-      flex: 1,
-      fontSize: 12,
-      padding: "7px 0",
-      borderRadius: 5,
-      border: "1px solid var(--amber)",
-      background: "#eef2ff",
-      color: "var(--amber)",
-      cursor: "pointer",
-      fontFamily: "inherit",
-      fontWeight: 500
-    } }, "Add Contact"), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => {
-          setAddMode(false);
-          setNewName("");
-          setNewEmail("");
-        },
-        style: {
-          fontSize: 12,
-          padding: "7px 14px",
-          borderRadius: 5,
-          border: "1px solid var(--bd2)",
-          background: "none",
-          color: "var(--mut)",
-          cursor: "pointer",
-          fontFamily: "inherit"
-        }
-      },
-      "Cancel"
-    ))))));
-  }
-  function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
-    const [rows, setRows] = useState4(null);
-    const [previewRow, setPreviewRow] = useState4(null);
-    const [previewData, setPreviewData] = useState4(null);
-    const [busy, setBusy] = useState4(false);
-    useEffect3(() => {
-      let alive = true;
-      (async () => {
-        const list = await window.storage.getHistory("hs-v1", 100);
-        if (alive) setRows(list);
-      })();
-      return () => {
-        alive = false;
-      };
-    }, []);
-    const refresh = async () => {
-      setRows(null);
-      const list = await window.storage.getHistory("hs-v1", 100);
-      setRows(list);
-    };
-    const fmtAgo = (iso) => {
-      const ms = Date.now() - new Date(iso).getTime();
-      const s = Math.floor(ms / 1e3);
-      if (s < 60) return `${s}s ago`;
-      const m = Math.floor(s / 60);
-      if (m < 60) return `${m}m ago`;
-      const h = Math.floor(m / 60);
-      if (h < 24) return `${h}h ago`;
-      const d = Math.floor(h / 24);
-      return `${d}d ago`;
-    };
-    const fmtAbs = (iso) => {
-      try {
-        return new Date(iso).toLocaleString();
-      } catch {
-        return iso;
-      }
-    };
-    const fmtBytes = (n) => {
-      if (n == null) return "—";
-      if (n < 1024) return `${n} B`;
-      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-      return `${(n / 1024 / 1024).toFixed(2)} MB`;
-    };
-    const labelStyle = (label) => {
-      const map = {
-        "auto": { bg: "#f3f4f6", fg: "#4b5563" },
-        "pre-import": { bg: "#fef3c7", fg: "#92400e" },
-        "pre-recascade": { bg: "#fee2e2", fg: "#991b1b" },
-        "pre-delete-project": { bg: "#fee2e2", fg: "#991b1b" },
-        "pre-restore": { bg: "#dbeafe", fg: "#1e40af" },
-        "safety-block": { bg: "#fef2f2", fg: "#7f1d1d" }
-      };
-      return map[label] || { bg: "#f3f4f6", fg: "#4b5563" };
-    };
-    const doPreview = async (row) => {
-      setBusy(true);
-      const valStr = await window.storage.getHistoryValue(row.id);
-      setBusy(false);
-      if (!valStr) {
-        showToast("Could not load snapshot.", { type: "error" });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(valStr);
-        setPreviewRow(row);
-        setPreviewData(parsed);
-      } catch {
-        showToast("Snapshot is not valid JSON.", { type: "error" });
-      }
-    };
-    const doDownload = async (row) => {
-      const valStr = await window.storage.getHistoryValue(row.id);
-      if (!valStr) {
-        showToast("Could not load snapshot.", { type: "error" });
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([valStr], { type: "application/json" }));
-      const stamp = row.created_at?.replace(/[:.]/g, "-").slice(0, 19) || "snapshot";
-      a.download = `planar-snapshot-${stamp}.json`;
-      a.click();
-    };
-    const doRestore = async (row) => {
-      if (!await askConfirm({
-        title: `Restore the snapshot from ${fmtAbs(row.created_at)}?`,
-        body: `${row.task_count} tasks, ${row.project_count} projects.
-
-The current state is saved as a 'pre-restore' snapshot first.`,
-        confirmLabel: "Restore"
-      })) return;
-      setBusy(true);
-      try {
-        if (data) {
-          await window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-restore", skipSanity: true });
-        }
-        const valStr = await window.storage.getHistoryValue(row.id);
-        if (!valStr) {
-          showToast("Could not load snapshot.", { type: "error" });
-          setBusy(false);
-          return;
-        }
-        const parsed = JSON.parse(valStr);
-        if (applyLoadedData) applyLoadedData(parsed);
-        else setData(parsed);
-        showToast(`Restored snapshot from ${fmtAgo(row.created_at)}.`, { type: "success", duration: 4e3 });
-        onClose && onClose();
-      } catch (e) {
-        console.error("Restore failed:", e);
-        showToast("Restore failed — see console.", { type: "error" });
-      }
-      setBusy(false);
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        "data-testid": "history-panel",
-        style: {
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.4)",
-          zIndex: 9e3,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 16
-        },
-        onClick: onClose
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 10,
-            width: "min(900px,96vw)",
-            maxHeight: "86vh",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden"
-          },
-          onClick: (e) => e.stopPropagation()
-        },
-        /* @__PURE__ */ React.createElement("div", { style: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 18px",
-          borderBottom: "1px solid var(--bd)",
-          flexShrink: 0
-        } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "RECOVERY"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "Version History")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } }, exportJSON && /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            className: "btn",
-            onClick: exportJSON,
-            title: "Download a complete offline copy of all data as a .json file",
-            style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11 }
-          },
-          /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })),
-          "Backup file"
-        ), importJSON && /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            className: "btn",
-            title: "Replace current data from a backup .json — current state is snapshotted first",
-            style: { cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11 }
-          },
-          /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 5 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "17" })),
-          "Restore file",
-          /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: (e) => {
-            importJSON(e);
-            e.target.value = "";
-          }, style: { display: "none" } })
-        ), /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 16, background: "var(--bd)" } }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: refresh, disabled: busy, "aria-busy": busy || void 0, title: "Refresh" }, "↻"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Close"))),
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", fontSize: 11, color: "var(--mut)", background: "#fafbfc", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, "Snapshots of your data, newest first. Restore reverts to a snapshot; your current state is backed up first as ", /* @__PURE__ */ React.createElement("code", { style: { background: "#eef2ff", padding: "1px 4px", borderRadius: 2, fontSize: 10 } }, "pre-restore"), ". For an offline copy, ", /* @__PURE__ */ React.createElement("strong", null, "Backup file"), " downloads everything as .json — ", /* @__PURE__ */ React.createElement("strong", null, "Restore file"), " loads one back."),
-        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "auto" } }, rows === null ? /* @__PURE__ */ React.createElement("div", { style: { padding: "40px 18px", textAlign: "center", color: "var(--mut)", fontSize: 12, cursor: "progress" } }, "Loading…") : rows.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { padding: "40px 18px", textAlign: "center", color: "var(--mut)", fontSize: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8, fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "No snapshots yet."), /* @__PURE__ */ React.createElement("div", null, "If you've just enabled history, the ", /* @__PURE__ */ React.createElement("code", null, "planar_history"), " table needs to be created in Supabase.", /* @__PURE__ */ React.createElement("br", null), "See the setup SQL in the project README. Snapshots will appear here as you edit.")) : /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { style: { background: "#fafbfc", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "When"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Label"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Projects"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Tasks"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Size"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => {
-          const ls = labelStyle(r.label);
-          return /* @__PURE__ */ React.createElement("tr", { key: r.id, style: { borderBottom: "1px solid var(--bd)" }, "data-testid": "history-row" }, /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", color: "var(--txt)" }, title: fmtAbs(r.created_at) }, fmtAgo(r.created_at)), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-block", padding: "1px 7px", borderRadius: 9, fontSize: 10, fontWeight: 500, background: ls.bg, color: ls.fg } }, r.label || "auto")), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, r.project_count ?? "—"), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, r.task_count ?? "—"), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--mut)" } }, fmtBytes(r.byte_size)), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy, "aria-busy": busy || void 0, onClick: () => doPreview(r), style: { marginRight: 4, fontSize: 10, padding: "2px 7px" } }, "Preview"), /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy, "aria-busy": busy || void 0, onClick: () => doDownload(r), style: { marginRight: 4, fontSize: 10, padding: "2px 7px" } }, "Download"), /* @__PURE__ */ React.createElement(
-            "button",
-            {
-              className: "btn",
-              disabled: busy,
-              "aria-busy": busy || void 0,
-              onClick: () => doRestore(r),
-              style: { fontSize: 10, padding: "2px 7px", borderColor: "var(--amber)", color: "var(--amber)" }
-            },
-            "Restore"
-          )));
-        })))),
-        previewRow && previewData && /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            onClick: () => {
-              setPreviewRow(null);
-              setPreviewData(null);
-            },
-            style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }
-          },
-          /* @__PURE__ */ React.createElement(
-            "div",
-            {
-              onClick: (e) => e.stopPropagation(),
-              style: { background: "var(--bg)", borderRadius: 8, width: "min(800px,94vw)", maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden" }
-            },
-            /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderBottom: "1px solid var(--bd)", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } }, "Snapshot Preview"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, fmtAbs(previewRow.created_at), " · ", previewRow.label)), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
-              setPreviewRow(null);
-              setPreviewData(null);
-            } }, "Close")),
-            /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "auto", padding: "12px 16px" } }, /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { style: { borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "6px 8px", fontWeight: 600, color: "var(--mut)" } }, "Project"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "6px 8px", fontWeight: 600, color: "var(--mut)" } }, "Tasks"))), /* @__PURE__ */ React.createElement("tbody", null, Object.entries(previewData.projects || {}).map(([pid, p]) => /* @__PURE__ */ React.createElement("tr", { key: pid, style: { borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("td", { style: { padding: "6px 8px" } }, crossScheduleLabel(p)), /* @__PURE__ */ React.createElement("td", { style: { padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, p.tasks?.length || 0)))))),
-            /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--bd)", display: "flex", justifyContent: "flex-end", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => doDownload(previewRow) }, "Download JSON"), /* @__PURE__ */ React.createElement(
-              "button",
-              {
-                className: "btn",
-                style: { borderColor: "var(--amber)", color: "var(--amber)" },
-                onClick: () => {
-                  const r = previewRow;
-                  setPreviewRow(null);
-                  setPreviewData(null);
-                  doRestore(r);
-                }
-              },
-              "Restore This Snapshot"
-            ))
-          )
-        )
-      )
-    );
-  }
-  var ErrorBoundary = class extends React.Component {
-    constructor(props) {
-      super(props);
-      this.state = { hasError: false, error: null };
-    }
-    static getDerivedStateFromError(error) {
-      return { hasError: true, error };
-    }
-    componentDidCatch(error, info) {
-      console.error("[planar] View render error:", error, info);
-    }
-    render() {
-      if (this.state.hasError) {
-        return /* @__PURE__ */ React.createElement("div", { style: {
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 12,
-          background: "var(--bg)",
-          padding: 32
-        } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "⚠️"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "This view failed to load"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--mut)", maxWidth: 360, textAlign: "center" } }, String(this.state.error?.message || this.state.error || "Unknown render error")), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { marginTop: 8 }, onClick: () => this.setState({ hasError: false, error: null }) }, "Try again"));
-      }
-      return this.props.children;
-    }
-  };
-  var SGQ_HEALTH = {
-    gray: { label: "Not Started", dot: "#ffffff", bd: "1.5px solid #d1d5db" },
-    yellow: { label: "In Progress", dot: "#c47b00", bd: "none" },
-    red: { label: "Needs Attn.", dot: "#dc2626", bd: "none" },
-    green: { label: "Complete", dot: "#16a34a", bd: "none" },
-    paused: { label: "Paused", dot: "#9ca3af", bd: "none" }
-  };
-  var SGQ_HKEYS = ["gray", "yellow", "red", "green", "paused"];
-  var SGQ_AV = ["#4f46e5", "#0969da", "#16a34a", "#c47b00", "#9333ea", "#0891b2", "#dc2626"];
-  var SGQ_ALLOWED_PATCH = /* @__PURE__ */ new Set(["health", "duration", "end", "percentComplete", "responsibleParty", "predecessors"]);
-  var SGQ_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  function sgqAvatarColor(name) {
-    let h = 0;
-    for (const c of String(name || "")) h = h * 31 + c.charCodeAt(0) >>> 0;
-    return SGQ_AV[h % SGQ_AV.length];
-  }
-  function sgqInitials(name) {
-    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return "?";
-    return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
-  }
-  function sgqConfClass(c) {
-    const n = Number(c || 0);
-    return n >= 0.8 ? "hi" : n >= 0.5 ? "mid" : "lo";
-  }
-  function sgqFmtDate(s) {
-    if (!s) return "";
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    if (!m) return s;
-    return SGQ_MONTHS[+m[2] - 1] + " " + +m[3];
-  }
-  function SgqDot({ h }) {
-    const m = SGQ_HEALTH[h] || SGQ_HEALTH.gray;
-    return /* @__PURE__ */ React.createElement("span", { className: "sgq-dot", style: { background: m.dot, border: m.bd !== "none" ? m.bd : "none" } });
-  }
-  function sgqChildrenOf(data, pid, parentId) {
-    const proj = data && data.projects && data.projects[pid];
-    if (!proj) return [];
-    return proj.tasks.filter((t) => parentId == null ? t.parentId == null : t.parentId === parentId);
-  }
-  function sgqCrumbOf(data, pid, path) {
-    if (pid == null || !Array.isArray(path) || path.length === 0) return null;
-    const proj = data && data.projects && data.projects[pid];
-    if (!proj) return null;
-    const byId = new Map(proj.tasks.map((t) => [t.id, t]));
-    const names = path.map((id) => byId.get(id) && byId.get(id).name).filter(Boolean);
-    if (names.length === 0) return null;
-    return { project: crossScheduleLabel(proj), names };
-  }
-  function SgqCrumb({ data, pid, path }) {
-    const c = sgqCrumbOf(data, pid, path);
-    if (!c) return /* @__PURE__ */ React.createElement("span", { style: { color: "#c47b00", fontWeight: 600 } }, "No task selected");
-    return /* @__PURE__ */ React.createElement("span", { className: "sgq-crumbline" }, c.project, c.names.map((nm, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("span", { className: "sgq-arrow" }, "▸"), nm)));
-  }
-  function SgqCascadePicker({ data, pid, path, ready, onChange }) {
-    const projects = data && data.projects ? Object.entries(data.projects) : [];
-    const selects = [];
-    if (pid != null && data && data.projects && data.projects[pid]) {
-      let nodes = sgqChildrenOf(data, pid, null);
-      let k = 0;
-      while (true) {
-        const val = path && path[k] != null ? path[k] : null;
-        selects.push({ k, nodes, val });
-        if (val == null) break;
-        const kids = sgqChildrenOf(data, pid, val);
-        if (kids.length === 0) break;
-        nodes = kids;
-        k++;
-      }
-    }
-    return /* @__PURE__ */ React.createElement("div", { className: "sgq-target" + (ready ? "" : " warnrow") }, /* @__PURE__ */ React.createElement("i", { className: ready ? "ti ti-map-pin" : "ti ti-help-circle" }), !ready && pid == null && /* @__PURE__ */ React.createElement("span", { className: "sgq-needpick" }, "Pick the task:"), /* @__PURE__ */ React.createElement(
-      "select",
-      {
-        className: "sgq-sel",
-        value: pid == null ? "" : pid,
-        onChange: (e) => onChange(e.target.value === "" ? null : +e.target.value, [])
-      },
-      /* @__PURE__ */ React.createElement("option", { value: "", disabled: true }, "Project…"),
-      projects.map(([k, p]) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, crossScheduleLabel(p)))
-    ), selects.map((sel) => /* @__PURE__ */ React.createElement(React.Fragment, { key: sel.k }, /* @__PURE__ */ React.createElement("span", { className: "sgq-arrow" }, "▸"), /* @__PURE__ */ React.createElement(
-      "select",
-      {
-        className: "sgq-sel",
-        value: sel.val == null ? "" : sel.val,
-        onChange: (e) => {
-          const v = e.target.value === "" ? null : +e.target.value;
-          const np = (path || []).slice(0, sel.k);
-          if (v != null) np.push(v);
-          onChange(pid, np);
-        }
-      },
-      /* @__PURE__ */ React.createElement("option", { value: "" }, sel.k === 0 ? "Phase…" : "↳ refine (optional)"),
-      sel.nodes.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.id, value: o.id }, o.name))
-    ))));
-  }
-  function SgqChangeRow({ field, fromVal, toVal, onEditTo, onRemove }) {
-    if (field === "health") {
-      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Status"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, /* @__PURE__ */ React.createElement(SgqDot, { h: fromVal }), SGQ_HEALTH[fromVal] && SGQ_HEALTH[fromVal].label || fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement("span", { className: "sgq-statuslabel" }, /* @__PURE__ */ React.createElement(SgqDot, { h: toVal }), /* @__PURE__ */ React.createElement("select", { className: "sgq-sel", value: toVal || "gray", onChange: (e) => onEditTo(e.target.value) }, SGQ_HKEYS.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, SGQ_HEALTH[k].label)))), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
-    }
-    if (field === "percentComplete") {
-      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "% Complete"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal != null ? fromVal : 0, "%"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          className: "sgq-miniinput",
-          type: "number",
-          min: "0",
-          max: "100",
-          value: toVal != null ? toVal : 0,
-          onChange: (e) => onEditTo(Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)))
-        }
-      ), /* @__PURE__ */ React.createElement("span", { style: { color: "#8b949e" } }, "%"), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
-    }
-    if (field === "duration") {
-      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Duration"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal != null ? fromVal : 0, "d"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          className: "sgq-miniinput",
-          type: "number",
-          min: "0",
-          value: toVal != null ? toVal : 0,
-          onChange: (e) => onEditTo(Math.max(0, parseInt(e.target.value, 10) || 0))
-        }
-      ), /* @__PURE__ */ React.createElement("span", { style: { color: "#8b949e" } }, "d"), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
-    }
-    if (field === "responsibleParty") {
-      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Owner"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...NO_AUTOFILL,
-          className: "sgq-miniinput",
-          type: "text",
-          style: { minWidth: 140 },
-          value: toVal || "",
-          onChange: (e) => onEditTo(e.target.value)
-        }
-      ), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
-    }
-    if (field === "end") {
-      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "End date"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          className: "sgq-miniinput",
-          type: "date",
-          value: toVal || "",
-          onChange: (e) => onEditTo(e.target.value)
-        }
-      ), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Reset — don't change end date", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
-    }
-    return null;
-  }
-  function InlineDate({ value, onCommit }) {
-    const disp = value ? toShortDate(value) : "";
-    const [txt, setTxt] = useState4(disp);
-    useEffect3(() => {
-      setTxt(disp);
-    }, [disp]);
-    const commit = () => {
-      const isoV = parseFlexDate(txt);
-      if (isoV) onCommit(isoV);
-      else setTxt(disp);
-    };
-    return /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...NO_AUTOFILL,
-        className: "rev-edit rev-date-edit",
-        value: txt,
-        placeholder: "—",
-        onChange: (e) => setTxt(e.target.value),
-        onBlur: commit,
-        onKeyDown: (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            e.currentTarget.blur();
-          } else if (e.key === "Escape") {
-            setTxt(disp);
-            e.currentTarget.blur();
-          }
-        }
-      }
-    );
-  }
-  function cleanEmailBody(raw) {
-    if (!raw) return { body: "", quoted: "", hasQuoted: false };
-    let text = String(raw).replace(/\r\n/g, "\n");
-    text = text.replace(/\s*<\s*https?:\/\/urldefense\.proofpoint\.com[^\n]*$/gim, "");
-    text = text.replace(/\s*<\s*(?:https?:\/\/|mailto:)[^>\n]*>/gi, "");
-    text = text.replace(/^[ \t]*\[?\s*EXTERNAL[^\n]*\]?\s*\n?/gim, "");
-    const lines = text.split("\n");
-    const quoteRe = /^\s*(?:-{3,}\s*Original Message\s*-{3,}|_{5,}|From:\s.+|On\b.+\bwrote:\s*)$/i;
-    let cut = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (quoteRe.test(lines[i])) {
-        cut = i;
-        break;
-      }
-    }
-    const head = cut >= 0 ? lines.slice(0, cut) : lines;
-    const quoted = cut >= 0 ? lines.slice(cut) : [];
-    const tidy = (a) => a.join("\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-    const qtext = tidy(quoted);
-    return { body: tidy(head), quoted: qtext, hasQuoted: qtext.length > 0 };
-  }
-  function SuggestionsView({ data, updateTask, setData, rows, setRows, loading, onClose, gridProps, activeIdx, setActiveIdx }) {
-    const [edits, setEdits] = useState4({});
-    const [view, setView] = useState4("grid");
-    const [split, setSplit] = useState4(50);
-    const [toast, setToast] = useState4(null);
-    const [showPicker, setShowPicker] = useState4(false);
-    const [showQuoted, setShowQuoted] = useState4(false);
-    const bodyRef = useRef4(null), targetRef = useRef4(null), canvasRef = useRef4(null);
-    const toastTimer = useRef4(null), undoRef = useRef4(null);
-    const [mailReaderOpen, setMailReaderOpen] = useState4(false);
-    const [mailOverflow, setMailOverflow] = useState4(false);
-    const mailBodyRef = useRef4(null);
-    useEffect3(() => {
-      setActiveIdx((i) => Math.max(0, Math.min(i, rows.length - 1)));
-    }, [rows.length]);
-    useEffect3(() => {
-      setShowPicker(false);
-      setShowQuoted(false);
-      setMailReaderOpen(false);
-    }, [activeIdx]);
-    React.useLayoutEffect(() => {
-      const measure = () => {
-        const el = mailBodyRef.current;
-        setMailOverflow(!!el && el.scrollHeight > el.clientHeight + 2);
-      };
-      measure();
-      window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
-    }, [activeIdx]);
-    const rfmt = (s) => {
-      if (!s) return "";
-      const p = s.split("-");
-      return +p[1] + "/" + +p[2];
-    };
-    const rfmtIso = (s) => {
-      if (!s) return "";
-      const p = s.split("-");
-      return +p[1] + "/" + +p[2] + "/" + String(p[0]).slice(2);
-    };
-    const getEff = (row) => {
-      const e = edits[row.id] || {};
-      return {
-        project_id: "project_id" in e ? e.project_id : row.project_id,
-        task_path: "task_path" in e ? e.task_path : row.task_path || [],
-        note_text: "note_text" in e ? e.note_text : row.note_text || "",
-        patch: "patch" in e ? e.patch : row.patch || {}
-      };
-    };
-    const patchRow = (id, p) => setEdits((E) => ({ ...E, [id]: { ...E[id] || {}, ...p } }));
-    const setPatchField = (id, field, val) => setEdits((E) => {
-      const row = rows.find((r) => r.id === id);
-      const cur = E[id] && E[id].patch || row && row.patch || {};
-      return { ...E, [id]: { ...E[id] || {}, patch: { ...cur, [field]: val } } };
-    });
-    const cleanPatchFor = (patch, target2) => {
-      const out = {};
-      Object.keys(patch || {}).forEach((k) => {
-        if (!SGQ_ALLOWED_PATCH.has(k)) return;
-        const v = patch[k];
-        if (v === void 0 || v === null || v === "") return;
-        const same = (x, y) => x && typeof x === "object" || y && typeof y === "object" ? JSON.stringify(x) === JSON.stringify(y) : String(x) === String(y);
-        if (target2 && same(target2[k], v)) return;
-        out[k] = v;
-      });
-      return out;
-    };
-    const previewProject = (tasks, tId, patchIn) => {
-      const boundEdit = resolveBoundEdit(tasks, tId, patchIn, (id) => MEETING_BODY_INDEX[id]);
-      const patch = boundEdit.updates;
-      let ts = tasks.map((t) => {
-        if (t.id !== tId) return t;
-        const u = { ...t, ...patch, ...completionDelta(t, patch) };
-        if ("predecessors" in patch) delete u.pinnedStart;
-        if ("duration" in patch && !("durValue" in patch) && !("durUnit" in patch)) {
-          u.durUnit = "d";
-          u.durValue = Math.max(0, Math.trunc(Number(patch.duration) || 0));
-        }
-        if ("durValue" in patch || "durUnit" in patch) {
-          u.durUnit = u.durUnit || "d";
-          if (u.durValue == null) u.durValue = 0;
-        }
-        const durEdited = "duration" in patch || "durValue" in patch || "durUnit" in patch;
-        if ((durEdited || "start" in patch) && !("end" in patch)) {
-          if (!(u.pinnedEnd && u.end)) {
-            const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u));
-            u.end = r.end;
-            u.duration = r.duration;
-          }
-        } else if ("end" in patch && !("start" in patch)) {
-          if (u.end && !u.start) {
-            u.start = u.end;
-            u.durUnit = "d";
-            u.durValue = 1;
-            u.duration = 1;
-          } else {
-            u.duration = u.start && u.end ? Math.max(0, difBD(u.start, u.end) + 1) : "";
-            u.durUnit = "d";
-            u.durValue = typeof u.duration === "number" ? u.duration : 0;
-          }
-          u.pinnedEnd = !!u.end;
-        }
-        if ("start" in patch) u.pinnedStart = true;
-        if (boundEdit.startOverride) {
-          u.start = boundEdit.startOverride;
-          u.end = boundEdit.startOverride;
-        }
-        return u;
-      });
-      if ("health" in patch) {
-        const desc = (id, all) => {
-          const k = all.filter((t) => t.parentId === id);
-          return [...k.map((x) => x.id), ...k.flatMap((x) => desc(x.id, all))];
-        };
-        const ids = new Set(desc(tId, ts));
-        if (ids.size) {
-          ts = ts.map((t) => ids.has(t.id) ? { ...t, health: patch.health, ...cascadeDelta(t, patch.health) } : t);
-        }
-      }
-      if ("duration" in patch || "start" in patch || "end" in patch || "predecessors" in patch || "meetingBound" in patch || "meetingBodyId" in patch || "pinnedMeetingDate" in patch || "minMeetingsAfter" in patch) {
-        ts = recomputeSchedule(ts);
-      }
-      return ts;
-    };
-    const active = rows[activeIdx] || null;
-    const isCreate = !!(active && (active.kind === "create_task" || active.patch && active.patch.kind === "create_task"));
-    const eff = active ? getEff(active) : null;
-    const pid = eff ? eff.project_id : null;
-    const proj = pid != null && data && data.projects ? data.projects[pid] : null;
-    const rawTargetId = eff && eff.task_path && eff.task_path.length ? eff.task_path[eff.task_path.length - 1] : null;
-    const target = proj && rawTargetId != null ? proj.tasks.find((t) => String(t.id) === String(rawTargetId)) || proj.tasks.find((t) => t.name === rawTargetId) || null : null;
-    const targetId = target ? target.id : null;
-    const matched = !isCreate && !!(proj && target);
-    const resolveTaskRef = (ref) => {
-      if (ref == null || !proj) return null;
-      return proj.tasks.find((t) => String(t.id) === String(ref)) || proj.tasks.find((t) => t.name === ref) || null;
-    };
-    let addedPredTasks = [];
-    let cleanPatch = matched && eff ? cleanPatchFor(eff.patch, target) : {};
-    if (matched && eff && eff.patch && Array.isArray(eff.patch.add_predecessors) && eff.patch.add_predecessors.length) {
-      const existing = Array.isArray(target.predecessors) ? target.predecessors : [];
-      const existingIds = new Set(existing.map((p) => p && typeof p === "object" ? p.id : p));
-      const additions = [];
-      eff.patch.add_predecessors.forEach((ref) => {
-        const t = resolveTaskRef(ref);
-        if (!t || t.id === targetId || existingIds.has(t.id)) return;
-        additions.push({ id: t.id, type: "FS", lag: 0 });
-        addedPredTasks.push(t);
-        existingIds.add(t.id);
-      });
-      if (additions.length) cleanPatch = { ...cleanPatch, predecessors: [...existing, ...additions] };
-    }
-    const previewTasks = matched ? previewProject(proj.tasks, targetId, cleanPatch) : [];
-    const propById = {};
-    previewTasks.forEach((t) => {
-      propById[t.id] = t;
-    });
-    const propTarget = matched ? propById[targetId] : null;
-    const moversList = [];
-    if (matched) proj.tasks.forEach((t) => {
-      if (t.id === targetId) return;
-      const p = propById[t.id];
-      if (!p) return;
-      if (p.start !== t.start || p.end !== t.end) moversList.push({ id: t.id, newStart: p.start, newEnd: p.end, dStart: difBD(t.start, p.start), dEnd: difBD(t.end, p.end) });
-    });
-    const moverMap = {};
-    moversList.forEach((m) => {
-      moverMap[m.id] = m;
-    });
-    const maxDelta = moversList.reduce((a, m) => Math.max(a, m.dEnd), 0);
-    const previewConflictMsg = matched ? pinConflictNotice(newPinConflicts(proj.tasks, previewTasks, cleanPatch && (cleanPatch.start || cleanPatch.end) ? [targetId] : []), cleanPatch && (cleanPatch.start || cleanPatch.end) ? targetId : null, rfmtIso) : "";
-    const sugByTask = {};
-    rows.forEach((r, i) => {
-      const e = getEff(r);
-      if (e.project_id === pid && e.task_path && e.task_path.length) {
-        const tid = e.task_path[e.task_path.length - 1];
-        if (!(tid in sugByTask)) sugByTask[tid] = i;
-      }
-    });
-    const propStatus = propTarget ? propTarget.health : target ? target.health : "gray";
-    const propEnd = propTarget ? propTarget.end : target ? target.end : "";
-    const propOwner = ownerJoin(propTarget ? ownerListOf(propTarget) : target ? ownerListOf(target) : []);
-    const endChanged = target && propEnd && propEnd !== target.end;
-    const endDelta = endChanged ? difBD(target.end, propEnd) : 0;
-    const startChanged = target && propTarget && propTarget.start !== target.start;
-    const noteText = eff ? eff.note_text : "";
-    const createReady = isCreate && !!proj && !!(eff && eff.patch && typeof eff.patch.name === "string" && eff.patch.name.trim());
-    let newTask = null, newTaskAddNames = [];
-    if (createReady) {
-      const parent = target;
-      const preds = [];
-      if (Array.isArray(eff.patch.add_predecessors)) eff.patch.add_predecessors.forEach((ref) => {
-        const t = resolveTaskRef(ref);
-        if (t) {
-          preds.push({ id: t.id, type: "FS", lag: 0 });
-          newTaskAddNames.push(t.name);
-        }
-      });
-      const newId = proj.tasks.reduce((m, t) => Math.max(m, +t.id || 0), 0) + 1;
-      const fallbackStart = eff.patch.start || (parent ? parent.start : proj.tasks[0] ? proj.tasks[0].start : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-      let dur = eff.patch.duration != null && eff.patch.duration !== "" ? eff.patch.duration : 1;
-      if (eff.patch.end && (eff.patch.duration == null || eff.patch.duration === "")) {
-        dur = fallbackStart && eff.patch.end ? Math.max(0, difBD(fallbackStart, eff.patch.end) + 1) : dur;
-      }
-      let prov = { id: newId, name: eff.patch.name.trim(), start: fallbackStart, end: "", duration: dur, durUnit: "d", durValue: dur, predecessors: preds, health: eff.patch.health || "gray", percentComplete: 0, parentId: parent ? parent.id : null, responsibleParty: eff.patch.responsibleParty || "", notes: [], isExpanded: true };
-      prov.end = calcEnd(prov.start, prov.duration);
-      let sim = recomputeSchedule([...proj.tasks, prov]);
-      const c = sim.find((t) => t.id === newId) || prov;
-      newTask = { ...prov, start: c.start, end: c.end, duration: c.duration };
-    }
-    const flash = (msg) => {
-      setToast({ msg });
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 6500);
-    };
-    const createTask = async () => {
-      if (!createReady || !newTask) return;
-      const row = active;
-      undoRef.current = { kind: "approve", pid, tasks: JSON.parse(JSON.stringify(proj.tasks)), row, idx: activeIdx };
-      const dateMatch = row.email_date && /^(\d{4})-(\d{2})-(\d{2})$/.exec(row.email_date);
-      const ymd = dateMatch ? row.email_date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-      const noteArr = noteText && String(noteText).trim() ? [{ id: Date.now(), date: ymd, text: String(noteText).trim() }] : [];
-      setData((d) => {
-        if (!d.projects || !d.projects[pid]) return d;
-        const p = d.projects[pid];
-        const tasks = p.tasks.slice();
-        const newId = tasks.reduce((m, t2) => Math.max(m, +t2.id || 0), 0) + 1;
-        const t = { id: newId, name: newTask.name, start: newTask.start, end: newTask.end, duration: newTask.duration, predecessors: newTask.predecessors, health: newTask.health, percentComplete: 0, parentId: newTask.parentId, responsibleParty: newTask.responsibleParty ? [newTask.responsibleParty] : [], notes: noteArr, isExpanded: true };
-        let insertIdx = tasks.length;
-        if (newTask.parentId != null) {
-          const predIds = new Set((newTask.predecessors || []).map((pp) => pp.id));
-          let afterPred = -1;
-          tasks.forEach((x, i) => {
-            if (predIds.has(x.id) && x.parentId === newTask.parentId) afterPred = i;
-          });
-          if (afterPred >= 0) {
-            insertIdx = afterPred + 1;
-          } else {
-            const desc = /* @__PURE__ */ new Set([newTask.parentId]);
-            let changed = true;
-            while (changed) {
-              changed = false;
-              tasks.forEach((x) => {
-                if (x.parentId != null && desc.has(x.parentId) && !desc.has(x.id)) {
-                  desc.add(x.id);
-                  changed = true;
-                }
-              });
-            }
-            let last = -1;
-            tasks.forEach((x, i) => {
-              if (desc.has(x.id)) last = i;
-            });
-            if (last >= 0) insertIdx = last + 1;
-          }
-        }
-        tasks.splice(insertIdx, 0, t);
-        const recomputed = recomputeSchedule(tasks);
-        return { ...d, projects: { ...d.projects, [pid]: { ...p, tasks: recomputed } } };
-      });
-      const sb = window.__sb;
-      if (sb) {
-        try {
-          await sb.from("planar_suggestions").update({ status: "approved" }).eq("id", row.id);
-        } catch (e) {
-          console.warn("mark approved failed:", e);
-        }
-      }
-      setRows((R) => R.filter((r) => r.id !== row.id));
-      setEdits((E) => {
-        const c = { ...E };
-        delete c[row.id];
-        return c;
-      });
-      flash("Task created · " + newTask.name);
-    };
-    const approve = async () => {
-      if (isCreate) {
-        return createTask();
-      }
-      if (!active || !matched) return;
-      const row = active, p = cleanPatch;
-      const dateMatch = row.email_date && /^(\d{4})-(\d{2})-(\d{2})$/.exec(row.email_date);
-      const ymd = dateMatch ? row.email_date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-      const noteTxt = String(noteText || "").trim();
-      const existingNotes = Array.isArray(target.notes) ? target.notes : [];
-      const merged = noteTxt ? { ...p, notes: [...existingNotes, { id: Date.now(), date: ymd, text: noteTxt }] } : { ...p };
-      if ("responsibleParty" in merged) merged.responsibleParty = merged.responsibleParty ? [merged.responsibleParty] : [];
-      undoRef.current = { kind: "approve", pid, tasks: JSON.parse(JSON.stringify(proj.tasks)), row, idx: activeIdx };
-      try {
-        updateTask(targetId, merged, pid);
-      } catch (e) {
-        console.error("updateTask failed:", e);
-        return;
-      }
-      const sb = window.__sb;
-      if (sb) {
-        try {
-          await sb.from("planar_suggestions").update({ status: "approved" }).eq("id", row.id);
-        } catch (e) {
-          console.warn("mark approved failed:", e);
-        }
-      }
-      setRows((R) => R.filter((r) => r.id !== row.id));
-      setEdits((E) => {
-        const c = { ...E };
-        delete c[row.id];
-        return c;
-      });
-      flash("Approved · " + (row.email_subject || "update"));
-    };
-    const dismiss = async () => {
-      if (!active) return;
-      const row = active;
-      undoRef.current = { kind: "dismiss", row, idx: activeIdx };
-      const sb = window.__sb;
-      if (sb) {
-        try {
-          await sb.from("planar_suggestions").update({ status: "dismissed" }).eq("id", row.id);
-        } catch (e) {
-          console.warn("mark dismissed failed:", e);
-        }
-      }
-      setRows((R) => R.filter((r) => r.id !== row.id));
-      setEdits((E) => {
-        const c = { ...E };
-        delete c[row.id];
-        return c;
-      });
-      flash("Dismissed · " + (row.email_subject || "update"));
-    };
-    const doUndo = async () => {
-      const snap = undoRef.current;
-      if (!snap) return;
-      undoRef.current = null;
-      setToast(null);
-      if (snap.kind === "approve" && setData) {
-        setData((d) => d.projects && d.projects[snap.pid] ? { ...d, projects: { ...d.projects, [snap.pid]: { ...d.projects[snap.pid], tasks: snap.tasks } } } : d);
-      }
-      setRows((R) => R.some((r) => r.id === snap.row.id) ? R : [snap.row, ...R]);
-      setActiveIdx(0);
-      const sb = window.__sb;
-      if (sb) {
-        try {
-          await sb.from("planar_suggestions").update({ status: "pending" }).eq("id", snap.row.id);
-        } catch (e) {
-        }
-      }
-    };
-    const prev = () => setActiveIdx((i) => Math.max(0, i - 1));
-    const next = () => setActiveIdx((i) => Math.min(rows.length - 1, i + 1));
-    useEffect3(() => {
-      const h = (e) => {
-        const t = e.target;
-        if (mailReaderOpen) {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            setMailReaderOpen(false);
-          }
-          return;
-        }
-        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-        const k = e.key.toLowerCase();
-        if (k === "j" || e.key === "ArrowRight") {
-          e.preventDefault();
-          next();
-        } else if (k === "k" || e.key === "ArrowLeft") {
-          e.preventDefault();
-          prev();
-        } else if (k === "a" || e.key === "Enter") {
-          if (active && (matched || createReady)) {
-            e.preventDefault();
-            approve();
-          }
-        } else if (k === "x" || e.key === "Backspace" || e.key === "Delete") {
-          if (active) {
-            e.preventDefault();
-            dismiss();
-          }
-        } else if (k === "g") {
-          e.preventDefault();
-          setView((v) => v === "grid" ? "gantt" : "grid");
-        } else if (k === "u") {
-          e.preventDefault();
-          doUndo();
-        } else if (e.key === "Escape") {
-          if (onClose) {
-            e.preventDefault();
-            onClose();
-          }
-        }
-      };
-      window.addEventListener("keydown", h);
-      return () => window.removeEventListener("keydown", h);
-    });
-    useEffect3(() => {
-      if (!matched) return;
-      const id = setTimeout(() => {
-        if (view === "grid" && targetRef.current) targetRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-        if (view === "gantt" && canvasRef.current && targetRef.current) {
-          const bar = targetRef.current.querySelector(".rev-bar,.rev-amber,.rev-ghost");
-          if (bar) canvasRef.current.scrollTo({ left: Math.max(0, bar.offsetLeft - 120), behavior: "smooth" });
-        }
-      }, 60);
-      return () => clearTimeout(id);
-    }, [activeIdx, view, matched, targetId]);
-    useEffect3(() => {
-      if (!(matched && gridProps && gridProps.setSelectedId && targetId != null)) return;
-      const id = setTimeout(() => gridProps.setSelectedId(targetId), 60);
-      return () => clearTimeout(id);
-    }, [targetId, matched]);
-    const onDivDown = (e) => {
-      e.preventDefault();
-      const sy = e.clientY, sp = split, H = bodyRef.current.getBoundingClientRect().height;
-      const mv = (ev) => {
-        let p = sp + (ev.clientY - sy) / H * 100;
-        p = Math.max(28, Math.min(76, p));
-        setSplit(p);
-      };
-      const release = window.pinSchedCursor("row-resize", { onExit: () => up() });
-      const up = () => {
-        document.removeEventListener("mousemove", mv);
-        document.removeEventListener("mouseup", up);
-        release();
-      };
-      document.addEventListener("mousemove", mv);
-      document.addEventListener("mouseup", up);
-    };
-    const visualTasks = proj ? sortByVisualOrder(proj.tasks) : [];
-    const byId = {};
-    (proj ? proj.tasks : []).forEach((t) => byId[t.id] = t);
-    const depthOf = (t) => {
-      let d = 0, p = t.parentId;
-      while (p != null && byId[p]) {
-        d++;
-        p = byId[p].parentId;
-      }
-      return d;
-    };
-    const renderStatus = (h) => {
-      const m = HEALTH[h] || HEALTH.gray;
-      return /* @__PURE__ */ React.createElement("span", { className: "revstatus" }, /* @__PURE__ */ React.createElement("span", { className: "revdot", style: { background: m.dot, border: m.border } }), m.label);
-    };
-    const renderGrid = () => {
-      if (!proj) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "Pick a task in the panel below to preview this update against the plan.");
-      return /* @__PURE__ */ React.createElement("div", { className: "rev-grid" }, /* @__PURE__ */ React.createElement("div", { className: "rev-ghead" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Task"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Start"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "End"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Status"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Owner"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" })), visualTasks.map((t) => {
-        const isTgt = matched && t.id === targetId;
-        const mv = moverMap[t.id];
-        const hasSug = t.id in sugByTask && !isTgt;
-        const ss = mv ? { start: mv.newStart, end: mv.newEnd } : { start: t.start, end: t.end };
-        return /* @__PURE__ */ React.createElement(React.Fragment, { key: t.id }, /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            ref: isTgt ? targetRef : null,
-            className: "rev-row" + (isTgt ? " tgt" : "") + (mv ? " mv" : "") + (hasSug ? " pick" : ""),
-            onClick: hasSug ? () => setActiveIdx(sugByTask[t.id]) : void 0
-          },
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-name", style: { paddingLeft: 12 + depthOf(t) * 15 + "px" } }, hasSug ? /* @__PURE__ */ React.createElement("span", { className: "rev-sugdot", title: "Pending update" }) : null, /* @__PURE__ */ React.createElement("span", { className: "nm" }, t.name || "(untitled)")),
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date" }, rfmt(ss.start), mv ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, mv.dStart >= 0 ? "+" : "", mv.dStart, "d") : null),
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date" }, rfmt(ss.end), mv ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, mv.dEnd >= 0 ? "+" : "", mv.dEnd, "d") : null),
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, renderStatus(t.health)),
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-owner" }, /* @__PURE__ */ React.createElement("span", { className: "nm" }, ownerJoin(ownerListOf(t)))),
-          /* @__PURE__ */ React.createElement("div", { className: "rev-cell" })
-        ), isTgt ? /* @__PURE__ */ React.createElement("div", { className: "rev-sub" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-prop", style: { paddingLeft: 12 + depthOf(t) * 15 + "px" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-corner-down-right" }), "proposed"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date faint" }, startChanged ? rfmt(propTarget.start) : ""), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-endcell" }, /* @__PURE__ */ React.createElement(InlineDate, { value: propEnd, onCommit: (isoV) => setPatchField(active.id, "end", isoV) }), endChanged ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, endDelta >= 0 ? "+" : "", endDelta, "d") : null), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, /* @__PURE__ */ React.createElement("select", { className: "rev-sel", value: propStatus, onChange: (e) => setPatchField(active.id, "health", e.target.value) }, HK.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, HEALTH[k] && HEALTH[k].label || k)))), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            ...NO_AUTOFILL,
-            className: "rev-edit",
-            value: propOwner,
-            placeholder: "—",
-            onChange: (e) => setPatchField(active.id, "responsibleParty", e.target.value)
-          }
-        )), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-actcell" }, /* @__PURE__ */ React.createElement("button", { className: "rev-iconbtn ok", title: "Approve (A)", onClick: approve }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check" })), /* @__PURE__ */ React.createElement("button", { className: "rev-iconbtn no", title: "Dismiss (X)", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })))) : null);
-      }));
-    };
-    const renderGantt = () => {
-      if (!proj) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "Pick a task in the panel below to preview this update on the timeline.");
-      const PPD2 = 13, ROWH = 30, HEAD = 40, DAY = 864e5;
-      let lo = null, hi = null;
-      const pushd = (s) => {
-        if (!s) return;
-        const d = pd(s);
-        if (!lo || d < lo) lo = d;
-        if (!hi || d > hi) hi = d;
-      };
-      visualTasks.forEach((t) => {
-        pushd(t.start);
-        pushd(t.end);
-        const p = propById[t.id];
-        if (p) {
-          pushd(p.start);
-          pushd(p.end);
-        }
-      });
-      if (!lo || !hi) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "No dated tasks to show yet.");
-      lo = new Date(lo.getTime() - 3 * DAY);
-      hi = new Date(hi.getTime() + 4 * DAY);
-      const days = Math.round((hi - lo) / DAY) + 1;
-      const width = days * PPD2;
-      const xOf = (s) => Math.round((pd(s) - lo) / DAY) * PPD2;
-      const wOf = (s, e) => (Math.round((pd(e) - pd(s)) / DAY) + 1) * PPD2;
-      const weekends = [], wk = [], months = [];
-      for (let i = 0; i < days; i++) {
-        const d = new Date(lo.getTime() + i * DAY);
-        const g2 = d.getDay();
-        if (g2 === 0 || g2 === 6) weekends.push(i);
-        if (g2 === 1) wk.push(i);
-        if (d.getDate() === 1 || i === 0) months.push({ i, label: SGQ_MONTHS[d.getMonth()] + " " + String(d.getFullYear()).slice(2) });
-      }
-      return /* @__PURE__ */ React.createElement("div", { className: "rev-gantt" }, /* @__PURE__ */ React.createElement("div", { className: "rev-glabels" }, /* @__PURE__ */ React.createElement("div", { className: "rev-glabhd" }, "Task"), visualTasks.map((t) => {
-        const isTgt = matched && t.id === targetId;
-        const mv = moverMap[t.id];
-        const m = HEALTH[t.health] || HEALTH.gray;
-        return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "rev-glab" + (isTgt ? " tgt" : "") + (mv ? " mv" : ""), style: { paddingLeft: 12 + depthOf(t) * 12 + "px" } }, /* @__PURE__ */ React.createElement("span", { className: "revdot", style: { background: m.dot, border: m.border } }), /* @__PURE__ */ React.createElement("span", { className: "nm" }, t.name || "(untitled)"));
-      })), /* @__PURE__ */ React.createElement("div", { className: "rev-gcanvas", ref: canvasRef }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative", width: width + "px" } }, /* @__PURE__ */ React.createElement("div", { className: "rev-axis" }, months.map((m, k) => /* @__PURE__ */ React.createElement("div", { key: k, className: "rev-month", style: { left: m.i * PPD2 + "px" } }, m.label))), weekends.map((i) => /* @__PURE__ */ React.createElement("div", { key: "w" + i, className: "rev-weekend", style: { left: i * PPD2 + "px", width: PPD2 + "px", top: HEAD + "px" } })), wk.map((i) => /* @__PURE__ */ React.createElement("div", { key: "l" + i, className: "rev-wk", style: { left: i * PPD2 + "px", top: HEAD + "px" } })), visualTasks.map((t, ri) => {
-        const isTgt = matched && t.id === targetId;
-        const mv = moverMap[t.id];
-        const top = HEAD + ri * ROWH;
-        const m = HEALTH[t.health] || HEALTH.gray;
-        const p = propById[t.id];
-        const changed = isTgt && propTarget && (propTarget.end !== t.end || propTarget.start !== t.start) || !!mv;
-        return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "rev-grow" + (isTgt ? " tgt" : "") + (mv ? " mv" : ""), style: { top: top + "px" }, ref: isTgt ? targetRef : null }, !t.start || !t.end ? null : changed && p ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-ghost", style: { left: xOf(t.start) + "px", width: wOf(t.start, t.end) + "px" } }), /* @__PURE__ */ React.createElement("div", { className: "rev-amber", style: { left: xOf(p.start) + "px", width: wOf(p.start, p.end) + "px" } }), isTgt ? /* @__PURE__ */ React.createElement("div", { className: "rev-flag", style: { left: xOf(p.end) + 8 + "px" } }, endDelta >= 0 ? "+" : "", endDelta, "d") : null) : /* @__PURE__ */ React.createElement("div", { className: "rev-bar", style: { left: xOf(t.start) + "px", width: wOf(t.start, t.end) + "px", background: m.ganttBar } }));
-      }), /* @__PURE__ */ React.createElement("div", { style: { height: HEAD + visualTasks.length * ROWH + "px" } }))));
-    };
-    const fromName = active ? active.email_from || "Unknown sender" : "";
-    const fromMatch = active ? /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(fromName) : null;
-    const dispName = fromMatch ? fromMatch[1] || fromMatch[2] : fromName;
-    const dispEmail = fromMatch ? fromMatch[2] : "";
-    const renderDrawer = () => {
-      if (!active) return /* @__PURE__ */ React.createElement("div", { className: "rev-empty" }, /* @__PURE__ */ React.createElement("div", { className: "ico" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-inbox" })), /* @__PURE__ */ React.createElement("h3", null, "Inbox zero"), /* @__PURE__ */ React.createElement("p", null, "No pending updates. Forward a work email and it’ll show up here as a suggested edit."));
-      return /* @__PURE__ */ React.createElement("div", { className: "rev-drawer" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cols" }, /* @__PURE__ */ React.createElement("div", { className: "rev-mail" }, /* @__PURE__ */ React.createElement("div", { className: "rev-head" }, /* @__PURE__ */ React.createElement("div", { className: "rev-av", style: { background: sgqAvatarColor(dispName) } }, sgqInitials(dispName)), /* @__PURE__ */ React.createElement("div", { className: "rev-who" }, /* @__PURE__ */ React.createElement("div", { className: "rev-name" }, dispName), dispEmail ? /* @__PURE__ */ React.createElement("div", { className: "rev-email" }, dispEmail) : null), /* @__PURE__ */ React.createElement("div", { className: "rev-meta" }, /* @__PURE__ */ React.createElement("span", { className: "rev-date2" }, rfmt(active.email_date)), /* @__PURE__ */ React.createElement("span", { className: "rev-conf " + sgqConfClass(active.confidence) }, Math.round((active.confidence || 0) * 100), "% match"))), /* @__PURE__ */ React.createElement("div", { className: "rev-subject" }, active.email_subject || "(no subject)", matched ? /* @__PURE__ */ React.createElement("span", { className: "rev-tgtpill" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-target-arrow" }), target.name) : null), (() => {
-        const ce = cleanEmailBody(active.email_body);
-        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-bodywrap" }, /* @__PURE__ */ React.createElement("div", { className: "rev-mailbody", ref: mailBodyRef, style: { maxHeight: 156, overflow: "hidden" } }, ce.body || "(no body)"), mailOverflow ? /* @__PURE__ */ React.createElement("div", { className: "rev-fade" }) : null), mailOverflow ? /* @__PURE__ */ React.createElement("button", { className: "rev-readmore", onClick: () => setMailReaderOpen(true) }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrows-diagonal", style: { fontSize: 13 } }), "Read full message") : ce.hasQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quotewrap" }, /* @__PURE__ */ React.createElement("button", { className: "rev-quote-toggle", onClick: () => setShowQuoted((q) => !q) }, /* @__PURE__ */ React.createElement("i", { className: "ti " + (showQuoted ? "ti-chevron-down" : "ti-chevron-right"), style: { fontSize: 13 } }), showQuoted ? "Hide quoted thread & disclaimers" : "Show quoted thread & disclaimers"), showQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quoted" }, ce.quoted) : null) : null);
-      })()), /* @__PURE__ */ React.createElement("div", { className: "rev-card" }, isCreate ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-taskline" }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9.5, fontWeight: 700, color: "#15803d", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 5, padding: "2px 6px", letterSpacing: ".04em", flexShrink: 0 } }, "NEW TASK"), /* @__PURE__ */ React.createElement(SgqCrumb, { data, pid, path: eff.task_path }))), /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Task name"), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...NO_AUTOFILL,
-          className: "rev-note",
-          style: { flex: "0 0 auto", minHeight: 0, height: 34, fontWeight: 600 },
-          value: eff.patch && eff.patch.name || "",
-          placeholder: "New task name",
-          onChange: (e) => patchRow(active.id, { patch: { ...eff.patch || {}, name: e.target.value } })
-        }
-      ), /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Note"), /* @__PURE__ */ React.createElement(
-        "textarea",
-        {
-          className: "rev-note",
-          rows: 2,
-          value: noteText,
-          placeholder: "Add a note to the new task…",
-          onChange: (e) => patchRow(active.id, { note_text: e.target.value })
-        }
-      ), createReady && newTask ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade", style: { color: "#15803d", background: "#ecfdf3", border: "1px solid #bbf7d0" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-calendar-plus" }), "Scheduled " + rfmt(newTask.start) + "–" + rfmt(newTask.end) + " · " + newTask.duration + "d") : null, newTaskAddNames.length ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade dep", style: { marginLeft: 8 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-bar-to-right" }), "Depends on " + newTaskAddNames.join(", ")) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-actions" }, /* @__PURE__ */ React.createElement("div", { className: "rev-qnav" }, /* @__PURE__ */ React.createElement("button", { onClick: prev, disabled: activeIdx <= 0, title: "Previous (K)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-left" })), /* @__PURE__ */ React.createElement("span", { className: "rev-qpos" }, activeIdx + 1, " of ", rows.length), /* @__PURE__ */ React.createElement("button", { onClick: next, disabled: activeIdx >= rows.length - 1, title: "Next (J)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-right" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-actbtns" }, /* @__PURE__ */ React.createElement("button", { className: "rev-approve", onClick: approve, disabled: !createReady, style: !createReady ? { opacity: 0.5, cursor: "default" } : void 0 }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus" }), "Create task"), /* @__PURE__ */ React.createElement("button", { className: "rev-dismiss", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }), "Dismiss")))) : !matched ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-lbl" }, "Match to a task"), /* @__PURE__ */ React.createElement("p", { className: "rev-cardhint" }, "This suggestion isn’t linked to a task yet. Pick one to preview the change against the plan."), /* @__PURE__ */ React.createElement(
-        SgqCascadePicker,
-        {
-          data,
-          pid: eff.project_id,
-          path: eff.task_path,
-          ready: false,
-          onChange: (p, pa) => patchRow(active.id, { project_id: p, task_path: pa })
-        }
-      )) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-taskline" }, /* @__PURE__ */ React.createElement(SgqCrumb, { data, pid, path: eff.task_path }), /* @__PURE__ */ React.createElement("span", { className: "rev-change", onClick: () => setShowPicker((s) => !s) }, showPicker ? "done" : "change task")), showPicker ? /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement(
-        SgqCascadePicker,
-        {
-          data,
-          pid: eff.project_id,
-          path: eff.task_path,
-          ready: true,
-          onChange: (p, pa) => patchRow(active.id, { project_id: p, task_path: pa })
-        }
-      )) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Note"), /* @__PURE__ */ React.createElement(
-        "textarea",
-        {
-          className: "rev-note",
-          rows: 2,
-          value: noteText,
-          placeholder: "Add a note to the task…",
-          onChange: (e) => patchRow(active.id, { note_text: e.target.value })
-        }
-      ), /* @__PURE__ */ React.createElement("div", { className: "rev-cascade " + (moversList.length ? "has" : "none") }, /* @__PURE__ */ React.createElement("i", { className: moversList.length ? "ti ti-arrow-ramp-right-2" : "ti ti-circle-check" }), moversList.length ? moversList.length + " task" + (moversList.length > 1 ? "s" : "") + " shift " + (maxDelta >= 0 ? "+" : "") + maxDelta + " business day" + (Math.abs(maxDelta) > 1 ? "s" : "") + " downstream" : "No downstream schedule impact"), previewConflictMsg ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade has", style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-alert-triangle" }), previewConflictMsg) : null, addedPredTasks.length ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade dep", style: { marginLeft: 8 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-bar-to-right" }), "Adds dependency on " + addedPredTasks.map((t) => t.name).join(", ")) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-actions" }, /* @__PURE__ */ React.createElement("div", { className: "rev-qnav" }, /* @__PURE__ */ React.createElement("button", { onClick: prev, disabled: activeIdx <= 0, title: "Previous (K)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-left" })), /* @__PURE__ */ React.createElement("span", { className: "rev-qpos" }, activeIdx + 1, " of ", rows.length), /* @__PURE__ */ React.createElement("button", { onClick: next, disabled: activeIdx >= rows.length - 1, title: "Next (J)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-right" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-actbtns" }, /* @__PURE__ */ React.createElement("button", { className: "rev-approve", onClick: approve }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check" }), "Approve"), /* @__PURE__ */ React.createElement("button", { className: "rev-dismiss", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }), "Dismiss")))))));
-    };
-    const flattenAll = (ts) => {
-      if (!ts || !ts.length) return [];
-      const childSet = focusGroupIds(ts);
-      const kids = /* @__PURE__ */ new Map();
-      ts.forEach((t) => {
-        if (!kids.has(t.parentId)) kids.set(t.parentId, []);
-        kids.get(t.parentId).push(t);
-      });
-      const out = [];
-      const walk = (pid2, level) => {
-        (kids.get(pid2) || []).forEach((t) => {
-          out.push({ ...t, level, hasChildren: childSet.has(t.id) });
-          walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-      return out;
-    };
-    const buildReviewTasks = () => {
-      const base = proj && proj.tasks && proj.tasks.length ? flattenAll(proj.tasks) : gridProps && gridProps.tasks ? gridProps.tasks : [];
-      if (isCreate) {
-        if (!createReady || !newTask) return base;
-        const subtreeSet = (arr, rootId) => {
-          const s = /* @__PURE__ */ new Set([rootId]);
-          let c = true;
-          while (c) {
-            c = false;
-            arr.forEach((t) => {
-              if (t.parentId != null && s.has(t.parentId) && !s.has(t.id)) {
-                s.add(t.id);
-                c = true;
-              }
-            });
-          }
-          return s;
-        };
-        const lastOfSubtree = (arr, rootId) => {
-          if (rootId == null) return -1;
-          const s = subtreeSet(arr, rootId);
-          let last = -1;
-          arr.forEach((t, i) => {
-            if (s.has(t.id)) last = i;
-          });
-          return last;
-        };
-        const predIds = new Set((newTask.predecessors || []).map((p) => p.id));
-        const parentRow = newTask.parentId != null ? base.find((t) => t.id === newTask.parentId) : null;
-        const row = { id: "__rvnew", __rvProposed: true, __rvNew: true, level: parentRow ? (parentRow.level || 0) + 1 : 0 };
-        let anchor = -1;
-        base.forEach((t, i) => {
-          if (predIds.has(t.id) && t.parentId === newTask.parentId) anchor = i;
-        });
-        if (anchor >= 0) anchor = lastOfSubtree(base, base[anchor].id);
-        else if (newTask.parentId != null) anchor = lastOfSubtree(base, newTask.parentId);
-        if (anchor < 0) return [...base, row];
-        const out2 = [];
-        base.forEach((t, i) => {
-          out2.push(t);
-          if (i === anchor) out2.push(row);
-        });
-        return out2;
-      }
-      if (!matched) return base.map((t) => t.id in sugByTask ? { ...t, __rvPending: sugByTask[t.id] } : t);
-      const out = [];
-      base.forEach((t) => {
-        if (t.id === targetId) {
-          out.push({ ...t, __rvTarget: true });
-          out.push({ id: "__rvprop", name: "", __rvProposed: true, level: t.level || 0 });
-        } else if (moverMap[t.id]) {
-          const m = moverMap[t.id];
-          out.push({ ...t, start: m.newStart, end: m.newEnd, __rvMover: m.dEnd });
-        } else if (t.id in sugByTask) {
-          out.push({ ...t, __rvPending: sugByTask[t.id] });
-        } else {
-          out.push(t);
-        }
-      });
-      return out;
-    };
-    const reviewTasks = gridProps ? buildReviewTasks() : null;
-    const setPatchExclusive = (set, drop) => setEdits((E) => {
-      if (!active) return E;
-      const row = rows.find((r) => r.id === active.id);
-      const cur = E[active.id] && E[active.id].patch || row && row.patch || {};
-      const np = { ...cur, ...set };
-      drop.forEach((k) => {
-        delete np[k];
-      });
-      return { ...E, [active.id]: { ...E[active.id] || {}, patch: np } };
-    });
-    const reviewCtx = {
-      isCreate,
-      newName: newTask ? newTask.name : "",
-      propStatus: isCreate ? newTask ? newTask.health : "gray" : propStatus,
-      propEnd: isCreate ? newTask ? newTask.end : "" : propEnd,
-      propOwner: isCreate ? newTask ? newTask.responsibleParty || "" : "" : propOwner,
-      propStart: isCreate ? newTask ? newTask.start : "" : propTarget ? propTarget.start : target ? target.start : "",
-      startChanged: isCreate ? true : !!startChanged,
-      propDur: isCreate ? newTask ? newTask.duration : null : propTarget ? propTarget.duration : target ? target.duration : null,
-      addedPreds: isCreate ? newTaskAddNames : addedPredTasks.map((t) => t.name),
-      endChanged: isCreate ? false : !!endChanged,
-      endDelta,
-      note: !!(noteText && String(noteText).trim()),
-      onStatus: (v) => {
-        if (active) setPatchField(active.id, "health", v);
-      },
-      onEnd: (v) => {
-        if (active) setPatchExclusive({ end: v }, ["duration"]);
-      },
-      onDur: (v) => {
-        if (active) setPatchExclusive({ duration: v }, ["end"]);
-      },
-      onOwner: (v) => {
-        if (active) setPatchField(active.id, "responsibleParty", v);
-      },
-      approve,
-      dismiss,
-      pick: (idx) => setActiveIdx(idx)
-    };
-    if (loading) return /* @__PURE__ */ React.createElement("div", { className: "rev", style: { flex: 1, minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-loading" }, "Loading updates…"));
-    return /* @__PURE__ */ React.createElement("div", { className: "rev", style: { flex: 1, minWidth: 0, minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-body", ref: bodyRef, style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-top", style: { height: split + "%", overflow: "hidden", display: "flex", minHeight: 0 } }, gridProps && reviewTasks ? /* @__PURE__ */ React.createElement(GridView, { ...gridProps, tasks: reviewTasks, review: reviewCtx }) : view === "grid" ? renderGrid() : renderGantt()), /* @__PURE__ */ React.createElement("div", { className: "rev-div", onMouseDown: onDivDown }, /* @__PURE__ */ React.createElement("span", { className: "grip" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null))), /* @__PURE__ */ React.createElement("div", { className: "rev-bottom" }, renderDrawer())), toast ? /* @__PURE__ */ React.createElement("div", { className: "rev-toast" }, /* @__PURE__ */ React.createElement("span", { className: "tmsg" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check ok" }), toast.msg), /* @__PURE__ */ React.createElement("button", { onClick: doUndo }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-back-up" }), "Undo")) : null, mailReaderOpen && active ? /* @__PURE__ */ React.createElement("div", { className: "rev-readeroverlay", onClick: () => setMailReaderOpen(false) }, /* @__PURE__ */ React.createElement("div", { className: "rev-reader", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "rev-reader-head" }, /* @__PURE__ */ React.createElement("div", { className: "rev-av", style: { background: sgqAvatarColor(dispName) } }, sgqInitials(dispName)), /* @__PURE__ */ React.createElement("div", { className: "rev-who", style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-name" }, dispName), dispEmail ? /* @__PURE__ */ React.createElement("div", { className: "rev-email" }, dispEmail) : null), /* @__PURE__ */ React.createElement("span", { className: "rev-date2" }, rfmt(active.email_date)), /* @__PURE__ */ React.createElement("button", { className: "rev-reader-close", onClick: () => setMailReaderOpen(false), title: "Close (Esc)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-reader-subject" }, active.email_subject || "(no subject)"), /* @__PURE__ */ React.createElement("div", { className: "rev-reader-body" }, (() => {
-      const ce = cleanEmailBody(active.email_body);
-      return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-mailbody", style: { marginTop: 0 } }, ce.body || "(no body)"), ce.hasQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quotewrap" }, /* @__PURE__ */ React.createElement("button", { className: "rev-quote-toggle", onClick: () => setShowQuoted((q) => !q) }, /* @__PURE__ */ React.createElement("i", { className: "ti " + (showQuoted ? "ti-chevron-down" : "ti-chevron-right"), style: { fontSize: 13 } }), showQuoted ? "Hide quoted thread & disclaimers" : "Show quoted thread & disclaimers"), showQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quoted" }, ce.quoted) : null) : null);
-    })()))) : null);
-  }
-  var VIEW_TAB_KEYS = ["aPid", "view", "section"];
-  var VIEW_PREF_KEYS = [
-    "gridZoom",
-    "gridColWidths",
-    "masterSort",
-    "masterCols",
-    "masterColWidths",
-    "masterGroupBy",
-    "masterLevelFilter",
-    "masterHealthFilter",
-    "masterProjectFilter",
-    "healthColStyle"
-  ];
-  var VIEW_TRANSIENT_KEYS = ["editProjId"];
-  var VIEW_STATE_KEYS = /* @__PURE__ */ new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
-  var VIEW_TAB_STORAGE_KEY = "planar:tabView:v1";
-  var VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
-  function loadTabView() {
-    try {
-      return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveTabView(obj) {
-    try {
-      sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  function loadViewPrefs() {
-    try {
-      return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveViewPrefs(obj) {
-    try {
-      localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  var TASK_FOCUS_STORAGE_KEY = "planar:taskFocus:v1";
-  function loadTaskFocus() {
-    try {
-      const v = JSON.parse(localStorage.getItem(TASK_FOCUS_STORAGE_KEY) || "{}");
-      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-    } catch {
-      return {};
-    }
-  }
-  function saveTaskFocus(obj) {
-    try {
-      localStorage.setItem(TASK_FOCUS_STORAGE_KEY, JSON.stringify(obj));
-    } catch (_) {
-    }
-  }
-  function applyTaskFocus(d) {
-    if (!d || typeof d !== "object" || !d.projects || typeof d.projects !== "object") return d;
-    const store = loadTaskFocus();
-    let projects = null;
-    Object.keys(store).forEach((pid) => {
-      const proj = d.projects[pid], ids = store[pid];
-      if (!proj || !Array.isArray(proj.tasks) || !Array.isArray(ids) || !ids.length) return;
-      const want = new Set(ids);
-      let changed = false;
-      const tasks = proj.tasks.map((t) => {
-        if (t && want.has(t.id) && t.focused === void 0) {
-          changed = true;
-          return { ...t, focused: true };
-        }
-        return t;
-      });
-      if (!changed) return;
-      if (!projects) projects = { ...d.projects };
-      projects[pid] = { ...proj, tasks };
-    });
-    return projects ? { ...d, projects } : d;
-  }
-  function persistTaskFocus(prev, next) {
-    if (!next || !next.projects || prev && prev.projects === next.projects) return;
-    const store = loadTaskFocus();
-    let dirty = false;
-    Object.entries(next.projects).forEach(([pid, proj]) => {
-      if (!proj || !Array.isArray(proj.tasks) || !proj.tasks.length) return;
-      const before = Array.isArray(store[pid]) ? store[pid] : [];
-      const live = new Set(proj.tasks.map((t) => t && t.id));
-      const set = new Set(before.filter((id) => live.has(id)));
-      proj.tasks.forEach((t) => {
-        if (!t) return;
-        if (t.focused === true) set.add(t.id);
-        else if (t.focused === false) set.delete(t.id);
-      });
-      const after = [...set];
-      if (after.length === before.length && after.every((id, i) => id === before[i])) return;
-      dirty = true;
-      if (after.length) store[pid] = after;
-      else delete store[pid];
-    });
-    if (dirty) saveTaskFocus(store);
-  }
-  function coreChanged(prev, next) {
-    if (prev === next) return false;
-    if (!prev || !next) return true;
-    const keys = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
-    for (const k of keys) {
-      if (VIEW_STATE_KEYS.has(k)) continue;
-      if (prev[k] !== next[k]) return true;
-    }
-    return false;
-  }
-  var TASK_VIEW_FIELDS = ["focused"];
-  function stripTaskViewFields(tasks) {
-    if (!Array.isArray(tasks)) return tasks;
-    return tasks.map((t) => {
-      if (!t || typeof t !== "object") return t;
-      let changed = false;
-      const out = { ...t };
-      TASK_VIEW_FIELDS.forEach((k) => {
-        if (k in out) {
-          delete out[k];
-          changed = true;
-        }
-      });
-      return changed ? out : t;
-    });
-  }
-  function stripViewState(d) {
-    if (!d || typeof d !== "object") return d;
-    const out = { ...d };
-    VIEW_STATE_KEYS.forEach((k) => {
-      delete out[k];
-    });
-    if (out.projects && typeof out.projects === "object") {
-      const projects = {};
-      Object.entries(out.projects).forEach(([pid, proj]) => {
-        projects[pid] = proj && Array.isArray(proj.tasks) ? { ...proj, tasks: stripTaskViewFields(proj.tasks) } : proj;
-      });
-      out.projects = projects;
-    }
-    return out;
-  }
-  function withLastActiveSite(d, siteId, scheduleId) {
-    if (siteId == null || scheduleId == null) return d;
-    if (d.lastActiveBySite && d.lastActiveBySite[siteId] === scheduleId) return d;
-    return { ...d, lastActiveBySite: { ...d.lastActiveBySite || {}, [siteId]: scheduleId } };
-  }
-  function persistViewState(prev, next) {
-    let tabChanged = false, prefsChanged = false;
-    VIEW_TAB_KEYS.forEach((k) => {
-      if (!prev || prev[k] !== next[k]) tabChanged = true;
-    });
-    VIEW_PREF_KEYS.forEach((k) => {
-      if (!prev || prev[k] !== next[k]) prefsChanged = true;
-    });
-    if (tabChanged) {
-      const cur = loadTabView();
-      VIEW_TAB_KEYS.forEach((k) => {
-        cur[k] = next[k];
-      });
-      saveTabView(cur);
-    }
-    if (prefsChanged) {
-      const cur = loadViewPrefs();
-      VIEW_PREF_KEYS.forEach((k) => {
-        cur[k] = next[k];
-      });
-      saveViewPrefs(cur);
-    }
-    persistTaskFocus(prev, next);
-  }
-  function pickActivePid(projects, preferred) {
-    if (!projects || typeof projects !== "object") return null;
-    if (preferred != null && projects[preferred]) return preferred;
-    const first = Object.values(projects).find((p) => p && typeof p === "object" && p.id != null);
-    return first ? first.id : null;
-  }
-  function activeProjectOf(d) {
-    if (!d || typeof d !== "object" || !d.projects) return null;
-    const p = d.aPid != null ? d.projects[d.aPid] : null;
-    return p && typeof p === "object" ? p : null;
-  }
-  function resolveViewState(d) {
-    if (!d || typeof d !== "object") return d;
-    const tab = loadTabView();
-    const prefs = loadViewPrefs();
-    const patch = { editProjId: null };
-    VIEW_TAB_KEYS.forEach((k) => {
-      patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k];
-    });
-    VIEW_PREF_KEYS.forEach((k) => {
-      patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k];
-    });
-    if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
-      patch.aPid = pickActivePid(d.projects, d.aPid);
-    }
-    const tabPatch = {};
-    VIEW_TAB_KEYS.forEach((k) => {
-      tabPatch[k] = patch[k];
-    });
-    const prefsPatch = {};
-    VIEW_PREF_KEYS.forEach((k) => {
-      prefsPatch[k] = patch[k];
-    });
-    saveTabView({ ...tab, ...tabPatch });
-    saveViewPrefs({ ...prefs, ...prefsPatch });
-    return applyTaskFocus({ ...d, ...patch });
-  }
-  function App() {
-    const [data, setData] = useState4(null);
-    const dataRef = useRef4(null);
-    useEffect3(() => {
-      dataRef.current = data;
-    }, [data]);
-    const rollToastRef = useRef4(null);
-    useEffect3(() => {
-      if (rollToastRef.current) {
-        showToast(rollToastRef.current);
-        rollToastRef.current = null;
-      }
-    }, [data]);
-    const visibleColIdxs = () => {
-      const d = dataRef.current;
-      const eff = activeEffectiveCols(d);
-      const vis = readGridCfg(d && d.projects?.[d.aPid], d).visible;
-      const idxs = [];
-      vis.forEach((k) => {
-        const i = eff.findIndex((c) => c.k === k);
-        if (i >= 0) idxs.push(i);
-      });
-      return idxs;
-    };
-    const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
-    const [successorPrompt, setSuccessorPrompt] = useState4(null);
-    const [successorPromptQueue, setSuccessorPromptQueue] = useState4([]);
-    useEffect3(() => {
-      if (!successorPrompt && successorPromptQueue.length > 0) {
-        setSuccessorPrompt(successorPromptQueue[0]);
-        setSuccessorPromptQueue((q) => q.slice(1));
-      }
-    }, [successorPrompt, successorPromptQueue]);
-    const [notesCtx, setNotesCtx] = useState4(null);
-    const [isMobile, setIsMobile] = useState4(() => typeof window !== "undefined" && window.innerWidth < 768);
-    const [mobMenuOpen, setMobMenuOpen] = useState4(false);
-    useEffect3(() => {
-      const h = () => setIsMobile(window.innerWidth < 768);
-      window.addEventListener("resize", h);
-      return () => window.removeEventListener("resize", h);
-    }, []);
-    const [coarsePointer, setCoarsePointer] = useState4(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-    useEffect3(() => {
-      if (typeof window === "undefined" || !window.matchMedia) return;
-      const mq = window.matchMedia("(pointer: coarse)");
-      const h = () => setCoarsePointer(mq.matches);
-      mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
-      return () => mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h);
-    }, []);
-    const [pdfExportOpen, setPdfExportOpen] = useState4(false);
-    const [projCtx, setProjCtx] = useState4(null);
-    const [taskCtx, setTaskCtx] = useState4(null);
-    const [iconPickerCtx, setIconPickerCtx] = useState4(null);
-    const clipboardRef = useRef4(null);
-    const pasteSelectRef = useRef4(null);
-    const [, setClipboardTick] = useState4(0);
-    const [renameModal, setRenameModal] = useState4(null);
-    const [deleteChoice, setDeleteChoice] = useState4(null);
-    const [moveToCtx, setMoveToCtx] = useState4(null);
-    const moveSelectRef = useRef4(null);
-    const [edit, setEdit] = useState4(null);
-    const editLiveRef = useRef4(null);
-    useEffect3(() => {
-      editLiveRef.current = edit;
-    }, [edit]);
-    const focusReselectRef = useRef4(null);
-    const [editStartChar, setEditStartChar] = useState4(null);
-    const [selectedId, setSelectedId] = useState4(null);
-    const [selRange, setSelRange] = useState4(null);
-    const [focusPins, setFocusPins] = useState4(() => /* @__PURE__ */ new Set());
-    const [selectedColIdx, setSelectedColIdx] = useState4(0);
-    const [, setTodayTick] = useState4(0);
-    const [, setHealthTick] = useState4(0);
-    useEffect3(() => {
-      const refresh = () => {
-        const t = fdLocal(/* @__PURE__ */ new Date());
-        if (t !== NOW) {
-          setNOW(t);
-          setTodayTick((x) => x + 1);
-          isDerivedUpdate.current = true;
-          setData((d) => {
-            const next = reconcileNeedsAttention(d);
-            if (next === d) isDerivedUpdate.current = false;
-            return next;
-          });
-        }
-      };
-      const onVis = () => {
-        if (!document.hidden) refresh();
-      };
-      window.addEventListener("focus", refresh);
-      document.addEventListener("visibilitychange", onVis);
-      const iv = setInterval(refresh, 6e4);
-      return () => {
-        window.removeEventListener("focus", refresh);
-        document.removeEventListener("visibilitychange", onVis);
-        clearInterval(iv);
-      };
-    }, []);
-    const [goToFocus, setGoToFocus] = useState4(null);
-    const [offlineFallback, setOfflineFallback] = useState4(false);
-    const [authRequired, setAuthRequired] = useState4(false);
-    const [driftNotice, setDriftNotice] = useState4(null);
-    const [ancestorPredNotice, setAncestorPredNotice] = useState4(null);
-    const [staleNotice, setStaleNotice] = useState4(false);
-    const didInitialLoad = useRef4(false);
-    const prevCoreRef = useRef4(null);
-    const [formatOpen, setFormatOpen] = useState4(false);
-    const [settingsOpen, setSettingsOpen] = useState4(false);
-    const [settingsSection, setSettingsSection] = useState4(null);
-    const [meetingCalOpen, setMeetingCalOpen] = useState4(false);
-    const [automationOpen, setAutomationOpen] = useState4(false);
-    const [contactsOpen, setContactsOpen] = useState4(false);
-    const [historyOpen, setHistoryOpen] = useState4(false);
-    const [reviewOpen, setReviewOpen] = useState4(false);
-    const [reviewRows, setReviewRows] = useState4([]);
-    const [reviewLoading, setReviewLoading] = useState4(true);
-    const [reviewIdx, setReviewIdx] = useState4(0);
-    useEffect3(() => {
-      const openTo = (e) => {
-        if ((e?.detail || null) === "meetings") {
-          setMeetingCalOpen(true);
-          setSettingsOpen(false);
-        } else {
-          setSettingsSection(e?.detail || null);
-          setSettingsOpen(true);
-        }
-        setAutomationOpen(false);
-        setContactsOpen(false);
-        setFormatOpen(false);
-      };
-      document.addEventListener("planar-open-settings", openTo);
-      return () => document.removeEventListener("planar-open-settings", openTo);
-    }, []);
-    const [ganttPPD, setGanttPPD] = useState4(() => {
-      const ganttW = window.innerWidth * 0.46;
-      return Math.max(1, Math.floor(ganttW / 365));
-    });
-    const [gridZoom, setGridZoom] = useState4(() => data?.gridZoom ?? 1);
-    useEffect3(() => {
-      if (data && typeof data.gridZoom === "number") setGridZoom(data.gridZoom);
-    }, [data?.gridZoom]);
-    const hoverZoneRef = useRef4("gantt");
-    const fileHandleRef = useRef4(null);
-    const fileHtmlRef = useRef4(null);
-    useEffect3(() => {
-      const sb = window.__sb;
-      if (!sb) {
-        setReviewLoading(false);
-        return;
-      }
-      let alive = true;
-      (async () => {
-        try {
-          const { data: list, error } = await sb.from("planar_suggestions").select("*").eq("status", "pending").order("created_at", { ascending: false });
-          if (!alive) return;
-          if (!error && list) setReviewRows(list);
-        } catch (e) {
-          console.warn("suggestions fetch failed:", e);
-        }
-        if (alive) setReviewLoading(false);
-      })();
-      let channel = null;
-      try {
-        channel = sb.channel("planar_suggestions_pending").on("postgres_changes", { event: "INSERT", schema: "public", table: "planar_suggestions" }, (payload) => {
-          if (payload && payload.new && payload.new.status === "pending")
-            setReviewRows((R) => [payload.new, ...R.filter((r) => r.id !== payload.new.id)]);
-        }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "planar_suggestions" }, (payload) => {
-          if (!payload || !payload.new) return;
-          if (payload.new.status !== "pending") setReviewRows((R) => R.filter((r) => r.id !== payload.new.id));
-          else setReviewRows((R) => R.map((r) => r.id === payload.new.id ? payload.new : r));
-        }).on("postgres_changes", { event: "DELETE", schema: "public", table: "planar_suggestions" }, (payload) => {
-          if (payload && payload.old) setReviewRows((R) => R.filter((r) => r.id !== payload.old.id));
-        }).subscribe();
-      } catch (e) {
-        console.warn("suggestions subscribe failed:", e);
-      }
-      return () => {
-        alive = false;
-        try {
-          if (channel) sb.removeChannel(channel);
-        } catch (e) {
-        }
-      };
-    }, []);
-    useEffect3(() => {
-      if (!reviewOpen || !data) return;
-      const a = reviewRows[reviewIdx];
-      if (a && a.project_id != null && data.aPid !== a.project_id && data.projects && data.projects[a.project_id]) setData((d) => ({ ...d, aPid: a.project_id }));
-    }, [reviewOpen, reviewIdx, reviewRows, data?.aPid]);
-    const fileSaveTimer = useRef4(null);
-    const [fileLinked, setFileLinked] = useState4(false);
-    const [savePulse, setSavePulse] = useState4(false);
-    const [saveStatus, setSaveStatus] = useState4("saved");
-    const saveSeq = useRef4(0);
-    const latestData = useRef4(null);
-    const saveStatusRef = useRef4("saved");
-    useEffect3(() => {
-      saveStatusRef.current = saveStatus;
-    }, [saveStatus]);
-    const attemptCloudSave = (d) => {
-      const seq = ++saveSeq.current;
-      setSaveStatus("saving");
-      window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" }).then((res) => {
-        if (saveSeq.current === seq) setSaveStatus(res ? "saved" : "error");
-      }).catch(() => {
-        if (saveSeq.current === seq) setSaveStatus("error");
-      });
-    };
-    const [dlOpen, setDlOpen] = useState4(false);
-    const history = useRef4([]);
-    const future = useRef4([]);
-    const prevData = useRef4(null);
-    const isUndoing = useRef4(false);
-    const isDerivedUpdate = useRef4(false);
-    const flatTasksRef = useRef4([]);
-    const lastSelIdxRef = useRef4(null);
-    const viewportTopFlatIdx = (tasks) => {
-      const g2 = document.querySelector('[data-grid-scroll="1"]');
-      if (!g2) return null;
-      const top = g2.getBoundingClientRect().top;
-      for (const r of g2.querySelectorAll("[data-task-row]")) {
-        const b = r.getBoundingClientRect();
-        if (b.top >= top + 20) {
-          const id = r.getAttribute("data-task-row");
-          const i = tasks.findIndex((t) => String(t.id) === id);
-          if (i >= 0) return i;
-        }
-      }
-      return null;
-    };
-    const projIdRef = useRef4(null);
-    const prevHolKey = useRef4(null);
-    const skipHolRecasc = useRef4(false);
-    const prevHealthKey = useRef4(null);
-    useEffect3(() => {
-      if (!data) return;
-      if (isUndoing.current) {
-        isUndoing.current = false;
-        prevData.current = data;
-        return;
-      }
-      if (isDerivedUpdate.current) {
-        isDerivedUpdate.current = false;
-        prevData.current = data;
-        return;
-      }
-      if (prevData.current !== null) {
-        history.current = [...history.current.slice(-19), prevData.current];
-        future.current = [];
-      }
-      prevData.current = data;
-    }, [data]);
-    const applyLoadedDataRef = useRef4(null);
-    const [loadTick, setLoadTick] = useState4(0);
-    const loadAttemptRef = useRef4(0);
-    useEffect3(() => {
-      let cancelled = false, retryTimer = null;
-      (async () => {
-        applyLoadedDataRef.current = (parsed) => {
-          let d = loadDocument(parsed);
-          d._pinnedClean = true;
-          setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
-          const driftFound = [];
-          const ancestorFound = [];
-          Object.keys(d.projects).forEach((pid) => {
-            let tasks = d.projects[pid].tasks.map(({ _pinStart, __wasDirectEdit, ...t }) => t);
-            d.projects[pid] = { ...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, driftFound, ancestorFound) };
-          });
-          if (driftFound.length) {
-            setDriftNotice(driftFound);
-            console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound);
-          }
-          if (ancestorFound.length) {
-            setAncestorPredNotice(ancestorFound);
-            console.warn("[planar ancestor-pred] imported/restored data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", ancestorFound);
-          }
-          try {
-            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
-          } catch {
-          }
-          setData(resolveViewState(d));
-        };
-        try {
-          const _isMobile = window.innerWidth < 768;
-          window.__planarCloudError = false;
-          window.__planarAuthRequired = false;
-          let r = null, readThrew = false, timer = null;
-          try {
-            r = await Promise.race([
-              window.storage.get("hs-v1"),
-              new Promise((_, rej) => {
-                timer = setTimeout(() => rej(new Error("hs-v1 read timed out")), LOAD_ATTEMPT_TIMEOUT_MS);
-              })
-            ]);
-          } catch {
-            readThrew = true;
-          }
-          clearTimeout(timer);
-          if (cancelled) return;
-          if (readThrew) window.__planarCloudError = true;
-          if (!r && window.__planarCloudError && window.self !== window.top) {
-            window.__planarLoadStatus = "failed";
-            postLoadState("failed");
-            const n = ++loadAttemptRef.current;
-            console.warn("[planar load] schedule read failed (attempt " + n + ") — retrying; nothing is written until it loads.");
-            retryTimer = setTimeout(() => setLoadTick((t) => t + 1), Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_BASE_MS * Math.pow(2, n - 1)));
-            return;
-          }
-          if (r) {
-            const d2 = loadDocument(JSON.parse(r.value));
-            const needsPinClean = !d2._pinnedClean;
-            d2._pinnedClean = true;
-            setHolidaySet(buildHolidaySet(d2.settings?.holidays || DEFAULT_HOLIDAYS));
-            const driftFound = [];
-            const ancestorFound = [];
-            Object.keys(d2.projects).forEach((pid) => {
-              let tasks = d2.projects[pid].tasks.map((t) => {
-                const { _pinStart, __wasDirectEdit, pinnedStart, ...rest } = t;
-                if (!needsPinClean && pinnedStart) rest.pinnedStart = true;
-                return rest;
-              });
-              d2.projects[pid] = { ...d2.projects[pid], tasks: recascadeWithDrift(tasks, pid, d2.projects[pid].name || pid, driftFound, ancestorFound) };
-            });
-            if (driftFound.length) {
-              setDriftNotice(driftFound);
-              console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound);
-            }
-            if (ancestorFound.length) {
-              setAncestorPredNotice(ancestorFound);
-              console.warn("[planar ancestor-pred] a task named its own parent/ancestor as a predecessor — link dropped and dates recalculated (NEW-1):", ancestorFound);
-              attemptCloudSave(d2);
-            }
-            try {
-              window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d2);
-            } catch {
-            }
-            setData(resolveViewState(d2));
-            return;
-          }
-          const seed = window.__PLANAR_DATA__ || SEED;
-          const d = loadDocument(seed);
-          setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
-          d._pinnedClean = true;
-          const seedAncestorFound = [];
-          Object.keys(d.projects).forEach((pid) => {
-            let tasks = d.projects[pid].tasks.map(({ _pinStart, __wasDirectEdit, ...t }) => t);
-            d.projects[pid] = { ...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, [], seedAncestorFound) };
-          });
-          if (seedAncestorFound.length) {
-            setAncestorPredNotice(seedAncestorFound);
-            console.warn("[planar ancestor-pred] seed data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", seedAncestorFound);
-          }
-          if (window.__planarCloudError) setOfflineFallback(true);
-          else if (window.__planarAuthRequired) setAuthRequired(true);
-          try {
-            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
-          } catch {
-          }
-          setData(resolveViewState(d));
-        } catch {
-          const d = loadDocument(window.__PLANAR_DATA__ || SEED);
-          setOfflineFallback(true);
-          try {
-            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
-          } catch {
-          }
-          setData(resolveViewState(d));
-        }
-      })();
-      return () => {
-        cancelled = true;
-        clearTimeout(retryTimer);
-      };
-    }, [loadTick]);
-    useEffect3(() => {
-      if (!data) return;
-      latestData.current = data;
-      persistViewState(prevCoreRef.current, data);
-      const isFirstLoad = !didInitialLoad.current;
-      if (isFirstLoad) didInitialLoad.current = true;
-      const coreIsNew = coreChanged(prevCoreRef.current, data);
-      prevCoreRef.current = data;
-      if (!isFirstLoad && coreIsNew) attemptCloudSave(data);
-      if (isFirstLoad || coreIsNew) {
-        setHolidaySet(buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS));
-        setRowH(Math.min(34, Math.max(20, data.settings?.rowHeight || 24)));
-        rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
-        const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
-        if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick((x) => x + 1);
-        prevHealthKey.current = healthKey;
-        const holKey = JSON.stringify(data.settings?.holidays);
-        if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
-          prevHolKey.current = holKey;
-          skipHolRecasc.current = true;
-          isDerivedUpdate.current = true;
-          setData((d) => {
-            const newProjects = {};
-            Object.entries(d.projects).forEach(([id, proj2]) => {
-              let tasks = proj2.tasks.map((t) => {
-                if (t.pinnedEnd && t.end) return t;
-                const r = resolveTaskSpan(t);
-                return { ...t, end: r.end, duration: r.duration };
-              });
-              tasks = recomputeSchedule(tasks);
-              newProjects[id] = { ...proj2, tasks };
-            });
-            return { ...d, projects: newProjects };
-          });
-        } else {
-          if (skipHolRecasc.current) skipHolRecasc.current = false;
-          else prevHolKey.current = holKey;
-        }
-        isDerivedUpdate.current = true;
-        setData((d) => {
-          const next = reconcileNeedsAttention(d);
-          if (next === d) isDerivedUpdate.current = false;
-          return next;
-        });
-      }
-      if (fileHandleRef.current && fileHtmlRef.current) {
-        clearTimeout(fileSaveTimer.current);
-        fileSaveTimer.current = setTimeout(async () => {
-          try {
-            const tag = `<script id="planar-data">window.__PLANAR_DATA__=${JSON.stringify(data)};<\/script>`;
-            let html = fileHtmlRef.current;
-            if (html.includes('<script id="planar-data">')) {
-              html = html.replace(/<script id="planar-data">[\s\S]*?<\/script>/, tag);
-            } else {
-              html = html.replace("<body>", "<body>\n" + tag);
-            }
-            fileHtmlRef.current = html;
-            const writable = await fileHandleRef.current.createWritable();
-            await writable.write(html);
-            await writable.close();
-          } catch (e) {
-            console.warn("Auto-save failed:", e);
-          }
-        }, 700);
-      }
-    }, [data]);
-    useEffect3(() => {
-      let t;
-      const onSaved = () => {
-        setSavePulse(true);
-        setOfflineFallback(false);
-        clearTimeout(t);
-        t = setTimeout(() => setSavePulse(false), 1500);
-      };
-      window.addEventListener("planar:cloud-saved", onSaved);
-      return () => {
-        window.removeEventListener("planar:cloud-saved", onSaved);
-        clearTimeout(t);
-      };
-    }, []);
-    useEffect3(() => {
-      if (saveStatus !== "error") return;
-      const retry = () => {
-        if (latestData.current) attemptCloudSave(latestData.current);
-      };
-      const iv = setInterval(retry, 2e4);
-      window.addEventListener("online", retry);
-      return () => {
-        clearInterval(iv);
-        window.removeEventListener("online", retry);
-      };
-    }, [saveStatus]);
-    useEffect3(() => {
-      let stopped = false;
-      const check = async () => {
-        if (stopped || !window.storage || !window.storage.checkRemote) return;
-        try {
-          const r = await window.storage.checkRemote("hs-v1");
-          if (!r || !r.ok) return;
-          if (!r.newer) {
-            setStaleNotice(false);
-            return;
-          }
-          if (saveStatusRef.current === "saved" && document.hidden) {
-            window.location.reload();
-            return;
-          }
-          if (saveStatusRef.current === "saved" && !document.hidden && window.storage.silentRefresh) {
-            const fresh = await window.storage.silentRefresh("hs-v1");
-            if (fresh && applyLoadedDataRef.current) {
-              applyLoadedDataRef.current(fresh);
-              setStaleNotice(false);
-              return;
-            }
-          }
-          setStaleNotice(true);
-        } catch (e) {
-        }
-      };
-      const iv = setInterval(check, 2e4);
-      window.addEventListener("focus", check);
-      window.addEventListener("online", check);
-      document.addEventListener("visibilitychange", check);
-      return () => {
-        stopped = true;
-        clearInterval(iv);
-        window.removeEventListener("focus", check);
-        window.removeEventListener("online", check);
-        document.removeEventListener("visibilitychange", check);
-      };
-    }, []);
-    useEffect3(() => {
-      const onStale = () => setStaleNotice(true);
-      window.addEventListener("planar:stale", onStale);
-      return () => window.removeEventListener("planar:stale", onStale);
-    }, []);
-    useEffect3(() => {
-      const onMerged = (e) => {
-        const merged = e && e.detail && e.detail.value;
-        const anc = e && e.detail && e.detail.base;
-        if (!merged || !merged.projects) return;
-        const changedRows = countChangedTaskRows(anc, merged);
-        const changedPids = changedProjectIds(anc, merged);
-        const where = mergeLocationPhrase(merged.projects, changedPids, dataRef.current?.aPid);
-        const trulyEmpty = changedRows === 0 && _mEq(merged.projects, anc && anc.projects);
-        setData((cur) => {
-          if (!cur) return applyTaskFocus(merged);
-          try {
-            return applyTaskFocus(mergeCloudDoc(anc, cur, merged));
-          } catch {
-            return applyTaskFocus(merged);
-          }
-        });
-        setStaleNotice(false);
-        if (!trulyEmpty && typeof showToast === "function") {
-          const msg = changedRows > 0 ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows === 1 ? "" : "s"} updated${where ? " " + where : ""}.` : "Merged in changes saved elsewhere.";
-          showToast(msg, { type: "info", duration: 4e3 });
-          logMergeToastEvent(changedRows, changedPids, merged.projects);
-        }
-      };
-      window.addEventListener("planar:merged", onMerged);
-      return () => window.removeEventListener("planar:merged", onMerged);
-    }, []);
-    useEffect3(() => {
-      const onBeforeUnload = (e) => {
-        if (saveStatusRef.current === "saved") return;
-        e.preventDefault();
-        e.returnValue = "";
-      };
-      window.addEventListener("beforeunload", onBeforeUnload);
-      return () => window.removeEventListener("beforeunload", onBeforeUnload);
-    }, []);
-    const overlayOpenRef = useRef4(false);
-    useEffect3(() => {
-      overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal || deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen || reviewOpen || meetingCalOpen);
-    }, [
-      successorPrompt,
-      notesCtx,
-      projCtx,
-      taskCtx,
-      renameModal,
-      deleteChoice,
-      pdfExportOpen,
-      formatOpen,
-      settingsOpen,
-      automationOpen,
-      contactsOpen,
-      historyOpen,
-      reviewOpen,
-      meetingCalOpen
-    ]);
-    const overlayAtKeyStartRef = useRef4(false);
-    useEffect3(() => {
-      const latch = () => {
-        overlayAtKeyStartRef.current = overlayOpenRef.current;
-      };
-      window.addEventListener("keydown", latch, true);
-      return () => window.removeEventListener("keydown", latch, true);
-    }, []);
-    useEffect3(() => {
-      const onKey = (e) => {
-        if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
-        const tag = document.activeElement.tagName;
-        const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-        if (e.key === "Insert" && !typing) {
-          e.preventDefault();
-          if (!e.repeat) insertTask();
-          return;
-        }
-        if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyF" && !typing && !document.activeElement?.isContentEditable && !editLiveRef.current) {
-          e.preventDefault();
-          if (e.repeat) return;
-          const ids = rowRangeSelIds();
-          toggleGroupFocus(ids.length ? ids[0] : selectedId, selectedId);
-          return;
-        }
-        if (e.key === "Delete" && !typing) {
-          if (!e.repeat && selectedId !== null) {
-            e.preventDefault();
-            const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
-            const isFullRow = selRange && rangesOf(selRange).every((g2) => g2.c1 === 0 && g2.c2 === lastColIdx);
-            if (isFullRow) {
-              const ids = fullRowSelIds();
-              requestDelete(ids.length ? ids : [selectedId]);
-              return;
-            }
-            const cols = activeEffectiveCols(dataRef.current);
-            if (selIsRange(selRange)) {
-              const ftasks = flatTasksRef.current;
-              const byRow = /* @__PURE__ */ new Map();
-              cellsOf(selRange).forEach(({ r, c }) => {
-                if (!byRow.has(r)) byRow.set(r, []);
-                byRow.get(r).push(c);
-              });
-              for (const [r, cs] of byRow) {
-                const t = ftasks[r];
-                if (!t) continue;
-                const patch = {};
-                for (const c of cs) {
-                  const col2 = cols[c];
-                  if (!col2?.e || col2.t === "health" || col2.t === "notes") continue;
-                  if (t.hasChildren && (col2.k === "start" || col2.k === "end" || col2.k === "duration" || col2.t === "cost")) continue;
-                  patch[col2.k] = col2.k === "duration" || col2.k === "percentComplete" ? 0 : "";
-                }
-                if (Object.keys(patch).length) updateTask(t.id, patch);
-              }
-              return;
-            }
-            const col = cols[selectedColIdx];
-            if (col?.e && col.t !== "health" && col.t !== "notes") {
-              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
-              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
-              if (!isParentDateLocked) {
-                const blank = col.k === "duration" || col.k === "percentComplete" ? 0 : "";
-                updateTask(selectedId, { [col.k]: blank });
-              }
-            }
-          }
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && selectedId !== null && !document.activeElement?.isContentEditable && !editLiveRef.current && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-          const flat = flatTasksRef.current;
-          const NEW_ROW = "__NEW_TASK__";
-          const anchorRow = selectedId === NEW_ROW ? flat.length : flat.findIndex((t2) => t2.id === selectedId);
-          if (anchorRow < 0) return;
-          e.preventDefault();
-          const proj2 = activeProjectOf(dataRef.current);
-          const eff = activeEffectiveCols(dataRef.current);
-          let formulas = null, succIds = null;
-          const env = {
-            formula: (id, k) => {
-              if (!formulas) formulas = computeFormulaValues(flat, formulaColsOf(proj2), proj2);
-              return formulas[id]?.[k];
-            },
-            predCount: (arr) => normPreds(arr).length,
-            succCount: (id) => {
-              if (!succIds) {
-                succIds = /* @__PURE__ */ new Set();
-                (proj2?.tasks || []).forEach((t2) => normPreds(t2.predecessors).forEach((p) => succIds.add(p.id)));
-              }
-              return succIds.has(id) ? 1 : 0;
-            },
-            ownerCount: (t2) => ownerListOf(t2).length,
-            floatDays: (t2) => t2.hasChildren ? null : meetingFloatBD(t2, fdLocal(/* @__PURE__ */ new Date())),
-            costDays: (t2) => t2.hasChildren ? null : meetingCostDays(t2, MEETING_BODY_INDEX[t2.meetingBodyId])
-          };
-          const blankAt = (r, c) => r >= flat.length || !eff[c] ? true : gridCellBlank(flat[r], eff[c], env);
-          const colMasters = visibleColIdxs();
-          if (e.shiftKey) {
-            if (selectedId === NEW_ROW) return;
-            const cur = selRange || { r1: anchorRow, r2: anchorRow, c1: selectedColIdx, c2: selectedColIdx };
-            const t2 = gridCtrlArrowTarget(e.key, flat.length, colMasters, cur.r2, cur.c2, blankAt);
-            if (t2) {
-              setSelRange(withActive(cur, { r1: cur.r1, c1: cur.c1, r2: t2.row, c2: t2.col }));
-              document.dispatchEvent(new CustomEvent("planar-reveal-cell", { detail: { row: t2.row, col: t2.col } }));
-            }
-            return;
-          }
-          const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, anchorRow, selectedColIdx, blankAt);
-          if (t) {
-            setSelectedColIdx(t.col);
-            if (t.row !== anchorRow && flat[t.row]) setSelectedId(flat[t.row].id);
-            setSelRange(null);
-          }
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && !typing) {
-          const k = e.key.toLowerCase();
-          if (k === "z" && !e.shiftKey) {
-            e.preventDefault();
-            if (history.current.length > 0) {
-              const prev = history.current[history.current.length - 1];
-              history.current = history.current.slice(0, -1);
-              future.current = [...future.current, dataRef.current];
-              isUndoing.current = true;
-              setData(prev);
-            }
-            return;
-          }
-          if (k === "y" || k === "z" && e.shiftKey) {
-            e.preventDefault();
-            if (future.current.length > 0) {
-              const next = future.current[future.current.length - 1];
-              future.current = future.current.slice(0, -1);
-              history.current = [...history.current, dataRef.current];
-              isUndoing.current = true;
-              setData(next);
-            }
-            return;
-          }
-          if (k === "c" && !e.shiftKey && selectedId !== null) {
-            e.preventDefault();
-            copyTaskById(structuralTargets(selectedId));
-            return;
-          }
-          if (k === "x" && !e.shiftKey && selectedId !== null) {
-            e.preventDefault();
-            cutTaskById(structuralTargets(selectedId));
-            return;
-          }
-          if (k === "v" && !e.shiftKey && selectedId !== null) {
-            e.preventDefault();
-            pasteTaskAfter(selectedId);
-            return;
-          }
-        }
-        if (e.altKey && e.shiftKey && e.key === "ArrowRight" && !typing) {
-          e.preventDefault();
-          if (!e.repeat && selectedId !== null) {
-            const ids = blockOnlyTargets(selectedId);
-            if (ids) indentSelectionByIds(ids);
-          }
-          return;
-        }
-        if (e.altKey && e.shiftKey && e.key === "ArrowLeft" && !typing) {
-          e.preventDefault();
-          if (!e.repeat && selectedId !== null) {
-            const ids = blockOnlyTargets(selectedId);
-            if (ids) outdentSelectionByIds(ids);
-          }
-          return;
-        }
-        if (e.key === "Tab" && !typing && selectedId !== null) {
-          e.preventDefault();
-          if (e.shiftKey) {
-            setSelectedColIdx((i) => stepGridCol(i, -1));
-          } else {
-            setSelectedColIdx((i) => stepGridCol(i, 1));
-          }
-          setSelRange(null);
-          return;
-        }
-        if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null) {
-          const arrowKeys = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"];
-          if (arrowKeys.includes(e.key)) {
-            e.preventDefault();
-            const ftasks = flatTasksRef.current;
-            const anchorRi = ftasks.findIndex((t) => t.id === selectedId);
-            if (anchorRi >= 0) {
-              const cur = selRange || { r1: anchorRi, r2: anchorRi, c1: selectedColIdx, c2: selectedColIdx };
-              let { r1, r2, c1, c2 } = cur;
-              if (e.key === "ArrowDown") r2 = Math.min(ftasks.length - 1, r2 + 1);
-              if (e.key === "ArrowUp") r2 = Math.max(0, r2 - 1);
-              if (e.key === "ArrowRight") c2 = stepGridCol(c2, 1);
-              if (e.key === "ArrowLeft") c2 = stepGridCol(c2, -1);
-              setSelRange(withActive(cur, { r1, r2, c1, c2 }));
-            }
-            return;
-          }
-        }
-        if (e.shiftKey && e.key === " " && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null) {
-          e.preventDefault();
-          const tasks = flatTasksRef.current;
-          const ri = tasks.findIndex((t) => t.id === selectedId);
-          if (ri >= 0) setSelRange({ r1: ri, r2: ri, c1: 0, c2: activeEffectiveCols(dataRef.current).length - 1 });
-          return;
-        }
-        if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null && (e.key === "Enter" || e.key === "F2")) {
-          if (selectedId === "__NEW_TASK__") {
-            e.preventDefault();
-            openNameEditOnReveal.current = true;
-            addTask();
-            return;
-          }
-          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
-          if (col) {
-            e.preventDefault();
-            if (col.t === "notes") {
-              const pid = projIdRef.current;
-              if (pid !== null) setNotesCtx({ taskId: selectedId, projectId: pid });
-            } else if (col.k === "health" || col.k === "status") {
-              const cell = document.querySelector(`[data-picker-cell="${col.k}-${selectedId}"]`);
-              const trigger = cell?.querySelector("[data-health-dot], span[style]") || cell?.firstElementChild;
-              trigger?.click();
-            } else if (col.e) {
-              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
-              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
-              if (!isParentDateLocked) setEdit({ taskId: selectedId, col: col.k });
-            }
-            return;
-          }
-        }
-        if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null && e.key.length === 1) {
-          if (selectedId === "__NEW_TASK__") return;
-          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
-          if (col) {
-            if (col.t === "notes") {
-              const pid = projIdRef.current;
-              if (pid !== null) {
-                e.preventDefault();
-                setNotesCtx({ taskId: selectedId, projectId: pid, initChar: e.key });
-              }
-              return;
-            }
-            if (col.e && col.t !== "health") {
-              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
-              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
-              if (isParentDateLocked) return;
-              const isNum = col.k === "duration" || col.k === "percentComplete";
-              if (isNum && !/\d/.test(e.key)) return;
-              e.preventDefault();
-              setEdit({ taskId: selectedId, col: col.k });
-              setEditStartChar(e.key);
-              return;
-            }
-          }
-        }
-        if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowDown" && !typing && selectedId !== null) {
-          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
-          if (col?.k === "health" || col?.k === "status") {
-            e.preventDefault();
-            const cell = document.querySelector(`[data-picker-cell="${col.k}-${selectedId}"]`);
-            const trigger = cell?.querySelector("[data-health-dot], span[style]") || cell?.firstElementChild;
-            trigger?.click();
-            return;
-          }
-        }
-        if (!e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !typing) {
-          const isArrow = e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight";
-          if (isArrow) {
-            document.dispatchEvent(new CustomEvent("planar-picker-open", { detail: "nav" }));
-          }
-          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            const tasks = flatTasksRef.current;
-            const target = stepGridRow(
-              tasks,
-              activeProjectOf(dataRef.current)?.tasks || [],
-              selectedId,
-              e.key === "ArrowDown" ? 1 : -1,
-              lastSelIdxRef.current,
-              viewportTopFlatIdx(tasks)
-            );
-            if (target != null) {
-              setSelectedId(target);
-              setSelRange(null);
-            }
-            return;
-          }
-          if (e.key === "ArrowRight") {
-            e.preventDefault();
-            setSelectedColIdx((i) => stepGridCol(i, 1));
-            setSelRange(null);
-            return;
-          }
-          if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            setSelectedColIdx((i) => stepGridCol(i, -1));
-            setSelRange(null);
-            return;
-          }
-        }
-      };
-      document.addEventListener("keydown", onKey);
-      return () => document.removeEventListener("keydown", onKey);
-    }, [selectedId, selectedColIdx, selRange, isUndoing]);
-    const toggleGroupFocus = (anchorId, selId) => {
-      const all = activeProjectOf(dataRef.current)?.tasks || [];
-      const gid = focusToggleTarget(all, anchorId);
-      if (gid == null) return;
-      const g2 = all.find((t) => t.id === gid);
-      if (!g2) return;
-      focusReselectRef.current = { selId };
-      setFocusPins((p) => p.size ? /* @__PURE__ */ new Set() : p);
-      setSelRange(null);
-      updateTask(gid, { focused: !g2.focused });
-      const row = (flatTasksRef.current || []).find((t) => t.id === gid);
-      if (!(row && row.isExpanded && row.hideableCount > 0))
-        showToast(`Focus ${g2.focused ? "off" : "on"} for "${g2.name || "Untitled"}"` + (g2.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
-    };
-    const zoomRafRef = useRef4(null);
-    const zoomAccRef = useRef4(0);
-    useEffect3(() => {
-      let armed = false;
-      const arm = (on) => {
-        if (on === armed) return;
-        armed = on;
-        if (on) window.addEventListener("wheel", onWheel, { passive: false });
-        else window.removeEventListener("wheel", onWheel);
-      };
-      const onKey = (e) => arm(!!(e.ctrlKey || e.metaKey));
-      const onPointer = (e) => arm(!!(e.ctrlKey || e.metaKey));
-      const onShellKeys = (e) => {
-        if (!e || e.origin !== window.location.origin) return;
-        const m = e && e.data;
-        if (!m || m.source !== "planar-shell" || m.type !== "planar:modifier-keys") return;
-        arm(!!(m.ctrl || m.meta));
-      };
-      const onBlur = () => arm(false);
-      const onWheel = (e) => {
-        if (!e.ctrlKey && !e.metaKey) return;
-        e.preventDefault();
-        zoomAccRef.current += e.deltaY;
-        if (zoomRafRef.current) return;
-        zoomRafRef.current = requestAnimationFrame(() => {
-          const delta = zoomAccRef.current;
-          zoomAccRef.current = 0;
-          zoomRafRef.current = null;
-          if (hoverZoneRef.current === "grid") {
-            setGridZoom((z) => {
-              const factor = delta < 0 ? 1.12 : 1 / 1.12;
-              const nz = Math.max(0.5, Math.min(2, Math.round(z * factor * 100) / 100));
-              setData((d) => ({ ...d, gridZoom: nz }));
-              return nz;
-            });
-          } else {
-            setGanttPPD((z) => {
-              const factor = delta < 0 ? 1.15 : 1 / 1.15;
-              return Math.max(1, Math.min(80, Math.round(z * factor * 10) / 10));
-            });
-          }
-        });
-      };
-      window.addEventListener("keydown", onKey, true);
-      window.addEventListener("keyup", onKey, true);
-      window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
-      window.addEventListener("pointerdown", onPointer, { capture: true, passive: true });
-      window.addEventListener("message", onShellKeys);
-      window.addEventListener("blur", onBlur);
-      return () => {
-        window.removeEventListener("keydown", onKey, true);
-        window.removeEventListener("keyup", onKey, true);
-        window.removeEventListener("pointermove", onPointer, true);
-        window.removeEventListener("pointerdown", onPointer, true);
-        window.removeEventListener("message", onShellKeys);
-        window.removeEventListener("blur", onBlur);
-        arm(false);
-        if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
-      };
-    }, []);
-    const updateTask = useCallback2((taskId, updates, projId = null) => {
-      const updatesIn = updates;
-      setData((d) => {
-        const pid = projId ?? d.aPid;
-        const boundEdit = resolveBoundEdit(d.projects[pid]?.tasks || [], taskId, updatesIn, (id) => MEETING_BODY_INDEX[id]);
-        const updates2 = boundEdit.updates;
-        const _origStart = ((d.projects[pid]?.tasks || []).find((t) => t.id === taskId) || {}).start || "";
-        const _beforeTasks = d.projects[pid]?.tasks || [];
-        const _prevBoundStart = {};
-        (d.projects[pid]?.tasks || []).forEach((t) => {
-          if (t.meetingBound && t.start) _prevBoundStart[t.id] = t.start;
-        });
-        let tasks = d.projects[pid].tasks.map((t) => {
-          if (t.id !== taskId) return t;
-          const u = { ...t, ...updates2, ...completionDelta(t, updates2) };
-          if ("rowColor" in updates2) u.rowColor = isValidColor(updates2.rowColor) ? updates2.rowColor : null;
-          if ("bold" in updates2) u.bold = !!updates2.bold;
-          if ("italic" in updates2) u.italic = !!updates2.italic;
-          if ("underline" in updates2) u.underline = !!updates2.underline;
-          if ("textColor" in updates2) u.textColor = isValidColor(updates2.textColor) ? updates2.textColor : null;
-          if ("fontSize" in updates2) u.fontSize = isValidFontSize(updates2.fontSize) ? updates2.fontSize : null;
-          if ("icons" in updates2) {
-            const ic = PlanyrTaskIcons.normalizeTaskIcons(updates2.icons);
-            if (ic.length) u.icons = ic;
-            else delete u.icons;
-          }
-          if ("predecessors" in updates2) {
-            u.predecessors = normPreds(updates2.predecessors);
-            delete u.pinnedStart;
-          }
-          if ("duration" in updates2 && !("durValue" in updates2) && !("durUnit" in updates2)) {
-            u.durUnit = "d";
-            u.durValue = Math.max(0, Math.trunc(Number(updates2.duration) || 0));
-          }
-          if ("durValue" in updates2 || "durUnit" in updates2) {
-            u.durUnit = u.durUnit || "d";
-            if (u.durValue == null) u.durValue = 0;
-          }
-          const durEdited = "duration" in updates2 || "durValue" in updates2 || "durUnit" in updates2;
-          if ((durEdited || "start" in updates2) && !("end" in updates2)) {
-            if (!(u.pinnedEnd && u.end)) {
-              const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u));
-              u.end = r.end;
-              u.duration = r.duration;
-            }
-          } else if ("end" in updates2 && !("start" in updates2)) {
-            if (u.end && !u.start) {
-              u.start = u.end;
-              u.durUnit = "d";
-              u.durValue = 1;
-              u.duration = 1;
-            } else {
-              u.duration = u.start && u.end ? Math.max(0, difBD(u.start, u.end) + 1) : 0;
-              u.durUnit = "d";
-              u.durValue = u.duration;
-            }
-            u.pinnedEnd = !!u.end;
-          }
-          if ("start" in updates2 && !("predecessors" in updates2)) u.pinnedStart = true;
-          if (boundEdit.startOverride) {
-            u.start = boundEdit.startOverride;
-            u.end = boundEdit.startOverride;
-          }
-          return u;
-        });
-        if ("health" in updates2) {
-          const getDescIds = (id, all) => {
-            const kids = all.filter((t) => t.parentId === id);
-            return [...kids.map((k) => k.id), ...kids.flatMap((k) => getDescIds(k.id, all))];
-          };
-          const descIds = new Set(getDescIds(taskId, tasks));
-          if (descIds.size > 0) {
-            tasks = tasks.map((t) => descIds.has(t.id) ? { ...t, health: updates2.health, ...cascadeDelta(t, updates2.health) } : t);
-          }
-        }
-        if (touchesSchedule(updates2)) {
-          tasks = recomputeSchedule(tasks);
-          const editedT = tasks.find((t) => t.id === taskId);
-          const _settled = settleBoundNotice(boundEdit, editedT && editedT.start);
-          if (_settled && !rollToastRef.current) rollToastRef.current = boundEditNotice(_settled, editedT && editedT.name, fmtD);
-          for (const t of tasks) {
-            const prev = _prevBoundStart[t.id];
-            if (t.id === taskId && ("start" in updates2 || "end" in updates2 || boundEdit.rebinding)) continue;
-            if (!rollToastRef.current && t.meetingBound && prev && t.start && t.start !== prev) {
-              const body = MEETING_BODY_INDEX[t.meetingBodyId];
-              if (body && !body.agendaLead) rollToastRef.current = `${t.name || "Task"} moved to ${fmtD(t.start)}, the next ${body.name || "meeting"} meeting.`;
-              else rollToastRef.current = `${t.name || "Task"} moved to ${fmtD(t.start)} — the ${fmtD(prev)} agenda closed ${fmtD(body ? agendaDeadline(body, prev) : "")}.`;
-            }
-          }
-          if (!rollToastRef.current && boundEdit.rebinding && editedT && editedT.meetingBound && _origStart && editedT.start && editedT.start !== _origStart) {
-            const body = MEETING_BODY_INDEX[editedT.meetingBodyId];
-            rollToastRef.current = `${editedT.name || "Task"} moved to ${fmtD(editedT.start)}, the next ${body && body.name || "meeting"} meeting${body && body.agendaLead ? " whose agenda is still open" : ""}.`;
-          }
-          const _typedDate = !!("start" in updates2 && updates2.start || "end" in updates2 && updates2.end);
-          const _pcMsg = pinConflictNotice(newPinConflicts(_beforeTasks, tasks, _typedDate ? [taskId] : []), _typedDate ? taskId : null, fmtD);
-          if (_pcMsg) {
-            const cur = rollToastRef.current || "";
-            if (!cur.includes(_pcMsg)) rollToastRef.current = cur ? cur + " " + _pcMsg : _pcMsg;
-          }
-        }
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks } } };
-      });
-      if (updates.health === "green") {
-        const snap = dataRef.current;
-        if (snap) {
-          const pid2 = projId ?? snap.aPid;
-          const oldTask = snap.projects[pid2]?.tasks.find((t) => t.id === taskId);
-          if (oldTask && oldTask.health !== "green") {
-            setTimeout(() => celebrateTaskComplete(oldTask.name), 60);
-            setTimeout(() => {
-              const d = dataRef.current;
-              if (!d) return;
-              const p = d.projects[pid2];
-              if (!p) return;
-              const completedTask = p.tasks.find((t) => t.id === taskId);
-              if (!completedTask) return;
-              const successors = p.tasks.filter(
-                (t) => normPreds(t.predecessors).some((pr) => pr.id === taskId) && t.health !== "green"
-              );
-              const hasReadyToStart = successors.some((t) => t.health === "gray");
-              if (hasReadyToStart) {
-                setSuccessorPromptQueue((q) => [...q, { completedTask, projId: pid2, projName: crossScheduleLabel(p), successors }]);
-              }
-            }, 80);
-          }
-        }
-      }
-    }, []);
-    const deleteTasks = useCallback2((taskIds) => {
-      if (!taskIds || taskIds.length === 0) return;
-      const pid = dataRef.current?.aPid;
-      const all = dataRef.current?.projects?.[pid]?.tasks || [];
-      const del = /* @__PURE__ */ new Set();
-      const mark = (id) => {
-        del.add(id);
-        all.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
-      };
-      taskIds.forEach(mark);
-      const rowCount = taskIds.length, totalCount = del.size;
-      setData((d) => {
-        const proj2 = d.projects[d.aPid];
-        if (!proj2) return d;
-        return { ...d, projects: { ...d.projects, [d.aPid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(proj2.tasks.filter((t) => !del.has(t.id)))) } } };
-      });
-      notifyRowsDeleted(rowCount, totalCount);
-    }, []);
-    const fullRowSelIds = () => {
-      if (!selRange) return [];
-      const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
-      if (!rangesOf(selRange).every((g2) => g2.c1 === 0 && g2.c2 === lastColIdx)) return [];
-      const ft = flatTasksRef.current || [];
-      return selRowsOf(selRange, ft.length - 1).map((r) => ft[r].id);
-    };
-    const rowRangeSelIds = () => {
-      if (!selRange) return [];
-      const ft = flatTasksRef.current || [];
-      const rows = selRowsOf(selRange, ft.length - 1);
-      if (rows.length <= 1) return [];
-      return rows.map((r) => ft[r].id);
-    };
-    const structuralTargets = (anchorId) => {
-      const ids = rowRangeSelIds();
-      return ids.length > 1 && ids.includes(anchorId) ? ids : [anchorId];
-    };
-    const blockOnlyTargets = (anchorId) => {
-      if (isMulti(selRange)) {
-        showToast(MULTI_SELECTION_MESSAGE, { type: "warn" });
-        return null;
-      }
-      return structuralTargets(anchorId);
-    };
-    const requestDelete = useCallback2((taskIds) => {
-      if (!taskIds || taskIds.length === 0) return;
-      const pid = dataRef.current?.aPid;
-      const all = dataRef.current?.projects?.[pid]?.tasks || [];
-      const hasAnyChildren = taskIds.some((id) => all.some((t) => t.parentId === id));
-      if (!hasAnyChildren) {
-        deleteTasks(taskIds);
-        setSelectedId(null);
-        setSelRange(null);
-        return;
-      }
-      const del = /* @__PURE__ */ new Set();
-      const mark = (id) => {
-        del.add(id);
-        all.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
-      };
-      taskIds.forEach(mark);
-      setDeleteChoice({ ids: taskIds, rowCount: taskIds.length, totalCount: del.size });
-    }, [deleteTasks]);
-    const promoteAndDeleteTasks = useCallback2((taskIds) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const proj2 = d.projects[pid];
-        if (!proj2) return d;
-        const newTasks = promoteChildrenAndDelete(proj2.tasks, taskIds);
-        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(newTasks)) } } };
-      });
-      notifyRowsDeleted(taskIds.length, taskIds.length);
-    }, []);
-    const fmtTargets = () => {
-      const rowIds = fullRowSelIds();
-      if (rowIds.length && taskCtx && rowIds.includes(taskCtx.task.id)) return { mode: "row", ids: rowIds };
-      const ft = flatTasksRef.current || [];
-      const cells = [];
-      if (selRange && ft.length) {
-        const eff = activeEffectiveCols(dataRef.current);
-        for (const { r, c } of cellsOf(selRange)) {
-          const ck = eff[c]?.k;
-          if (ck && ft[r]) cells.push({ taskId: ft[r].id, colKey: ck });
-        }
-      } else if (taskCtx) {
-        cells.push({ taskId: taskCtx.task.id, colKey: activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name" });
-      }
-      return { mode: "cell", cells };
-    };
-    const applyFormatAndSync = (patch, { clearAll = false } = {}) => {
-      const tgt = fmtTargets();
-      const pid = taskCtx?.projId ?? dataRef.current?.aPid;
-      const mergeCell = (entry) => {
-        const e = { ...entry || {} };
-        if ("bold" in patch) e.bold = patch.bold;
-        if ("italic" in patch) e.italic = patch.italic;
-        if ("fill" in patch) e.fill = patch.fill;
-        if ("underline" in patch) e.underline = patch.underline;
-        if ("color" in patch) e.color = patch.color;
-        if ("size" in patch) e.size = patch.size;
-        return e.bold || e.italic || e.fill || e.underline || e.color || e.size ? e : null;
-      };
-      setData((d) => {
-        const proj2 = d.projects[pid];
-        if (!proj2) return d;
-        let tasks;
-        if (tgt.mode === "row") {
-          const idset = new Set(tgt.ids);
-          tasks = proj2.tasks.map((t) => {
-            if (!idset.has(t.id)) return t;
-            if (clearAll) {
-              const { cellFmt: _cellFmt, ...rest } = t;
-              return { ...rest, rowColor: null, bold: false, italic: false, underline: false, textColor: null, fontSize: null };
-            }
-            const u = { ...t };
-            if ("bold" in patch) u.bold = patch.bold;
-            if ("italic" in patch) u.italic = patch.italic;
-            if ("fill" in patch) u.rowColor = patch.fill;
-            if ("underline" in patch) u.underline = patch.underline;
-            if ("color" in patch) u.textColor = patch.color;
-            if ("size" in patch) u.fontSize = patch.size;
-            return u;
-          });
-        } else {
-          const byTask = {};
-          tgt.cells.forEach(({ taskId, colKey }) => {
-            (byTask[taskId] = byTask[taskId] || []).push(colKey);
-          });
-          tasks = proj2.tasks.map((t) => {
-            const cols = byTask[t.id];
-            if (!cols) return t;
-            const cf = { ...t.cellFmt || {} };
-            cols.forEach((k) => {
-              const e = clearAll ? null : mergeCell(cf[k]);
-              if (e) cf[k] = e;
-              else delete cf[k];
-            });
-            if (Object.keys(cf).length) return { ...t, cellFmt: cf };
-            const { cellFmt: _cellFmt, ...rest } = t;
-            return rest;
-          });
-        }
-        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks } } };
-      });
-      setTaskCtx((c) => {
-        if (!c) return c;
-        const t = { ...c.task };
-        if (tgt.mode === "row") {
-          if (clearAll) {
-            t.rowColor = null;
-            t.bold = false;
-            t.italic = false;
-            t.underline = false;
-            t.textColor = null;
-            t.fontSize = null;
-            delete t.cellFmt;
-          } else {
-            if ("bold" in patch) t.bold = patch.bold;
-            if ("italic" in patch) t.italic = patch.italic;
-            if ("fill" in patch) t.rowColor = patch.fill;
-            if ("underline" in patch) t.underline = patch.underline;
-            if ("color" in patch) t.textColor = patch.color;
-            if ("size" in patch) t.fontSize = patch.size;
-          }
-        } else {
-          const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name";
-          const cf = { ...t.cellFmt || {} };
-          const e = clearAll ? null : mergeCell(cf[key]);
-          if (e) cf[key] = e;
-          else delete cf[key];
-          if (Object.keys(cf).length) t.cellFmt = cf;
-          else delete t.cellFmt;
-        }
-        return { ...c, task: t };
-      });
-    };
-    const ctxFmtState = () => {
-      if (!taskCtx) return null;
-      const tgt = fmtTargets();
-      const ft = flatTasksRef.current || [];
-      const oneOrMixed = (vals) => {
-        const uniq = new Set(vals);
-        return uniq.size <= 1 ? vals[0] ?? null : "mixed";
-      };
-      const LEVEL_SIZES = [13, 12, 11.5, 11];
-      const naturalSizeOf = (task, colKey) => colKey === "name" ? LEVEL_SIZES[Math.min(task?.level || 0, 3)] : 12;
-      if (tgt.mode === "row") {
-        const t = taskCtx.task;
-        const sizes2 = tgt.ids.map((id) => (id === t.id ? t : ft.find((x) => x.id === id))?.fontSize ?? null);
-        return {
-          mode: "row",
-          bold: !!t.bold,
-          italic: !!t.italic,
-          underline: !!t.underline,
-          fill: t.rowColor || null,
-          color: t.textColor || null,
-          size: oneOrMixed(sizes2),
-          naturalSize: naturalSizeOf(t, "name"),
-          hasAny: !!(t.bold || t.italic || t.underline || t.rowColor || t.textColor || t.fontSize || t.cellFmt && Object.keys(t.cellFmt).length),
-          count: tgt.ids.length || 1,
-          unit: tgt.ids.length > 1 ? "rows" : "row",
-          scopeLabel: tgt.ids.length > 1 ? `${tgt.ids.length} rows` : "Row"
-        };
-      }
-      const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name";
-      const e = taskCtx.task.cellFmt?.[key] || {};
-      const cellFmtOf = (taskId, colKey) => taskId === taskCtx.task.id && colKey === key ? e : ft.find((x) => x.id === taskId)?.cellFmt?.[colKey];
-      const hasAny = tgt.cells.some(({ taskId, colKey }) => {
-        const f = cellFmtOf(taskId, colKey);
-        return !!(f && (f.bold || f.italic || f.underline || f.fill || f.color || f.size));
-      });
-      const sizes = tgt.cells.map(({ taskId, colKey }) => cellFmtOf(taskId, colKey)?.size ?? null);
-      return {
-        mode: "cell",
-        bold: !!e.bold,
-        italic: !!e.italic,
-        underline: !!e.underline,
-        fill: e.fill || null,
-        color: e.color || null,
-        size: oneOrMixed(sizes),
-        naturalSize: naturalSizeOf(taskCtx.task, key),
-        hasAny,
-        count: tgt.cells.length || 1,
-        unit: tgt.cells.length > 1 ? "cells" : "cell",
-        scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : "Cell"
-      };
-    };
-    const rowJumpRef = useRef4(false);
-    const goToTask = useCallback2((pid, taskId) => {
-      rowJumpRef.current = true;
-      setData((d) => {
-        const proj2 = d.projects[pid];
-        if (!proj2) return d;
-        const byId = {};
-        proj2.tasks.forEach((t) => {
-          byId[t.id] = t;
-        });
-        const toExpand = /* @__PURE__ */ new Set();
-        let p = byId[taskId]?.parentId;
-        while (p != null && byId[p]) {
-          toExpand.add(p);
-          p = byId[p].parentId;
-        }
-        const needsExpand = [...toExpand].some((id) => !byId[id].isExpanded);
-        const tasks = needsExpand ? proj2.tasks.map((t) => toExpand.has(t.id) && !t.isExpanded ? { ...t, isExpanded: true } : t) : proj2.tasks;
-        return {
-          ...d,
-          section: "projects",
-          aPid: pid,
-          view: d.view === "gantt" ? "split" : d.view,
-          projects: { ...d.projects, [pid]: { ...proj2, tasks } }
-        };
-      });
-      setSelectedId(taskId);
-      setSelectedColIdx(0);
-      setSelRange(null);
-      setGoToFocus({ taskId, n: Date.now() });
-    }, []);
-    const revealRef = useRef4(null);
-    const openNameEditOnReveal = useRef4(false);
-    const revealInserted = useCallback2(() => {
-      const shouldOpenEdit = openNameEditOnReveal.current;
-      openNameEditOnReveal.current = false;
-      requestAnimationFrame(() => {
-        const id = revealRef.current;
-        revealRef.current = null;
-        if (id == null) return;
-        setSelectedId(id);
-        setSelRange(null);
-        const ni = COLS.findIndex((c) => c.k === "name");
-        if (ni >= 0) setSelectedColIdx(ni);
-        if (shouldOpenEdit) {
-          requestAnimationFrame(() => setEdit({ taskId: id, col: "name" }));
-        }
-      });
-    }, []);
-    const addTask = useCallback2(() => {
-      setData((d) => {
-        const pid = d.aPid;
-        const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
-        const id = Math.max(d.nTid[pid] ?? 1, maxId + 1);
-        const visualOrder = sortByVisualOrder(d.projects[pid].tasks);
-        const lastTask = visualOrder.length > 0 ? visualOrder[visualOrder.length - 1] : null;
-        const newParentId = lastTask ? lastTask.parentId : null;
-        const task = mkt(id, "", "", "", newParentId);
-        let tasks = [...d.projects[pid].tasks, task];
-        const anc = /* @__PURE__ */ new Set();
-        {
-          let p = newParentId;
-          while (p != null) {
-            anc.add(p);
-            const par = tasks.find((t) => t.id === p);
-            p = par ? par.parentId : null;
-          }
-        }
-        if (anc.size) tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused } : t);
-        const finalArr = sortByVisualOrder(tasks);
-        revealRef.current = finalArr.indexOf(task) + 1;
-        return { ...d, nTid: { ...d.nTid, [pid]: id + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(finalArr) } } };
-      });
-      revealInserted();
-    }, []);
-    const deleteTask = useCallback2((taskId) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const del = /* @__PURE__ */ new Set();
-        const mark = (id) => {
-          del.add(id);
-          d.projects[pid].tasks.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
-        };
-        mark(taskId);
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(d.projects[pid].tasks.filter((t) => !del.has(t.id)))) } } };
-      });
-      if (selectedId === taskId) setSelectedId(null);
-    }, [selectedId]);
-    const insertAboveAnchor = useCallback2((anchorId) => {
-      const visibleIds = (flatTasksRef.current || []).map((t) => t.id);
-      const sid = _mintTaskSid();
-      setData((d) => {
-        const pid = d.aPid;
-        const newTask = { ...mkt(0, "", "", "", null), _sid: sid };
-        const tasks = insertRowAbove(d.projects[pid].tasks, visibleIds, anchorId, newTask);
-        const finalArr = sortByVisualOrder(tasks);
-        revealRef.current = finalArr.findIndex((t) => t._sid === sid) + 1;
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(finalArr) } } };
-      });
-      setFocusPins((p) => {
-        const n = new Set(p);
-        n.add(sid);
-        return n;
-      });
-      revealInserted();
-    }, []);
-    const insertTask = useCallback2(() => {
-      const flat = flatTasksRef.current || [];
-      let anchorId = selectedId;
-      if (isMulti(selRange)) {
-        showToast(MULTI_SELECTION_MESSAGE, { type: "warn" });
-        return;
-      }
-      if (selRange && selRange.r1 !== selRange.r2) {
-        const top = flat[Math.min(selRange.r1, selRange.r2)];
-        if (top) anchorId = top.id;
-      }
-      insertAboveAnchor(anchorId);
-    }, [selectedId, selRange]);
-    const insertTaskBelow = useCallback2((taskId) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const rawTasks = d.projects[pid].tasks;
-        const flatOrder = [];
-        const walk = (parentId) => {
-          rawTasks.filter((t) => t.parentId === parentId).forEach((t) => {
-            flatOrder.push(t);
-            if (t.isExpanded) walk(t.id);
-          });
-        };
-        walk(null);
-        const flatIdx = taskId !== null ? flatOrder.findIndex((t) => t.id === taskId) : flatOrder.length - 1;
-        const targetTask = flatIdx >= 0 ? flatOrder[flatIdx] : null;
-        const newParentId = targetTask ? targetTask.parentId : null;
-        const newTask = mkt(0, "", "", "", newParentId);
-        let tasks = [...rawTasks];
-        if (!targetTask) {
-          tasks.push(newTask);
-        } else {
-          const rawIdx = tasks.findIndex((t) => t.id === targetTask.id);
-          tasks.splice(rawIdx + 1, 0, newTask);
-        }
-        const anc = /* @__PURE__ */ new Set();
-        {
-          let p = newParentId;
-          while (p != null) {
-            anc.add(p);
-            const par = tasks.find((t) => t.id === p);
-            p = par ? par.parentId : null;
-          }
-        }
-        if (anc.size) tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused } : t);
-        revealRef.current = tasks.indexOf(newTask) + 1;
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(tasks) } } };
-      });
-      revealInserted();
-    }, []);
-    const insertTaskAbove = useCallback2((taskId) => {
-      insertAboveAnchor(taskId);
-    }, []);
-    const addDeadlineTask = useCallback2((anchorId, projId = null) => {
-      setData((d) => {
-        const pid = projId ?? d.aPid;
-        const proj2 = d.projects[pid];
-        if (!proj2) return d;
-        const rawTasks = proj2.tasks || [];
-        const anchor = rawTasks.find((t) => t.id === anchorId);
-        if (!anchor || !anchor.meetingBound) return d;
-        const body = MEETING_BODY_INDEX[anchor.meetingBodyId];
-        const newTask = { ...mkt(0, `Deadline — ${body && body.name || "meeting"}`, "", "", anchor.parentId), deadlineForTaskId: anchor.id };
-        const tasks = [...rawTasks];
-        const rawIdx = tasks.findIndex((t) => t.id === anchorId);
-        if (rawIdx === -1) tasks.push(newTask);
-        else tasks.splice(rawIdx, 0, newTask);
-        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(tasks)) } } };
-      });
-    }, []);
-    const addSubtask = useCallback2((taskId) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
-        const id = Math.max(d.nTid[pid] ?? 1, maxId + 1);
-        const task = mkt(id, "", "", "", taskId);
-        let tasks = [...d.projects[pid].tasks, task];
-        const anc = /* @__PURE__ */ new Set([taskId]);
-        {
-          let p = taskId;
-          while (p != null) {
-            const par = tasks.find((t) => t.id === p);
-            p = par ? par.parentId : null;
-            if (p != null) anc.add(p);
-          }
-        }
-        tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === taskId ? false : t.focused } : t);
-        revealRef.current = id;
-        return { ...d, nTid: { ...d.nTid, [pid]: id + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks } } };
-      });
-      revealInserted();
-    }, []);
-    const duplicateTask = useCallback2((taskId) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const tasks = d.projects[pid].tasks;
-        const src = tasks.find((t) => t.id === taskId);
-        if (!src) return d;
-        const nid = Math.max(d.nTid[pid] ?? 1, Math.max(0, ...tasks.map((t) => t.id)) + 1);
-        const copy = { ...src, id: nid, _sid: _mintTaskSid(), name: src.name + " (Copy)", notes: src.notes.map((n) => ({ ...n })) };
-        const srcIdx = tasks.findIndex((t) => t.id === taskId);
-        let newTasks = [...tasks];
-        newTasks.splice(srcIdx + 1, 0, copy);
-        const anc = /* @__PURE__ */ new Set();
-        {
-          let p = copy.parentId;
-          while (p != null) {
-            anc.add(p);
-            const par = newTasks.find((t) => t.id === p);
-            p = par ? par.parentId : null;
-          }
-        }
-        if (anc.size) newTasks = newTasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === copy.parentId ? false : t.focused } : t);
-        revealRef.current = newTasks.indexOf(copy) + 1;
-        return { ...d, nTid: { ...d.nTid, [pid]: nid + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(newTasks) } } };
-      });
-      revealInserted();
-    }, []);
-    const collectSubtreeFor = (rootId, allTasks) => {
-      const out = [];
-      const walk = (id) => {
-        const t = allTasks.find((x) => x.id === id);
-        if (!t) return;
-        out.push({ ...t, notes: (t.notes || []).map((n) => ({ ...n })), predecessors: (t.predecessors || []).map((p) => ({ ...p })), ...Array.isArray(t.icons) ? { icons: [...t.icons] } : {} });
-        allTasks.filter((x) => x.parentId === id).forEach((c) => walk(c.id));
-      };
-      walk(rootId);
-      return out;
-    };
-    const rootsOfSelection = (taskIds, allTasks) => {
-      const idSet = new Set(taskIds);
-      const byId = new Map(allTasks.map((t) => [t.id, t]));
-      return taskIds.filter((id) => byId.has(id) && !idSet.has(byId.get(id).parentId));
-    };
-    const copyTaskById = useCallback2((taskIds) => {
-      const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
-      const pid = dataRef.current?.aPid;
-      const tasks = dataRef.current?.projects?.[pid]?.tasks;
-      if (!tasks) return;
-      const rootIds = rootsOfSelection(ids, tasks);
-      const subtree = rootIds.flatMap((id) => collectSubtreeFor(id, tasks));
-      if (subtree.length === 0) return;
-      clipboardRef.current = { mode: "copy", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
-      setClipboardTick((t) => t + 1);
-      const extra = subtree.length - rootIds.length;
-      const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
-      showToast(`Copied ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""}`, { duration: 1800 });
-    }, []);
-    const cutTaskById = useCallback2((taskIds) => {
-      const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
-      const pid = dataRef.current?.aPid;
-      const tasks = dataRef.current?.projects?.[pid]?.tasks;
-      if (!tasks) return;
-      const rootIds = rootsOfSelection(ids, tasks);
-      const subtree = rootIds.flatMap((id) => collectSubtreeFor(id, tasks));
-      if (subtree.length === 0) return;
-      clipboardRef.current = { mode: "cut", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
-      setClipboardTick((t) => t + 1);
-      const extra = subtree.length - rootIds.length;
-      const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
-      showToast(`Cut ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""} — paste to move`, { duration: 1800 });
-    }, []);
-    const pasteTaskAfter = useCallback2((targetId) => {
-      const cb = clipboardRef.current;
-      if (!cb || targetId == null) return;
-      const pastedOldIds = new Set(cb.tasks.map((t) => t.id));
-      const crossProjectPaste = cb.sourceProjId !== dataRef.current?.aPid;
-      const droppedLinkCount = crossProjectPaste ? cb.tasks.reduce((n2, t) => n2 + (t.predecessors || []).filter((p) => p && !pastedOldIds.has(p.id)).length, 0) : 0;
-      setData((d) => {
-        const pid = d.aPid;
-        const tasks = d.projects[pid].tasks;
-        const target = tasks.find((t) => t.id === targetId);
-        if (!target) return d;
-        const baseTempId = Math.max(0, ...tasks.map((t) => t.id)) + 1e3;
-        const idMap = {};
-        cb.tasks.forEach((t, i) => {
-          idMap[t.id] = baseTempId + i;
-        });
-        const crossProject = cb.sourceProjId !== pid;
-        const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]);
-        const pasted = cb.tasks.map((t) => ({
-          ...t,
-          id: idMap[t.id],
-          _sid: cb.mode === "cut" ? t._sid : _mintTaskSid(),
-          // Each subtree's own root becomes a sibling of the target (same parent), in the SAME
-          // relative order they were selected in; inner tasks keep their parent inside their own
-          // subtree (remapped to the new IDs).
-          parentId: rootOldIds.has(t.id) ? target.parentId : idMap[t.parentId] ?? null,
-          // Predecessor rewiring: internal (within the pasted subtree) → new ID, always. External
-          // (points outside the subtree) → same-project, keep the original ID (it still resolves to
-          // a real task there); cross-project, DROP it — the id space is unrelated in the
-          // destination and keeping it risks silently rewiring onto an unrelated task that happens
-          // to share that number (NEW-4/B1080548). renumberTasks below still prunes anything left
-          // dangling for any other reason, as a backstop.
-          predecessors: (t.predecessors || []).map((p) => idMap[p.id] != null ? { ...p, id: idMap[p.id] } : crossProject ? null : p).filter(Boolean)
-        }));
-        const result = [...tasks];
-        const targetIdx = result.findIndex((t) => t.id === target.id);
-        result.splice(targetIdx + 1, 0, ...pasted);
-        let final = result;
-        if (cb.mode === "cut" && cb.sourceProjId === pid) {
-          const sourceIds = new Set(cb.tasks.map((t) => t.id));
-          final = result.filter((t) => !sourceIds.has(t.id)).map((t) => ({ ...t, predecessors: (t.predecessors || []).map((p) => p && idMap[p.id] !== void 0 ? { ...p, id: idMap[p.id] } : p) }));
-        }
-        const sorted = recomputeAfterStructureChange(sortByVisualOrder(final));
-        const firstRootOldId = (cb.sourceRootIds || [cb.sourceRootId])[0];
-        const rootTempId = idMap[firstRootOldId];
-        const rootIdx = sorted.findIndex((t) => t.id === rootTempId);
-        pasteSelectRef.current = rootIdx >= 0 ? rootIdx + 1 : null;
-        return {
-          ...d,
-          projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(sorted) } }
-        };
-      });
-      const n = cb.tasks.length;
-      const dropMsg = droppedLinkCount > 0 ? ` — ${droppedLinkCount} link${droppedLinkCount > 1 ? "s" : ""} to ${droppedLinkCount > 1 ? "tasks" : "a task"} left in the source schedule ${droppedLinkCount > 1 ? "were" : "was"} dropped` : "";
-      showToast(`Pasted ${n} task${n > 1 ? "s" : ""}${dropMsg}`, { duration: droppedLinkCount > 0 ? 5e3 : 1600 });
-      if (cb.mode === "cut") {
-        clipboardRef.current = null;
-        setClipboardTick((t) => t + 1);
-      }
-    }, []);
-    useEffect3(() => {
-      if (pasteSelectRef.current == null) return;
-      const id = pasteSelectRef.current;
-      pasteSelectRef.current = null;
-      setSelectedId(id);
-      setSelRange(null);
-      setSelectedColIdx(1);
-    }, [data]);
-    const indentSelectionByIds = useCallback2((taskIds) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const newTasks = indentSelection(d.projects[pid].tasks, taskIds);
-        if (!newTasks) return d;
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
-      });
-    }, []);
-    const outdentSelectionByIds = useCallback2((taskIds) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const newTasks = outdentSelection(d.projects[pid].tasks, taskIds);
-        if (!newTasks) return d;
-        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
-      });
-    }, []);
-    const moveSelectionByIds = useCallback2((taskIds, destParentId, insertAfterId) => {
-      setData((d) => {
-        const pid = d.aPid;
-        const proj2 = d.projects[pid];
-        if (!proj2) return d;
-        const newTasks = moveSelectionToDestination(proj2.tasks, taskIds, destParentId, insertAfterId);
-        if (!newTasks) return d;
-        const sorted = sortByVisualOrder(newTasks);
-        const byId = new Map(proj2.tasks.map((t) => [t.id, t]));
-        const rootIds = taskIds.filter((id) => byId.has(id) && !taskIds.includes(byId.get(id).parentId));
-        const firstIdx = rootIds.length ? sorted.findIndex((t) => t.id === rootIds[0]) : -1;
-        moveSelectRef.current = firstIdx >= 0 ? firstIdx + 1 : null;
-        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(sorted)) } } };
-      });
-    }, []);
-    useEffect3(() => {
-      if (moveSelectRef.current == null) return;
-      const id = moveSelectRef.current;
-      moveSelectRef.current = null;
-      setSelectedId(id);
-      setSelRange(null);
-      setSelectedColIdx(1);
-    }, [data]);
-    const addProject = useCallback2(async (opts) => {
-      const o = opts && typeof opts === "object" && !("nativeEvent" in opts) ? opts : {};
-      const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
-      if (window.storage && window.storage.scheduleRowsAuthoritative) {
-        const id = await window.storage.insertSchedule({
-          name: o.name || null,
-          ownerKind,
-          linkedSiteId: o.linkedSiteId ?? null,
-          linkedSiteName: o.linkedSiteName ?? null
-        });
-        if (id == null) {
-          if (typeof showToast === "function") showToast("Couldn't create a new schedule — please try again.", { type: "error", duration: 6e3 });
-          return;
-        }
-        setData((d) => {
-          if (!d) return d;
-          const proj2 = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
-          if (o.linkedSiteId != null) {
-            proj2.linkedSiteId = o.linkedSiteId;
-            proj2.linkedSiteName = o.linkedSiteName || null;
-          }
-          const nd = {
-            ...d,
-            nPid: Math.max(d.nPid, id + 1),
-            aPid: id,
-            nTid: { ...d.nTid, [id]: 1 },
-            projects: { ...d.projects, [id]: proj2 }
-          };
-          return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
-        });
-        return;
-      }
-      setData((d) => {
-        if (!d) return d;
-        const id = d.nPid;
-        const proj2 = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
-        if (o.linkedSiteId != null) {
-          proj2.linkedSiteId = o.linkedSiteId;
-          proj2.linkedSiteName = o.linkedSiteName || null;
-        }
-        const nd = {
-          ...d,
-          nPid: id + 1,
-          aPid: id,
-          nTid: { ...d.nTid, [id]: 1 },
-          projects: { ...d.projects, [id]: proj2 }
-        };
-        return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
-      });
-    }, []);
-    const renameProject = useCallback2((id, name) => {
-      setData((d) => d && d.projects && d.projects[id] ? { ...d, editProjId: null, projects: { ...d.projects, [id]: { ...d.projects[id], name } } } : d);
-    }, []);
-    const buildDuplicateProject = (src, newId) => {
-      const bodyIdMap = {};
-      const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
-        const copy = copyMeetingBodyWithNewId(mb, i);
-        if (mb && mb.id) bodyIdMap[mb.id] = copy.id;
-        return copy;
-      }) : void 0;
-      const newTasks = src.tasks.map((t) => ({
-        ...t,
-        notes: t.notes.map((n) => ({ ...n })),
-        ...Array.isArray(t.icons) ? { icons: [...t.icons] } : {},
-        // NEW-1 — task icons ride along with the copy (a fresh array, not shared)
-        ...t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? { meetingBodyId: bodyIdMap[t.meetingBodyId] } : {}
-      }));
-      return {
-        ...src,
-        id: newId,
-        name: src.name + " (Copy)",
-        tasks: newTasks,
-        formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map((fc) => ({ ...fc })) : void 0,
-        meetingBodies: copiedBodies
-      };
-    };
-    const duplicateProject = useCallback2(async (id) => {
-      if (window.storage && window.storage.scheduleRowsAuthoritative) {
-        const src = dataRef.current && dataRef.current.projects && dataRef.current.projects[id];
-        if (!src) return;
-        const maxTid = src.tasks.length ? Math.max(...src.tasks.map((t) => t.id)) + 1 : 1;
-        const newId = await window.storage.insertSchedule({
-          name: src.name + " (Copy)",
-          ownerKind: src.ownerKind,
-          linkedSiteId: src.linkedSiteId ?? null,
-          linkedSiteName: src.linkedSiteName ?? null,
-          projectData: buildDuplicateProject(src, null)
-          // id filled in by insertSchedule once known
-        });
-        if (newId == null) {
-          if (typeof showToast === "function") showToast("Couldn't duplicate this schedule — please try again.", { type: "error", duration: 6e3 });
-          return;
-        }
-        setData((d) => {
-          if (!d || !d.projects || !d.projects[id]) return d;
-          const copy = buildDuplicateProject(d.projects[id], newId);
-          const nd = {
-            ...d,
-            nPid: Math.max(d.nPid, newId + 1),
-            nTid: { ...d.nTid, [newId]: maxTid },
-            aPid: newId,
-            projects: { ...d.projects, [newId]: copy }
-          };
-          rebuildMeetingBodyIndex(nd);
-          return copy.linkedSiteId != null ? withLastActiveSite(nd, copy.linkedSiteId, newId) : nd;
-        });
-        return;
-      }
-      setData((d) => {
-        const src = d.projects[id];
-        const newId = d.nPid;
-        const copy = buildDuplicateProject(src, newId);
-        const maxTid = copy.tasks.length ? Math.max(...copy.tasks.map((t) => t.id)) + 1 : 1;
-        const nd = {
-          ...d,
-          nPid: newId + 1,
-          nTid: { ...d.nTid, [newId]: maxTid },
-          aPid: newId,
-          projects: { ...d.projects, [newId]: copy }
-        };
-        rebuildMeetingBodyIndex(nd);
-        return src.linkedSiteId != null ? withLastActiveSite(nd, src.linkedSiteId, newId) : nd;
-      });
-    }, []);
-    const deleteProject = useCallback2(async (id, { skipConfirm = false } = {}) => {
-      if (!skipConfirm) {
-        const d0 = latestData.current;
-        const proj0 = d0?.projects?.[id];
-        if (!proj0) return;
-        const taskCount0 = proj0.tasks?.length || 0;
-        if (!await askConfirm({
-          title: `Delete project "${crossScheduleLabel(proj0)}"?`,
-          body: `This removes ${taskCount0} task${taskCount0 === 1 ? "" : "s"}.
-
-A backup snapshot will be saved — you can restore it from Version History.`,
-          confirmLabel: "Delete",
-          danger: true
-        })) return;
-      }
-      setData((d) => {
-        if (!d || !d.projects || !d.projects[id]) return d;
-        const _proj = d.projects[id];
-        try {
-          window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-delete-project", skipSanity: true });
-        } catch {
-        }
-        return removeScheduleFromDoc(d, id);
-      });
-    }, []);
-    const inShell = typeof window !== "undefined" && window.self !== window.top;
-    useEffect3(() => {
-      if (!data) return;
-      const pid = pickActivePid(data.projects, data.aPid);
-      if (pid != null && pid !== data.aPid) setData((d) => d && d.aPid !== pid ? { ...d, aPid: pid } : d);
-    }, [data && data.aPid, data && data.projects]);
-    const navSigRef = useRef4("");
-    useEffect3(() => {
-      if (!inShell || !data) return;
-      const rowLink = rowJumpRef.current;
-      rowJumpRef.current = false;
-      const list = Object.values(data.projects || {}).map((p) => ({ id: p.id, name: p.name, ownerKind: ownerOf(p).kind, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null, taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0 }));
-      const sig = JSON.stringify([data.section ?? "projects", data.aPid ?? null, list]);
-      if (sig === navSigRef.current) return;
-      navSigRef.current = sig;
-      try {
-        window.parent.postMessage({
-          source: "planar-seq",
-          type: "planar:nav-state",
-          section: data.section ?? "projects",
-          activeId: data.aPid ?? null,
-          projects: list,
-          ...rowLink ? { rowLink: true } : {}
-        }, window.location.origin);
-      } catch (_) {
-      }
-    }, [data, inShell]);
-    const [, setSiteNamesTick] = React.useState(0);
-    useEffect3(() => {
-      const onNames = (e) => {
-        if (!e || e.origin !== window.location.origin) return;
-        const m = e && e.data;
-        if (!m || m.source !== "planar-shell" || m.type !== "planar:site-names") return;
-        const names = m.names && typeof m.names === "object" ? m.names : {};
-        setSiteNameResolver((id) => id != null && names[id] || null);
-        setSiteNamesTick((n) => n + 1);
-      };
-      window.addEventListener("message", onNames);
-      return () => window.removeEventListener("message", onNames);
-    }, []);
-    useEffect3(() => {
-      if (!inShell) return;
-      const onLoadMsg = (e) => {
-        if (e.origin !== window.location.origin) return;
-        const m = e.data;
-        if (!m || m.source !== "planar-shell" || latestData.current) return;
-        if (m.type === "planar:nav-request") postLoadState(window.__planarLoadStatus === "failed" ? "failed" : "loading");
-        else if (m.type === "planar:retry-load") {
-          window.__planarLoadStatus = "loading";
-          setLoadTick((t) => t + 1);
-        }
-      };
-      window.addEventListener("message", onLoadMsg);
-      return () => window.removeEventListener("message", onLoadMsg);
-    }, [inShell]);
-    useEffect3(() => {
-      if (!inShell) return;
-      const onMsg = (e) => {
-        if (e.origin !== window.location.origin) return;
-        const m = e.data;
-        if (!m || m.source !== "planar-shell") return;
-        if (!latestData.current) return;
-        if (m.type === "planar:nav-request") {
-          const d = latestData.current;
-          if (d) {
-            const list = Object.values(d.projects || {}).map((p) => ({ id: p.id, name: p.name, ownerKind: ownerOf(p).kind, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null, taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0 }));
-            try {
-              window.parent.postMessage({
-                source: "planar-seq",
-                type: "planar:nav-state",
-                section: d.section ?? "projects",
-                activeId: d.aPid ?? null,
-                projects: list
-              }, window.location.origin);
-            } catch (_) {
-            }
-          }
-          return;
-        }
-        const emitLinkChanged = (siteId, scheduleId, name) => {
-          try {
-            window.parent.postMessage({
-              source: "planar-seq",
-              type: "planar:link-changed",
-              siteId: siteId ?? null,
-              scheduleId: scheduleId ?? null,
-              name: name ?? null
-            }, window.location.origin);
-          } catch (_) {
-          }
-        };
-        if (m.type === "planar:nav-select" && m.id != null) {
-          setData((d) => {
-            const proj2 = d.projects && d.projects[m.id];
-            if (!proj2) return d;
-            const nd = { ...d, section: "projects", aPid: m.id };
-            return proj2.linkedSiteId != null ? withLastActiveSite(nd, proj2.linkedSiteId, m.id) : nd;
-          });
-        } else if (m.type === "planar:nav-select-by-site" && m.siteId != null) {
-          setData((d) => {
-            const linked = Object.values(d.projects || {}).filter((p) => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
-            if (!linked.length) return d;
-            const preferredId = d.lastActiveBySite ? d.lastActiveBySite[m.siteId] : null;
-            const match = preferredId != null && linked.find((p) => p.id === preferredId) || linked[0];
-            if (d.aPid === match.id && (d.section ?? "projects") === "projects") return d;
-            return withLastActiveSite({ ...d, section: "projects", aPid: match.id }, m.siteId, match.id);
-          });
-        } else if (m.type === "planar:nav-link" && m.id != null) {
-          setData((d) => {
-            if (!d.projects || !d.projects[m.id]) return d;
-            const proj2 = { ...d.projects[m.id] };
-            const base = { ...d, section: "projects", aPid: m.id };
-            if (m.siteId != null) {
-              proj2.linkedSiteId = m.siteId;
-              proj2.linkedSiteName = m.siteName || null;
-              return withLastActiveSite({ ...base, projects: { ...d.projects, [m.id]: proj2 } }, m.siteId, m.id);
-            }
-            delete proj2.linkedSiteId;
-            delete proj2.linkedSiteName;
-            proj2.ownerKind = OWNER_KIND_ORG;
-            return { ...base, projects: { ...d.projects, [m.id]: proj2 } };
-          });
-          emitLinkChanged(m.siteId ?? null, m.id, m.siteName ?? null);
-        } else if (m.type === "planar:nav-create-linked") {
-          const newId = latestData.current ? latestData.current.nPid : null;
-          addProject({ name: m.name, ownerKind: m.ownerKind ?? null, linkedSiteId: m.siteId ?? null, linkedSiteName: m.siteName ?? null });
-          setData((d) => ({ ...d, section: "projects" }));
-          if (newId != null && m.siteId != null) emitLinkChanged(m.siteId, newId, m.siteName ?? null);
-        } else if (m.type === "planar:nav-dashboard") {
-          setData((d) => ({ ...d, section: "reports" }));
-        } else if (m.type === "planar:nav-new") {
-          addProject();
-          setData((d) => ({ ...d, section: "projects" }));
-        } else if (m.type === "planar:nav-duplicate" && m.id != null) {
-          if (latestData.current && latestData.current.projects && latestData.current.projects[m.id]) {
-            duplicateProject(m.id);
-            setData((d) => ({ ...d, section: "projects" }));
-          }
-        } else if (m.type === "planar:nav-rename" && m.id != null && typeof m.name === "string") {
-          const name = m.name.trim();
-          if (name) renameProject(m.id, name);
-        } else if (m.type === "planar:nav-delete" && m.id != null) {
-          const projCount = latestData.current ? Object.keys(latestData.current.projects || {}).length : 0;
-          const wasActive = latestData.current && latestData.current.aPid === m.id;
-          deleteProject(m.id, { skipConfirm: true });
-          if (wasActive && projCount > 1) setData((d) => ({ ...d, section: "reports" }));
-        } else if (m.type === "planar:nav-select-task" && m.siteId != null && (m.taskId != null || m.taskSid != null)) {
-          const linkedForTask = latestData.current ? Object.values(latestData.current.projects || {}).filter((p) => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId) : [];
-          const preferredForTask = latestData.current && latestData.current.lastActiveBySite ? latestData.current.lastActiveBySite[m.siteId] : null;
-          const preferredScheduleForTask = preferredForTask != null ? linkedForTask.find((p) => p.id === preferredForTask) : null;
-          const bySid = m.taskSid != null;
-          const hasTask = (p) => p && Array.isArray(p.tasks) && p.tasks.some((t) => bySid ? t._sid === m.taskSid : t.id === m.taskId);
-          const match = hasTask(preferredScheduleForTask) && preferredScheduleForTask || linkedForTask.find(hasTask) || preferredScheduleForTask || linkedForTask[0];
-          if (match) {
-            const target = bySid ? match.tasks.find((t) => t._sid === m.taskSid) : null;
-            if (bySid && !target) setData((d) => ({ ...d, section: "projects", aPid: match.id }));
-            else goToTask(match.id, bySid ? target.id : m.taskId);
-          }
-        }
-      };
-      window.addEventListener("message", onMsg);
-      return () => window.removeEventListener("message", onMsg);
-    }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
-    const tbSigRef = useRef4("");
-    useEffect3(() => {
-      if (!inShell || !data) return;
-      const sec = data.section ?? "projects";
-      const section2 = sec === "suggestions" ? "projects" : sec;
-      const view = data.view ?? "grid";
-      const state = {
-        view,
-        section: section2,
-        isMobile: !!isMobile,
-        zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
-        zoomable: section2 === "projects" && (view === "split" || view === "gantt"),
-        reviewCount: reviewRows.length,
-        reviewOpen: !!reviewOpen,
-        saveStatus,
-        savePulse: !!savePulse,
-        fileLinked: !!fileLinked,
-        // B566 — bridge the offline/cloud-unreachable condition up too, so the unified header
-        // cloud badge can show the honest amber "offline" state instead of a false-green "synced":
-        // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
-        // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
-        offlineFallback: !!offlineFallback,
-        // B778/NEW-1 — signed-out (or not on the schedule's team), distinct from offlineFallback.
-        authRequired: !!authRequired,
-        activePanel: settingsOpen ? "settings" : automationOpen ? "automation" : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null
-      };
-      const sig = JSON.stringify(state);
-      if (sig === tbSigRef.current) return;
-      tbSigRef.current = sig;
-      try {
-        window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
-      } catch (_) {
-      }
-    }, [
-      inShell,
-      data,
-      isMobile,
-      ganttPPD,
-      reviewRows,
-      reviewOpen,
-      saveStatus,
-      savePulse,
-      fileLinked,
-      offlineFallback,
-      authRequired,
-      settingsOpen,
-      automationOpen,
-      contactsOpen,
-      formatOpen,
-      historyOpen
-    ]);
-    useEffect3(() => {
-      if (!inShell) return;
-      const onCmd = (e) => {
-        if (e.origin !== window.location.origin) return;
-        const m = e.data;
-        if (!m || m.source !== "planar-shell") return;
-        switch (m.type) {
-          case "planar:view-set":
-            if (m.view) setData((d) => d ? { ...d, view: m.view } : d);
-            break;
-          case "planar:review-toggle": {
-            const opening = !reviewOpen;
-            if (opening && reviewRows.length && data && data.projects) {
-              const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
-              if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData((d) => ({ ...d, aPid: a.project_id }));
-            }
-            setReviewOpen(opening);
-            break;
-          }
-          case "planar:zoom":
-            if (m.dir === "in") setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35)));
-            else if (m.dir === "out") setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35)));
-            break;
-          case "planar:export":
-            if (m.mode === "pdf") setPdfExportOpen(true);
-            else exportHTML();
-            break;
-          case "planar:save":
-            if (saveStatus === "error") {
-              if (latestData.current) attemptCloudSave(latestData.current);
-            } else openFile();
-            break;
-          case "planar:history":
-            setHistoryOpen(true);
-            setSettingsOpen(false);
-            setAutomationOpen(false);
-            setContactsOpen(false);
-            setFormatOpen(false);
-            break;
-          case "planar:contacts":
-            setContactsOpen((o) => !o);
-            setSettingsOpen(false);
-            setAutomationOpen(false);
-            setFormatOpen(false);
-            break;
-          case "planar:automation":
-            setAutomationOpen((o) => !o);
-            setSettingsOpen(false);
-            setContactsOpen(false);
-            setFormatOpen(false);
-            break;
-          case "planar:settings":
-            setSettingsOpen((o) => !o);
-            setAutomationOpen(false);
-            setContactsOpen(false);
-            setFormatOpen(false);
-            break;
-          case "planar:format":
-            setFormatOpen((o) => !o);
-            setSettingsOpen(false);
-            setAutomationOpen(false);
-            setContactsOpen(false);
-            break;
-          default:
-            break;
-        }
-      };
-      window.addEventListener("message", onCmd);
-      return () => window.removeEventListener("message", onCmd);
-    }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
-    const proj = activeProjectOf(data);
-    const flatTasks = useMemo3(() => {
-      if (!proj) return [];
-      const settings = data?.settings;
-      const childSet = focusGroupIds(proj.tasks);
-      const byId = {};
-      const kidsBy = /* @__PURE__ */ new Map();
-      proj.tasks.forEach((t) => {
-        byId[t.id] = t;
-        if (!kidsBy.has(t.parentId)) kidsBy.set(t.parentId, []);
-        kidsBy.get(t.parentId).push(t);
-      });
-      const kidsOf = (id) => kidsBy.get(id) || [];
-      const statusMemo = {};
-      const rolledStatus = (id) => {
-        if (statusMemo[id] !== void 0) return statusMemo[id];
-        const kids = kidsOf(id);
-        let res;
-        if (kids.length === 0) {
-          const h = computeDisplayHealth(byId[id], settings, byId);
-          res = h === "green" ? "done" : h === "gray" ? "upcoming" : h === "paused" ? "paused" : "active";
-        } else {
-          const ss = kids.map((k) => rolledStatus(k.id));
-          res = ss.every((s) => s === "done") ? "done" : ss.every((s) => s === "upcoming") ? "upcoming" : ss.every((s) => s === "paused") ? "paused" : "active";
-        }
-        statusMemo[id] = res;
-        return res;
-      };
-      const hideStatusOf = (id) => {
-        const s = rolledStatus(id);
-        return s === "active" ? null : s;
-      };
-      const costMemo = {};
-      const costOf = (id) => {
-        if (id in costMemo) return costMemo[id];
-        const kids = kidsOf(id);
-        const v = kids.length ? (Number(byId[id]?.cost) || 0) + kids.reduce((s, c) => s + costOf(c.id), 0) : Number(byId[id]?.cost) || 0;
-        costMemo[id] = v;
-        return v;
-      };
-      const _fieldMemo = {};
-      const sumOf = (id, field) => {
-        const k = field + ":" + id;
-        if (k in _fieldMemo) return _fieldMemo[k];
-        const kids = kidsOf(id);
-        const v = kids.length ? (Number(byId[id]?.[field]) || 0) + kids.reduce((s, c) => s + sumOf(c.id, field), 0) : Number(byId[id]?.[field]) || 0;
-        _fieldMemo[k] = v;
-        return v;
-      };
-      const out = [];
-      const walk = (parentId, level) => {
-        const parent = parentId === null ? null : byId[parentId];
-        let children = kidsOf(parentId);
-        if (parent && parent.focused) children = children.filter((c) => !hideStatusOf(c.id) || focusPins.has(c._sid));
-        children.forEach((t) => {
-          const hasChildren = childSet.has(t.id);
-          let hideableDone = 0, hideableUpcoming = 0, hideablePaused = 0;
-          if (hasChildren) {
-            kidsOf(t.id).forEach((c) => {
-              const hs = focusPins.has(c._sid) ? null : hideStatusOf(c.id);
-              if (hs === "done") hideableDone++;
-              else if (hs === "upcoming") hideableUpcoming++;
-              else if (hs === "paused") hideablePaused++;
-            });
-          }
-          out.push({
-            ...t,
-            level,
-            hasChildren,
-            hideableDone,
-            hideableUpcoming,
-            hideablePaused,
-            hideableCount: hideableDone + hideableUpcoming + hideablePaused,
-            rolledCost: costOf(t.id),
-            rolledBudget: sumOf(t.id, "budget"),
-            rolledActual: sumOf(t.id, "actualCost")
-          });
-          if (t.isExpanded) walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-      return out;
-    }, [proj, data?.settings, NOW, focusPins]);
-    React.useLayoutEffect(() => {
-      flatTasksRef.current = flatTasks;
-    }, [flatTasks]);
-    const focusSig = (proj?.tasks || []).filter((t) => t.focused).map((t) => t._sid).join(",");
-    React.useEffect(() => {
-      setFocusPins((p) => p.size ? /* @__PURE__ */ new Set() : p);
-    }, [focusSig]);
-    React.useLayoutEffect(() => {
-      const r = focusReselectRef.current;
-      if (!r) return;
-      focusReselectRef.current = null;
-      const next = focusReselectTarget(proj?.tasks || [], new Set(flatTasks.map((t) => t.id)), r.selId);
-      if (next != null && next !== r.selId) setSelectedId(next);
-    }, [focusSig]);
-    React.useLayoutEffect(() => {
-      if (selectedId == null || selectedId === "__NEW_TASK__") return;
-      const i = flatTasks.findIndex((t) => t.id === selectedId);
-      if (i >= 0) lastSelIdxRef.current = i;
-    }, [selectedId, flatTasks]);
-    useEffect3(() => {
-      projIdRef.current = data?.aPid ?? null;
-    }, [data]);
-    useEffect3(() => {
-      if (!edit) setEditStartChar(null);
-    }, [edit]);
-    const succMap = useMemo3(() => {
-      if (!proj) return {};
-      const m = {};
-      proj.tasks.forEach((t) => normPreds(t.predecessors).forEach((p) => {
-        (m[p.id] = m[p.id] || []).push(t.id);
-      }));
-      return m;
-    }, [proj]);
-    const getTaskName = useCallback2((id) => proj?.tasks.find((t) => t.id === id)?.name ?? `#${id}`, [proj]);
-    const liveNotesTask = notesCtx ? data?.projects[notesCtx.projectId]?.tasks.find((t) => t.id === notesCtx.taskId) : null;
-    const dl = (content, name, type) => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([content], { type }));
-      a.download = name;
-      a.click();
-    };
-    const openFile = async () => {
-      if (!window.showOpenFilePicker) {
-        showToast("Auto-save requires Chrome or Edge.", { type: "warn", duration: 4e3 });
-        return;
-      }
-      try {
-        const [handle] = await window.showOpenFilePicker({
-          types: [{ description: "planar HTML file", accept: { "text/html": [".html"] } }],
-          multiple: false
-        });
-        const perm = await handle.requestPermission({ mode: "readwrite" });
-        if (perm !== "granted") return;
-        const file = await handle.getFile();
-        fileHtmlRef.current = await file.text();
-        fileHandleRef.current = handle;
-        setFileLinked(true);
-      } catch (e) {
-      }
-    };
-    const exportJSON = () => dl(JSON.stringify(data, null, 2), `${scheduleExportName(Object.values(data.projects))}.json`, "application/json");
-    const importJSON = (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const r = new FileReader();
-      r.onload = async (ev) => {
-        let parsed;
-        try {
-          parsed = JSON.parse(ev.target.result);
-        } catch {
-          showToast("Import failed — not valid JSON.", { type: "error", duration: 4e3 });
-          return;
-        }
-        if (!parsed || typeof parsed !== "object" || !parsed.projects || typeof parsed.projects !== "object") {
-          showToast("Import failed — missing 'projects' object.", { type: "error", duration: 4e3 });
-          return;
-        }
-        const taskCount = Object.values(parsed.projects).reduce((n, p) => n + (Array.isArray(p?.tasks) ? p.tasks.length : 0), 0);
-        const projCount = Object.keys(parsed.projects).length;
-        const curTaskCount = data ? Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks?.length || 0), 0) : 0;
-        if (!await askConfirm({
-          title: "Replace current data with this import?",
-          body: `Current: ${Object.keys(data?.projects || {}).length} projects, ${curTaskCount} tasks
-Incoming: ${projCount} projects, ${taskCount} tasks
-
-A backup snapshot of the current state is saved first.`,
-          confirmLabel: "Replace",
-          danger: true
-        })) {
-          return;
-        }
-        if (data) {
-          try {
-            window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-import", skipSanity: true });
-          } catch {
-          }
-        }
-        if (applyLoadedDataRef.current) applyLoadedDataRef.current(parsed);
-        else setData(parsed);
-        showToast(`Imported ${projCount} project${projCount === 1 ? "" : "s"}, ${taskCount} task${taskCount === 1 ? "" : "s"}.`, { type: "success", duration: 3e3 });
-      };
-      r.readAsText(f);
-      e.target.value = "";
-    };
-    const exportHTML = () => {
-      const rows = Object.values(data.projects).map((p) => `<h2>${escapeHtml(crossScheduleLabel(p))}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` + p.tasks.map((t) => {
-        const h = HEALTH[t.health] || HEALTH.gray;
-        const pct = effectivePercentComplete(t, p.tasks);
-        return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration) || 0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t)) || "—")}</td></tr>`;
-      }).join("") + `</table>`).join("");
-      const names = Object.values(data.projects).map((p) => p.name).filter(Boolean);
-      const title = names.length === 1 ? names[0] : "Planyr Schedule";
-      dl(
-        `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>${escapeHtml(title)} — ${(/* @__PURE__ */ new Date()).toLocaleDateString()}</h1>${rows}</body></html>`,
-        `${scheduleExportName(Object.values(data.projects))}.html`,
-        "text/html"
-      );
-    };
-    const rolledHealthMap = useMemo3(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
-    if (!data) return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", color: "#e6a817", fontFamily: "'Inter',system-ui,sans-serif", fontSize: 14, letterSpacing: ".1em" } }, "LOADING...");
-    if (!proj) return /* @__PURE__ */ React.createElement("div", { "data-schedule-empty": "1", style: { height: "100vh", background: "var(--bg)", color: "var(--txt)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "'Inter',system-ui,sans-serif", textAlign: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "No schedules yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, maxWidth: 360, lineHeight: 1.5 } }, "This account has no schedule to show. Create one to start planning — nothing has been removed."), /* @__PURE__ */ React.createElement("button", { onClick: () => addProject(), style: { cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, background: "var(--accent)", color: "var(--on-accent,#fff)", border: "none", borderRadius: 6, padding: "8px 16px" } }, "New schedule"));
-    const setHoverZone = (zone) => {
-      hoverZoneRef.current = zone;
-    };
-    const moveRows = (anchorId, destParentId, insertAfterId) => moveSelectionByIds(structuralTargets(anchorId), destParentId, insertAfterId);
-    const shared = { tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: (v) => setData((d) => ({ ...d, healthColStyle: v })), data, moveRows, isMobile };
-    let section = data.section ?? "projects";
-    if (section === "suggestions") section = "projects";
-    return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)", color: "var(--txt)", overflow: "hidden" } }, offlineFallback && /* @__PURE__ */ React.createElement("div", { style: {
-      background: "#fef2f2",
-      borderBottom: "1px solid #fecaca",
-      color: "#991b1b",
-      padding: "7px 14px",
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      fontSize: 12.5,
-      lineHeight: 1.45,
-      flexShrink: 0,
-      zIndex: 31
-    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "Cloud unreachable — showing the offline copy embedded in this file."), " ", "It may be out of date, and changes will not save. Fix the connection, then reload."), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => window.location.reload(),
-        style: {
-          flexShrink: 0,
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 12,
-          fontWeight: 600,
-          background: "var(--bg)",
-          border: "1px solid #fca5a5",
-          color: "#991b1b",
-          borderRadius: 5,
-          padding: "4px 12px"
-        }
-      },
-      "Reload"
-    )), authRequired && !offlineFallback && /* @__PURE__ */ React.createElement("div", { style: {
-      background: "#fffbeb",
-      borderBottom: "1px solid #fde68a",
-      color: "#92400e",
-      padding: "7px 14px",
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      fontSize: 12.5,
-      lineHeight: 1.45,
-      flexShrink: 0,
-      zIndex: 31
-    } }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", style: { flexShrink: 0 } }, /* @__PURE__ */ React.createElement("rect", { x: "5", y: "11", width: "14", height: "10", rx: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4" })), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "Sign in to see this schedule."), " ", "Showing a blank starter copy —", " ", window.self === window.top ? /* @__PURE__ */ React.createElement("a", { "data-testid": "sequence-signin-link", href: "/?app&auth=signin#/schedule", style: { color: "inherit", fontWeight: 700 } }, "sign in to Planyr") : /* @__PURE__ */ React.createElement(React.Fragment, null, "use Sign in at the top right of Planyr"), ", then reload.")), staleNotice && !offlineFallback && !authRequired && /* @__PURE__ */ React.createElement("div", { style: {
-      background: "#fffbeb",
-      borderBottom: "1px solid #fde68a",
-      color: "#92400e",
-      padding: "7px 14px",
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      fontSize: 12.5,
-      lineHeight: 1.45,
-      flexShrink: 0,
-      zIndex: 31
-    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "↻"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "A newer version was saved elsewhere."), " ", saveStatus === "saved" ? `Reload to load the latest version of ${crossScheduleLabel(data.projects?.[data.aPid])}.` : `You have unsaved changes in ${crossScheduleLabel(data.projects?.[data.aPid])} -- reloading replaces them with the newer version. Your copy is kept in Version History either way.`), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: async () => {
-          const ae = document.activeElement;
-          if (ae && typeof ae.blur === "function" && ae !== document.body) {
-            ae.blur();
-            await new Promise((r) => setTimeout(r, 50));
-          }
-          const d = latestData.current;
-          if (d && saveStatusRef.current !== "saved") {
-            try {
-              await window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" });
-            } catch {
-            }
-          }
-          window.location.reload();
-        },
-        style: {
-          flexShrink: 0,
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 12,
-          fontWeight: 600,
-          background: "var(--bg)",
-          border: "1px solid #fcd34d",
-          color: "#92400e",
-          borderRadius: 5,
-          padding: "4px 12px"
-        }
-      },
-      "Reload"
-    )), ancestorPredNotice && ancestorPredNotice.length > 0 && (() => {
-      const flat = ancestorPredNotice.flatMap((p) => (p.tasks || []).map((t) => ({ ...t, project: p.project, pid: p.pid })));
-      const n = flat.length;
-      const shown = flat.slice(0, 3);
-      const extra = n - shown.length;
-      return /* @__PURE__ */ React.createElement("div", { style: {
-        background: "#fffbeb",
-        borderBottom: "1px solid #fde68a",
-        color: "#92400e",
-        padding: "7px 14px",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 10,
-        fontSize: 12.5,
-        lineHeight: 1.45,
-        flexShrink: 0,
-        zIndex: 31
-      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, n, " task", n === 1 ? "" : "s", " named ", n === 1 ? "its own" : "their own", " parent summary row as a predecessor — the link would loop forever, so it was removed and ", n === 1 ? "its date was" : "their dates were", " recalculated."), " ", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.pid + ":" + t.id }, i > 0 ? "; " : "", /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => goToTask(t.pid, t.id),
-          title: "Click to jump to this row",
-          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
-        },
-        scheduleRowPrefix(data.projects, t.pid, data.aPid),
-        "#",
-        t.id,
-        ' "',
-        t.name,
-        '"'
-      ))), extra > 0 ? `; +${extra} more` : "", ". Add back a real dependency (a sibling task, not the summary row) if one was intended."), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => setAncestorPredNotice(null),
-          style: {
-            flexShrink: 0,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: 12,
-            fontWeight: 600,
-            background: "var(--bg)",
-            border: "1px solid #fcd34d",
-            color: "#92400e",
-            borderRadius: 5,
-            padding: "4px 12px"
-          }
-        },
-        "Dismiss"
-      ));
-    })(), driftNotice && driftNotice.length > 0 && (() => {
-      const flat = driftNotice.flatMap((p) => (p.tasks || []).map((t) => ({ ...t, project: p.project, pid: p.pid })));
-      const n = flat.length;
-      const shown = flat.slice(0, 3);
-      const extra = n - shown.length;
-      return /* @__PURE__ */ React.createElement("div", { style: {
-        background: "#fffbeb",
-        borderBottom: "1px solid #fde68a",
-        color: "#92400e",
-        padding: "7px 14px",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 10,
-        fontSize: 12.5,
-        lineHeight: 1.45,
-        flexShrink: 0,
-        zIndex: 31
-      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, n, " saved task ", n === 1 ? "date was" : "dates were", " out of sync with ", n === 1 ? "its" : "their", " predecessor", n === 1 ? "" : "s", " and ", n === 1 ? "has" : "have", " been recalculated."), " ", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.pid + ":" + t.id }, i > 0 ? "; " : "", /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => goToTask(t.pid, t.id),
-          title: "Click to jump to this row",
-          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
-        },
-        scheduleRowPrefix(data.projects, t.pid, data.aPid),
-        "#",
-        t.id,
-        ' "',
-        t.name,
-        '" ',
-        fmtD(t.from) || "(no date)",
-        "→",
-        fmtD(t.to)
-      ))), extra > 0 ? `; +${extra} more` : "", ". Check they match your intended schedule — if a gap was deliberate, pin the date or add a lag."), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => setDriftNotice(null),
-          style: {
-            flexShrink: 0,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: 12,
-            fontWeight: 600,
-            background: "var(--bg)",
-            border: "1px solid #fcd34d",
-            color: "#92400e",
-            borderRadius: 5,
-            padding: "4px 12px"
-          }
-        },
-        "Dismiss"
-      ));
-    })(), (() => {
-      const cft = (data?.projects?.[data.aPid]?.tasks || []).filter((t) => t.finishConflict);
-      if (!cft.length) return null;
-      const shown = cft.slice(0, 3);
-      const extra = cft.length - shown.length;
-      return /* @__PURE__ */ React.createElement("div", { style: {
-        background: "#fef2f2",
-        borderBottom: "1px solid #fecaca",
-        color: "#991b1b",
-        padding: "7px 14px",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        fontSize: 12.5,
-        lineHeight: 1.45,
-        flexShrink: 0,
-        zIndex: 31
-      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, cft.length, " task", cft.length > 1 ? "s" : "", " can’t meet ", cft.length > 1 ? "their" : "its", " locked finish date."), " ", "The predecessor chain needs more time than the locked finish allows (", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.id }, i > 0 ? ", " : "", /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          onClick: () => goToTask(data.aPid, t.id),
-          title: "Click to jump to this row",
-          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
-        },
-        "#",
-        t.id,
-        ' "',
-        t.name || "Task " + t.id,
-        '"'
-      ))), extra > 0 ? `, +${extra} more` : "", "). Move the finish, shorten the duration, or change the dependency."));
-    })(), /* @__PURE__ */ React.createElement("div", { className: "app-header", style: { minHeight: 46, background: "var(--bg)", borderBottom: "1px solid var(--bd2)", display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6, columnGap: 8, padding: "6px 14px", flexShrink: 0, zIndex: 30 } }, /* @__PURE__ */ React.createElement("svg", { className: "hdr-logo", height: "26", viewBox: "0 0 196 52", xmlns: "http://www.w3.org/2000/svg", style: { flexShrink: 0, marginRight: 8, display: "block" } }, /* @__PURE__ */ React.createElement("g", { transform: "translate(0,6)" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: "44", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("rect", { x: "10", y: "13", width: "33", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("rect", { x: "17", y: "26", width: "39", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("path", { d: "M44,3.5 L50,3.5 L50,16.5 L10,16.5", stroke: "#4f46e5", strokeWidth: "1.2", fill: "none", opacity: "0.32" }), /* @__PURE__ */ React.createElement("polygon", { points: "10,16.5 15,13.5 15,19.5", fill: "#4f46e5", opacity: "0.32" }), /* @__PURE__ */ React.createElement("path", { d: "M43,16.5 L52,16.5 L52,29.5 L17,29.5", stroke: "#4f46e5", strokeWidth: "1.2", fill: "none", opacity: "0.32" }), /* @__PURE__ */ React.createElement("polygon", { points: "17,29.5 22,26.5 22,32.5", fill: "#4f46e5", opacity: "0.32" })), /* @__PURE__ */ React.createElement("text", { x: "62", y: "36", fontFamily: "'Inter',system-ui,sans-serif", fontSize: "34", fontWeight: "400", letterSpacing: "-1.5", fill: "#3730a3" }, "planyr")), /* @__PURE__ */ React.createElement("div", { className: "hdr-mode", style: { display: "flex", background: "#f0f0f0", borderRadius: 7, padding: "3px", gap: 2, flexShrink: 0 } }, [["reports", "Dashboard"], ["projects", "Projects"]].map(([s, label]) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        key: s,
-        onClick: () => setData((d) => ({ ...d, section: s })),
-        style: {
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 13,
-          fontWeight: section === s ? 600 : 500,
-          letterSpacing: ".01em",
-          padding: "5px 12px",
-          borderRadius: 5,
-          transition: "all .15s",
-          background: section === s ? "#fff" : "transparent",
-          color: section === s ? "var(--amber)" : "var(--mut)",
-          boxShadow: section === s ? "0 1px 3px rgba(0,0,0,0.12)" : "none"
-        }
-      },
-      label
-    ))), section === "projects" && !reviewOpen && /* @__PURE__ */ React.createElement("div", { className: "hdr-project", style: { display: "flex", alignItems: "center", gap: 8, marginLeft: 8, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 22, background: "var(--bd2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement(ProjDropdown, { data, setData, addProject, setProjCtx })), section === "projects" && !reviewOpen && /* @__PURE__ */ React.createElement("div", { className: "hdr-view", style: { display: "flex", background: "#f0f0f0", borderRadius: 7, padding: "3px", gap: 2, marginLeft: 8, flexShrink: 0 } }, [["grid", "Grid"], ["split", "Split"], ["gantt", "Gantt"]].map(([v, label]) => {
-      const active = data.view === v;
-      return /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          key: v,
-          onClick: () => setData((d) => ({ ...d, view: v })),
-          style: {
-            border: "none",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: 13,
-            fontWeight: active ? 600 : 500,
-            letterSpacing: ".01em",
-            padding: "5px 12px",
-            borderRadius: 5,
-            transition: "all .15s",
-            background: active ? "#fff" : "transparent",
-            color: active ? "var(--amber)" : "var(--mut)",
-            boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none"
-          }
-        },
-        label
-      );
-    })), section === "projects" && /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => {
-          const opening = !reviewOpen;
-          if (opening && reviewRows.length && data && data.projects) {
-            const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
-            if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData((d) => ({ ...d, aPid: a.project_id }));
-          }
-          setReviewOpen(opening);
-        },
-        title: "Review suggested updates from forwarded emails",
-        className: "hdr-review",
-        style: {
-          marginLeft: 8,
-          flexShrink: 0,
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 13,
-          fontWeight: 600,
-          letterSpacing: ".01em",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "5px 9px",
-          borderRadius: 7,
-          transition: "all .15s",
-          border: reviewOpen ? "1px solid var(--amber)" : "1px solid var(--bd2)",
-          background: reviewOpen ? "#eef2ff" : "var(--surf)",
-          color: reviewOpen || reviewRows.length ? "var(--amber)" : "var(--mut)"
-        }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("polyline", { points: "22 12 16 12 14 15 10 15 8 12 2 12" }), /* @__PURE__ */ React.createElement("path", { d: "M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" })),
-      reviewRows.length > 0 && /* @__PURE__ */ React.createElement("span", { style: {
-        fontSize: 11,
-        fontWeight: 700,
-        color: "#fff",
-        background: "var(--amber)",
-        borderRadius: 20,
-        padding: "1px 7px",
-        minWidth: 18,
-        textAlign: "center",
-        lineHeight: 1.5
-      } }, reviewRows.length)
-    ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("div", { className: "hdr-actions", style: { display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: "auto" } }, isMobile && (data.view === "gantt" || data.view === "split") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: coarsePointer ? 4 : 1 } }, /* @__PURE__ */ React.createElement("button", { style: { padding: "0 10px", fontSize: 15, height: coarsePointer ? 44 : 26, minWidth: coarsePointer ? 44 : 26, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)", borderRadius: 5, background: "none", color: "var(--mut)", cursor: "pointer" }, title: "Zoom out", onClick: () => setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35))) }, "−"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", width: 30, textAlign: "center", userSelect: "none" } }, Math.round(ganttPPD / 6 * 100), "%"), /* @__PURE__ */ React.createElement("button", { style: { padding: "0 10px", fontSize: 15, height: coarsePointer ? 44 : 26, minWidth: coarsePointer ? 44 : 26, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)", borderRadius: 5, background: "none", color: "var(--mut)", cursor: "pointer" }, title: "Zoom in", onClick: () => setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35))) }, "+")), isMobile ? (
-      /* MOBILE: single overflow button containing Download/Import/Auto-Save */
-      /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, mobMenuOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => setMobMenuOpen(false) }), /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          onClick: () => setMobMenuOpen((o) => !o),
-          "aria-label": "More actions",
-          style: {
-            background: mobMenuOpen ? "#eef2ff" : saveStatus === "error" ? "#fef2f2" : "none",
-            border: saveStatus === "error" ? "1px solid #fca5a5" : "1px solid var(--bd2)",
-            cursor: "pointer",
-            borderRadius: 5,
-            padding: "6px 10px",
-            display: "flex",
-            alignItems: "center",
-            gap: 3,
-            color: saveStatus === "error" ? "#dc2626" : mobMenuOpen ? "var(--amber)" : "var(--mut)",
-            transition: "all .12s"
-          }
-        },
-        /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "currentColor" }, /* @__PURE__ */ React.createElement("circle", { cx: "5", cy: "12", r: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "19", cy: "12", r: "2" }))
-      ), mobMenuOpen && /* @__PURE__ */ React.createElement("div", { style: {
-        position: "absolute",
-        top: "calc(100% + 6px)",
-        right: 0,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 8,
-        boxShadow: "0 6px 24px rgba(0,0,0,.14)",
-        zIndex: 999,
-        minWidth: 220,
-        padding: "6px 0",
-        overflow: "hidden"
-      } }, /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onClick: () => {
-            if (saveStatus === "error") {
-              if (latestData.current) attemptCloudSave(latestData.current);
-            } else {
-              openFile();
-            }
-            setMobMenuOpen(false);
-          },
-          style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderBottom: "1px solid var(--bd)" }
-        },
-        /* @__PURE__ */ React.createElement("span", { style: {
-          width: 9,
-          height: 9,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: saveStatus === "error" ? "#dc2626" : fileLinked ? "#16a34a" : "var(--bd2)"
-        } }),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: saveStatus === "error" ? "#dc2626" : "var(--txt)", fontWeight: saveStatus === "error" ? 600 : 500 } }, saveStatus === "error" ? "Not saved — tap to retry" : fileLinked ? "Backup File Linked" : "Link Backup File"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: saveStatus === "error" ? "#dc2626" : "var(--mut)" } }, saveStatus === "error" ? "Changes have NOT reached the cloud" : fileLinked ? "Cloud + local file" : "Cloud auto-save is always on"))
-      ), /* @__PURE__ */ React.createElement("div", { onClick: () => {
-        exportHTML();
-        setMobMenuOpen(false);
-      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9 } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Web Snapshot"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Quick plain task tables · .html"))), /* @__PURE__ */ React.createElement("div", { "data-testid": "open-history-mobile", onClick: () => {
-        setHistoryOpen(true);
-        setMobMenuOpen(false);
-      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9 } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "10" }), /* @__PURE__ */ React.createElement("polyline", { points: "12 6 12 12 16 14" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Version History"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Browse & restore snapshots"))), /* @__PURE__ */ React.createElement("div", { onClick: () => {
-        setPdfExportOpen(true);
-        setMobMenuOpen(false);
-      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Export PDF"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Print-ready exhibit"))), /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onClick: () => {
-            setAutomationOpen((o) => !o);
-            setMobMenuOpen(false);
-          },
-          style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderTop: "1px solid var(--bd)" }
-        },
-        /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Automation"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Auto-status rules"))
-      )))
-    ) : /* @__PURE__ */ React.createElement(React.Fragment, null, section === "projects" && /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: formatOpen ? "btn act" : "btn",
-        title: "Format — row height & bar labels",
-        onClick: () => {
-          setFormatOpen((o) => !o);
-          setSettingsOpen(false);
-          setAutomationOpen(false);
-          setContactsOpen(false);
-        },
-        style: { padding: "0 7px", height: 21, display: "flex", alignItems: "center", marginRight: 5 }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("line", { x1: "4", y1: "21", x2: "4", y2: "14" }), /* @__PURE__ */ React.createElement("line", { x1: "4", y1: "10", x2: "4", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "21", x2: "12", y2: "12" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "8", x2: "12", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "21", x2: "20", y2: "16" }), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "12", x2: "20", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "14", x2: "7", y2: "14" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "8", x2: "15", y2: "8" }), /* @__PURE__ */ React.createElement("line", { x1: "17", y1: "16", x2: "23", y2: "16" }))
-    ), section === "projects" && !isMobile && (data.view === "split" || data.view === "gantt") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: coarsePointer ? 4 : 1, paddingRight: 5, borderRight: "1px solid var(--bd2)" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", style: { padding: coarsePointer ? "0 12px" : "0 6px", fontSize: coarsePointer ? 15 : 13, height: coarsePointer ? 44 : 21, minWidth: coarsePointer ? 44 : void 0, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)" }, title: "Zoom out", onClick: () => setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35))) }, "−"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", width: 30, textAlign: "center", userSelect: "none" } }, Math.round(ganttPPD / 6 * 100), "%"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { padding: coarsePointer ? "0 12px" : "0 6px", fontSize: coarsePointer ? 15 : 13, height: coarsePointer ? 44 : 21, minWidth: coarsePointer ? 44 : void 0, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)" }, title: "Zoom in", onClick: () => setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35))) }, "+")), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, dlOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => setDlOpen(false) }), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "btn",
-        onClick: () => setDlOpen((o) => !o),
-        title: "Export — PDF exhibit or web snapshot",
-        style: { display: "flex", alignItems: "center", gap: 4, padding: "0 8px", height: 21, lineHeight: 1 }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" }), /* @__PURE__ */ React.createElement("polyline", { points: "16 6 12 2 8 6" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" })),
-      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, opacity: 0.5 } }, "▾")
-    ), dlOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: "calc(100% + 5px)", right: 0, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 7, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 999, minWidth: 192, padding: "4px 0", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { onClick: () => {
-      setPdfExportOpen(true);
-      setDlOpen(false);
-    }, style: { padding: "8px 14px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }, onMouseEnter: (e) => e.currentTarget.style.background = "#f6f8fa", onMouseLeave: (e) => e.currentTarget.style.background = "transparent" }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "PDF / Print Exhibit"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Formatted pages — share or file")), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } }), /* @__PURE__ */ React.createElement("div", { onClick: () => {
-      exportHTML();
-      setDlOpen(false);
-    }, style: { padding: "8px 14px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }, onMouseEnter: (e) => e.currentTarget.style.background = "#f6f8fa", onMouseLeave: (e) => e.currentTarget.style.background = "transparent" }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "Web Snapshot"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Quick plain task tables · .html")))), /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 20, background: "var(--bd2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "btn",
-        onClick: saveStatus === "error" ? () => {
-          if (latestData.current) attemptCloudSave(latestData.current);
-        } : openFile,
-        title: saveStatus === "error" ? "Changes NOT saved to cloud — retrying automatically. Click to retry now." : saveStatus === "saving" ? "Saving to cloud…" : (savePulse ? "Saved to cloud ✓" : "All changes saved to cloud") + (fileLinked ? " · also writing to linked file" : " — click to also back up to a local file"),
-        style: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 5,
-          padding: "3px 8px",
-          fontSize: 11,
-          fontWeight: 600,
-          color: saveStatus === "error" ? "#dc2626" : savePulse ? "#16a34a" : saveStatus === "saving" ? "#b45309" : "var(--mut)",
-          borderColor: saveStatus === "error" ? "#fca5a5" : savePulse ? "#86efac" : fileLinked ? "#bbf7d0" : void 0,
-          background: saveStatus === "error" ? "#fef2f2" : savePulse ? "#f0fdf4" : void 0,
-          boxShadow: savePulse && saveStatus !== "error" ? "0 0 0 3px #dcfce7" : "none",
-          cursor: saveStatus === "saving" ? "progress" : void 0,
-          transition: "color .25s, background .25s, border-color .25s, box-shadow .25s"
-        }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }), /* @__PURE__ */ React.createElement("polyline", { points: "17 21 17 13 7 13 7 21" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 3 7 8 15 8" })),
-      saveStatus === "error" && "Not saved"
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        "data-testid": "open-history-desktop",
-        onClick: () => {
-          setHistoryOpen(true);
-          setSettingsOpen(false);
-          setAutomationOpen(false);
-          setContactsOpen(false);
-          setFormatOpen(false);
-        },
-        title: "Version history — browse & restore snapshots",
-        className: historyOpen ? "btn act" : "btn",
-        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M1 4v6h6" }), /* @__PURE__ */ React.createElement("path", { d: "M3.51 15a9 9 0 1 0 2.13-9.36L1 10" }), /* @__PURE__ */ React.createElement("polyline", { points: "12 7 12 12 15 14" }))
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => {
-          setContactsOpen((o) => !o);
-          setSettingsOpen(false);
-          setAutomationOpen(false);
-          setFormatOpen(false);
-        },
-        title: "Contacts",
-        className: contactsOpen ? "btn act" : "btn",
-        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "7", r: "4" }), /* @__PURE__ */ React.createElement("path", { d: "M23 21v-2a4 4 0 0 0-3-3.87" }), /* @__PURE__ */ React.createElement("path", { d: "M16 3.13a4 4 0 0 1 0 7.75" }))
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => {
-          setAutomationOpen((o) => !o);
-          setSettingsOpen(false);
-          setContactsOpen(false);
-          setFormatOpen(false);
-        },
-        title: "Automation rules",
-        className: automationOpen ? "btn act" : "btn",
-        style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "0 9px", height: 21, lineHeight: 1 }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.3", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })),
-      "Automation"
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => {
-          setSettingsOpen((o) => !o);
-          setAutomationOpen(false);
-          setContactsOpen(false);
-          setFormatOpen(false);
-        },
-        title: "Settings",
-        className: settingsOpen ? "btn act" : "btn",
-        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("path", { d: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "3" }))
-    )), isMobile && /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: () => setSettingsOpen((o) => !o),
-        title: "Settings",
-        style: {
-          background: settingsOpen ? "#eef2ff" : "none",
-          border: "1px solid var(--bd2)",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          padding: "6px 8px",
-          borderRadius: 5,
-          lineHeight: 1,
-          color: settingsOpen ? "var(--amber)" : "var(--mut)",
-          transition: "all .12s"
-        }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("path", { d: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "3" }))
-    ))), settingsOpen && /* @__PURE__ */ React.createElement(SettingsPanel, { data, setData, onClose: () => setSettingsOpen(false), openFile, fileLinked, initialSection: settingsSection, onOpenMeetingCalendars: () => setMeetingCalOpen(true) }), meetingCalOpen && /* @__PURE__ */ React.createElement(
-      MeetingCalendarsModal,
-      {
-        projName: proj?.name,
-        bodies: (activeProjectOf(data) || {}).meetingBodies || [],
-        otherSchedules: otherScheduleMeetingBodies(data, data.aPid),
-        onChange: (next) => setData((d) => {
-          const p = d.projects && d.projects[d.aPid];
-          if (!p) return d;
-          const nd = { ...d, projects: { ...d.projects, [d.aPid]: { ...p, meetingBodies: next } } };
-          rebuildMeetingBodyIndex(nd);
-          const proj2 = nd.projects[nd.aPid];
-          nd.projects = { ...nd.projects, [nd.aPid]: { ...proj2, tasks: recomputeSchedule((proj2.tasks || []).map((t) => ({ ...t }))) } };
-          return nd;
-        }),
-        onClose: () => setMeetingCalOpen(false)
-      }
-    ), formatOpen && /* @__PURE__ */ React.createElement(FormatPanel, { data, setData, onClose: () => setFormatOpen(false) }), automationOpen && /* @__PURE__ */ React.createElement(AutomationPanel, { data, setData, onClose: () => setAutomationOpen(false) }), contactsOpen && /* @__PURE__ */ React.createElement(ContactsPanel, { data, setData, onClose: () => setContactsOpen(false) }), historyOpen && /* @__PURE__ */ React.createElement(HistoryPanel, { data, setData, exportJSON, importJSON, applyLoadedData: (parsed) => applyLoadedDataRef.current?.(parsed), onClose: () => setHistoryOpen(false) }), successorPrompt && /* @__PURE__ */ React.createElement(SuccessorPromptModal, { prompt: successorPrompt, updateTask, onClose: () => setSuccessorPrompt(null), onOpenTask: (pid, taskId) => {
-      goToTask(pid, taskId);
-      setSuccessorPrompt(null);
-    } }), deleteChoice && /* @__PURE__ */ React.createElement(
-      DeleteChildrenModal,
-      {
-        rowCount: deleteChoice.rowCount,
-        totalCount: deleteChoice.totalCount,
-        onCascade: () => {
-          deleteTasks(deleteChoice.ids);
-          setSelectedId(null);
-          setSelRange(null);
-          setDeleteChoice(null);
-        },
-        onPromote: () => {
-          promoteAndDeleteTasks(deleteChoice.ids);
-          setSelectedId(null);
-          setSelRange(null);
-          setDeleteChoice(null);
-        },
-        onCancel: () => setDeleteChoice(null)
-      }
-    ), moveToCtx && /* @__PURE__ */ React.createElement(
-      MoveToModal,
-      {
-        tasks: (data.projects[moveToCtx.projId] || {}).tasks || [],
-        sourceIds: moveToCtx.ids,
-        onCommit: (destParentId, insertAfterId) => {
-          moveSelectionByIds(moveToCtx.ids, destParentId, insertAfterId);
-          setMoveToCtx(null);
-        },
-        onCancel: () => setMoveToCtx(null)
-      }
-    ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "hidden", display: "flex" } }, /* @__PURE__ */ React.createElement(ErrorBoundary, { key: data.view }, section === "projects" && !reviewOpen && (data.view ?? "grid") === "grid" && /* @__PURE__ */ React.createElement(GridView, { ...shared }), section === "projects" && !reviewOpen && (data.view ?? "grid") === "gantt" && /* @__PURE__ */ React.createElement(GanttView, { tasks: flatTasks, updateTask, pxPerDay: ganttPPD, onZoomChange: setGanttPPD, rolledHealthMap, proj, onMouseEnter: () => setHoverZone("gantt"), selectedId, setSelectedId, settings: data.settings }), section === "projects" && !reviewOpen && data.view === "split" && /* @__PURE__ */ React.createElement(SplitView, { ...shared }), section === "reports" && /* @__PURE__ */ React.createElement(MasterView, { data, setData, updateTask, setNotesCtx, goToTask }), section === "projects" && reviewOpen && /* @__PURE__ */ React.createElement(SuggestionsView, { data, updateTask, setData, rows: reviewRows, setRows: setReviewRows, loading: reviewLoading, onClose: () => setReviewOpen(false), gridProps: shared, activeIdx: reviewIdx, setActiveIdx: setReviewIdx }))), liveNotesTask && /* @__PURE__ */ React.createElement(NotesModal, { task: liveNotesTask, projectId: notesCtx.projectId, initChar: notesCtx?.initChar || null, updateTask, onClose: () => setNotesCtx(null) }), pdfExportOpen && /* @__PURE__ */ React.createElement(PDFExportModal, { data, activePid: data.aPid, setData, onClose: () => setPdfExportOpen(false) }), iconPickerCtx && /* @__PURE__ */ React.createElement(TaskIconPickerHost, { ctx: iconPickerCtx, tasks: (data.projects[iconPickerCtx.projId] || {}).tasks || [], updateTask, onClose: () => setIconPickerCtx(null) }), taskCtx && /* @__PURE__ */ React.createElement(
-      TaskContextMenu,
-      {
-        x: taskCtx.x,
-        y: taskCtx.y,
-        task: taskCtx.task,
-        projId: taskCtx.projId,
-        onInsertAbove: () => {
-          insertTaskAbove(taskCtx.task.id);
-          setTaskCtx(null);
-        },
-        onInsertBelow: () => {
-          insertTaskBelow(taskCtx.task.id);
-          setTaskCtx(null);
-        },
-        onAddSubtask: () => {
-          addSubtask(taskCtx.task.id);
-          setTaskCtx(null);
-        },
-        onDuplicate: () => {
-          duplicateTask(taskCtx.task.id);
-          setTaskCtx(null);
-        },
-        onCutTask: () => {
-          cutTaskById(structuralTargets(taskCtx.task.id));
-          setTaskCtx(null);
-        },
-        onCopyTaskFull: () => {
-          copyTaskById(structuralTargets(taskCtx.task.id));
-          setTaskCtx(null);
-        },
-        onPasteTask: () => {
-          pasteTaskAfter(taskCtx.task.id);
-          setTaskCtx(null);
-        },
-        hasClipboard: !!clipboardRef.current,
-        onIndent: () => {
-          const ids = blockOnlyTargets(taskCtx.task.id);
-          if (ids) indentSelectionByIds(ids);
-          setTaskCtx(null);
-        },
-        onOutdent: () => {
-          const ids = blockOnlyTargets(taskCtx.task.id);
-          if (ids) outdentSelectionByIds(ids);
-          setTaskCtx(null);
-        },
-        onMoveTo: () => {
-          const ids = blockOnlyTargets(taskCtx.task.id);
-          if (ids) setMoveToCtx({ ids, projId: taskCtx.projId });
-          setTaskCtx(null);
-        },
-        canOutdent: (() => {
-          const targets = structuralTargets(taskCtx.task.id);
-          const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
-          const byId = new Map(ts.map((t) => [t.id, t]));
-          return targets.some((id) => (byId.get(id)?.parentId ?? null) !== null);
-        })(),
-        meetingBodies: (data.projects[taskCtx.projId] || {}).meetingBodies || [],
-        otherBodies: otherScheduleMeetingBodies(data, taskCtx.projId).flatMap((g2) => g2.bodies.map((b) => ({ pid: g2.pid, schedName: g2.schedName, body: b }))),
-        bindCount: (() => {
-          const ids = fullRowSelIds();
-          return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1;
-        })(),
-        boundTasks: (() => {
-          const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
-          const parents = new Set(ts.filter((t) => t.parentId != null).map((t) => t.parentId));
-          return ts.filter((t) => t.meetingBound && t.meetingBodyId && t.id !== taskCtx.task.id && !parents.has(t.id)).map((t) => ({ id: t.id, name: t.name || `Task ${t.id}` }));
-        })(),
-        deadlineAnchorName: (() => {
-          if (taskCtx.task.deadlineForTaskId == null) return null;
-          const a = ((data.projects[taskCtx.projId] || {}).tasks || []).find((t) => t.id === taskCtx.task.deadlineForTaskId);
-          return a ? a.name || `Task ${a.id}` : null;
-        })(),
-        onBindMeeting: (bodyId) => {
-          const ids = fullRowSelIds();
-          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
-          targets.forEach((id) => updateTask(id, { meetingBound: true, meetingBodyId: bodyId, deadlineForTaskId: null }, taskCtx.projId));
-          setTaskCtx(null);
-        },
-        onUnbindMeeting: () => {
-          const ids = fullRowSelIds();
-          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
-          targets.forEach((id) => updateTask(id, { meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, taskCtx.projId));
-          setTaskCtx(null);
-        },
-        onImportBindMeeting: (srcPid, srcBodyId) => {
-          const ids = fullRowSelIds();
-          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
-          const projId = taskCtx.projId;
-          const srcBody = ((data.projects[srcPid] || {}).meetingBodies || []).find((b) => b.id === srcBodyId);
-          if (!srcBody) {
-            setTaskCtx(null);
-            return;
-          }
-          const destBodies = (data.projects[projId] || {}).meetingBodies || [];
-          const { bodies: nextBodies, id: newBodyId } = importMeetingBody(destBodies, srcBody);
-          if (nextBodies !== destBodies) {
-            setData((d) => {
-              const p = d.projects[projId];
-              if (!p) return d;
-              const nd = { ...d, projects: { ...d.projects, [projId]: { ...p, meetingBodies: nextBodies } } };
-              rebuildMeetingBodyIndex(nd);
-              return nd;
-            });
-          }
-          targets.forEach((id) => updateTask(id, { meetingBound: true, meetingBodyId: newBodyId, deadlineForTaskId: null }, projId));
-          setTaskCtx(null);
-        },
-        onAddDeadlineRow: () => {
-          addDeadlineTask(taskCtx.task.id, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        onLinkAsDeadline: (anchorId) => {
-          updateTask(taskCtx.task.id, { deadlineForTaskId: anchorId, meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        onUnlinkDeadline: () => {
-          updateTask(taskCtx.task.id, { deadlineForTaskId: null }, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        onAddMeetingCalendar: () => {
-          setMeetingCalOpen(true);
-          setSettingsOpen(false);
-          setAutomationOpen(false);
-          setContactsOpen(false);
-          setFormatOpen(false);
-          setTaskCtx(null);
-        },
-        onStepMeeting: (iso) => {
-          if (iso) updateTask(taskCtx.task.id, { pinnedMeetingDate: iso }, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        onDelete: () => {
-          const ids = fullRowSelIds();
-          requestDelete(ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id]);
-          setTaskCtx(null);
-        },
-        deleteCount: (() => {
-          const ids = fullRowSelIds();
-          return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1;
-        })(),
-        onSetHealth: (hk) => {
-          updateTask(taskCtx.task.id, { health: hk }, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        hasIcons: window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0,
-        onSetIcon: () => {
-          setIconPickerCtx({ taskId: taskCtx.task.id, projId: taskCtx.projId, x: taskCtx.x, y: taskCtx.y });
-          setTaskCtx(null);
-        },
-        onRemoveIcon: () => {
-          updateTask(taskCtx.task.id, { icons: [] }, taskCtx.projId);
-          setTaskCtx(null);
-        },
-        fmt: ctxFmtState(),
-        onSetRowColor: (color) => applyFormatAndSync({ fill: color ?? null }),
-        onSetBold: (v) => applyFormatAndSync({ bold: v }),
-        onSetItalic: (v) => applyFormatAndSync({ italic: v }),
-        onSetUnderline: (v) => applyFormatAndSync({ underline: v }),
-        onSetTextColor: (color) => applyFormatAndSync({ color: color ?? null }),
-        onSetFontSize: (size) => applyFormatAndSync({ size: size ?? null }),
-        onClearFormat: () => applyFormatAndSync({}, { clearAll: true }),
-        onClose: () => setTaskCtx(null)
-      }
-    ), projCtx && /* @__PURE__ */ React.createElement(
-      ProjContextMenu,
-      {
-        x: projCtx.x,
-        y: projCtx.y,
-        projId: projCtx.id,
-        canDelete: true,
-        onRename: () => {
-          setRenameModal({ id: projCtx.id, name: data.projects[projCtx.id]?.name || "" });
-          setProjCtx(null);
-        },
-        onDuplicate: () => {
-          duplicateProject(projCtx.id);
-          setProjCtx(null);
-        },
-        onDelete: () => {
-          deleteProject(projCtx.id);
-          setProjCtx(null);
-        },
-        onClose: () => setProjCtx(null)
-      }
-    ), renameModal && /* @__PURE__ */ React.createElement(
-      RenameModal,
-      {
-        name: renameModal.name,
-        onConfirm: (name) => {
-          renameProject(renameModal.id, name);
-          setRenameModal(null);
-        },
-        onClose: () => setRenameModal(null)
-      }
-    ));
-  }
-  function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
-    const [open, setOpen] = useState4(false);
-    const [editingId, setEditingId] = useState4(null);
-    const [editVal, setEditVal] = useState4("");
-    const editRef = useRef4(null);
-    const btnRef = useRef4(null);
-    const menuRef = useRef4(null);
-    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    const projHealth = (p) => {
-      if (!p.tasks.length) return "gray";
-      if (p.tasks.some((t) => t.health === "red")) return "red";
-      if (p.tasks.some((t) => t.health === "yellow")) return "yellow";
-      if (p.tasks.every((t) => t.health === "green")) return "green";
-      return "gray";
-    };
-    const toggle = () => setOpen((o) => !o);
-    useEffect3(() => {
-      if (!open) {
-        setEditingId(null);
-        return;
-      }
-      const down = (e) => {
-        if (!btnRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
-      };
-      document.addEventListener("mousedown", down);
-      return () => document.removeEventListener("mousedown", down);
-    }, [open]);
-    useEffect3(() => {
-      if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
-    }, [editingId]);
-    const cur = activeProjectOf(data);
-    const dot = HEALTH[cur ? projHealth(cur) : "gray"].dot;
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        ref: btnRef,
-        className: "",
-        style: breadcrumb ? {
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "3px 6px",
-          borderRadius: 4,
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--txt)"
-        } : {
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          cursor: "pointer",
-          fontFamily: "inherit",
-          background: open ? "#eef2ff" : "transparent",
-          border: `1px solid ${open ? "#c7d2fe" : "transparent"}`,
-          borderRadius: 7,
-          padding: "4px 10px",
-          maxWidth: 230,
-          minWidth: 80,
-          transition: "background .15s,border-color .15s"
-        },
-        onClick: toggle,
-        onMouseEnter: (e) => {
-          if (!breadcrumb && !open) e.currentTarget.style.background = "var(--surf)";
-        },
-        onMouseLeave: (e) => {
-          if (!breadcrumb && !open) e.currentTarget.style.background = "transparent";
-        }
-      },
-      !breadcrumb && /* @__PURE__ */ React.createElement("span", { style: { width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: `0 0 0 3px ${dot}1f` } }),
-      /* @__PURE__ */ React.createElement("span", { style: breadcrumb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" } : {
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        flex: 1,
-        textAlign: "left",
-        fontSize: 16,
-        fontWeight: 700,
-        letterSpacing: "-.015em",
-        color: "var(--txt)",
-        lineHeight: 1.1
-      } }, cur?.name),
-      /* @__PURE__ */ React.createElement(
-        "i",
-        {
-          className: "ti ti-chevron-down",
-          "aria-hidden": "true",
-          style: { fontSize: breadcrumb ? 11 : 13, color: "var(--mut)", flexShrink: 0, transition: "transform .15s", transform: open ? "rotate(180deg)" : "none" }
-        }
-      )
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top: pos.top,
-        left: pos.left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: 4,
-        zIndex: 9999,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-        minWidth: 230
-      } }, Object.values(data.projects).map((p) => {
-        const h = projHealth(p);
-        const isActive = p.id === data.aPid;
-        const isEditing = editingId === p.id;
-        const confirmRename = () => {
-          if (editVal.trim()) setData((d) => ({ ...d, projects: { ...d.projects, [p.id]: { ...d.projects[p.id], name: editVal.trim() } } }));
-          setEditingId(null);
-        };
-        return /* @__PURE__ */ React.createElement(
-          "div",
-          {
-            key: p.id,
-            onClick: () => {
-              if (!isEditing) {
-                setData((d) => ({ ...d, aPid: p.id }));
-                setOpen(false);
-              }
-            },
-            onContextMenu: (e) => {
-              e.preventDefault();
-              setProjCtx({ id: p.id, x: e.clientX, y: e.clientY });
-              setOpen(false);
-            },
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "5px 8px",
-              borderRadius: 4,
-              cursor: isEditing ? "default" : "pointer",
-              background: isActive ? "var(--surf)" : "transparent",
-              fontFamily: "'Inter',system-ui,sans-serif",
-              fontSize: 12,
-              fontWeight: isActive ? 500 : 400,
-              color: "var(--txt)"
-            },
-            onMouseEnter: (e) => {
-              if (!isActive && !isEditing) e.currentTarget.style.background = "var(--surf)";
-            },
-            onMouseLeave: (e) => {
-              if (!isActive && !isEditing) e.currentTarget.style.background = "transparent";
-            }
-          },
-          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", background: HEALTH[h].dot, flexShrink: 0 } }),
-          isEditing ? /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              ...NO_AUTOFILL,
-              ref: editRef,
-              value: editVal,
-              onChange: (e) => setEditVal(e.target.value),
-              onClick: (e) => e.stopPropagation(),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") {
-                  e.stopPropagation();
-                  confirmRename();
-                }
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  setEditingId(null);
-                }
-              },
-              onBlur: confirmRename,
-              style: {
-                flex: 1,
-                border: "1px solid var(--blue)",
-                borderRadius: 3,
-                padding: "2px 5px",
-                fontSize: 12,
-                fontFamily: "inherit",
-                outline: "none",
-                background: "var(--bg)",
-                color: "var(--txt)"
-              }
-            }
-          ) : /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p)),
-          !isEditing && /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              onClick: (e) => {
-                e.stopPropagation();
-                setEditVal(p.name);
-                setEditingId(p.id);
-              },
-              title: "Rename",
-              style: {
-                opacity: 0,
-                fontSize: 11,
-                color: "var(--mut)",
-                cursor: "pointer",
-                flexShrink: 0,
-                padding: "1px 3px",
-                borderRadius: 3,
-                lineHeight: 1,
-                transition: "opacity .12s"
-              },
-              onMouseEnter: (e) => {
-                e.currentTarget.style.opacity = "1";
-                e.currentTarget.style.color = "var(--amber)";
-                e.currentTarget.style.background = "#eef2ff";
-              },
-              onMouseLeave: (e) => {
-                e.currentTarget.style.opacity = "0";
-                e.currentTarget.style.color = "var(--mut)";
-                e.currentTarget.style.background = "transparent";
-              },
-              ref: (el) => {
-                if (el) {
-                  const row = el.closest("div[style]");
-                  if (row) {
-                    row.addEventListener("mouseenter", () => {
-                      el.style.opacity = "0.4";
-                    });
-                    row.addEventListener("mouseleave", () => {
-                      el.style.opacity = "0";
-                    });
-                  }
-                }
-              }
-            },
-            /* @__PURE__ */ React.createElement("i", { className: "ti ti-pencil", style: { fontSize: 11 } })
-          ),
-          !isEditing && isActive && /* @__PURE__ */ React.createElement("i", { className: "ti ti-check", "aria-hidden": "true", style: { fontSize: 12, color: "var(--amber)", flexShrink: 0 } })
-        );
-      }), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          onClick: () => {
-            addProject();
-            setOpen(false);
-          },
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 10px",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontFamily: "'Inter',system-ui,sans-serif",
-            fontSize: 12,
-            color: "var(--mut)"
-          },
-          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-        },
-        /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus", "aria-hidden": "true", style: { fontSize: 13 } }),
-        "New project"
-      )),
-      document.body
-    ));
-  }
-  function RenameModal({ name, onConfirm, onClose }) {
-    const [val, setVal] = useState4(name);
-    const inputRef = useRef4(null);
-    useEffect3(() => {
-      inputRef.current?.select();
-    }, []);
-    const confirm = () => {
-      if (val.trim()) onConfirm(val.trim());
-    };
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        style: { position: "fixed", inset: 0, background: "#00000060", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" },
-        onClick: onClose
-      },
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          style: {
-            background: "var(--surf)",
-            border: "1px solid var(--bd2)",
-            borderTop: "2px solid var(--amber)",
-            borderRadius: 6,
-            padding: 20,
-            width: 340,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14
-          },
-          onClick: (e) => e.stopPropagation()
-        },
-        /* @__PURE__ */ React.createElement("div", { style: { color: "var(--amber)", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: ".06em" } }, "RENAME PROJECT"),
-        /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            ...NO_AUTOFILL,
-            ref: inputRef,
-            className: "ei",
-            value: val,
-            onChange: (e) => setVal(e.target.value),
-            onKeyDown: (e) => {
-              if (e.key === "Enter") confirm();
-              if (e.key === "Escape") onClose();
-            }
-          }
-        ),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { borderColor: "var(--amber)", color: "var(--amber)" }, onClick: confirm }, "Rename"))
-      )
-    );
-  }
-  function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
-    const menuRef = useRef4(null);
-    useEffect3(() => {
-      const down = (e) => {
-        if (!menuRef.current?.contains(e.target)) onClose();
-      };
-      const key = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("mousedown", down);
-      document.addEventListener("keydown", key);
-      window.addEventListener("scroll", onClose, true);
-      window.addEventListener("resize", onClose);
-      return () => {
-        document.removeEventListener("mousedown", down);
-        document.removeEventListener("keydown", key);
-        window.removeEventListener("scroll", onClose, true);
-        window.removeEventListener("resize", onClose);
-      };
-    }, [onClose]);
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const mw = 178, mh = canDelete ? 108 : 76;
-    const left = x + mw > vw ? vw - mw - 8 : x;
-    const top = y + mh > vh ? vh - mh - 8 : y;
-    const Item = ({ icon, label, danger, onClick }) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onClick,
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 12px",
-          cursor: "pointer",
-          fontSize: 12,
-          color: danger ? "#dc2626" : "var(--txt)",
-          borderRadius: 4,
-          transition: "background .1s",
-          fontFamily: "'Inter',system-ui,sans-serif"
-        },
-        onMouseEnter: (e) => e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)",
-        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-      },
-      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 14, flexShrink: 0, color: danger ? "#dc2626" : "var(--mut)" }, "aria-hidden": "true" }),
-      label
-    );
-    return ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top,
-        left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: "4px",
-        zIndex: 9999,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.13)",
-        minWidth: mw
-      } }, /* @__PURE__ */ React.createElement(Item, { icon: "ti-pencil", label: "Rename", onClick: onRename }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate", onClick: onDuplicate }), canDelete && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: "Delete", danger: true, onClick: onDelete }))),
-      document.body
-    );
-  }
-  var SwatchGrid = ({ current, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 5px", display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: 2, justifyContent: "start" } }, /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      title: "None (clear)",
-      onClick: () => onPick(null),
-      type: "button",
-      style: {
-        width: 18,
-        height: 18,
-        borderRadius: 2,
-        background: "var(--bg)",
-        cursor: "pointer",
-        padding: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: current == null ? "1.5px solid #4f46e5" : "1px solid #d1d5db"
-      }
-    },
-    /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 10 10" }, /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "1", x2: "9", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "1", x2: "1", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }))
-  ), ROW_COLORS.slice(0, 19).map((rc) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: rc.color,
-      title: rc.label,
-      onClick: () => onPick(rc.color),
-      type: "button",
-      style: {
-        width: 18,
-        height: 18,
-        borderRadius: 2,
-        background: rc.color,
-        cursor: "pointer",
-        padding: 0,
-        border: current === rc.color ? "1.5px solid #111827" : "1px solid #d1d5db",
-        boxShadow: current === rc.color ? "inset 0 0 0 1px #fff" : "none"
-      }
-    }
-  )));
-  var CaretPopover = ({ children, popRef, openLeft }) => /* @__PURE__ */ React.createElement(
-    "div",
-    {
-      ref: popRef,
-      onMouseDown: (e) => e.stopPropagation(),
-      style: {
-        position: "absolute",
-        top: "100%",
-        marginTop: 4,
-        ...openLeft ? { right: 0 } : { left: 0 },
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-        zIndex: 10002
-      }
-    },
-    children
-  );
-  var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
-    const fb = fmt;
-    const [openCaret, setOpenCaret] = useState4(null);
-    const popRef = useRef4(null);
-    useEffect3(() => {
-      if (!openCaret) return;
-      const down = (e) => {
-        if (popRef.current?.contains(e.target)) return;
-        if (e.target.closest?.("[data-caret-toggle]")) return;
-        setOpenCaret(null);
-      };
-      document.addEventListener("mousedown", down, true);
-      return () => document.removeEventListener("mousedown", down, true);
-    }, [openCaret]);
-    const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
-    const [sizeText, setSizeText] = useState4(sizeDisplay);
-    useEffect3(() => {
-      setSizeText(sizeDisplay);
-    }, [sizeDisplay]);
-    const commitSize = (raw) => {
-      const trimmed = String(raw).trim();
-      if (trimmed === "") {
-        onSetFontSize(null);
-        return;
-      }
-      const n = parseFloat(trimmed);
-      if (!Number.isFinite(n)) {
-        setSizeText(sizeDisplay);
-        return;
-      }
-      onSetFontSize(Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n * 2) / 2)));
-    };
-    const MiniBtn = ({ active, disabled, onClick, title, children, w = 20 }) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        title,
-        onClick: disabled ? void 0 : onClick,
-        disabled,
-        type: "button",
-        style: {
-          width: w,
-          height: 20,
-          borderRadius: 3,
-          padding: 0,
-          cursor: disabled ? "default" : "pointer",
-          flexShrink: 0,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
-          background: active ? "#4f46e5" : "transparent",
-          border: `1px solid ${active ? "#4338ca" : "transparent"}`,
-          opacity: disabled ? 0.5 : 1
-        },
-        onMouseEnter: (e) => {
-          if (!disabled && !active) e.currentTarget.style.background = "#e5e7eb";
-        },
-        onMouseLeave: (e) => {
-          if (!disabled && !active) e.currentTarget.style.background = "transparent";
-        }
-      },
-      children
-    );
-    const Row2 = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2, height: 22 } }, children);
-    const Group = ({ children, style }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, padding: "3px 5px", justifyContent: "center", flexShrink: 0, ...style } }, children);
-    const VRule = () => /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd2)", margin: "3px 0" } });
-    const ColorCaret = ({ kind, icon, current, title, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex", alignItems: "center", gap: 1 } }, /* @__PURE__ */ React.createElement(MiniBtn, { title, onClick: () => {
-    }, w: 22 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1 } }, icon, /* @__PURE__ */ React.createElement("div", { style: { width: 13, height: 2.5, background: current || "transparent", border: current ? "none" : "1px dashed #c0c8d0", borderRadius: 1 } }))), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        "data-caret-toggle": true,
-        title: `${title} options`,
-        type: "button",
-        onClick: () => setOpenCaret((c) => c === kind ? null : kind),
-        style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
-      },
-      "▾"
-    ), openCaret === kind && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement(SwatchGrid, { current, onPick: (c) => {
-      onPick(c);
-      setOpenCaret(null);
-    } })));
-    return /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref,
-        onMouseDown: (e) => e.stopPropagation(),
-        style: {
-          position: "fixed",
-          top,
-          left,
-          maxWidth,
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 8,
-          boxShadow: "0 6px 20px rgba(0,0,0,0.16)",
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "stretch",
-          fontFamily: "'Inter',system-ui,sans-serif",
-          zIndex: 10001,
-          padding: 1
-        }
-      },
-      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          ...NO_AUTOFILL,
-          value: sizeText,
-          onChange: (e) => setSizeText(e.target.value),
-          onBlur: (e) => commitSize(e.target.value),
-          onKeyDown: (e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitSize(e.target.value);
-              e.currentTarget.blur();
-            } else if (e.key === "Escape") {
-              setSizeText(sizeDisplay);
-              e.currentTarget.blur();
-            }
-          },
-          placeholder: "—",
-          title: "Text size",
-          "aria-label": "Text size",
-          style: { width: 28, height: 20, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 3, textAlign: "center", padding: 0, fontFamily: "'Inter',system-ui,sans-serif" }
-        }
-      ), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          "data-caret-toggle": true,
-          title: "Text size options",
-          type: "button",
-          onClick: () => setOpenCaret((c) => c === "size" ? null : "size"),
-          style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
-        },
-        "▾"
-      ), openCaret === "size" && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement("div", { style: { padding: "2px 0", minWidth: 56, maxHeight: 220, overflow: "auto" } }, FONT_SIZE_STEPS.map((v) => /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          key: v,
-          onClick: () => {
-            onSetFontSize(v);
-            setOpenCaret(null);
-          },
-          style: {
-            padding: "4px 10px",
-            fontSize: 11,
-            cursor: "pointer",
-            textAlign: "left",
-            background: fb.size === v ? "var(--surf)" : "transparent",
-            fontWeight: fb.size === v ? 700 : 400
-          }
-        },
-        v
-      ))))), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Shrink text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, -1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A−")), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Grow text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, 1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A+"))), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.bold, onClick: () => onSetBold(!fb.bold), title: "Bold" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 800, fontSize: 12 } }, "B")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.italic, onClick: () => onSetItalic(!fb.italic), title: "Italic" }, /* @__PURE__ */ React.createElement("span", { style: { fontStyle: "italic", fontWeight: 600, fontSize: 12, fontFamily: "Georgia,'Times New Roman',serif" } }, "I")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.underline, onClick: () => onSetUnderline(!fb.underline), title: "Underline" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 12, textDecoration: "underline" } }, "U")))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        ColorCaret,
-        {
-          kind: "color",
-          title: "Text color",
-          current: fb.color,
-          icon: /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 800, lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "A"),
-          onPick: onSetTextColor
-        }
-      )), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
-        ColorCaret,
-        {
-          kind: "fill",
-          title: "Highlight / fill",
-          current: fb.fill,
-          icon: /* @__PURE__ */ React.createElement("svg", { width: "12", height: "10", viewBox: "0 0 24 20", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" }), /* @__PURE__ */ React.createElement("path", { d: "M5 9h13" })),
-          onPick: onSetFill
-        }
-      ))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center" } }, /* @__PURE__ */ React.createElement(MiniBtn, { title: "Clear formatting", disabled: !fb.hasAny, onClick: onClearFormat, w: 20 }, /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 20H7l-4-4 8-8 12 12-4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M9 11l4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M22 21H7" })))),
-      /* @__PURE__ */ React.createElement(VRule, null),
-      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center", alignItems: "center", minWidth: 52 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)", textAlign: "center", lineHeight: 1.1, userSelect: "none" } }, fb.count, " ", fb.unit), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--mut)", textAlign: "center", userSelect: "none" } }, "Selected"))
-    );
+  exposeToHarness({
+    stepVisibleColIdx: [() => stepVisibleColIdx],
+    stepGridRow: [() => stepGridRow],
+    ctrlJumpIndex: [() => ctrlJumpIndex],
+    gridCtrlArrowTarget: [() => gridCtrlArrowTarget],
+    gridCellBlank: [() => gridCellBlank],
+    focusGroupIds: [() => focusGroupIds],
+    rowCanFocus: [() => rowCanFocus],
+    focusChipTitle: [() => focusChipTitle],
+    focusToggleTarget: [() => focusToggleTarget],
+    focusReselectTarget: [() => focusReselectTarget]
   });
-  function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
-    const menuRef = useRef4(null);
-    const toolbarRef = useRef4(null);
-    useEffect3(() => {
-      const down = (e) => {
-        if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
-      };
-      const key = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("mousedown", down);
-      document.addEventListener("keydown", key);
-      window.addEventListener("scroll", onClose, true);
-      window.addEventListener("resize", onClose);
-      return () => {
-        document.removeEventListener("mousedown", down);
-        document.removeEventListener("keydown", key);
-        window.removeEventListener("scroll", onClose, true);
-        window.removeEventListener("resize", onClose);
-      };
-    }, [onClose]);
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const mw = 220, mh = 460;
-    const left = x + mw > vw ? vw - mw - 8 : x;
-    const top = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
-    const TB_W = 258, TB_H = 54, TB_GAP = 6;
-    const tbMaxWidth = Math.min(TB_W, vw - 16);
-    let tbTop = top - TB_H - TB_GAP;
-    if (tbTop < 8) tbTop = Math.min(top + mh + TB_GAP, vh - TB_H - 8);
-    const tbLeft = Math.min(Math.max(8, left), vw - tbMaxWidth - 8);
-    const Item = ({ icon, label, hint, danger, disabled, onClick, children }) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        onClick: disabled ? void 0 : onClick,
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          padding: "3px 11px",
-          cursor: disabled ? "default" : "pointer",
-          fontSize: 11,
-          color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--txt)",
-          borderRadius: 4,
-          transition: "background .1s",
-          fontFamily: "'Inter',system-ui,sans-serif",
-          opacity: disabled ? 0.5 : 1
-        },
-        onMouseEnter: (e) => {
-          if (!disabled) e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)";
-        },
-        onMouseLeave: (e) => {
-          e.currentTarget.style.background = "transparent";
-        }
-      },
-      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 12, flexShrink: 0, color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--mut)", width: 14, textAlign: "center" }, "aria-hidden": "true" }),
-      /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, label, children),
-      hint && /* @__PURE__ */ React.createElement("span", { style: { color: "#b0b7c0", fontSize: 9, fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".03em" } }, hint)
-    );
-    const Sep = () => /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } });
-    const fb = fmt || {
-      bold: !!task.bold,
-      italic: !!task.italic,
-      underline: !!task.underline,
-      fill: task.rowColor || null,
-      color: task.textColor || null,
-      size: task.fontSize || null,
-      naturalSize: [13, 12, 11.5, 11][Math.min(task.level || 0, 3)],
-      hasAny: !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize,
-      count: 1,
-      unit: "row",
-      scopeLabel: null
-    };
-    const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
-    const [subMeet, setSubMeet] = useState4(false);
-    const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
-    const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
-    const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
-    const curBodyName = !task.meetingBound ? "" : meetingBody ? meetingBody.name || "Meeting body" : "⚠ calendar missing";
-    const isDeadlineRow = task.deadlineForTaskId != null;
-    const subOpenLeft = left + mw + 210 > vw;
-    const nextMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
-    const prevMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
-    const fmtMeetingStep = (iso) => {
-      const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
-      return isNaN(d) ? "" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    };
-    const SubCaption = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 11px 2px", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", userSelect: "none" } }, children);
-    return ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-        FormatMiniToolbar,
-        {
-          ref: toolbarRef,
-          fmt: fb,
-          top: tbTop,
-          left: tbLeft,
-          maxWidth: tbMaxWidth,
-          onSetBold,
-          onSetItalic,
-          onSetUnderline,
-          onSetTextColor,
-          onSetFill: onSetRowColor,
-          onSetFontSize,
-          onClearFormat
-        }
-      ), /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
-        position: "fixed",
-        top,
-        left,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        padding: "3px 0",
-        zIndex: 9999,
-        boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
-        minWidth: mw
-      } }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-top", label: "Insert Row Above", hint: "Ins", onClick: onInsertAbove }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-bottom", label: "Insert Row Below", onClick: onInsertBelow }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-sitemap", label: "Add Subtask", onClick: onAddSubtask }), /* @__PURE__ */ React.createElement(Sep, null), meetingBody && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-right", label: nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting", disabled: !nextMeetingIso, onClick: () => onStepMeeting(nextMeetingIso) }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-left", label: prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting", disabled: !prevMeetingIso, onClick: () => onStepMeeting(prevMeetingIso) })), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" }, onMouseEnter: () => setSubMeet(true), onMouseLeave: () => setSubMeet(false) }, meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-plus", label: "Add a meeting calendar…", onClick: onAddMeetingCalendar }) : isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: `Deadline for: ${deadlineAnchorName || "(missing task)"}`, hint: "▸" }) : task.meetingBound ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: `Meeting: ${curBodyName}${foreignMatch ? ` — from ${foreignMatch.schedName}` : ""}`, hint: "▸" }) : /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar", hint: "▸" }), subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && /* @__PURE__ */ React.createElement("div", { style: {
-        position: "absolute",
-        top: -4,
-        ...subOpenLeft ? { right: "100%" } : { left: "100%" },
-        minWidth: 200,
-        maxHeight: 320,
-        overflow: "auto",
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-        padding: "3px 0",
-        zIndex: 1e4
-      } }, isDeadlineRow ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, "Deadline row for “", deadlineAnchorName || "missing task", "”"), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag-off", label: "Unlink (keep current date)", onClick: onUnlinkDeadline })) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"), /* @__PURE__ */ React.createElement(Item, { icon: !task.meetingBound ? "ti-check" : "ti-circle", label: "— none —", onClick: onUnbindMeeting }), meetingBodies.map((b) => {
-        const isCur = task.meetingBound && task.meetingBodyId === b.id;
-        return /* @__PURE__ */ React.createElement(Item, { key: b.id, icon: isCur ? "ti-check" : "ti-circle", label: b.name || "Meeting body", onClick: () => onBindMeeting(b.id) });
-      }), otherBodies.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "From other schedules"), otherBodies.map((ob) => {
-        const isCur = task.meetingBound && !localBody && task.meetingBodyId === ob.body.id;
-        return /* @__PURE__ */ React.createElement(
-          Item,
-          {
-            key: `${ob.pid}:${ob.body.id}`,
-            icon: isCur ? "ti-check" : "ti-calendar-event",
-            label: `${ob.body.name || "Meeting body"} · ${ob.schedName}${isCur ? " — copy into this schedule" : ""}`,
-            onClick: () => onImportBindMeeting(ob.pid, ob.body.id)
-          }
-        );
-      })), bindCount === 1 && task.meetingBound && !task.hasChildren && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: "+ Add deadline row (call/file-by date)", onClick: onAddDeadlineRow })), bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "Use as deadline row for"), boundTasks.slice(0, 8).map((bt) => /* @__PURE__ */ React.createElement(Item, { key: bt.id, icon: "ti-flag", label: bt.name, onClick: () => onLinkAsDeadline(bt.id) })))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-settings", label: "Manage meeting calendars…", onClick: onAddMeetingCalendar }))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons", label: hasIcons ? "Change icon…" : "Set icon…", onClick: onSetIcon }), hasIcons && /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons-off", label: "Remove icon", onClick: onRemoveIcon }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate Row", onClick: onDuplicate }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-scissors", label: "Cut", hint: "Ctrl+X", onClick: onCutTask }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-files", label: "Copy", hint: "Ctrl+C", onClick: onCopyTaskFull }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-clipboard", label: "Paste Below", hint: "Ctrl+V", onClick: onPasteTask, disabled: !hasClipboard }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-increase", label: "Indent →", hint: "Alt⇧→", onClick: onIndent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-decrease", label: "Outdent ←", hint: "Alt⇧←", onClick: onOutdent, disabled: !canOutdent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-folder-symlink", label: "Move to…", onClick: onMoveTo }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row", danger: true, onClick: onDelete }))),
-      document.body
-    );
-  }
+
+  // src/workspaces/scheduler/page/grid/gridStyle.js
+  var GRID_LINE = "1px solid var(--bd)";
+  var GRID_LINE_RANGE = "1px solid #93c5fd";
+  var pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map((f) => `linear-gradient(${f},${f})`).join(",");
+  exposeToHarness({
+    GRID_LINE: [() => GRID_LINE],
+    GRID_LINE_RANGE: [() => GRID_LINE_RANGE],
+    pinnedFillLayers: [() => pinnedFillLayers]
+  });
+
+  // src/workspaces/scheduler/page/grid/headers.jsx
+  var { useState: useState4, useEffect: useEffect3, useRef: useRef4 } = React;
   var HEALTH_COL_STYLES = [
     { k: "stoplight", label: "Stoplight" },
     { k: "progressbar", label: "Progress bar" },
@@ -16940,30 +10754,1186 @@ A backup snapshot of the current state is saved first.`,
       document.body
     );
   }
+  exposeToHarness({
+    HEALTH_COL_STYLES: [() => HEALTH_COL_STYLES],
+    HealthColHeaderIcon: [() => HealthColHeaderIcon],
+    HealthColHeader: [() => HealthColHeader],
+    STATUS_PALETTE: [() => STATUS_PALETTE],
+    StatusHeaderDropdown: [() => StatusHeaderDropdown],
+    NOTE_SIZES: [() => NOTE_SIZES],
+    NotesColHeader: [() => NotesColHeader],
+    GridColumnsChooser: [() => GridColumnsChooser],
+    GridHeaderMenu: [() => GridHeaderMenu],
+    FormulaColumnEditor: [() => FormulaColumnEditor]
+  });
+
+  // src/workspaces/scheduler/page/grid/pickers.jsx
+  var { useState: useState5, useEffect: useEffect4, useRef: useRef5 } = React;
+  var PICKER_EVENT = "planar-picker-open";
+  function HealthPicker({ value, onChange }) {
+    const [open, setOpen] = useState5(false);
+    const [hiIdx, setHiIdx] = useState5(-1);
+    const dotRef = useRef5(null);
+    const menuRef = useRef5(null);
+    const idRef = useRef5(`hp-${Math.random()}`);
+    const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.left + r.width / 2 - 10 }), () => setOpen(false));
+    useEffect4(() => {
+      const onOther = (e) => {
+        if (e.detail !== idRef.current) setOpen(false);
+      };
+      document.addEventListener(PICKER_EVENT, onOther);
+      return () => document.removeEventListener(PICKER_EVENT, onOther);
+    }, []);
+    useEffect4(() => {
+      if (!open) return;
+      setHiIdx(-1);
+      const handleDown = (e) => {
+        if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target))
+          setOpen(false);
+      };
+      document.addEventListener("mousedown", handleDown);
+      return () => document.removeEventListener("mousedown", handleDown);
+    }, [open]);
+    useEffect4(() => {
+      if (!open) return;
+      const handleKey = (e) => {
+        if (e.key === "Tab") {
+          setOpen(false);
+          return;
+        }
+        if (!["ArrowDown", "ArrowUp", "Enter", "Escape", " "].includes(e.key)) return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (e.key === "Escape") {
+          setOpen(false);
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          setHiIdx((i) => Math.min(HK.length - 1, i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          setHiIdx((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Enter" || e.key === " ") {
+          setHiIdx((i) => {
+            const sel = HK[i] ?? value;
+            setTimeout(() => {
+              onChange(sel);
+              setOpen(false);
+            }, 0);
+            return i;
+          });
+        }
+      };
+      document.addEventListener("keydown", handleKey, true);
+      return () => document.removeEventListener("keydown", handleKey, true);
+    }, [open, value, onChange]);
+    const handleDotClick = (e) => {
+      e.stopPropagation();
+      document.dispatchEvent(new CustomEvent(PICKER_EVENT, { detail: idRef.current }));
+      setOpen((o) => !o);
+    };
+    const h = HEALTH[value] || HEALTH.gray;
+    const dot = h.dot;
+    const DotSpan = ({ hk, size = 13, active = false, noPointer = false }) => {
+      const hh = HEALTH[hk] || HEALTH.gray;
+      return /* @__PURE__ */ React.createElement("span", { style: {
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: hh.dot,
+        border: hh.border,
+        display: "block",
+        flexShrink: 0,
+        boxShadow: active ? `0 0 0 2px ${hh.dot === "#ffffff" ? "#d1d5db" : hh.dot}44` : "none",
+        transition: "box-shadow .15s",
+        pointerEvents: noPointer ? "none" : "auto"
+      } });
+    };
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        ref: dotRef,
+        onClick: handleDotClick,
+        "data-health-dot": "true",
+        title: "Set status",
+        onMouseEnter: (e) => {
+          if (!open) e.currentTarget.style.background = "rgba(0,0,0,0.045)";
+        },
+        onMouseLeave: (e) => {
+          if (!open) e.currentTarget.style.background = "transparent";
+        },
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          cursor: "pointer",
+          background: open ? "rgba(9,105,218,0.07)" : "transparent",
+          transition: "background .12s"
+        }
+      },
+      /* @__PURE__ */ React.createElement("span", { style: {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        width: 24,
+        height: 18,
+        borderRadius: 4,
+        pointerEvents: "none",
+        outline: open ? `1.5px solid ${dot === "#ffffff" ? "#d1d5db" : dot}` : "1.5px solid transparent",
+        outlineOffset: 0,
+        transition: "outline-color .1s"
+      } }, /* @__PURE__ */ React.createElement(DotSpan, { hk: value, active: open, noPointer: true }))
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ref: menuRef,
+          ...MENU_STOPS_GRID,
+          style: {
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 6,
+            padding: "5px 4px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            zIndex: 9999,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.15)"
+          }
+        },
+        HK.map((hk, i) => /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            key: hk,
+            title: HEALTH[hk].label,
+            onMouseEnter: () => setHiIdx(i),
+            onMouseLeave: () => setHiIdx(-1),
+            onClick: (e) => {
+              e.stopPropagation();
+              onChange(hk);
+              setOpen(false);
+            },
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 28,
+              height: 20,
+              borderRadius: 4,
+              cursor: "pointer",
+              outline: i === hiIdx ? `1.5px solid ${HEALTH[hk].dot === "#ffffff" ? "#d1d5db" : HEALTH[hk].dot}` : "1.5px solid transparent",
+              outlineOffset: 0,
+              transition: "outline-color .1s",
+              background: i === hiIdx ? "var(--surf)" : "transparent"
+            }
+          },
+          /* @__PURE__ */ React.createElement(DotSpan, { hk, active: i === hiIdx, noPointer: true })
+        ))
+      ),
+      document.body
+    ));
+  }
+  function StatusPicker({ value, onChange }) {
+    const [open, setOpen] = useState5(false);
+    const [hiIdx, setHiIdx] = useState5(-1);
+    const ref = useRef5(null);
+    const menuRef = useRef5(null);
+    const idRef = useRef5(`sp-${Math.random()}`);
+    const pos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
+    useEffect4(() => {
+      const onOther = (e) => {
+        if (e.detail !== idRef.current) setOpen(false);
+      };
+      document.addEventListener(PICKER_EVENT, onOther);
+      return () => document.removeEventListener(PICKER_EVENT, onOther);
+    }, []);
+    useEffect4(() => {
+      if (!open) return;
+      setHiIdx(-1);
+      const handleDown = (e) => {
+        if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target))
+          setOpen(false);
+      };
+      document.addEventListener("mousedown", handleDown);
+      return () => document.removeEventListener("mousedown", handleDown);
+    }, [open]);
+    useEffect4(() => {
+      if (!open) return;
+      const handleKey = (e) => {
+        if (e.key === "Tab") {
+          setOpen(false);
+          return;
+        }
+        if (!["ArrowDown", "ArrowUp", "Enter", "Escape", " "].includes(e.key)) return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (e.key === "Escape") {
+          setOpen(false);
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          setHiIdx((i) => Math.min(HK.length - 1, i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          setHiIdx((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Enter" || e.key === " ") {
+          setHiIdx((i) => {
+            const sel = HK[i] ?? value;
+            setTimeout(() => {
+              onChange(sel);
+              setOpen(false);
+            }, 0);
+            return i;
+          });
+        }
+      };
+      document.addEventListener("keydown", handleKey, true);
+      return () => document.removeEventListener("keydown", handleKey, true);
+    }, [open, value, onChange]);
+    const handleClick = (e) => {
+      e.stopPropagation();
+      document.dispatchEvent(new CustomEvent(PICKER_EVENT, { detail: idRef.current }));
+      setOpen((o) => !o);
+    };
+    const Pill = ({ hk, showDot = false }) => {
+      const hh = HEALTH[hk] || HEALTH.gray;
+      const dotColor = hh.dot === "#ffffff" ? "#d1d5db" : hh.dot;
+      return /* @__PURE__ */ React.createElement("span", { style: {
+        background: hh.bar,
+        border: `1px solid ${dotColor}88`,
+        borderRadius: 4,
+        padding: "2px 9px",
+        fontSize: 11,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        color: HDARK[hk],
+        fontFamily: "'Inter',system-ui,sans-serif",
+        whiteSpace: "nowrap",
+        userSelect: "none"
+      } }, showDot && /* @__PURE__ */ React.createElement("span", { style: {
+        width: 7,
+        height: 7,
+        borderRadius: 2,
+        flexShrink: 0,
+        background: hh.dot === "#ffffff" ? "#fff" : dotColor,
+        border: hh.dot === "#ffffff" ? "1.5px solid #d1d5db" : "none"
+      } }), hh.label);
+    };
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        ref,
+        onClick: handleClick,
+        style: { cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, color: "var(--mut)", fontSize: 11, fontFamily: "'Inter',system-ui,sans-serif" }
+      },
+      (HEALTH[value] || HEALTH.gray).label
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ref: menuRef,
+          ...MENU_STOPS_GRID,
+          style: {
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 6,
+            padding: "5px 6px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+            zIndex: 9999,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.15)"
+          }
+        },
+        HK.map((hk, i) => /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            key: hk,
+            onMouseEnter: () => setHiIdx(i),
+            onMouseLeave: () => setHiIdx(-1),
+            onClick: (e) => {
+              e.stopPropagation();
+              onChange(hk);
+              setOpen(false);
+            },
+            style: {
+              cursor: "pointer",
+              padding: "1px 0",
+              borderRadius: 3,
+              display: "block",
+              background: i === hiIdx ? "var(--surf)" : "transparent"
+            }
+          },
+          /* @__PURE__ */ React.createElement(Pill, { hk, showDot: true })
+        ))
+      ),
+      document.body
+    ));
+  }
+  var predLagPlainEnglish = (raw) => {
+    const preds = parsePreds(raw);
+    if (!preds.length) return "";
+    return preds.map((p) => {
+      const base = {
+        FS: `After task ${p.id} finishes`,
+        SS: `When task ${p.id} starts`,
+        FF: `As task ${p.id} finishes`,
+        SF: `Until task ${p.id} starts`
+      }[p.type] || `After task ${p.id} finishes`;
+      if (!p.lag) return base;
+      const n = Math.abs(p.lag), unit = p.lagUnit === "calendar" ? "calendar" : "working";
+      const days = `${n} ${unit} day${n === 1 ? "" : "s"}`;
+      return p.lag > 0 ? `${base}, then ${days}` : `${base}, ${days} earlier`;
+    }).join(" · ");
+  };
+  function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit, tabStep }) {
+    const [hint, setHint] = useState5(() => predLagPlainEnglish(seedVal));
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...NO_AUTOFILL,
+        autoFocus: true,
+        className: "ei",
+        placeholder: "e.g. 2, 3SS, 4FF+2d  ·  add 'cd' for calendar days",
+        defaultValue: seedVal,
+        onChange: (e) => setHint(predLagPlainEnglish(e.target.value)),
+        onBlur: (e) => commit(taskId, colKey, e.target.value),
+        onKeyDown: (e) => {
+          if (e.key === "Enter") {
+            e.nativeEvent.stopImmediatePropagation();
+            commitAndAdvance(taskId, colKey, e.target.value);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.nativeEvent.stopImmediatePropagation();
+            setEdit(null);
+            return;
+          }
+          if (e.key === "Tab") {
+            e.preventDefault();
+            e.nativeEvent.stopImmediatePropagation();
+            commit(taskId, colKey, e.target.value);
+            tabStep(e.shiftKey);
+          }
+        }
+      }
+    ), /* @__PURE__ */ React.createElement("div", { style: {
+      position: "absolute",
+      top: "100%",
+      left: 0,
+      marginTop: 2,
+      zIndex: 40,
+      minWidth: 210,
+      maxWidth: 340,
+      background: "var(--surf,#f6f8fa)",
+      border: "1px solid var(--bd2,#d0d7de)",
+      borderRadius: 6,
+      boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+      padding: "6px 9px",
+      fontSize: 11,
+      lineHeight: 1.45,
+      textAlign: "left",
+      whiteSpace: "normal",
+      pointerEvents: "none",
+      fontFamily: "'Inter', system-ui, sans-serif"
+    } }, hint ? /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600, color: "var(--txt,#1f2328)", marginBottom: 3 } }, hint) : null, /* @__PURE__ */ React.createElement("div", { style: { color: "var(--mut,#57606a)" } }, "'d' = working days · 'cd' = calendar days (weekends counted)")));
+  }
+  var TASK_ICON_PX = 16;
+  var TASK_ICON_GAP = 2;
+  var TASK_ICON_PAD = 2;
+  var TASK_ICON_AFTER = 2;
+  var taskIconsW = (n) => n > 0 ? n * TASK_ICON_PX + (n - 1) * TASK_ICON_GAP + 2 * TASK_ICON_PAD + TASK_ICON_AFTER : 0;
+  var TASK_ICON_UID = 0;
+  function TaskIconGlyph({ id, size = 16, faded = false }) {
+    const [failed, setFailed] = React.useState(false);
+    const uidRef = React.useRef(null);
+    if (uidRef.current === null) uidRef.current = "ti" + ++TASK_ICON_UID;
+    const TI = window.PlanyrTaskIcons;
+    const st = { display: "block", flexShrink: 0, opacity: faded ? 0.55 : 1 };
+    if (TI.isCustom(id)) {
+      const nm = TI.customName(id);
+      if (!TI.CUSTOM_SVG[nm]) return null;
+      return /* @__PURE__ */ React.createElement("svg", { viewBox: TI.customViewBox(nm), width: size, height: size, "aria-hidden": "true", style: st, dangerouslySetInnerHTML: { __html: TI.customMarkup(nm, uidRef.current) } });
+    }
+    if (TI.isBuiltinSvg(id)) {
+      const b = TI.BUILTIN_SVG[TI.svgName(id)];
+      if (!b) return null;
+      return /* @__PURE__ */ React.createElement("svg", { viewBox: b.viewBox, width: size, height: size, fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", style: st, dangerouslySetInnerHTML: { __html: b.markup } });
+    }
+    if (failed) return /* @__PURE__ */ React.createElement("span", { "aria-hidden": "true", style: { ...st, width: size, height: size, fontSize: Math.round(size * 0.8), lineHeight: size + "px", textAlign: "center" } }, id);
+    return /* @__PURE__ */ React.createElement("img", { src: "/sequence/vendor/twemoji/" + TI.twemojiFile(id) + ".svg", width: size, height: size, alt: "", draggable: false, style: st, onError: () => setFailed(true) });
+  }
+  function TaskIconPicker({ anchorRef, icons, onChange, onClose }) {
+    const TI = window.PlanyrTaskIcons;
+    const [q, setQ] = React.useState("");
+    const rootRef = React.useRef(null);
+    const PW = 336;
+    const pos = useAnchoredPopover(true, anchorRef, (r) => {
+      const room = window.innerHeight - r.bottom - 12, above = room < 300 && r.top > room;
+      const maxH = Math.max(220, Math.min(420, (above ? r.top : room) - 8));
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - PW - 8));
+      return above ? { left, bottom: window.innerHeight - r.top + 4, maxH } : { left, top: r.bottom + 4, maxH };
+    }, onClose);
+    React.useEffect(() => {
+      const down = (e) => {
+        const el = rootRef.current, a = anchorRef.current;
+        if (el && el.contains(e.target)) return;
+        if (a && a.contains(e.target)) return;
+        onClose();
+      };
+      document.addEventListener("mousedown", down);
+      return () => document.removeEventListener("mousedown", down);
+    }, []);
+    const groups = TI.searchTaskIcons(q);
+    const shown = TI.normalizeTaskIcons(icons);
+    if (!pos) return null;
+    return ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ref: rootRef,
+          "data-task-icon-picker": true,
+          ...MENU_STOPS_GRID,
+          role: "dialog",
+          "aria-label": "Choose task icons",
+          onKeyDown: (e) => {
+            e.nativeEvent.stopImmediatePropagation();
+            e.stopPropagation();
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onClose();
+            }
+          },
+          onDoubleClick: (e) => e.stopPropagation(),
+          style: {
+            position: "fixed",
+            left: pos.left,
+            top: pos.top,
+            bottom: pos.bottom,
+            width: PW,
+            maxHeight: pos.maxH,
+            zIndex: 1e5,
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 9,
+            boxShadow: "0 8px 28px rgba(0,0,0,.18)",
+            fontFamily: "'Inter',system-ui,sans-serif",
+            overflow: "hidden"
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 8px 6px", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            ...NO_AUTOFILL,
+            autoFocus: true,
+            type: "text",
+            value: q,
+            onChange: (e) => setQ(e.target.value),
+            placeholder: "Search icons — tia, sewer, roof, tilt…",
+            "aria-label": "Search icons",
+            style: { width: "100%", height: 28, border: "1px solid var(--bd2)", borderRadius: 6, padding: "0 8px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "var(--txt)", background: "var(--bg)" },
+            onFocus: (e) => {
+              e.target.style.borderColor = "var(--blue)";
+            },
+            onBlur: (e) => {
+              e.target.style.borderColor = "";
+            }
+          }
+        )),
+        /* @__PURE__ */ React.createElement("div", { style: { overflowY: "auto", padding: "4px 8px 8px", flex: "1 1 auto", minHeight: 0 } }, groups.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 6px", fontSize: 12, color: "var(--mut)", textAlign: "center" } }, "Nothing matches “", q.trim(), "”. Try another word."), groups.map((g2) => /* @__PURE__ */ React.createElement("div", { key: g2.key, "data-icon-group": g2.key }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", padding: "8px 2px 3px" } }, g2.title), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 2 } }, g2.items.map((it) => {
+          const on = shown.includes(it.id), lab = TI.iconLabel(it.id, it.label);
+          return /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              key: it.id,
+              type: "button",
+              className: "ti-pick-cell",
+              "data-icon-id": it.id,
+              "aria-pressed": on,
+              "aria-label": lab,
+              title: lab,
+              onClick: () => onChange(TI.toggleTaskIcon(shown, it.id))
+            },
+            /* @__PURE__ */ React.createElement(TaskIconGlyph, { id: it.id, size: 22 }),
+            TI.isDrawn(it.id) && /* @__PURE__ */ React.createElement("span", { "aria-hidden": "true", style: { position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "#16a34a" } })
+          );
+        }))))),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", borderTop: "1px solid var(--bd)", flexShrink: 0, background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("a", { href: "/sequence/vendor/twemoji/CREDITS.txt", target: "_blank", rel: "noopener", title: "Emoji art: Twemoji, CC-BY 4.0", style: { fontSize: 10, color: "var(--mut)", textDecoration: "none", marginRight: "auto" } }, "Emoji art: Twemoji (CC-BY 4.0)"), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-icon-clear": true,
+            disabled: shown.length === 0,
+            onClick: () => onChange([]),
+            style: { height: 24, padding: "0 10px", fontSize: 11.5, fontFamily: "inherit", borderRadius: 5, border: "1px solid var(--bd2)", background: "var(--bg)", color: shown.length ? "var(--txt)" : "var(--mut)", cursor: shown.length ? "pointer" : "default" }
+          },
+          "Clear"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-icon-done": true,
+            onClick: onClose,
+            style: { height: 24, padding: "0 12px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "1px solid var(--blue)", background: "var(--blue)", color: "#fff", cursor: "pointer" }
+          },
+          "Done"
+        ))
+      ),
+      document.body
+    );
+  }
+  function TaskIconSlot({ task, updateTask }) {
+    const TI = window.PlanyrTaskIcons;
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef(null);
+    const icons = TI.normalizeTaskIcons(task.icons);
+    const close = React.useCallback(() => setOpen(false), []);
+    if (icons.length === 0) return null;
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        ref,
+        "data-task-icon-slot": icons.length,
+        role: "button",
+        "aria-label": "Task icons",
+        "aria-haspopup": "dialog",
+        "aria-expanded": open,
+        onMouseDown: (e) => e.stopPropagation(),
+        onDoubleClick: (e) => e.stopPropagation(),
+        onClick: (e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        },
+        style: { height: ROW_H - 2, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-start", gap: TASK_ICON_GAP, padding: "0 " + TASK_ICON_PAD + "px", marginRight: TASK_ICON_AFTER, borderRadius: 3, cursor: "pointer", userSelect: "none" }
+      },
+      icons.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, "data-task-icon": id, title: TI.iconLabel(id), style: { display: "inline-flex" } }, /* @__PURE__ */ React.createElement(TaskIconGlyph, { id, size: TASK_ICON_PX })))
+    ), open && /* @__PURE__ */ React.createElement(TaskIconPicker, { anchorRef: ref, icons, onChange: (next) => updateTask(task.id, { icons: next }), onClose: close }));
+  }
+  function TaskIconPickerHost({ ctx, tasks, updateTask, onClose }) {
+    const anchorRef = React.useRef(null);
+    const pointRef = React.useRef(null);
+    if (!anchorRef.current) {
+      let el = document.querySelector('[data-task-row="' + ctx.taskId + '"] [data-task-name]');
+      if (el) {
+        const s = anchorSurroundings(el);
+        if (anchorHidden(el.getBoundingClientRect(), s.area, s.occluders)) el = null;
+      }
+      if (!el) {
+        el = document.createElement("span");
+        el.style.cssText = "position:fixed;width:1px;height:1px;pointer-events:none;visibility:hidden;left:" + ctx.x + "px;top:" + ctx.y + "px";
+        document.body.appendChild(el);
+        pointRef.current = el;
+      }
+      anchorRef.current = el;
+    }
+    React.useEffect(() => () => {
+      if (pointRef.current) pointRef.current.remove();
+    }, []);
+    const task = (tasks || []).find((t) => t.id === ctx.taskId);
+    if (!task) return null;
+    return /* @__PURE__ */ React.createElement(TaskIconPicker, { anchorRef, icons: window.PlanyrTaskIcons.normalizeTaskIcons(task.icons), onChange: (next) => updateTask(ctx.taskId, { icons: next }, ctx.projId), onClose });
+  }
+  function PhaseIconSummary({ tasks, taskId }) {
+    const sum = window.PlanyrTaskIcons.phaseIconSummary(tasks, taskId);
+    if (!sum.icons.length) return null;
+    const MAXI = 8, vis = sum.icons.slice(0, MAXI), more = sum.icons.length - vis.length;
+    return /* @__PURE__ */ React.createElement("span", { "data-phase-icons": true, style: { display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 8, flex: "0 1000 auto", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" } }, "   ", vis.map((id) => /* @__PURE__ */ React.createElement(TaskIconGlyph, { key: id, id, size: 13, faded: true })), more > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "+", more));
+  }
+  exposeToHarness({
+    PICKER_EVENT: [() => PICKER_EVENT],
+    HealthPicker: [() => HealthPicker],
+    StatusPicker: [() => StatusPicker],
+    predLagPlainEnglish: [() => predLagPlainEnglish],
+    PredEditor: [() => PredEditor],
+    TASK_ICON_PX: [() => TASK_ICON_PX],
+    TASK_ICON_GAP: [() => TASK_ICON_GAP],
+    TASK_ICON_PAD: [() => TASK_ICON_PAD],
+    TASK_ICON_AFTER: [() => TASK_ICON_AFTER],
+    taskIconsW: [() => taskIconsW],
+    TASK_ICON_UID: [() => TASK_ICON_UID, (v) => {
+      TASK_ICON_UID = v;
+    }],
+    TaskIconGlyph: [() => TaskIconGlyph],
+    TaskIconPicker: [() => TaskIconPicker],
+    TaskIconSlot: [() => TaskIconSlot],
+    TaskIconPickerHost: [() => TaskIconPickerHost],
+    PhaseIconSummary: [() => PhaseIconSummary]
+  });
+
+  // src/workspaces/scheduler/page/grid/Cell.jsx
+  function Cell({ task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef, data }) {
+    const tabStep = (back) => setSelectedColIdx((i) => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : 1));
+    const cf = task.cellFmt?.[col.k];
+    const s = {
+      fontSize: cf?.size || 12,
+      padding: "0 8px",
+      height: ROW_H,
+      display: "flex",
+      alignItems: "center",
+      overflow: "hidden",
+      whiteSpace: "nowrap",
+      color: cf?.color || void 0,
+      textDecoration: cf?.underline ? "underline" : void 0
+    };
+    const mono = { fontFamily: "'Inter',system-ui,sans-serif" };
+    if (col.t === "formula") {
+      const fc = formulaCell;
+      if (!fc || fc.display === "" || fc.display == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "flex-end", color: "var(--mut)" } });
+      if (!fc.ok) return /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: { ...s, ...mono, justifyContent: "flex-end", color: "var(--danger, #d83a3a)", fontSize: 11, fontWeight: 600 },
+          title: fc.detail ? fc.error + " — " + fc.detail : fc.error
+        },
+        fc.display
+      );
+      return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "flex-end", color: "var(--txt)", fontSize: 11 }, title: fc.display }, fc.display);
+    }
+    const isPickerCol = col.k === "health" || col.k === "status";
+    const isEdit = !isPickerCol && edit?.taskId === task.id && edit?.col === col.k;
+    if (isEdit) {
+      const isParentDateLocked = task.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
+      if (!isParentDateLocked) {
+        if (col.t === "date") {
+          const seedVal2 = editStartChar != null ? editStartChar : toShortDate(task[col.k]);
+          return /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              ...NO_AUTOFILL,
+              autoFocus: true,
+              className: "ei",
+              placeholder: "M/D or M/D/YY",
+              style: { textAlign: "center", fontSize: 11 },
+              defaultValue: seedVal2,
+              onBlur: (e) => commit(task.id, col.k, e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") {
+                  e.nativeEvent.stopImmediatePropagation();
+                  commitAndAdvance(task.id, col.k, e.target.value);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.nativeEvent.stopImmediatePropagation();
+                  setEdit(null);
+                  return;
+                }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  e.nativeEvent.stopImmediatePropagation();
+                  commit(task.id, col.k, e.target.value);
+                  tabStep(e.shiftKey);
+                }
+              }
+            }
+          );
+        }
+        if (col.k === "name") {
+          const ls = [{ fontSize: 13, fontWeight: 600 }, { fontSize: 12, fontWeight: 500 }, { fontSize: 11.5, fontWeight: 400 }, { fontSize: 11, fontWeight: 400 }][Math.min(task.level, 3)];
+          const seedVal2 = editStartChar != null ? editStartChar : task.name ?? "";
+          const cf2 = task.cellFmt?.name;
+          const fw = task.bold || cf2?.bold ? 700 : ls.fontWeight;
+          const fs = task.italic || cf2?.italic ? "italic" : "normal";
+          const fSize = cf2?.size ?? task.fontSize ?? ls.fontSize;
+          const fColor = cf2?.color ?? task.textColor ?? void 0;
+          const fUnderline = task.underline || cf2?.underline ? "underline" : "none";
+          return /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              ...NO_AUTOFILL,
+              autoFocus: true,
+              className: "ei",
+              defaultValue: seedVal2,
+              style: { fontSize: fSize, fontWeight: fw, fontStyle: fs, color: fColor, textDecoration: fUnderline, paddingLeft: 20 + taskIconsW(window.PlanyrTaskIcons.normalizeTaskIcons(task.icons).length) + task.level * 14 },
+              onFocus: (e) => {
+                if (editStartChar == null) e.target.select();
+              },
+              onBlur: (e) => commit(task.id, "name", e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") {
+                  e.nativeEvent.stopImmediatePropagation();
+                  commitAndAdvance(task.id, "name", e.target.value);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.nativeEvent.stopImmediatePropagation();
+                  setEdit(null);
+                  return;
+                }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  e.nativeEvent.stopImmediatePropagation();
+                  commit(task.id, "name", e.target.value);
+                  tabStep(e.shiftKey);
+                }
+              }
+            }
+          );
+        }
+        if (col.k === "responsibleParty") {
+          return /* @__PURE__ */ React.createElement(
+            ContactPicker,
+            {
+              variant: "grid",
+              owners: ownerListOf(task),
+              seedText: editStartChar != null ? editStartChar : "",
+              contacts: contacts || [],
+              onOwnersChange: (names, newContacts) => {
+                (newContacts || []).forEach((nc) => addContact && addContact(nc));
+                applyCommit(task.id, "responsibleParty", names);
+              },
+              onClose: () => setEdit(null)
+            }
+          );
+        }
+        const seedVal = editStartChar != null ? editStartChar : col.k === "predecessors" ? fmtPreds(task.predecessors) : task[col.k] ?? "";
+        if (col.k === "predecessors") {
+          return /* @__PURE__ */ React.createElement(
+            PredEditor,
+            {
+              seedVal,
+              taskId: task.id,
+              colKey: col.k,
+              commit,
+              commitAndAdvance,
+              setEdit,
+              tabStep
+            }
+          );
+        }
+        return /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            ...NO_AUTOFILL,
+            autoFocus: true,
+            className: "ei",
+            placeholder: col.k === "duration" ? "e.g. 10d, 3w, 30cd, 2mo" : void 0,
+            style: col.k === "duration" || col.k === "percentComplete" ? { textAlign: "center", fontSize: 11 } : void 0,
+            defaultValue: seedVal,
+            onBlur: (e) => commit(task.id, col.k, e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === "Enter") {
+                e.nativeEvent.stopImmediatePropagation();
+                commitAndAdvance(task.id, col.k, e.target.value);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.nativeEvent.stopImmediatePropagation();
+                setEdit(null);
+                return;
+              }
+              if (e.key === "Tab") {
+                e.preventDefault();
+                e.nativeEvent.stopImmediatePropagation();
+                commit(task.id, col.k, e.target.value);
+                tabStep(e.shiftKey);
+              }
+            }
+          }
+        );
+      }
+    }
+    switch (col.k) {
+      case "id": {
+        const hasCellFmt = !!(task.cellFmt && Object.keys(task.cellFmt).length);
+        const hasFmt = !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize || hasCellFmt;
+        const fmtSummary = hasFmt ? `Formatted: ${[task.rowColor && "fill color", task.bold && "bold", task.italic && "italic", task.underline && "underline", task.textColor && "text color", task.fontSize && "text size", hasCellFmt && "cell formats"].filter(Boolean).join(", ")}` : "Click to select row";
+        return (
+          // B<NEW> — paddingLeft was 4 while the drag grip (a separate absolutely-positioned
+          // overlay, left:0 width:8) sits on top of it, so the number's own left edge landed
+          // UNDER the grip icon with no visible gap ("crab icon" — voice transcription for
+          // GRAB icon — "butted right up against the number", owner report 2026-08-25). 12
+          // clears the grip's 8px strip plus a small breathing gap, without touching the
+          // grip's hit area (still exactly 8px, pointer-events always on — CHROME-NEVER-
+          // EATS-A-PRESS: widening the grip itself previously broke row-range select).
+          /* @__PURE__ */ React.createElement("span", { title: fmtSummary, style: { ...s, ...mono, color: "var(--mut)", fontSize: 11, cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 3, paddingLeft: 12 } }, task.rowColor && /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: 1.5, background: task.rowColor, border: "1px solid rgba(0,0,0,0.2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement("span", null, task.id), task.bold && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 800, color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "B"), task.italic && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 700, fontStyle: "italic", color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "I"), task.underline && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 700, textDecoration: "underline", color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "U"))
+        );
+      }
+      case "name":
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, paddingLeft: 4 + task.level * 14, gap: 0, flex: 1, minWidth: 0 } }, proj?.tasks.some((t) => t.parentId === task.id) ? /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            className: "ti-chev",
+            onClick: (e) => {
+              e.stopPropagation();
+              const opening = !task.isExpanded;
+              if (opening && expandAnchorRef) expandAnchorRef.current = task.id;
+              updateTask(task.id, { isExpanded: opening });
+            },
+            onMouseDown: (e) => e.stopPropagation(),
+            onDoubleClick: (e) => e.stopPropagation(),
+            title: task.isExpanded ? "Collapse" : "Expand",
+            style: {
+              cursor: "pointer",
+              flexShrink: 0,
+              width: 16,
+              height: ROW_H - 2,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 3,
+              color: task.isExpanded ? "var(--blue)" : "var(--mut)",
+              userSelect: "none"
+            }
+          },
+          /* @__PURE__ */ React.createElement("i", { className: "ti " + (task.isExpanded ? "ti-chevron-down" : "ti-chevron-right"), "aria-hidden": "true", style: { fontSize: 14, lineHeight: 1 } })
+        ) : /* @__PURE__ */ React.createElement("span", { style: { width: 16, flexShrink: 0, display: "inline-block" } }), /* @__PURE__ */ React.createElement(TaskIconSlot, { task, updateTask }), (() => {
+          const ls = [{ fontSize: 13, fontWeight: 600 }, { fontSize: 12, fontWeight: 500 }, { fontSize: 11.5, fontWeight: 400 }, { fontSize: 11, fontWeight: 400 }][Math.min(task.level, 3)];
+          const cf2 = task.cellFmt?.name;
+          const isEmpty = !task.name;
+          const fw = task.bold || cf2?.bold ? 700 : ls.fontWeight;
+          const fs = task.italic || cf2?.italic || isEmpty ? "italic" : "normal";
+          const fSize = cf2?.size ?? task.fontSize ?? ls.fontSize;
+          const fColor = cf2?.color ?? task.textColor;
+          const fUnderline = task.underline || cf2?.underline ? "underline" : "none";
+          return /* @__PURE__ */ React.createElement("span", { title: task.name || void 0, "data-task-name": true, style: { overflow: "hidden", textOverflow: "ellipsis", color: isEmpty ? "var(--mut)" : fColor || "#1f2328", fontStyle: fs, fontSize: fSize, fontWeight: fw, textDecoration: fUnderline, minWidth: 0 } }, task.name || "New task");
+        })(), !task.isExpanded && task.hasChildren && /* @__PURE__ */ React.createElement(PhaseIconSummary, { tasks: proj?.tasks, taskId: task.id }), rowCanFocus(task) && /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            "data-focus-chip": task.focused ? "on" : "off",
+            onClick: (e) => {
+              e.stopPropagation();
+              updateTask(task.id, { focused: !task.focused });
+            },
+            onDoubleClick: (e) => e.stopPropagation(),
+            title: focusChipTitle(task),
+            style: {
+              marginLeft: "auto",
+              flexShrink: 0,
+              cursor: "pointer",
+              userSelect: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 10,
+              fontWeight: 600,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              color: "var(--mut)",
+              padding: "2px 7px",
+              borderRadius: 10,
+              background: task.focused ? "var(--surf)" : "transparent",
+              border: `1px solid ${task.focused ? "var(--bd2)" : "transparent"}`,
+              transition: "background .12s,border-color .12s"
+            },
+            onMouseEnter: (e) => {
+              e.currentTarget.style.background = "var(--surf)";
+              e.currentTarget.style.borderColor = "var(--bd2)";
+            },
+            onMouseLeave: (e) => {
+              if (!task.focused) {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.borderColor = "transparent";
+              }
+            }
+          },
+          /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round", style: { opacity: 0.65, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M3 5h18M6 12h12M10 19h4" })),
+          task.focused && task.hideableDone > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "#16a34a", flexShrink: 0 } }), task.hideableDone),
+          task.focused && task.hideablePaused > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "#9ca3af", flexShrink: 0 } }), task.hideablePaused),
+          task.focused && task.hideableUpcoming > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "var(--bg)", border: "1.5px solid #d1d5db", flexShrink: 0 } }), task.hideableUpcoming)
+        ));
+      case "start":
+      case "end": {
+        const rawDate = task[col.k];
+        if (!rawDate) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)", fontSize: 11 } });
+        const [y, m, d] = rawDate.split("-");
+        const dateStr = String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
+        const isStart = col.k === "start";
+        const isPinned = !task.hasChildren && (isStart ? startIsPinned(task) : task.pinnedEnd);
+        const isConflict = !task.hasChildren && (isStart ? !!task.startConflict : !!task.finishConflict);
+        const unpin = (e) => {
+          e.stopPropagation();
+          if (isStart) updateTask(task.id, unpinStartPatch(task), projId);
+          else updateTask(task.id, { pinnedEnd: false, durValue: taskDurValue(task), durUnit: taskDurUnit(task) }, projId);
+        };
+        return /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            style: { ...s, ...mono, justifyContent: "center", color: isConflict ? "var(--danger,#d83a3a)" : task.hasChildren ? "#94a3b8" : "var(--mut)", fontSize: 11, fontWeight: isConflict ? 700 : void 0 },
+            title: task.hasChildren ? "Computed from subtasks" : isConflict ? isStart ? "Pinned start is earlier than the predecessors allow — the pin is winning and the dependency is being overridden. Unpin to follow the predecessors, or change the dependency." : "Locked finish can't be met — the predecessor chain needs more time. Move the finish, shorten the duration, or change the dependency." : isPinned ? isStart ? "Start pinned — click the lock to let the predecessor drive this date" : "Finish locked (hard constraint) — click the lock to let it flow from start + duration" : void 0
+          },
+          isConflict && /* @__PURE__ */ React.createElement("span", { style: { marginRight: 2, flexShrink: 0, fontSize: 11 } }, "⚠"),
+          isPinned && /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              title: isStart ? "Pinned start — click to unpin and let the predecessor drive this date" : "Locked finish — click to unlock and let it flow from start + duration",
+              onClick: unpin,
+              style: { display: "inline-flex", alignItems: "center", marginRight: 3, cursor: "pointer", color: isConflict ? "var(--danger,#d83a3a)" : "var(--amber)", opacity: 0.85, flexShrink: 0 },
+              onMouseEnter: (e) => e.currentTarget.style.opacity = "1",
+              onMouseLeave: (e) => e.currentTarget.style.opacity = "0.85"
+            },
+            /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "11", width: "18", height: "11", rx: "2", ry: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M7 11V7a5 5 0 0 1 10 0v4" }))
+          ),
+          isStart && !task.hasChildren && task.meetingBound && MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
+            const info = meetingBoundInfo(task);
+            const color = info?.state === "danger" ? "var(--danger,#d83a3a)" : info?.state === "warning" ? "var(--warn-text,#b45309)" : "var(--mut)";
+            const b = info?.body || {};
+            const trace = meetingBindingTrace(task, (id) => (proj?.tasks || []).find((t) => t.id === id), b);
+            const traceLines = [];
+            if (trace && trace.driver) {
+              const { dep, predTask } = trace.driver;
+              const typeWord = { FS: "finish-to-start", SS: "start-to-start", FF: "finish-to-finish", SF: "start-to-finish" }[(dep.type || "FS").toUpperCase()] || "finish-to-start";
+              const lagPhrase = dep.lag ? `, plus a ${Math.abs(dep.lag)}-${dep.lagUnit === "calendar" ? "calendar" : "working"}-day lag (${typeWord}),` : ` (${typeWord}, no lag)`;
+              traceLines.push(`Driven by "${predTask.name || "task " + predTask.id}", finishing ${fmtD(predTask.end || predTask.start)}${lagPhrase} ready no earlier than ${fmtD(trace.earliestDate)}.`);
+              if (trace.skipped.length) traceLines.push(`Skipped ${trace.skipped.length === 1 ? "meeting" : "meetings"}: ${trace.skipped.map((sk) => `${fmtD(sk.meetingDate)} (agenda closed ${fmtD(sk.deadline)}, before the packet was ready)`).join("; ")}.`);
+            }
+            const dupFlag = meetingDoubleLagFlag(task, b);
+            const title = [
+              `${b.name || "Meeting body"}${b.jurisdiction ? " · " + b.jurisdiction : ""}`,
+              `Meets ${cadenceSummary(b)}; ${agendaLeadSummary(b)}.`,
+              task.start ? `Hearing ${fmtD(task.start)} — file the agenda by ${fmtD(info?.deadline)}${b.cutoffTime ? " (" + b.cutoffTime + ")" : ""}.` : "No eligible meeting yet — waiting on a predecessor date.",
+              ...traceLines,
+              dupFlag ? "⚠ Possible double count: this task's own link lag and this calendar's filing lead look like they're counting the same wait — see the ⚠×2 mark on this row." : null,
+              info?.state === "danger" ? task.meetingDateOffCalendar ? "⚠ INFEASIBLE: this date isn't a scheduled meeting day for this body at all — roll to the next meeting or unpin." : "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin." : info?.state === "warning" ? `⚠ Only ${info.floatBD} working day(s) of float before the agenda deadline.` : "This is a meeting-calendar date: it can't be freely typed, has no duration, and slips by a full cycle if the deadline is missed.",
+              b.verifiedOn ? `Calendar verified ${fmtD(b.verifiedOn)}.` : "Calendar is rule-derived (unverified)."
+            ].filter(Boolean).join("\n");
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { title, style: { display: "inline-flex", alignItems: "center", marginRight: 3, color, flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" }))), dupFlag && (() => {
+              const fixTitle = `⚠ Possible double count: the ${dupFlag.lagN}-${dupFlag.unit}-day link lag and "${b.name || "this calendar"}"'s own ${dupFlag.leadN}-${dupFlag.unit}-day filing lead may both be counting the same wait, pushing this task out an extra meeting cycle.
+Click to drop the duplicate lag (keeps the predecessor link and the meeting binding). Undo with Ctrl+Z.`;
+              return /* @__PURE__ */ React.createElement(
+                "span",
+                {
+                  title: fixTitle,
+                  onClick: (e) => {
+                    e.stopPropagation();
+                    const patch = dropDuplicateLagPatch(task, dupFlag);
+                    if (patch) updateTask(task.id, { predecessors: patch }, projId);
+                  },
+                  style: { display: "inline-flex", alignItems: "center", marginRight: 3, color: "var(--warn-text,#b45309)", flexShrink: 0, cursor: "pointer" }
+                },
+                /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 9v4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 17h.01" }), /* @__PURE__ */ React.createElement("path", { d: "M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.71 3.86a2 2 0 0 0-3.42 0Z" }))
+              );
+            })());
+          })(),
+          isStart && !task.hasChildren && task.meetingBound && !MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
+            const title = [
+              "⚠ Bound to a meeting calendar that no longer exists" + (task.meetingBodyId ? ` (id ${task.meetingBodyId})` : "") + ".",
+              "Its date is held at the last known value but won't update on its own — this usually means the calendar was lost when another browser tab saved over it.",
+              "Fix: re-create or re-select the calendar in Settings → Meeting Calendars, or unbind this task (right-click → Meeting binding)."
+            ].join("\n");
+            return /* @__PURE__ */ React.createElement("span", { title, "aria-label": "Bound to a missing meeting calendar", style: { position: "relative", display: "inline-flex", alignItems: "center", marginRight: 3, color: "var(--danger,#d83a3a)", flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" })), /* @__PURE__ */ React.createElement("span", { "aria-hidden": true, style: { position: "absolute", top: -2, right: -2, width: 5, height: 5, borderRadius: "50%", background: "var(--danger,#d83a3a)" } }));
+          })(),
+          isStart && !task.hasChildren && task.deadlineForTaskId != null && (() => {
+            const anchor = (proj?.tasks || []).find((a) => a.id === task.deadlineForTaskId);
+            const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
+            const color = task.deadlineInfeasible ? "var(--danger,#d83a3a)" : "var(--mut)";
+            const title = [
+              anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}"${body && body.name ? ` (${body.name})` : ""}.` : "Deadline row — its anchor task is missing; the date no longer auto-updates.",
+              body ? `Always sits ${agendaLeadSummary(body).replace("agenda due ", "")} the meeting — moves automatically when the meeting date moves.` : "",
+              task.deadlineInfeasible ? "⚠ INFEASIBLE: this row's predecessors land AFTER the call/file-by date." : ""
+            ].filter(Boolean).join("\n");
+            return /* @__PURE__ */ React.createElement("span", { title, style: { display: "inline-flex", alignItems: "center", marginRight: 3, color, flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M4 21V4" }), /* @__PURE__ */ React.createElement("path", { d: "M4 4h12l-2 4 2 4H4" })));
+          })(),
+          dateStr
+        );
+      }
+      case "meetingBody": {
+        if (task.hasChildren) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", color: "#94a3b8" }, title: "A summary/parent can't be meeting-bound" }, "—");
+        if (task.deadlineForTaskId != null) {
+          const anchor = (proj?.tasks || []).find((a) => a.id === task.deadlineForTaskId);
+          const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
+          return /* @__PURE__ */ React.createElement("span", { style: { ...s, fontSize: 10, color: "var(--mut)" }, title: anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}" — unlink via right-click to bind it directly` : "Deadline row (anchor missing)" }, "deadline", body && body.name ? ` · ${body.name}` : "");
+        }
+        const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
+        const cur = task.meetingBound ? task.meetingBodyId || "" : "";
+        const localMatch = cur ? bodies.find((b) => b.id === cur) : null;
+        const foreign = task.meetingBound && cur && !localMatch ? findMeetingBodyElsewhere(data, projId, cur) : null;
+        if (task.meetingBound && !localMatch && foreign) {
+          return /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              style: { ...s, fontSize: 10, color: "var(--txt)" },
+              title: `Bound to "${foreign.body.name || "Meeting body"}" from ${foreign.schedName} — right-click → Meeting binding to change it or copy it into this schedule.`
+            },
+            foreign.body.name || "Meeting body",
+            " · ",
+            foreign.schedName
+          );
+        }
+        if (task.meetingBound && !localMatch && !foreign) {
+          return /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              style: { ...s, fontSize: 10, color: "var(--danger,#d83a3a)" },
+              title: "Bound to a meeting calendar that no longer exists anywhere on the account — right-click → Meeting binding to unbind it."
+            },
+            "⚠ calendar missing"
+          );
+        }
+        if (!bodies.length) return /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            style: { ...s, justifyContent: "center", color: "var(--amber)", fontSize: 10, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 },
+            title: "Click to set up meeting calendars",
+            onClick: (e) => {
+              e.stopPropagation();
+              document.dispatchEvent(new CustomEvent("planar-open-settings", { detail: "meetings" }));
+            }
+          },
+          "set up…"
+        );
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: 0 }, "data-picker-cell": `meeting-${task.id}` }, /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            value: cur,
+            onClick: (e) => e.stopPropagation(),
+            onChange: (e) => {
+              const v = e.target.value;
+              updateTask(task.id, v ? { meetingBound: true, meetingBodyId: v } : { meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, projId);
+            },
+            style: { width: "100%", fontSize: 11, border: "none", background: "transparent", color: cur ? "var(--txt)" : "var(--mut)", cursor: "pointer", padding: "0 4px" }
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "" }, "— none —"),
+          bodies.map((b) => /* @__PURE__ */ React.createElement("option", { key: b.id, value: b.id }, b.name || "Meeting body"))
+        ));
+      }
+      case "floatToDeadline": {
+        const fb = task.hasChildren ? null : meetingFloatBD(task, fdLocal(/* @__PURE__ */ new Date()));
+        if (fb == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" } });
+        const c = fb < 0 ? "var(--danger,#d83a3a)" : fb <= 2 ? "var(--warn-text,#b45309)" : "var(--mut)";
+        return /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            style: { ...s, ...mono, justifyContent: "center", color: c, fontWeight: fb <= 2 ? 700 : void 0 },
+            title: "Float to deadline — working days from today until the agenda-submittal deadline (≤2 reads at-risk)"
+          },
+          fb,
+          "d"
+        );
+      }
+      case "costIfMissed": {
+        const cost = task.hasChildren ? null : meetingCostDays(task, MEETING_BODY_INDEX[task.meetingBodyId]);
+        if (cost == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" } });
+        return /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" },
+            title: "Cost if missed — calendar days the hearing slips to the next eligible meeting (one day of slip is routinely a month)"
+          },
+          "+",
+          cost,
+          "d"
+        );
+      }
+      case "duration":
+        return /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            style: { ...s, ...mono, color: task.hasChildren ? "#94a3b8" : "var(--mut)" },
+            title: task.hasChildren ? "Computed from subtasks" : durTooltip(task) || void 0
+          },
+          fmtTaskDuration(task, task.hasChildren)
+        );
+      case "predecessors": {
+        const preds = normPreds(task.predecessors);
+        const un = new Set(task.predUnresolved || []);
+        const unNames = [...un].map((id) => {
+          const n = getTaskName(id);
+          return n ? `${id} · ${n}` : `${id} (no longer in this schedule)`;
+        });
+        return /* @__PURE__ */ React.createElement(
+          DepCell,
+          {
+            items: preds,
+            renderLabel: (p) => fmtPreds([p]),
+            renderName: (p) => getTaskName(p.id),
+            s,
+            flagged: (p) => un.has(p.id),
+            title: unNames.length ? `This date is NOT driven by ${unNames.length === 1 ? "" : "any of "}${unNames.join("; ")} — ${unNames.length === 1 ? "it has" : "they have"} no dates, or it's this task's own summary row (a cycle). The date shown comes from the remaining predecessors only.` : predLagPlainEnglish(fmtPreds(preds))
+          }
+        );
+      }
+      case "successors": {
+        const ids = succMap[task.id] || [];
+        return /* @__PURE__ */ React.createElement(DepCell, { items: ids, renderLabel: (id) => String(id), renderName: (id) => getTaskName(id), s });
+      }
+      case "health": {
+        if (isExpandedParent) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", padding: 0 } });
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", padding: 0 }, "data-picker-cell": `health-${task.id}` }, /* @__PURE__ */ React.createElement(HealthPicker, { value: dispHealth || task.health, onChange: (hk) => commit(task.id, "health", hk) }));
+      }
+      case "status":
+        if (isExpandedParent) return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: "0 4px" } });
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: "0 4px" }, "data-picker-cell": `status-${task.id}` }, /* @__PURE__ */ React.createElement(StatusPicker, { value: dispHealth || task.health, onChange: (hk) => commit(task.id, "status", hk) }));
+      case "percentComplete":
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 50, height: 3, background: "#e2e8f0", borderRadius: 2, overflow: "hidden", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: `${effectivePercentComplete(task, proj?.tasks)}%`, height: "100%", background: (HEALTH[task.health] || HEALTH.gray).dot, display: "block" } })), /* @__PURE__ */ React.createElement("span", { style: { ...mono, fontSize: 11, color: "var(--mut)" }, title: task.hasChildren ? "Rolled up from this row's tasks" : void 0 }, effectivePercentComplete(task, proj?.tasks), "%"));
+      case "responsibleParty": {
+        const { label, title } = ownerDisplayParts(ownerListOf(task));
+        return /* @__PURE__ */ React.createElement("span", { title: title || void 0, style: { ...s, color: "var(--mut)", fontSize: 11 } }, label);
+      }
+      case "cost":
+      case "budget":
+      case "actualCost": {
+        const rolledKey = col.k === "cost" ? "rolledCost" : col.k === "budget" ? "rolledBudget" : "rolledActual";
+        const v = task[rolledKey] ?? (Number(task[col.k]) || 0);
+        const rolled = task.hasChildren;
+        const tip = rolled ? "Sum of subtask " + (col.k === "cost" ? "costs" : col.k === "budget" ? "budgets" : "actuals") : void 0;
+        const st = { ...s, ...mono, fontSize: 11, justifyContent: "flex-end", color: rolled ? "#94a3b8" : "var(--mut)" };
+        if (!v) return /* @__PURE__ */ React.createElement("span", { style: st, title: tip });
+        return /* @__PURE__ */ React.createElement("span", { style: st, title: tip }, "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }));
+      }
+      case "notes": {
+        const _count = task.notes.length;
+        const latest = task.notes[task.notes.length - 1];
+        return /* @__PURE__ */ React.createElement("span", { style: { ...s, gap: 6, cursor: "pointer" }, onClick: (e) => {
+          e.stopPropagation();
+          setNotesCtx({ taskId: task.id, projectId: projId });
+        } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontSize: 11, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, latest ? (() => {
+          const [, m, d] = latest.date.split("-");
+          return `${+m}/${+d} | ${latest.text}`;
+        })() : "+"));
+      }
+      default:
+        return /* @__PURE__ */ React.createElement("span", { style: s }, task[col.k]);
+    }
+  }
+  exposeToHarness({
+    Cell: [() => Cell]
+  });
+
+  // src/workspaces/scheduler/page/grid/GridView.jsx
+  var { useState: useState6, useEffect: useEffect5, useRef: useRef6, useMemo: useMemo3 } = React;
   function GridView({ tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom = 1, setHoverZone, onColWidths, review, moveRows }) {
     const taskById = useMemo3(() => {
       const m = {};
       (proj?.tasks || []).forEach((t) => m[t.id] = t);
       return m;
     }, [proj?.tasks]);
-    const [winTop, setWinTop] = useState4(0);
-    const localRef = useRef4(null);
+    const [winTop, setWinTop] = useState6(0);
+    const localRef = useRef6(null);
     const ref = scrollRef || localRef;
     const vh = (ref.current?.clientHeight || window.innerHeight) - 80;
     const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
     const totalRows = tasks.length + emptyPad;
     const { startIdx, endIdx } = rowWindow(winTop, ref.current?.clientHeight || window.innerHeight, totalRows);
-    const isDraggingCells = useRef4(false);
-    const cellDragPin = useRef4(null);
-    const _healthClickSel = useRef4(null);
-    const colBtnRef = useRef4(null);
-    const rowDragRef = useRef4(null);
-    const rowDragCancelRef = useRef4(null);
-    useEffect3(() => () => {
+    const isDraggingCells = useRef6(false);
+    const cellDragPin = useRef6(null);
+    const _healthClickSel = useRef6(null);
+    const colBtnRef = useRef6(null);
+    const rowDragRef = useRef6(null);
+    const rowDragCancelRef = useRef6(null);
+    useEffect5(() => () => {
       rowDragCancelRef.current?.();
     }, []);
-    const dragLineRef = useRef4(null);
-    const dragNestRef = useRef4(null);
+    const dragLineRef = useRef6(null);
+    const dragNestRef = useRef6(null);
     const dragTargetIds = (anchorId) => {
       if (!selRange) return [anchorId];
       const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
@@ -17147,7 +12117,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("keydown", onKey, true);
       window.addEventListener("blur", cancel);
     };
-    useEffect3(() => {
+    useEffect5(() => {
       const up = () => {
         isDraggingCells.current = false;
         if (cellDragPin.current) {
@@ -17158,7 +12128,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mouseup", up);
       return () => document.removeEventListener("mouseup", up);
     }, []);
-    useEffect3(() => {
+    useEffect5(() => {
       const NAV = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "PageUp", "PageDown", "Home", "End", "Enter"]);
       const ptr = { x: null, y: null }, at = { x: null, y: null };
       const onKey = (e) => {
@@ -17195,9 +12165,9 @@ A backup snapshot of the current state is saved first.`,
       if (ed.right && !(stripJoinsRange && ci === stripCi)) s.push("inset -2px 0 0 0 #2563eb");
       return s.join(",");
     };
-    const cellSessionRef = useRef4(null);
-    const skipColClickRef = useRef4(false);
-    const liveGridRef = useRef4({ tasks, allCols: [], gridZoom, stripCi: -1 });
+    const cellSessionRef = useRef6(null);
+    const skipColClickRef = useRef6(false);
+    const liveGridRef = useRef6({ tasks, allCols: [], gridZoom, stripCi: -1 });
     const beginCellDrag = (startEvent, { rowMode, apply, onEnd }) => {
       cellSessionRef.current?.stop("cancel");
       const el = ref.current;
@@ -17290,7 +12260,7 @@ A backup snapshot of the current state is saved first.`,
       window.addEventListener("blur", onCancel);
       raf = requestAnimationFrame(tick);
     };
-    useEffect3(() => () => cellSessionRef.current?.stop("cancel"), []);
+    useEffect5(() => () => cellSessionRef.current?.stop("cancel"), []);
     const currentSelection = () => {
       if (selRange) return selRange;
       const ri0 = selectedId != null ? tasks.findIndex((t) => t.id === selectedId) : -1;
@@ -17398,12 +12368,12 @@ A backup snapshot of the current state is saved first.`,
       if (setTaskCtx) setTaskCtx({ task, projId: proj?.id, x: e.clientX, y: e.clientY });
     };
     const hasRange = selIsRange(selRange);
-    const colWidthsRef = useRef4(null);
-    const pinRef = useRef4({ lw: 0, rw: 0, l: [], r: [], w: {} });
-    const expandAnchorRef = useRef4(null);
-    const suppressSelChaseRef = useRef4(false);
-    const heldListRef = useRef4(tasks);
-    const selChaseAllowedRef = useRef4(false);
+    const colWidthsRef = useRef6(null);
+    const pinRef = useRef6({ lw: 0, rw: 0, l: [], r: [], w: {} });
+    const expandAnchorRef = useRef6(null);
+    const suppressSelChaseRef = useRef6(false);
+    const heldListRef = useRef6(tasks);
+    const selChaseAllowedRef = useRef6(false);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prev = heldListRef.current;
@@ -17443,7 +12413,7 @@ A backup snapshot of the current state is saved first.`,
       const delta = (now - anchorIdx) * ROW_H;
       if (delta) el.scrollTop = Math.max(0, st + delta);
     }, [tasks]);
-    const heldRowHRef = useRef4(ROW_H);
+    const heldRowHRef = useRef6(ROW_H);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prevRH = heldRowHRef.current;
@@ -17483,12 +12453,12 @@ A backup snapshot of the current state is saved first.`,
         }
       }
     };
-    const revealCellRef = useRef4(null);
+    const revealCellRef = useRef6(null);
     revealCellRef.current = (row, masterCol) => {
       revealRowIdx(row);
       revealColKey(allCols[masterCol]?.k);
     };
-    useEffect3(() => {
+    useEffect5(() => {
       const on = (e) => {
         const d = e.detail || {};
         if (revealCellRef.current) revealCellRef.current(d.row, d.col);
@@ -17496,8 +12466,8 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("planar-reveal-cell", on);
       return () => document.removeEventListener("planar-reveal-cell", on);
     }, []);
-    const chasedSelRef = useRef4({ id: selectedId, col: selectedColIdx });
-    useEffect3(() => {
+    const chasedSelRef = useRef6({ id: selectedId, col: selectedColIdx });
+    useEffect5(() => {
       const suppressSelChase = suppressSelChaseRef.current;
       suppressSelChaseRef.current = false;
       const prevSel = chasedSelRef.current;
@@ -17514,11 +12484,11 @@ A backup snapshot of the current state is saved first.`,
       revealColKey(allCols[selectedColIdx]?.k);
     }, [selectedId, selectedColIdx, tasks]);
     const rvAnchorId = review ? tasks.find((t) => t.__rvTarget)?.id ?? tasks.find((t) => t.__rvProposed)?.id ?? null : null;
-    const [rvEdit, setRvEdit] = useState4(null);
-    useEffect3(() => {
+    const [rvEdit, setRvEdit] = useState6(null);
+    useEffect5(() => {
       setRvEdit(null);
     }, [rvAnchorId]);
-    useEffect3(() => {
+    useEffect5(() => {
       if (!review || rvAnchorId == null) return;
       const el = ref.current;
       if (!el) return;
@@ -17529,7 +12499,7 @@ A backup snapshot of the current state is saved first.`,
       }, 50);
       return () => clearTimeout(id);
     }, [rvAnchorId]);
-    useEffect3(() => {
+    useEffect5(() => {
       if (!goToFocus) return;
       const el = ref.current;
       if (!el) return;
@@ -17667,7 +12637,7 @@ A backup snapshot of the current state is saved first.`,
       () => computeFormulaValues(tasks, formulaCols, proj),
       [tasks, formulaCols, data.settings?.holidays, NOW]
     );
-    const [liveW, setLiveW] = useState4(null);
+    const [liveW, setLiveW] = useState6(null);
     const widthOf = (k) => liveW && liveW.k === k ? liveW.w : cfg.widths[k] ?? colByK[k]?.w ?? 100;
     const colWidths = useMemo3(() => {
       const o = {};
@@ -17677,13 +12647,13 @@ A backup snapshot of the current state is saved first.`,
       return o;
     }, [cfg, liveW, allCols]);
     colWidthsRef.current = colWidths;
-    useEffect3(() => {
+    useEffect5(() => {
       if (onColWidths) onColWidths({ order: colOrder, widths: colWidths });
     }, [colWidths, colOrder]);
     const orderedCols = colOrder.map((k) => colByK[k]).filter(Boolean);
-    const [gridW, setGridW] = useState4(0);
-    const [scrollSide, setScrollSide] = useState4({ l: false, r: false });
-    useEffect3(() => {
+    const [gridW, setGridW] = useState6(0);
+    const [scrollSide, setScrollSide] = useState6({ l: false, r: false });
+    useEffect5(() => {
       const el = ref.current;
       if (!el) return;
       const measure = () => setGridW(Math.floor(el.getBoundingClientRect().width / (gridZoom || 1)));
@@ -17738,7 +12708,7 @@ A backup snapshot of the current state is saved first.`,
       setScrollSide((p) => p.l === l && p.r === r ? p : { l, r });
     };
     const totalW = orderedCols.reduce((s, c) => s + dispW[c.k], 0);
-    useEffect3(() => {
+    useEffect5(() => {
       syncScrollSide(ref.current);
     }, [gridW, totalW, pinOn]);
     pinRef.current = { lw: pinLW, rw: pinRW, l: pinL, r: pinR, w: dispW };
@@ -17757,7 +12727,7 @@ A backup snapshot of the current state is saved first.`,
       sh.push("inset -2px 0 0 0 #2563eb");
       return sh.join(",");
     };
-    useEffect3(() => {
+    useEffect5(() => {
       if (selectedId === null || !colMasterIdxs.length) return;
       if (colMasterIdxs.includes(selectedColIdx)) return;
       const target = colMasterIdxs.reduce(
@@ -17766,7 +12736,7 @@ A backup snapshot of the current state is saved first.`,
       );
       if (target !== selectedColIdx) setSelectedColIdx(target);
     }, [colOrder, selectedColIdx, selectedId]);
-    const [formulaEditor, setFormulaEditor] = useState4(null);
+    const [formulaEditor, setFormulaEditor] = useState6(null);
     const saveFormulaCol = ({ colKey, label, formula }) => setData((d) => {
       const p = d.projects?.[pid];
       if (!p) return d;
@@ -17814,10 +12784,10 @@ A backup snapshot of the current state is saved first.`,
       const res = PF.evaluateFormula(formula, { columns: colMap(sample), rows: aggRows, rowIndex: 0, calendar: formulaCalendar(), today: formulaToday(), formatDate: dateFmt });
       return { ...res, display: res.ok ? PF.formatValue(res.value, { formatDate: dateFmt }) : res.error, sampleName: sample.name || "Task " + sample.id };
     };
-    const [dragColKey, setDragColKey] = useState4(null);
-    const [dragOverKey, setDragOverKey] = useState4(null);
-    const [colMenuOpen, setColMenuOpen] = useState4(false);
-    const [hdrCtx, setHdrCtx] = useState4(null);
+    const [dragColKey, setDragColKey] = useState6(null);
+    const [dragOverKey, setDragOverKey] = useState6(null);
+    const [colMenuOpen, setColMenuOpen] = useState6(false);
+    const [hdrCtx, setHdrCtx] = useState6(null);
     const persistVisible = (visible) => writeGridCfg(setData, pid, { visible, widths: cfg.widths });
     const persistWidths = (widths) => writeGridCfg(setData, pid, { visible: colOrder, widths });
     const reorderCols = (fromKey, toKey) => {
@@ -18422,1118 +13392,6253 @@ A backup snapshot of the current state is saved first.`,
       }
     ));
   }
-  var PICKER_EVENT = "planar-picker-open";
-  function HealthPicker({ value, onChange }) {
-    const [open, setOpen] = useState4(false);
-    const [hiIdx, setHiIdx] = useState4(-1);
-    const dotRef = useRef4(null);
-    const menuRef = useRef4(null);
-    const idRef = useRef4(`hp-${Math.random()}`);
-    const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.left + r.width / 2 - 10 }), () => setOpen(false));
-    useEffect3(() => {
-      const onOther = (e) => {
-        if (e.detail !== idRef.current) setOpen(false);
+  exposeToHarness({
+    GridView: [() => GridView]
+  });
+
+  // src/workspaces/scheduler/page/main.jsx
+  var { useState: useState7, useEffect: useEffect6, useRef: useRef7, useMemo: useMemo4, useCallback: useCallback2 } = React;
+  function removeScheduleFromDoc(d, id) {
+    if (!d || !d.projects || !d.projects[id]) return d;
+    const newProjects = { ...d.projects };
+    delete newProjects[id];
+    const remaining = Object.keys(newProjects).map(Number);
+    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
+    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
+  }
+  function logMergeToastEvent(changedRows, changedPids, projects) {
+    try {
+      if (!window.__sb) return;
+      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
+      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
+      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
+      }, () => {
+      });
+    } catch (e) {
+    }
+  }
+  var ROW_COLORS = [
+    { color: "#fef3c7", label: "Yellow tint" },
+    { color: "#ffedd5", label: "Orange tint" },
+    { color: "#fee2e2", label: "Red tint" },
+    { color: "#fce7f3", label: "Pink tint" },
+    { color: "#f3e8ff", label: "Purple tint" },
+    { color: "#fde68a", label: "Yellow" },
+    { color: "#fed7aa", label: "Orange" },
+    { color: "#fecaca", label: "Red" },
+    { color: "#fbcfe8", label: "Pink" },
+    { color: "#e9d5ff", label: "Purple" },
+    { color: "#d9f99d", label: "Lime" },
+    { color: "#bbf7d0", label: "Green" },
+    { color: "#a5f3fc", label: "Cyan" },
+    { color: "#bfdbfe", label: "Blue" },
+    { color: "#c7d2fe", label: "Indigo" },
+    { color: "#ecfccb", label: "Lime tint" },
+    { color: "#d1fae5", label: "Green tint" },
+    { color: "#cffafe", label: "Cyan tint" },
+    { color: "#dbeafe", label: "Blue tint" },
+    { color: "#e0e7ff", label: "Indigo tint" }
+  ];
+  var SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
+  var isValidColor = (v) => v == null || SAFE_COLOR_RE.test(v);
+  var FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
+  var FONT_SIZE_MIN = FONT_SIZE_STEPS[0];
+  var FONT_SIZE_MAX = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
+  var isValidFontSize = (n) => typeof n === "number" && Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX;
+  var stepFontSize = (cur, dir) => {
+    const base = typeof cur === "number" ? cur : 12;
+    if (dir > 0) {
+      const next = FONT_SIZE_STEPS.find((v) => v > base);
+      return next != null ? next : FONT_SIZE_MAX;
+    }
+    const prev = FONT_SIZE_STEPS.filter((v) => v < base);
+    return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
+  };
+  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
+  var askConfirm = /* @__PURE__ */ (() => {
+    let _open = null;
+    return ({ title, body = "", confirmLabel = "Continue", danger = false } = {}) => new Promise((resolve) => {
+      if (_open) _open(false);
+      const prevFocus = document.activeElement;
+      const back = document.createElement("div");
+      back.setAttribute("data-testid", "schedule-confirm");
+      Object.assign(back.style, { position: "fixed", inset: "0", background: "rgba(0,0,0,.45)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+      const card = document.createElement("div");
+      card.setAttribute("role", "alertdialog");
+      card.setAttribute("aria-modal", "true");
+      Object.assign(card.style, { background: "var(--bg)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: "10px", boxShadow: "0 12px 40px rgba(0,0,0,.35)", width: "min(440px, 100%)", padding: "18px 20px 14px", fontFamily: "'Inter', system-ui, sans-serif" });
+      const h = document.createElement("div");
+      h.textContent = title || "Are you sure?";
+      Object.assign(h.style, { fontSize: "14px", fontWeight: "600", marginBottom: body ? "8px" : "14px", lineHeight: "1.4" });
+      card.appendChild(h);
+      if (body) {
+        const b = document.createElement("div");
+        b.textContent = body;
+        Object.assign(b.style, { fontSize: "12.5px", color: "var(--mut)", lineHeight: "1.55", whiteSpace: "pre-wrap", marginBottom: "16px" });
+        card.appendChild(b);
+      }
+      const row = document.createElement("div");
+      Object.assign(row.style, { display: "flex", justifyContent: "flex-end", gap: "8px" });
+      const mk = (label, primary) => {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.textContent = label;
+        Object.assign(x.style, {
+          font: "inherit",
+          fontSize: "12.5px",
+          fontWeight: "600",
+          padding: "7px 14px",
+          borderRadius: "7px",
+          cursor: "pointer",
+          border: primary ? "1px solid transparent" : "1px solid var(--bd2)",
+          background: primary ? danger ? "#b42318" : "var(--amber)" : "var(--surf)",
+          color: primary ? danger || document.documentElement.dataset.theme !== "dark" ? "#fff" : "#14171C" : "var(--txt)"
+        });
+        return x;
       };
-      document.addEventListener(PICKER_EVENT, onOther);
-      return () => document.removeEventListener(PICKER_EVENT, onOther);
-    }, []);
-    useEffect3(() => {
-      if (!open) return;
-      setHiIdx(-1);
-      const handleDown = (e) => {
-        if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target))
-          setOpen(false);
-      };
-      document.addEventListener("mousedown", handleDown);
-      return () => document.removeEventListener("mousedown", handleDown);
-    }, [open]);
-    useEffect3(() => {
-      if (!open) return;
-      const handleKey = (e) => {
-        if (e.key === "Tab") {
-          setOpen(false);
-          return;
+      const no = mk("Cancel", false), yes = mk(confirmLabel, true);
+      row.appendChild(no);
+      row.appendChild(yes);
+      card.appendChild(row);
+      back.appendChild(card);
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        _open = null;
+        document.removeEventListener("keydown", onKey, true);
+        back.remove();
+        try {
+          prevFocus && prevFocus.focus && prevFocus.focus();
+        } catch {
         }
-        if (!["ArrowDown", "ArrowUp", "Enter", "Escape", " "].includes(e.key)) return;
-        e.stopImmediatePropagation();
-        e.preventDefault();
+        resolve(v);
+      };
+      const onKey = (e) => {
         if (e.key === "Escape") {
-          setOpen(false);
+          e.preventDefault();
+          e.stopPropagation();
+          finish(false);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(document.activeElement === no ? false : true);
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          (document.activeElement === yes ? no : yes).focus();
+        }
+      };
+      _open = finish;
+      no.onclick = () => finish(false);
+      yes.onclick = () => finish(true);
+      back.addEventListener("mousedown", (e) => {
+        if (e.target === back) finish(false);
+      });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(back);
+      (danger ? no : yes).focus();
+    });
+  })();
+  var mkt = (id, name, start, dur, parentId = null, health = "gray", predecessors = []) => {
+    const isBlank2 = !start && (dur === "" || dur === null || dur === void 0);
+    const safeStart = isBlank2 ? "" : start && !isNaN(new Date(start).getTime()) ? start : NOW;
+    const safeDur = isBlank2 ? 0 : dur;
+    return {
+      id,
+      _sid: _mintTaskSid(),
+      name,
+      start: safeStart,
+      end: calcEnd(safeStart, safeDur),
+      duration: safeDur,
+      durUnit: "d",
+      durValue: safeDur,
+      predecessors,
+      health,
+      percentComplete: health === "green" ? 100 : health === "yellow" ? 40 : 0,
+      parentId,
+      responsibleParty: [],
+      cost: "",
+      notes: [],
+      isExpanded: true,
+      meetingBound: false
+      // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
+    };
+  };
+  window.__planarLoadStatus = "loading";
+  function postLoadState(state) {
+    try {
+      if (window.self !== window.top) {
+        window.parent.postMessage({ source: "planar-seq", type: "planar:load-state", state }, window.location.origin);
+      }
+    } catch (_) {
+    }
+  }
+  var LOAD_ATTEMPT_TIMEOUT_MS = 2e4;
+  var LOAD_RETRY_BASE_MS = 2e3;
+  var LOAD_RETRY_MAX_MS = 3e4;
+  var SEED = {
+    nPid: 4,
+    nTid: { 1: 12, 2: 5, 3: 10 },
+    aPid: 3,
+    view: "split",
+    section: "projects",
+    editProjId: null,
+    healthColStyle: "stoplight",
+    settings: { ...DEFAULT_SETTINGS, holidays: { ...DEFAULT_HOLIDAYS } },
+    projects: {
+      1: { id: 1, name: "Hillwood I-10 Logistics", tasks: [
+        mkt(1, "Site Acquisition", "2025-01-06", 30, null, "green", []),
+        mkt(2, "Title Search", "2025-01-06", 14, 1, "green", []),
+        mkt(3, "Environmental Phase I", "2025-01-13", 21, 1, "green", [1]),
+        mkt(4, "Design & Engineering", "2025-02-03", 60, null, "yellow", []),
+        mkt(5, "Schematic Design", "2025-02-03", 21, 4, "green", [1]),
+        mkt(6, "Construction Documents", "2025-02-24", 35, 4, "yellow", [5]),
+        mkt(7, "Permitting", "2025-04-01", 45, null, "yellow", [4]),
+        mkt(8, "Submit Plans", "2025-04-01", 5, 7, "green", [6]),
+        mkt(9, "City Review", "2025-04-07", 30, 7, "yellow", [8]),
+        mkt(10, "Permit Issued", "2025-05-07", 0, 7, "red", [9]),
+        mkt(11, "Construction", "2025-05-08", 180, null, "gray", [7])
+      ] },
+      2: { id: 2, name: "Grand Pkwy Distribution", tasks: [
+        mkt(1, "Site Control", "2025-03-01", 21, null, "green", []),
+        mkt(2, "Due Diligence", "2025-03-22", 30, null, "yellow", [1]),
+        mkt(3, "Design", "2025-04-22", 60, null, "gray", [2]),
+        mkt(4, "Construction", "2025-06-22", 150, null, "gray", [3])
+      ] },
+      3: { id: 3, name: "Sample Project", tasks: [
+        mkt(1, "Project Kick Off", "2025-06-02", 0, null, "gray", []),
+        mkt(2, "Due Diligence", "2025-06-02", 30, null, "green", [1]),
+        mkt(3, "Order Reports", "2025-06-02", 5, 2, "green", []),
+        mkt(4, "Review Reports", "2025-06-09", 15, 2, "yellow", [3]),
+        mkt(5, "Entitlements", "2025-07-14", 60, null, "gray", [2]),
+        mkt(6, "Submit Application", "2025-07-14", 5, 5, "gray", []),
+        mkt(7, "Agency Review", "2025-07-21", 40, 5, "gray", [6]),
+        mkt(8, "Approval", "2025-09-15", 0, 5, "gray", [7]),
+        mkt(9, "Construction", "2025-09-16", 120, null, "gray", [5])
+      ] }
+    }
+  };
+  installRowPointerTypeListener();
+  function celebrateTaskComplete(taskName) {
+    try {
+      document.getElementById("planar-celebrate-toast")?.remove();
+      document.getElementById("planar-delete-toast")?.remove();
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const toast = document.createElement("div");
+      toast.id = "planar-celebrate-toast";
+      toast.style.cssText = "position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:100002;pointer-events:none;";
+      const card = document.createElement("div");
+      card.style.cssText = "display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid #d0d7de;border-radius:10px;padding:10px 16px 10px 13px;box-shadow:0 6px 24px rgba(27,31,36,.16),0 1px 3px rgba(27,31,36,.08);font-family:'Inter',system-ui,-apple-system,sans-serif;";
+      toast.appendChild(card);
+      const dotWrap = document.createElement("span");
+      dotWrap.style.cssText = "position:relative;width:20px;height:20px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;";
+      const ring = document.createElement("span");
+      ring.style.cssText = "position:absolute;left:50%;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:2px solid #16a34a;opacity:0;";
+      const dot = document.createElement("span");
+      dot.style.cssText = "position:relative;width:20px;height:20px;border-radius:50%;background:#16a34a;display:inline-flex;align-items:center;justify-content:center;";
+      dot.innerHTML = '<svg width="12" height="12" viewBox="0 0 13 13" fill="none"><path d="M3 6.7 L5.5 9.2 L10 3.8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray:14;stroke-dashoffset:14;"/></svg>';
+      dotWrap.appendChild(ring);
+      dotWrap.appendChild(dot);
+      card.appendChild(dotWrap);
+      const text = document.createElement("span");
+      const nameEl = document.createElement("div");
+      nameEl.style.cssText = "font-size:12.5px;font-weight:600;color:#1f2328;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35;";
+      nameEl.textContent = (taskName || "Task").toString();
+      const subEl = document.createElement("div");
+      subEl.style.cssText = "font-size:11px;font-weight:500;color:#15803d;line-height:1.35;";
+      subEl.textContent = "Marked complete";
+      text.appendChild(nameEl);
+      text.appendChild(subEl);
+      card.appendChild(text);
+      document.body.appendChild(toast);
+      const chk = dot.querySelector("path");
+      const LIFE = 2300;
+      const exit = (dur) => {
+        toast.animate(
+          [
+            { transform: "translateX(-50%) translateY(0)", opacity: 1 },
+            { transform: "translateX(-50%) translateY(10px)", opacity: 0 }
+          ],
+          { duration: dur, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }
+        );
+        setTimeout(() => toast.remove(), dur + 30);
+      };
+      if (reduce) {
+        if (chk) chk.style.strokeDashoffset = "0";
+        toast.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: "forwards" });
+        setTimeout(() => exit(200), LIFE);
+        return;
+      }
+      toast.animate(
+        [
+          { transform: "translateX(-50%) translateY(16px)", opacity: 0 },
+          { transform: "translateX(-50%) translateY(-2px)", opacity: 1, offset: 0.7 },
+          { transform: "translateX(-50%) translateY(0)", opacity: 1 }
+        ],
+        { duration: 300, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
+      );
+      dot.animate(
+        [{ transform: "scale(.4)" }, { transform: "scale(1.28)", offset: 0.55 }, { transform: "scale(.95)", offset: 0.8 }, { transform: "scale(1)" }],
+        { duration: 420, delay: 90, easing: "cubic-bezier(.34,1.56,.64,1)", fill: "backwards" }
+      );
+      if (chk) {
+        chk.animate([{ strokeDashoffset: 14 }, { strokeDashoffset: 0 }], { duration: 320, delay: 200, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
+        setTimeout(() => {
+          chk.style.strokeDashoffset = "0";
+        }, 540);
+      }
+      ring.animate(
+        [{ transform: "scale(.9)", opacity: 0.55 }, { transform: "scale(2.6)", opacity: 0 }],
+        { duration: 620, delay: 160, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
+      );
+      const colors = ["#16a34a", "#22c55e", "#4f46e5", "#16a34a", "#34d399", "#4f46e5"];
+      const N = 6;
+      for (let i = 0; i < N; i++) {
+        const s = document.createElement("span");
+        s.style.cssText = `position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;border-radius:50%;background:${colors[i % colors.length]};opacity:0;`;
+        dotWrap.appendChild(s);
+        const ang = (-90 + (i / (N - 1) - 0.5) * 150) * Math.PI / 180;
+        const dist = 22 + Math.random() * 14;
+        const dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist;
+        s.animate(
+          [
+            { transform: "translate(0,0) scale(1)", opacity: 1 },
+            { transform: `translate(${dx * 0.55}px,${dy * 0.55}px) scale(.7)`, opacity: 1, offset: 0.4 },
+            { transform: `translate(${dx}px,${dy}px) scale(.35)`, opacity: 0 }
+          ],
+          { duration: 580, delay: 170, easing: "cubic-bezier(.18,.7,.3,1)", fill: "forwards" }
+        );
+      }
+      setTimeout(() => exit(240), LIFE);
+    } catch (e) {
+    }
+  }
+  function notifyRowsDeleted(rowCount, totalCount) {
+    try {
+      document.getElementById("planar-delete-toast")?.remove();
+      document.getElementById("planar-celebrate-toast")?.remove();
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const toast = document.createElement("div");
+      toast.id = "planar-delete-toast";
+      toast.style.cssText = "position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:100002;pointer-events:none;";
+      const card = document.createElement("div");
+      card.style.cssText = "display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid #d0d7de;border-radius:10px;padding:10px 16px 10px 13px;box-shadow:0 6px 24px rgba(27,31,36,.16),0 1px 3px rgba(27,31,36,.08);font-family:'Inter',system-ui,-apple-system,sans-serif;";
+      toast.appendChild(card);
+      const dot = document.createElement("span");
+      dot.style.cssText = "width:20px;height:20px;border-radius:50%;background:#dc2626;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;";
+      dot.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.4 H10"/><path d="M4.6 3.4 V2.4 A.7 .7 0 0 1 5.3 1.7 H6.7 A.7 .7 0 0 1 7.4 2.4 V3.4"/><path d="M3.1 3.4 L3.7 9.9 A.8 .8 0 0 0 4.5 10.6 H7.5 A.8 .8 0 0 0 8.3 9.9 L8.9 3.4"/><path d="M5.1 5.4 V8.6 M6.9 5.4 V8.6"/></svg>';
+      card.appendChild(dot);
+      const text = document.createElement("span");
+      const nameEl = document.createElement("div");
+      nameEl.style.cssText = "font-size:12.5px;font-weight:600;color:#1f2328;line-height:1.35;";
+      nameEl.textContent = rowCount === 1 ? "1 row deleted" : `${rowCount} rows deleted`;
+      const subEl = document.createElement("div");
+      subEl.style.cssText = "font-size:11px;font-weight:500;color:#57606a;line-height:1.35;";
+      subEl.textContent = (totalCount > rowCount ? `${totalCount} tasks removed including subtasks · ` : "") + "Ctrl+Z to undo";
+      text.appendChild(nameEl);
+      text.appendChild(subEl);
+      card.appendChild(text);
+      document.body.appendChild(toast);
+      const LIFE = 2600;
+      const exit = (dur) => {
+        toast.animate(
+          [
+            { transform: "translateX(-50%) translateY(0)", opacity: 1 },
+            { transform: "translateX(-50%) translateY(10px)", opacity: 0 }
+          ],
+          { duration: dur, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }
+        );
+        setTimeout(() => toast.remove(), dur + 30);
+      };
+      if (reduce) {
+        toast.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: "forwards" });
+        setTimeout(() => exit(200), LIFE);
+        return;
+      }
+      toast.animate(
+        [
+          { transform: "translateX(-50%) translateY(16px)", opacity: 0 },
+          { transform: "translateX(-50%) translateY(-2px)", opacity: 1, offset: 0.7 },
+          { transform: "translateX(-50%) translateY(0)", opacity: 1 }
+        ],
+        { duration: 280, easing: "cubic-bezier(.22,1,.36,1)", fill: "forwards" }
+      );
+      setTimeout(() => exit(240), LIFE);
+    } catch (e) {
+    }
+  }
+  var FOOTER_BTN_STYLE = {
+    fontSize: 12,
+    width: 150,
+    height: 34,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+    fontFamily: "inherit",
+    fontWeight: 600,
+    cursor: "pointer",
+    border: "1px solid #e5e7eb",
+    background: "var(--bg)",
+    color: "#374151"
+  };
+  function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
+    const { completedTask, projId, projName, successors } = prompt;
+    const readyToStart = successors.filter((t) => t.health === "gray");
+    const alreadyActive = successors.filter((t) => t.health !== "gray");
+    const [pending, setPending] = React.useState(() => {
+      const m = {};
+      successors.forEach((t) => {
+        m[t.id] = t.health === "gray" ? "yellow" : null;
+      });
+      return m;
+    });
+    const changeCount = Object.values(pending).filter((v) => v !== null).length;
+    function apply() {
+      Object.entries(pending).forEach(([tid, hk]) => {
+        if (hk !== null) updateTask(Number(tid), { health: hk }, projId);
+      });
+      onClose();
+    }
+    function StatusPills({ task }) {
+      const opts = [
+        { k: "gray", label: "Not Started" },
+        { k: "yellow", label: "In Progress" },
+        { k: "red", label: "Needs Attn." },
+        { k: "green", label: "Complete" }
+      ];
+      const cur = pending[task.id];
+      const isGray = task.health === "gray";
+      return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 6 } }, !isGray && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          "data-successor-pill": "nochange",
+          onClick: () => setPending((p) => ({ ...p, [task.id]: null })),
+          style: {
+            fontSize: 10,
+            padding: "3px 8px",
+            borderRadius: 12,
+            fontFamily: "inherit",
+            cursor: "pointer",
+            border: cur === null ? "1.5px solid #6366f1" : "1px solid #d1d5db",
+            background: cur === null ? "#eef2ff" : "#f9fafb",
+            color: cur === null ? "#4f46e5" : "#6b7280",
+            fontWeight: cur === null ? 600 : 400
+          }
+        },
+        "No change"
+      ), opts.map((o) => {
+        const h = HEALTH[o.k] || HEALTH.gray;
+        const sel = pending[task.id] === o.k;
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: o.k,
+            "data-successor-pill": o.k,
+            onClick: () => setPending((p) => ({ ...p, [task.id]: o.k })),
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 10,
+              padding: "3px 9px",
+              borderRadius: 12,
+              fontFamily: "inherit",
+              cursor: "pointer",
+              border: sel ? `1.5px solid ${h.dot === "#ffffff" ? "#d1d5db" : h.dot}` : "1px solid #e5e7eb",
+              background: sel ? h.bar : "#f9fafb",
+              color: sel ? HDARK[o.k] : "#6b7280",
+              fontWeight: sel ? 600 : 400
+            }
+          },
+          /* @__PURE__ */ React.createElement("span", { style: {
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            flexShrink: 0,
+            background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
+          } }),
+          o.label
+        );
+      }));
+    }
+    function TaskRow({ task, accent }) {
+      const h = HEALTH[task.health] || HEALTH.gray;
+      return /* @__PURE__ */ React.createElement("div", { "data-successor-row": task.id, style: {
+        padding: "10px 14px",
+        borderRadius: 7,
+        marginBottom: 8,
+        background: accent ? "#fafbff" : "#f9fafb",
+        border: `1px solid ${accent ? "#e0e4f8" : "#e5e7eb"}`
+      } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: {
+        fontWeight: 500,
+        fontSize: 13,
+        color: "#1f2328",
+        flex: 1,
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }, title: task.name }, task.name), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: {
+        width: 7,
+        height: 7,
+        borderRadius: "50%",
+        background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
+      } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" } }, h.label))), /* @__PURE__ */ React.createElement(StatusPills, { task }), onOpenTask && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 7 } }, /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => onOpenTask(projId, task.id),
+          style: { fontSize: 11, color: "#4f46e5", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 500 }
+        },
+        "Open in Projects",
+        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "9 18 15 12 9 6" }))
+      )));
+    }
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        "data-successor-modal": true,
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) onClose();
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 4e3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(15,23,42,.35)"
+        }
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--bg)",
+            borderRadius: 12,
+            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
+            width: 480,
+            maxWidth: "94vw",
+            maxHeight: "82vh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          },
+          tabIndex: -1,
+          ref: (el) => el?.focus(),
+          onKeyDown: (e) => {
+            if (e.key === "Escape") {
+              onClose();
+              return;
+            }
+            if (e.key === "Enter" && changeCount > 0) apply();
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: {
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          background: "#dcfce7",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        } }, /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#16a34a", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "20 6 9 17 4 12" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "#16a34a", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 } }, "Task Completed"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: completedTask.name }, completedTask.name))), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: onClose,
+            style: { background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, padding: "4px", borderRadius: 4, lineHeight: 1, flexShrink: 0 },
+            onMouseEnter: (e) => e.currentTarget.style.color = "#374151",
+            onMouseLeave: (e) => e.currentTarget.style.color = "#9ca3af"
+          },
+          "✕"
+        )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#6b7280", marginTop: 8, paddingLeft: 42 } }, projName, " · ", successors.length, " successor", successors.length !== 1 ? "s" : "", " to review")),
+        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "14px 20px" } }, readyToStart.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: "#6366f1" } }), " Ready to Start"), readyToStart.map((t) => /* @__PURE__ */ React.createElement(TaskRow, { key: t.id, task: t, accent: true }))), alreadyActive.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 8, marginTop: readyToStart.length ? 12 : 0, display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: "#9ca3af" } }), " Already Active"), alreadyActive.map((t) => /* @__PURE__ */ React.createElement(TaskRow, { key: t.id, task: t, accent: false })))),
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, background: "#f9fafb", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#9ca3af", marginRight: "auto" } }, changeCount > 0 ? `${changeCount} update${changeCount !== 1 ? "s" : ""} pending` : "No changes"), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            "data-successor-apply": "skip",
+            onClick: onClose,
+            style: FOOTER_BTN_STYLE,
+            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
+            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
+          },
+          "Skip"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            "data-successor-apply": "update",
+            onClick: apply,
+            disabled: !changeCount,
+            title: "Applies the status picked for each row above · Enter",
+            style: {
+              ...FOOTER_BTN_STYLE,
+              cursor: changeCount ? "pointer" : "default",
+              border: changeCount ? "1px solid #4f46e5" : "1px solid #e5e7eb",
+              background: changeCount ? "#4f46e5" : "#f3f4f6",
+              color: changeCount ? "#fff" : "#9ca3af"
+            }
+          },
+          "Update Successors"
+        ))
+      )
+    );
+  }
+  function DeleteChildrenModal({ rowCount, totalCount, onCascade, onPromote, onCancel }) {
+    const subtaskCount = totalCount - rowCount;
+    const title = rowCount > 1 ? `Delete ${rowCount} tasks?` : "Delete this task?";
+    const body = rowCount > 1 ? `${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""} would come with ${rowCount > 1 ? "them" : "it"}.` : `This task has ${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""}.`;
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        "data-delete-children-modal": true,
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) onCancel();
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 4e3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(15,23,42,.35)"
+        }
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--bg)",
+            borderRadius: 12,
+            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
+            width: 460,
+            maxWidth: "94vw",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          },
+          tabIndex: -1,
+          ref: (el) => el?.focus(),
+          onKeyDown: (e) => {
+            if (e.key === "Escape") onCancel();
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328" } }, title), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#6b7280", marginTop: 6 } }, body, " Delete them too, or keep them — they'll move up to this task's parent, in the same order.")),
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, background: "#f9fafb" } }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            "data-delete-children-choice": "cancel",
+            onClick: onCancel,
+            style: FOOTER_BTN_STYLE,
+            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
+            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
+          },
+          "Cancel"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            "data-delete-children-choice": "promote",
+            onClick: onPromote,
+            style: FOOTER_BTN_STYLE,
+            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
+            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
+          },
+          "Keep subtasks"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            "data-delete-children-choice": "cascade",
+            onClick: onCascade,
+            style: { ...FOOTER_BTN_STYLE, border: "1px solid #dc2626", background: "#dc2626", color: "#fff" }
+          },
+          "Delete all ",
+          totalCount
+        ))
+      )
+    );
+  }
+  function MoveToModal({ tasks, sourceIds, onCommit, onCancel }) {
+    const [query, setQuery] = React.useState("");
+    const [hi, setHi] = React.useState(0);
+    const inputRef = React.useRef(null);
+    React.useEffect(() => {
+      inputRef.current?.focus();
+    }, []);
+    const blocked = React.useMemo(() => {
+      const b = new Set(sourceIds);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        tasks.forEach((t) => {
+          if (t.parentId != null && b.has(t.parentId) && !b.has(t.id)) {
+            b.add(t.id);
+            grew = true;
+          }
+        });
+      }
+      return b;
+    }, [tasks, sourceIds]);
+    const options = React.useMemo(() => {
+      const kidsBy = /* @__PURE__ */ new Map();
+      tasks.forEach((t) => {
+        const p = t.parentId ?? null;
+        if (!kidsBy.has(p)) kidsBy.set(p, []);
+        kidsBy.get(p).push(t);
+      });
+      const out = [];
+      const walk = (parentId, level) => (kidsBy.get(parentId) || []).forEach((t) => {
+        if (!blocked.has(t.id)) out.push({ id: t.id, name: t.name || `Task ${t.id}`, level });
+        walk(t.id, level + 1);
+      });
+      walk(null, 0);
+      const q = query.trim().toLowerCase();
+      const filtered = q ? out.filter((o) => o.name.toLowerCase().includes(q)) : out;
+      return [{ id: null, name: "— Top level —", level: 0 }, ...filtered];
+    }, [tasks, blocked, query]);
+    const commit = (id) => {
+      if (id !== void 0) onCommit(id, "end");
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        "data-move-to-modal": true,
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) onCancel();
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 4e3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(15,23,42,.35)"
+        }
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--bg)",
+            borderRadius: 12,
+            boxShadow: "0 16px 48px rgba(0,0,0,.18)",
+            width: 420,
+            maxWidth: "94vw",
+            maxHeight: "70vh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          },
+          tabIndex: -1,
+          onKeyDown: (e) => {
+            if (e.key === "Escape") {
+              onCancel();
+              return;
+            }
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setHi((h) => Math.min(options.length - 1, h + 1));
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setHi((h) => Math.max(0, h - 1));
+              return;
+            }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit(options[hi]?.id);
+              return;
+            }
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 16px 10px", borderBottom: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#1f2328", marginBottom: 8 } }, "Move ", sourceIds.length > 1 ? `${sourceIds.length} tasks` : "task", " to…"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            ...NO_AUTOFILL,
+            ref: inputRef,
+            value: query,
+            onChange: (e) => {
+              setQuery(e.target.value);
+              setHi(0);
+            },
+            placeholder: "Search tasks…",
+            style: {
+              width: "100%",
+              boxSizing: "border-box",
+              fontSize: 13,
+              padding: "7px 9px",
+              border: "1px solid #d1d5db",
+              borderRadius: 6,
+              outline: "none",
+              fontFamily: "inherit"
+            }
+          }
+        )),
+        /* @__PURE__ */ React.createElement("div", { style: { overflow: "auto", flex: 1, padding: "4px 0" } }, options.length === 1 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", fontSize: 12, color: "#9ca3af" } }, "No matching tasks"), options.map((o, i) => /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            key: o.id ?? "__top",
+            "data-move-to-option": o.id ?? "top",
+            onMouseEnter: () => setHi(i),
+            onClick: () => commit(o.id),
+            style: {
+              padding: "6px 14px",
+              paddingLeft: 14 + o.level * 16,
+              fontSize: 13,
+              cursor: "pointer",
+              background: i === hi ? "#eff6ff" : "transparent",
+              color: o.id === null ? "#4b5563" : "#1f2328",
+              fontStyle: o.id === null ? "italic" : "normal",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis"
+            }
+          },
+          o.name
+        ))),
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", display: "flex", justifyContent: "flex-end", gap: 8, background: "#f9fafb", borderTop: "1px solid #e5e7eb" } }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: onCancel,
+            style: FOOTER_BTN_STYLE,
+            onMouseEnter: (e) => e.currentTarget.style.borderColor = "#6b7280",
+            onMouseLeave: (e) => e.currentTarget.style.borderColor = "#e5e7eb"
+          },
+          "Cancel"
+        ))
+      )
+    );
+  }
+  function ContactsPanel({ data, setData, onClose }) {
+    const contacts = data.settings?.contacts || [];
+    const [editId, setEditId] = React.useState(null);
+    const [editName, setEditName] = React.useState("");
+    const [editEmail, setEditEmail] = React.useState("");
+    const [addMode, setAddMode] = React.useState(false);
+    const [newName, setNewName] = React.useState("");
+    const [newEmail, setNewEmail] = React.useState("");
+    function saveContacts(updated) {
+      setData((d) => ({ ...d, settings: { ...d.settings, contacts: updated } }));
+    }
+    function startEdit(c) {
+      setEditId(c.id);
+      setEditName(c.name);
+      setEditEmail(c.email || "");
+      setAddMode(false);
+    }
+    function commitEdit() {
+      const nm = editName.trim();
+      if (!nm) return;
+      const oldName = (contacts.find((c) => c.id === editId) || {}).name;
+      setData((d) => {
+        const settings = { ...d.settings, contacts: (d.settings?.contacts || []).map((c) => c.id === editId ? { ...c, name: nm, email: editEmail.trim() } : c) };
+        let projects = d.projects;
+        if (oldName && oldName !== nm) {
+          projects = {};
+          Object.entries(d.projects).forEach(([pid, proj]) => {
+            projects[pid] = { ...proj, tasks: (proj.tasks || []).map((t) => {
+              const list = ownerListOf(t);
+              if (!ownerHas(list, oldName)) return t;
+              return { ...t, responsibleParty: renameOwnerIn(list, oldName, nm) };
+            }) };
+          });
+        }
+        return { ...d, settings, projects };
+      });
+      setEditId(null);
+    }
+    function del(id) {
+      const goneName = (contacts.find((c) => c.id === id) || {}).name;
+      setData((d) => {
+        const settings = { ...d.settings, contacts: (d.settings?.contacts || []).filter((c) => c.id !== id) };
+        let projects = d.projects;
+        if (goneName) {
+          projects = {};
+          Object.entries(d.projects).forEach(([pid, proj]) => {
+            projects[pid] = { ...proj, tasks: (proj.tasks || []).map((t) => {
+              const list = ownerListOf(t);
+              if (!ownerHas(list, goneName)) return t;
+              return { ...t, responsibleParty: removeOwnerFrom(list, goneName) };
+            }) };
+          });
+        }
+        return { ...d, settings, projects };
+      });
+    }
+    function addContact() {
+      if (!newName.trim()) return;
+      const id = Date.now();
+      saveContacts([...contacts, { id, name: newName.trim(), email: newEmail.trim() }]);
+      setNewName("");
+      setNewEmail("");
+      setAddMode(false);
+    }
+    return /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 3e3, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.32)" } }, /* @__PURE__ */ React.createElement("div", { style: { background: "var(--bg)", borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,.18)", width: 420, maxWidth: "94vw", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "16px 20px 12px", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 15, fontWeight: 600, color: "var(--txt)" } }, "Contacts"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", marginTop: 2 } }, contacts.length, " contact", contacts.length !== 1 ? "s" : "")), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: onClose,
+        style: { background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 18, lineHeight: 1, padding: "4px 6px", borderRadius: 5 },
+        onMouseEnter: (e) => e.currentTarget.style.background = "#f0f0f0",
+        onMouseLeave: (e) => e.currentTarget.style.background = "none"
+      },
+      "✕"
+    )), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "8px 0" } }, contacts.length === 0 && !addMode && /* @__PURE__ */ React.createElement("div", { style: { padding: "24px 20px", textAlign: "center", color: "var(--mut)", fontSize: 13 } }, "No contacts yet. Add one below."), contacts.map((c) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: c.id,
+        style: { display: "flex", alignItems: "center", gap: 10, padding: "8px 20px", transition: "background .1s" },
+        onMouseEnter: (e) => e.currentTarget.style.background = "#f8f9fa",
+        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+      },
+      editId === c.id ? /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", gap: 6, alignItems: "center" } }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ...contactField("name"),
+          value: editName,
+          onChange: (e) => setEditName(e.target.value),
+          autoFocus: true,
+          placeholder: "Name *",
+          style: { flex: 1, fontSize: 12, border: "1px solid var(--blue)", borderRadius: 4, padding: "4px 7px", fontFamily: "inherit", outline: "none" },
+          onKeyDown: (e) => {
+            if (e.key === "Enter") commitEdit();
+            if (e.key === "Escape") setEditId(null);
+          }
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ...contactField("email"),
+          value: editEmail,
+          onChange: (e) => setEditEmail(e.target.value),
+          placeholder: "Email",
+          style: { flex: 1, fontSize: 12, border: "1px solid var(--bd2)", borderRadius: 4, padding: "4px 7px", fontFamily: "inherit", outline: "none" },
+          onFocus: (e) => e.target.style.borderColor = "var(--blue)",
+          onBlur: (e) => e.target.style.borderColor = "var(--bd2)",
+          onKeyDown: (e) => {
+            if (e.key === "Enter") commitEdit();
+            if (e.key === "Escape") setEditId(null);
+          }
+        }
+      ), /* @__PURE__ */ React.createElement("button", { onClick: commitEdit, style: { fontSize: 11, padding: "4px 9px", borderRadius: 4, border: "1px solid var(--amber)", background: "#eef2ff", color: "var(--amber)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" } }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: () => setEditId(null), style: { fontSize: 11, padding: "4px 7px", borderRadius: 4, border: "1px solid var(--bd2)", background: "none", color: "var(--mut)", cursor: "pointer", fontFamily: "inherit" } }, "✕")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: {
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        background: avatarColor(c.name),
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#fff",
+        flexShrink: 0
+      } }, getInitials(c.name)), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, c.name), c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.email), !c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--bd2)" } }, "No email")), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => startEdit(c),
+          style: { background: "none", border: "none", cursor: "pointer", color: "var(--mut)", padding: "4px 6px", borderRadius: 4, fontSize: 11, fontFamily: "inherit" },
+          onMouseEnter: (e) => e.currentTarget.style.background = "#e8eaf0",
+          onMouseLeave: (e) => e.currentTarget.style.background = "none"
+        },
+        "Edit"
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => del(c.id),
+          style: { background: "none", border: "none", cursor: "pointer", color: "#f85149", padding: "4px 6px", borderRadius: 4, fontSize: 16, lineHeight: 1 },
+          onMouseEnter: (e) => e.currentTarget.style.background = "#fef2f2",
+          onMouseLeave: (e) => e.currentTarget.style.background = "none"
+        },
+        "×"
+      ))
+    ))), /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", padding: "12px 20px", flexShrink: 0 } }, !addMode ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setAddMode(true),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          color: "var(--blue)",
+          fontWeight: 500,
+          background: "none",
+          border: "1px dashed var(--bd2)",
+          borderRadius: 6,
+          padding: "7px 14px",
+          cursor: "pointer",
+          width: "100%",
+          justifyContent: "center",
+          fontFamily: "inherit"
+        },
+        onMouseEnter: (e) => e.currentTarget.style.borderColor = "var(--blue)",
+        onMouseLeave: (e) => e.currentTarget.style.borderColor = "var(--bd2)"
+      },
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, lineHeight: 1 } }, "+"),
+      " Add Contact"
+    ) : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...contactField("name"),
+        autoFocus: true,
+        value: newName,
+        onChange: (e) => setNewName(e.target.value),
+        placeholder: "Full name *",
+        style: { flex: 1, fontSize: 12, border: "1px solid var(--blue)", borderRadius: 5, padding: "6px 9px", fontFamily: "inherit", outline: "none" },
+        onKeyDown: (e) => {
+          if (e.key === "Enter") addContact();
+          if (e.key === "Escape") setAddMode(false);
+        }
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...contactField("email"),
+        value: newEmail,
+        onChange: (e) => setNewEmail(e.target.value),
+        placeholder: "Email (optional)",
+        style: { flex: 1, fontSize: 12, border: "1px solid var(--bd2)", borderRadius: 5, padding: "6px 9px", fontFamily: "inherit", outline: "none" },
+        onFocus: (e) => e.target.style.borderColor = "var(--blue)",
+        onBlur: (e) => e.target.style.borderColor = "var(--bd2)",
+        onKeyDown: (e) => {
+          if (e.key === "Enter") addContact();
+          if (e.key === "Escape") setAddMode(false);
+        }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { onClick: addContact, style: {
+      flex: 1,
+      fontSize: 12,
+      padding: "7px 0",
+      borderRadius: 5,
+      border: "1px solid var(--amber)",
+      background: "#eef2ff",
+      color: "var(--amber)",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 500
+    } }, "Add Contact"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setAddMode(false);
+          setNewName("");
+          setNewEmail("");
+        },
+        style: {
+          fontSize: 12,
+          padding: "7px 14px",
+          borderRadius: 5,
+          border: "1px solid var(--bd2)",
+          background: "none",
+          color: "var(--mut)",
+          cursor: "pointer",
+          fontFamily: "inherit"
+        }
+      },
+      "Cancel"
+    ))))));
+  }
+  function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
+    const [rows, setRows] = useState7(null);
+    const [previewRow, setPreviewRow] = useState7(null);
+    const [previewData, setPreviewData] = useState7(null);
+    const [busy, setBusy] = useState7(false);
+    useEffect6(() => {
+      let alive = true;
+      (async () => {
+        const list = await window.storage.getHistory("hs-v1", 100);
+        if (alive) setRows(list);
+      })();
+      return () => {
+        alive = false;
+      };
+    }, []);
+    const refresh = async () => {
+      setRows(null);
+      const list = await window.storage.getHistory("hs-v1", 100);
+      setRows(list);
+    };
+    const fmtAgo = (iso) => {
+      const ms = Date.now() - new Date(iso).getTime();
+      const s = Math.floor(ms / 1e3);
+      if (s < 60) return `${s}s ago`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      return `${d}d ago`;
+    };
+    const fmtAbs = (iso) => {
+      try {
+        return new Date(iso).toLocaleString();
+      } catch {
+        return iso;
+      }
+    };
+    const fmtBytes = (n) => {
+      if (n == null) return "—";
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    };
+    const labelStyle = (label) => {
+      const map = {
+        "auto": { bg: "#f3f4f6", fg: "#4b5563" },
+        "pre-import": { bg: "#fef3c7", fg: "#92400e" },
+        "pre-recascade": { bg: "#fee2e2", fg: "#991b1b" },
+        "pre-delete-project": { bg: "#fee2e2", fg: "#991b1b" },
+        "pre-restore": { bg: "#dbeafe", fg: "#1e40af" },
+        "safety-block": { bg: "#fef2f2", fg: "#7f1d1d" }
+      };
+      return map[label] || { bg: "#f3f4f6", fg: "#4b5563" };
+    };
+    const doPreview = async (row) => {
+      setBusy(true);
+      const valStr = await window.storage.getHistoryValue(row.id);
+      setBusy(false);
+      if (!valStr) {
+        showToast("Could not load snapshot.", { type: "error" });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(valStr);
+        setPreviewRow(row);
+        setPreviewData(parsed);
+      } catch {
+        showToast("Snapshot is not valid JSON.", { type: "error" });
+      }
+    };
+    const doDownload = async (row) => {
+      const valStr = await window.storage.getHistoryValue(row.id);
+      if (!valStr) {
+        showToast("Could not load snapshot.", { type: "error" });
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([valStr], { type: "application/json" }));
+      const stamp = row.created_at?.replace(/[:.]/g, "-").slice(0, 19) || "snapshot";
+      a.download = `planar-snapshot-${stamp}.json`;
+      a.click();
+    };
+    const doRestore = async (row) => {
+      if (!await askConfirm({
+        title: `Restore the snapshot from ${fmtAbs(row.created_at)}?`,
+        body: `${row.task_count} tasks, ${row.project_count} projects.
+
+The current state is saved as a 'pre-restore' snapshot first.`,
+        confirmLabel: "Restore"
+      })) return;
+      setBusy(true);
+      try {
+        if (data) {
+          await window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-restore", skipSanity: true });
+        }
+        const valStr = await window.storage.getHistoryValue(row.id);
+        if (!valStr) {
+          showToast("Could not load snapshot.", { type: "error" });
+          setBusy(false);
           return;
         }
-        if (e.key === "ArrowDown") {
-          setHiIdx((i) => Math.min(HK.length - 1, i + 1));
+        const parsed = JSON.parse(valStr);
+        if (applyLoadedData) applyLoadedData(parsed);
+        else setData(parsed);
+        showToast(`Restored snapshot from ${fmtAgo(row.created_at)}.`, { type: "success", duration: 4e3 });
+        onClose && onClose();
+      } catch (e) {
+        console.error("Restore failed:", e);
+        showToast("Restore failed — see console.", { type: "error" });
+      }
+      setBusy(false);
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        "data-testid": "history-panel",
+        style: {
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.4)",
+          zIndex: 9e3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16
+        },
+        onClick: onClose
+      },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          style: {
+            background: "var(--bg)",
+            border: "1px solid var(--bd2)",
+            borderRadius: 10,
+            width: "min(900px,96vw)",
+            maxHeight: "86vh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          },
+          onClick: (e) => e.stopPropagation()
+        },
+        /* @__PURE__ */ React.createElement("div", { style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 18px",
+          borderBottom: "1px solid var(--bd)",
+          flexShrink: 0
+        } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: ".07em", textTransform: "uppercase", lineHeight: 1, marginBottom: 2 } }, "RECOVERY"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "Version History")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } }, exportJSON && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            className: "btn",
+            onClick: exportJSON,
+            title: "Download a complete offline copy of all data as a .json file",
+            style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11 }
+          },
+          /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })),
+          "Backup file"
+        ), importJSON && /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            className: "btn",
+            title: "Replace current data from a backup .json — current state is snapshotted first",
+            style: { cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11 }
+          },
+          /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 5 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "17" })),
+          "Restore file",
+          /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: (e) => {
+            importJSON(e);
+            e.target.value = "";
+          }, style: { display: "none" } })
+        ), /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 16, background: "var(--bd)" } }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: refresh, disabled: busy, "aria-busy": busy || void 0, title: "Refresh" }, "↻"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Close"))),
+        /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", fontSize: 11, color: "var(--mut)", background: "#fafbfc", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, "Snapshots of your data, newest first. Restore reverts to a snapshot; your current state is backed up first as ", /* @__PURE__ */ React.createElement("code", { style: { background: "#eef2ff", padding: "1px 4px", borderRadius: 2, fontSize: 10 } }, "pre-restore"), ". For an offline copy, ", /* @__PURE__ */ React.createElement("strong", null, "Backup file"), " downloads everything as .json — ", /* @__PURE__ */ React.createElement("strong", null, "Restore file"), " loads one back."),
+        /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "auto" } }, rows === null ? /* @__PURE__ */ React.createElement("div", { style: { padding: "40px 18px", textAlign: "center", color: "var(--mut)", fontSize: 12, cursor: "progress" } }, "Loading…") : rows.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { padding: "40px 18px", textAlign: "center", color: "var(--mut)", fontSize: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8, fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "No snapshots yet."), /* @__PURE__ */ React.createElement("div", null, "If you've just enabled history, the ", /* @__PURE__ */ React.createElement("code", null, "planar_history"), " table needs to be created in Supabase.", /* @__PURE__ */ React.createElement("br", null), "See the setup SQL in the project README. Snapshots will appear here as you edit.")) : /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { style: { background: "#fafbfc", borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "When"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Label"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Projects"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Tasks"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Size"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "8px 12px", fontWeight: 600, color: "var(--mut)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" } }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => {
+          const ls = labelStyle(r.label);
+          return /* @__PURE__ */ React.createElement("tr", { key: r.id, style: { borderBottom: "1px solid var(--bd)" }, "data-testid": "history-row" }, /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", color: "var(--txt)" }, title: fmtAbs(r.created_at) }, fmtAgo(r.created_at)), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-block", padding: "1px 7px", borderRadius: 9, fontSize: 10, fontWeight: 500, background: ls.bg, color: ls.fg } }, r.label || "auto")), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, r.project_count ?? "—"), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, r.task_count ?? "—"), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--mut)" } }, fmtBytes(r.byte_size)), /* @__PURE__ */ React.createElement("td", { style: { padding: "8px 12px", textAlign: "right" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy, "aria-busy": busy || void 0, onClick: () => doPreview(r), style: { marginRight: 4, fontSize: 10, padding: "2px 7px" } }, "Preview"), /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy, "aria-busy": busy || void 0, onClick: () => doDownload(r), style: { marginRight: 4, fontSize: 10, padding: "2px 7px" } }, "Download"), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              className: "btn",
+              disabled: busy,
+              "aria-busy": busy || void 0,
+              onClick: () => doRestore(r),
+              style: { fontSize: 10, padding: "2px 7px", borderColor: "var(--amber)", color: "var(--amber)" }
+            },
+            "Restore"
+          )));
+        })))),
+        previewRow && previewData && /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            onClick: () => {
+              setPreviewRow(null);
+              setPreviewData(null);
+            },
+            style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }
+          },
+          /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              onClick: (e) => e.stopPropagation(),
+              style: { background: "var(--bg)", borderRadius: 8, width: "min(800px,94vw)", maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden" }
+            },
+            /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderBottom: "1px solid var(--bd)", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } }, "Snapshot Preview"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, fmtAbs(previewRow.created_at), " · ", previewRow.label)), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+              setPreviewRow(null);
+              setPreviewData(null);
+            } }, "Close")),
+            /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "auto", padding: "12px 16px" } }, /* @__PURE__ */ React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { style: { borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("th", { style: { textAlign: "left", padding: "6px 8px", fontWeight: 600, color: "var(--mut)" } }, "Project"), /* @__PURE__ */ React.createElement("th", { style: { textAlign: "right", padding: "6px 8px", fontWeight: 600, color: "var(--mut)" } }, "Tasks"))), /* @__PURE__ */ React.createElement("tbody", null, Object.entries(previewData.projects || {}).map(([pid, p]) => /* @__PURE__ */ React.createElement("tr", { key: pid, style: { borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("td", { style: { padding: "6px 8px" } }, crossScheduleLabel(p)), /* @__PURE__ */ React.createElement("td", { style: { padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" } }, p.tasks?.length || 0)))))),
+            /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--bd)", display: "flex", justifyContent: "flex-end", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => doDownload(previewRow) }, "Download JSON"), /* @__PURE__ */ React.createElement(
+              "button",
+              {
+                className: "btn",
+                style: { borderColor: "var(--amber)", color: "var(--amber)" },
+                onClick: () => {
+                  const r = previewRow;
+                  setPreviewRow(null);
+                  setPreviewData(null);
+                  doRestore(r);
+                }
+              },
+              "Restore This Snapshot"
+            ))
+          )
+        )
+      )
+    );
+  }
+  var ErrorBoundary = class extends React.Component {
+    constructor(props) {
+      super(props);
+      this.state = { hasError: false, error: null };
+    }
+    static getDerivedStateFromError(error) {
+      return { hasError: true, error };
+    }
+    componentDidCatch(error, info) {
+      console.error("[planar] View render error:", error, info);
+    }
+    render() {
+      if (this.state.hasError) {
+        return /* @__PURE__ */ React.createElement("div", { style: {
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          background: "var(--bg)",
+          padding: 32
+        } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "⚠️"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--txt)" } }, "This view failed to load"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--mut)", maxWidth: 360, textAlign: "center" } }, String(this.state.error?.message || this.state.error || "Unknown render error")), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { marginTop: 8 }, onClick: () => this.setState({ hasError: false, error: null }) }, "Try again"));
+      }
+      return this.props.children;
+    }
+  };
+  var SGQ_HEALTH = {
+    gray: { label: "Not Started", dot: "#ffffff", bd: "1.5px solid #d1d5db" },
+    yellow: { label: "In Progress", dot: "#c47b00", bd: "none" },
+    red: { label: "Needs Attn.", dot: "#dc2626", bd: "none" },
+    green: { label: "Complete", dot: "#16a34a", bd: "none" },
+    paused: { label: "Paused", dot: "#9ca3af", bd: "none" }
+  };
+  var SGQ_HKEYS = ["gray", "yellow", "red", "green", "paused"];
+  var SGQ_AV = ["#4f46e5", "#0969da", "#16a34a", "#c47b00", "#9333ea", "#0891b2", "#dc2626"];
+  var SGQ_ALLOWED_PATCH = /* @__PURE__ */ new Set(["health", "duration", "end", "percentComplete", "responsibleParty", "predecessors"]);
+  var SGQ_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function sgqAvatarColor(name) {
+    let h = 0;
+    for (const c of String(name || "")) h = h * 31 + c.charCodeAt(0) >>> 0;
+    return SGQ_AV[h % SGQ_AV.length];
+  }
+  function sgqInitials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "?";
+    return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+  }
+  function sgqConfClass(c) {
+    const n = Number(c || 0);
+    return n >= 0.8 ? "hi" : n >= 0.5 ? "mid" : "lo";
+  }
+  function sgqFmtDate(s) {
+    if (!s) return "";
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (!m) return s;
+    return SGQ_MONTHS[+m[2] - 1] + " " + +m[3];
+  }
+  function SgqDot({ h }) {
+    const m = SGQ_HEALTH[h] || SGQ_HEALTH.gray;
+    return /* @__PURE__ */ React.createElement("span", { className: "sgq-dot", style: { background: m.dot, border: m.bd !== "none" ? m.bd : "none" } });
+  }
+  function sgqChildrenOf(data, pid, parentId) {
+    const proj = data && data.projects && data.projects[pid];
+    if (!proj) return [];
+    return proj.tasks.filter((t) => parentId == null ? t.parentId == null : t.parentId === parentId);
+  }
+  function sgqCrumbOf(data, pid, path) {
+    if (pid == null || !Array.isArray(path) || path.length === 0) return null;
+    const proj = data && data.projects && data.projects[pid];
+    if (!proj) return null;
+    const byId = new Map(proj.tasks.map((t) => [t.id, t]));
+    const names = path.map((id) => byId.get(id) && byId.get(id).name).filter(Boolean);
+    if (names.length === 0) return null;
+    return { project: crossScheduleLabel(proj), names };
+  }
+  function SgqCrumb({ data, pid, path }) {
+    const c = sgqCrumbOf(data, pid, path);
+    if (!c) return /* @__PURE__ */ React.createElement("span", { style: { color: "#c47b00", fontWeight: 600 } }, "No task selected");
+    return /* @__PURE__ */ React.createElement("span", { className: "sgq-crumbline" }, c.project, c.names.map((nm, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("span", { className: "sgq-arrow" }, "▸"), nm)));
+  }
+  function SgqCascadePicker({ data, pid, path, ready, onChange }) {
+    const projects = data && data.projects ? Object.entries(data.projects) : [];
+    const selects = [];
+    if (pid != null && data && data.projects && data.projects[pid]) {
+      let nodes = sgqChildrenOf(data, pid, null);
+      let k = 0;
+      while (true) {
+        const val = path && path[k] != null ? path[k] : null;
+        selects.push({ k, nodes, val });
+        if (val == null) break;
+        const kids = sgqChildrenOf(data, pid, val);
+        if (kids.length === 0) break;
+        nodes = kids;
+        k++;
+      }
+    }
+    return /* @__PURE__ */ React.createElement("div", { className: "sgq-target" + (ready ? "" : " warnrow") }, /* @__PURE__ */ React.createElement("i", { className: ready ? "ti ti-map-pin" : "ti ti-help-circle" }), !ready && pid == null && /* @__PURE__ */ React.createElement("span", { className: "sgq-needpick" }, "Pick the task:"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        className: "sgq-sel",
+        value: pid == null ? "" : pid,
+        onChange: (e) => onChange(e.target.value === "" ? null : +e.target.value, [])
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "", disabled: true }, "Project…"),
+      projects.map(([k, p]) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, crossScheduleLabel(p)))
+    ), selects.map((sel) => /* @__PURE__ */ React.createElement(React.Fragment, { key: sel.k }, /* @__PURE__ */ React.createElement("span", { className: "sgq-arrow" }, "▸"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        className: "sgq-sel",
+        value: sel.val == null ? "" : sel.val,
+        onChange: (e) => {
+          const v = e.target.value === "" ? null : +e.target.value;
+          const np = (path || []).slice(0, sel.k);
+          if (v != null) np.push(v);
+          onChange(pid, np);
+        }
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, sel.k === 0 ? "Phase…" : "↳ refine (optional)"),
+      sel.nodes.map((o) => /* @__PURE__ */ React.createElement("option", { key: o.id, value: o.id }, o.name))
+    ))));
+  }
+  function SgqChangeRow({ field, fromVal, toVal, onEditTo, onRemove }) {
+    if (field === "health") {
+      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Status"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, /* @__PURE__ */ React.createElement(SgqDot, { h: fromVal }), SGQ_HEALTH[fromVal] && SGQ_HEALTH[fromVal].label || fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement("span", { className: "sgq-statuslabel" }, /* @__PURE__ */ React.createElement(SgqDot, { h: toVal }), /* @__PURE__ */ React.createElement("select", { className: "sgq-sel", value: toVal || "gray", onChange: (e) => onEditTo(e.target.value) }, SGQ_HKEYS.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, SGQ_HEALTH[k].label)))), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
+    }
+    if (field === "percentComplete") {
+      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "% Complete"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal != null ? fromVal : 0, "%"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "sgq-miniinput",
+          type: "number",
+          min: "0",
+          max: "100",
+          value: toVal != null ? toVal : 0,
+          onChange: (e) => onEditTo(Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)))
+        }
+      ), /* @__PURE__ */ React.createElement("span", { style: { color: "#8b949e" } }, "%"), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
+    }
+    if (field === "duration") {
+      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Duration"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal != null ? fromVal : 0, "d"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "sgq-miniinput",
+          type: "number",
+          min: "0",
+          value: toVal != null ? toVal : 0,
+          onChange: (e) => onEditTo(Math.max(0, parseInt(e.target.value, 10) || 0))
+        }
+      ), /* @__PURE__ */ React.createElement("span", { style: { color: "#8b949e" } }, "d"), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
+    }
+    if (field === "responsibleParty") {
+      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "Owner"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ...NO_AUTOFILL,
+          className: "sgq-miniinput",
+          type: "text",
+          style: { minWidth: 140 },
+          value: toVal || "",
+          onChange: (e) => onEditTo(e.target.value)
+        }
+      ), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Don't apply this change", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
+    }
+    if (field === "end") {
+      return /* @__PURE__ */ React.createElement("div", { className: "sgq-chg" }, /* @__PURE__ */ React.createElement("span", { className: "sgq-field" }, "End date"), /* @__PURE__ */ React.createElement("span", { className: "sgq-fromval" }, fromVal || "—"), /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-right sgq-toarrow" }), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "sgq-miniinput",
+          type: "date",
+          value: toVal || "",
+          onChange: (e) => onEditTo(e.target.value)
+        }
+      ), /* @__PURE__ */ React.createElement("span", { className: "sgq-grow" }), onRemove && /* @__PURE__ */ React.createElement("span", { className: "sgq-x", title: "Reset — don't change end date", onClick: onRemove }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })));
+    }
+    return null;
+  }
+  function InlineDate({ value, onCommit }) {
+    const disp = value ? toShortDate(value) : "";
+    const [txt, setTxt] = useState7(disp);
+    useEffect6(() => {
+      setTxt(disp);
+    }, [disp]);
+    const commit = () => {
+      const isoV = parseFlexDate(txt);
+      if (isoV) onCommit(isoV);
+      else setTxt(disp);
+    };
+    return /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...NO_AUTOFILL,
+        className: "rev-edit rev-date-edit",
+        value: txt,
+        placeholder: "—",
+        onChange: (e) => setTxt(e.target.value),
+        onBlur: commit,
+        onKeyDown: (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            setTxt(disp);
+            e.currentTarget.blur();
+          }
+        }
+      }
+    );
+  }
+  function cleanEmailBody(raw) {
+    if (!raw) return { body: "", quoted: "", hasQuoted: false };
+    let text = String(raw).replace(/\r\n/g, "\n");
+    text = text.replace(/\s*<\s*https?:\/\/urldefense\.proofpoint\.com[^\n]*$/gim, "");
+    text = text.replace(/\s*<\s*(?:https?:\/\/|mailto:)[^>\n]*>/gi, "");
+    text = text.replace(/^[ \t]*\[?\s*EXTERNAL[^\n]*\]?\s*\n?/gim, "");
+    const lines = text.split("\n");
+    const quoteRe = /^\s*(?:-{3,}\s*Original Message\s*-{3,}|_{5,}|From:\s.+|On\b.+\bwrote:\s*)$/i;
+    let cut = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (quoteRe.test(lines[i])) {
+        cut = i;
+        break;
+      }
+    }
+    const head = cut >= 0 ? lines.slice(0, cut) : lines;
+    const quoted = cut >= 0 ? lines.slice(cut) : [];
+    const tidy = (a) => a.join("\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    const qtext = tidy(quoted);
+    return { body: tidy(head), quoted: qtext, hasQuoted: qtext.length > 0 };
+  }
+  function SuggestionsView({ data, updateTask, setData, rows, setRows, loading, onClose, gridProps, activeIdx, setActiveIdx }) {
+    const [edits, setEdits] = useState7({});
+    const [view, setView] = useState7("grid");
+    const [split, setSplit] = useState7(50);
+    const [toast, setToast] = useState7(null);
+    const [showPicker, setShowPicker] = useState7(false);
+    const [showQuoted, setShowQuoted] = useState7(false);
+    const bodyRef = useRef7(null), targetRef = useRef7(null), canvasRef = useRef7(null);
+    const toastTimer = useRef7(null), undoRef = useRef7(null);
+    const [mailReaderOpen, setMailReaderOpen] = useState7(false);
+    const [mailOverflow, setMailOverflow] = useState7(false);
+    const mailBodyRef = useRef7(null);
+    useEffect6(() => {
+      setActiveIdx((i) => Math.max(0, Math.min(i, rows.length - 1)));
+    }, [rows.length]);
+    useEffect6(() => {
+      setShowPicker(false);
+      setShowQuoted(false);
+      setMailReaderOpen(false);
+    }, [activeIdx]);
+    React.useLayoutEffect(() => {
+      const measure = () => {
+        const el = mailBodyRef.current;
+        setMailOverflow(!!el && el.scrollHeight > el.clientHeight + 2);
+      };
+      measure();
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }, [activeIdx]);
+    const rfmt = (s) => {
+      if (!s) return "";
+      const p = s.split("-");
+      return +p[1] + "/" + +p[2];
+    };
+    const rfmtIso = (s) => {
+      if (!s) return "";
+      const p = s.split("-");
+      return +p[1] + "/" + +p[2] + "/" + String(p[0]).slice(2);
+    };
+    const getEff = (row) => {
+      const e = edits[row.id] || {};
+      return {
+        project_id: "project_id" in e ? e.project_id : row.project_id,
+        task_path: "task_path" in e ? e.task_path : row.task_path || [],
+        note_text: "note_text" in e ? e.note_text : row.note_text || "",
+        patch: "patch" in e ? e.patch : row.patch || {}
+      };
+    };
+    const patchRow = (id, p) => setEdits((E) => ({ ...E, [id]: { ...E[id] || {}, ...p } }));
+    const setPatchField = (id, field, val) => setEdits((E) => {
+      const row = rows.find((r) => r.id === id);
+      const cur = E[id] && E[id].patch || row && row.patch || {};
+      return { ...E, [id]: { ...E[id] || {}, patch: { ...cur, [field]: val } } };
+    });
+    const cleanPatchFor = (patch, target2) => {
+      const out = {};
+      Object.keys(patch || {}).forEach((k) => {
+        if (!SGQ_ALLOWED_PATCH.has(k)) return;
+        const v = patch[k];
+        if (v === void 0 || v === null || v === "") return;
+        const same = (x, y) => x && typeof x === "object" || y && typeof y === "object" ? JSON.stringify(x) === JSON.stringify(y) : String(x) === String(y);
+        if (target2 && same(target2[k], v)) return;
+        out[k] = v;
+      });
+      return out;
+    };
+    const previewProject = (tasks, tId, patchIn) => {
+      const boundEdit = resolveBoundEdit(tasks, tId, patchIn, (id) => MEETING_BODY_INDEX[id]);
+      const patch = boundEdit.updates;
+      let ts = tasks.map((t) => {
+        if (t.id !== tId) return t;
+        const u = { ...t, ...patch, ...completionDelta(t, patch) };
+        if ("predecessors" in patch) delete u.pinnedStart;
+        if ("duration" in patch && !("durValue" in patch) && !("durUnit" in patch)) {
+          u.durUnit = "d";
+          u.durValue = Math.max(0, Math.trunc(Number(patch.duration) || 0));
+        }
+        if ("durValue" in patch || "durUnit" in patch) {
+          u.durUnit = u.durUnit || "d";
+          if (u.durValue == null) u.durValue = 0;
+        }
+        const durEdited = "duration" in patch || "durValue" in patch || "durUnit" in patch;
+        if ((durEdited || "start" in patch) && !("end" in patch)) {
+          if (!(u.pinnedEnd && u.end)) {
+            const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u));
+            u.end = r.end;
+            u.duration = r.duration;
+          }
+        } else if ("end" in patch && !("start" in patch)) {
+          if (u.end && !u.start) {
+            u.start = u.end;
+            u.durUnit = "d";
+            u.durValue = 1;
+            u.duration = 1;
+          } else {
+            u.duration = u.start && u.end ? Math.max(0, difBD(u.start, u.end) + 1) : "";
+            u.durUnit = "d";
+            u.durValue = typeof u.duration === "number" ? u.duration : 0;
+          }
+          u.pinnedEnd = !!u.end;
+        }
+        if ("start" in patch) u.pinnedStart = true;
+        if (boundEdit.startOverride) {
+          u.start = boundEdit.startOverride;
+          u.end = boundEdit.startOverride;
+        }
+        return u;
+      });
+      if ("health" in patch) {
+        const desc = (id, all) => {
+          const k = all.filter((t) => t.parentId === id);
+          return [...k.map((x) => x.id), ...k.flatMap((x) => desc(x.id, all))];
+        };
+        const ids = new Set(desc(tId, ts));
+        if (ids.size) {
+          ts = ts.map((t) => ids.has(t.id) ? { ...t, health: patch.health, ...cascadeDelta(t, patch.health) } : t);
+        }
+      }
+      if ("duration" in patch || "start" in patch || "end" in patch || "predecessors" in patch || "meetingBound" in patch || "meetingBodyId" in patch || "pinnedMeetingDate" in patch || "minMeetingsAfter" in patch) {
+        ts = recomputeSchedule(ts);
+      }
+      return ts;
+    };
+    const active = rows[activeIdx] || null;
+    const isCreate = !!(active && (active.kind === "create_task" || active.patch && active.patch.kind === "create_task"));
+    const eff = active ? getEff(active) : null;
+    const pid = eff ? eff.project_id : null;
+    const proj = pid != null && data && data.projects ? data.projects[pid] : null;
+    const rawTargetId = eff && eff.task_path && eff.task_path.length ? eff.task_path[eff.task_path.length - 1] : null;
+    const target = proj && rawTargetId != null ? proj.tasks.find((t) => String(t.id) === String(rawTargetId)) || proj.tasks.find((t) => t.name === rawTargetId) || null : null;
+    const targetId = target ? target.id : null;
+    const matched = !isCreate && !!(proj && target);
+    const resolveTaskRef = (ref) => {
+      if (ref == null || !proj) return null;
+      return proj.tasks.find((t) => String(t.id) === String(ref)) || proj.tasks.find((t) => t.name === ref) || null;
+    };
+    let addedPredTasks = [];
+    let cleanPatch = matched && eff ? cleanPatchFor(eff.patch, target) : {};
+    if (matched && eff && eff.patch && Array.isArray(eff.patch.add_predecessors) && eff.patch.add_predecessors.length) {
+      const existing = Array.isArray(target.predecessors) ? target.predecessors : [];
+      const existingIds = new Set(existing.map((p) => p && typeof p === "object" ? p.id : p));
+      const additions = [];
+      eff.patch.add_predecessors.forEach((ref) => {
+        const t = resolveTaskRef(ref);
+        if (!t || t.id === targetId || existingIds.has(t.id)) return;
+        additions.push({ id: t.id, type: "FS", lag: 0 });
+        addedPredTasks.push(t);
+        existingIds.add(t.id);
+      });
+      if (additions.length) cleanPatch = { ...cleanPatch, predecessors: [...existing, ...additions] };
+    }
+    const previewTasks = matched ? previewProject(proj.tasks, targetId, cleanPatch) : [];
+    const propById = {};
+    previewTasks.forEach((t) => {
+      propById[t.id] = t;
+    });
+    const propTarget = matched ? propById[targetId] : null;
+    const moversList = [];
+    if (matched) proj.tasks.forEach((t) => {
+      if (t.id === targetId) return;
+      const p = propById[t.id];
+      if (!p) return;
+      if (p.start !== t.start || p.end !== t.end) moversList.push({ id: t.id, newStart: p.start, newEnd: p.end, dStart: difBD(t.start, p.start), dEnd: difBD(t.end, p.end) });
+    });
+    const moverMap = {};
+    moversList.forEach((m) => {
+      moverMap[m.id] = m;
+    });
+    const maxDelta = moversList.reduce((a, m) => Math.max(a, m.dEnd), 0);
+    const previewConflictMsg = matched ? pinConflictNotice(newPinConflicts(proj.tasks, previewTasks, cleanPatch && (cleanPatch.start || cleanPatch.end) ? [targetId] : []), cleanPatch && (cleanPatch.start || cleanPatch.end) ? targetId : null, rfmtIso) : "";
+    const sugByTask = {};
+    rows.forEach((r, i) => {
+      const e = getEff(r);
+      if (e.project_id === pid && e.task_path && e.task_path.length) {
+        const tid = e.task_path[e.task_path.length - 1];
+        if (!(tid in sugByTask)) sugByTask[tid] = i;
+      }
+    });
+    const propStatus = propTarget ? propTarget.health : target ? target.health : "gray";
+    const propEnd = propTarget ? propTarget.end : target ? target.end : "";
+    const propOwner = ownerJoin(propTarget ? ownerListOf(propTarget) : target ? ownerListOf(target) : []);
+    const endChanged = target && propEnd && propEnd !== target.end;
+    const endDelta = endChanged ? difBD(target.end, propEnd) : 0;
+    const startChanged = target && propTarget && propTarget.start !== target.start;
+    const noteText = eff ? eff.note_text : "";
+    const createReady = isCreate && !!proj && !!(eff && eff.patch && typeof eff.patch.name === "string" && eff.patch.name.trim());
+    let newTask = null, newTaskAddNames = [];
+    if (createReady) {
+      const parent = target;
+      const preds = [];
+      if (Array.isArray(eff.patch.add_predecessors)) eff.patch.add_predecessors.forEach((ref) => {
+        const t = resolveTaskRef(ref);
+        if (t) {
+          preds.push({ id: t.id, type: "FS", lag: 0 });
+          newTaskAddNames.push(t.name);
+        }
+      });
+      const newId = proj.tasks.reduce((m, t) => Math.max(m, +t.id || 0), 0) + 1;
+      const fallbackStart = eff.patch.start || (parent ? parent.start : proj.tasks[0] ? proj.tasks[0].start : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+      let dur = eff.patch.duration != null && eff.patch.duration !== "" ? eff.patch.duration : 1;
+      if (eff.patch.end && (eff.patch.duration == null || eff.patch.duration === "")) {
+        dur = fallbackStart && eff.patch.end ? Math.max(0, difBD(fallbackStart, eff.patch.end) + 1) : dur;
+      }
+      let prov = { id: newId, name: eff.patch.name.trim(), start: fallbackStart, end: "", duration: dur, durUnit: "d", durValue: dur, predecessors: preds, health: eff.patch.health || "gray", percentComplete: 0, parentId: parent ? parent.id : null, responsibleParty: eff.patch.responsibleParty || "", notes: [], isExpanded: true };
+      prov.end = calcEnd(prov.start, prov.duration);
+      let sim = recomputeSchedule([...proj.tasks, prov]);
+      const c = sim.find((t) => t.id === newId) || prov;
+      newTask = { ...prov, start: c.start, end: c.end, duration: c.duration };
+    }
+    const flash = (msg) => {
+      setToast({ msg });
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 6500);
+    };
+    const createTask = async () => {
+      if (!createReady || !newTask) return;
+      const row = active;
+      undoRef.current = { kind: "approve", pid, tasks: JSON.parse(JSON.stringify(proj.tasks)), row, idx: activeIdx };
+      const dateMatch = row.email_date && /^(\d{4})-(\d{2})-(\d{2})$/.exec(row.email_date);
+      const ymd = dateMatch ? row.email_date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      const noteArr = noteText && String(noteText).trim() ? [{ id: Date.now(), date: ymd, text: String(noteText).trim() }] : [];
+      setData((d) => {
+        if (!d.projects || !d.projects[pid]) return d;
+        const p = d.projects[pid];
+        const tasks = p.tasks.slice();
+        const newId = tasks.reduce((m, t2) => Math.max(m, +t2.id || 0), 0) + 1;
+        const t = { id: newId, name: newTask.name, start: newTask.start, end: newTask.end, duration: newTask.duration, predecessors: newTask.predecessors, health: newTask.health, percentComplete: 0, parentId: newTask.parentId, responsibleParty: newTask.responsibleParty ? [newTask.responsibleParty] : [], notes: noteArr, isExpanded: true };
+        let insertIdx = tasks.length;
+        if (newTask.parentId != null) {
+          const predIds = new Set((newTask.predecessors || []).map((pp) => pp.id));
+          let afterPred = -1;
+          tasks.forEach((x, i) => {
+            if (predIds.has(x.id) && x.parentId === newTask.parentId) afterPred = i;
+          });
+          if (afterPred >= 0) {
+            insertIdx = afterPred + 1;
+          } else {
+            const desc = /* @__PURE__ */ new Set([newTask.parentId]);
+            let changed = true;
+            while (changed) {
+              changed = false;
+              tasks.forEach((x) => {
+                if (x.parentId != null && desc.has(x.parentId) && !desc.has(x.id)) {
+                  desc.add(x.id);
+                  changed = true;
+                }
+              });
+            }
+            let last = -1;
+            tasks.forEach((x, i) => {
+              if (desc.has(x.id)) last = i;
+            });
+            if (last >= 0) insertIdx = last + 1;
+          }
+        }
+        tasks.splice(insertIdx, 0, t);
+        const recomputed = recomputeSchedule(tasks);
+        return { ...d, projects: { ...d.projects, [pid]: { ...p, tasks: recomputed } } };
+      });
+      const sb = window.__sb;
+      if (sb) {
+        try {
+          await sb.from("planar_suggestions").update({ status: "approved" }).eq("id", row.id);
+        } catch (e) {
+          console.warn("mark approved failed:", e);
+        }
+      }
+      setRows((R) => R.filter((r) => r.id !== row.id));
+      setEdits((E) => {
+        const c = { ...E };
+        delete c[row.id];
+        return c;
+      });
+      flash("Task created · " + newTask.name);
+    };
+    const approve = async () => {
+      if (isCreate) {
+        return createTask();
+      }
+      if (!active || !matched) return;
+      const row = active, p = cleanPatch;
+      const dateMatch = row.email_date && /^(\d{4})-(\d{2})-(\d{2})$/.exec(row.email_date);
+      const ymd = dateMatch ? row.email_date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      const noteTxt = String(noteText || "").trim();
+      const existingNotes = Array.isArray(target.notes) ? target.notes : [];
+      const merged = noteTxt ? { ...p, notes: [...existingNotes, { id: Date.now(), date: ymd, text: noteTxt }] } : { ...p };
+      if ("responsibleParty" in merged) merged.responsibleParty = merged.responsibleParty ? [merged.responsibleParty] : [];
+      undoRef.current = { kind: "approve", pid, tasks: JSON.parse(JSON.stringify(proj.tasks)), row, idx: activeIdx };
+      try {
+        updateTask(targetId, merged, pid);
+      } catch (e) {
+        console.error("updateTask failed:", e);
+        return;
+      }
+      const sb = window.__sb;
+      if (sb) {
+        try {
+          await sb.from("planar_suggestions").update({ status: "approved" }).eq("id", row.id);
+        } catch (e) {
+          console.warn("mark approved failed:", e);
+        }
+      }
+      setRows((R) => R.filter((r) => r.id !== row.id));
+      setEdits((E) => {
+        const c = { ...E };
+        delete c[row.id];
+        return c;
+      });
+      flash("Approved · " + (row.email_subject || "update"));
+    };
+    const dismiss = async () => {
+      if (!active) return;
+      const row = active;
+      undoRef.current = { kind: "dismiss", row, idx: activeIdx };
+      const sb = window.__sb;
+      if (sb) {
+        try {
+          await sb.from("planar_suggestions").update({ status: "dismissed" }).eq("id", row.id);
+        } catch (e) {
+          console.warn("mark dismissed failed:", e);
+        }
+      }
+      setRows((R) => R.filter((r) => r.id !== row.id));
+      setEdits((E) => {
+        const c = { ...E };
+        delete c[row.id];
+        return c;
+      });
+      flash("Dismissed · " + (row.email_subject || "update"));
+    };
+    const doUndo = async () => {
+      const snap = undoRef.current;
+      if (!snap) return;
+      undoRef.current = null;
+      setToast(null);
+      if (snap.kind === "approve" && setData) {
+        setData((d) => d.projects && d.projects[snap.pid] ? { ...d, projects: { ...d.projects, [snap.pid]: { ...d.projects[snap.pid], tasks: snap.tasks } } } : d);
+      }
+      setRows((R) => R.some((r) => r.id === snap.row.id) ? R : [snap.row, ...R]);
+      setActiveIdx(0);
+      const sb = window.__sb;
+      if (sb) {
+        try {
+          await sb.from("planar_suggestions").update({ status: "pending" }).eq("id", snap.row.id);
+        } catch (e) {
+        }
+      }
+    };
+    const prev = () => setActiveIdx((i) => Math.max(0, i - 1));
+    const next = () => setActiveIdx((i) => Math.min(rows.length - 1, i + 1));
+    useEffect6(() => {
+      const h = (e) => {
+        const t = e.target;
+        if (mailReaderOpen) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setMailReaderOpen(false);
+          }
           return;
         }
-        if (e.key === "ArrowUp") {
-          setHiIdx((i) => Math.max(0, i - 1));
-          return;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+        const k = e.key.toLowerCase();
+        if (k === "j" || e.key === "ArrowRight") {
+          e.preventDefault();
+          next();
+        } else if (k === "k" || e.key === "ArrowLeft") {
+          e.preventDefault();
+          prev();
+        } else if (k === "a" || e.key === "Enter") {
+          if (active && (matched || createReady)) {
+            e.preventDefault();
+            approve();
+          }
+        } else if (k === "x" || e.key === "Backspace" || e.key === "Delete") {
+          if (active) {
+            e.preventDefault();
+            dismiss();
+          }
+        } else if (k === "g") {
+          e.preventDefault();
+          setView((v) => v === "grid" ? "gantt" : "grid");
+        } else if (k === "u") {
+          e.preventDefault();
+          doUndo();
+        } else if (e.key === "Escape") {
+          if (onClose) {
+            e.preventDefault();
+            onClose();
+          }
         }
-        if (e.key === "Enter" || e.key === " ") {
-          setHiIdx((i) => {
-            const sel = HK[i] ?? value;
-            setTimeout(() => {
-              onChange(sel);
-              setOpen(false);
-            }, 0);
-            return i;
+      };
+      window.addEventListener("keydown", h);
+      return () => window.removeEventListener("keydown", h);
+    });
+    useEffect6(() => {
+      if (!matched) return;
+      const id = setTimeout(() => {
+        if (view === "grid" && targetRef.current) targetRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+        if (view === "gantt" && canvasRef.current && targetRef.current) {
+          const bar = targetRef.current.querySelector(".rev-bar,.rev-amber,.rev-ghost");
+          if (bar) canvasRef.current.scrollTo({ left: Math.max(0, bar.offsetLeft - 120), behavior: "smooth" });
+        }
+      }, 60);
+      return () => clearTimeout(id);
+    }, [activeIdx, view, matched, targetId]);
+    useEffect6(() => {
+      if (!(matched && gridProps && gridProps.setSelectedId && targetId != null)) return;
+      const id = setTimeout(() => gridProps.setSelectedId(targetId), 60);
+      return () => clearTimeout(id);
+    }, [targetId, matched]);
+    const onDivDown = (e) => {
+      e.preventDefault();
+      const sy = e.clientY, sp = split, H = bodyRef.current.getBoundingClientRect().height;
+      const mv = (ev) => {
+        let p = sp + (ev.clientY - sy) / H * 100;
+        p = Math.max(28, Math.min(76, p));
+        setSplit(p);
+      };
+      const release = window.pinSchedCursor("row-resize", { onExit: () => up() });
+      const up = () => {
+        document.removeEventListener("mousemove", mv);
+        document.removeEventListener("mouseup", up);
+        release();
+      };
+      document.addEventListener("mousemove", mv);
+      document.addEventListener("mouseup", up);
+    };
+    const visualTasks = proj ? sortByVisualOrder(proj.tasks) : [];
+    const byId = {};
+    (proj ? proj.tasks : []).forEach((t) => byId[t.id] = t);
+    const depthOf = (t) => {
+      let d = 0, p = t.parentId;
+      while (p != null && byId[p]) {
+        d++;
+        p = byId[p].parentId;
+      }
+      return d;
+    };
+    const renderStatus = (h) => {
+      const m = HEALTH[h] || HEALTH.gray;
+      return /* @__PURE__ */ React.createElement("span", { className: "revstatus" }, /* @__PURE__ */ React.createElement("span", { className: "revdot", style: { background: m.dot, border: m.border } }), m.label);
+    };
+    const renderGrid = () => {
+      if (!proj) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "Pick a task in the panel below to preview this update against the plan.");
+      return /* @__PURE__ */ React.createElement("div", { className: "rev-grid" }, /* @__PURE__ */ React.createElement("div", { className: "rev-ghead" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Task"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Start"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "End"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Status"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, "Owner"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" })), visualTasks.map((t) => {
+        const isTgt = matched && t.id === targetId;
+        const mv = moverMap[t.id];
+        const hasSug = t.id in sugByTask && !isTgt;
+        const ss = mv ? { start: mv.newStart, end: mv.newEnd } : { start: t.start, end: t.end };
+        return /* @__PURE__ */ React.createElement(React.Fragment, { key: t.id }, /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            ref: isTgt ? targetRef : null,
+            className: "rev-row" + (isTgt ? " tgt" : "") + (mv ? " mv" : "") + (hasSug ? " pick" : ""),
+            onClick: hasSug ? () => setActiveIdx(sugByTask[t.id]) : void 0
+          },
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-name", style: { paddingLeft: 12 + depthOf(t) * 15 + "px" } }, hasSug ? /* @__PURE__ */ React.createElement("span", { className: "rev-sugdot", title: "Pending update" }) : null, /* @__PURE__ */ React.createElement("span", { className: "nm" }, t.name || "(untitled)")),
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date" }, rfmt(ss.start), mv ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, mv.dStart >= 0 ? "+" : "", mv.dStart, "d") : null),
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date" }, rfmt(ss.end), mv ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, mv.dEnd >= 0 ? "+" : "", mv.dEnd, "d") : null),
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, renderStatus(t.health)),
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-owner" }, /* @__PURE__ */ React.createElement("span", { className: "nm" }, ownerJoin(ownerListOf(t)))),
+          /* @__PURE__ */ React.createElement("div", { className: "rev-cell" })
+        ), isTgt ? /* @__PURE__ */ React.createElement("div", { className: "rev-sub" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-prop", style: { paddingLeft: 12 + depthOf(t) * 15 + "px" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-corner-down-right" }), "proposed"), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-date faint" }, startChanged ? rfmt(propTarget.start) : ""), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-endcell" }, /* @__PURE__ */ React.createElement(InlineDate, { value: propEnd, onCommit: (isoV) => setPatchField(active.id, "end", isoV) }), endChanged ? /* @__PURE__ */ React.createElement("span", { className: "rev-delta" }, endDelta >= 0 ? "+" : "", endDelta, "d") : null), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, /* @__PURE__ */ React.createElement("select", { className: "rev-sel", value: propStatus, onChange: (e) => setPatchField(active.id, "health", e.target.value) }, HK.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, HEALTH[k] && HEALTH[k].label || k)))), /* @__PURE__ */ React.createElement("div", { className: "rev-cell" }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            ...NO_AUTOFILL,
+            className: "rev-edit",
+            value: propOwner,
+            placeholder: "—",
+            onChange: (e) => setPatchField(active.id, "responsibleParty", e.target.value)
+          }
+        )), /* @__PURE__ */ React.createElement("div", { className: "rev-cell rev-actcell" }, /* @__PURE__ */ React.createElement("button", { className: "rev-iconbtn ok", title: "Approve (A)", onClick: approve }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check" })), /* @__PURE__ */ React.createElement("button", { className: "rev-iconbtn no", title: "Dismiss (X)", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" })))) : null);
+      }));
+    };
+    const renderGantt = () => {
+      if (!proj) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "Pick a task in the panel below to preview this update on the timeline.");
+      const PPD2 = 13, ROWH = 30, HEAD = 40, DAY = 864e5;
+      let lo = null, hi = null;
+      const pushd = (s) => {
+        if (!s) return;
+        const d = pd(s);
+        if (!lo || d < lo) lo = d;
+        if (!hi || d > hi) hi = d;
+      };
+      visualTasks.forEach((t) => {
+        pushd(t.start);
+        pushd(t.end);
+        const p = propById[t.id];
+        if (p) {
+          pushd(p.start);
+          pushd(p.end);
+        }
+      });
+      if (!lo || !hi) return /* @__PURE__ */ React.createElement("div", { className: "rev-hint" }, "No dated tasks to show yet.");
+      lo = new Date(lo.getTime() - 3 * DAY);
+      hi = new Date(hi.getTime() + 4 * DAY);
+      const days = Math.round((hi - lo) / DAY) + 1;
+      const width = days * PPD2;
+      const xOf = (s) => Math.round((pd(s) - lo) / DAY) * PPD2;
+      const wOf = (s, e) => (Math.round((pd(e) - pd(s)) / DAY) + 1) * PPD2;
+      const weekends = [], wk = [], months = [];
+      for (let i = 0; i < days; i++) {
+        const d = new Date(lo.getTime() + i * DAY);
+        const g2 = d.getDay();
+        if (g2 === 0 || g2 === 6) weekends.push(i);
+        if (g2 === 1) wk.push(i);
+        if (d.getDate() === 1 || i === 0) months.push({ i, label: SGQ_MONTHS[d.getMonth()] + " " + String(d.getFullYear()).slice(2) });
+      }
+      return /* @__PURE__ */ React.createElement("div", { className: "rev-gantt" }, /* @__PURE__ */ React.createElement("div", { className: "rev-glabels" }, /* @__PURE__ */ React.createElement("div", { className: "rev-glabhd" }, "Task"), visualTasks.map((t) => {
+        const isTgt = matched && t.id === targetId;
+        const mv = moverMap[t.id];
+        const m = HEALTH[t.health] || HEALTH.gray;
+        return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "rev-glab" + (isTgt ? " tgt" : "") + (mv ? " mv" : ""), style: { paddingLeft: 12 + depthOf(t) * 12 + "px" } }, /* @__PURE__ */ React.createElement("span", { className: "revdot", style: { background: m.dot, border: m.border } }), /* @__PURE__ */ React.createElement("span", { className: "nm" }, t.name || "(untitled)"));
+      })), /* @__PURE__ */ React.createElement("div", { className: "rev-gcanvas", ref: canvasRef }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative", width: width + "px" } }, /* @__PURE__ */ React.createElement("div", { className: "rev-axis" }, months.map((m, k) => /* @__PURE__ */ React.createElement("div", { key: k, className: "rev-month", style: { left: m.i * PPD2 + "px" } }, m.label))), weekends.map((i) => /* @__PURE__ */ React.createElement("div", { key: "w" + i, className: "rev-weekend", style: { left: i * PPD2 + "px", width: PPD2 + "px", top: HEAD + "px" } })), wk.map((i) => /* @__PURE__ */ React.createElement("div", { key: "l" + i, className: "rev-wk", style: { left: i * PPD2 + "px", top: HEAD + "px" } })), visualTasks.map((t, ri) => {
+        const isTgt = matched && t.id === targetId;
+        const mv = moverMap[t.id];
+        const top = HEAD + ri * ROWH;
+        const m = HEALTH[t.health] || HEALTH.gray;
+        const p = propById[t.id];
+        const changed = isTgt && propTarget && (propTarget.end !== t.end || propTarget.start !== t.start) || !!mv;
+        return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "rev-grow" + (isTgt ? " tgt" : "") + (mv ? " mv" : ""), style: { top: top + "px" }, ref: isTgt ? targetRef : null }, !t.start || !t.end ? null : changed && p ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-ghost", style: { left: xOf(t.start) + "px", width: wOf(t.start, t.end) + "px" } }), /* @__PURE__ */ React.createElement("div", { className: "rev-amber", style: { left: xOf(p.start) + "px", width: wOf(p.start, p.end) + "px" } }), isTgt ? /* @__PURE__ */ React.createElement("div", { className: "rev-flag", style: { left: xOf(p.end) + 8 + "px" } }, endDelta >= 0 ? "+" : "", endDelta, "d") : null) : /* @__PURE__ */ React.createElement("div", { className: "rev-bar", style: { left: xOf(t.start) + "px", width: wOf(t.start, t.end) + "px", background: m.ganttBar } }));
+      }), /* @__PURE__ */ React.createElement("div", { style: { height: HEAD + visualTasks.length * ROWH + "px" } }))));
+    };
+    const fromName = active ? active.email_from || "Unknown sender" : "";
+    const fromMatch = active ? /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(fromName) : null;
+    const dispName = fromMatch ? fromMatch[1] || fromMatch[2] : fromName;
+    const dispEmail = fromMatch ? fromMatch[2] : "";
+    const renderDrawer = () => {
+      if (!active) return /* @__PURE__ */ React.createElement("div", { className: "rev-empty" }, /* @__PURE__ */ React.createElement("div", { className: "ico" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-inbox" })), /* @__PURE__ */ React.createElement("h3", null, "Inbox zero"), /* @__PURE__ */ React.createElement("p", null, "No pending updates. Forward a work email and it’ll show up here as a suggested edit."));
+      return /* @__PURE__ */ React.createElement("div", { className: "rev-drawer" }, /* @__PURE__ */ React.createElement("div", { className: "rev-cols" }, /* @__PURE__ */ React.createElement("div", { className: "rev-mail" }, /* @__PURE__ */ React.createElement("div", { className: "rev-head" }, /* @__PURE__ */ React.createElement("div", { className: "rev-av", style: { background: sgqAvatarColor(dispName) } }, sgqInitials(dispName)), /* @__PURE__ */ React.createElement("div", { className: "rev-who" }, /* @__PURE__ */ React.createElement("div", { className: "rev-name" }, dispName), dispEmail ? /* @__PURE__ */ React.createElement("div", { className: "rev-email" }, dispEmail) : null), /* @__PURE__ */ React.createElement("div", { className: "rev-meta" }, /* @__PURE__ */ React.createElement("span", { className: "rev-date2" }, rfmt(active.email_date)), /* @__PURE__ */ React.createElement("span", { className: "rev-conf " + sgqConfClass(active.confidence) }, Math.round((active.confidence || 0) * 100), "% match"))), /* @__PURE__ */ React.createElement("div", { className: "rev-subject" }, active.email_subject || "(no subject)", matched ? /* @__PURE__ */ React.createElement("span", { className: "rev-tgtpill" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-target-arrow" }), target.name) : null), (() => {
+        const ce = cleanEmailBody(active.email_body);
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-bodywrap" }, /* @__PURE__ */ React.createElement("div", { className: "rev-mailbody", ref: mailBodyRef, style: { maxHeight: 156, overflow: "hidden" } }, ce.body || "(no body)"), mailOverflow ? /* @__PURE__ */ React.createElement("div", { className: "rev-fade" }) : null), mailOverflow ? /* @__PURE__ */ React.createElement("button", { className: "rev-readmore", onClick: () => setMailReaderOpen(true) }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrows-diagonal", style: { fontSize: 13 } }), "Read full message") : ce.hasQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quotewrap" }, /* @__PURE__ */ React.createElement("button", { className: "rev-quote-toggle", onClick: () => setShowQuoted((q) => !q) }, /* @__PURE__ */ React.createElement("i", { className: "ti " + (showQuoted ? "ti-chevron-down" : "ti-chevron-right"), style: { fontSize: 13 } }), showQuoted ? "Hide quoted thread & disclaimers" : "Show quoted thread & disclaimers"), showQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quoted" }, ce.quoted) : null) : null);
+      })()), /* @__PURE__ */ React.createElement("div", { className: "rev-card" }, isCreate ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-taskline" }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9.5, fontWeight: 700, color: "#15803d", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 5, padding: "2px 6px", letterSpacing: ".04em", flexShrink: 0 } }, "NEW TASK"), /* @__PURE__ */ React.createElement(SgqCrumb, { data, pid, path: eff.task_path }))), /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Task name"), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ...NO_AUTOFILL,
+          className: "rev-note",
+          style: { flex: "0 0 auto", minHeight: 0, height: 34, fontWeight: 600 },
+          value: eff.patch && eff.patch.name || "",
+          placeholder: "New task name",
+          onChange: (e) => patchRow(active.id, { patch: { ...eff.patch || {}, name: e.target.value } })
+        }
+      ), /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Note"), /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          className: "rev-note",
+          rows: 2,
+          value: noteText,
+          placeholder: "Add a note to the new task…",
+          onChange: (e) => patchRow(active.id, { note_text: e.target.value })
+        }
+      ), createReady && newTask ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade", style: { color: "#15803d", background: "#ecfdf3", border: "1px solid #bbf7d0" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-calendar-plus" }), "Scheduled " + rfmt(newTask.start) + "–" + rfmt(newTask.end) + " · " + newTask.duration + "d") : null, newTaskAddNames.length ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade dep", style: { marginLeft: 8 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-bar-to-right" }), "Depends on " + newTaskAddNames.join(", ")) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-actions" }, /* @__PURE__ */ React.createElement("div", { className: "rev-qnav" }, /* @__PURE__ */ React.createElement("button", { onClick: prev, disabled: activeIdx <= 0, title: "Previous (K)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-left" })), /* @__PURE__ */ React.createElement("span", { className: "rev-qpos" }, activeIdx + 1, " of ", rows.length), /* @__PURE__ */ React.createElement("button", { onClick: next, disabled: activeIdx >= rows.length - 1, title: "Next (J)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-right" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-actbtns" }, /* @__PURE__ */ React.createElement("button", { className: "rev-approve", onClick: approve, disabled: !createReady, style: !createReady ? { opacity: 0.5, cursor: "default" } : void 0 }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus" }), "Create task"), /* @__PURE__ */ React.createElement("button", { className: "rev-dismiss", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }), "Dismiss")))) : !matched ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-lbl" }, "Match to a task"), /* @__PURE__ */ React.createElement("p", { className: "rev-cardhint" }, "This suggestion isn’t linked to a task yet. Pick one to preview the change against the plan."), /* @__PURE__ */ React.createElement(
+        SgqCascadePicker,
+        {
+          data,
+          pid: eff.project_id,
+          path: eff.task_path,
+          ready: false,
+          onChange: (p, pa) => patchRow(active.id, { project_id: p, task_path: pa })
+        }
+      )) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-taskline" }, /* @__PURE__ */ React.createElement(SgqCrumb, { data, pid, path: eff.task_path }), /* @__PURE__ */ React.createElement("span", { className: "rev-change", onClick: () => setShowPicker((s) => !s) }, showPicker ? "done" : "change task")), showPicker ? /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement(
+        SgqCascadePicker,
+        {
+          data,
+          pid: eff.project_id,
+          path: eff.task_path,
+          ready: true,
+          onChange: (p, pa) => patchRow(active.id, { project_id: p, task_path: pa })
+        }
+      )) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-lbl", style: { marginTop: 10 } }, "Note"), /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          className: "rev-note",
+          rows: 2,
+          value: noteText,
+          placeholder: "Add a note to the task…",
+          onChange: (e) => patchRow(active.id, { note_text: e.target.value })
+        }
+      ), /* @__PURE__ */ React.createElement("div", { className: "rev-cascade " + (moversList.length ? "has" : "none") }, /* @__PURE__ */ React.createElement("i", { className: moversList.length ? "ti ti-arrow-ramp-right-2" : "ti ti-circle-check" }), moversList.length ? moversList.length + " task" + (moversList.length > 1 ? "s" : "") + " shift " + (maxDelta >= 0 ? "+" : "") + maxDelta + " business day" + (Math.abs(maxDelta) > 1 ? "s" : "") + " downstream" : "No downstream schedule impact"), previewConflictMsg ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade has", style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-alert-triangle" }), previewConflictMsg) : null, addedPredTasks.length ? /* @__PURE__ */ React.createElement("div", { className: "rev-cascade dep", style: { marginLeft: 8 } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-bar-to-right" }), "Adds dependency on " + addedPredTasks.map((t) => t.name).join(", ")) : null, /* @__PURE__ */ React.createElement("div", { className: "rev-actions" }, /* @__PURE__ */ React.createElement("div", { className: "rev-qnav" }, /* @__PURE__ */ React.createElement("button", { onClick: prev, disabled: activeIdx <= 0, title: "Previous (K)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-left" })), /* @__PURE__ */ React.createElement("span", { className: "rev-qpos" }, activeIdx + 1, " of ", rows.length), /* @__PURE__ */ React.createElement("button", { onClick: next, disabled: activeIdx >= rows.length - 1, title: "Next (J)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-chevron-right" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-actbtns" }, /* @__PURE__ */ React.createElement("button", { className: "rev-approve", onClick: approve }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check" }), "Approve"), /* @__PURE__ */ React.createElement("button", { className: "rev-dismiss", onClick: dismiss }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }), "Dismiss")))))));
+    };
+    const flattenAll = (ts) => {
+      if (!ts || !ts.length) return [];
+      const childSet = focusGroupIds(ts);
+      const kids = /* @__PURE__ */ new Map();
+      ts.forEach((t) => {
+        if (!kids.has(t.parentId)) kids.set(t.parentId, []);
+        kids.get(t.parentId).push(t);
+      });
+      const out = [];
+      const walk = (pid2, level) => {
+        (kids.get(pid2) || []).forEach((t) => {
+          out.push({ ...t, level, hasChildren: childSet.has(t.id) });
+          walk(t.id, level + 1);
+        });
+      };
+      walk(null, 0);
+      return out;
+    };
+    const buildReviewTasks = () => {
+      const base = proj && proj.tasks && proj.tasks.length ? flattenAll(proj.tasks) : gridProps && gridProps.tasks ? gridProps.tasks : [];
+      if (isCreate) {
+        if (!createReady || !newTask) return base;
+        const subtreeSet = (arr, rootId) => {
+          const s = /* @__PURE__ */ new Set([rootId]);
+          let c = true;
+          while (c) {
+            c = false;
+            arr.forEach((t) => {
+              if (t.parentId != null && s.has(t.parentId) && !s.has(t.id)) {
+                s.add(t.id);
+                c = true;
+              }
+            });
+          }
+          return s;
+        };
+        const lastOfSubtree = (arr, rootId) => {
+          if (rootId == null) return -1;
+          const s = subtreeSet(arr, rootId);
+          let last = -1;
+          arr.forEach((t, i) => {
+            if (s.has(t.id)) last = i;
+          });
+          return last;
+        };
+        const predIds = new Set((newTask.predecessors || []).map((p) => p.id));
+        const parentRow = newTask.parentId != null ? base.find((t) => t.id === newTask.parentId) : null;
+        const row = { id: "__rvnew", __rvProposed: true, __rvNew: true, level: parentRow ? (parentRow.level || 0) + 1 : 0 };
+        let anchor = -1;
+        base.forEach((t, i) => {
+          if (predIds.has(t.id) && t.parentId === newTask.parentId) anchor = i;
+        });
+        if (anchor >= 0) anchor = lastOfSubtree(base, base[anchor].id);
+        else if (newTask.parentId != null) anchor = lastOfSubtree(base, newTask.parentId);
+        if (anchor < 0) return [...base, row];
+        const out2 = [];
+        base.forEach((t, i) => {
+          out2.push(t);
+          if (i === anchor) out2.push(row);
+        });
+        return out2;
+      }
+      if (!matched) return base.map((t) => t.id in sugByTask ? { ...t, __rvPending: sugByTask[t.id] } : t);
+      const out = [];
+      base.forEach((t) => {
+        if (t.id === targetId) {
+          out.push({ ...t, __rvTarget: true });
+          out.push({ id: "__rvprop", name: "", __rvProposed: true, level: t.level || 0 });
+        } else if (moverMap[t.id]) {
+          const m = moverMap[t.id];
+          out.push({ ...t, start: m.newStart, end: m.newEnd, __rvMover: m.dEnd });
+        } else if (t.id in sugByTask) {
+          out.push({ ...t, __rvPending: sugByTask[t.id] });
+        } else {
+          out.push(t);
+        }
+      });
+      return out;
+    };
+    const reviewTasks = gridProps ? buildReviewTasks() : null;
+    const setPatchExclusive = (set, drop) => setEdits((E) => {
+      if (!active) return E;
+      const row = rows.find((r) => r.id === active.id);
+      const cur = E[active.id] && E[active.id].patch || row && row.patch || {};
+      const np = { ...cur, ...set };
+      drop.forEach((k) => {
+        delete np[k];
+      });
+      return { ...E, [active.id]: { ...E[active.id] || {}, patch: np } };
+    });
+    const reviewCtx = {
+      isCreate,
+      newName: newTask ? newTask.name : "",
+      propStatus: isCreate ? newTask ? newTask.health : "gray" : propStatus,
+      propEnd: isCreate ? newTask ? newTask.end : "" : propEnd,
+      propOwner: isCreate ? newTask ? newTask.responsibleParty || "" : "" : propOwner,
+      propStart: isCreate ? newTask ? newTask.start : "" : propTarget ? propTarget.start : target ? target.start : "",
+      startChanged: isCreate ? true : !!startChanged,
+      propDur: isCreate ? newTask ? newTask.duration : null : propTarget ? propTarget.duration : target ? target.duration : null,
+      addedPreds: isCreate ? newTaskAddNames : addedPredTasks.map((t) => t.name),
+      endChanged: isCreate ? false : !!endChanged,
+      endDelta,
+      note: !!(noteText && String(noteText).trim()),
+      onStatus: (v) => {
+        if (active) setPatchField(active.id, "health", v);
+      },
+      onEnd: (v) => {
+        if (active) setPatchExclusive({ end: v }, ["duration"]);
+      },
+      onDur: (v) => {
+        if (active) setPatchExclusive({ duration: v }, ["end"]);
+      },
+      onOwner: (v) => {
+        if (active) setPatchField(active.id, "responsibleParty", v);
+      },
+      approve,
+      dismiss,
+      pick: (idx) => setActiveIdx(idx)
+    };
+    if (loading) return /* @__PURE__ */ React.createElement("div", { className: "rev", style: { flex: 1, minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-loading" }, "Loading updates…"));
+    return /* @__PURE__ */ React.createElement("div", { className: "rev", style: { flex: 1, minWidth: 0, minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-body", ref: bodyRef, style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-top", style: { height: split + "%", overflow: "hidden", display: "flex", minHeight: 0 } }, gridProps && reviewTasks ? /* @__PURE__ */ React.createElement(GridView, { ...gridProps, tasks: reviewTasks, review: reviewCtx }) : view === "grid" ? renderGrid() : renderGantt()), /* @__PURE__ */ React.createElement("div", { className: "rev-div", onMouseDown: onDivDown }, /* @__PURE__ */ React.createElement("span", { className: "grip" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null))), /* @__PURE__ */ React.createElement("div", { className: "rev-bottom" }, renderDrawer())), toast ? /* @__PURE__ */ React.createElement("div", { className: "rev-toast" }, /* @__PURE__ */ React.createElement("span", { className: "tmsg" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-check ok" }), toast.msg), /* @__PURE__ */ React.createElement("button", { onClick: doUndo }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-arrow-back-up" }), "Undo")) : null, mailReaderOpen && active ? /* @__PURE__ */ React.createElement("div", { className: "rev-readeroverlay", onClick: () => setMailReaderOpen(false) }, /* @__PURE__ */ React.createElement("div", { className: "rev-reader", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "rev-reader-head" }, /* @__PURE__ */ React.createElement("div", { className: "rev-av", style: { background: sgqAvatarColor(dispName) } }, sgqInitials(dispName)), /* @__PURE__ */ React.createElement("div", { className: "rev-who", style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "rev-name" }, dispName), dispEmail ? /* @__PURE__ */ React.createElement("div", { className: "rev-email" }, dispEmail) : null), /* @__PURE__ */ React.createElement("span", { className: "rev-date2" }, rfmt(active.email_date)), /* @__PURE__ */ React.createElement("button", { className: "rev-reader-close", onClick: () => setMailReaderOpen(false), title: "Close (Esc)" }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-x" }))), /* @__PURE__ */ React.createElement("div", { className: "rev-reader-subject" }, active.email_subject || "(no subject)"), /* @__PURE__ */ React.createElement("div", { className: "rev-reader-body" }, (() => {
+      const ce = cleanEmailBody(active.email_body);
+      return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "rev-mailbody", style: { marginTop: 0 } }, ce.body || "(no body)"), ce.hasQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quotewrap" }, /* @__PURE__ */ React.createElement("button", { className: "rev-quote-toggle", onClick: () => setShowQuoted((q) => !q) }, /* @__PURE__ */ React.createElement("i", { className: "ti " + (showQuoted ? "ti-chevron-down" : "ti-chevron-right"), style: { fontSize: 13 } }), showQuoted ? "Hide quoted thread & disclaimers" : "Show quoted thread & disclaimers"), showQuoted ? /* @__PURE__ */ React.createElement("div", { className: "rev-quoted" }, ce.quoted) : null) : null);
+    })()))) : null);
+  }
+  var VIEW_TAB_KEYS = ["aPid", "view", "section"];
+  var VIEW_PREF_KEYS = [
+    "gridZoom",
+    "gridColWidths",
+    "masterSort",
+    "masterCols",
+    "masterColWidths",
+    "masterGroupBy",
+    "masterLevelFilter",
+    "masterHealthFilter",
+    "masterProjectFilter",
+    "healthColStyle"
+  ];
+  var VIEW_TRANSIENT_KEYS = ["editProjId"];
+  var VIEW_STATE_KEYS = /* @__PURE__ */ new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
+  var VIEW_TAB_STORAGE_KEY = "planar:tabView:v1";
+  var VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
+  function loadTabView() {
+    try {
+      return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveTabView(obj) {
+    try {
+      sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  function loadViewPrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveViewPrefs(obj) {
+    try {
+      localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  var TASK_FOCUS_STORAGE_KEY = "planar:taskFocus:v1";
+  function loadTaskFocus() {
+    try {
+      const v = JSON.parse(localStorage.getItem(TASK_FOCUS_STORAGE_KEY) || "{}");
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveTaskFocus(obj) {
+    try {
+      localStorage.setItem(TASK_FOCUS_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {
+    }
+  }
+  function applyTaskFocus(d) {
+    if (!d || typeof d !== "object" || !d.projects || typeof d.projects !== "object") return d;
+    const store = loadTaskFocus();
+    let projects = null;
+    Object.keys(store).forEach((pid) => {
+      const proj = d.projects[pid], ids = store[pid];
+      if (!proj || !Array.isArray(proj.tasks) || !Array.isArray(ids) || !ids.length) return;
+      const want = new Set(ids);
+      let changed = false;
+      const tasks = proj.tasks.map((t) => {
+        if (t && want.has(t.id) && t.focused === void 0) {
+          changed = true;
+          return { ...t, focused: true };
+        }
+        return t;
+      });
+      if (!changed) return;
+      if (!projects) projects = { ...d.projects };
+      projects[pid] = { ...proj, tasks };
+    });
+    return projects ? { ...d, projects } : d;
+  }
+  function persistTaskFocus(prev, next) {
+    if (!next || !next.projects || prev && prev.projects === next.projects) return;
+    const store = loadTaskFocus();
+    let dirty = false;
+    Object.entries(next.projects).forEach(([pid, proj]) => {
+      if (!proj || !Array.isArray(proj.tasks) || !proj.tasks.length) return;
+      const before = Array.isArray(store[pid]) ? store[pid] : [];
+      const live = new Set(proj.tasks.map((t) => t && t.id));
+      const set = new Set(before.filter((id) => live.has(id)));
+      proj.tasks.forEach((t) => {
+        if (!t) return;
+        if (t.focused === true) set.add(t.id);
+        else if (t.focused === false) set.delete(t.id);
+      });
+      const after = [...set];
+      if (after.length === before.length && after.every((id, i) => id === before[i])) return;
+      dirty = true;
+      if (after.length) store[pid] = after;
+      else delete store[pid];
+    });
+    if (dirty) saveTaskFocus(store);
+  }
+  function coreChanged(prev, next) {
+    if (prev === next) return false;
+    if (!prev || !next) return true;
+    const keys = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const k of keys) {
+      if (VIEW_STATE_KEYS.has(k)) continue;
+      if (prev[k] !== next[k]) return true;
+    }
+    return false;
+  }
+  var TASK_VIEW_FIELDS = ["focused"];
+  function stripTaskViewFields(tasks) {
+    if (!Array.isArray(tasks)) return tasks;
+    return tasks.map((t) => {
+      if (!t || typeof t !== "object") return t;
+      let changed = false;
+      const out = { ...t };
+      TASK_VIEW_FIELDS.forEach((k) => {
+        if (k in out) {
+          delete out[k];
+          changed = true;
+        }
+      });
+      return changed ? out : t;
+    });
+  }
+  function stripViewState(d) {
+    if (!d || typeof d !== "object") return d;
+    const out = { ...d };
+    VIEW_STATE_KEYS.forEach((k) => {
+      delete out[k];
+    });
+    if (out.projects && typeof out.projects === "object") {
+      const projects = {};
+      Object.entries(out.projects).forEach(([pid, proj]) => {
+        projects[pid] = proj && Array.isArray(proj.tasks) ? { ...proj, tasks: stripTaskViewFields(proj.tasks) } : proj;
+      });
+      out.projects = projects;
+    }
+    return out;
+  }
+  function withLastActiveSite(d, siteId, scheduleId) {
+    if (siteId == null || scheduleId == null) return d;
+    if (d.lastActiveBySite && d.lastActiveBySite[siteId] === scheduleId) return d;
+    return { ...d, lastActiveBySite: { ...d.lastActiveBySite || {}, [siteId]: scheduleId } };
+  }
+  function persistViewState(prev, next) {
+    let tabChanged = false, prefsChanged = false;
+    VIEW_TAB_KEYS.forEach((k) => {
+      if (!prev || prev[k] !== next[k]) tabChanged = true;
+    });
+    VIEW_PREF_KEYS.forEach((k) => {
+      if (!prev || prev[k] !== next[k]) prefsChanged = true;
+    });
+    if (tabChanged) {
+      const cur = loadTabView();
+      VIEW_TAB_KEYS.forEach((k) => {
+        cur[k] = next[k];
+      });
+      saveTabView(cur);
+    }
+    if (prefsChanged) {
+      const cur = loadViewPrefs();
+      VIEW_PREF_KEYS.forEach((k) => {
+        cur[k] = next[k];
+      });
+      saveViewPrefs(cur);
+    }
+    persistTaskFocus(prev, next);
+  }
+  function pickActivePid(projects, preferred) {
+    if (!projects || typeof projects !== "object") return null;
+    if (preferred != null && projects[preferred]) return preferred;
+    const first = Object.values(projects).find((p) => p && typeof p === "object" && p.id != null);
+    return first ? first.id : null;
+  }
+  function resolveViewState(d) {
+    if (!d || typeof d !== "object") return d;
+    const tab = loadTabView();
+    const prefs = loadViewPrefs();
+    const patch = { editProjId: null };
+    VIEW_TAB_KEYS.forEach((k) => {
+      patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k];
+    });
+    VIEW_PREF_KEYS.forEach((k) => {
+      patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k];
+    });
+    if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
+      patch.aPid = pickActivePid(d.projects, d.aPid);
+    }
+    const tabPatch = {};
+    VIEW_TAB_KEYS.forEach((k) => {
+      tabPatch[k] = patch[k];
+    });
+    const prefsPatch = {};
+    VIEW_PREF_KEYS.forEach((k) => {
+      prefsPatch[k] = patch[k];
+    });
+    saveTabView({ ...tab, ...tabPatch });
+    saveViewPrefs({ ...prefs, ...prefsPatch });
+    return applyTaskFocus({ ...d, ...patch });
+  }
+  function App() {
+    const [data, setData] = useState7(null);
+    const dataRef = useRef7(null);
+    useEffect6(() => {
+      dataRef.current = data;
+    }, [data]);
+    const rollToastRef = useRef7(null);
+    useEffect6(() => {
+      if (rollToastRef.current) {
+        showToast(rollToastRef.current);
+        rollToastRef.current = null;
+      }
+    }, [data]);
+    const visibleColIdxs = () => {
+      const d = dataRef.current;
+      const eff = activeEffectiveCols(d);
+      const vis = readGridCfg(d && d.projects?.[d.aPid], d).visible;
+      const idxs = [];
+      vis.forEach((k) => {
+        const i = eff.findIndex((c) => c.k === k);
+        if (i >= 0) idxs.push(i);
+      });
+      return idxs;
+    };
+    const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
+    const [successorPrompt, setSuccessorPrompt] = useState7(null);
+    const [successorPromptQueue, setSuccessorPromptQueue] = useState7([]);
+    useEffect6(() => {
+      if (!successorPrompt && successorPromptQueue.length > 0) {
+        setSuccessorPrompt(successorPromptQueue[0]);
+        setSuccessorPromptQueue((q) => q.slice(1));
+      }
+    }, [successorPrompt, successorPromptQueue]);
+    const [notesCtx, setNotesCtx] = useState7(null);
+    const [isMobile, setIsMobile] = useState7(() => typeof window !== "undefined" && window.innerWidth < 768);
+    const [mobMenuOpen, setMobMenuOpen] = useState7(false);
+    useEffect6(() => {
+      const h = () => setIsMobile(window.innerWidth < 768);
+      window.addEventListener("resize", h);
+      return () => window.removeEventListener("resize", h);
+    }, []);
+    const [coarsePointer, setCoarsePointer] = useState7(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    useEffect6(() => {
+      if (typeof window === "undefined" || !window.matchMedia) return;
+      const mq = window.matchMedia("(pointer: coarse)");
+      const h = () => setCoarsePointer(mq.matches);
+      mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
+      return () => mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h);
+    }, []);
+    const [pdfExportOpen, setPdfExportOpen] = useState7(false);
+    const [projCtx, setProjCtx] = useState7(null);
+    const [taskCtx, setTaskCtx] = useState7(null);
+    const [iconPickerCtx, setIconPickerCtx] = useState7(null);
+    const clipboardRef = useRef7(null);
+    const pasteSelectRef = useRef7(null);
+    const [, setClipboardTick] = useState7(0);
+    const [renameModal, setRenameModal] = useState7(null);
+    const [deleteChoice, setDeleteChoice] = useState7(null);
+    const [moveToCtx, setMoveToCtx] = useState7(null);
+    const moveSelectRef = useRef7(null);
+    const [edit, setEdit] = useState7(null);
+    const editLiveRef = useRef7(null);
+    useEffect6(() => {
+      editLiveRef.current = edit;
+    }, [edit]);
+    const focusReselectRef = useRef7(null);
+    const [editStartChar, setEditStartChar] = useState7(null);
+    const [selectedId, setSelectedId] = useState7(null);
+    const [selRange, setSelRange] = useState7(null);
+    const [focusPins, setFocusPins] = useState7(() => /* @__PURE__ */ new Set());
+    const [selectedColIdx, setSelectedColIdx] = useState7(0);
+    const [, setTodayTick] = useState7(0);
+    const [, setHealthTick] = useState7(0);
+    useEffect6(() => {
+      const refresh = () => {
+        const t = fdLocal(/* @__PURE__ */ new Date());
+        if (t !== NOW) {
+          setNOW(t);
+          setTodayTick((x) => x + 1);
+          isDerivedUpdate.current = true;
+          setData((d) => {
+            const next = reconcileNeedsAttention(d);
+            if (next === d) isDerivedUpdate.current = false;
+            return next;
           });
         }
       };
-      document.addEventListener("keydown", handleKey, true);
-      return () => document.removeEventListener("keydown", handleKey, true);
-    }, [open, value, onChange]);
-    const handleDotClick = (e) => {
-      e.stopPropagation();
-      document.dispatchEvent(new CustomEvent(PICKER_EVENT, { detail: idRef.current }));
-      setOpen((o) => !o);
+      const onVis = () => {
+        if (!document.hidden) refresh();
+      };
+      window.addEventListener("focus", refresh);
+      document.addEventListener("visibilitychange", onVis);
+      const iv = setInterval(refresh, 6e4);
+      return () => {
+        window.removeEventListener("focus", refresh);
+        document.removeEventListener("visibilitychange", onVis);
+        clearInterval(iv);
+      };
+    }, []);
+    const [goToFocus, setGoToFocus] = useState7(null);
+    const [offlineFallback, setOfflineFallback] = useState7(false);
+    const [authRequired, setAuthRequired] = useState7(false);
+    const [driftNotice, setDriftNotice] = useState7(null);
+    const [ancestorPredNotice, setAncestorPredNotice] = useState7(null);
+    const [staleNotice, setStaleNotice] = useState7(false);
+    const didInitialLoad = useRef7(false);
+    const prevCoreRef = useRef7(null);
+    const [formatOpen, setFormatOpen] = useState7(false);
+    const [settingsOpen, setSettingsOpen] = useState7(false);
+    const [settingsSection, setSettingsSection] = useState7(null);
+    const [meetingCalOpen, setMeetingCalOpen] = useState7(false);
+    const [automationOpen, setAutomationOpen] = useState7(false);
+    const [contactsOpen, setContactsOpen] = useState7(false);
+    const [historyOpen, setHistoryOpen] = useState7(false);
+    const [reviewOpen, setReviewOpen] = useState7(false);
+    const [reviewRows, setReviewRows] = useState7([]);
+    const [reviewLoading, setReviewLoading] = useState7(true);
+    const [reviewIdx, setReviewIdx] = useState7(0);
+    useEffect6(() => {
+      const openTo = (e) => {
+        if ((e?.detail || null) === "meetings") {
+          setMeetingCalOpen(true);
+          setSettingsOpen(false);
+        } else {
+          setSettingsSection(e?.detail || null);
+          setSettingsOpen(true);
+        }
+        setAutomationOpen(false);
+        setContactsOpen(false);
+        setFormatOpen(false);
+      };
+      document.addEventListener("planar-open-settings", openTo);
+      return () => document.removeEventListener("planar-open-settings", openTo);
+    }, []);
+    const [ganttPPD, setGanttPPD] = useState7(() => {
+      const ganttW = window.innerWidth * 0.46;
+      return Math.max(1, Math.floor(ganttW / 365));
+    });
+    const [gridZoom, setGridZoom] = useState7(() => data?.gridZoom ?? 1);
+    useEffect6(() => {
+      if (data && typeof data.gridZoom === "number") setGridZoom(data.gridZoom);
+    }, [data?.gridZoom]);
+    const hoverZoneRef = useRef7("gantt");
+    const fileHandleRef = useRef7(null);
+    const fileHtmlRef = useRef7(null);
+    useEffect6(() => {
+      const sb = window.__sb;
+      if (!sb) {
+        setReviewLoading(false);
+        return;
+      }
+      let alive = true;
+      (async () => {
+        try {
+          const { data: list, error } = await sb.from("planar_suggestions").select("*").eq("status", "pending").order("created_at", { ascending: false });
+          if (!alive) return;
+          if (!error && list) setReviewRows(list);
+        } catch (e) {
+          console.warn("suggestions fetch failed:", e);
+        }
+        if (alive) setReviewLoading(false);
+      })();
+      let channel = null;
+      try {
+        channel = sb.channel("planar_suggestions_pending").on("postgres_changes", { event: "INSERT", schema: "public", table: "planar_suggestions" }, (payload) => {
+          if (payload && payload.new && payload.new.status === "pending")
+            setReviewRows((R) => [payload.new, ...R.filter((r) => r.id !== payload.new.id)]);
+        }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "planar_suggestions" }, (payload) => {
+          if (!payload || !payload.new) return;
+          if (payload.new.status !== "pending") setReviewRows((R) => R.filter((r) => r.id !== payload.new.id));
+          else setReviewRows((R) => R.map((r) => r.id === payload.new.id ? payload.new : r));
+        }).on("postgres_changes", { event: "DELETE", schema: "public", table: "planar_suggestions" }, (payload) => {
+          if (payload && payload.old) setReviewRows((R) => R.filter((r) => r.id !== payload.old.id));
+        }).subscribe();
+      } catch (e) {
+        console.warn("suggestions subscribe failed:", e);
+      }
+      return () => {
+        alive = false;
+        try {
+          if (channel) sb.removeChannel(channel);
+        } catch (e) {
+        }
+      };
+    }, []);
+    useEffect6(() => {
+      if (!reviewOpen || !data) return;
+      const a = reviewRows[reviewIdx];
+      if (a && a.project_id != null && data.aPid !== a.project_id && data.projects && data.projects[a.project_id]) setData((d) => ({ ...d, aPid: a.project_id }));
+    }, [reviewOpen, reviewIdx, reviewRows, data?.aPid]);
+    const fileSaveTimer = useRef7(null);
+    const [fileLinked, setFileLinked] = useState7(false);
+    const [savePulse, setSavePulse] = useState7(false);
+    const [saveStatus, setSaveStatus] = useState7("saved");
+    const saveSeq = useRef7(0);
+    const latestData = useRef7(null);
+    const saveStatusRef = useRef7("saved");
+    useEffect6(() => {
+      saveStatusRef.current = saveStatus;
+    }, [saveStatus]);
+    const attemptCloudSave = (d) => {
+      const seq = ++saveSeq.current;
+      setSaveStatus("saving");
+      window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" }).then((res) => {
+        if (saveSeq.current === seq) setSaveStatus(res ? "saved" : "error");
+      }).catch(() => {
+        if (saveSeq.current === seq) setSaveStatus("error");
+      });
     };
-    const h = HEALTH[value] || HEALTH.gray;
-    const dot = h.dot;
-    const DotSpan = ({ hk, size = 13, active = false, noPointer = false }) => {
-      const hh = HEALTH[hk] || HEALTH.gray;
-      return /* @__PURE__ */ React.createElement("span", { style: {
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: hh.dot,
-        border: hh.border,
-        display: "block",
-        flexShrink: 0,
-        boxShadow: active ? `0 0 0 2px ${hh.dot === "#ffffff" ? "#d1d5db" : hh.dot}44` : "none",
-        transition: "box-shadow .15s",
-        pointerEvents: noPointer ? "none" : "auto"
-      } });
+    const [dlOpen, setDlOpen] = useState7(false);
+    const history = useRef7([]);
+    const future = useRef7([]);
+    const prevData = useRef7(null);
+    const isUndoing = useRef7(false);
+    const isDerivedUpdate = useRef7(false);
+    const flatTasksRef = useRef7([]);
+    const lastSelIdxRef = useRef7(null);
+    const viewportTopFlatIdx = (tasks) => {
+      const g2 = document.querySelector('[data-grid-scroll="1"]');
+      if (!g2) return null;
+      const top = g2.getBoundingClientRect().top;
+      for (const r of g2.querySelectorAll("[data-task-row]")) {
+        const b = r.getBoundingClientRect();
+        if (b.top >= top + 20) {
+          const id = r.getAttribute("data-task-row");
+          const i = tasks.findIndex((t) => String(t.id) === id);
+          if (i >= 0) return i;
+        }
+      }
+      return null;
     };
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "span",
+    const projIdRef = useRef7(null);
+    const prevHolKey = useRef7(null);
+    const skipHolRecasc = useRef7(false);
+    const prevHealthKey = useRef7(null);
+    useEffect6(() => {
+      if (!data) return;
+      if (isUndoing.current) {
+        isUndoing.current = false;
+        prevData.current = data;
+        return;
+      }
+      if (isDerivedUpdate.current) {
+        isDerivedUpdate.current = false;
+        prevData.current = data;
+        return;
+      }
+      if (prevData.current !== null) {
+        history.current = [...history.current.slice(-19), prevData.current];
+        future.current = [];
+      }
+      prevData.current = data;
+    }, [data]);
+    const applyLoadedDataRef = useRef7(null);
+    const [loadTick, setLoadTick] = useState7(0);
+    const loadAttemptRef = useRef7(0);
+    useEffect6(() => {
+      let cancelled = false, retryTimer = null;
+      (async () => {
+        applyLoadedDataRef.current = (parsed) => {
+          let d = loadDocument(parsed);
+          d._pinnedClean = true;
+          setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
+          const driftFound = [];
+          const ancestorFound = [];
+          Object.keys(d.projects).forEach((pid) => {
+            let tasks = d.projects[pid].tasks.map(({ _pinStart, __wasDirectEdit, ...t }) => t);
+            d.projects[pid] = { ...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, driftFound, ancestorFound) };
+          });
+          if (driftFound.length) {
+            setDriftNotice(driftFound);
+            console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound);
+          }
+          if (ancestorFound.length) {
+            setAncestorPredNotice(ancestorFound);
+            console.warn("[planar ancestor-pred] imported/restored data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", ancestorFound);
+          }
+          try {
+            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
+          } catch {
+          }
+          setData(resolveViewState(d));
+        };
+        try {
+          const _isMobile = window.innerWidth < 768;
+          window.__planarCloudError = false;
+          window.__planarAuthRequired = false;
+          let r = null, readThrew = false, timer = null;
+          try {
+            r = await Promise.race([
+              window.storage.get("hs-v1"),
+              new Promise((_, rej) => {
+                timer = setTimeout(() => rej(new Error("hs-v1 read timed out")), LOAD_ATTEMPT_TIMEOUT_MS);
+              })
+            ]);
+          } catch {
+            readThrew = true;
+          }
+          clearTimeout(timer);
+          if (cancelled) return;
+          if (readThrew) window.__planarCloudError = true;
+          if (!r && window.__planarCloudError && window.self !== window.top) {
+            window.__planarLoadStatus = "failed";
+            postLoadState("failed");
+            const n = ++loadAttemptRef.current;
+            console.warn("[planar load] schedule read failed (attempt " + n + ") — retrying; nothing is written until it loads.");
+            retryTimer = setTimeout(() => setLoadTick((t) => t + 1), Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_BASE_MS * Math.pow(2, n - 1)));
+            return;
+          }
+          if (r) {
+            const d2 = loadDocument(JSON.parse(r.value));
+            const needsPinClean = !d2._pinnedClean;
+            d2._pinnedClean = true;
+            setHolidaySet(buildHolidaySet(d2.settings?.holidays || DEFAULT_HOLIDAYS));
+            const driftFound = [];
+            const ancestorFound = [];
+            Object.keys(d2.projects).forEach((pid) => {
+              let tasks = d2.projects[pid].tasks.map((t) => {
+                const { _pinStart, __wasDirectEdit, pinnedStart, ...rest } = t;
+                if (!needsPinClean && pinnedStart) rest.pinnedStart = true;
+                return rest;
+              });
+              d2.projects[pid] = { ...d2.projects[pid], tasks: recascadeWithDrift(tasks, pid, d2.projects[pid].name || pid, driftFound, ancestorFound) };
+            });
+            if (driftFound.length) {
+              setDriftNotice(driftFound);
+              console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound);
+            }
+            if (ancestorFound.length) {
+              setAncestorPredNotice(ancestorFound);
+              console.warn("[planar ancestor-pred] a task named its own parent/ancestor as a predecessor — link dropped and dates recalculated (NEW-1):", ancestorFound);
+              attemptCloudSave(d2);
+            }
+            try {
+              window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d2);
+            } catch {
+            }
+            setData(resolveViewState(d2));
+            return;
+          }
+          const seed = window.__PLANAR_DATA__ || SEED;
+          const d = loadDocument(seed);
+          setHolidaySet(buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS));
+          d._pinnedClean = true;
+          const seedAncestorFound = [];
+          Object.keys(d.projects).forEach((pid) => {
+            let tasks = d.projects[pid].tasks.map(({ _pinStart, __wasDirectEdit, ...t }) => t);
+            d.projects[pid] = { ...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, [], seedAncestorFound) };
+          });
+          if (seedAncestorFound.length) {
+            setAncestorPredNotice(seedAncestorFound);
+            console.warn("[planar ancestor-pred] seed data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", seedAncestorFound);
+          }
+          if (window.__planarCloudError) setOfflineFallback(true);
+          else if (window.__planarAuthRequired) setAuthRequired(true);
+          try {
+            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
+          } catch {
+          }
+          setData(resolveViewState(d));
+        } catch {
+          const d = loadDocument(window.__PLANAR_DATA__ || SEED);
+          setOfflineFallback(true);
+          try {
+            window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d);
+          } catch {
+          }
+          setData(resolveViewState(d));
+        }
+      })();
+      return () => {
+        cancelled = true;
+        clearTimeout(retryTimer);
+      };
+    }, [loadTick]);
+    useEffect6(() => {
+      if (!data) return;
+      latestData.current = data;
+      persistViewState(prevCoreRef.current, data);
+      const isFirstLoad = !didInitialLoad.current;
+      if (isFirstLoad) didInitialLoad.current = true;
+      const coreIsNew = coreChanged(prevCoreRef.current, data);
+      prevCoreRef.current = data;
+      if (!isFirstLoad && coreIsNew) attemptCloudSave(data);
+      if (isFirstLoad || coreIsNew) {
+        setHolidaySet(buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS));
+        setRowH(Math.min(34, Math.max(20, data.settings?.rowHeight || 24)));
+        rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
+        const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
+        if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick((x) => x + 1);
+        prevHealthKey.current = healthKey;
+        const holKey = JSON.stringify(data.settings?.holidays);
+        if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
+          prevHolKey.current = holKey;
+          skipHolRecasc.current = true;
+          isDerivedUpdate.current = true;
+          setData((d) => {
+            const newProjects = {};
+            Object.entries(d.projects).forEach(([id, proj2]) => {
+              let tasks = proj2.tasks.map((t) => {
+                if (t.pinnedEnd && t.end) return t;
+                const r = resolveTaskSpan(t);
+                return { ...t, end: r.end, duration: r.duration };
+              });
+              tasks = recomputeSchedule(tasks);
+              newProjects[id] = { ...proj2, tasks };
+            });
+            return { ...d, projects: newProjects };
+          });
+        } else {
+          if (skipHolRecasc.current) skipHolRecasc.current = false;
+          else prevHolKey.current = holKey;
+        }
+        isDerivedUpdate.current = true;
+        setData((d) => {
+          const next = reconcileNeedsAttention(d);
+          if (next === d) isDerivedUpdate.current = false;
+          return next;
+        });
+      }
+      if (fileHandleRef.current && fileHtmlRef.current) {
+        clearTimeout(fileSaveTimer.current);
+        fileSaveTimer.current = setTimeout(async () => {
+          try {
+            const tag = `<script id="planar-data">window.__PLANAR_DATA__=${JSON.stringify(data)};<\/script>`;
+            let html = fileHtmlRef.current;
+            if (html.includes('<script id="planar-data">')) {
+              html = html.replace(/<script id="planar-data">[\s\S]*?<\/script>/, tag);
+            } else {
+              html = html.replace("<body>", "<body>\n" + tag);
+            }
+            fileHtmlRef.current = html;
+            const writable = await fileHandleRef.current.createWritable();
+            await writable.write(html);
+            await writable.close();
+          } catch (e) {
+            console.warn("Auto-save failed:", e);
+          }
+        }, 700);
+      }
+    }, [data]);
+    useEffect6(() => {
+      let t;
+      const onSaved = () => {
+        setSavePulse(true);
+        setOfflineFallback(false);
+        clearTimeout(t);
+        t = setTimeout(() => setSavePulse(false), 1500);
+      };
+      window.addEventListener("planar:cloud-saved", onSaved);
+      return () => {
+        window.removeEventListener("planar:cloud-saved", onSaved);
+        clearTimeout(t);
+      };
+    }, []);
+    useEffect6(() => {
+      if (saveStatus !== "error") return;
+      const retry = () => {
+        if (latestData.current) attemptCloudSave(latestData.current);
+      };
+      const iv = setInterval(retry, 2e4);
+      window.addEventListener("online", retry);
+      return () => {
+        clearInterval(iv);
+        window.removeEventListener("online", retry);
+      };
+    }, [saveStatus]);
+    useEffect6(() => {
+      let stopped = false;
+      const check = async () => {
+        if (stopped || !window.storage || !window.storage.checkRemote) return;
+        try {
+          const r = await window.storage.checkRemote("hs-v1");
+          if (!r || !r.ok) return;
+          if (!r.newer) {
+            setStaleNotice(false);
+            return;
+          }
+          if (saveStatusRef.current === "saved" && document.hidden) {
+            window.location.reload();
+            return;
+          }
+          if (saveStatusRef.current === "saved" && !document.hidden && window.storage.silentRefresh) {
+            const fresh = await window.storage.silentRefresh("hs-v1");
+            if (fresh && applyLoadedDataRef.current) {
+              applyLoadedDataRef.current(fresh);
+              setStaleNotice(false);
+              return;
+            }
+          }
+          setStaleNotice(true);
+        } catch (e) {
+        }
+      };
+      const iv = setInterval(check, 2e4);
+      window.addEventListener("focus", check);
+      window.addEventListener("online", check);
+      document.addEventListener("visibilitychange", check);
+      return () => {
+        stopped = true;
+        clearInterval(iv);
+        window.removeEventListener("focus", check);
+        window.removeEventListener("online", check);
+        document.removeEventListener("visibilitychange", check);
+      };
+    }, []);
+    useEffect6(() => {
+      const onStale = () => setStaleNotice(true);
+      window.addEventListener("planar:stale", onStale);
+      return () => window.removeEventListener("planar:stale", onStale);
+    }, []);
+    useEffect6(() => {
+      const onMerged = (e) => {
+        const merged = e && e.detail && e.detail.value;
+        const anc = e && e.detail && e.detail.base;
+        if (!merged || !merged.projects) return;
+        const changedRows = countChangedTaskRows(anc, merged);
+        const changedPids = changedProjectIds(anc, merged);
+        const where = mergeLocationPhrase(merged.projects, changedPids, dataRef.current?.aPid);
+        const trulyEmpty = changedRows === 0 && _mEq(merged.projects, anc && anc.projects);
+        setData((cur) => {
+          if (!cur) return applyTaskFocus(merged);
+          try {
+            return applyTaskFocus(mergeCloudDoc(anc, cur, merged));
+          } catch {
+            return applyTaskFocus(merged);
+          }
+        });
+        setStaleNotice(false);
+        if (!trulyEmpty && typeof showToast === "function") {
+          const msg = changedRows > 0 ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows === 1 ? "" : "s"} updated${where ? " " + where : ""}.` : "Merged in changes saved elsewhere.";
+          showToast(msg, { type: "info", duration: 4e3 });
+          logMergeToastEvent(changedRows, changedPids, merged.projects);
+        }
+      };
+      window.addEventListener("planar:merged", onMerged);
+      return () => window.removeEventListener("planar:merged", onMerged);
+    }, []);
+    useEffect6(() => {
+      const onBeforeUnload = (e) => {
+        if (saveStatusRef.current === "saved") return;
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", onBeforeUnload);
+      return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    }, []);
+    const overlayOpenRef = useRef7(false);
+    useEffect6(() => {
+      overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal || deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen || reviewOpen || meetingCalOpen);
+    }, [
+      successorPrompt,
+      notesCtx,
+      projCtx,
+      taskCtx,
+      renameModal,
+      deleteChoice,
+      pdfExportOpen,
+      formatOpen,
+      settingsOpen,
+      automationOpen,
+      contactsOpen,
+      historyOpen,
+      reviewOpen,
+      meetingCalOpen
+    ]);
+    const overlayAtKeyStartRef = useRef7(false);
+    useEffect6(() => {
+      const latch = () => {
+        overlayAtKeyStartRef.current = overlayOpenRef.current;
+      };
+      window.addEventListener("keydown", latch, true);
+      return () => window.removeEventListener("keydown", latch, true);
+    }, []);
+    useEffect6(() => {
+      const onKey = (e) => {
+        if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
+        const tag = document.activeElement.tagName;
+        const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+        if (e.key === "Insert" && !typing) {
+          e.preventDefault();
+          if (!e.repeat) insertTask();
+          return;
+        }
+        if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyF" && !typing && !document.activeElement?.isContentEditable && !editLiveRef.current) {
+          e.preventDefault();
+          if (e.repeat) return;
+          const ids = rowRangeSelIds();
+          toggleGroupFocus(ids.length ? ids[0] : selectedId, selectedId);
+          return;
+        }
+        if (e.key === "Delete" && !typing) {
+          if (!e.repeat && selectedId !== null) {
+            e.preventDefault();
+            const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
+            const isFullRow = selRange && rangesOf(selRange).every((g2) => g2.c1 === 0 && g2.c2 === lastColIdx);
+            if (isFullRow) {
+              const ids = fullRowSelIds();
+              requestDelete(ids.length ? ids : [selectedId]);
+              return;
+            }
+            const cols = activeEffectiveCols(dataRef.current);
+            if (selIsRange(selRange)) {
+              const ftasks = flatTasksRef.current;
+              const byRow = /* @__PURE__ */ new Map();
+              cellsOf(selRange).forEach(({ r, c }) => {
+                if (!byRow.has(r)) byRow.set(r, []);
+                byRow.get(r).push(c);
+              });
+              for (const [r, cs] of byRow) {
+                const t = ftasks[r];
+                if (!t) continue;
+                const patch = {};
+                for (const c of cs) {
+                  const col2 = cols[c];
+                  if (!col2?.e || col2.t === "health" || col2.t === "notes") continue;
+                  if (t.hasChildren && (col2.k === "start" || col2.k === "end" || col2.k === "duration" || col2.t === "cost")) continue;
+                  patch[col2.k] = col2.k === "duration" || col2.k === "percentComplete" ? 0 : "";
+                }
+                if (Object.keys(patch).length) updateTask(t.id, patch);
+              }
+              return;
+            }
+            const col = cols[selectedColIdx];
+            if (col?.e && col.t !== "health" && col.t !== "notes") {
+              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
+              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
+              if (!isParentDateLocked) {
+                const blank = col.k === "duration" || col.k === "percentComplete" ? 0 : "";
+                updateTask(selectedId, { [col.k]: blank });
+              }
+            }
+          }
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && selectedId !== null && !document.activeElement?.isContentEditable && !editLiveRef.current && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+          const flat = flatTasksRef.current;
+          const NEW_ROW = "__NEW_TASK__";
+          const anchorRow = selectedId === NEW_ROW ? flat.length : flat.findIndex((t2) => t2.id === selectedId);
+          if (anchorRow < 0) return;
+          e.preventDefault();
+          const proj2 = activeProjectOf(dataRef.current);
+          const eff = activeEffectiveCols(dataRef.current);
+          let formulas = null, succIds = null;
+          const env = {
+            formula: (id, k) => {
+              if (!formulas) formulas = computeFormulaValues(flat, formulaColsOf(proj2), proj2);
+              return formulas[id]?.[k];
+            },
+            predCount: (arr) => normPreds(arr).length,
+            succCount: (id) => {
+              if (!succIds) {
+                succIds = /* @__PURE__ */ new Set();
+                (proj2?.tasks || []).forEach((t2) => normPreds(t2.predecessors).forEach((p) => succIds.add(p.id)));
+              }
+              return succIds.has(id) ? 1 : 0;
+            },
+            ownerCount: (t2) => ownerListOf(t2).length,
+            floatDays: (t2) => t2.hasChildren ? null : meetingFloatBD(t2, fdLocal(/* @__PURE__ */ new Date())),
+            costDays: (t2) => t2.hasChildren ? null : meetingCostDays(t2, MEETING_BODY_INDEX[t2.meetingBodyId])
+          };
+          const blankAt = (r, c) => r >= flat.length || !eff[c] ? true : gridCellBlank(flat[r], eff[c], env);
+          const colMasters = visibleColIdxs();
+          if (e.shiftKey) {
+            if (selectedId === NEW_ROW) return;
+            const cur = selRange || { r1: anchorRow, r2: anchorRow, c1: selectedColIdx, c2: selectedColIdx };
+            const t2 = gridCtrlArrowTarget(e.key, flat.length, colMasters, cur.r2, cur.c2, blankAt);
+            if (t2) {
+              setSelRange(withActive(cur, { r1: cur.r1, c1: cur.c1, r2: t2.row, c2: t2.col }));
+              document.dispatchEvent(new CustomEvent("planar-reveal-cell", { detail: { row: t2.row, col: t2.col } }));
+            }
+            return;
+          }
+          const t = gridCtrlArrowTarget(e.key, flat.length, colMasters, anchorRow, selectedColIdx, blankAt);
+          if (t) {
+            setSelectedColIdx(t.col);
+            if (t.row !== anchorRow && flat[t.row]) setSelectedId(flat[t.row].id);
+            setSelRange(null);
+          }
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && !typing) {
+          const k = e.key.toLowerCase();
+          if (k === "z" && !e.shiftKey) {
+            e.preventDefault();
+            if (history.current.length > 0) {
+              const prev = history.current[history.current.length - 1];
+              history.current = history.current.slice(0, -1);
+              future.current = [...future.current, dataRef.current];
+              isUndoing.current = true;
+              setData(prev);
+            }
+            return;
+          }
+          if (k === "y" || k === "z" && e.shiftKey) {
+            e.preventDefault();
+            if (future.current.length > 0) {
+              const next = future.current[future.current.length - 1];
+              future.current = future.current.slice(0, -1);
+              history.current = [...history.current, dataRef.current];
+              isUndoing.current = true;
+              setData(next);
+            }
+            return;
+          }
+          if (k === "c" && !e.shiftKey && selectedId !== null) {
+            e.preventDefault();
+            copyTaskById(structuralTargets(selectedId));
+            return;
+          }
+          if (k === "x" && !e.shiftKey && selectedId !== null) {
+            e.preventDefault();
+            cutTaskById(structuralTargets(selectedId));
+            return;
+          }
+          if (k === "v" && !e.shiftKey && selectedId !== null) {
+            e.preventDefault();
+            pasteTaskAfter(selectedId);
+            return;
+          }
+        }
+        if (e.altKey && e.shiftKey && e.key === "ArrowRight" && !typing) {
+          e.preventDefault();
+          if (!e.repeat && selectedId !== null) {
+            const ids = blockOnlyTargets(selectedId);
+            if (ids) indentSelectionByIds(ids);
+          }
+          return;
+        }
+        if (e.altKey && e.shiftKey && e.key === "ArrowLeft" && !typing) {
+          e.preventDefault();
+          if (!e.repeat && selectedId !== null) {
+            const ids = blockOnlyTargets(selectedId);
+            if (ids) outdentSelectionByIds(ids);
+          }
+          return;
+        }
+        if (e.key === "Tab" && !typing && selectedId !== null) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            setSelectedColIdx((i) => stepGridCol(i, -1));
+          } else {
+            setSelectedColIdx((i) => stepGridCol(i, 1));
+          }
+          setSelRange(null);
+          return;
+        }
+        if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null) {
+          const arrowKeys = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"];
+          if (arrowKeys.includes(e.key)) {
+            e.preventDefault();
+            const ftasks = flatTasksRef.current;
+            const anchorRi = ftasks.findIndex((t) => t.id === selectedId);
+            if (anchorRi >= 0) {
+              const cur = selRange || { r1: anchorRi, r2: anchorRi, c1: selectedColIdx, c2: selectedColIdx };
+              let { r1, r2, c1, c2 } = cur;
+              if (e.key === "ArrowDown") r2 = Math.min(ftasks.length - 1, r2 + 1);
+              if (e.key === "ArrowUp") r2 = Math.max(0, r2 - 1);
+              if (e.key === "ArrowRight") c2 = stepGridCol(c2, 1);
+              if (e.key === "ArrowLeft") c2 = stepGridCol(c2, -1);
+              setSelRange(withActive(cur, { r1, r2, c1, c2 }));
+            }
+            return;
+          }
+        }
+        if (e.shiftKey && e.key === " " && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null) {
+          e.preventDefault();
+          const tasks = flatTasksRef.current;
+          const ri = tasks.findIndex((t) => t.id === selectedId);
+          if (ri >= 0) setSelRange({ r1: ri, r2: ri, c1: 0, c2: activeEffectiveCols(dataRef.current).length - 1 });
+          return;
+        }
+        if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null && (e.key === "Enter" || e.key === "F2")) {
+          if (selectedId === "__NEW_TASK__") {
+            e.preventDefault();
+            openNameEditOnReveal.current = true;
+            addTask();
+            return;
+          }
+          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
+          if (col) {
+            e.preventDefault();
+            if (col.t === "notes") {
+              const pid = projIdRef.current;
+              if (pid !== null) setNotesCtx({ taskId: selectedId, projectId: pid });
+            } else if (col.k === "health" || col.k === "status") {
+              const cell = document.querySelector(`[data-picker-cell="${col.k}-${selectedId}"]`);
+              const trigger = cell?.querySelector("[data-health-dot], span[style]") || cell?.firstElementChild;
+              trigger?.click();
+            } else if (col.e) {
+              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
+              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
+              if (!isParentDateLocked) setEdit({ taskId: selectedId, col: col.k });
+            }
+            return;
+          }
+        }
+        if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null && e.key.length === 1) {
+          if (selectedId === "__NEW_TASK__") return;
+          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
+          if (col) {
+            if (col.t === "notes") {
+              const pid = projIdRef.current;
+              if (pid !== null) {
+                e.preventDefault();
+                setNotesCtx({ taskId: selectedId, projectId: pid, initChar: e.key });
+              }
+              return;
+            }
+            if (col.e && col.t !== "health") {
+              const selTask = flatTasksRef.current.find((t) => t.id === selectedId);
+              const isParentDateLocked = selTask?.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
+              if (isParentDateLocked) return;
+              const isNum = col.k === "duration" || col.k === "percentComplete";
+              if (isNum && !/\d/.test(e.key)) return;
+              e.preventDefault();
+              setEdit({ taskId: selectedId, col: col.k });
+              setEditStartChar(e.key);
+              return;
+            }
+          }
+        }
+        if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowDown" && !typing && selectedId !== null) {
+          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
+          if (col?.k === "health" || col?.k === "status") {
+            e.preventDefault();
+            const cell = document.querySelector(`[data-picker-cell="${col.k}-${selectedId}"]`);
+            const trigger = cell?.querySelector("[data-health-dot], span[style]") || cell?.firstElementChild;
+            trigger?.click();
+            return;
+          }
+        }
+        if (!e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !typing) {
+          const isArrow = e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight";
+          if (isArrow) {
+            document.dispatchEvent(new CustomEvent("planar-picker-open", { detail: "nav" }));
+          }
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const tasks = flatTasksRef.current;
+            const target = stepGridRow(
+              tasks,
+              activeProjectOf(dataRef.current)?.tasks || [],
+              selectedId,
+              e.key === "ArrowDown" ? 1 : -1,
+              lastSelIdxRef.current,
+              viewportTopFlatIdx(tasks)
+            );
+            if (target != null) {
+              setSelectedId(target);
+              setSelRange(null);
+            }
+            return;
+          }
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            setSelectedColIdx((i) => stepGridCol(i, 1));
+            setSelRange(null);
+            return;
+          }
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            setSelectedColIdx((i) => stepGridCol(i, -1));
+            setSelRange(null);
+            return;
+          }
+        }
+      };
+      document.addEventListener("keydown", onKey);
+      return () => document.removeEventListener("keydown", onKey);
+    }, [selectedId, selectedColIdx, selRange, isUndoing]);
+    const toggleGroupFocus = (anchorId, selId) => {
+      const all = activeProjectOf(dataRef.current)?.tasks || [];
+      const gid = focusToggleTarget(all, anchorId);
+      if (gid == null) return;
+      const g2 = all.find((t) => t.id === gid);
+      if (!g2) return;
+      focusReselectRef.current = { selId };
+      setFocusPins((p) => p.size ? /* @__PURE__ */ new Set() : p);
+      setSelRange(null);
+      updateTask(gid, { focused: !g2.focused });
+      const row = (flatTasksRef.current || []).find((t) => t.id === gid);
+      if (!(row && row.isExpanded && row.hideableCount > 0))
+        showToast(`Focus ${g2.focused ? "off" : "on"} for "${g2.name || "Untitled"}"` + (g2.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
+    };
+    const zoomRafRef = useRef7(null);
+    const zoomAccRef = useRef7(0);
+    useEffect6(() => {
+      let armed = false;
+      const arm = (on) => {
+        if (on === armed) return;
+        armed = on;
+        if (on) window.addEventListener("wheel", onWheel, { passive: false });
+        else window.removeEventListener("wheel", onWheel);
+      };
+      const onKey = (e) => arm(!!(e.ctrlKey || e.metaKey));
+      const onPointer = (e) => arm(!!(e.ctrlKey || e.metaKey));
+      const onShellKeys = (e) => {
+        if (!e || e.origin !== window.location.origin) return;
+        const m = e && e.data;
+        if (!m || m.source !== "planar-shell" || m.type !== "planar:modifier-keys") return;
+        arm(!!(m.ctrl || m.meta));
+      };
+      const onBlur = () => arm(false);
+      const onWheel = (e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        zoomAccRef.current += e.deltaY;
+        if (zoomRafRef.current) return;
+        zoomRafRef.current = requestAnimationFrame(() => {
+          const delta = zoomAccRef.current;
+          zoomAccRef.current = 0;
+          zoomRafRef.current = null;
+          if (hoverZoneRef.current === "grid") {
+            setGridZoom((z) => {
+              const factor = delta < 0 ? 1.12 : 1 / 1.12;
+              const nz = Math.max(0.5, Math.min(2, Math.round(z * factor * 100) / 100));
+              setData((d) => ({ ...d, gridZoom: nz }));
+              return nz;
+            });
+          } else {
+            setGanttPPD((z) => {
+              const factor = delta < 0 ? 1.15 : 1 / 1.15;
+              return Math.max(1, Math.min(80, Math.round(z * factor * 10) / 10));
+            });
+          }
+        });
+      };
+      window.addEventListener("keydown", onKey, true);
+      window.addEventListener("keyup", onKey, true);
+      window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
+      window.addEventListener("pointerdown", onPointer, { capture: true, passive: true });
+      window.addEventListener("message", onShellKeys);
+      window.addEventListener("blur", onBlur);
+      return () => {
+        window.removeEventListener("keydown", onKey, true);
+        window.removeEventListener("keyup", onKey, true);
+        window.removeEventListener("pointermove", onPointer, true);
+        window.removeEventListener("pointerdown", onPointer, true);
+        window.removeEventListener("message", onShellKeys);
+        window.removeEventListener("blur", onBlur);
+        arm(false);
+        if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
+      };
+    }, []);
+    const updateTask = useCallback2((taskId, updates, projId = null) => {
+      const updatesIn = updates;
+      setData((d) => {
+        const pid = projId ?? d.aPid;
+        const boundEdit = resolveBoundEdit(d.projects[pid]?.tasks || [], taskId, updatesIn, (id) => MEETING_BODY_INDEX[id]);
+        const updates2 = boundEdit.updates;
+        const _origStart = ((d.projects[pid]?.tasks || []).find((t) => t.id === taskId) || {}).start || "";
+        const _beforeTasks = d.projects[pid]?.tasks || [];
+        const _prevBoundStart = {};
+        (d.projects[pid]?.tasks || []).forEach((t) => {
+          if (t.meetingBound && t.start) _prevBoundStart[t.id] = t.start;
+        });
+        let tasks = d.projects[pid].tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          const u = { ...t, ...updates2, ...completionDelta(t, updates2) };
+          if ("rowColor" in updates2) u.rowColor = isValidColor(updates2.rowColor) ? updates2.rowColor : null;
+          if ("bold" in updates2) u.bold = !!updates2.bold;
+          if ("italic" in updates2) u.italic = !!updates2.italic;
+          if ("underline" in updates2) u.underline = !!updates2.underline;
+          if ("textColor" in updates2) u.textColor = isValidColor(updates2.textColor) ? updates2.textColor : null;
+          if ("fontSize" in updates2) u.fontSize = isValidFontSize(updates2.fontSize) ? updates2.fontSize : null;
+          if ("icons" in updates2) {
+            const ic = PlanyrTaskIcons.normalizeTaskIcons(updates2.icons);
+            if (ic.length) u.icons = ic;
+            else delete u.icons;
+          }
+          if ("predecessors" in updates2) {
+            u.predecessors = normPreds(updates2.predecessors);
+            delete u.pinnedStart;
+          }
+          if ("duration" in updates2 && !("durValue" in updates2) && !("durUnit" in updates2)) {
+            u.durUnit = "d";
+            u.durValue = Math.max(0, Math.trunc(Number(updates2.duration) || 0));
+          }
+          if ("durValue" in updates2 || "durUnit" in updates2) {
+            u.durUnit = u.durUnit || "d";
+            if (u.durValue == null) u.durValue = 0;
+          }
+          const durEdited = "duration" in updates2 || "durValue" in updates2 || "durUnit" in updates2;
+          if ((durEdited || "start" in updates2) && !("end" in updates2)) {
+            if (!(u.pinnedEnd && u.end)) {
+              const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u));
+              u.end = r.end;
+              u.duration = r.duration;
+            }
+          } else if ("end" in updates2 && !("start" in updates2)) {
+            if (u.end && !u.start) {
+              u.start = u.end;
+              u.durUnit = "d";
+              u.durValue = 1;
+              u.duration = 1;
+            } else {
+              u.duration = u.start && u.end ? Math.max(0, difBD(u.start, u.end) + 1) : 0;
+              u.durUnit = "d";
+              u.durValue = u.duration;
+            }
+            u.pinnedEnd = !!u.end;
+          }
+          if ("start" in updates2 && !("predecessors" in updates2)) u.pinnedStart = true;
+          if (boundEdit.startOverride) {
+            u.start = boundEdit.startOverride;
+            u.end = boundEdit.startOverride;
+          }
+          return u;
+        });
+        if ("health" in updates2) {
+          const getDescIds = (id, all) => {
+            const kids = all.filter((t) => t.parentId === id);
+            return [...kids.map((k) => k.id), ...kids.flatMap((k) => getDescIds(k.id, all))];
+          };
+          const descIds = new Set(getDescIds(taskId, tasks));
+          if (descIds.size > 0) {
+            tasks = tasks.map((t) => descIds.has(t.id) ? { ...t, health: updates2.health, ...cascadeDelta(t, updates2.health) } : t);
+          }
+        }
+        if (touchesSchedule(updates2)) {
+          tasks = recomputeSchedule(tasks);
+          const editedT = tasks.find((t) => t.id === taskId);
+          const _settled = settleBoundNotice(boundEdit, editedT && editedT.start);
+          if (_settled && !rollToastRef.current) rollToastRef.current = boundEditNotice(_settled, editedT && editedT.name, fmtD);
+          for (const t of tasks) {
+            const prev = _prevBoundStart[t.id];
+            if (t.id === taskId && ("start" in updates2 || "end" in updates2 || boundEdit.rebinding)) continue;
+            if (!rollToastRef.current && t.meetingBound && prev && t.start && t.start !== prev) {
+              const body = MEETING_BODY_INDEX[t.meetingBodyId];
+              if (body && !body.agendaLead) rollToastRef.current = `${t.name || "Task"} moved to ${fmtD(t.start)}, the next ${body.name || "meeting"} meeting.`;
+              else rollToastRef.current = `${t.name || "Task"} moved to ${fmtD(t.start)} — the ${fmtD(prev)} agenda closed ${fmtD(body ? agendaDeadline(body, prev) : "")}.`;
+            }
+          }
+          if (!rollToastRef.current && boundEdit.rebinding && editedT && editedT.meetingBound && _origStart && editedT.start && editedT.start !== _origStart) {
+            const body = MEETING_BODY_INDEX[editedT.meetingBodyId];
+            rollToastRef.current = `${editedT.name || "Task"} moved to ${fmtD(editedT.start)}, the next ${body && body.name || "meeting"} meeting${body && body.agendaLead ? " whose agenda is still open" : ""}.`;
+          }
+          const _typedDate = !!("start" in updates2 && updates2.start || "end" in updates2 && updates2.end);
+          const _pcMsg = pinConflictNotice(newPinConflicts(_beforeTasks, tasks, _typedDate ? [taskId] : []), _typedDate ? taskId : null, fmtD);
+          if (_pcMsg) {
+            const cur = rollToastRef.current || "";
+            if (!cur.includes(_pcMsg)) rollToastRef.current = cur ? cur + " " + _pcMsg : _pcMsg;
+          }
+        }
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks } } };
+      });
+      if (updates.health === "green") {
+        const snap = dataRef.current;
+        if (snap) {
+          const pid2 = projId ?? snap.aPid;
+          const oldTask = snap.projects[pid2]?.tasks.find((t) => t.id === taskId);
+          if (oldTask && oldTask.health !== "green") {
+            setTimeout(() => celebrateTaskComplete(oldTask.name), 60);
+            setTimeout(() => {
+              const d = dataRef.current;
+              if (!d) return;
+              const p = d.projects[pid2];
+              if (!p) return;
+              const completedTask = p.tasks.find((t) => t.id === taskId);
+              if (!completedTask) return;
+              const successors = p.tasks.filter(
+                (t) => normPreds(t.predecessors).some((pr) => pr.id === taskId) && t.health !== "green"
+              );
+              const hasReadyToStart = successors.some((t) => t.health === "gray");
+              if (hasReadyToStart) {
+                setSuccessorPromptQueue((q) => [...q, { completedTask, projId: pid2, projName: crossScheduleLabel(p), successors }]);
+              }
+            }, 80);
+          }
+        }
+      }
+    }, []);
+    const deleteTasks = useCallback2((taskIds) => {
+      if (!taskIds || taskIds.length === 0) return;
+      const pid = dataRef.current?.aPid;
+      const all = dataRef.current?.projects?.[pid]?.tasks || [];
+      const del = /* @__PURE__ */ new Set();
+      const mark = (id) => {
+        del.add(id);
+        all.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
+      };
+      taskIds.forEach(mark);
+      const rowCount = taskIds.length, totalCount = del.size;
+      setData((d) => {
+        const proj2 = d.projects[d.aPid];
+        if (!proj2) return d;
+        return { ...d, projects: { ...d.projects, [d.aPid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(proj2.tasks.filter((t) => !del.has(t.id)))) } } };
+      });
+      notifyRowsDeleted(rowCount, totalCount);
+    }, []);
+    const fullRowSelIds = () => {
+      if (!selRange) return [];
+      const lastColIdx = activeEffectiveCols(dataRef.current).length - 1;
+      if (!rangesOf(selRange).every((g2) => g2.c1 === 0 && g2.c2 === lastColIdx)) return [];
+      const ft = flatTasksRef.current || [];
+      return selRowsOf(selRange, ft.length - 1).map((r) => ft[r].id);
+    };
+    const rowRangeSelIds = () => {
+      if (!selRange) return [];
+      const ft = flatTasksRef.current || [];
+      const rows = selRowsOf(selRange, ft.length - 1);
+      if (rows.length <= 1) return [];
+      return rows.map((r) => ft[r].id);
+    };
+    const structuralTargets = (anchorId) => {
+      const ids = rowRangeSelIds();
+      return ids.length > 1 && ids.includes(anchorId) ? ids : [anchorId];
+    };
+    const blockOnlyTargets = (anchorId) => {
+      if (isMulti(selRange)) {
+        showToast(MULTI_SELECTION_MESSAGE, { type: "warn" });
+        return null;
+      }
+      return structuralTargets(anchorId);
+    };
+    const requestDelete = useCallback2((taskIds) => {
+      if (!taskIds || taskIds.length === 0) return;
+      const pid = dataRef.current?.aPid;
+      const all = dataRef.current?.projects?.[pid]?.tasks || [];
+      const hasAnyChildren = taskIds.some((id) => all.some((t) => t.parentId === id));
+      if (!hasAnyChildren) {
+        deleteTasks(taskIds);
+        setSelectedId(null);
+        setSelRange(null);
+        return;
+      }
+      const del = /* @__PURE__ */ new Set();
+      const mark = (id) => {
+        del.add(id);
+        all.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
+      };
+      taskIds.forEach(mark);
+      setDeleteChoice({ ids: taskIds, rowCount: taskIds.length, totalCount: del.size });
+    }, [deleteTasks]);
+    const promoteAndDeleteTasks = useCallback2((taskIds) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const proj2 = d.projects[pid];
+        if (!proj2) return d;
+        const newTasks = promoteChildrenAndDelete(proj2.tasks, taskIds);
+        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(newTasks)) } } };
+      });
+      notifyRowsDeleted(taskIds.length, taskIds.length);
+    }, []);
+    const fmtTargets = () => {
+      const rowIds = fullRowSelIds();
+      if (rowIds.length && taskCtx && rowIds.includes(taskCtx.task.id)) return { mode: "row", ids: rowIds };
+      const ft = flatTasksRef.current || [];
+      const cells = [];
+      if (selRange && ft.length) {
+        const eff = activeEffectiveCols(dataRef.current);
+        for (const { r, c } of cellsOf(selRange)) {
+          const ck = eff[c]?.k;
+          if (ck && ft[r]) cells.push({ taskId: ft[r].id, colKey: ck });
+        }
+      } else if (taskCtx) {
+        cells.push({ taskId: taskCtx.task.id, colKey: activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name" });
+      }
+      return { mode: "cell", cells };
+    };
+    const applyFormatAndSync = (patch, { clearAll = false } = {}) => {
+      const tgt = fmtTargets();
+      const pid = taskCtx?.projId ?? dataRef.current?.aPid;
+      const mergeCell = (entry) => {
+        const e = { ...entry || {} };
+        if ("bold" in patch) e.bold = patch.bold;
+        if ("italic" in patch) e.italic = patch.italic;
+        if ("fill" in patch) e.fill = patch.fill;
+        if ("underline" in patch) e.underline = patch.underline;
+        if ("color" in patch) e.color = patch.color;
+        if ("size" in patch) e.size = patch.size;
+        return e.bold || e.italic || e.fill || e.underline || e.color || e.size ? e : null;
+      };
+      setData((d) => {
+        const proj2 = d.projects[pid];
+        if (!proj2) return d;
+        let tasks;
+        if (tgt.mode === "row") {
+          const idset = new Set(tgt.ids);
+          tasks = proj2.tasks.map((t) => {
+            if (!idset.has(t.id)) return t;
+            if (clearAll) {
+              const { cellFmt: _cellFmt, ...rest } = t;
+              return { ...rest, rowColor: null, bold: false, italic: false, underline: false, textColor: null, fontSize: null };
+            }
+            const u = { ...t };
+            if ("bold" in patch) u.bold = patch.bold;
+            if ("italic" in patch) u.italic = patch.italic;
+            if ("fill" in patch) u.rowColor = patch.fill;
+            if ("underline" in patch) u.underline = patch.underline;
+            if ("color" in patch) u.textColor = patch.color;
+            if ("size" in patch) u.fontSize = patch.size;
+            return u;
+          });
+        } else {
+          const byTask = {};
+          tgt.cells.forEach(({ taskId, colKey }) => {
+            (byTask[taskId] = byTask[taskId] || []).push(colKey);
+          });
+          tasks = proj2.tasks.map((t) => {
+            const cols = byTask[t.id];
+            if (!cols) return t;
+            const cf = { ...t.cellFmt || {} };
+            cols.forEach((k) => {
+              const e = clearAll ? null : mergeCell(cf[k]);
+              if (e) cf[k] = e;
+              else delete cf[k];
+            });
+            if (Object.keys(cf).length) return { ...t, cellFmt: cf };
+            const { cellFmt: _cellFmt, ...rest } = t;
+            return rest;
+          });
+        }
+        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks } } };
+      });
+      setTaskCtx((c) => {
+        if (!c) return c;
+        const t = { ...c.task };
+        if (tgt.mode === "row") {
+          if (clearAll) {
+            t.rowColor = null;
+            t.bold = false;
+            t.italic = false;
+            t.underline = false;
+            t.textColor = null;
+            t.fontSize = null;
+            delete t.cellFmt;
+          } else {
+            if ("bold" in patch) t.bold = patch.bold;
+            if ("italic" in patch) t.italic = patch.italic;
+            if ("fill" in patch) t.rowColor = patch.fill;
+            if ("underline" in patch) t.underline = patch.underline;
+            if ("color" in patch) t.textColor = patch.color;
+            if ("size" in patch) t.fontSize = patch.size;
+          }
+        } else {
+          const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name";
+          const cf = { ...t.cellFmt || {} };
+          const e = clearAll ? null : mergeCell(cf[key]);
+          if (e) cf[key] = e;
+          else delete cf[key];
+          if (Object.keys(cf).length) t.cellFmt = cf;
+          else delete t.cellFmt;
+        }
+        return { ...c, task: t };
+      });
+    };
+    const ctxFmtState = () => {
+      if (!taskCtx) return null;
+      const tgt = fmtTargets();
+      const ft = flatTasksRef.current || [];
+      const oneOrMixed = (vals) => {
+        const uniq = new Set(vals);
+        return uniq.size <= 1 ? vals[0] ?? null : "mixed";
+      };
+      const LEVEL_SIZES = [13, 12, 11.5, 11];
+      const naturalSizeOf = (task, colKey) => colKey === "name" ? LEVEL_SIZES[Math.min(task?.level || 0, 3)] : 12;
+      if (tgt.mode === "row") {
+        const t = taskCtx.task;
+        const sizes2 = tgt.ids.map((id) => (id === t.id ? t : ft.find((x) => x.id === id))?.fontSize ?? null);
+        return {
+          mode: "row",
+          bold: !!t.bold,
+          italic: !!t.italic,
+          underline: !!t.underline,
+          fill: t.rowColor || null,
+          color: t.textColor || null,
+          size: oneOrMixed(sizes2),
+          naturalSize: naturalSizeOf(t, "name"),
+          hasAny: !!(t.bold || t.italic || t.underline || t.rowColor || t.textColor || t.fontSize || t.cellFmt && Object.keys(t.cellFmt).length),
+          count: tgt.ids.length || 1,
+          unit: tgt.ids.length > 1 ? "rows" : "row",
+          scopeLabel: tgt.ids.length > 1 ? `${tgt.ids.length} rows` : "Row"
+        };
+      }
+      const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || "name";
+      const e = taskCtx.task.cellFmt?.[key] || {};
+      const cellFmtOf = (taskId, colKey) => taskId === taskCtx.task.id && colKey === key ? e : ft.find((x) => x.id === taskId)?.cellFmt?.[colKey];
+      const hasAny = tgt.cells.some(({ taskId, colKey }) => {
+        const f = cellFmtOf(taskId, colKey);
+        return !!(f && (f.bold || f.italic || f.underline || f.fill || f.color || f.size));
+      });
+      const sizes = tgt.cells.map(({ taskId, colKey }) => cellFmtOf(taskId, colKey)?.size ?? null);
+      return {
+        mode: "cell",
+        bold: !!e.bold,
+        italic: !!e.italic,
+        underline: !!e.underline,
+        fill: e.fill || null,
+        color: e.color || null,
+        size: oneOrMixed(sizes),
+        naturalSize: naturalSizeOf(taskCtx.task, key),
+        hasAny,
+        count: tgt.cells.length || 1,
+        unit: tgt.cells.length > 1 ? "cells" : "cell",
+        scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : "Cell"
+      };
+    };
+    const rowJumpRef = useRef7(false);
+    const goToTask = useCallback2((pid, taskId) => {
+      rowJumpRef.current = true;
+      setData((d) => {
+        const proj2 = d.projects[pid];
+        if (!proj2) return d;
+        const byId = {};
+        proj2.tasks.forEach((t) => {
+          byId[t.id] = t;
+        });
+        const toExpand = /* @__PURE__ */ new Set();
+        let p = byId[taskId]?.parentId;
+        while (p != null && byId[p]) {
+          toExpand.add(p);
+          p = byId[p].parentId;
+        }
+        const needsExpand = [...toExpand].some((id) => !byId[id].isExpanded);
+        const tasks = needsExpand ? proj2.tasks.map((t) => toExpand.has(t.id) && !t.isExpanded ? { ...t, isExpanded: true } : t) : proj2.tasks;
+        return {
+          ...d,
+          section: "projects",
+          aPid: pid,
+          view: d.view === "gantt" ? "split" : d.view,
+          projects: { ...d.projects, [pid]: { ...proj2, tasks } }
+        };
+      });
+      setSelectedId(taskId);
+      setSelectedColIdx(0);
+      setSelRange(null);
+      setGoToFocus({ taskId, n: Date.now() });
+    }, []);
+    const revealRef = useRef7(null);
+    const openNameEditOnReveal = useRef7(false);
+    const revealInserted = useCallback2(() => {
+      const shouldOpenEdit = openNameEditOnReveal.current;
+      openNameEditOnReveal.current = false;
+      requestAnimationFrame(() => {
+        const id = revealRef.current;
+        revealRef.current = null;
+        if (id == null) return;
+        setSelectedId(id);
+        setSelRange(null);
+        const ni = COLS.findIndex((c) => c.k === "name");
+        if (ni >= 0) setSelectedColIdx(ni);
+        if (shouldOpenEdit) {
+          requestAnimationFrame(() => setEdit({ taskId: id, col: "name" }));
+        }
+      });
+    }, []);
+    const addTask = useCallback2(() => {
+      setData((d) => {
+        const pid = d.aPid;
+        const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
+        const id = Math.max(d.nTid[pid] ?? 1, maxId + 1);
+        const visualOrder = sortByVisualOrder(d.projects[pid].tasks);
+        const lastTask = visualOrder.length > 0 ? visualOrder[visualOrder.length - 1] : null;
+        const newParentId = lastTask ? lastTask.parentId : null;
+        const task = mkt(id, "", "", "", newParentId);
+        let tasks = [...d.projects[pid].tasks, task];
+        const anc = /* @__PURE__ */ new Set();
+        {
+          let p = newParentId;
+          while (p != null) {
+            anc.add(p);
+            const par = tasks.find((t) => t.id === p);
+            p = par ? par.parentId : null;
+          }
+        }
+        if (anc.size) tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused } : t);
+        const finalArr = sortByVisualOrder(tasks);
+        revealRef.current = finalArr.indexOf(task) + 1;
+        return { ...d, nTid: { ...d.nTid, [pid]: id + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(finalArr) } } };
+      });
+      revealInserted();
+    }, []);
+    const deleteTask = useCallback2((taskId) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const del = /* @__PURE__ */ new Set();
+        const mark = (id) => {
+          del.add(id);
+          d.projects[pid].tasks.filter((t) => t.parentId === id).forEach((t) => mark(t.id));
+        };
+        mark(taskId);
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(d.projects[pid].tasks.filter((t) => !del.has(t.id)))) } } };
+      });
+      if (selectedId === taskId) setSelectedId(null);
+    }, [selectedId]);
+    const insertAboveAnchor = useCallback2((anchorId) => {
+      const visibleIds = (flatTasksRef.current || []).map((t) => t.id);
+      const sid = _mintTaskSid();
+      setData((d) => {
+        const pid = d.aPid;
+        const newTask = { ...mkt(0, "", "", "", null), _sid: sid };
+        const tasks = insertRowAbove(d.projects[pid].tasks, visibleIds, anchorId, newTask);
+        const finalArr = sortByVisualOrder(tasks);
+        revealRef.current = finalArr.findIndex((t) => t._sid === sid) + 1;
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(finalArr) } } };
+      });
+      setFocusPins((p) => {
+        const n = new Set(p);
+        n.add(sid);
+        return n;
+      });
+      revealInserted();
+    }, []);
+    const insertTask = useCallback2(() => {
+      const flat = flatTasksRef.current || [];
+      let anchorId = selectedId;
+      if (isMulti(selRange)) {
+        showToast(MULTI_SELECTION_MESSAGE, { type: "warn" });
+        return;
+      }
+      if (selRange && selRange.r1 !== selRange.r2) {
+        const top = flat[Math.min(selRange.r1, selRange.r2)];
+        if (top) anchorId = top.id;
+      }
+      insertAboveAnchor(anchorId);
+    }, [selectedId, selRange]);
+    const insertTaskBelow = useCallback2((taskId) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const rawTasks = d.projects[pid].tasks;
+        const flatOrder = [];
+        const walk = (parentId) => {
+          rawTasks.filter((t) => t.parentId === parentId).forEach((t) => {
+            flatOrder.push(t);
+            if (t.isExpanded) walk(t.id);
+          });
+        };
+        walk(null);
+        const flatIdx = taskId !== null ? flatOrder.findIndex((t) => t.id === taskId) : flatOrder.length - 1;
+        const targetTask = flatIdx >= 0 ? flatOrder[flatIdx] : null;
+        const newParentId = targetTask ? targetTask.parentId : null;
+        const newTask = mkt(0, "", "", "", newParentId);
+        let tasks = [...rawTasks];
+        if (!targetTask) {
+          tasks.push(newTask);
+        } else {
+          const rawIdx = tasks.findIndex((t) => t.id === targetTask.id);
+          tasks.splice(rawIdx + 1, 0, newTask);
+        }
+        const anc = /* @__PURE__ */ new Set();
+        {
+          let p = newParentId;
+          while (p != null) {
+            anc.add(p);
+            const par = tasks.find((t) => t.id === p);
+            p = par ? par.parentId : null;
+          }
+        }
+        if (anc.size) tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === newParentId ? false : t.focused } : t);
+        revealRef.current = tasks.indexOf(newTask) + 1;
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(tasks) } } };
+      });
+      revealInserted();
+    }, []);
+    const insertTaskAbove = useCallback2((taskId) => {
+      insertAboveAnchor(taskId);
+    }, []);
+    const addDeadlineTask = useCallback2((anchorId, projId = null) => {
+      setData((d) => {
+        const pid = projId ?? d.aPid;
+        const proj2 = d.projects[pid];
+        if (!proj2) return d;
+        const rawTasks = proj2.tasks || [];
+        const anchor = rawTasks.find((t) => t.id === anchorId);
+        if (!anchor || !anchor.meetingBound) return d;
+        const body = MEETING_BODY_INDEX[anchor.meetingBodyId];
+        const newTask = { ...mkt(0, `Deadline — ${body && body.name || "meeting"}`, "", "", anchor.parentId), deadlineForTaskId: anchor.id };
+        const tasks = [...rawTasks];
+        const rawIdx = tasks.findIndex((t) => t.id === anchorId);
+        if (rawIdx === -1) tasks.push(newTask);
+        else tasks.splice(rawIdx, 0, newTask);
+        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(tasks)) } } };
+      });
+    }, []);
+    const addSubtask = useCallback2((taskId) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
+        const id = Math.max(d.nTid[pid] ?? 1, maxId + 1);
+        const task = mkt(id, "", "", "", taskId);
+        let tasks = [...d.projects[pid].tasks, task];
+        const anc = /* @__PURE__ */ new Set([taskId]);
+        {
+          let p = taskId;
+          while (p != null) {
+            const par = tasks.find((t) => t.id === p);
+            p = par ? par.parentId : null;
+            if (p != null) anc.add(p);
+          }
+        }
+        tasks = tasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === taskId ? false : t.focused } : t);
+        revealRef.current = id;
+        return { ...d, nTid: { ...d.nTid, [pid]: id + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks } } };
+      });
+      revealInserted();
+    }, []);
+    const duplicateTask = useCallback2((taskId) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const tasks = d.projects[pid].tasks;
+        const src = tasks.find((t) => t.id === taskId);
+        if (!src) return d;
+        const nid = Math.max(d.nTid[pid] ?? 1, Math.max(0, ...tasks.map((t) => t.id)) + 1);
+        const copy = { ...src, id: nid, _sid: _mintTaskSid(), name: src.name + " (Copy)", notes: src.notes.map((n) => ({ ...n })) };
+        const srcIdx = tasks.findIndex((t) => t.id === taskId);
+        let newTasks = [...tasks];
+        newTasks.splice(srcIdx + 1, 0, copy);
+        const anc = /* @__PURE__ */ new Set();
+        {
+          let p = copy.parentId;
+          while (p != null) {
+            anc.add(p);
+            const par = newTasks.find((t) => t.id === p);
+            p = par ? par.parentId : null;
+          }
+        }
+        if (anc.size) newTasks = newTasks.map((t) => anc.has(t.id) ? { ...t, isExpanded: true, focused: t.id === copy.parentId ? false : t.focused } : t);
+        revealRef.current = newTasks.indexOf(copy) + 1;
+        return { ...d, nTid: { ...d.nTid, [pid]: nid + 1 }, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(newTasks) } } };
+      });
+      revealInserted();
+    }, []);
+    const collectSubtreeFor = (rootId, allTasks) => {
+      const out = [];
+      const walk = (id) => {
+        const t = allTasks.find((x) => x.id === id);
+        if (!t) return;
+        out.push({ ...t, notes: (t.notes || []).map((n) => ({ ...n })), predecessors: (t.predecessors || []).map((p) => ({ ...p })), ...Array.isArray(t.icons) ? { icons: [...t.icons] } : {} });
+        allTasks.filter((x) => x.parentId === id).forEach((c) => walk(c.id));
+      };
+      walk(rootId);
+      return out;
+    };
+    const rootsOfSelection = (taskIds, allTasks) => {
+      const idSet = new Set(taskIds);
+      const byId = new Map(allTasks.map((t) => [t.id, t]));
+      return taskIds.filter((id) => byId.has(id) && !idSet.has(byId.get(id).parentId));
+    };
+    const copyTaskById = useCallback2((taskIds) => {
+      const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
+      const pid = dataRef.current?.aPid;
+      const tasks = dataRef.current?.projects?.[pid]?.tasks;
+      if (!tasks) return;
+      const rootIds = rootsOfSelection(ids, tasks);
+      const subtree = rootIds.flatMap((id) => collectSubtreeFor(id, tasks));
+      if (subtree.length === 0) return;
+      clipboardRef.current = { mode: "copy", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
+      setClipboardTick((t) => t + 1);
+      const extra = subtree.length - rootIds.length;
+      const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
+      showToast(`Copied ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""}`, { duration: 1800 });
+    }, []);
+    const cutTaskById = useCallback2((taskIds) => {
+      const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
+      const pid = dataRef.current?.aPid;
+      const tasks = dataRef.current?.projects?.[pid]?.tasks;
+      if (!tasks) return;
+      const rootIds = rootsOfSelection(ids, tasks);
+      const subtree = rootIds.flatMap((id) => collectSubtreeFor(id, tasks));
+      if (subtree.length === 0) return;
+      clipboardRef.current = { mode: "cut", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
+      setClipboardTick((t) => t + 1);
+      const extra = subtree.length - rootIds.length;
+      const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
+      showToast(`Cut ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""} — paste to move`, { duration: 1800 });
+    }, []);
+    const pasteTaskAfter = useCallback2((targetId) => {
+      const cb = clipboardRef.current;
+      if (!cb || targetId == null) return;
+      const pastedOldIds = new Set(cb.tasks.map((t) => t.id));
+      const crossProjectPaste = cb.sourceProjId !== dataRef.current?.aPid;
+      const droppedLinkCount = crossProjectPaste ? cb.tasks.reduce((n2, t) => n2 + (t.predecessors || []).filter((p) => p && !pastedOldIds.has(p.id)).length, 0) : 0;
+      setData((d) => {
+        const pid = d.aPid;
+        const tasks = d.projects[pid].tasks;
+        const target = tasks.find((t) => t.id === targetId);
+        if (!target) return d;
+        const baseTempId = Math.max(0, ...tasks.map((t) => t.id)) + 1e3;
+        const idMap = {};
+        cb.tasks.forEach((t, i) => {
+          idMap[t.id] = baseTempId + i;
+        });
+        const crossProject = cb.sourceProjId !== pid;
+        const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]);
+        const pasted = cb.tasks.map((t) => ({
+          ...t,
+          id: idMap[t.id],
+          _sid: cb.mode === "cut" ? t._sid : _mintTaskSid(),
+          // Each subtree's own root becomes a sibling of the target (same parent), in the SAME
+          // relative order they were selected in; inner tasks keep their parent inside their own
+          // subtree (remapped to the new IDs).
+          parentId: rootOldIds.has(t.id) ? target.parentId : idMap[t.parentId] ?? null,
+          // Predecessor rewiring: internal (within the pasted subtree) → new ID, always. External
+          // (points outside the subtree) → same-project, keep the original ID (it still resolves to
+          // a real task there); cross-project, DROP it — the id space is unrelated in the
+          // destination and keeping it risks silently rewiring onto an unrelated task that happens
+          // to share that number (NEW-4/B1080548). renumberTasks below still prunes anything left
+          // dangling for any other reason, as a backstop.
+          predecessors: (t.predecessors || []).map((p) => idMap[p.id] != null ? { ...p, id: idMap[p.id] } : crossProject ? null : p).filter(Boolean)
+        }));
+        const result = [...tasks];
+        const targetIdx = result.findIndex((t) => t.id === target.id);
+        result.splice(targetIdx + 1, 0, ...pasted);
+        let final = result;
+        if (cb.mode === "cut" && cb.sourceProjId === pid) {
+          const sourceIds = new Set(cb.tasks.map((t) => t.id));
+          final = result.filter((t) => !sourceIds.has(t.id)).map((t) => ({ ...t, predecessors: (t.predecessors || []).map((p) => p && idMap[p.id] !== void 0 ? { ...p, id: idMap[p.id] } : p) }));
+        }
+        const sorted = recomputeAfterStructureChange(sortByVisualOrder(final));
+        const firstRootOldId = (cb.sourceRootIds || [cb.sourceRootId])[0];
+        const rootTempId = idMap[firstRootOldId];
+        const rootIdx = sorted.findIndex((t) => t.id === rootTempId);
+        pasteSelectRef.current = rootIdx >= 0 ? rootIdx + 1 : null;
+        return {
+          ...d,
+          projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(sorted) } }
+        };
+      });
+      const n = cb.tasks.length;
+      const dropMsg = droppedLinkCount > 0 ? ` — ${droppedLinkCount} link${droppedLinkCount > 1 ? "s" : ""} to ${droppedLinkCount > 1 ? "tasks" : "a task"} left in the source schedule ${droppedLinkCount > 1 ? "were" : "was"} dropped` : "";
+      showToast(`Pasted ${n} task${n > 1 ? "s" : ""}${dropMsg}`, { duration: droppedLinkCount > 0 ? 5e3 : 1600 });
+      if (cb.mode === "cut") {
+        clipboardRef.current = null;
+        setClipboardTick((t) => t + 1);
+      }
+    }, []);
+    useEffect6(() => {
+      if (pasteSelectRef.current == null) return;
+      const id = pasteSelectRef.current;
+      pasteSelectRef.current = null;
+      setSelectedId(id);
+      setSelRange(null);
+      setSelectedColIdx(1);
+    }, [data]);
+    const indentSelectionByIds = useCallback2((taskIds) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const newTasks = indentSelection(d.projects[pid].tasks, taskIds);
+        if (!newTasks) return d;
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
+      });
+    }, []);
+    const outdentSelectionByIds = useCallback2((taskIds) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const newTasks = outdentSelection(d.projects[pid].tasks, taskIds);
+        if (!newTasks) return d;
+        return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
+      });
+    }, []);
+    const moveSelectionByIds = useCallback2((taskIds, destParentId, insertAfterId) => {
+      setData((d) => {
+        const pid = d.aPid;
+        const proj2 = d.projects[pid];
+        if (!proj2) return d;
+        const newTasks = moveSelectionToDestination(proj2.tasks, taskIds, destParentId, insertAfterId);
+        if (!newTasks) return d;
+        const sorted = sortByVisualOrder(newTasks);
+        const byId = new Map(proj2.tasks.map((t) => [t.id, t]));
+        const rootIds = taskIds.filter((id) => byId.has(id) && !taskIds.includes(byId.get(id).parentId));
+        const firstIdx = rootIds.length ? sorted.findIndex((t) => t.id === rootIds[0]) : -1;
+        moveSelectRef.current = firstIdx >= 0 ? firstIdx + 1 : null;
+        return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(sorted)) } } };
+      });
+    }, []);
+    useEffect6(() => {
+      if (moveSelectRef.current == null) return;
+      const id = moveSelectRef.current;
+      moveSelectRef.current = null;
+      setSelectedId(id);
+      setSelRange(null);
+      setSelectedColIdx(1);
+    }, [data]);
+    const addProject = useCallback2(async (opts) => {
+      const o = opts && typeof opts === "object" && !("nativeEvent" in opts) ? opts : {};
+      const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
+      if (window.storage && window.storage.scheduleRowsAuthoritative) {
+        const id = await window.storage.insertSchedule({
+          name: o.name || null,
+          ownerKind,
+          linkedSiteId: o.linkedSiteId ?? null,
+          linkedSiteName: o.linkedSiteName ?? null
+        });
+        if (id == null) {
+          if (typeof showToast === "function") showToast("Couldn't create a new schedule — please try again.", { type: "error", duration: 6e3 });
+          return;
+        }
+        setData((d) => {
+          if (!d) return d;
+          const proj2 = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
+          if (o.linkedSiteId != null) {
+            proj2.linkedSiteId = o.linkedSiteId;
+            proj2.linkedSiteName = o.linkedSiteName || null;
+          }
+          const nd = {
+            ...d,
+            nPid: Math.max(d.nPid, id + 1),
+            aPid: id,
+            nTid: { ...d.nTid, [id]: 1 },
+            projects: { ...d.projects, [id]: proj2 }
+          };
+          return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
+        });
+        return;
+      }
+      setData((d) => {
+        if (!d) return d;
+        const id = d.nPid;
+        const proj2 = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
+        if (o.linkedSiteId != null) {
+          proj2.linkedSiteId = o.linkedSiteId;
+          proj2.linkedSiteName = o.linkedSiteName || null;
+        }
+        const nd = {
+          ...d,
+          nPid: id + 1,
+          aPid: id,
+          nTid: { ...d.nTid, [id]: 1 },
+          projects: { ...d.projects, [id]: proj2 }
+        };
+        return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
+      });
+    }, []);
+    const renameProject = useCallback2((id, name) => {
+      setData((d) => d && d.projects && d.projects[id] ? { ...d, editProjId: null, projects: { ...d.projects, [id]: { ...d.projects[id], name } } } : d);
+    }, []);
+    const buildDuplicateProject = (src, newId) => {
+      const bodyIdMap = {};
+      const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
+        const copy = copyMeetingBodyWithNewId(mb, i);
+        if (mb && mb.id) bodyIdMap[mb.id] = copy.id;
+        return copy;
+      }) : void 0;
+      const newTasks = src.tasks.map((t) => ({
+        ...t,
+        notes: t.notes.map((n) => ({ ...n })),
+        ...Array.isArray(t.icons) ? { icons: [...t.icons] } : {},
+        // NEW-1 — task icons ride along with the copy (a fresh array, not shared)
+        ...t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? { meetingBodyId: bodyIdMap[t.meetingBodyId] } : {}
+      }));
+      return {
+        ...src,
+        id: newId,
+        name: src.name + " (Copy)",
+        tasks: newTasks,
+        formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map((fc) => ({ ...fc })) : void 0,
+        meetingBodies: copiedBodies
+      };
+    };
+    const duplicateProject = useCallback2(async (id) => {
+      if (window.storage && window.storage.scheduleRowsAuthoritative) {
+        const src = dataRef.current && dataRef.current.projects && dataRef.current.projects[id];
+        if (!src) return;
+        const maxTid = src.tasks.length ? Math.max(...src.tasks.map((t) => t.id)) + 1 : 1;
+        const newId = await window.storage.insertSchedule({
+          name: src.name + " (Copy)",
+          ownerKind: src.ownerKind,
+          linkedSiteId: src.linkedSiteId ?? null,
+          linkedSiteName: src.linkedSiteName ?? null,
+          projectData: buildDuplicateProject(src, null)
+          // id filled in by insertSchedule once known
+        });
+        if (newId == null) {
+          if (typeof showToast === "function") showToast("Couldn't duplicate this schedule — please try again.", { type: "error", duration: 6e3 });
+          return;
+        }
+        setData((d) => {
+          if (!d || !d.projects || !d.projects[id]) return d;
+          const copy = buildDuplicateProject(d.projects[id], newId);
+          const nd = {
+            ...d,
+            nPid: Math.max(d.nPid, newId + 1),
+            nTid: { ...d.nTid, [newId]: maxTid },
+            aPid: newId,
+            projects: { ...d.projects, [newId]: copy }
+          };
+          rebuildMeetingBodyIndex(nd);
+          return copy.linkedSiteId != null ? withLastActiveSite(nd, copy.linkedSiteId, newId) : nd;
+        });
+        return;
+      }
+      setData((d) => {
+        const src = d.projects[id];
+        const newId = d.nPid;
+        const copy = buildDuplicateProject(src, newId);
+        const maxTid = copy.tasks.length ? Math.max(...copy.tasks.map((t) => t.id)) + 1 : 1;
+        const nd = {
+          ...d,
+          nPid: newId + 1,
+          nTid: { ...d.nTid, [newId]: maxTid },
+          aPid: newId,
+          projects: { ...d.projects, [newId]: copy }
+        };
+        rebuildMeetingBodyIndex(nd);
+        return src.linkedSiteId != null ? withLastActiveSite(nd, src.linkedSiteId, newId) : nd;
+      });
+    }, []);
+    const deleteProject = useCallback2(async (id, { skipConfirm = false } = {}) => {
+      if (!skipConfirm) {
+        const d0 = latestData.current;
+        const proj0 = d0?.projects?.[id];
+        if (!proj0) return;
+        const taskCount0 = proj0.tasks?.length || 0;
+        if (!await askConfirm({
+          title: `Delete project "${crossScheduleLabel(proj0)}"?`,
+          body: `This removes ${taskCount0} task${taskCount0 === 1 ? "" : "s"}.
+
+A backup snapshot will be saved — you can restore it from Version History.`,
+          confirmLabel: "Delete",
+          danger: true
+        })) return;
+      }
+      setData((d) => {
+        if (!d || !d.projects || !d.projects[id]) return d;
+        const _proj = d.projects[id];
+        try {
+          window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-delete-project", skipSanity: true });
+        } catch {
+        }
+        return removeScheduleFromDoc(d, id);
+      });
+    }, []);
+    const inShell = typeof window !== "undefined" && window.self !== window.top;
+    useEffect6(() => {
+      if (!data) return;
+      const pid = pickActivePid(data.projects, data.aPid);
+      if (pid != null && pid !== data.aPid) setData((d) => d && d.aPid !== pid ? { ...d, aPid: pid } : d);
+    }, [data && data.aPid, data && data.projects]);
+    const navSigRef = useRef7("");
+    useEffect6(() => {
+      if (!inShell || !data) return;
+      const rowLink = rowJumpRef.current;
+      rowJumpRef.current = false;
+      const list = Object.values(data.projects || {}).map((p) => ({ id: p.id, name: p.name, ownerKind: ownerOf(p).kind, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null, taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0 }));
+      const sig = JSON.stringify([data.section ?? "projects", data.aPid ?? null, list]);
+      if (sig === navSigRef.current) return;
+      navSigRef.current = sig;
+      try {
+        window.parent.postMessage({
+          source: "planar-seq",
+          type: "planar:nav-state",
+          section: data.section ?? "projects",
+          activeId: data.aPid ?? null,
+          projects: list,
+          ...rowLink ? { rowLink: true } : {}
+        }, window.location.origin);
+      } catch (_) {
+      }
+    }, [data, inShell]);
+    const [, setSiteNamesTick] = React.useState(0);
+    useEffect6(() => {
+      const onNames = (e) => {
+        if (!e || e.origin !== window.location.origin) return;
+        const m = e && e.data;
+        if (!m || m.source !== "planar-shell" || m.type !== "planar:site-names") return;
+        const names = m.names && typeof m.names === "object" ? m.names : {};
+        setSiteNameResolver((id) => id != null && names[id] || null);
+        setSiteNamesTick((n) => n + 1);
+      };
+      window.addEventListener("message", onNames);
+      return () => window.removeEventListener("message", onNames);
+    }, []);
+    useEffect6(() => {
+      if (!inShell) return;
+      const onLoadMsg = (e) => {
+        if (e.origin !== window.location.origin) return;
+        const m = e.data;
+        if (!m || m.source !== "planar-shell" || latestData.current) return;
+        if (m.type === "planar:nav-request") postLoadState(window.__planarLoadStatus === "failed" ? "failed" : "loading");
+        else if (m.type === "planar:retry-load") {
+          window.__planarLoadStatus = "loading";
+          setLoadTick((t) => t + 1);
+        }
+      };
+      window.addEventListener("message", onLoadMsg);
+      return () => window.removeEventListener("message", onLoadMsg);
+    }, [inShell]);
+    useEffect6(() => {
+      if (!inShell) return;
+      const onMsg = (e) => {
+        if (e.origin !== window.location.origin) return;
+        const m = e.data;
+        if (!m || m.source !== "planar-shell") return;
+        if (!latestData.current) return;
+        if (m.type === "planar:nav-request") {
+          const d = latestData.current;
+          if (d) {
+            const list = Object.values(d.projects || {}).map((p) => ({ id: p.id, name: p.name, ownerKind: ownerOf(p).kind, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null, taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0 }));
+            try {
+              window.parent.postMessage({
+                source: "planar-seq",
+                type: "planar:nav-state",
+                section: d.section ?? "projects",
+                activeId: d.aPid ?? null,
+                projects: list
+              }, window.location.origin);
+            } catch (_) {
+            }
+          }
+          return;
+        }
+        const emitLinkChanged = (siteId, scheduleId, name) => {
+          try {
+            window.parent.postMessage({
+              source: "planar-seq",
+              type: "planar:link-changed",
+              siteId: siteId ?? null,
+              scheduleId: scheduleId ?? null,
+              name: name ?? null
+            }, window.location.origin);
+          } catch (_) {
+          }
+        };
+        if (m.type === "planar:nav-select" && m.id != null) {
+          setData((d) => {
+            const proj2 = d.projects && d.projects[m.id];
+            if (!proj2) return d;
+            const nd = { ...d, section: "projects", aPid: m.id };
+            return proj2.linkedSiteId != null ? withLastActiveSite(nd, proj2.linkedSiteId, m.id) : nd;
+          });
+        } else if (m.type === "planar:nav-select-by-site" && m.siteId != null) {
+          setData((d) => {
+            const linked = Object.values(d.projects || {}).filter((p) => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
+            if (!linked.length) return d;
+            const preferredId = d.lastActiveBySite ? d.lastActiveBySite[m.siteId] : null;
+            const match = preferredId != null && linked.find((p) => p.id === preferredId) || linked[0];
+            if (d.aPid === match.id && (d.section ?? "projects") === "projects") return d;
+            return withLastActiveSite({ ...d, section: "projects", aPid: match.id }, m.siteId, match.id);
+          });
+        } else if (m.type === "planar:nav-link" && m.id != null) {
+          setData((d) => {
+            if (!d.projects || !d.projects[m.id]) return d;
+            const proj2 = { ...d.projects[m.id] };
+            const base = { ...d, section: "projects", aPid: m.id };
+            if (m.siteId != null) {
+              proj2.linkedSiteId = m.siteId;
+              proj2.linkedSiteName = m.siteName || null;
+              return withLastActiveSite({ ...base, projects: { ...d.projects, [m.id]: proj2 } }, m.siteId, m.id);
+            }
+            delete proj2.linkedSiteId;
+            delete proj2.linkedSiteName;
+            proj2.ownerKind = OWNER_KIND_ORG;
+            return { ...base, projects: { ...d.projects, [m.id]: proj2 } };
+          });
+          emitLinkChanged(m.siteId ?? null, m.id, m.siteName ?? null);
+        } else if (m.type === "planar:nav-create-linked") {
+          const newId = latestData.current ? latestData.current.nPid : null;
+          addProject({ name: m.name, ownerKind: m.ownerKind ?? null, linkedSiteId: m.siteId ?? null, linkedSiteName: m.siteName ?? null });
+          setData((d) => ({ ...d, section: "projects" }));
+          if (newId != null && m.siteId != null) emitLinkChanged(m.siteId, newId, m.siteName ?? null);
+        } else if (m.type === "planar:nav-dashboard") {
+          setData((d) => ({ ...d, section: "reports" }));
+        } else if (m.type === "planar:nav-new") {
+          addProject();
+          setData((d) => ({ ...d, section: "projects" }));
+        } else if (m.type === "planar:nav-duplicate" && m.id != null) {
+          if (latestData.current && latestData.current.projects && latestData.current.projects[m.id]) {
+            duplicateProject(m.id);
+            setData((d) => ({ ...d, section: "projects" }));
+          }
+        } else if (m.type === "planar:nav-rename" && m.id != null && typeof m.name === "string") {
+          const name = m.name.trim();
+          if (name) renameProject(m.id, name);
+        } else if (m.type === "planar:nav-delete" && m.id != null) {
+          const projCount = latestData.current ? Object.keys(latestData.current.projects || {}).length : 0;
+          const wasActive = latestData.current && latestData.current.aPid === m.id;
+          deleteProject(m.id, { skipConfirm: true });
+          if (wasActive && projCount > 1) setData((d) => ({ ...d, section: "reports" }));
+        } else if (m.type === "planar:nav-select-task" && m.siteId != null && (m.taskId != null || m.taskSid != null)) {
+          const linkedForTask = latestData.current ? Object.values(latestData.current.projects || {}).filter((p) => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId) : [];
+          const preferredForTask = latestData.current && latestData.current.lastActiveBySite ? latestData.current.lastActiveBySite[m.siteId] : null;
+          const preferredScheduleForTask = preferredForTask != null ? linkedForTask.find((p) => p.id === preferredForTask) : null;
+          const bySid = m.taskSid != null;
+          const hasTask = (p) => p && Array.isArray(p.tasks) && p.tasks.some((t) => bySid ? t._sid === m.taskSid : t.id === m.taskId);
+          const match = hasTask(preferredScheduleForTask) && preferredScheduleForTask || linkedForTask.find(hasTask) || preferredScheduleForTask || linkedForTask[0];
+          if (match) {
+            const target = bySid ? match.tasks.find((t) => t._sid === m.taskSid) : null;
+            if (bySid && !target) setData((d) => ({ ...d, section: "projects", aPid: match.id }));
+            else goToTask(match.id, bySid ? target.id : m.taskId);
+          }
+        }
+      };
+      window.addEventListener("message", onMsg);
+      return () => window.removeEventListener("message", onMsg);
+    }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
+    const tbSigRef = useRef7("");
+    useEffect6(() => {
+      if (!inShell || !data) return;
+      const sec = data.section ?? "projects";
+      const section2 = sec === "suggestions" ? "projects" : sec;
+      const view = data.view ?? "grid";
+      const state = {
+        view,
+        section: section2,
+        isMobile: !!isMobile,
+        zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
+        zoomable: section2 === "projects" && (view === "split" || view === "gantt"),
+        reviewCount: reviewRows.length,
+        reviewOpen: !!reviewOpen,
+        saveStatus,
+        savePulse: !!savePulse,
+        fileLinked: !!fileLinked,
+        // B566 — bridge the offline/cloud-unreachable condition up too, so the unified header
+        // cloud badge can show the honest amber "offline" state instead of a false-green "synced":
+        // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
+        // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
+        offlineFallback: !!offlineFallback,
+        // B778/NEW-1 — signed-out (or not on the schedule's team), distinct from offlineFallback.
+        authRequired: !!authRequired,
+        activePanel: settingsOpen ? "settings" : automationOpen ? "automation" : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null
+      };
+      const sig = JSON.stringify(state);
+      if (sig === tbSigRef.current) return;
+      tbSigRef.current = sig;
+      try {
+        window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
+      } catch (_) {
+      }
+    }, [
+      inShell,
+      data,
+      isMobile,
+      ganttPPD,
+      reviewRows,
+      reviewOpen,
+      saveStatus,
+      savePulse,
+      fileLinked,
+      offlineFallback,
+      authRequired,
+      settingsOpen,
+      automationOpen,
+      contactsOpen,
+      formatOpen,
+      historyOpen
+    ]);
+    useEffect6(() => {
+      if (!inShell) return;
+      const onCmd = (e) => {
+        if (e.origin !== window.location.origin) return;
+        const m = e.data;
+        if (!m || m.source !== "planar-shell") return;
+        switch (m.type) {
+          case "planar:view-set":
+            if (m.view) setData((d) => d ? { ...d, view: m.view } : d);
+            break;
+          case "planar:review-toggle": {
+            const opening = !reviewOpen;
+            if (opening && reviewRows.length && data && data.projects) {
+              const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
+              if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData((d) => ({ ...d, aPid: a.project_id }));
+            }
+            setReviewOpen(opening);
+            break;
+          }
+          case "planar:zoom":
+            if (m.dir === "in") setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35)));
+            else if (m.dir === "out") setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35)));
+            break;
+          case "planar:export":
+            if (m.mode === "pdf") setPdfExportOpen(true);
+            else exportHTML();
+            break;
+          case "planar:save":
+            if (saveStatus === "error") {
+              if (latestData.current) attemptCloudSave(latestData.current);
+            } else openFile();
+            break;
+          case "planar:history":
+            setHistoryOpen(true);
+            setSettingsOpen(false);
+            setAutomationOpen(false);
+            setContactsOpen(false);
+            setFormatOpen(false);
+            break;
+          case "planar:contacts":
+            setContactsOpen((o) => !o);
+            setSettingsOpen(false);
+            setAutomationOpen(false);
+            setFormatOpen(false);
+            break;
+          case "planar:automation":
+            setAutomationOpen((o) => !o);
+            setSettingsOpen(false);
+            setContactsOpen(false);
+            setFormatOpen(false);
+            break;
+          case "planar:settings":
+            setSettingsOpen((o) => !o);
+            setAutomationOpen(false);
+            setContactsOpen(false);
+            setFormatOpen(false);
+            break;
+          case "planar:format":
+            setFormatOpen((o) => !o);
+            setSettingsOpen(false);
+            setAutomationOpen(false);
+            setContactsOpen(false);
+            break;
+          default:
+            break;
+        }
+      };
+      window.addEventListener("message", onCmd);
+      return () => window.removeEventListener("message", onCmd);
+    }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
+    const proj = activeProjectOf(data);
+    const flatTasks = useMemo4(() => {
+      if (!proj) return [];
+      const settings = data?.settings;
+      const childSet = focusGroupIds(proj.tasks);
+      const byId = {};
+      const kidsBy = /* @__PURE__ */ new Map();
+      proj.tasks.forEach((t) => {
+        byId[t.id] = t;
+        if (!kidsBy.has(t.parentId)) kidsBy.set(t.parentId, []);
+        kidsBy.get(t.parentId).push(t);
+      });
+      const kidsOf = (id) => kidsBy.get(id) || [];
+      const statusMemo = {};
+      const rolledStatus = (id) => {
+        if (statusMemo[id] !== void 0) return statusMemo[id];
+        const kids = kidsOf(id);
+        let res;
+        if (kids.length === 0) {
+          const h = computeDisplayHealth(byId[id], settings, byId);
+          res = h === "green" ? "done" : h === "gray" ? "upcoming" : h === "paused" ? "paused" : "active";
+        } else {
+          const ss = kids.map((k) => rolledStatus(k.id));
+          res = ss.every((s) => s === "done") ? "done" : ss.every((s) => s === "upcoming") ? "upcoming" : ss.every((s) => s === "paused") ? "paused" : "active";
+        }
+        statusMemo[id] = res;
+        return res;
+      };
+      const hideStatusOf = (id) => {
+        const s = rolledStatus(id);
+        return s === "active" ? null : s;
+      };
+      const costMemo = {};
+      const costOf = (id) => {
+        if (id in costMemo) return costMemo[id];
+        const kids = kidsOf(id);
+        const v = kids.length ? (Number(byId[id]?.cost) || 0) + kids.reduce((s, c) => s + costOf(c.id), 0) : Number(byId[id]?.cost) || 0;
+        costMemo[id] = v;
+        return v;
+      };
+      const _fieldMemo = {};
+      const sumOf = (id, field) => {
+        const k = field + ":" + id;
+        if (k in _fieldMemo) return _fieldMemo[k];
+        const kids = kidsOf(id);
+        const v = kids.length ? (Number(byId[id]?.[field]) || 0) + kids.reduce((s, c) => s + sumOf(c.id, field), 0) : Number(byId[id]?.[field]) || 0;
+        _fieldMemo[k] = v;
+        return v;
+      };
+      const out = [];
+      const walk = (parentId, level) => {
+        const parent = parentId === null ? null : byId[parentId];
+        let children = kidsOf(parentId);
+        if (parent && parent.focused) children = children.filter((c) => !hideStatusOf(c.id) || focusPins.has(c._sid));
+        children.forEach((t) => {
+          const hasChildren = childSet.has(t.id);
+          let hideableDone = 0, hideableUpcoming = 0, hideablePaused = 0;
+          if (hasChildren) {
+            kidsOf(t.id).forEach((c) => {
+              const hs = focusPins.has(c._sid) ? null : hideStatusOf(c.id);
+              if (hs === "done") hideableDone++;
+              else if (hs === "upcoming") hideableUpcoming++;
+              else if (hs === "paused") hideablePaused++;
+            });
+          }
+          out.push({
+            ...t,
+            level,
+            hasChildren,
+            hideableDone,
+            hideableUpcoming,
+            hideablePaused,
+            hideableCount: hideableDone + hideableUpcoming + hideablePaused,
+            rolledCost: costOf(t.id),
+            rolledBudget: sumOf(t.id, "budget"),
+            rolledActual: sumOf(t.id, "actualCost")
+          });
+          if (t.isExpanded) walk(t.id, level + 1);
+        });
+      };
+      walk(null, 0);
+      return out;
+    }, [proj, data?.settings, NOW, focusPins]);
+    React.useLayoutEffect(() => {
+      flatTasksRef.current = flatTasks;
+    }, [flatTasks]);
+    const focusSig = (proj?.tasks || []).filter((t) => t.focused).map((t) => t._sid).join(",");
+    React.useEffect(() => {
+      setFocusPins((p) => p.size ? /* @__PURE__ */ new Set() : p);
+    }, [focusSig]);
+    React.useLayoutEffect(() => {
+      const r = focusReselectRef.current;
+      if (!r) return;
+      focusReselectRef.current = null;
+      const next = focusReselectTarget(proj?.tasks || [], new Set(flatTasks.map((t) => t.id)), r.selId);
+      if (next != null && next !== r.selId) setSelectedId(next);
+    }, [focusSig]);
+    React.useLayoutEffect(() => {
+      if (selectedId == null || selectedId === "__NEW_TASK__") return;
+      const i = flatTasks.findIndex((t) => t.id === selectedId);
+      if (i >= 0) lastSelIdxRef.current = i;
+    }, [selectedId, flatTasks]);
+    useEffect6(() => {
+      projIdRef.current = data?.aPid ?? null;
+    }, [data]);
+    useEffect6(() => {
+      if (!edit) setEditStartChar(null);
+    }, [edit]);
+    const succMap = useMemo4(() => {
+      if (!proj) return {};
+      const m = {};
+      proj.tasks.forEach((t) => normPreds(t.predecessors).forEach((p) => {
+        (m[p.id] = m[p.id] || []).push(t.id);
+      }));
+      return m;
+    }, [proj]);
+    const getTaskName = useCallback2((id) => proj?.tasks.find((t) => t.id === id)?.name ?? `#${id}`, [proj]);
+    const liveNotesTask = notesCtx ? data?.projects[notesCtx.projectId]?.tasks.find((t) => t.id === notesCtx.taskId) : null;
+    const dl = (content, name, type) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([content], { type }));
+      a.download = name;
+      a.click();
+    };
+    const openFile = async () => {
+      if (!window.showOpenFilePicker) {
+        showToast("Auto-save requires Chrome or Edge.", { type: "warn", duration: 4e3 });
+        return;
+      }
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: "planar HTML file", accept: { "text/html": [".html"] } }],
+          multiple: false
+        });
+        const perm = await handle.requestPermission({ mode: "readwrite" });
+        if (perm !== "granted") return;
+        const file = await handle.getFile();
+        fileHtmlRef.current = await file.text();
+        fileHandleRef.current = handle;
+        setFileLinked(true);
+      } catch (e) {
+      }
+    };
+    const exportJSON = () => dl(JSON.stringify(data, null, 2), `${scheduleExportName(Object.values(data.projects))}.json`, "application/json");
+    const importJSON = (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = async (ev) => {
+        let parsed;
+        try {
+          parsed = JSON.parse(ev.target.result);
+        } catch {
+          showToast("Import failed — not valid JSON.", { type: "error", duration: 4e3 });
+          return;
+        }
+        if (!parsed || typeof parsed !== "object" || !parsed.projects || typeof parsed.projects !== "object") {
+          showToast("Import failed — missing 'projects' object.", { type: "error", duration: 4e3 });
+          return;
+        }
+        const taskCount = Object.values(parsed.projects).reduce((n, p) => n + (Array.isArray(p?.tasks) ? p.tasks.length : 0), 0);
+        const projCount = Object.keys(parsed.projects).length;
+        const curTaskCount = data ? Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks?.length || 0), 0) : 0;
+        if (!await askConfirm({
+          title: "Replace current data with this import?",
+          body: `Current: ${Object.keys(data?.projects || {}).length} projects, ${curTaskCount} tasks
+Incoming: ${projCount} projects, ${taskCount} tasks
+
+A backup snapshot of the current state is saved first.`,
+          confirmLabel: "Replace",
+          danger: true
+        })) {
+          return;
+        }
+        if (data) {
+          try {
+            window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-import", skipSanity: true });
+          } catch {
+          }
+        }
+        if (applyLoadedDataRef.current) applyLoadedDataRef.current(parsed);
+        else setData(parsed);
+        showToast(`Imported ${projCount} project${projCount === 1 ? "" : "s"}, ${taskCount} task${taskCount === 1 ? "" : "s"}.`, { type: "success", duration: 3e3 });
+      };
+      r.readAsText(f);
+      e.target.value = "";
+    };
+    const exportHTML = () => {
+      const rows = Object.values(data.projects).map((p) => `<h2>${escapeHtml(crossScheduleLabel(p))}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` + p.tasks.map((t) => {
+        const h = HEALTH[t.health] || HEALTH.gray;
+        const pct = effectivePercentComplete(t, p.tasks);
+        return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration) || 0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t)) || "—")}</td></tr>`;
+      }).join("") + `</table>`).join("");
+      const names = Object.values(data.projects).map((p) => p.name).filter(Boolean);
+      const title = names.length === 1 ? names[0] : "Planyr Schedule";
+      dl(
+        `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>${escapeHtml(title)} — ${(/* @__PURE__ */ new Date()).toLocaleDateString()}</h1>${rows}</body></html>`,
+        `${scheduleExportName(Object.values(data.projects))}.html`,
+        "text/html"
+      );
+    };
+    const rolledHealthMap = useMemo4(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
+    if (!data) return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", color: "#e6a817", fontFamily: "'Inter',system-ui,sans-serif", fontSize: 14, letterSpacing: ".1em" } }, "LOADING...");
+    if (!proj) return /* @__PURE__ */ React.createElement("div", { "data-schedule-empty": "1", style: { height: "100vh", background: "var(--bg)", color: "var(--txt)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "'Inter',system-ui,sans-serif", textAlign: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "No schedules yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, maxWidth: 360, lineHeight: 1.5 } }, "This account has no schedule to show. Create one to start planning — nothing has been removed."), /* @__PURE__ */ React.createElement("button", { onClick: () => addProject(), style: { cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, background: "var(--accent)", color: "var(--on-accent,#fff)", border: "none", borderRadius: 6, padding: "8px 16px" } }, "New schedule"));
+    const setHoverZone = (zone) => {
+      hoverZoneRef.current = zone;
+    };
+    const moveRows = (anchorId, destParentId, insertAfterId) => moveSelectionByIds(structuralTargets(anchorId), destParentId, insertAfterId);
+    const shared = { tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: (v) => setData((d) => ({ ...d, healthColStyle: v })), data, moveRows, isMobile };
+    let section = data.section ?? "projects";
+    if (section === "suggestions") section = "projects";
+    return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)", color: "var(--txt)", overflow: "hidden" } }, offlineFallback && /* @__PURE__ */ React.createElement("div", { style: {
+      background: "#fef2f2",
+      borderBottom: "1px solid #fecaca",
+      color: "#991b1b",
+      padding: "7px 14px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontSize: 12.5,
+      lineHeight: 1.45,
+      flexShrink: 0,
+      zIndex: 31
+    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "Cloud unreachable — showing the offline copy embedded in this file."), " ", "It may be out of date, and changes will not save. Fix the connection, then reload."), /* @__PURE__ */ React.createElement(
+      "button",
       {
-        ref: dotRef,
-        onClick: handleDotClick,
-        "data-health-dot": "true",
-        title: "Set status",
-        onMouseEnter: (e) => {
-          if (!open) e.currentTarget.style.background = "rgba(0,0,0,0.045)";
+        onClick: () => window.location.reload(),
+        style: {
+          flexShrink: 0,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 12,
+          fontWeight: 600,
+          background: "var(--bg)",
+          border: "1px solid #fca5a5",
+          color: "#991b1b",
+          borderRadius: 5,
+          padding: "4px 12px"
+        }
+      },
+      "Reload"
+    )), authRequired && !offlineFallback && /* @__PURE__ */ React.createElement("div", { style: {
+      background: "#fffbeb",
+      borderBottom: "1px solid #fde68a",
+      color: "#92400e",
+      padding: "7px 14px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontSize: 12.5,
+      lineHeight: 1.45,
+      flexShrink: 0,
+      zIndex: 31
+    } }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", style: { flexShrink: 0 } }, /* @__PURE__ */ React.createElement("rect", { x: "5", y: "11", width: "14", height: "10", rx: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4" })), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "Sign in to see this schedule."), " ", "Showing a blank starter copy —", " ", window.self === window.top ? /* @__PURE__ */ React.createElement("a", { "data-testid": "sequence-signin-link", href: "/?app&auth=signin#/schedule", style: { color: "inherit", fontWeight: 700 } }, "sign in to Planyr") : /* @__PURE__ */ React.createElement(React.Fragment, null, "use Sign in at the top right of Planyr"), ", then reload.")), staleNotice && !offlineFallback && !authRequired && /* @__PURE__ */ React.createElement("div", { style: {
+      background: "#fffbeb",
+      borderBottom: "1px solid #fde68a",
+      color: "#92400e",
+      padding: "7px 14px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontSize: 12.5,
+      lineHeight: 1.45,
+      flexShrink: 0,
+      zIndex: 31
+    } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "↻"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, "A newer version was saved elsewhere."), " ", saveStatus === "saved" ? `Reload to load the latest version of ${crossScheduleLabel(data.projects?.[data.aPid])}.` : `You have unsaved changes in ${crossScheduleLabel(data.projects?.[data.aPid])} -- reloading replaces them with the newer version. Your copy is kept in Version History either way.`), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: async () => {
+          const ae = document.activeElement;
+          if (ae && typeof ae.blur === "function" && ae !== document.body) {
+            ae.blur();
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          const d = latestData.current;
+          if (d && saveStatusRef.current !== "saved") {
+            try {
+              await window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" });
+            } catch {
+            }
+          }
+          window.location.reload();
         },
-        onMouseLeave: (e) => {
-          if (!open) e.currentTarget.style.background = "transparent";
+        style: {
+          flexShrink: 0,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 12,
+          fontWeight: 600,
+          background: "var(--bg)",
+          border: "1px solid #fcd34d",
+          color: "#92400e",
+          borderRadius: 5,
+          padding: "4px 12px"
+        }
+      },
+      "Reload"
+    )), ancestorPredNotice && ancestorPredNotice.length > 0 && (() => {
+      const flat = ancestorPredNotice.flatMap((p) => (p.tasks || []).map((t) => ({ ...t, project: p.project, pid: p.pid })));
+      const n = flat.length;
+      const shown = flat.slice(0, 3);
+      const extra = n - shown.length;
+      return /* @__PURE__ */ React.createElement("div", { style: {
+        background: "#fffbeb",
+        borderBottom: "1px solid #fde68a",
+        color: "#92400e",
+        padding: "7px 14px",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        fontSize: 12.5,
+        lineHeight: 1.45,
+        flexShrink: 0,
+        zIndex: 31
+      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, n, " task", n === 1 ? "" : "s", " named ", n === 1 ? "its own" : "their own", " parent summary row as a predecessor — the link would loop forever, so it was removed and ", n === 1 ? "its date was" : "their dates were", " recalculated."), " ", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.pid + ":" + t.id }, i > 0 ? "; " : "", /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => goToTask(t.pid, t.id),
+          title: "Click to jump to this row",
+          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
         },
+        scheduleRowPrefix(data.projects, t.pid, data.aPid),
+        "#",
+        t.id,
+        ' "',
+        t.name,
+        '"'
+      ))), extra > 0 ? `; +${extra} more` : "", ". Add back a real dependency (a sibling task, not the summary row) if one was intended."), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => setAncestorPredNotice(null),
+          style: {
+            flexShrink: 0,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 12,
+            fontWeight: 600,
+            background: "var(--bg)",
+            border: "1px solid #fcd34d",
+            color: "#92400e",
+            borderRadius: 5,
+            padding: "4px 12px"
+          }
+        },
+        "Dismiss"
+      ));
+    })(), driftNotice && driftNotice.length > 0 && (() => {
+      const flat = driftNotice.flatMap((p) => (p.tasks || []).map((t) => ({ ...t, project: p.project, pid: p.pid })));
+      const n = flat.length;
+      const shown = flat.slice(0, 3);
+      const extra = n - shown.length;
+      return /* @__PURE__ */ React.createElement("div", { style: {
+        background: "#fffbeb",
+        borderBottom: "1px solid #fde68a",
+        color: "#92400e",
+        padding: "7px 14px",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        fontSize: 12.5,
+        lineHeight: 1.45,
+        flexShrink: 0,
+        zIndex: 31
+      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, n, " saved task ", n === 1 ? "date was" : "dates were", " out of sync with ", n === 1 ? "its" : "their", " predecessor", n === 1 ? "" : "s", " and ", n === 1 ? "has" : "have", " been recalculated."), " ", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.pid + ":" + t.id }, i > 0 ? "; " : "", /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => goToTask(t.pid, t.id),
+          title: "Click to jump to this row",
+          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
+        },
+        scheduleRowPrefix(data.projects, t.pid, data.aPid),
+        "#",
+        t.id,
+        ' "',
+        t.name,
+        '" ',
+        fmtD(t.from) || "(no date)",
+        "→",
+        fmtD(t.to)
+      ))), extra > 0 ? `; +${extra} more` : "", ". Check they match your intended schedule — if a gap was deliberate, pin the date or add a lag."), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => setDriftNotice(null),
+          style: {
+            flexShrink: 0,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 12,
+            fontWeight: 600,
+            background: "var(--bg)",
+            border: "1px solid #fcd34d",
+            color: "#92400e",
+            borderRadius: 5,
+            padding: "4px 12px"
+          }
+        },
+        "Dismiss"
+      ));
+    })(), (() => {
+      const cft = (data?.projects?.[data.aPid]?.tasks || []).filter((t) => t.finishConflict);
+      if (!cft.length) return null;
+      const shown = cft.slice(0, 3);
+      const extra = cft.length - shown.length;
+      return /* @__PURE__ */ React.createElement("div", { style: {
+        background: "#fef2f2",
+        borderBottom: "1px solid #fecaca",
+        color: "#991b1b",
+        padding: "7px 14px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        fontSize: 12.5,
+        lineHeight: 1.45,
+        flexShrink: 0,
+        zIndex: 31
+      } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, flexShrink: 0 } }, "⚠"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("strong", null, cft.length, " task", cft.length > 1 ? "s" : "", " can’t meet ", cft.length > 1 ? "their" : "its", " locked finish date."), " ", "The predecessor chain needs more time than the locked finish allows (", shown.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.id }, i > 0 ? ", " : "", /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          onClick: () => goToTask(data.aPid, t.id),
+          title: "Click to jump to this row",
+          style: { cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }
+        },
+        "#",
+        t.id,
+        ' "',
+        t.name || "Task " + t.id,
+        '"'
+      ))), extra > 0 ? `, +${extra} more` : "", "). Move the finish, shorten the duration, or change the dependency."));
+    })(), /* @__PURE__ */ React.createElement("div", { className: "app-header", style: { minHeight: 46, background: "var(--bg)", borderBottom: "1px solid var(--bd2)", display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6, columnGap: 8, padding: "6px 14px", flexShrink: 0, zIndex: 30 } }, /* @__PURE__ */ React.createElement("svg", { className: "hdr-logo", height: "26", viewBox: "0 0 196 52", xmlns: "http://www.w3.org/2000/svg", style: { flexShrink: 0, marginRight: 8, display: "block" } }, /* @__PURE__ */ React.createElement("g", { transform: "translate(0,6)" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: "44", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("rect", { x: "10", y: "13", width: "33", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("rect", { x: "17", y: "26", width: "39", height: "7", rx: "2", fill: "#4f46e5" }), /* @__PURE__ */ React.createElement("path", { d: "M44,3.5 L50,3.5 L50,16.5 L10,16.5", stroke: "#4f46e5", strokeWidth: "1.2", fill: "none", opacity: "0.32" }), /* @__PURE__ */ React.createElement("polygon", { points: "10,16.5 15,13.5 15,19.5", fill: "#4f46e5", opacity: "0.32" }), /* @__PURE__ */ React.createElement("path", { d: "M43,16.5 L52,16.5 L52,29.5 L17,29.5", stroke: "#4f46e5", strokeWidth: "1.2", fill: "none", opacity: "0.32" }), /* @__PURE__ */ React.createElement("polygon", { points: "17,29.5 22,26.5 22,32.5", fill: "#4f46e5", opacity: "0.32" })), /* @__PURE__ */ React.createElement("text", { x: "62", y: "36", fontFamily: "'Inter',system-ui,sans-serif", fontSize: "34", fontWeight: "400", letterSpacing: "-1.5", fill: "#3730a3" }, "planyr")), /* @__PURE__ */ React.createElement("div", { className: "hdr-mode", style: { display: "flex", background: "#f0f0f0", borderRadius: 7, padding: "3px", gap: 2, flexShrink: 0 } }, [["reports", "Dashboard"], ["projects", "Projects"]].map(([s, label]) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: s,
+        onClick: () => setData((d) => ({ ...d, section: s })),
+        style: {
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 13,
+          fontWeight: section === s ? 600 : 500,
+          letterSpacing: ".01em",
+          padding: "5px 12px",
+          borderRadius: 5,
+          transition: "all .15s",
+          background: section === s ? "#fff" : "transparent",
+          color: section === s ? "var(--amber)" : "var(--mut)",
+          boxShadow: section === s ? "0 1px 3px rgba(0,0,0,0.12)" : "none"
+        }
+      },
+      label
+    ))), section === "projects" && !reviewOpen && /* @__PURE__ */ React.createElement("div", { className: "hdr-project", style: { display: "flex", alignItems: "center", gap: 8, marginLeft: 8, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 22, background: "var(--bd2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement(ProjDropdown, { data, setData, addProject, setProjCtx })), section === "projects" && !reviewOpen && /* @__PURE__ */ React.createElement("div", { className: "hdr-view", style: { display: "flex", background: "#f0f0f0", borderRadius: 7, padding: "3px", gap: 2, marginLeft: 8, flexShrink: 0 } }, [["grid", "Grid"], ["split", "Split"], ["gantt", "Gantt"]].map(([v, label]) => {
+      const active = data.view === v;
+      return /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: v,
+          onClick: () => setData((d) => ({ ...d, view: v })),
+          style: {
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 13,
+            fontWeight: active ? 600 : 500,
+            letterSpacing: ".01em",
+            padding: "5px 12px",
+            borderRadius: 5,
+            transition: "all .15s",
+            background: active ? "#fff" : "transparent",
+            color: active ? "var(--amber)" : "var(--mut)",
+            boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none"
+          }
+        },
+        label
+      );
+    })), section === "projects" && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          const opening = !reviewOpen;
+          if (opening && reviewRows.length && data && data.projects) {
+            const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
+            if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData((d) => ({ ...d, aPid: a.project_id }));
+          }
+          setReviewOpen(opening);
+        },
+        title: "Review suggested updates from forwarded emails",
+        className: "hdr-review",
+        style: {
+          marginLeft: 8,
+          flexShrink: 0,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 13,
+          fontWeight: 600,
+          letterSpacing: ".01em",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 9px",
+          borderRadius: 7,
+          transition: "all .15s",
+          border: reviewOpen ? "1px solid var(--amber)" : "1px solid var(--bd2)",
+          background: reviewOpen ? "#eef2ff" : "var(--surf)",
+          color: reviewOpen || reviewRows.length ? "var(--amber)" : "var(--mut)"
+        }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("polyline", { points: "22 12 16 12 14 15 10 15 8 12 2 12" }), /* @__PURE__ */ React.createElement("path", { d: "M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" })),
+      reviewRows.length > 0 && /* @__PURE__ */ React.createElement("span", { style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#fff",
+        background: "var(--amber)",
+        borderRadius: 20,
+        padding: "1px 7px",
+        minWidth: 18,
+        textAlign: "center",
+        lineHeight: 1.5
+      } }, reviewRows.length)
+    ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("div", { className: "hdr-actions", style: { display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: "auto" } }, isMobile && (data.view === "gantt" || data.view === "split") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: coarsePointer ? 4 : 1 } }, /* @__PURE__ */ React.createElement("button", { style: { padding: "0 10px", fontSize: 15, height: coarsePointer ? 44 : 26, minWidth: coarsePointer ? 44 : 26, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)", borderRadius: 5, background: "none", color: "var(--mut)", cursor: "pointer" }, title: "Zoom out", onClick: () => setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35))) }, "−"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", width: 30, textAlign: "center", userSelect: "none" } }, Math.round(ganttPPD / 6 * 100), "%"), /* @__PURE__ */ React.createElement("button", { style: { padding: "0 10px", fontSize: 15, height: coarsePointer ? 44 : 26, minWidth: coarsePointer ? 44 : 26, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)", borderRadius: 5, background: "none", color: "var(--mut)", cursor: "pointer" }, title: "Zoom in", onClick: () => setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35))) }, "+")), isMobile ? (
+      /* MOBILE: single overflow button containing Download/Import/Auto-Save */
+      /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, mobMenuOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => setMobMenuOpen(false) }), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => setMobMenuOpen((o) => !o),
+          "aria-label": "More actions",
+          style: {
+            background: mobMenuOpen ? "#eef2ff" : saveStatus === "error" ? "#fef2f2" : "none",
+            border: saveStatus === "error" ? "1px solid #fca5a5" : "1px solid var(--bd2)",
+            cursor: "pointer",
+            borderRadius: 5,
+            padding: "6px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            color: saveStatus === "error" ? "#dc2626" : mobMenuOpen ? "var(--amber)" : "var(--mut)",
+            transition: "all .12s"
+          }
+        },
+        /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "currentColor" }, /* @__PURE__ */ React.createElement("circle", { cx: "5", cy: "12", r: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "19", cy: "12", r: "2" }))
+      ), mobMenuOpen && /* @__PURE__ */ React.createElement("div", { style: {
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 0,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 8,
+        boxShadow: "0 6px 24px rgba(0,0,0,.14)",
+        zIndex: 999,
+        minWidth: 220,
+        padding: "6px 0",
+        overflow: "hidden"
+      } }, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => {
+            if (saveStatus === "error") {
+              if (latestData.current) attemptCloudSave(latestData.current);
+            } else {
+              openFile();
+            }
+            setMobMenuOpen(false);
+          },
+          style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderBottom: "1px solid var(--bd)" }
+        },
+        /* @__PURE__ */ React.createElement("span", { style: {
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: saveStatus === "error" ? "#dc2626" : fileLinked ? "#16a34a" : "var(--bd2)"
+        } }),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: saveStatus === "error" ? "#dc2626" : "var(--txt)", fontWeight: saveStatus === "error" ? 600 : 500 } }, saveStatus === "error" ? "Not saved — tap to retry" : fileLinked ? "Backup File Linked" : "Link Backup File"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: saveStatus === "error" ? "#dc2626" : "var(--mut)" } }, saveStatus === "error" ? "Changes have NOT reached the cloud" : fileLinked ? "Cloud + local file" : "Cloud auto-save is always on"))
+      ), /* @__PURE__ */ React.createElement("div", { onClick: () => {
+        exportHTML();
+        setMobMenuOpen(false);
+      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9 } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Web Snapshot"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Quick plain task tables · .html"))), /* @__PURE__ */ React.createElement("div", { "data-testid": "open-history-mobile", onClick: () => {
+        setHistoryOpen(true);
+        setMobMenuOpen(false);
+      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9 } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "10" }), /* @__PURE__ */ React.createElement("polyline", { points: "12 6 12 12 16 14" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Version History"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Browse & restore snapshots"))), /* @__PURE__ */ React.createElement("div", { onClick: () => {
+        setPdfExportOpen(true);
+        setMobMenuOpen(false);
+      }, style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderBottom: "1px solid var(--bd)" } }, /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Export PDF"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Print-ready exhibit"))), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => {
+            setAutomationOpen((o) => !o);
+            setMobMenuOpen(false);
+          },
+          style: { padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 9, borderTop: "1px solid var(--bd)" }
+        },
+        /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", style: { color: "var(--mut)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "var(--txt)", fontWeight: 500 } }, "Automation"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Auto-status rules"))
+      )))
+    ) : /* @__PURE__ */ React.createElement(React.Fragment, null, section === "projects" && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: formatOpen ? "btn act" : "btn",
+        title: "Format — row height & bar labels",
+        onClick: () => {
+          setFormatOpen((o) => !o);
+          setSettingsOpen(false);
+          setAutomationOpen(false);
+          setContactsOpen(false);
+        },
+        style: { padding: "0 7px", height: 21, display: "flex", alignItems: "center", marginRight: 5 }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("line", { x1: "4", y1: "21", x2: "4", y2: "14" }), /* @__PURE__ */ React.createElement("line", { x1: "4", y1: "10", x2: "4", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "21", x2: "12", y2: "12" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "8", x2: "12", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "21", x2: "20", y2: "16" }), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "12", x2: "20", y2: "3" }), /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "14", x2: "7", y2: "14" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "8", x2: "15", y2: "8" }), /* @__PURE__ */ React.createElement("line", { x1: "17", y1: "16", x2: "23", y2: "16" }))
+    ), section === "projects" && !isMobile && (data.view === "split" || data.view === "gantt") && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: coarsePointer ? 4 : 1, paddingRight: 5, borderRight: "1px solid var(--bd2)" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", style: { padding: coarsePointer ? "0 12px" : "0 6px", fontSize: coarsePointer ? 15 : 13, height: coarsePointer ? 44 : 21, minWidth: coarsePointer ? 44 : void 0, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)" }, title: "Zoom out", onClick: () => setGanttPPD((z) => Math.max(1, Math.floor(z / 1.35))) }, "−"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", width: 30, textAlign: "center", userSelect: "none" } }, Math.round(ganttPPD / 6 * 100), "%"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { padding: coarsePointer ? "0 12px" : "0 6px", fontSize: coarsePointer ? 15 : 13, height: coarsePointer ? 44 : 21, minWidth: coarsePointer ? 44 : void 0, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--bd2)" }, title: "Zoom in", onClick: () => setGanttPPD((z) => Math.min(80, Math.ceil(z * 1.35))) }, "+")), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, dlOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 998 }, onClick: () => setDlOpen(false) }), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "btn",
+        onClick: () => setDlOpen((o) => !o),
+        title: "Export — PDF exhibit or web snapshot",
+        style: { display: "flex", alignItems: "center", gap: 4, padding: "0 8px", height: 21, lineHeight: 1 }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" }), /* @__PURE__ */ React.createElement("polyline", { points: "16 6 12 2 8 6" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" })),
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, opacity: 0.5 } }, "▾")
+    ), dlOpen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: "calc(100% + 5px)", right: 0, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 7, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 999, minWidth: 192, padding: "4px 0", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { onClick: () => {
+      setPdfExportOpen(true);
+      setDlOpen(false);
+    }, style: { padding: "8px 14px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }, onMouseEnter: (e) => e.currentTarget.style.background = "#f6f8fa", onMouseLeave: (e) => e.currentTarget.style.background = "transparent" }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "PDF / Print Exhibit"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Formatted pages — share or file")), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } }), /* @__PURE__ */ React.createElement("div", { onClick: () => {
+      exportHTML();
+      setDlOpen(false);
+    }, style: { padding: "8px 14px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }, onMouseEnter: (e) => e.currentTarget.style.background = "#f6f8fa", onMouseLeave: (e) => e.currentTarget.style.background = "transparent" }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "Web Snapshot"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "Quick plain task tables · .html")))), /* @__PURE__ */ React.createElement("div", { style: { width: 1, height: 20, background: "var(--bd2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "btn",
+        onClick: saveStatus === "error" ? () => {
+          if (latestData.current) attemptCloudSave(latestData.current);
+        } : openFile,
+        title: saveStatus === "error" ? "Changes NOT saved to cloud — retrying automatically. Click to retry now." : saveStatus === "saving" ? "Saving to cloud…" : (savePulse ? "Saved to cloud ✓" : "All changes saved to cloud") + (fileLinked ? " · also writing to linked file" : " — click to also back up to a local file"),
         style: {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          position: "relative",
-          width: "100%",
-          height: "100%",
-          cursor: "pointer",
-          background: open ? "rgba(9,105,218,0.07)" : "transparent",
-          transition: "background .12s"
+          gap: 5,
+          padding: "3px 8px",
+          fontSize: 11,
+          fontWeight: 600,
+          color: saveStatus === "error" ? "#dc2626" : savePulse ? "#16a34a" : saveStatus === "saving" ? "#b45309" : "var(--mut)",
+          borderColor: saveStatus === "error" ? "#fca5a5" : savePulse ? "#86efac" : fileLinked ? "#bbf7d0" : void 0,
+          background: saveStatus === "error" ? "#fef2f2" : savePulse ? "#f0fdf4" : void 0,
+          boxShadow: savePulse && saveStatus !== "error" ? "0 0 0 3px #dcfce7" : "none",
+          cursor: saveStatus === "saving" ? "progress" : void 0,
+          transition: "color .25s, background .25s, border-color .25s, box-shadow .25s"
         }
       },
-      /* @__PURE__ */ React.createElement("span", { style: {
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        position: "relative",
-        width: 24,
-        height: 18,
-        borderRadius: 4,
-        pointerEvents: "none",
-        outline: open ? `1.5px solid ${dot === "#ffffff" ? "#d1d5db" : dot}` : "1.5px solid transparent",
-        outlineOffset: 0,
-        transition: "outline-color .1s"
-      } }, /* @__PURE__ */ React.createElement(DotSpan, { hk: value, active: open, noPointer: true }))
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          ref: menuRef,
-          ...MENU_STOPS_GRID,
-          style: {
-            position: "fixed",
-            top: pos.top,
-            left: pos.left,
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 6,
-            padding: "5px 4px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            zIndex: 9999,
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)"
-          }
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }), /* @__PURE__ */ React.createElement("polyline", { points: "17 21 17 13 7 13 7 21" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 3 7 8 15 8" })),
+      saveStatus === "error" && "Not saved"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        "data-testid": "open-history-desktop",
+        onClick: () => {
+          setHistoryOpen(true);
+          setSettingsOpen(false);
+          setAutomationOpen(false);
+          setContactsOpen(false);
+          setFormatOpen(false);
         },
-        HK.map((hk, i) => /* @__PURE__ */ React.createElement(
-          "span",
+        title: "Version history — browse & restore snapshots",
+        className: historyOpen ? "btn act" : "btn",
+        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M1 4v6h6" }), /* @__PURE__ */ React.createElement("path", { d: "M3.51 15a9 9 0 1 0 2.13-9.36L1 10" }), /* @__PURE__ */ React.createElement("polyline", { points: "12 7 12 12 15 14" }))
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setContactsOpen((o) => !o);
+          setSettingsOpen(false);
+          setAutomationOpen(false);
+          setFormatOpen(false);
+        },
+        title: "Contacts",
+        className: contactsOpen ? "btn act" : "btn",
+        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "7", r: "4" }), /* @__PURE__ */ React.createElement("path", { d: "M23 21v-2a4 4 0 0 0-3-3.87" }), /* @__PURE__ */ React.createElement("path", { d: "M16 3.13a4 4 0 0 1 0 7.75" }))
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setAutomationOpen((o) => !o);
+          setSettingsOpen(false);
+          setContactsOpen(false);
+          setFormatOpen(false);
+        },
+        title: "Automation rules",
+        className: automationOpen ? "btn act" : "btn",
+        style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "0 9px", height: 21, lineHeight: 1 }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.3", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })),
+      "Automation"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setSettingsOpen((o) => !o);
+          setAutomationOpen(false);
+          setContactsOpen(false);
+          setFormatOpen(false);
+        },
+        title: "Settings",
+        className: settingsOpen ? "btn act" : "btn",
+        style: { display: "flex", alignItems: "center", justifyContent: "center", padding: "3px 8px" }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("path", { d: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "3" }))
+    )), isMobile && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setSettingsOpen((o) => !o),
+        title: "Settings",
+        style: {
+          background: settingsOpen ? "#eef2ff" : "none",
+          border: "1px solid var(--bd2)",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          padding: "6px 8px",
+          borderRadius: 5,
+          lineHeight: 1,
+          color: settingsOpen ? "var(--amber)" : "var(--mut)",
+          transition: "all .12s"
+        }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "block" } }, /* @__PURE__ */ React.createElement("path", { d: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "3" }))
+    ))), settingsOpen && /* @__PURE__ */ React.createElement(SettingsPanel, { data, setData, onClose: () => setSettingsOpen(false), openFile, fileLinked, initialSection: settingsSection, onOpenMeetingCalendars: () => setMeetingCalOpen(true) }), meetingCalOpen && /* @__PURE__ */ React.createElement(
+      MeetingCalendarsModal,
+      {
+        projName: proj?.name,
+        bodies: (activeProjectOf(data) || {}).meetingBodies || [],
+        otherSchedules: otherScheduleMeetingBodies(data, data.aPid),
+        onChange: (next) => setData((d) => {
+          const p = d.projects && d.projects[d.aPid];
+          if (!p) return d;
+          const nd = { ...d, projects: { ...d.projects, [d.aPid]: { ...p, meetingBodies: next } } };
+          rebuildMeetingBodyIndex(nd);
+          const proj2 = nd.projects[nd.aPid];
+          nd.projects = { ...nd.projects, [nd.aPid]: { ...proj2, tasks: recomputeSchedule((proj2.tasks || []).map((t) => ({ ...t }))) } };
+          return nd;
+        }),
+        onClose: () => setMeetingCalOpen(false)
+      }
+    ), formatOpen && /* @__PURE__ */ React.createElement(FormatPanel, { data, setData, onClose: () => setFormatOpen(false) }), automationOpen && /* @__PURE__ */ React.createElement(AutomationPanel, { data, setData, onClose: () => setAutomationOpen(false) }), contactsOpen && /* @__PURE__ */ React.createElement(ContactsPanel, { data, setData, onClose: () => setContactsOpen(false) }), historyOpen && /* @__PURE__ */ React.createElement(HistoryPanel, { data, setData, exportJSON, importJSON, applyLoadedData: (parsed) => applyLoadedDataRef.current?.(parsed), onClose: () => setHistoryOpen(false) }), successorPrompt && /* @__PURE__ */ React.createElement(SuccessorPromptModal, { prompt: successorPrompt, updateTask, onClose: () => setSuccessorPrompt(null), onOpenTask: (pid, taskId) => {
+      goToTask(pid, taskId);
+      setSuccessorPrompt(null);
+    } }), deleteChoice && /* @__PURE__ */ React.createElement(
+      DeleteChildrenModal,
+      {
+        rowCount: deleteChoice.rowCount,
+        totalCount: deleteChoice.totalCount,
+        onCascade: () => {
+          deleteTasks(deleteChoice.ids);
+          setSelectedId(null);
+          setSelRange(null);
+          setDeleteChoice(null);
+        },
+        onPromote: () => {
+          promoteAndDeleteTasks(deleteChoice.ids);
+          setSelectedId(null);
+          setSelRange(null);
+          setDeleteChoice(null);
+        },
+        onCancel: () => setDeleteChoice(null)
+      }
+    ), moveToCtx && /* @__PURE__ */ React.createElement(
+      MoveToModal,
+      {
+        tasks: (data.projects[moveToCtx.projId] || {}).tasks || [],
+        sourceIds: moveToCtx.ids,
+        onCommit: (destParentId, insertAfterId) => {
+          moveSelectionByIds(moveToCtx.ids, destParentId, insertAfterId);
+          setMoveToCtx(null);
+        },
+        onCancel: () => setMoveToCtx(null)
+      }
+    ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "hidden", display: "flex" } }, /* @__PURE__ */ React.createElement(ErrorBoundary, { key: data.view }, section === "projects" && !reviewOpen && (data.view ?? "grid") === "grid" && /* @__PURE__ */ React.createElement(GridView, { ...shared }), section === "projects" && !reviewOpen && (data.view ?? "grid") === "gantt" && /* @__PURE__ */ React.createElement(GanttView, { tasks: flatTasks, updateTask, pxPerDay: ganttPPD, onZoomChange: setGanttPPD, rolledHealthMap, proj, onMouseEnter: () => setHoverZone("gantt"), selectedId, setSelectedId, settings: data.settings }), section === "projects" && !reviewOpen && data.view === "split" && /* @__PURE__ */ React.createElement(SplitView, { ...shared }), section === "reports" && /* @__PURE__ */ React.createElement(MasterView, { data, setData, updateTask, setNotesCtx, goToTask }), section === "projects" && reviewOpen && /* @__PURE__ */ React.createElement(SuggestionsView, { data, updateTask, setData, rows: reviewRows, setRows: setReviewRows, loading: reviewLoading, onClose: () => setReviewOpen(false), gridProps: shared, activeIdx: reviewIdx, setActiveIdx: setReviewIdx }))), liveNotesTask && /* @__PURE__ */ React.createElement(NotesModal, { task: liveNotesTask, projectId: notesCtx.projectId, initChar: notesCtx?.initChar || null, updateTask, onClose: () => setNotesCtx(null) }), pdfExportOpen && /* @__PURE__ */ React.createElement(PDFExportModal, { data, activePid: data.aPid, setData, onClose: () => setPdfExportOpen(false) }), iconPickerCtx && /* @__PURE__ */ React.createElement(TaskIconPickerHost, { ctx: iconPickerCtx, tasks: (data.projects[iconPickerCtx.projId] || {}).tasks || [], updateTask, onClose: () => setIconPickerCtx(null) }), taskCtx && /* @__PURE__ */ React.createElement(
+      TaskContextMenu,
+      {
+        x: taskCtx.x,
+        y: taskCtx.y,
+        task: taskCtx.task,
+        projId: taskCtx.projId,
+        onInsertAbove: () => {
+          insertTaskAbove(taskCtx.task.id);
+          setTaskCtx(null);
+        },
+        onInsertBelow: () => {
+          insertTaskBelow(taskCtx.task.id);
+          setTaskCtx(null);
+        },
+        onAddSubtask: () => {
+          addSubtask(taskCtx.task.id);
+          setTaskCtx(null);
+        },
+        onDuplicate: () => {
+          duplicateTask(taskCtx.task.id);
+          setTaskCtx(null);
+        },
+        onCutTask: () => {
+          cutTaskById(structuralTargets(taskCtx.task.id));
+          setTaskCtx(null);
+        },
+        onCopyTaskFull: () => {
+          copyTaskById(structuralTargets(taskCtx.task.id));
+          setTaskCtx(null);
+        },
+        onPasteTask: () => {
+          pasteTaskAfter(taskCtx.task.id);
+          setTaskCtx(null);
+        },
+        hasClipboard: !!clipboardRef.current,
+        onIndent: () => {
+          const ids = blockOnlyTargets(taskCtx.task.id);
+          if (ids) indentSelectionByIds(ids);
+          setTaskCtx(null);
+        },
+        onOutdent: () => {
+          const ids = blockOnlyTargets(taskCtx.task.id);
+          if (ids) outdentSelectionByIds(ids);
+          setTaskCtx(null);
+        },
+        onMoveTo: () => {
+          const ids = blockOnlyTargets(taskCtx.task.id);
+          if (ids) setMoveToCtx({ ids, projId: taskCtx.projId });
+          setTaskCtx(null);
+        },
+        canOutdent: (() => {
+          const targets = structuralTargets(taskCtx.task.id);
+          const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
+          const byId = new Map(ts.map((t) => [t.id, t]));
+          return targets.some((id) => (byId.get(id)?.parentId ?? null) !== null);
+        })(),
+        meetingBodies: (data.projects[taskCtx.projId] || {}).meetingBodies || [],
+        otherBodies: otherScheduleMeetingBodies(data, taskCtx.projId).flatMap((g2) => g2.bodies.map((b) => ({ pid: g2.pid, schedName: g2.schedName, body: b }))),
+        bindCount: (() => {
+          const ids = fullRowSelIds();
+          return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1;
+        })(),
+        boundTasks: (() => {
+          const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
+          const parents = new Set(ts.filter((t) => t.parentId != null).map((t) => t.parentId));
+          return ts.filter((t) => t.meetingBound && t.meetingBodyId && t.id !== taskCtx.task.id && !parents.has(t.id)).map((t) => ({ id: t.id, name: t.name || `Task ${t.id}` }));
+        })(),
+        deadlineAnchorName: (() => {
+          if (taskCtx.task.deadlineForTaskId == null) return null;
+          const a = ((data.projects[taskCtx.projId] || {}).tasks || []).find((t) => t.id === taskCtx.task.deadlineForTaskId);
+          return a ? a.name || `Task ${a.id}` : null;
+        })(),
+        onBindMeeting: (bodyId) => {
+          const ids = fullRowSelIds();
+          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+          targets.forEach((id) => updateTask(id, { meetingBound: true, meetingBodyId: bodyId, deadlineForTaskId: null }, taskCtx.projId));
+          setTaskCtx(null);
+        },
+        onUnbindMeeting: () => {
+          const ids = fullRowSelIds();
+          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+          targets.forEach((id) => updateTask(id, { meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, taskCtx.projId));
+          setTaskCtx(null);
+        },
+        onImportBindMeeting: (srcPid, srcBodyId) => {
+          const ids = fullRowSelIds();
+          const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+          const projId = taskCtx.projId;
+          const srcBody = ((data.projects[srcPid] || {}).meetingBodies || []).find((b) => b.id === srcBodyId);
+          if (!srcBody) {
+            setTaskCtx(null);
+            return;
+          }
+          const destBodies = (data.projects[projId] || {}).meetingBodies || [];
+          const { bodies: nextBodies, id: newBodyId } = importMeetingBody(destBodies, srcBody);
+          if (nextBodies !== destBodies) {
+            setData((d) => {
+              const p = d.projects[projId];
+              if (!p) return d;
+              const nd = { ...d, projects: { ...d.projects, [projId]: { ...p, meetingBodies: nextBodies } } };
+              rebuildMeetingBodyIndex(nd);
+              return nd;
+            });
+          }
+          targets.forEach((id) => updateTask(id, { meetingBound: true, meetingBodyId: newBodyId, deadlineForTaskId: null }, projId));
+          setTaskCtx(null);
+        },
+        onAddDeadlineRow: () => {
+          addDeadlineTask(taskCtx.task.id, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        onLinkAsDeadline: (anchorId) => {
+          updateTask(taskCtx.task.id, { deadlineForTaskId: anchorId, meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        onUnlinkDeadline: () => {
+          updateTask(taskCtx.task.id, { deadlineForTaskId: null }, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        onAddMeetingCalendar: () => {
+          setMeetingCalOpen(true);
+          setSettingsOpen(false);
+          setAutomationOpen(false);
+          setContactsOpen(false);
+          setFormatOpen(false);
+          setTaskCtx(null);
+        },
+        onStepMeeting: (iso) => {
+          if (iso) updateTask(taskCtx.task.id, { pinnedMeetingDate: iso }, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        onDelete: () => {
+          const ids = fullRowSelIds();
+          requestDelete(ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id]);
+          setTaskCtx(null);
+        },
+        deleteCount: (() => {
+          const ids = fullRowSelIds();
+          return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1;
+        })(),
+        onSetHealth: (hk) => {
+          updateTask(taskCtx.task.id, { health: hk }, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        hasIcons: window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0,
+        onSetIcon: () => {
+          setIconPickerCtx({ taskId: taskCtx.task.id, projId: taskCtx.projId, x: taskCtx.x, y: taskCtx.y });
+          setTaskCtx(null);
+        },
+        onRemoveIcon: () => {
+          updateTask(taskCtx.task.id, { icons: [] }, taskCtx.projId);
+          setTaskCtx(null);
+        },
+        fmt: ctxFmtState(),
+        onSetRowColor: (color) => applyFormatAndSync({ fill: color ?? null }),
+        onSetBold: (v) => applyFormatAndSync({ bold: v }),
+        onSetItalic: (v) => applyFormatAndSync({ italic: v }),
+        onSetUnderline: (v) => applyFormatAndSync({ underline: v }),
+        onSetTextColor: (color) => applyFormatAndSync({ color: color ?? null }),
+        onSetFontSize: (size) => applyFormatAndSync({ size: size ?? null }),
+        onClearFormat: () => applyFormatAndSync({}, { clearAll: true }),
+        onClose: () => setTaskCtx(null)
+      }
+    ), projCtx && /* @__PURE__ */ React.createElement(
+      ProjContextMenu,
+      {
+        x: projCtx.x,
+        y: projCtx.y,
+        projId: projCtx.id,
+        canDelete: true,
+        onRename: () => {
+          setRenameModal({ id: projCtx.id, name: data.projects[projCtx.id]?.name || "" });
+          setProjCtx(null);
+        },
+        onDuplicate: () => {
+          duplicateProject(projCtx.id);
+          setProjCtx(null);
+        },
+        onDelete: () => {
+          deleteProject(projCtx.id);
+          setProjCtx(null);
+        },
+        onClose: () => setProjCtx(null)
+      }
+    ), renameModal && /* @__PURE__ */ React.createElement(
+      RenameModal,
+      {
+        name: renameModal.name,
+        onConfirm: (name) => {
+          renameProject(renameModal.id, name);
+          setRenameModal(null);
+        },
+        onClose: () => setRenameModal(null)
+      }
+    ));
+  }
+  function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
+    const [open, setOpen] = useState7(false);
+    const [editingId, setEditingId] = useState7(null);
+    const [editVal, setEditVal] = useState7("");
+    const editRef = useRef7(null);
+    const btnRef = useRef7(null);
+    const menuRef = useRef7(null);
+    const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
+    const projHealth = (p) => {
+      if (!p.tasks.length) return "gray";
+      if (p.tasks.some((t) => t.health === "red")) return "red";
+      if (p.tasks.some((t) => t.health === "yellow")) return "yellow";
+      if (p.tasks.every((t) => t.health === "green")) return "green";
+      return "gray";
+    };
+    const toggle = () => setOpen((o) => !o);
+    useEffect6(() => {
+      if (!open) {
+        setEditingId(null);
+        return;
+      }
+      const down = (e) => {
+        if (!btnRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
+      };
+      document.addEventListener("mousedown", down);
+      return () => document.removeEventListener("mousedown", down);
+    }, [open]);
+    useEffect6(() => {
+      if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
+    }, [editingId]);
+    const cur = activeProjectOf(data);
+    const dot = HEALTH[cur ? projHealth(cur) : "gray"].dot;
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        ref: btnRef,
+        className: "",
+        style: breadcrumb ? {
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 6px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--txt)"
+        } : {
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          background: open ? "#eef2ff" : "transparent",
+          border: `1px solid ${open ? "#c7d2fe" : "transparent"}`,
+          borderRadius: 7,
+          padding: "4px 10px",
+          maxWidth: 230,
+          minWidth: 80,
+          transition: "background .15s,border-color .15s"
+        },
+        onClick: toggle,
+        onMouseEnter: (e) => {
+          if (!breadcrumb && !open) e.currentTarget.style.background = "var(--surf)";
+        },
+        onMouseLeave: (e) => {
+          if (!breadcrumb && !open) e.currentTarget.style.background = "transparent";
+        }
+      },
+      !breadcrumb && /* @__PURE__ */ React.createElement("span", { style: { width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: `0 0 0 3px ${dot}1f` } }),
+      /* @__PURE__ */ React.createElement("span", { style: breadcrumb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" } : {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        flex: 1,
+        textAlign: "left",
+        fontSize: 16,
+        fontWeight: 700,
+        letterSpacing: "-.015em",
+        color: "var(--txt)",
+        lineHeight: 1.1
+      } }, cur?.name),
+      /* @__PURE__ */ React.createElement(
+        "i",
+        {
+          className: "ti ti-chevron-down",
+          "aria-hidden": "true",
+          style: { fontSize: breadcrumb ? 11 : 13, color: "var(--mut)", flexShrink: 0, transition: "transform .15s", transform: open ? "rotate(180deg)" : "none" }
+        }
+      )
+    ), open && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: 4,
+        zIndex: 9999,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        minWidth: 230
+      } }, Object.values(data.projects).map((p) => {
+        const h = projHealth(p);
+        const isActive = p.id === data.aPid;
+        const isEditing = editingId === p.id;
+        const confirmRename = () => {
+          if (editVal.trim()) setData((d) => ({ ...d, projects: { ...d.projects, [p.id]: { ...d.projects[p.id], name: editVal.trim() } } }));
+          setEditingId(null);
+        };
+        return /* @__PURE__ */ React.createElement(
+          "div",
           {
-            key: hk,
-            title: HEALTH[hk].label,
-            onMouseEnter: () => setHiIdx(i),
-            onMouseLeave: () => setHiIdx(-1),
-            onClick: (e) => {
-              e.stopPropagation();
-              onChange(hk);
+            key: p.id,
+            onClick: () => {
+              if (!isEditing) {
+                setData((d) => ({ ...d, aPid: p.id }));
+                setOpen(false);
+              }
+            },
+            onContextMenu: (e) => {
+              e.preventDefault();
+              setProjCtx({ id: p.id, x: e.clientX, y: e.clientY });
               setOpen(false);
             },
             style: {
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              width: 28,
-              height: 20,
+              gap: 6,
+              padding: "5px 8px",
               borderRadius: 4,
-              cursor: "pointer",
-              outline: i === hiIdx ? `1.5px solid ${HEALTH[hk].dot === "#ffffff" ? "#d1d5db" : HEALTH[hk].dot}` : "1.5px solid transparent",
-              outlineOffset: 0,
-              transition: "outline-color .1s",
-              background: i === hiIdx ? "var(--surf)" : "transparent"
-            }
-          },
-          /* @__PURE__ */ React.createElement(DotSpan, { hk, active: i === hiIdx, noPointer: true })
-        ))
-      ),
-      document.body
-    ));
-  }
-  function StatusPicker({ value, onChange }) {
-    const [open, setOpen] = useState4(false);
-    const [hiIdx, setHiIdx] = useState4(-1);
-    const ref = useRef4(null);
-    const menuRef = useRef4(null);
-    const idRef = useRef4(`sp-${Math.random()}`);
-    const pos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect3(() => {
-      const onOther = (e) => {
-        if (e.detail !== idRef.current) setOpen(false);
-      };
-      document.addEventListener(PICKER_EVENT, onOther);
-      return () => document.removeEventListener(PICKER_EVENT, onOther);
-    }, []);
-    useEffect3(() => {
-      if (!open) return;
-      setHiIdx(-1);
-      const handleDown = (e) => {
-        if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target))
-          setOpen(false);
-      };
-      document.addEventListener("mousedown", handleDown);
-      return () => document.removeEventListener("mousedown", handleDown);
-    }, [open]);
-    useEffect3(() => {
-      if (!open) return;
-      const handleKey = (e) => {
-        if (e.key === "Tab") {
-          setOpen(false);
-          return;
-        }
-        if (!["ArrowDown", "ArrowUp", "Enter", "Escape", " "].includes(e.key)) return;
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        if (e.key === "Escape") {
-          setOpen(false);
-          return;
-        }
-        if (e.key === "ArrowDown") {
-          setHiIdx((i) => Math.min(HK.length - 1, i + 1));
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          setHiIdx((i) => Math.max(0, i - 1));
-          return;
-        }
-        if (e.key === "Enter" || e.key === " ") {
-          setHiIdx((i) => {
-            const sel = HK[i] ?? value;
-            setTimeout(() => {
-              onChange(sel);
-              setOpen(false);
-            }, 0);
-            return i;
-          });
-        }
-      };
-      document.addEventListener("keydown", handleKey, true);
-      return () => document.removeEventListener("keydown", handleKey, true);
-    }, [open, value, onChange]);
-    const handleClick = (e) => {
-      e.stopPropagation();
-      document.dispatchEvent(new CustomEvent(PICKER_EVENT, { detail: idRef.current }));
-      setOpen((o) => !o);
-    };
-    const Pill = ({ hk, showDot = false }) => {
-      const hh = HEALTH[hk] || HEALTH.gray;
-      const dotColor = hh.dot === "#ffffff" ? "#d1d5db" : hh.dot;
-      return /* @__PURE__ */ React.createElement("span", { style: {
-        background: hh.bar,
-        border: `1px solid ${dotColor}88`,
-        borderRadius: 4,
-        padding: "2px 9px",
-        fontSize: 11,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        color: HDARK[hk],
-        fontFamily: "'Inter',system-ui,sans-serif",
-        whiteSpace: "nowrap",
-        userSelect: "none"
-      } }, showDot && /* @__PURE__ */ React.createElement("span", { style: {
-        width: 7,
-        height: 7,
-        borderRadius: 2,
-        flexShrink: 0,
-        background: hh.dot === "#ffffff" ? "#fff" : dotColor,
-        border: hh.dot === "#ffffff" ? "1.5px solid #d1d5db" : "none"
-      } }), hh.label);
-    };
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        ref,
-        onClick: handleClick,
-        style: { cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, color: "var(--mut)", fontSize: 11, fontFamily: "'Inter',system-ui,sans-serif" }
-      },
-      (HEALTH[value] || HEALTH.gray).label
-    ), open && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          ref: menuRef,
-          ...MENU_STOPS_GRID,
-          style: {
-            position: "fixed",
-            top: pos.top,
-            left: pos.left,
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 6,
-            padding: "5px 6px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-            zIndex: 9999,
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)"
-          }
-        },
-        HK.map((hk, i) => /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            key: hk,
-            onMouseEnter: () => setHiIdx(i),
-            onMouseLeave: () => setHiIdx(-1),
-            onClick: (e) => {
-              e.stopPropagation();
-              onChange(hk);
-              setOpen(false);
+              cursor: isEditing ? "default" : "pointer",
+              background: isActive ? "var(--surf)" : "transparent",
+              fontFamily: "'Inter',system-ui,sans-serif",
+              fontSize: 12,
+              fontWeight: isActive ? 500 : 400,
+              color: "var(--txt)"
             },
-            style: {
-              cursor: "pointer",
-              padding: "1px 0",
-              borderRadius: 3,
-              display: "block",
-              background: i === hiIdx ? "var(--surf)" : "transparent"
+            onMouseEnter: (e) => {
+              if (!isActive && !isEditing) e.currentTarget.style.background = "var(--surf)";
+            },
+            onMouseLeave: (e) => {
+              if (!isActive && !isEditing) e.currentTarget.style.background = "transparent";
             }
           },
-          /* @__PURE__ */ React.createElement(Pill, { hk, showDot: true })
-        ))
-      ),
+          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", background: HEALTH[h].dot, flexShrink: 0 } }),
+          isEditing ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              ...NO_AUTOFILL,
+              ref: editRef,
+              value: editVal,
+              onChange: (e) => setEditVal(e.target.value),
+              onClick: (e) => e.stopPropagation(),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") {
+                  e.stopPropagation();
+                  confirmRename();
+                }
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setEditingId(null);
+                }
+              },
+              onBlur: confirmRename,
+              style: {
+                flex: 1,
+                border: "1px solid var(--blue)",
+                borderRadius: 3,
+                padding: "2px 5px",
+                fontSize: 12,
+                fontFamily: "inherit",
+                outline: "none",
+                background: "var(--bg)",
+                color: "var(--txt)"
+              }
+            }
+          ) : /* @__PURE__ */ React.createElement("span", { title: crossScheduleLabel(p), style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, crossScheduleLabel(p)),
+          !isEditing && /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              onClick: (e) => {
+                e.stopPropagation();
+                setEditVal(p.name);
+                setEditingId(p.id);
+              },
+              title: "Rename",
+              style: {
+                opacity: 0,
+                fontSize: 11,
+                color: "var(--mut)",
+                cursor: "pointer",
+                flexShrink: 0,
+                padding: "1px 3px",
+                borderRadius: 3,
+                lineHeight: 1,
+                transition: "opacity .12s"
+              },
+              onMouseEnter: (e) => {
+                e.currentTarget.style.opacity = "1";
+                e.currentTarget.style.color = "var(--amber)";
+                e.currentTarget.style.background = "#eef2ff";
+              },
+              onMouseLeave: (e) => {
+                e.currentTarget.style.opacity = "0";
+                e.currentTarget.style.color = "var(--mut)";
+                e.currentTarget.style.background = "transparent";
+              },
+              ref: (el) => {
+                if (el) {
+                  const row = el.closest("div[style]");
+                  if (row) {
+                    row.addEventListener("mouseenter", () => {
+                      el.style.opacity = "0.4";
+                    });
+                    row.addEventListener("mouseleave", () => {
+                      el.style.opacity = "0";
+                    });
+                  }
+                }
+              }
+            },
+            /* @__PURE__ */ React.createElement("i", { className: "ti ti-pencil", style: { fontSize: 11 } })
+          ),
+          !isEditing && isActive && /* @__PURE__ */ React.createElement("i", { className: "ti ti-check", "aria-hidden": "true", style: { fontSize: 12, color: "var(--amber)", flexShrink: 0 } })
+        );
+      }), /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => {
+            addProject();
+            setOpen(false);
+          },
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontFamily: "'Inter',system-ui,sans-serif",
+            fontSize: 12,
+            color: "var(--mut)"
+          },
+          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+        },
+        /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus", "aria-hidden": "true", style: { fontSize: 13 } }),
+        "New project"
+      )),
       document.body
     ));
   }
-  var predLagPlainEnglish = (raw) => {
-    const preds = parsePreds(raw);
-    if (!preds.length) return "";
-    return preds.map((p) => {
-      const base = {
-        FS: `After task ${p.id} finishes`,
-        SS: `When task ${p.id} starts`,
-        FF: `As task ${p.id} finishes`,
-        SF: `Until task ${p.id} starts`
-      }[p.type] || `After task ${p.id} finishes`;
-      if (!p.lag) return base;
-      const n = Math.abs(p.lag), unit = p.lagUnit === "calendar" ? "calendar" : "working";
-      const days = `${n} ${unit} day${n === 1 ? "" : "s"}`;
-      return p.lag > 0 ? `${base}, then ${days}` : `${base}, ${days} earlier`;
-    }).join(" · ");
-  };
-  function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit, tabStep }) {
-    const [hint, setHint] = useState4(() => predLagPlainEnglish(seedVal));
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...NO_AUTOFILL,
-        autoFocus: true,
-        className: "ei",
-        placeholder: "e.g. 2, 3SS, 4FF+2d  ·  add 'cd' for calendar days",
-        defaultValue: seedVal,
-        onChange: (e) => setHint(predLagPlainEnglish(e.target.value)),
-        onBlur: (e) => commit(taskId, colKey, e.target.value),
-        onKeyDown: (e) => {
-          if (e.key === "Enter") {
-            e.nativeEvent.stopImmediatePropagation();
-            commitAndAdvance(taskId, colKey, e.target.value);
-            return;
-          }
-          if (e.key === "Escape") {
-            e.nativeEvent.stopImmediatePropagation();
-            setEdit(null);
-            return;
-          }
-          if (e.key === "Tab") {
-            e.preventDefault();
-            e.nativeEvent.stopImmediatePropagation();
-            commit(taskId, colKey, e.target.value);
-            tabStep(e.shiftKey);
-          }
-        }
-      }
-    ), /* @__PURE__ */ React.createElement("div", { style: {
-      position: "absolute",
-      top: "100%",
-      left: 0,
-      marginTop: 2,
-      zIndex: 40,
-      minWidth: 210,
-      maxWidth: 340,
-      background: "var(--surf,#f6f8fa)",
-      border: "1px solid var(--bd2,#d0d7de)",
-      borderRadius: 6,
-      boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
-      padding: "6px 9px",
-      fontSize: 11,
-      lineHeight: 1.45,
-      textAlign: "left",
-      whiteSpace: "normal",
-      pointerEvents: "none",
-      fontFamily: "'Inter', system-ui, sans-serif"
-    } }, hint ? /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600, color: "var(--txt,#1f2328)", marginBottom: 3 } }, hint) : null, /* @__PURE__ */ React.createElement("div", { style: { color: "var(--mut,#57606a)" } }, "'d' = working days · 'cd' = calendar days (weekends counted)")));
-  }
-  var TASK_ICON_PX = 16;
-  var TASK_ICON_GAP = 2;
-  var TASK_ICON_PAD = 2;
-  var TASK_ICON_AFTER = 2;
-  var taskIconsW = (n) => n > 0 ? n * TASK_ICON_PX + (n - 1) * TASK_ICON_GAP + 2 * TASK_ICON_PAD + TASK_ICON_AFTER : 0;
-  var TASK_ICON_UID = 0;
-  function TaskIconGlyph({ id, size = 16, faded = false }) {
-    const [failed, setFailed] = React.useState(false);
-    const uidRef = React.useRef(null);
-    if (uidRef.current === null) uidRef.current = "ti" + ++TASK_ICON_UID;
-    const TI = window.PlanyrTaskIcons;
-    const st = { display: "block", flexShrink: 0, opacity: faded ? 0.55 : 1 };
-    if (TI.isCustom(id)) {
-      const nm = TI.customName(id);
-      if (!TI.CUSTOM_SVG[nm]) return null;
-      return /* @__PURE__ */ React.createElement("svg", { viewBox: TI.customViewBox(nm), width: size, height: size, "aria-hidden": "true", style: st, dangerouslySetInnerHTML: { __html: TI.customMarkup(nm, uidRef.current) } });
-    }
-    if (TI.isBuiltinSvg(id)) {
-      const b = TI.BUILTIN_SVG[TI.svgName(id)];
-      if (!b) return null;
-      return /* @__PURE__ */ React.createElement("svg", { viewBox: b.viewBox, width: size, height: size, fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", style: st, dangerouslySetInnerHTML: { __html: b.markup } });
-    }
-    if (failed) return /* @__PURE__ */ React.createElement("span", { "aria-hidden": "true", style: { ...st, width: size, height: size, fontSize: Math.round(size * 0.8), lineHeight: size + "px", textAlign: "center" } }, id);
-    return /* @__PURE__ */ React.createElement("img", { src: "/sequence/vendor/twemoji/" + TI.twemojiFile(id) + ".svg", width: size, height: size, alt: "", draggable: false, style: st, onError: () => setFailed(true) });
-  }
-  function TaskIconPicker({ anchorRef, icons, onChange, onClose }) {
-    const TI = window.PlanyrTaskIcons;
-    const [q, setQ] = React.useState("");
-    const rootRef = React.useRef(null);
-    const PW = 336;
-    const pos = useAnchoredPopover(true, anchorRef, (r) => {
-      const room = window.innerHeight - r.bottom - 12, above = room < 300 && r.top > room;
-      const maxH = Math.max(220, Math.min(420, (above ? r.top : room) - 8));
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - PW - 8));
-      return above ? { left, bottom: window.innerHeight - r.top + 4, maxH } : { left, top: r.bottom + 4, maxH };
-    }, onClose);
-    React.useEffect(() => {
-      const down = (e) => {
-        const el = rootRef.current, a = anchorRef.current;
-        if (el && el.contains(e.target)) return;
-        if (a && a.contains(e.target)) return;
-        onClose();
-      };
-      document.addEventListener("mousedown", down);
-      return () => document.removeEventListener("mousedown", down);
+  function RenameModal({ name, onConfirm, onClose }) {
+    const [val, setVal] = useState7(name);
+    const inputRef = useRef7(null);
+    useEffect6(() => {
+      inputRef.current?.select();
     }, []);
-    const groups = TI.searchTaskIcons(q);
-    const shown = TI.normalizeTaskIcons(icons);
-    if (!pos) return null;
-    return ReactDOM.createPortal(
+    const confirm = () => {
+      if (val.trim()) onConfirm(val.trim());
+    };
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: { position: "fixed", inset: 0, background: "#00000060", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" },
+        onClick: onClose
+      },
       /* @__PURE__ */ React.createElement(
         "div",
         {
-          ref: rootRef,
-          "data-task-icon-picker": true,
-          ...MENU_STOPS_GRID,
-          role: "dialog",
-          "aria-label": "Choose task icons",
-          onKeyDown: (e) => {
-            e.nativeEvent.stopImmediatePropagation();
-            e.stopPropagation();
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onClose();
-            }
-          },
-          onDoubleClick: (e) => e.stopPropagation(),
           style: {
-            position: "fixed",
-            left: pos.left,
-            top: pos.top,
-            bottom: pos.bottom,
-            width: PW,
-            maxHeight: pos.maxH,
-            zIndex: 1e5,
+            background: "var(--surf)",
+            border: "1px solid var(--bd2)",
+            borderTop: "2px solid var(--amber)",
+            borderRadius: 6,
+            padding: 20,
+            width: 340,
             display: "flex",
             flexDirection: "column",
-            background: "var(--bg)",
-            border: "1px solid var(--bd2)",
-            borderRadius: 9,
-            boxShadow: "0 8px 28px rgba(0,0,0,.18)",
-            fontFamily: "'Inter',system-ui,sans-serif",
-            overflow: "hidden"
-          }
+            gap: 14
+          },
+          onClick: (e) => e.stopPropagation()
         },
-        /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 8px 6px", borderBottom: "1px solid var(--bd)", flexShrink: 0 } }, /* @__PURE__ */ React.createElement(
+        /* @__PURE__ */ React.createElement("div", { style: { color: "var(--amber)", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: ".06em" } }, "RENAME PROJECT"),
+        /* @__PURE__ */ React.createElement(
           "input",
           {
             ...NO_AUTOFILL,
-            autoFocus: true,
-            type: "text",
-            value: q,
-            onChange: (e) => setQ(e.target.value),
-            placeholder: "Search icons — tia, sewer, roof, tilt…",
-            "aria-label": "Search icons",
-            style: { width: "100%", height: 28, border: "1px solid var(--bd2)", borderRadius: 6, padding: "0 8px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "var(--txt)", background: "var(--bg)" },
-            onFocus: (e) => {
-              e.target.style.borderColor = "var(--blue)";
-            },
-            onBlur: (e) => {
-              e.target.style.borderColor = "";
+            ref: inputRef,
+            className: "ei",
+            value: val,
+            onChange: (e) => setVal(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === "Enter") confirm();
+              if (e.key === "Escape") onClose();
             }
           }
-        )),
-        /* @__PURE__ */ React.createElement("div", { style: { overflowY: "auto", padding: "4px 8px 8px", flex: "1 1 auto", minHeight: 0 } }, groups.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 6px", fontSize: 12, color: "var(--mut)", textAlign: "center" } }, "Nothing matches “", q.trim(), "”. Try another word."), groups.map((g2) => /* @__PURE__ */ React.createElement("div", { key: g2.key, "data-icon-group": g2.key }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", padding: "8px 2px 3px" } }, g2.title), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 2 } }, g2.items.map((it) => {
-          const on = shown.includes(it.id), lab = TI.iconLabel(it.id, it.label);
-          return /* @__PURE__ */ React.createElement(
-            "button",
-            {
-              key: it.id,
-              type: "button",
-              className: "ti-pick-cell",
-              "data-icon-id": it.id,
-              "aria-pressed": on,
-              "aria-label": lab,
-              title: lab,
-              onClick: () => onChange(TI.toggleTaskIcon(shown, it.id))
-            },
-            /* @__PURE__ */ React.createElement(TaskIconGlyph, { id: it.id, size: 22 }),
-            TI.isDrawn(it.id) && /* @__PURE__ */ React.createElement("span", { "aria-hidden": "true", style: { position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "#16a34a" } })
-          );
-        }))))),
-        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", borderTop: "1px solid var(--bd)", flexShrink: 0, background: "var(--surf)" } }, /* @__PURE__ */ React.createElement("a", { href: "/sequence/vendor/twemoji/CREDITS.txt", target: "_blank", rel: "noopener", title: "Emoji art: Twemoji, CC-BY 4.0", style: { fontSize: 10, color: "var(--mut)", textDecoration: "none", marginRight: "auto" } }, "Emoji art: Twemoji (CC-BY 4.0)"), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            type: "button",
-            "data-icon-clear": true,
-            disabled: shown.length === 0,
-            onClick: () => onChange([]),
-            style: { height: 24, padding: "0 10px", fontSize: 11.5, fontFamily: "inherit", borderRadius: 5, border: "1px solid var(--bd2)", background: "var(--bg)", color: shown.length ? "var(--txt)" : "var(--mut)", cursor: shown.length ? "pointer" : "default" }
-          },
-          "Clear"
-        ), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            type: "button",
-            "data-icon-done": true,
-            onClick: onClose,
-            style: { height: 24, padding: "0 12px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "1px solid var(--blue)", background: "var(--blue)", color: "#fff", cursor: "pointer" }
-          },
-          "Done"
-        ))
-      ),
+        ),
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { borderColor: "var(--amber)", color: "var(--amber)" }, onClick: confirm }, "Rename"))
+      )
+    );
+  }
+  function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
+    const menuRef = useRef7(null);
+    useEffect6(() => {
+      const down = (e) => {
+        if (!menuRef.current?.contains(e.target)) onClose();
+      };
+      const key = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("mousedown", down);
+      document.addEventListener("keydown", key);
+      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("resize", onClose);
+      return () => {
+        document.removeEventListener("mousedown", down);
+        document.removeEventListener("keydown", key);
+        window.removeEventListener("scroll", onClose, true);
+        window.removeEventListener("resize", onClose);
+      };
+    }, [onClose]);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = 178, mh = canDelete ? 108 : 76;
+    const left = x + mw > vw ? vw - mw - 8 : x;
+    const top = y + mh > vh ? vh - mh - 8 : y;
+    const Item = ({ icon, label, danger, onClick }) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 12px",
+          cursor: "pointer",
+          fontSize: 12,
+          color: danger ? "#dc2626" : "var(--txt)",
+          borderRadius: 4,
+          transition: "background .1s",
+          fontFamily: "'Inter',system-ui,sans-serif"
+        },
+        onMouseEnter: (e) => e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)",
+        onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+      },
+      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 14, flexShrink: 0, color: danger ? "#dc2626" : "var(--mut)" }, "aria-hidden": "true" }),
+      label
+    );
+    return ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top,
+        left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: "4px",
+        zIndex: 9999,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.13)",
+        minWidth: mw
+      } }, /* @__PURE__ */ React.createElement(Item, { icon: "ti-pencil", label: "Rename", onClick: onRename }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate", onClick: onDuplicate }), canDelete && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: "Delete", danger: true, onClick: onDelete }))),
       document.body
     );
   }
-  function TaskIconSlot({ task, updateTask }) {
-    const TI = window.PlanyrTaskIcons;
-    const [open, setOpen] = React.useState(false);
-    const ref = React.useRef(null);
-    const icons = TI.normalizeTaskIcons(task.icons);
-    const close = React.useCallback(() => setOpen(false), []);
-    if (icons.length === 0) return null;
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "span",
+  var SwatchGrid = ({ current, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 5px", display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: 2, justifyContent: "start" } }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      title: "None (clear)",
+      onClick: () => onPick(null),
+      type: "button",
+      style: {
+        width: 18,
+        height: 18,
+        borderRadius: 2,
+        background: "var(--bg)",
+        cursor: "pointer",
+        padding: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: current == null ? "1.5px solid #4f46e5" : "1px solid #d1d5db"
+      }
+    },
+    /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 10 10" }, /* @__PURE__ */ React.createElement("line", { x1: "1", y1: "1", x2: "9", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "1", x2: "1", y2: "9", stroke: current == null ? "#4f46e5" : "#9ca3af", strokeWidth: "1.5" }))
+  ), ROW_COLORS.slice(0, 19).map((rc) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: rc.color,
+      title: rc.label,
+      onClick: () => onPick(rc.color),
+      type: "button",
+      style: {
+        width: 18,
+        height: 18,
+        borderRadius: 2,
+        background: rc.color,
+        cursor: "pointer",
+        padding: 0,
+        border: current === rc.color ? "1.5px solid #111827" : "1px solid #d1d5db",
+        boxShadow: current === rc.color ? "inset 0 0 0 1px #fff" : "none"
+      }
+    }
+  )));
+  var CaretPopover = ({ children, popRef, openLeft }) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      ref: popRef,
+      onMouseDown: (e) => e.stopPropagation(),
+      style: {
+        position: "absolute",
+        top: "100%",
+        marginTop: 4,
+        ...openLeft ? { right: 0 } : { left: 0 },
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        zIndex: 10002
+      }
+    },
+    children
+  );
+  var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
+    const fb = fmt;
+    const [openCaret, setOpenCaret] = useState7(null);
+    const popRef = useRef7(null);
+    useEffect6(() => {
+      if (!openCaret) return;
+      const down = (e) => {
+        if (popRef.current?.contains(e.target)) return;
+        if (e.target.closest?.("[data-caret-toggle]")) return;
+        setOpenCaret(null);
+      };
+      document.addEventListener("mousedown", down, true);
+      return () => document.removeEventListener("mousedown", down, true);
+    }, [openCaret]);
+    const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
+    const [sizeText, setSizeText] = useState7(sizeDisplay);
+    useEffect6(() => {
+      setSizeText(sizeDisplay);
+    }, [sizeDisplay]);
+    const commitSize = (raw) => {
+      const trimmed = String(raw).trim();
+      if (trimmed === "") {
+        onSetFontSize(null);
+        return;
+      }
+      const n = parseFloat(trimmed);
+      if (!Number.isFinite(n)) {
+        setSizeText(sizeDisplay);
+        return;
+      }
+      onSetFontSize(Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n * 2) / 2)));
+    };
+    const MiniBtn = ({ active, disabled, onClick, title, children, w = 20 }) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        title,
+        onClick: disabled ? void 0 : onClick,
+        disabled,
+        type: "button",
+        style: {
+          width: w,
+          height: 20,
+          borderRadius: 3,
+          padding: 0,
+          cursor: disabled ? "default" : "pointer",
+          flexShrink: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
+          background: active ? "#4f46e5" : "transparent",
+          border: `1px solid ${active ? "#4338ca" : "transparent"}`,
+          opacity: disabled ? 0.5 : 1
+        },
+        onMouseEnter: (e) => {
+          if (!disabled && !active) e.currentTarget.style.background = "#e5e7eb";
+        },
+        onMouseLeave: (e) => {
+          if (!disabled && !active) e.currentTarget.style.background = "transparent";
+        }
+      },
+      children
+    );
+    const Row2 = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2, height: 22 } }, children);
+    const Group = ({ children, style }) => /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 1, padding: "3px 5px", justifyContent: "center", flexShrink: 0, ...style } }, children);
+    const VRule = () => /* @__PURE__ */ React.createElement("div", { style: { width: 1, alignSelf: "stretch", background: "var(--bd2)", margin: "3px 0" } });
+    const ColorCaret = ({ kind, icon, current, title, onPick }) => /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex", alignItems: "center", gap: 1 } }, /* @__PURE__ */ React.createElement(MiniBtn, { title, onClick: () => {
+    }, w: 22 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1 } }, icon, /* @__PURE__ */ React.createElement("div", { style: { width: 13, height: 2.5, background: current || "transparent", border: current ? "none" : "1px dashed #c0c8d0", borderRadius: 1 } }))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        "data-caret-toggle": true,
+        title: `${title} options`,
+        type: "button",
+        onClick: () => setOpenCaret((c) => c === kind ? null : kind),
+        style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
+      },
+      "▾"
+    ), openCaret === kind && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement(SwatchGrid, { current, onPick: (c) => {
+      onPick(c);
+      setOpenCaret(null);
+    } })));
+    return /* @__PURE__ */ React.createElement(
+      "div",
       {
         ref,
-        "data-task-icon-slot": icons.length,
-        role: "button",
-        "aria-label": "Task icons",
-        "aria-haspopup": "dialog",
-        "aria-expanded": open,
         onMouseDown: (e) => e.stopPropagation(),
-        onDoubleClick: (e) => e.stopPropagation(),
-        onClick: (e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        },
-        style: { height: ROW_H - 2, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-start", gap: TASK_ICON_GAP, padding: "0 " + TASK_ICON_PAD + "px", marginRight: TASK_ICON_AFTER, borderRadius: 3, cursor: "pointer", userSelect: "none" }
+        style: {
+          position: "fixed",
+          top,
+          left,
+          maxWidth,
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 8,
+          boxShadow: "0 6px 20px rgba(0,0,0,0.16)",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "stretch",
+          fontFamily: "'Inter',system-ui,sans-serif",
+          zIndex: 10001,
+          padding: 1
+        }
       },
-      icons.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, "data-task-icon": id, title: TI.iconLabel(id), style: { display: "inline-flex" } }, /* @__PURE__ */ React.createElement(TaskIconGlyph, { id, size: TASK_ICON_PX })))
-    ), open && /* @__PURE__ */ React.createElement(TaskIconPicker, { anchorRef: ref, icons, onChange: (next) => updateTask(task.id, { icons: next }), onClose: close }));
-  }
-  function TaskIconPickerHost({ ctx, tasks, updateTask, onClose }) {
-    const anchorRef = React.useRef(null);
-    const pointRef = React.useRef(null);
-    if (!anchorRef.current) {
-      let el = document.querySelector('[data-task-row="' + ctx.taskId + '"] [data-task-name]');
-      if (el) {
-        const s = anchorSurroundings(el);
-        if (anchorHidden(el.getBoundingClientRect(), s.area, s.occluders)) el = null;
-      }
-      if (!el) {
-        el = document.createElement("span");
-        el.style.cssText = "position:fixed;width:1px;height:1px;pointer-events:none;visibility:hidden;left:" + ctx.x + "px;top:" + ctx.y + "px";
-        document.body.appendChild(el);
-        pointRef.current = el;
-      }
-      anchorRef.current = el;
-    }
-    React.useEffect(() => () => {
-      if (pointRef.current) pointRef.current.remove();
-    }, []);
-    const task = (tasks || []).find((t) => t.id === ctx.taskId);
-    if (!task) return null;
-    return /* @__PURE__ */ React.createElement(TaskIconPicker, { anchorRef, icons: window.PlanyrTaskIcons.normalizeTaskIcons(task.icons), onChange: (next) => updateTask(ctx.taskId, { icons: next }, ctx.projId), onClose });
-  }
-  function PhaseIconSummary({ tasks, taskId }) {
-    const sum = window.PlanyrTaskIcons.phaseIconSummary(tasks, taskId);
-    if (!sum.icons.length) return null;
-    const MAXI = 8, vis = sum.icons.slice(0, MAXI), more = sum.icons.length - vis.length;
-    return /* @__PURE__ */ React.createElement("span", { "data-phase-icons": true, style: { display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 8, flex: "0 1000 auto", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" } }, "   ", vis.map((id) => /* @__PURE__ */ React.createElement(TaskIconGlyph, { key: id, id, size: 13, faded: true })), more > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)" } }, "+", more));
-  }
-  function Cell({ task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef, data }) {
-    const tabStep = (back) => setSelectedColIdx((i) => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : 1));
-    const cf = task.cellFmt?.[col.k];
-    const s = {
-      fontSize: cf?.size || 12,
-      padding: "0 8px",
-      height: ROW_H,
-      display: "flex",
-      alignItems: "center",
-      overflow: "hidden",
-      whiteSpace: "nowrap",
-      color: cf?.color || void 0,
-      textDecoration: cf?.underline ? "underline" : void 0
-    };
-    const mono = { fontFamily: "'Inter',system-ui,sans-serif" };
-    if (col.t === "formula") {
-      const fc = formulaCell;
-      if (!fc || fc.display === "" || fc.display == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "flex-end", color: "var(--mut)" } });
-      if (!fc.ok) return /* @__PURE__ */ React.createElement(
-        "span",
+      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        "input",
         {
-          style: { ...s, ...mono, justifyContent: "flex-end", color: "var(--danger, #d83a3a)", fontSize: 11, fontWeight: 600 },
-          title: fc.detail ? fc.error + " — " + fc.detail : fc.error
+          ...NO_AUTOFILL,
+          value: sizeText,
+          onChange: (e) => setSizeText(e.target.value),
+          onBlur: (e) => commitSize(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitSize(e.target.value);
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              setSizeText(sizeDisplay);
+              e.currentTarget.blur();
+            }
+          },
+          placeholder: "—",
+          title: "Text size",
+          "aria-label": "Text size",
+          style: { width: 28, height: 20, fontSize: 11, border: "1px solid var(--bd2)", borderRadius: 3, textAlign: "center", padding: 0, fontFamily: "'Inter',system-ui,sans-serif" }
+        }
+      ), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          "data-caret-toggle": true,
+          title: "Text size options",
+          type: "button",
+          onClick: () => setOpenCaret((c) => c === "size" ? null : "size"),
+          style: { width: 11, height: 20, border: "none", background: "transparent", cursor: "pointer", color: "var(--mut)", flexShrink: 0, fontSize: 8, padding: 0 }
         },
-        fc.display
-      );
-      return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "flex-end", color: "var(--txt)", fontSize: 11 }, title: fc.display }, fc.display);
-    }
-    const isPickerCol = col.k === "health" || col.k === "status";
-    const isEdit = !isPickerCol && edit?.taskId === task.id && edit?.col === col.k;
-    if (isEdit) {
-      const isParentDateLocked = task.hasChildren && (col.k === "start" || col.k === "end" || col.k === "duration" || col.t === "cost");
-      if (!isParentDateLocked) {
-        if (col.t === "date") {
-          const seedVal2 = editStartChar != null ? editStartChar : toShortDate(task[col.k]);
-          return /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              ...NO_AUTOFILL,
-              autoFocus: true,
-              className: "ei",
-              placeholder: "M/D or M/D/YY",
-              style: { textAlign: "center", fontSize: 11 },
-              defaultValue: seedVal2,
-              onBlur: (e) => commit(task.id, col.k, e.target.value),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") {
-                  e.nativeEvent.stopImmediatePropagation();
-                  commitAndAdvance(task.id, col.k, e.target.value);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.nativeEvent.stopImmediatePropagation();
-                  setEdit(null);
-                  return;
-                }
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  e.nativeEvent.stopImmediatePropagation();
-                  commit(task.id, col.k, e.target.value);
-                  tabStep(e.shiftKey);
-                }
-              }
-            }
-          );
+        "▾"
+      ), openCaret === "size" && /* @__PURE__ */ React.createElement(CaretPopover, { popRef }, /* @__PURE__ */ React.createElement("div", { style: { padding: "2px 0", minWidth: 56, maxHeight: 220, overflow: "auto" } }, FONT_SIZE_STEPS.map((v) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: v,
+          onClick: () => {
+            onSetFontSize(v);
+            setOpenCaret(null);
+          },
+          style: {
+            padding: "4px 10px",
+            fontSize: 11,
+            cursor: "pointer",
+            textAlign: "left",
+            background: fb.size === v ? "var(--surf)" : "transparent",
+            fontWeight: fb.size === v ? 700 : 400
+          }
+        },
+        v
+      ))))), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Shrink text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, -1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A−")), /* @__PURE__ */ React.createElement(MiniBtn, { title: "Grow text", onClick: () => onSetFontSize(stepFontSize(fb.size === "mixed" ? fb.naturalSize ?? 12 : fb.size ?? fb.naturalSize ?? 12, 1)) }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700 } }, "A+"))), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.bold, onClick: () => onSetBold(!fb.bold), title: "Bold" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 800, fontSize: 12 } }, "B")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.italic, onClick: () => onSetItalic(!fb.italic), title: "Italic" }, /* @__PURE__ */ React.createElement("span", { style: { fontStyle: "italic", fontWeight: 600, fontSize: 12, fontFamily: "Georgia,'Times New Roman',serif" } }, "I")), /* @__PURE__ */ React.createElement(MiniBtn, { active: !!fb.underline, onClick: () => onSetUnderline(!fb.underline), title: "Underline" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 12, textDecoration: "underline" } }, "U")))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, null, /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        ColorCaret,
+        {
+          kind: "color",
+          title: "Text color",
+          current: fb.color,
+          icon: /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 800, lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "A"),
+          onPick: onSetTextColor
         }
-        if (col.k === "name") {
-          const ls = [{ fontSize: 13, fontWeight: 600 }, { fontSize: 12, fontWeight: 500 }, { fontSize: 11.5, fontWeight: 400 }, { fontSize: 11, fontWeight: 400 }][Math.min(task.level, 3)];
-          const seedVal2 = editStartChar != null ? editStartChar : task.name ?? "";
-          const cf2 = task.cellFmt?.name;
-          const fw = task.bold || cf2?.bold ? 700 : ls.fontWeight;
-          const fs = task.italic || cf2?.italic ? "italic" : "normal";
-          const fSize = cf2?.size ?? task.fontSize ?? ls.fontSize;
-          const fColor = cf2?.color ?? task.textColor ?? void 0;
-          const fUnderline = task.underline || cf2?.underline ? "underline" : "none";
-          return /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              ...NO_AUTOFILL,
-              autoFocus: true,
-              className: "ei",
-              defaultValue: seedVal2,
-              style: { fontSize: fSize, fontWeight: fw, fontStyle: fs, color: fColor, textDecoration: fUnderline, paddingLeft: 20 + taskIconsW(window.PlanyrTaskIcons.normalizeTaskIcons(task.icons).length) + task.level * 14 },
-              onFocus: (e) => {
-                if (editStartChar == null) e.target.select();
-              },
-              onBlur: (e) => commit(task.id, "name", e.target.value),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") {
-                  e.nativeEvent.stopImmediatePropagation();
-                  commitAndAdvance(task.id, "name", e.target.value);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.nativeEvent.stopImmediatePropagation();
-                  setEdit(null);
-                  return;
-                }
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  e.nativeEvent.stopImmediatePropagation();
-                  commit(task.id, "name", e.target.value);
-                  tabStep(e.shiftKey);
-                }
-              }
-            }
-          );
+      )), /* @__PURE__ */ React.createElement(Row2, null, /* @__PURE__ */ React.createElement(
+        ColorCaret,
+        {
+          kind: "fill",
+          title: "Highlight / fill",
+          current: fb.fill,
+          icon: /* @__PURE__ */ React.createElement("svg", { width: "12", height: "10", viewBox: "0 0 24 20", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" }), /* @__PURE__ */ React.createElement("path", { d: "M5 9h13" })),
+          onPick: onSetFill
         }
-        if (col.k === "responsibleParty") {
-          return /* @__PURE__ */ React.createElement(
-            ContactPicker,
-            {
-              variant: "grid",
-              owners: ownerListOf(task),
-              seedText: editStartChar != null ? editStartChar : "",
-              contacts: contacts || [],
-              onOwnersChange: (names, newContacts) => {
-                (newContacts || []).forEach((nc) => addContact && addContact(nc));
-                applyCommit(task.id, "responsibleParty", names);
-              },
-              onClose: () => setEdit(null)
-            }
-          );
+      ))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center" } }, /* @__PURE__ */ React.createElement(MiniBtn, { title: "Clear formatting", disabled: !fb.hasAny, onClick: onClearFormat, w: 20 }, /* @__PURE__ */ React.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 20H7l-4-4 8-8 12 12-4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M9 11l4 4" }), /* @__PURE__ */ React.createElement("path", { d: "M22 21H7" })))),
+      /* @__PURE__ */ React.createElement(VRule, null),
+      /* @__PURE__ */ React.createElement(Group, { style: { justifyContent: "center", alignItems: "center", minWidth: 52 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--txt)", textAlign: "center", lineHeight: 1.1, userSelect: "none" } }, fb.count, " ", fb.unit), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 8, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--mut)", textAlign: "center", userSelect: "none" } }, "Selected"))
+    );
+  });
+  function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
+    const menuRef = useRef7(null);
+    const toolbarRef = useRef7(null);
+    useEffect6(() => {
+      const down = (e) => {
+        if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
+      };
+      const key = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("mousedown", down);
+      document.addEventListener("keydown", key);
+      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("resize", onClose);
+      return () => {
+        document.removeEventListener("mousedown", down);
+        document.removeEventListener("keydown", key);
+        window.removeEventListener("scroll", onClose, true);
+        window.removeEventListener("resize", onClose);
+      };
+    }, [onClose]);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = 220, mh = 460;
+    const left = x + mw > vw ? vw - mw - 8 : x;
+    const top = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
+    const TB_W = 258, TB_H = 54, TB_GAP = 6;
+    const tbMaxWidth = Math.min(TB_W, vw - 16);
+    let tbTop = top - TB_H - TB_GAP;
+    if (tbTop < 8) tbTop = Math.min(top + mh + TB_GAP, vh - TB_H - 8);
+    const tbLeft = Math.min(Math.max(8, left), vw - tbMaxWidth - 8);
+    const Item = ({ icon, label, hint, danger, disabled, onClick, children }) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick: disabled ? void 0 : onClick,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "3px 11px",
+          cursor: disabled ? "default" : "pointer",
+          fontSize: 11,
+          color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--txt)",
+          borderRadius: 4,
+          transition: "background .1s",
+          fontFamily: "'Inter',system-ui,sans-serif",
+          opacity: disabled ? 0.5 : 1
+        },
+        onMouseEnter: (e) => {
+          if (!disabled) e.currentTarget.style.background = danger ? "#fff1f2" : "var(--surf)";
+        },
+        onMouseLeave: (e) => {
+          e.currentTarget.style.background = "transparent";
         }
-        const seedVal = editStartChar != null ? editStartChar : col.k === "predecessors" ? fmtPreds(task.predecessors) : task[col.k] ?? "";
-        if (col.k === "predecessors") {
-          return /* @__PURE__ */ React.createElement(
-            PredEditor,
-            {
-              seedVal,
-              taskId: task.id,
-              colKey: col.k,
-              commit,
-              commitAndAdvance,
-              setEdit,
-              tabStep
-            }
-          );
+      },
+      /* @__PURE__ */ React.createElement("i", { className: `ti ${icon}`, style: { fontSize: 12, flexShrink: 0, color: disabled ? "#c0c8d0" : danger ? "#dc2626" : "var(--mut)", width: 14, textAlign: "center" }, "aria-hidden": "true" }),
+      /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, label, children),
+      hint && /* @__PURE__ */ React.createElement("span", { style: { color: "#b0b7c0", fontSize: 9, fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".03em" } }, hint)
+    );
+    const Sep = () => /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "2px 0" } });
+    const fb = fmt || {
+      bold: !!task.bold,
+      italic: !!task.italic,
+      underline: !!task.underline,
+      fill: task.rowColor || null,
+      color: task.textColor || null,
+      size: task.fontSize || null,
+      naturalSize: [13, 12, 11.5, 11][Math.min(task.level || 0, 3)],
+      hasAny: !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize,
+      count: 1,
+      unit: "row",
+      scopeLabel: null
+    };
+    const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
+    const [subMeet, setSubMeet] = useState7(false);
+    const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
+    const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
+    const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
+    const curBodyName = !task.meetingBound ? "" : meetingBody ? meetingBody.name || "Meeting body" : "⚠ calendar missing";
+    const isDeadlineRow = task.deadlineForTaskId != null;
+    const subOpenLeft = left + mw + 210 > vw;
+    const nextMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
+    const prevMeetingIso = meetingBody && task.start ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
+    const fmtMeetingStep = (iso) => {
+      const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
+      return isNaN(d) ? "" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    };
+    const SubCaption = ({ children }) => /* @__PURE__ */ React.createElement("div", { style: { padding: "4px 11px 2px", fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", userSelect: "none" } }, children);
+    return ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+        FormatMiniToolbar,
+        {
+          ref: toolbarRef,
+          fmt: fb,
+          top: tbTop,
+          left: tbLeft,
+          maxWidth: tbMaxWidth,
+          onSetBold,
+          onSetItalic,
+          onSetUnderline,
+          onSetTextColor,
+          onSetFill: onSetRowColor,
+          onSetFontSize,
+          onClearFormat
         }
+      ), /* @__PURE__ */ React.createElement("div", { ref: menuRef, style: {
+        position: "fixed",
+        top,
+        left,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        padding: "3px 0",
+        zIndex: 9999,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.14)",
+        minWidth: mw
+      } }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-top", label: "Insert Row Above", hint: "Ins", onClick: onInsertAbove }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-row-insert-bottom", label: "Insert Row Below", onClick: onInsertBelow }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-sitemap", label: "Add Subtask", onClick: onAddSubtask }), /* @__PURE__ */ React.createElement(Sep, null), meetingBody && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-right", label: nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting", disabled: !nextMeetingIso, onClick: () => onStepMeeting(nextMeetingIso) }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-chevron-left", label: prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting", disabled: !prevMeetingIso, onClick: () => onStepMeeting(prevMeetingIso) })), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" }, onMouseEnter: () => setSubMeet(true), onMouseLeave: () => setSubMeet(false) }, meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-plus", label: "Add a meeting calendar…", onClick: onAddMeetingCalendar }) : isDeadlineRow ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: `Deadline for: ${deadlineAnchorName || "(missing task)"}`, hint: "▸" }) : task.meetingBound ? /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: `Meeting: ${curBodyName}${foreignMatch ? ` — from ${foreignMatch.schedName}` : ""}`, hint: "▸" }) : /* @__PURE__ */ React.createElement(Item, { icon: "ti-calendar-event", label: bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar", hint: "▸" }), subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && /* @__PURE__ */ React.createElement("div", { style: {
+        position: "absolute",
+        top: -4,
+        ...subOpenLeft ? { right: "100%" } : { left: "100%" },
+        minWidth: 200,
+        maxHeight: 320,
+        overflow: "auto",
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 6,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        padding: "3px 0",
+        zIndex: 1e4
+      } }, isDeadlineRow ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, "Deadline row for “", deadlineAnchorName || "missing task", "”"), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag-off", label: "Unlink (keep current date)", onClick: onUnlinkDeadline })) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SubCaption, null, bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"), /* @__PURE__ */ React.createElement(Item, { icon: !task.meetingBound ? "ti-check" : "ti-circle", label: "— none —", onClick: onUnbindMeeting }), meetingBodies.map((b) => {
+        const isCur = task.meetingBound && task.meetingBodyId === b.id;
+        return /* @__PURE__ */ React.createElement(Item, { key: b.id, icon: isCur ? "ti-check" : "ti-circle", label: b.name || "Meeting body", onClick: () => onBindMeeting(b.id) });
+      }), otherBodies.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "From other schedules"), otherBodies.map((ob) => {
+        const isCur = task.meetingBound && !localBody && task.meetingBodyId === ob.body.id;
         return /* @__PURE__ */ React.createElement(
-          "input",
+          Item,
           {
-            ...NO_AUTOFILL,
-            autoFocus: true,
-            className: "ei",
-            placeholder: col.k === "duration" ? "e.g. 10d, 3w, 30cd, 2mo" : void 0,
-            style: col.k === "duration" || col.k === "percentComplete" ? { textAlign: "center", fontSize: 11 } : void 0,
-            defaultValue: seedVal,
-            onBlur: (e) => commit(task.id, col.k, e.target.value),
-            onKeyDown: (e) => {
-              if (e.key === "Enter") {
-                e.nativeEvent.stopImmediatePropagation();
-                commitAndAdvance(task.id, col.k, e.target.value);
-                return;
-              }
-              if (e.key === "Escape") {
-                e.nativeEvent.stopImmediatePropagation();
-                setEdit(null);
-                return;
-              }
-              if (e.key === "Tab") {
-                e.preventDefault();
-                e.nativeEvent.stopImmediatePropagation();
-                commit(task.id, col.k, e.target.value);
-                tabStep(e.shiftKey);
-              }
-            }
+            key: `${ob.pid}:${ob.body.id}`,
+            icon: isCur ? "ti-check" : "ti-calendar-event",
+            label: `${ob.body.name || "Meeting body"} · ${ob.schedName}${isCur ? " — copy into this schedule" : ""}`,
+            onClick: () => onImportBindMeeting(ob.pid, ob.body.id)
           }
         );
-      }
-    }
-    switch (col.k) {
-      case "id": {
-        const hasCellFmt = !!(task.cellFmt && Object.keys(task.cellFmt).length);
-        const hasFmt = !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize || hasCellFmt;
-        const fmtSummary = hasFmt ? `Formatted: ${[task.rowColor && "fill color", task.bold && "bold", task.italic && "italic", task.underline && "underline", task.textColor && "text color", task.fontSize && "text size", hasCellFmt && "cell formats"].filter(Boolean).join(", ")}` : "Click to select row";
-        return (
-          // B<NEW> — paddingLeft was 4 while the drag grip (a separate absolutely-positioned
-          // overlay, left:0 width:8) sits on top of it, so the number's own left edge landed
-          // UNDER the grip icon with no visible gap ("crab icon" — voice transcription for
-          // GRAB icon — "butted right up against the number", owner report 2026-08-25). 12
-          // clears the grip's 8px strip plus a small breathing gap, without touching the
-          // grip's hit area (still exactly 8px, pointer-events always on — CHROME-NEVER-
-          // EATS-A-PRESS: widening the grip itself previously broke row-range select).
-          /* @__PURE__ */ React.createElement("span", { title: fmtSummary, style: { ...s, ...mono, color: "var(--mut)", fontSize: 11, cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 3, paddingLeft: 12 } }, task.rowColor && /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: 1.5, background: task.rowColor, border: "1px solid rgba(0,0,0,0.2)", flexShrink: 0 } }), /* @__PURE__ */ React.createElement("span", null, task.id), task.bold && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 800, color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "B"), task.italic && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 700, fontStyle: "italic", color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "I"), task.underline && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8.5, fontWeight: 700, textDecoration: "underline", color: "#4f46e5", lineHeight: 1, fontFamily: "'Inter',system-ui,sans-serif" } }, "U"))
-        );
-      }
-      case "name":
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, paddingLeft: 4 + task.level * 14, gap: 0, flex: 1, minWidth: 0 } }, proj?.tasks.some((t) => t.parentId === task.id) ? /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            className: "ti-chev",
-            onClick: (e) => {
-              e.stopPropagation();
-              const opening = !task.isExpanded;
-              if (opening && expandAnchorRef) expandAnchorRef.current = task.id;
-              updateTask(task.id, { isExpanded: opening });
-            },
-            onMouseDown: (e) => e.stopPropagation(),
-            onDoubleClick: (e) => e.stopPropagation(),
-            title: task.isExpanded ? "Collapse" : "Expand",
-            style: {
-              cursor: "pointer",
-              flexShrink: 0,
-              width: 16,
-              height: ROW_H - 2,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 3,
-              color: task.isExpanded ? "var(--blue)" : "var(--mut)",
-              userSelect: "none"
-            }
-          },
-          /* @__PURE__ */ React.createElement("i", { className: "ti " + (task.isExpanded ? "ti-chevron-down" : "ti-chevron-right"), "aria-hidden": "true", style: { fontSize: 14, lineHeight: 1 } })
-        ) : /* @__PURE__ */ React.createElement("span", { style: { width: 16, flexShrink: 0, display: "inline-block" } }), /* @__PURE__ */ React.createElement(TaskIconSlot, { task, updateTask }), (() => {
-          const ls = [{ fontSize: 13, fontWeight: 600 }, { fontSize: 12, fontWeight: 500 }, { fontSize: 11.5, fontWeight: 400 }, { fontSize: 11, fontWeight: 400 }][Math.min(task.level, 3)];
-          const cf2 = task.cellFmt?.name;
-          const isEmpty = !task.name;
-          const fw = task.bold || cf2?.bold ? 700 : ls.fontWeight;
-          const fs = task.italic || cf2?.italic || isEmpty ? "italic" : "normal";
-          const fSize = cf2?.size ?? task.fontSize ?? ls.fontSize;
-          const fColor = cf2?.color ?? task.textColor;
-          const fUnderline = task.underline || cf2?.underline ? "underline" : "none";
-          return /* @__PURE__ */ React.createElement("span", { title: task.name || void 0, "data-task-name": true, style: { overflow: "hidden", textOverflow: "ellipsis", color: isEmpty ? "var(--mut)" : fColor || "#1f2328", fontStyle: fs, fontSize: fSize, fontWeight: fw, textDecoration: fUnderline, minWidth: 0 } }, task.name || "New task");
-        })(), !task.isExpanded && task.hasChildren && /* @__PURE__ */ React.createElement(PhaseIconSummary, { tasks: proj?.tasks, taskId: task.id }), rowCanFocus(task) && /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            "data-focus-chip": task.focused ? "on" : "off",
-            onClick: (e) => {
-              e.stopPropagation();
-              updateTask(task.id, { focused: !task.focused });
-            },
-            onDoubleClick: (e) => e.stopPropagation(),
-            title: focusChipTitle(task),
-            style: {
-              marginLeft: "auto",
-              flexShrink: 0,
-              cursor: "pointer",
-              userSelect: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 10,
-              fontWeight: 600,
-              lineHeight: 1,
-              whiteSpace: "nowrap",
-              color: "var(--mut)",
-              padding: "2px 7px",
-              borderRadius: 10,
-              background: task.focused ? "var(--surf)" : "transparent",
-              border: `1px solid ${task.focused ? "var(--bd2)" : "transparent"}`,
-              transition: "background .12s,border-color .12s"
-            },
-            onMouseEnter: (e) => {
-              e.currentTarget.style.background = "var(--surf)";
-              e.currentTarget.style.borderColor = "var(--bd2)";
-            },
-            onMouseLeave: (e) => {
-              if (!task.focused) {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.borderColor = "transparent";
-              }
-            }
-          },
-          /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round", style: { opacity: 0.65, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M3 5h18M6 12h12M10 19h4" })),
-          task.focused && task.hideableDone > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "#16a34a", flexShrink: 0 } }), task.hideableDone),
-          task.focused && task.hideablePaused > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "#9ca3af", flexShrink: 0 } }), task.hideablePaused),
-          task.focused && task.hideableUpcoming > 0 && /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 3 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "var(--bg)", border: "1.5px solid #d1d5db", flexShrink: 0 } }), task.hideableUpcoming)
-        ));
-      case "start":
-      case "end": {
-        const rawDate = task[col.k];
-        if (!rawDate) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)", fontSize: 11 } });
-        const [y, m, d] = rawDate.split("-");
-        const dateStr = String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
-        const isStart = col.k === "start";
-        const isPinned = !task.hasChildren && (isStart ? startIsPinned(task) : task.pinnedEnd);
-        const isConflict = !task.hasChildren && (isStart ? !!task.startConflict : !!task.finishConflict);
-        const unpin = (e) => {
-          e.stopPropagation();
-          if (isStart) updateTask(task.id, unpinStartPatch(task), projId);
-          else updateTask(task.id, { pinnedEnd: false, durValue: taskDurValue(task), durUnit: taskDurUnit(task) }, projId);
-        };
-        return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            style: { ...s, ...mono, justifyContent: "center", color: isConflict ? "var(--danger,#d83a3a)" : task.hasChildren ? "#94a3b8" : "var(--mut)", fontSize: 11, fontWeight: isConflict ? 700 : void 0 },
-            title: task.hasChildren ? "Computed from subtasks" : isConflict ? isStart ? "Pinned start is earlier than the predecessors allow — the pin is winning and the dependency is being overridden. Unpin to follow the predecessors, or change the dependency." : "Locked finish can't be met — the predecessor chain needs more time. Move the finish, shorten the duration, or change the dependency." : isPinned ? isStart ? "Start pinned — click the lock to let the predecessor drive this date" : "Finish locked (hard constraint) — click the lock to let it flow from start + duration" : void 0
-          },
-          isConflict && /* @__PURE__ */ React.createElement("span", { style: { marginRight: 2, flexShrink: 0, fontSize: 11 } }, "⚠"),
-          isPinned && /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              title: isStart ? "Pinned start — click to unpin and let the predecessor drive this date" : "Locked finish — click to unlock and let it flow from start + duration",
-              onClick: unpin,
-              style: { display: "inline-flex", alignItems: "center", marginRight: 3, cursor: "pointer", color: isConflict ? "var(--danger,#d83a3a)" : "var(--amber)", opacity: 0.85, flexShrink: 0 },
-              onMouseEnter: (e) => e.currentTarget.style.opacity = "1",
-              onMouseLeave: (e) => e.currentTarget.style.opacity = "0.85"
-            },
-            /* @__PURE__ */ React.createElement("svg", { width: "9", height: "9", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "11", width: "18", height: "11", rx: "2", ry: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M7 11V7a5 5 0 0 1 10 0v4" }))
-          ),
-          isStart && !task.hasChildren && task.meetingBound && MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
-            const info = meetingBoundInfo(task);
-            const color = info?.state === "danger" ? "var(--danger,#d83a3a)" : info?.state === "warning" ? "var(--warn-text,#b45309)" : "var(--mut)";
-            const b = info?.body || {};
-            const trace = meetingBindingTrace(task, (id) => (proj?.tasks || []).find((t) => t.id === id), b);
-            const traceLines = [];
-            if (trace && trace.driver) {
-              const { dep, predTask } = trace.driver;
-              const typeWord = { FS: "finish-to-start", SS: "start-to-start", FF: "finish-to-finish", SF: "start-to-finish" }[(dep.type || "FS").toUpperCase()] || "finish-to-start";
-              const lagPhrase = dep.lag ? `, plus a ${Math.abs(dep.lag)}-${dep.lagUnit === "calendar" ? "calendar" : "working"}-day lag (${typeWord}),` : ` (${typeWord}, no lag)`;
-              traceLines.push(`Driven by "${predTask.name || "task " + predTask.id}", finishing ${fmtD(predTask.end || predTask.start)}${lagPhrase} ready no earlier than ${fmtD(trace.earliestDate)}.`);
-              if (trace.skipped.length) traceLines.push(`Skipped ${trace.skipped.length === 1 ? "meeting" : "meetings"}: ${trace.skipped.map((sk) => `${fmtD(sk.meetingDate)} (agenda closed ${fmtD(sk.deadline)}, before the packet was ready)`).join("; ")}.`);
-            }
-            const dupFlag = meetingDoubleLagFlag(task, b);
-            const title = [
-              `${b.name || "Meeting body"}${b.jurisdiction ? " · " + b.jurisdiction : ""}`,
-              `Meets ${cadenceSummary(b)}; ${agendaLeadSummary(b)}.`,
-              task.start ? `Hearing ${fmtD(task.start)} — file the agenda by ${fmtD(info?.deadline)}${b.cutoffTime ? " (" + b.cutoffTime + ")" : ""}.` : "No eligible meeting yet — waiting on a predecessor date.",
-              ...traceLines,
-              dupFlag ? "⚠ Possible double count: this task's own link lag and this calendar's filing lead look like they're counting the same wait — see the ⚠×2 mark on this row." : null,
-              info?.state === "danger" ? task.meetingDateOffCalendar ? "⚠ INFEASIBLE: this date isn't a scheduled meeting day for this body at all — roll to the next meeting or unpin." : "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin." : info?.state === "warning" ? `⚠ Only ${info.floatBD} working day(s) of float before the agenda deadline.` : "This is a meeting-calendar date: it can't be freely typed, has no duration, and slips by a full cycle if the deadline is missed.",
-              b.verifiedOn ? `Calendar verified ${fmtD(b.verifiedOn)}.` : "Calendar is rule-derived (unverified)."
-            ].filter(Boolean).join("\n");
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { title, style: { display: "inline-flex", alignItems: "center", marginRight: 3, color, flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" }))), dupFlag && (() => {
-              const fixTitle = `⚠ Possible double count: the ${dupFlag.lagN}-${dupFlag.unit}-day link lag and "${b.name || "this calendar"}"'s own ${dupFlag.leadN}-${dupFlag.unit}-day filing lead may both be counting the same wait, pushing this task out an extra meeting cycle.
-Click to drop the duplicate lag (keeps the predecessor link and the meeting binding). Undo with Ctrl+Z.`;
-              return /* @__PURE__ */ React.createElement(
-                "span",
-                {
-                  title: fixTitle,
-                  onClick: (e) => {
-                    e.stopPropagation();
-                    const patch = dropDuplicateLagPatch(task, dupFlag);
-                    if (patch) updateTask(task.id, { predecessors: patch }, projId);
-                  },
-                  style: { display: "inline-flex", alignItems: "center", marginRight: 3, color: "var(--warn-text,#b45309)", flexShrink: 0, cursor: "pointer" }
-                },
-                /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 9v4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 17h.01" }), /* @__PURE__ */ React.createElement("path", { d: "M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.71 3.86a2 2 0 0 0-3.42 0Z" }))
-              );
-            })());
-          })(),
-          isStart && !task.hasChildren && task.meetingBound && !MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
-            const title = [
-              "⚠ Bound to a meeting calendar that no longer exists" + (task.meetingBodyId ? ` (id ${task.meetingBodyId})` : "") + ".",
-              "Its date is held at the last known value but won't update on its own — this usually means the calendar was lost when another browser tab saved over it.",
-              "Fix: re-create or re-select the calendar in Settings → Meeting Calendars, or unbind this task (right-click → Meeting binding)."
-            ].join("\n");
-            return /* @__PURE__ */ React.createElement("span", { title, "aria-label": "Bound to a missing meeting calendar", style: { position: "relative", display: "inline-flex", alignItems: "center", marginRight: 3, color: "var(--danger,#d83a3a)", flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 21h18" }), /* @__PURE__ */ React.createElement("path", { d: "M5 21V10M9 21V10M15 21V10M19 21V10" }), /* @__PURE__ */ React.createElement("path", { d: "M4 10h16" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3 3 8h18L12 3Z" })), /* @__PURE__ */ React.createElement("span", { "aria-hidden": true, style: { position: "absolute", top: -2, right: -2, width: 5, height: 5, borderRadius: "50%", background: "var(--danger,#d83a3a)" } }));
-          })(),
-          isStart && !task.hasChildren && task.deadlineForTaskId != null && (() => {
-            const anchor = (proj?.tasks || []).find((a) => a.id === task.deadlineForTaskId);
-            const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
-            const color = task.deadlineInfeasible ? "var(--danger,#d83a3a)" : "var(--mut)";
-            const title = [
-              anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}"${body && body.name ? ` (${body.name})` : ""}.` : "Deadline row — its anchor task is missing; the date no longer auto-updates.",
-              body ? `Always sits ${agendaLeadSummary(body).replace("agenda due ", "")} the meeting — moves automatically when the meeting date moves.` : "",
-              task.deadlineInfeasible ? "⚠ INFEASIBLE: this row's predecessors land AFTER the call/file-by date." : ""
-            ].filter(Boolean).join("\n");
-            return /* @__PURE__ */ React.createElement("span", { title, style: { display: "inline-flex", alignItems: "center", marginRight: 3, color, flexShrink: 0, cursor: "help" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M4 21V4" }), /* @__PURE__ */ React.createElement("path", { d: "M4 4h12l-2 4 2 4H4" })));
-          })(),
-          dateStr
-        );
-      }
-      case "meetingBody": {
-        if (task.hasChildren) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", color: "#94a3b8" }, title: "A summary/parent can't be meeting-bound" }, "—");
-        if (task.deadlineForTaskId != null) {
-          const anchor = (proj?.tasks || []).find((a) => a.id === task.deadlineForTaskId);
-          const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
-          return /* @__PURE__ */ React.createElement("span", { style: { ...s, fontSize: 10, color: "var(--mut)" }, title: anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}" — unlink via right-click to bind it directly` : "Deadline row (anchor missing)" }, "deadline", body && body.name ? ` · ${body.name}` : "");
-        }
-        const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
-        const cur = task.meetingBound ? task.meetingBodyId || "" : "";
-        const localMatch = cur ? bodies.find((b) => b.id === cur) : null;
-        const foreign = task.meetingBound && cur && !localMatch ? findMeetingBodyElsewhere(data, projId, cur) : null;
-        if (task.meetingBound && !localMatch && foreign) {
-          return /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              style: { ...s, fontSize: 10, color: "var(--txt)" },
-              title: `Bound to "${foreign.body.name || "Meeting body"}" from ${foreign.schedName} — right-click → Meeting binding to change it or copy it into this schedule.`
-            },
-            foreign.body.name || "Meeting body",
-            " · ",
-            foreign.schedName
-          );
-        }
-        if (task.meetingBound && !localMatch && !foreign) {
-          return /* @__PURE__ */ React.createElement(
-            "span",
-            {
-              style: { ...s, fontSize: 10, color: "var(--danger,#d83a3a)" },
-              title: "Bound to a meeting calendar that no longer exists anywhere on the account — right-click → Meeting binding to unbind it."
-            },
-            "⚠ calendar missing"
-          );
-        }
-        if (!bodies.length) return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            style: { ...s, justifyContent: "center", color: "var(--amber)", fontSize: 10, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 },
-            title: "Click to set up meeting calendars",
-            onClick: (e) => {
-              e.stopPropagation();
-              document.dispatchEvent(new CustomEvent("planar-open-settings", { detail: "meetings" }));
-            }
-          },
-          "set up…"
-        );
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: 0 }, "data-picker-cell": `meeting-${task.id}` }, /* @__PURE__ */ React.createElement(
-          "select",
-          {
-            value: cur,
-            onClick: (e) => e.stopPropagation(),
-            onChange: (e) => {
-              const v = e.target.value;
-              updateTask(task.id, v ? { meetingBound: true, meetingBodyId: v } : { meetingBound: false, meetingBodyId: null, pinnedMeetingDate: void 0 }, projId);
-            },
-            style: { width: "100%", fontSize: 11, border: "none", background: "transparent", color: cur ? "var(--txt)" : "var(--mut)", cursor: "pointer", padding: "0 4px" }
-          },
-          /* @__PURE__ */ React.createElement("option", { value: "" }, "— none —"),
-          bodies.map((b) => /* @__PURE__ */ React.createElement("option", { key: b.id, value: b.id }, b.name || "Meeting body"))
-        ));
-      }
-      case "floatToDeadline": {
-        const fb = task.hasChildren ? null : meetingFloatBD(task, fdLocal(/* @__PURE__ */ new Date()));
-        if (fb == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" } });
-        const c = fb < 0 ? "var(--danger,#d83a3a)" : fb <= 2 ? "var(--warn-text,#b45309)" : "var(--mut)";
-        return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            style: { ...s, ...mono, justifyContent: "center", color: c, fontWeight: fb <= 2 ? 700 : void 0 },
-            title: "Float to deadline — working days from today until the agenda-submittal deadline (≤2 reads at-risk)"
-          },
-          fb,
-          "d"
-        );
-      }
-      case "costIfMissed": {
-        const cost = task.hasChildren ? null : meetingCostDays(task, MEETING_BODY_INDEX[task.meetingBodyId]);
-        if (cost == null) return /* @__PURE__ */ React.createElement("span", { style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" } });
-        return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            style: { ...s, ...mono, justifyContent: "center", color: "var(--mut)" },
-            title: "Cost if missed — calendar days the hearing slips to the next eligible meeting (one day of slip is routinely a month)"
-          },
-          "+",
-          cost,
-          "d"
-        );
-      }
-      case "duration":
-        return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            style: { ...s, ...mono, color: task.hasChildren ? "#94a3b8" : "var(--mut)" },
-            title: task.hasChildren ? "Computed from subtasks" : durTooltip(task) || void 0
-          },
-          fmtTaskDuration(task, task.hasChildren)
-        );
-      case "predecessors": {
-        const preds = normPreds(task.predecessors);
-        const un = new Set(task.predUnresolved || []);
-        const unNames = [...un].map((id) => {
-          const n = getTaskName(id);
-          return n ? `${id} · ${n}` : `${id} (no longer in this schedule)`;
-        });
-        return /* @__PURE__ */ React.createElement(
-          DepCell,
-          {
-            items: preds,
-            renderLabel: (p) => fmtPreds([p]),
-            renderName: (p) => getTaskName(p.id),
-            s,
-            flagged: (p) => un.has(p.id),
-            title: unNames.length ? `This date is NOT driven by ${unNames.length === 1 ? "" : "any of "}${unNames.join("; ")} — ${unNames.length === 1 ? "it has" : "they have"} no dates, or it's this task's own summary row (a cycle). The date shown comes from the remaining predecessors only.` : predLagPlainEnglish(fmtPreds(preds))
-          }
-        );
-      }
-      case "successors": {
-        const ids = succMap[task.id] || [];
-        return /* @__PURE__ */ React.createElement(DepCell, { items: ids, renderLabel: (id) => String(id), renderName: (id) => getTaskName(id), s });
-      }
-      case "health": {
-        if (isExpandedParent) return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", padding: 0 } });
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, justifyContent: "center", padding: 0 }, "data-picker-cell": `health-${task.id}` }, /* @__PURE__ */ React.createElement(HealthPicker, { value: dispHealth || task.health, onChange: (hk) => commit(task.id, "health", hk) }));
-      }
-      case "status":
-        if (isExpandedParent) return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: "0 4px" } });
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, padding: "0 4px" }, "data-picker-cell": `status-${task.id}` }, /* @__PURE__ */ React.createElement(StatusPicker, { value: dispHealth || task.health, onChange: (hk) => commit(task.id, "status", hk) }));
-      case "percentComplete":
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 50, height: 3, background: "#e2e8f0", borderRadius: 2, overflow: "hidden", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: `${effectivePercentComplete(task, proj?.tasks)}%`, height: "100%", background: (HEALTH[task.health] || HEALTH.gray).dot, display: "block" } })), /* @__PURE__ */ React.createElement("span", { style: { ...mono, fontSize: 11, color: "var(--mut)" }, title: task.hasChildren ? "Rolled up from this row's tasks" : void 0 }, effectivePercentComplete(task, proj?.tasks), "%"));
-      case "responsibleParty": {
-        const { label, title } = ownerDisplayParts(ownerListOf(task));
-        return /* @__PURE__ */ React.createElement("span", { title: title || void 0, style: { ...s, color: "var(--mut)", fontSize: 11 } }, label);
-      }
-      case "cost":
-      case "budget":
-      case "actualCost": {
-        const rolledKey = col.k === "cost" ? "rolledCost" : col.k === "budget" ? "rolledBudget" : "rolledActual";
-        const v = task[rolledKey] ?? (Number(task[col.k]) || 0);
-        const rolled = task.hasChildren;
-        const tip = rolled ? "Sum of subtask " + (col.k === "cost" ? "costs" : col.k === "budget" ? "budgets" : "actuals") : void 0;
-        const st = { ...s, ...mono, fontSize: 11, justifyContent: "flex-end", color: rolled ? "#94a3b8" : "var(--mut)" };
-        if (!v) return /* @__PURE__ */ React.createElement("span", { style: st, title: tip });
-        return /* @__PURE__ */ React.createElement("span", { style: st, title: tip }, "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }));
-      }
-      case "notes": {
-        const _count = task.notes.length;
-        const latest = task.notes[task.notes.length - 1];
-        return /* @__PURE__ */ React.createElement("span", { style: { ...s, gap: 6, cursor: "pointer" }, onClick: (e) => {
-          e.stopPropagation();
-          setNotesCtx({ taskId: task.id, projectId: projId });
-        } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontSize: 11, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, latest ? (() => {
-          const [, m, d] = latest.date.split("-");
-          return `${+m}/${+d} | ${latest.text}`;
-        })() : "+"));
-      }
-      default:
-        return /* @__PURE__ */ React.createElement("span", { style: s }, task[col.k]);
-    }
+      })), bindCount === 1 && task.meetingBound && !task.hasChildren && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-flag", label: "+ Add deadline row (call/file-by date)", onClick: onAddDeadlineRow })), bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(SubCaption, null, "Use as deadline row for"), boundTasks.slice(0, 8).map((bt) => /* @__PURE__ */ React.createElement(Item, { key: bt.id, icon: "ti-flag", label: bt.name, onClick: () => onLinkAsDeadline(bt.id) })))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-settings", label: "Manage meeting calendars…", onClick: onAddMeetingCalendar }))), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons", label: hasIcons ? "Change icon…" : "Set icon…", onClick: onSetIcon }), hasIcons && /* @__PURE__ */ React.createElement(Item, { icon: "ti-icons-off", label: "Remove icon", onClick: onRemoveIcon }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-copy", label: "Duplicate Row", onClick: onDuplicate }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-scissors", label: "Cut", hint: "Ctrl+X", onClick: onCutTask }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-files", label: "Copy", hint: "Ctrl+C", onClick: onCopyTaskFull }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-clipboard", label: "Paste Below", hint: "Ctrl+V", onClick: onPasteTask, disabled: !hasClipboard }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-increase", label: "Indent →", hint: "Alt⇧→", onClick: onIndent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-indent-decrease", label: "Outdent ←", hint: "Alt⇧←", onClick: onOutdent, disabled: !canOutdent }), /* @__PURE__ */ React.createElement(Item, { icon: "ti-folder-symlink", label: "Move to…", onClick: onMoveTo }), /* @__PURE__ */ React.createElement(Sep, null), /* @__PURE__ */ React.createElement(Item, { icon: "ti-trash", label: deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row", danger: true, onClick: onDelete }))),
+      document.body
+    );
   }
   var MB_WD = [{ v: 0, l: "Sun" }, { v: 1, l: "Mon" }, { v: 2, l: "Tue" }, { v: 3, l: "Wed" }, { v: 4, l: "Thu" }, { v: 5, l: "Fri" }, { v: 6, l: "Sat" }];
   var MB_POSITIONS = [{ v: 1, l: "1st" }, { v: 2, l: "2nd" }, { v: 3, l: "3rd" }, { v: 4, l: "4th" }, { v: 5, l: "5th" }, { v: -2, l: "2nd-to-last" }, { v: -1, l: "Last" }];
@@ -19559,10 +19664,10 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   };
   var MB_ACTIVE_POPOVER_CLOSE = null;
   function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
-    const [open, setOpen] = useState4(false);
-    const btnRef = useRef4(null), popRef = useRef4(null);
+    const [open, setOpen] = useState7(false);
+    const btnRef = useRef7(null), popRef = useRef7(null);
     const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect3(() => {
+    useEffect6(() => {
       if (!open) return;
       const close = () => setOpen(false);
       MB_ACTIVE_POPOVER_CLOSE = close;
@@ -19630,7 +19735,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ));
   }
   function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
-    const [picked, setPicked] = useState4(() => /* @__PURE__ */ new Set());
+    const [picked, setPicked] = useState7(() => /* @__PURE__ */ new Set());
     const toggle = (key) => setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -19662,13 +19767,13 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
     const initial = Array.isArray(bodies) ? bodies : [];
-    const [draft, setDraft] = useState4(() => JSON.parse(JSON.stringify(initial)));
-    const savedRef = useRef4(JSON.stringify(initial));
-    const [savedFlash, setSavedFlash] = useState4(false);
-    const [confirmClose, setConfirmClose] = useState4(false);
+    const [draft, setDraft] = useState7(() => JSON.parse(JSON.stringify(initial)));
+    const savedRef = useRef7(JSON.stringify(initial));
+    const [savedFlash, setSavedFlash] = useState7(false);
+    const [confirmClose, setConfirmClose] = useState7(false);
     const list = draft;
     const dirty = JSON.stringify(draft) !== savedRef.current;
-    const [selId, setSelId] = useState4(() => list[0] && list[0].id || null);
+    const [selId, setSelId] = useState7(() => list[0] && list[0].id || null);
     const sel = list.find((b) => b.id === selId) || null;
     const save = () => {
       onChange(JSON.parse(JSON.stringify(draft)));
@@ -19680,9 +19785,9 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       if (dirty) setConfirmClose(true);
       else onClose();
     };
-    const backdropRef = useRef4(null);
-    const downOnBackdropRef = useRef4(false);
-    useEffect3(() => {
+    const backdropRef = useRef7(null);
+    const downOnBackdropRef = useRef7(false);
+    useEffect6(() => {
       const onKey = (e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
@@ -19713,7 +19818,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       setDraft((prev) => prev.filter((b) => b.id !== id));
       if (selId === id) setSelId(rest[0] && rest[0].id || null);
     };
-    const [importOpen, setImportOpen] = useState4(false);
+    const [importOpen, setImportOpen] = useState7(false);
     const importBodies = (sourceBodies) => {
       const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
       setDraft(next);
@@ -19845,16 +19950,16 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return { ...d, settings: { ...d.settings, holidays }, projects: newProjects };
     });
     const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter((t) => t.pinnedStart).length, 0);
-    const [open, setOpen] = useState4(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
+    const [open, setOpen] = useState7(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
     const tog = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
-    useEffect3(() => {
+    useEffect6(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
       document.addEventListener("keydown", onKey);
       return () => document.removeEventListener("keydown", onKey);
     }, [onClose]);
-    useEffect3(() => {
+    useEffect6(() => {
       if (!initialSection) return;
       const el = document.querySelector(`[data-section="${initialSection}"]`);
       if (el) el.scrollIntoView({ block: "start" });
@@ -20078,7 +20183,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   function FormatPanel({ data, setData, onClose }) {
     const s = data.settings || {};
     const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    useEffect3(() => {
+    useEffect6(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
@@ -20166,11 +20271,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 6, lineHeight: 1.4 } }, "Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.")));
   }
   function RuleColorPicker({ value, onChange }) {
-    const [open, setOpen] = useState4(false);
-    const dotRef = useRef4(null);
-    const menuRef = useRef4(null);
+    const [open, setOpen] = useState7(false);
+    const dotRef = useRef7(null);
+    const menuRef = useRef7(null);
     const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.right - 110 }), () => setOpen(false));
-    useEffect3(() => {
+    useEffect6(() => {
       if (!open) return;
       const onDown = (e) => {
         if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
@@ -20442,24 +20547,24 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function DesktopSplitView(props) {
     const settings = props.data?.settings || DEFAULT_SETTINGS;
-    const gridRef = useRef4(null);
-    const ganttRef = useRef4(null);
-    const [split, setSplit] = useState4(() => settings.defaultSplit || 60);
-    const containerRef = useRef4(null);
-    const divDragging = useRef4(false);
-    const [snapMode, setSnapMode] = useState4(() => settings.snapDefault !== false);
-    const [dragging, setDragging] = useState4(false);
-    const [_hintY, setHintY] = useState4(0);
-    const snapModeRef = useRef4(settings.snapDefault !== false);
-    useEffect3(() => {
+    const gridRef = useRef7(null);
+    const ganttRef = useRef7(null);
+    const [split, setSplit] = useState7(() => settings.defaultSplit || 60);
+    const containerRef = useRef7(null);
+    const divDragging = useRef7(false);
+    const [snapMode, setSnapMode] = useState7(() => settings.snapDefault !== false);
+    const [dragging, setDragging] = useState7(false);
+    const [_hintY, setHintY] = useState7(0);
+    const snapModeRef = useRef7(settings.snapDefault !== false);
+    useEffect6(() => {
       snapModeRef.current = snapMode;
     }, [snapMode]);
-    useEffect3(() => {
+    useEffect6(() => {
       const v = settings.snapDefault !== false;
       setSnapMode(v);
       snapModeRef.current = v;
     }, [settings.snapDefault]);
-    const echo = useRef4({ grid: null, gantt: null });
+    const echo = useRef7({ grid: null, gantt: null });
     const sync = (src) => (e) => {
       const st = e.currentTarget.scrollTop, dst = src === "grid" ? "gantt" : "grid";
       if (echo.current[src] === st) {
@@ -20478,7 +20583,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         }));
       }
     };
-    const liveColWidths = useRef4(null);
+    const liveColWidths = useRef7(null);
     const onDividerDown = (e) => {
       e.preventDefault();
       divDragging.current = true;
@@ -20660,15 +20765,15 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   function PDFExportModal({ data, activePid, onClose, setData }) {
     const projs = Object.values(data.projects);
     const now = /* @__PURE__ */ new Date();
-    const seedCollapsed = useMemo3(() => {
+    const seedCollapsed = useMemo4(() => {
       const out = [];
       Object.values(data.projects).forEach((p) => p.tasks.forEach((t) => {
         if (p.tasks.some((x) => x.parentId === t.id) && t.isExpanded === false) out.push(p.id + ":" + t.id);
       }));
       return out;
     }, []);
-    const initPrefs = useMemo3(() => loadExportPrefs(), []);
-    const [cfg, setCfg] = useState4(() => {
+    const initPrefs = useMemo4(() => loadExportPrefs(), []);
+    const [cfg, setCfg] = useState7(() => {
       const base = {
         exhibitLabel: "",
         projectTitle: "",
@@ -20708,14 +20813,14 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return base;
     });
     const upd = (patch) => setCfg((c) => ({ ...c, ...patch }));
-    const cfgRef = useRef4(cfg);
-    useEffect3(() => {
+    const cfgRef = useRef7(cfg);
+    useEffect6(() => {
       cfgRef.current = cfg;
     }, [cfg]);
-    const [headerOpen, setHeaderOpen] = useState4(() => !!initPrefs.headerOpen);
-    const [secOpen, setSecOpen] = useState4(() => initPrefs.secOpen || {});
+    const [headerOpen, setHeaderOpen] = useState7(() => !!initPrefs.headerOpen);
+    const [secOpen, setSecOpen] = useState7(() => initPrefs.secOpen || {});
     const secIsOpen = (k) => secOpen[k] !== false;
-    useEffect3(() => {
+    useEffect6(() => {
       const out = {};
       EXPORT_PERSIST_KEYS.forEach((k) => {
         out[k] = cfg[k];
@@ -20724,8 +20829,8 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       out.headerOpen = headerOpen;
       saveExportPrefs(out);
     }, [cfg, secOpen, headerOpen]);
-    const [previewCfg, setPreviewCfg] = useState4(cfg);
-    useEffect3(() => {
+    const [previewCfg, setPreviewCfg] = useState7(cfg);
+    useEffect6(() => {
       const t = setTimeout(() => setPreviewCfg(cfg), 280);
       return () => clearTimeout(t);
     }, [cfg]);
@@ -20757,7 +20862,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     };
     const expandAll = () => setDetailLevel("all");
     const collapseAll = () => setDetailLevel("1");
-    useEffect3(() => {
+    useEffect6(() => {
       const onToggle = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarToggleCollapse") return;
@@ -20771,7 +20876,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       window.addEventListener("message", onToggle);
       return () => window.removeEventListener("message", onToggle);
     }, []);
-    useEffect3(() => {
+    useEffect6(() => {
       const onResize = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarColResize") return;
@@ -20796,18 +20901,18 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         return n;
       });
     };
-    const [previewUrl, setPreviewUrl] = useState4(null);
-    useEffect3(() => {
+    const [previewUrl, setPreviewUrl] = useState7(null);
+    useEffect6(() => {
       const html = buildPDFHtml(previewCfg, data, true);
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }, [previewCfg]);
-    const previewPaneRef = useRef4(null);
-    const [paneW, setPaneW] = useState4(760);
-    const [_paneH, setPaneH] = useState4(520);
-    useEffect3(() => {
+    const previewPaneRef = useRef7(null);
+    const [paneW, setPaneW] = useState7(760);
+    const [_paneH, setPaneH] = useState7(520);
+    useEffect6(() => {
       const el = previewPaneRef.current;
       if (!el) return;
       const obs = new ResizeObserver(([e]) => {
@@ -20820,12 +20925,12 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     const _ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
     const pageW = Math.round((cfg.orientation === "landscape" ? _ps.h : _ps.w) * 96);
     const pageH = Math.round((cfg.orientation === "landscape" ? _ps.w : _ps.h) * 96);
-    const iframeRef = useRef4(null);
-    const [iframeH, setIframeH] = useState4(pageH);
-    useEffect3(() => {
+    const iframeRef = useRef7(null);
+    const [iframeH, setIframeH] = useState7(pageH);
+    useEffect6(() => {
       setIframeH(pageH);
     }, [pageH]);
-    useEffect3(() => {
+    useEffect6(() => {
       const handler = (e) => {
         if (e.origin !== window.location.origin) return;
         if (e.data?.type === "planarPreviewHeight") setIframeH(Math.max(pageH, e.data.h));
@@ -20834,7 +20939,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return () => window.removeEventListener("message", handler);
     }, [pageH]);
     const fitScale = Math.min(1, (paneW - 48) / pageW);
-    const [previewZoom, setPreviewZoom] = useState4(1);
+    const [previewZoom, setPreviewZoom] = useState7(1);
     const scale = fitScale * previewZoom;
     const zoomTo = (z) => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
     const fitWidth = () => {
@@ -20843,11 +20948,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     };
     const setTimeUnit = (u) => upd({ timeUnit: u, zoomMul: 1, panFrac: 0 });
     const bumpScale = (f) => upd({ zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul || 1) * f)) });
-    const [panMode, setPanMode] = useState4(false);
-    const panRef = useRef4(null);
-    const overlayRef = useRef4(null);
-    const flushRef = useRef4(0);
-    useEffect3(() => {
+    const [panMode, setPanMode] = useState7(false);
+    const panRef = useRef7(null);
+    const overlayRef = useRef7(null);
+    const flushRef = useRef7(0);
+    useEffect6(() => {
       const el = overlayRef.current;
       if (!el || !panMode) return;
       const pane = previewPaneRef.current;
@@ -21255,7 +21360,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     onCancel,
     onDelete
   }) {
-    const [hover, setHover] = useState4(false);
+    const [hover, setHover] = useState7(false);
     return /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -21372,7 +21477,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     );
   }
   function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
-    const [dateEdit, setDateEdit] = useState4(false);
+    const [dateEdit, setDateEdit] = useState7(false);
     return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 } }, dateEdit ? /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -21449,13 +21554,13 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ))));
   }
   function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
-    const [draftText, setDraftText] = useState4(() => initChar || "");
-    const [draftDate, setDraftDate] = useState4(() => NOW);
-    const [edit, setEdit] = useState4(null);
-    const [editText, setEditText] = useState4("");
-    const [editDate, setEditDate] = useState4("");
-    const [menuOpen, setMenuOpen] = useState4(false);
-    const [confirmClear, setConfirmClear] = useState4(false);
+    const [draftText, setDraftText] = useState7(() => initChar || "");
+    const [draftDate, setDraftDate] = useState7(() => NOW);
+    const [edit, setEdit] = useState7(null);
+    const [editText, setEditText] = useState7("");
+    const [editDate, setEditDate] = useState7("");
+    const [menuOpen, setMenuOpen] = useState7(false);
+    const [confirmClear, setConfirmClear] = useState7(false);
     const defSize = (() => {
       try {
         return localStorage.getItem("planar_noteSize") || "sm";
@@ -21464,14 +21569,14 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       }
     })();
     const noteFs = (n) => NOTE_SIZES.find((s) => s.k === (n.size || defSize))?.px ?? 13;
-    const taRef = useRef4(null);
-    const backdropRef = useRef4(null);
-    const downOnBackdropRef = useRef4(false);
-    const editRef = useRef4(null);
-    useEffect3(() => {
+    const taRef = useRef7(null);
+    const backdropRef = useRef7(null);
+    const downOnBackdropRef = useRef7(false);
+    const editRef = useRef7(null);
+    useEffect6(() => {
       editRef.current = edit;
     }, [edit]);
-    useEffect3(() => {
+    useEffect6(() => {
       const ta = taRef.current;
       if (ta) {
         const len = ta.value.length;
@@ -21479,7 +21584,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         ta.selectionStart = ta.selectionEnd = len;
       }
     }, []);
-    useEffect3(() => {
+    useEffect6(() => {
       const handler = (e) => {
         if (e.key !== "Escape") return;
         if (editRef.current) {
@@ -22627,10 +22732,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   exposeToHarness({
     removeScheduleFromDoc: [() => removeScheduleFromDoc],
     logMergeToastEvent: [() => logMergeToastEvent],
-    GRID_LINE: [() => GRID_LINE],
-    GRID_LINE_RANGE: [() => GRID_LINE_RANGE],
     ROW_COLORS: [() => ROW_COLORS],
-    pinnedFillLayers: [() => pinnedFillLayers],
     SAFE_COLOR_RE: [() => SAFE_COLOR_RE],
     isValidColor: [() => isValidColor],
     FONT_SIZE_STEPS: [() => FONT_SIZE_STEPS],
@@ -22645,42 +22747,6 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     LOAD_RETRY_BASE_MS: [() => LOAD_RETRY_BASE_MS],
     LOAD_RETRY_MAX_MS: [() => LOAD_RETRY_MAX_MS],
     SEED: [() => SEED],
-    lastRowPointerType: [() => lastRowPointerType, (v) => {
-      lastRowPointerType = v;
-    }],
-    COLS: [() => COLS],
-    TOTAL_W: [() => TOTAL_W],
-    COL_BY_K: [() => COL_BY_K],
-    DEFAULT_GRID_COLS: [() => DEFAULT_GRID_COLS],
-    formulaColsOf: [() => formulaColsOf],
-    readGridCfg: [() => readGridCfg],
-    writeGridCfg: [() => writeGridCfg],
-    COL_LABELS: [() => COL_LABELS],
-    colLabel: [() => colLabel],
-    formulaColToColDef: [() => formulaColToColDef],
-    effectiveColsOf: [() => effectiveColsOf],
-    activeEffectiveCols: [() => activeEffectiveCols],
-    _pfDateRef: [() => _pfDateRef],
-    _pfNumOrBlank: [() => _pfNumOrBlank],
-    _pfCostRef: [() => _pfCostRef],
-    FORMULA_BUILTIN_REFS: [() => FORMULA_BUILTIN_REFS],
-    formulaCalendar: [() => formulaCalendar],
-    formulaToday: [() => formulaToday],
-    _formulaBuiltinMap: [() => _formulaBuiltinMap],
-    buildFormulaRowColumns: [() => buildFormulaRowColumns],
-    formulaColumnNames: [() => formulaColumnNames],
-    isBuiltinFormulaName: [() => isBuiltinFormulaName],
-    computeFormulaValues: [() => computeFormulaValues],
-    stepVisibleColIdx: [() => stepVisibleColIdx],
-    stepGridRow: [() => stepGridRow],
-    ctrlJumpIndex: [() => ctrlJumpIndex],
-    gridCtrlArrowTarget: [() => gridCtrlArrowTarget],
-    gridCellBlank: [() => gridCellBlank],
-    focusGroupIds: [() => focusGroupIds],
-    rowCanFocus: [() => rowCanFocus],
-    focusChipTitle: [() => focusChipTitle],
-    focusToggleTarget: [() => focusToggleTarget],
-    focusReselectTarget: [() => focusReselectTarget],
     celebrateTaskComplete: [() => celebrateTaskComplete],
     notifyRowsDeleted: [() => notifyRowsDeleted],
     FOOTER_BTN_STYLE: [() => FOOTER_BTN_STYLE],
@@ -22730,7 +22796,6 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     withLastActiveSite: [() => withLastActiveSite],
     persistViewState: [() => persistViewState],
     pickActivePid: [() => pickActivePid],
-    activeProjectOf: [() => activeProjectOf],
     resolveViewState: [() => resolveViewState],
     App: [() => App],
     ProjDropdown: [() => ProjDropdown],
@@ -22740,36 +22805,6 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     CaretPopover: [() => CaretPopover],
     FormatMiniToolbar: [() => FormatMiniToolbar],
     TaskContextMenu: [() => TaskContextMenu],
-    HEALTH_COL_STYLES: [() => HEALTH_COL_STYLES],
-    HealthColHeaderIcon: [() => HealthColHeaderIcon],
-    HealthColHeader: [() => HealthColHeader],
-    STATUS_PALETTE: [() => STATUS_PALETTE],
-    StatusHeaderDropdown: [() => StatusHeaderDropdown],
-    NOTE_SIZES: [() => NOTE_SIZES],
-    NotesColHeader: [() => NotesColHeader],
-    GridColumnsChooser: [() => GridColumnsChooser],
-    GridHeaderMenu: [() => GridHeaderMenu],
-    FormulaColumnEditor: [() => FormulaColumnEditor],
-    GridView: [() => GridView],
-    PICKER_EVENT: [() => PICKER_EVENT],
-    HealthPicker: [() => HealthPicker],
-    StatusPicker: [() => StatusPicker],
-    predLagPlainEnglish: [() => predLagPlainEnglish],
-    PredEditor: [() => PredEditor],
-    TASK_ICON_PX: [() => TASK_ICON_PX],
-    TASK_ICON_GAP: [() => TASK_ICON_GAP],
-    TASK_ICON_PAD: [() => TASK_ICON_PAD],
-    TASK_ICON_AFTER: [() => TASK_ICON_AFTER],
-    taskIconsW: [() => taskIconsW],
-    TASK_ICON_UID: [() => TASK_ICON_UID, (v) => {
-      TASK_ICON_UID = v;
-    }],
-    TaskIconGlyph: [() => TaskIconGlyph],
-    TaskIconPicker: [() => TaskIconPicker],
-    TaskIconSlot: [() => TaskIconSlot],
-    TaskIconPickerHost: [() => TaskIconPickerHost],
-    PhaseIconSummary: [() => PhaseIconSummary],
-    Cell: [() => Cell],
     MB_WD: [() => MB_WD],
     MB_POSITIONS: [() => MB_POSITIONS],
     MB_MONTHS: [() => MB_MONTHS],
