@@ -4,7 +4,9 @@
  * (2) every row reads a registry source at the county's own ArcGIS Online org and nothing rides the relay; (3) the click cards are CLEAN — plain labels, no raw field names,
  * no sentinel placeholders, no contact columns; (4) the floodway buffer is a map layer only and says it is not the screening buffer; (5) the registry fixtures exist per row and no fixture
  * invents a count (the host is unreachable from the build sandbox — the live endpoint truth is the V# pass). */
+// source-scan: the guard must read the pack FILE production loads (a wrong service URL there shipped once, #3041); the file cannot be inspected any other way than its text.
 import { describe, it, expect, vi, beforeAll } from "vitest";
+import { srcRead } from "./helpers/srcRead.js";
 
 vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(), featureLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
@@ -104,13 +106,12 @@ describe("every row reads a registry source at the county's own ArcGIS Online or
   it("the file production actually loads says the same: the lazy pack loader, the all-packs tooling copy and the file text on disk all carry the measured URLs", async () => {
     const { SOURCE_PACKS } = await import("../src/shared/gis/sourcePacks.js");
     const { PACKS_ALL } = await import("../src/shared/gis/sourcePacksAll.js");
-    const { readFileSync } = await import("node:fs");
     const loaded = await SOURCE_PACKS.find((p) => p.id === "waller").load(); // the exact path lazyLayerFiles.js takes in production
     for (const [key, url] of Object.entries(URLS)) {
       expect(loaded.sources[key].serviceUrl, `lazy pack ${key}`).toBe(url);
       expect(PACKS_ALL.waller.sources[key].serviceUrl, `all-packs ${key}`).toBe(url);
     }
-    const text = readFileSync(new URL("../src/shared/gis/sourcesWaller.js", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const text = srcRead("src/shared/gis/sourcesWaller.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(text).not.toMatch(/Brookshire_Katy_Drainage_District/);
     for (const svc of ["Proposed_Thoroughfare", "CPC_Protected_Properties_2024", "CPC_owned_2024", "CCN_Boundaries", "MUDs", "Floodway_Buffer_100ft"]) expect(text, svc).toContain(svc);
   });
