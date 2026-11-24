@@ -354,7 +354,7 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack, repackFlushLayers } from "./lib/dogEar.js";
 import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth, designatedRowSides, withRowSide, withRowWidth, rowMarginFt } from "./lib/roadCrossSection.js";
 import { rowSideMinFt, rowSideCompass, signedOffsetFrom } from "./lib/roadRowBand.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
@@ -18482,30 +18482,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // parking field are derived by relayoutWallKids; a buffer / road is placed flush when added and does not
   // move on its own, so a change to the layers inside it (parking rows, a removed sidewalk) closes here.
   // Returns the SAME array when nothing moves (no dirty churn).
-  const repackFlushBeyond = (arr, b, side) => {
-    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
-    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
-    const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
-    const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
-    const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
-    const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road" || isWallTrailer(x);
-    let run = (isH ? b.h : b.w) / 2;
-    const moves = new Map();
-    // Derived layers (sidewalk, parking) keep their place; flush layers (buffer, road) pack beyond ALL of them.
-    const byPerp = (a, c) => perp(a) - perp(c);
-    [...kids.filter((x) => !flush(x)).sort(byPerp), ...kids.filter(flush).sort(byPerp)].forEach((x) => {
-      const d = depth(x);
-      if (flush(x)) {
-        const want = run + d / 2, l = local(x);
-        if (Math.abs(perp(x) - want) > 0.01) {
-          const off = rot2(isH ? l.x : sg * want, isH ? sg * want : l.y, b.rot);
-          moves.set(x.id, { cx: b.cx + off.x, cy: b.cy + off.y });
-        }
-      }
-      run += d;
-    });
-    return moves.size ? arr.map((x) => (moves.has(x.id) ? { ...x, ...moves.get(x.id) } : x)) : arr;
-  };
+  // B2671304 (×2) — ONE shared pack (lib/dogEar `repackFlushLayers`), the same one every refit and the load heal run.
+  const repackFlushBeyond = (arr, b, side) => repackFlushLayers(arr, b, side);
   // Is every side in `sides` a loaded dock wall?
   const sidesAreDock = (b, sides) => { const ds = dockSidesOf(b).dockSides; return sides.length > 0 && sides.every((s) => ds.includes(s)); };
   // Type a layer's DEPTH (a trailer's is ONE row's depth; a road's is its travel width).
