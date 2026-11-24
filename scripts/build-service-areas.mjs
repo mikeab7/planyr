@@ -59,6 +59,12 @@ if (want("fortbend")) {
   if (!rec) throw new Error("Fort Bend County TX not found in the county polygon asset");
   areas.fortbend = { label: "Fort Bend County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Waller County layers, 2026-11-24): `waller` — Waller County TX, from the SAME bundled county polygons as `harris` (no network). Rebuild just it with `--only=waller`. */
+if (want("waller")) {
+  const rec = index.counties.find((c) => c.state === "TX" && /^waller$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Waller County TX not found in the county polygon asset");
+  areas.waller = { label: "Waller County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 /* NEW-1 (Rutherford County TN zoning): `rutherford` = Rutherford County TN, from the SAME bundled county polygons as `harris` (no network). The county / Murfreesboro / Smyrna / La Vergne
  * zoning rows are declared for this area, so a Texas, Georgia, Mississippi or Nashville-side Tennessee site never lists them. */
 if (want("rutherford")) {

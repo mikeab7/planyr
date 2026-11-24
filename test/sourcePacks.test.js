@@ -171,7 +171,7 @@ function walk(dir, out = []) {
 }
 const SRC = path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname), "../src");
 const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-const PACK_FILE = /shared\/gis\/sources(Colorado|Georgia|Tennessee|Mississippi|RegistryOnly|Florida|Ok|HoustonMetro|TxCityZoning|SugarLand|FortBend|Nashville|NashvilleBuffers|Rutherford)\.js$/;
+const PACK_FILE = /shared\/gis\/sources(Colorado|Georgia|Tennessee|Mississippi|RegistryOnly|Florida|Ok|HoustonMetro|TxCityZoning|SugarLand|FortBend|Waller|Nashville|NashvilleBuffers|Rutherford)\.js$/;
 
 describe("the sweeps", () => {
   const files = walk(SRC);
@@ -195,7 +195,7 @@ describe("the sweeps", () => {
   it("no eager module reads a pack-only registry key — only the lazy layer file(s) that declare its pack (and the fixtures / pack files) may", async () => {
     const idx = await import(GIS + "sourcePackIndex.generated.js");
     const lf = await import(LIB + "lazyLayerFiles.js");
-    const fileOfLayer = (key) => ({ desoto: "desotoLayers", sugarland: "sugarLandLayers", fortbend: "fortBendLayers", nashville: "nashvilleLayers", nashvilleBuffers: "nashvilleBufferLayers", georgia: "georgiaLayers", colorado: "coloradoLayers", tennessee: "tennesseeLayers", mississippi: "mississippiLayers", florida: "floridaLayers", oklahoma: "oklahomaLayers", chambers: "chambersLayers", houstonMetro: "houstonMetroLayers", txCityZoning: "txCityZoningLayers" })[key];
+    const fileOfLayer = (key) => ({ desoto: "desotoLayers", sugarland: "sugarLandLayers", fortbend: "fortBendLayers", waller: "wallerLayers", nashville: "nashvilleLayers", nashvilleBuffers: "nashvilleBufferLayers", georgia: "georgiaLayers", colorado: "coloradoLayers", tennessee: "tennesseeLayers", mississippi: "mississippiLayers", florida: "floridaLayers", oklahoma: "oklahomaLayers", chambers: "chambersLayers", houstonMetro: "houstonMetroLayers", txCityZoning: "txCityZoningLayers" })[key];
     const ownersOf = (pack) => lf.LAZY_LAYER_FILES.filter((f) => f.packs.includes(pack)).map((f) => fileOfLayer(f.key) + ".js");
     const texts = Object.fromEntries(files.filter((f) => !PACK_FILE.test(f) && !/shared\/gis\/(sources|sourceFixtures|sourcePack)/.test(f) && !/sourcesAll|sourcePacks/.test(f)).map((f) => [f, strip(readFileSync(f, "utf8"))]));
     const bad = [];

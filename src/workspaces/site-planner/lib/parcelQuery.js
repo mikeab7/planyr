@@ -71,12 +71,27 @@ export function situsFor(county, attrs) {
   return (c?.addrParts && composeSitus(attrs, c.addrParts)) || situsAddress(attrs);
 }
 
+/* NEW-1 (Meriwether GA, 2026-11) — the LIKE pattern body for an id search. A county may store its parcel number SPACE-PADDED
+ * ("023    012", "004    016 001") while the card collapses the spaces ("023 012"), so a typed "023 012" never matched. The typed id is cut
+ * into tokens on whitespace and punctuation (space - . / , _ #) and the tokens are matched IN ORDER with anything between them
+ * (`023%012`), so "023 012", "023-012" and the padded form all find the same lot. A single token is left as typed — unless the county
+ * row declares `idSpread` (a padded id column), where a run of 4+ letters/digits is also matched across ANY gap ("023012" → `0%2%3%0%1%2`).
+ * `tokens: false` (a county with its own id normaliser, TN) keeps the typed value verbatim. Pure; the caller escapes quotes. */
+export function idLikePattern(v, { tokens = true, spread = false } = {}) {
+  const typed = String(v ?? "").trim();
+  if (!tokens) return typed;
+  const toks = typed.split(/[\s\-.\/,_#]+/).filter(Boolean);
+  if (toks.length >= 2) return toks.join("%");
+  if (spread && toks.length === 1 && /^[A-Za-z0-9]{4,}$/.test(toks[0])) return toks[0].split("").join("%");
+  return toks.length === 1 ? toks[0] : typed;
+}
+
 /* Build the where-clause for one search. `meta` is the layer's live field metadata
  * (used to pick equality-vs-LIKE for a numeric id field and to confirm the scope
  * field exists). Throws a plain Error for a config problem (missing/odd field name) —
  * distinct from a ParcelFetchError, so a caller can tell "bad query" from "server
  * down". */
-export function buildParcelWhere({ meta, mode, value, idField, addrField, addrParts = null, scopeWhere }) {
+export function buildParcelWhere({ meta, mode, value, idField, addrField, addrParts = null, scopeWhere, idTokens = true, idSpread = false }) {
   if (idField && !okField(idField)) throw new Error("Unexpected parcel-ID field name on this layer.");
   if (addrField && !okField(addrField)) throw new Error("Unexpected address field name on this layer.");
   const v = String(value ?? "").trim();
@@ -87,7 +102,11 @@ export function buildParcelWhere({ meta, mode, value, idField, addrField, addrPa
     if (!idField) throw new Error("No account/parcel-id field on this layer — try an address search.");
     const fld = fields.find((f) => f.name === idField);
     const numeric = fld && /integer|double|single|oid|smallinteger/i.test(fld.type);
-    where = numeric && /^\d+$/.test(v) ? `${idField} = ${v}` : `UPPER(${idField}) LIKE UPPER('%${esc}%')`;
+    if (numeric && /^\d+$/.test(v)) where = `${idField} = ${v}`;
+    else {
+      const pat = idLikePattern(v, { tokens: idTokens, spread: idSpread });
+      where = `UPPER(${idField}) LIKE UPPER('%${pat.replace(/'/g, "''")}%')`;
+    }
   } else {
     /* A county whose situs is split across columns (lib/addrParts.js) is searched on those columns; the single `addrField` LIKE is the
      * fallback when none is declared or the layer no longer carries the declared ones. */
@@ -166,12 +185,12 @@ export function idAttrFor(county, attrs) {
 
 // Run one ID/address query against a single layer; returns the matched features plus
 // the resolved layer + detected field names (so the caller can import a result).
-async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, addrParts, scopeWhere, pinId, pinAddr, timeoutMs }) {
+async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, addrParts, scopeWhere, idTokens, idSpread, pinId, pinAddr, timeoutMs }) {
   const layerUrl = await resolveLayerUrl(rawUrl, { timeoutMs });
   const meta = await getLayerInfo(layerUrl, { timeoutMs });
   const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
   const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
-  const where = buildParcelWhere({ meta, mode, value, idField, addrField, addrParts, scopeWhere });
+  const where = buildParcelWhere({ meta, mode, value, idField, addrField, addrParts, scopeWhere, idTokens, idSpread });
   // NEW-1 (Iowa second pass) — a layer that stacks rows on one lot (counties.js `pointOrderBy`) is asked newest-first, and one lot is listed once.
   const orderBy = pointOrderByForUrl(layerUrl);
   /* NEW-1/2/3 (stacked rows, lib/parcelStack.js) — a layer that returns several rows for one lot declares `dedupeBy`; the search then lists a LOT once. Bartow (`distinct`) asks the server for the distinct
@@ -217,6 +236,8 @@ export async function lookupParcels({ county, lookupUrl, mode, value, timeoutMs 
       addrHint: COUNTIES[county]?.addrField,
       addrParts: COUNTIES[county]?.addrParts,
       scopeWhere: COUNTIES[county]?.scopeWhere,
+      idTokens: !COUNTIES[county]?.idNormalizer,
+      idSpread: !!COUNTIES[county]?.idPadded,
       pinId: !!COUNTIES[county]?.pinIdField,
       pinAddr: !!COUNTIES[county]?.pinAddrField,
       timeoutMs,

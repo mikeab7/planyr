@@ -67,6 +67,18 @@ export const PARCEL_FIXTURES = {
       { id: "0070-0164-025", owner: "GEORGIA GARAGE LLC", acres: 0.58 },
     ],
   },
+  ga_meriwether: {
+    // NEW-4 (2026-11-24) — the sweep's own 2026-11-22 readings (Parcel_No is stored SPACE-PADDED, so the ids below are the padded form). ⚠ NOT re-measured by the session that added it:
+    // services9.arcgis.com is blocked in the Claude Code sandbox, so `acresField: "Acres"` is a GUESS at the column the sweep's acreage came from and `ownerField` is left to the app's `ownerKey`.
+    // The FIRST nightly run is the live check: a red Meriwether row there means a wrong field guess, not a moved lot — re-measure from a browser before trusting either.
+    idField: "Parcel_No", acresField: "Acres", probed: "2026-11-22",
+    parcels: [
+      { id: "023    012", owner: "WEYERHAEUSER COMPANY", acres: 1804.34 },
+      { id: "112    001", owner: "STATE OF GA", acres: 2975 },
+      { id: "069A   009", owner: "BASWELL CHRISTOPHER SHANE", acres: 4.36 },
+      { id: "002    008 001", owner: "J M ROLL OFF & RECYCLING LLC", acres: 41.21 },
+    ],
+  },
   chambers: {
     // ⚠ NOT re-measured by the session that added it: gisdata.pandai.com is blocked in the Claude Code sandbox and is not on the
     // gis-proxy allow-list, so these three rows are the weekly sweep's own 2026-11-01 readings. `ownerField` is left to the app's
