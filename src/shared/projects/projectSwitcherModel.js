@@ -1,3 +1,4 @@
+import { shortMonthDay } from "../units/dateFormat.js";
 /* The project switcher dropdown's pure model (NEW-1, breadcrumb project picker restyle).
  *
  * Three things live here so the dropdown and its tests can never disagree about them:
@@ -86,11 +87,7 @@ export function orderForSwitcher(list = [], currentId = null, pinnedIds = [], op
   ];
 }
 
-/* One formatter for the whole session. `Date#toLocaleDateString(locale, opts)` builds a fresh Intl.DateTimeFormat on every call (~1.5 ms each in
- * Chrome), and the project switcher renders a row per project on EVERY render of the header — measured on a 143-plan account at 213 ms of one plan
- * open (NEW-1, B2224000). Same locale (the default), same options → the same string. */
-let shortDateFmt = null;
-const shortDate = (t) => (shortDateFmt || (shortDateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }))).format(new Date(t));
+const shortDate = shortMonthDay; // the session-wide Intl formatter lives in shared/units/dateFormat.js (B2224000)
 
 /** Short row time: "now", "12m", "4h", "3d", "2w", then a short date for anything over ~a month. */
 export function relTimeShort(ts, now = Date.now()) {

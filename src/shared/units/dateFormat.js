@@ -121,3 +121,13 @@ export function dashboardShort(iso, nowMs = Date.now()) {
   return month <= 1 ? "1mo ago" : `${month}mo ago`;
 }
 
+
+/* ---- SHORT DATES (audit M2). Bodies copied verbatim from the call sites they replace. ---- */
+// "Nov 24" - month + day in the browser locale. One Intl formatter for the session: Date#toLocaleDateString builds a fresh
+// formatter per call and the project switcher renders a row per project on every header render (B2224000).
+let shortMonthDayFmt = null;
+export const shortMonthDay = (t) => (shortMonthDayFmt || (shortMonthDayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }))).format(new Date(t));
+// "Nov 24, 2026" - month, day and year from an ISO/ms stamp; unparseable or empty reads "" (Library file rows).
+export function shortDateWithYear(s) {
+  try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; }
+}

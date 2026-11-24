@@ -23,6 +23,7 @@ import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { windowFeatures, WINDOW_PAD_M } from "./featureWindow.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 import { ageWordsLong } from "../../../shared/units/dateFormat.js";
+import { acresTiered } from "../../../shared/units/numberFormat.js";
 
 const FT_PER_MI = 5280;
 const EDGE = 1e-6; // a feature EXACTLY at the radius is inside it (≤, not <): float dust must not flip that
@@ -351,7 +352,7 @@ export function severityWells(m, t = CHECK_THRESHOLDS) {
 
 /* ── copy ────────────────────────────────────────────────────────────────────────────────────── */
 const pct = (f) => (f >= 0.995 ? "100%" : f < 0.01 ? "<1%" : `${Math.round(f * 100)}%`);
-const acres = (a) => (a < 0.1 ? "<0.1 AC" : `${a < 10 ? a.toFixed(1) : Math.round(a)} AC`);
+const acres = acresTiered;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 export const NONE_NEAR = "None within a quarter mile";
 
