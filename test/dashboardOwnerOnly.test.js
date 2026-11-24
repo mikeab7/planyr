@@ -1,3 +1,4 @@
+// source-scan: the Shell is a React component that cannot run in node; its gate wiring can only be pinned by reading its source.
 /* The Dashboard is owner-only (2026-11-24): one gate (the admin is_admin() answer), everyone else
  * lands on the Map and the Dashboard never mounts (so none of its data is fetched). */
 import { describe, it, expect, beforeEach } from "vitest";
