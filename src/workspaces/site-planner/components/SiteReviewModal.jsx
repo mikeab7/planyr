@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { pendingLegacySites, importOneSiteToCloud, discardLegacySite, isEmptySite } from "../lib/storage.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { Dialog } from "../../../shared/ui/controls.jsx";
 
 const F = "system-ui, -apple-system, sans-serif";
 
@@ -50,13 +51,6 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
   const savedCount = Object.values(decisions).filter((v) => v === "saved").length;
   const decidedCount = Object.values(decisions).filter((v) => v === "saved" || v === "skipped" || v === "discarded").length;
 
-  // B532: dismiss with Escape (the scrim-click already closes; the keyboard path was missing).
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(savedCount); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, savedCount]);
-
   const handleSave = async (id) => {
     setDecisions((d) => ({ ...d, [id]: "saving" }));
     const r = await importOneSiteToCloud(uid, id);
@@ -102,21 +96,13 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
   const progress = sites.length > 0 ? (decidedCount / sites.length) * 100 : 0;
 
   return (
-    <div
+    <Dialog onClose={() => onClose(savedCount)} label="Review unsaved on-device sites" z={5000} scrim="rgba(8,10,20,0.75)" padding={0}
+      width="min(520px, 100%)"
       style={{
-        position: "fixed", inset: 0, zIndex: 5000,
-        background: "rgba(8,10,20,0.75)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 16, fontFamily: F,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(savedCount); }}
-    >
-      <div role="dialog" aria-modal="true" aria-label="Review unsaved on-device sites" style={{
-        background: "#181f35", color: "#e4ecff",
+        background: "#181f35", color: "#e4ecff", fontFamily: F,
         border: "1px solid #273560", borderRadius: 14,
-        width: "100%", maxWidth: 520,
         boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
-        display: "flex", flexDirection: "column", maxHeight: "88vh",
+        display: "flex", flexDirection: "column", maxHeight: "88vh", overflowY: "visible",
       }}>
 
         {/* Header */}
@@ -342,7 +328,6 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
           </button>
         </div>
 
-      </div>
-    </div>
+    </Dialog>
   );
 }

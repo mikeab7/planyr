@@ -99,6 +99,16 @@ const appApi = {
   dismissByKey(key) { const n = appToasts.filter((t) => !t || t.dedupeKey !== key); if (n.length !== appToasts.length) { appToasts = n; emitApp(); } },
 };
 export function useToast() { return appApi; }
+/* One module's single "current notice" line as an app toast (audit M2). Returns `setNotice(text)`: a non-empty string shows it
+ * (a new one REPLACES the last, in place — the `dedupeKey`), "" / null clears it, and the toast is withdrawn when the module
+ * unmounts so a notice never outlives the surface that raised it. `testId` keeps a surface's own checks finding it. */
+export function useNoticeToast(key, { testId, ttlMs = 15000 } = {}) {
+  useEffect(() => () => appApi.dismissByKey(key), [key]);
+  return useCallback((text) => {
+    if (text) appApi.show({ text: String(text), dedupeKey: key, testId, ttlMs });
+    else appApi.dismissByKey(key);
+  }, [key, testId, ttlMs]);
+}
 export function AppToastHost() {
   const list = useSyncExternalStore(appSubscribe, appSnapshot, appSnapshot);
   const close = useCallback((id) => appApi.dismiss(id), []);

@@ -19,7 +19,7 @@
  * in (a hint collision), that is said plainly.
  * Module-scope components only (MODULE-SCOPE-COMPONENTS). Reached only when the address carries ?authlink=. */
 import { useEffect, useRef, useState } from "react";
-import { Button } from "../shared/ui/controls.jsx";
+import { Button, Dialog } from "../shared/ui/controls.jsx";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { parseAuthLinkSearch, stripAuthLinkParams, accountHint, landingPlan, SUPPORT_EMAIL } from "../shared/auth/authLink.js";
@@ -30,8 +30,6 @@ import { failureCopy, SUPPORT_MAILTO } from "../workspaces/site-planner/lib/emai
 import EmailLinkSent from "../workspaces/site-planner/components/EmailLinkSent.jsx";
 
 const AUTH_WAIT_MS = 4000;
-const overlay = { position: "fixed", inset: 0, zIndex: 5100, background: "var(--modal-scrim)", display: "grid", placeItems: "center", padding: 16 };
-const card = { background: "var(--surface-raised)", color: "var(--text-primary)", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)", padding: 22, width: 380, maxWidth: "100%", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: FONT_SIZE.emphasis, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", marginTop: 8 };
 
 function stripUrl() {
@@ -50,13 +48,14 @@ function recordProof(accessToken) {
 }
 
 function Shell({ title, children }) {
+  // A landing page, not a dismissible dialog: no Escape, no backdrop close (the person finishes or goes to sign in).
   return (
-    <div style={overlay} data-testid="auth-link-landing">
-      <div role="dialog" aria-modal="true" aria-label={title} style={card}>
-        <h2 style={{ margin: "0 0 10px", fontSize: 16 }} data-testid="auth-link-title">{title}</h2>
-        {children}
-      </div>
-    </div>
+    <Dialog onClose={() => {}} label={title} testId="auth-link-landing" z={5100} scrim="var(--modal-scrim)" width={380} padding={22}
+      dismissOnBackdrop={false} dismissOnEscape={false}
+      style={{ color: "var(--text-primary)", border: "none", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)", maxHeight: "92vh", boxSizing: "border-box", maxWidth: "100%" }}>
+      <h2 style={{ margin: "0 0 10px", fontSize: 16 }} data-testid="auth-link-title">{title}</h2>
+      {children}
+    </Dialog>
   );
 }
 

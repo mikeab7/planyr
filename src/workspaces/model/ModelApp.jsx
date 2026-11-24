@@ -35,6 +35,7 @@
  */
 import { useDashboardOwner, dashboardCopy } from "../../shared/ui/dashboardAccess.js";
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
+import { useNoticeToast } from "../../shared/ui/Toast.jsx";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -321,14 +322,8 @@ export default function ModelApp({
   }, []);
   const loadTokenRef = useRef(0);
   // A one-line, auto-dismissing message for anything a shortcut could not do — LOUD-FAILURE: no silent no-op.
-  const [notice, setNotice] = useState(null);
-  const noticeTimer = useRef(null);
-  const showNotice = useCallback((msg) => {
-    setNotice(msg);
-    clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(null), 7000);
-  }, []);
-  useEffect(() => () => clearTimeout(noticeTimer.current), []);
+  // The transient notice line is an app toast now (audit M2); `showNotice(msg)` keeps its signature. ~7 s, replaces the last one.
+  const showNotice = useNoticeToast("model-notice", { testId: "model-notice", ttlMs: 7000 });
   const fileMenuRef = useRef(null);
   // ORG SCOPE (NEW-1) — hoisted above the view-preference hooks below so they can key on the
   // right thing (a project id, or an org workbook id) without reordering any hook relative to
@@ -1025,12 +1020,6 @@ export default function ModelApp({
                 onReady={(h) => { univerHandleRef.current = h; }}
               />
             </Suspense>
-          )}
-          {notice && (
-            <div
-              role="status" data-testid="model-notice"
-              style={{ position: "fixed", left: "50%", bottom: 48, transform: "translateX(-50%)", zIndex: 65, maxWidth: "calc(100vw - 32px)", padding: "6px 12px", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: RADIUS.md }}
-            >{notice}</div>
           )}
         </>
       ) : orgMode ? (

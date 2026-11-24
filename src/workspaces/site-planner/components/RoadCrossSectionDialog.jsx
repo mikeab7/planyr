@@ -23,6 +23,7 @@
  * scope throughout (MODULE-SCOPE-COMPONENTS): XSectionPreview is a sibling function component, never
  * defined inside the dialog's render body. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Dialog } from "../../../shared/ui/controls.jsx";
 import {
   BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
@@ -436,12 +437,8 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
   const canApply = bands.length > 0 && c2c > 0;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Design road cross-section" data-testid="road-xsection-dialog"
-      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}
-      style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.42)", display: "grid", placeItems: "center", padding: 16 }}
-      onPointerDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div onPointerDown={(e) => e.stopPropagation()}
-        style={{ width: "min(720px, 100%)", maxHeight: "calc(100vh - 32px)", overflowY: "auto", background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.32)", padding: 18 }}>
+    <Dialog onClose={onCancel} label="Design road cross-section" testId="road-xsection-dialog" z={5000} width="min(720px, 100%)" padding={18}
+      style={{ border: "1px solid var(--planner-border)", borderRadius: 12 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Design road cross-section</div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3, lineHeight: 1.5 }}>
           An ordered list of bands across the road — travel lanes, a median, turn lane, shoulders, parking, sidewalks. Widths are measured across the centerline.
@@ -563,7 +560,6 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
             {mode === "edit" ? "Apply to this road" : "Use this section"}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

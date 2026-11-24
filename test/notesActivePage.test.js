@@ -60,4 +60,44 @@ describe("which page was open (readActivePageId/writeActivePageId)", () => {
     expect(store.readActivePageId("local")).toBe("home-page");
     expect(store.readActivePageId()).toBeNull();   // current scope ("u_activepage") is untouched
   });
+
+  it("remembers a page per project, and projects never read each other's", () => {
+    store.writeActivePageId("a1", undefined, "projA");
+    store.writeActivePageId("b1", undefined, "projB");
+    expect(store.readActivePageId(undefined, "projA")).toBe("a1");
+    expect(store.readActivePageId(undefined, "projB")).toBe("b1");
+    expect(store.readActivePageId(undefined, "projC")).toBeNull();
+    store.writeActivePageId("a2", undefined, "projA");
+    expect(store.readActivePageId(undefined, "projA")).toBe("a2");
+    expect(store.readActivePageId(undefined, "projB")).toBe("b1");
+  });
+
+  it("clearing one project's page leaves the others", () => {
+    store.writeActivePageId("a1", undefined, "projA");
+    store.writeActivePageId("b1", undefined, "projB");
+    store.writeActivePageId(null, undefined, "projA");
+    expect(store.readActivePageId(undefined, "projA")).toBeNull();
+    expect(store.readActivePageId(undefined, "projB")).toBe("b1");
+  });
+
+  it("a bare id written before per-project memory still reads, for any project (the caller proves visibility)", () => {
+    store.writeActivePageId("seed");
+    const k = [...mem.keys()][0];
+    mem.set(k, "legacy");   // the pre-change shape: a bare id string
+    expect(store.readActivePageId()).toBe("legacy");
+    expect(store.readActivePageId(undefined, "projA")).toBe("legacy");
+  });
+
+  it("per-project memory is account-scoped", () => {
+    store.setNotesScope("userA");
+    store.writeActivePageId("a-page", undefined, "projA");
+    store.setNotesScope("userB");
+    expect(store.readActivePageId(undefined, "projA")).toBeNull();
+  });
+
+  it("activeProjectKey names project, org and all routes distinctly", () => {
+    expect(store.activeProjectKey("p9", false)).toBe("p9");
+    expect(store.activeProjectKey(null, true)).toBe("org");
+    expect(store.activeProjectKey(null, false)).toBe("all");
+  });
 });
