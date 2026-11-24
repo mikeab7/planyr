@@ -1,3 +1,4 @@
+import { pointInPairRing as inRing } from "./ringMath.js";
 /* SERVICE AREAS — where a source actually serves (B2436066, Imagery & Layers NEW-3).
  *
  * A registry row declares `regions: ["harris"]` / `["houston"]` / `["bkdd"]`; this leaf answers "is this point inside that area?".
@@ -41,14 +42,6 @@ export function ensureServiceAreas() {
 export function _setServiceAreas(data) { DATA = data; loading = data ? Promise.resolve(data) : null; }
 
 
-function inRing(ring, x, y) {
-  let c = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
-  }
-  return c;
-}
 const inPolygon = (poly, x, y) => inRing(poly[0], x, y) && !poly.slice(1).some((h) => inRing(h, x, y));
 
 /* true / false, or null when it cannot be told (no location, or the area is unknown / not loaded). */

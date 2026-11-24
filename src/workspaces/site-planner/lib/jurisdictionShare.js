@@ -47,6 +47,7 @@
 
 import ClipperLib from "clipper-lib";
 
+import { pointInPairRing, distToSegmentXY } from "./ringMath.js";
 /* Clipper is an INTEGER engine. Metres × 1000 = millimetres, which is four orders of magnitude
  * finer than any published boundary and still far inside the 2^53 integer range for a site. */
 const SCALE = 1000;
@@ -79,14 +80,7 @@ export function signedArea(ring) {
 }
 
 // Even-odd point-in-ring. `ring` is [[x, y], …] in any consistent frame.
-export function pointInRing([px, py], ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
+export const pointInRing = ([px, py], ring) => pointInPairRing(ring, px, py);
 
 /* ⛔ RULE 1 — ESRI's `rings` is a FLAT array of outers AND holes, distinguished only by winding.
  * Returns [{ outer, holes: [] }, …]. A hole whose containing outer cannot be identified is kept
@@ -334,12 +328,7 @@ const segsOf = (polys, ref) => {
   }
   return segs;
 };
-const ptSegDist = (v, a, b) => {
-  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
-  let t = l2 ? ((v[0] - a[0]) * dx + (v[1] - a[1]) * dy) / l2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(v[0] - (a[0] + t * dx), v[1] - (a[1] + t * dy));
-};
+const ptSegDist = (v, a, b) => distToSegmentXY(v[0], v[1], a[0], a[1], b[0], b[1]);
 /* ⛔ SEGMENT TO SEGMENT, NOT VERTEX TO SEGMENT. A vertex-only sweep is not a distance between two
  * boundaries: where the OTHER side's vertex is the nearest point (a boundary corner poking at a
  * long straight lot line — exactly the shape of a strip annexation beside a rectangular tract) it

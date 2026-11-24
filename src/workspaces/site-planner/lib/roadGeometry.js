@@ -23,6 +23,7 @@
  * here depends on the axis sign. No React, no canvas helpers — unit-tested in
  * test/roadGeometry.test.js. */
 import { boundedCache, pointsSignature } from "./pureCache.js";
+import { distToSegment } from "./ringMath.js";
 
 
 export const DEFAULT_TESS_DEG = 6;       // ~1 tessellation point per 6° of arc / curve
@@ -1918,13 +1919,6 @@ export function nodeJunction(params) {
  * Returns { pts, vtx, dropped:[originalIndex] } or null. Pure — unit-tested. */
 export const ROAD_SIMPLIFY_TOL_FT = 1.5;
 
-function distToSegment(p, a, b) {
-  const d = sub(b, a), L2 = dot(d, d);
-  if (L2 < EPS) return len(sub(p, a));
-  let t = dot(sub(p, a), d) / L2;
-  t = Math.max(0, Math.min(1, t));
-  return len(sub(p, add(a, mul(d, t))));
-}
 // Farthest any point of `orig` sits from the polyline `keep` (both arrays of points).
 function maxOffset(orig, keep) {
   let worst = 0;

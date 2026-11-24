@@ -16,6 +16,12 @@
 import { bufferPolyline } from "./metesAndBounds.js";
 
 // Feet per degree of latitude (WGS84 mean, 69.047 mi × 5280). Longitude scales by cos(lat).
+// ⛔ Deliberately NOT `mapLock.js`'s FT_PER_DEG (365223, the Web-Mercator sphere base the planner's
+// SVG↔basemap lock is built on). That number only means something INSIDE the planner's frame, where
+// every drawn foot is Mercator-scaled to match the basemap. This module projects to a private flat
+// frame, buffers by a REAL ground width, and projects straight back, so it wants the true ground
+// length of a degree of latitude. The two differ by 0.18% (0.09 ft on a 50 ft corridor); the frame
+// cancels out of the round trip, only the buffer width sees it. B2671309 audited both; do not unify.
 const FT_PER_DEG_LAT = 364567;
 const D2R = Math.PI / 180;
 

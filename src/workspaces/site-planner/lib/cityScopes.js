@@ -1,3 +1,4 @@
+import { pointInPairRing as pointInRing } from "./ringMath.js";
 /* B1583296 — CITY-SCOPED PARCEL SOURCES: a genuine addition to how a point resolves to a parcel
  * source, not a config line.
  *
@@ -80,14 +81,6 @@
  * the nationwide asset's delta encoding exists to protect.
  */
 
-function pointInRing(ring, lng, lat) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
 
 // Roughly 150 m in degrees — matches countyPolygonsCore.js's NEAR_EDGE_DEG, the band inside which
 // this simplified boundary cannot be trusted to have picked the right side of the city line.
