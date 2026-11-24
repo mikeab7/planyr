@@ -52,8 +52,8 @@ export function useDrainageCheck({ drainSaveArmed, els, origin, parcels, setSett
     // measures the check and not the check minus its own module load.
     const checkT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
     const [{ beginGroundElevation }, dtim] = await Promise.all([
-      import("./lib/groundElevation.js"),
-      import("./lib/drainageTiming.js"),
+      import("./groundElevation.js"),
+      import("./drainageTiming.js"),
     ]);
     const { createDrainageTimer, buildDrainageTimingRow, reportDrainageTiming, wseLegName, armDrainageSaveLeg, SAVE_ATTRIBUTION_MS } = dtim;
     const timer = createDrainageTimer(undefined, checkT0);
@@ -338,7 +338,7 @@ export function useDrainageCheck({ drainSaveArmed, els, origin, parcels, setSett
           // were already happening. Started BEFORE the `await` below on purpose — kick it off, then
           // let it ride. A failed chunk fetch rejects at the await and lands in the existing catch,
           // which reports it as the named LOUD-FAILURE "could not run" state like any other outage.
-          const enginePromise = import("./lib/screeningBfeSite.js");
+          const enginePromise = import("./screeningBfeSite.js");
           const [wideR, pfdsR, soilsR] = await Promise.allSettled([
             loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
             resolvePfds({ lat: sLat, lng: sLng }),

@@ -84,7 +84,7 @@ export function usePrintHandlers({ composeMode, composePageOverride, composePrev
     setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
     preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false };
     setPrintMode(true); setComposeMode(false); setExportMenu(false); setSel(null);
-    import("./components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
+    import("../components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
   };
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
