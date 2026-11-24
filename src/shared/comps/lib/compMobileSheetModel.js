@@ -7,7 +7,7 @@
  * values are read off the same draft the desktop sheet edits (`draftToComp`, the column getters).
  */
 import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, formatNumberDisplay, sanitizeNumericInput, activeCellFlags } from "./compSheetColumns.js";
-import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate, validateComp, ucStatusLabel } from "./comps.js";
+import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate, validateComp, ucStatusLabel, avKindLabel } from "./comps.js";
 import { rowHasBlockingFlags } from "./compParse.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 import { usdFixed } from "../../units/numberFormat.js";
@@ -25,6 +25,7 @@ const money2 = (n) => money(n, 2);
 /** Party row labels on the phone: lease Landlord / Tenant, land + building sale Seller / Buyer. */
 export function mobilePartyLabels(compType) {
   if (compType === "under_construction") return { provider: "Developer", acquirer: "Tenant" };
+  if (compType === "available") return { provider: "Landlord", acquirer: "Listing broker" };
   return compType === "lease" ? { provider: "Landlord", acquirer: "Tenant" } : { provider: "Seller", acquirer: "Buyer" };
 }
 
@@ -131,7 +132,7 @@ export function hugWidthCh(text) {
 
 /* ---- Derived read-backs ------------------------------------------------------------------- */
 
-const sizeOf = (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" || d.compType === "under_construction" ? d.bldgSizeSf : d.leaseSizeSf);
+const sizeOf = (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" || d.compType === "under_construction" ? d.bldgSizeSf : d.leaseSizeSf); // available: leaseSizeSf = SF available
 const priceOf = (d) => (d.compType === "land" ? d.landPrice : d.bldgPrice);
 
 /** Quiet line under the Price row, or null until price AND size are both present.
@@ -177,6 +178,15 @@ export function footerReadback(draft) {
     if (sizeText) parts.push(`${sizeText} SF`);
     const months = col("leaseTerm").getValue(draft);
     if (months !== "" && months != null) parts.push(`${months} mo`);
+  } else if (draft.compType === "available") {
+    parts.push(draft.avKind === "sublease" ? "Sublease" : avKindLabel(draft.avKind) || "Available");
+    if (sizeText) parts.push(`${sizeText} SF available`);
+    if (draft.avDate) parts.push(`from ${String(draft.avDate).slice(0, 10)}`);
+    const rate = Number(draft.leaseRate);
+    if (draft.leaseRate !== "" && draft.leaseRate != null && rate > 0) {
+      const per = draft.leaseRatePeriod === "monthly" ? "/mo" : draft.leaseRatePeriod === "annual" ? "/yr" : " mo or yr?";
+      parts.push(`asking ${money2(rate)}/SF${per}`);
+    }
   } else if (draft.compType === "under_construction") {
     const st = ucStatusLabel(draft.ucStatus);
     if (st) parts.push(st);

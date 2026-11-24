@@ -76,6 +76,9 @@ export function orderVerbs(all, lastVerb, isAvailable = () => true) {
 export function verbLabel(key, selectedCount = 0) {
   if (key === "site") return selectedCount > 1 ? `Plan ${selectedCount} parcels` : "Plan this site";
   if (key === "comp") return "Log a comp";
+  // Owner-approved 2026-11-24: ONE row for supply (a building under construction or available space),
+  // with the choice inside it, to keep the Record info menu short.
+  if (key === "supply") return "Log supply";
   if (key === "siteplan") return "Place a site plan";
   // B1372144 — the fourth verb. Reads the same however much ground is selected, like "a comp" and
   // "a site plan": a note is one thing whatever it is pinned to. Only "site" varies with the count,

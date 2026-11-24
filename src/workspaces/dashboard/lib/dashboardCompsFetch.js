@@ -16,9 +16,9 @@ export async function fetchAllCompsForCard() {
   try {
     const { data, error } = await fetchAllComps();
     if (error) return [];
-    // Buildings under construction are competing SUPPLY, not transactions: the card compares a deal
-    // against its peer deals, so they never enter it (they live in Records and on the map).
-    return (data || []).filter((c) => c.compType !== "under_construction");
+    // Buildings under construction and available space are SUPPLY, not transactions: the card
+    // compares a deal against its peer deals, so they never enter it (they live in Records and on the map).
+    return (data || []).filter((c) => c.compType !== "under_construction" && c.compType !== "available");
   } catch (_) {
     return [];
   }

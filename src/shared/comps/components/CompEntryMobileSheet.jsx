@@ -24,7 +24,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
-import { cellState, TYPE_OPTIONS, UC_STATUS_OPTIONS, UC_KIND_OPTIONS } from "../lib/compSheetColumns.js";
+import { cellState, TYPE_OPTIONS, UC_STATUS_OPTIONS, UC_KIND_OPTIONS, AV_KIND_OPTIONS } from "../lib/compSheetColumns.js";
 import { rowStatusText } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
 import {
@@ -41,7 +41,7 @@ const VALUE_FS = 15; // design-exempt: deliberate 15px value size — the one th
 const NAME_FS = 18; // design-exempt: deliberate 18px deal name — the one headline on the sheet, typed in place
 
 // Segmented type order on the phone: the owner's order, Lease first.
-const TYPE_SEG = ["lease", "land", "building_sale", "under_construction"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg Sale", under_construction: "Constr." }[v] }));
+const TYPE_SEG = ["lease", "land", "building_sale", "under_construction", "available"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg Sale", under_construction: "Constr.", available: "Avail." }[v] }));
 const UC_STATUS_SEG = UC_STATUS_OPTIONS;
 const UC_KIND_SEG = UC_KIND_OPTIONS;
 const TYPE_LABEL = Object.fromEntries(TYPE_OPTIONS.map((o) => [o.value, o.label]));
@@ -351,7 +351,7 @@ export default function CompEntryMobileSheet({
   // same pass would overwrite the first); the effect re-runs on the rows it just changed.
   useEffect(() => {
     for (const r of rows) {
-      if (r.draft.compType !== "lease" && r.draft.compType !== "under_construction") continue;
+      if (r.draft.compType !== "lease" && r.draft.compType !== "under_construction" && r.draft.compType !== "available") continue;
       const step = periodGuessStep({ rate: r.draft.leaseRate, period: r.draft.leaseRatePeriod, guessed: !!guessed[r._id], locked: !!locked[r._id] });
       if (!step) continue;
       if (step.period && r.cellFlags?.leaseRatePeriod?.level === "blocking") onResolvePeriod(r._id, step.period);
@@ -428,7 +428,8 @@ export default function CompEntryMobileSheet({
   const placed = !!draft.anchor; // a pending reverse-geocode still counts as placed — never "Place on map"
   const isLease = compType === "lease";
   const isUC = compType === "under_construction"; // competing supply: asking rate + construction facts, never a price
-  const hasRateCard = isLease || isUC;
+  const isAvail = compType === "available"; // a vacancy: asking rate + availability facts, never a price
+  const hasRateCard = isLease || isUC || isAvail;
   const isLand = compType === "land";
   const parties = mobilePartyLabels(compType);
   const flag = currentRow.cellFlags?.leaseRatePeriod;
@@ -527,7 +528,7 @@ export default function CompEntryMobileSheet({
           <InputRow {...common} col={cl("partyAcquirer")} label={parties.acquirer} />
           <InputRow {...common} col={cl("partyProvider")} label={parties.provider} />
           <InputRow
-            {...common} col={cl("size")} label="Size"
+            {...common} col={cl("size")} label={isAvail ? "Available" : "Size"}
             suffix={isLand ? null : "SF"}
             trailing={isLand ? (
               <Segmented label="Size unit" value={draft.landSizeUnit === "ac" ? "ac" : "sf"}
@@ -555,8 +556,18 @@ export default function CompEntryMobileSheet({
           </Group>
         )}
 
+        {isAvail && (
+          <Group title="Availability">
+            <div style={{ padding: "10px 16px 4px" }}>
+              <Segmented fill label="Direct or sublease" value={draft.avKind || ""} options={AV_KIND_OPTIONS}
+                onChange={(v) => commit(cl("avKind"), v)} />
+            </div>
+            <InputRow {...common} col={cl("avDate")} label="Available" />
+          </Group>
+        )}
+
         {hasRateCard && (
-          <Group title={isUC ? "Asking rate" : "Rent"}>
+          <Group title={isUC || isAvail ? "Asking rate" : "Rent"}>
             <InputRow
               {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" nudge={nudgeOn("period")}
               trailingIfValue

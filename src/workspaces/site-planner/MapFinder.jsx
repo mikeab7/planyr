@@ -93,7 +93,7 @@ import { GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 // NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
 // note in icons.jsx for why each shape was picked.
-import { CompIcon, SitePlanIcon, NoteIcon } from "./components/icons.jsx";
+import { CompIcon, SitePlanIcon, NoteIcon, SupplyIcon } from "./components/icons.jsx";
 import DealDatesForm from "./components/DealDatesForm.jsx";
 import {
   resolveLayerUrl,
@@ -155,7 +155,8 @@ import { cityNamesEffective, countiesCitiesOn } from "./lib/placeNamesSuppress.j
 import { setStateLineEmphasis } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
-import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
+import { compMarkerSvg, compMarkerSize, compMarkerColor } from "../../shared/comps/lib/compMarkerIcon.js";
+import { BinBackRow } from "../../shared/ui/menuBin.jsx";
 // B1372144 (map notes) — a note is a comp's ANCHOR with a note's payload. It reuses this file's
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
@@ -554,6 +555,12 @@ function RailTab({ label, count, active, onClick, title }) {
     </button>
   );
 }
+
+/* The "Log supply" choice (Record info menu, owner-approved 2026-11-24): each is a comps-table type. */
+const SUPPLY_CHOICES = [
+  { type: "under_construction", label: "Under construction", subtitle: "A building going up, spec or build-to-suit" },
+  { type: "available", label: "Available space", subtitle: "A vacancy: direct or sublease" },
+];
 
 function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, focusCompReveal = false, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
@@ -2494,7 +2501,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         // A building under construction has no executed date: its tooltip says when it delivers instead.
-        const tipWhen = c.compType === "under_construction" ? (c.ucDeliveryDate ? `delivers ${c.ucDeliveryDate}` : "") : (c.compDate || "");
+        const tipWhen = c.compType === "under_construction" ? (c.ucDeliveryDate ? `delivers ${c.ucDeliveryDate}` : "") : c.compType === "available" ? (c.avDate ? `available ${c.avDate}` : "") : (c.compDate || "");
         const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${tipWhen}`;
         if (!selectMode && !placingCompPin) {
           // B711329 — right-click a comp marker (any type, not just lease) to export its owning
@@ -3814,10 +3821,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       ? { ...cur, anchor: { ...cur.anchor, county } } : cur));
   };
 
-  const placeCompPinAt = async (latlng) => {
+  // `supplyType` (optional): the "Log supply" choice ("under_construction" | "available"), handed to
+  // the comps panel with the location so the new row starts as that type. Never stored on the anchor.
+  const placeCompPinAt = async (latlng, supplyType) => {
     setPlacingCompPin(false);
     const county = await resolveCompCounty(latlng.lat, latlng.lng, "pin");
-    onPlaceComp && onPlaceComp({ kind: "pin", lat: latlng.lat, lon: latlng.lng, county });
+    onPlaceComp && onPlaceComp({ kind: "pin", lat: latlng.lat, lon: latlng.lng, county, ...(supplyType ? { supplyType } : {}) });
   };
   const placeCompPinAtRef = useRef(placeCompPinAt);
   useEffect(() => { placeCompPinAtRef.current = placeCompPinAt; });
@@ -3835,10 +3844,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // for several — anchored at the assembly's own bbox-center (the same point a "Plan N parcels"
   // site would open on), carrying the toolbar's own already-computed acreage so it survives into
   // the comp instead of forcing Michael to re-type 66.17 by hand.
-  const placeCompOnSelectedParcel = () => {
+  const placeCompOnSelectedParcel = (supplyType) => {
     const anchor = compAnchorFromSelection(selected, asm);
     if (!anchor) return;
-    onPlaceComp && onPlaceComp(anchor);
+    onPlaceComp && onPlaceComp(supplyType ? { ...anchor, supplyType } : anchor);
     // NEW-1 (2026-09-24) — `finishGroundAction`, not a bare `clearSel()`: this verb finishes without
     // leaving the map, so it must exit select mode itself or the toolbar falls back to "Selecting…"
     // with nothing selected instead of its normal AT-REST row. See that helper's own comment.
@@ -3986,6 +3995,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * item was B1372144, which has now built the concept: `public.map_notes`, a marker, an editor and
    * a layer toggle. So the verb is added HERE, in this one table, rather than as a second entry
    * point beside the bar — which is what that instruction was protecting. */
+  const lastSupplyTypeRef = useRef("under_construction"); // what Enter repeats when "Log supply" leads
   const DECIDE_VERBS = [
     {
       key: "site",
@@ -4015,6 +4025,24 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (pin) return placeCompPinAt({ lat: pin.lat, lng: pin.lon });
       },
       // A comp needs somewhere to go: without `onPlaceComp` this whole flow has no receiver.
+      available: () => !!onPlaceComp,
+    },
+    {
+      /* Owner-approved 2026-11-24 ("log supply option with a choice inside of it"): a building under
+       * construction or available space (a vacancy). Same anchors and receiver as a comp; the choice
+       * rides along as `supplyType`. The Record info menu opens a second pane for the choice; Enter
+       * (sticky lead) repeats the last choice made. */
+      key: "supply",
+      accent: COMP_ACCENT,
+      onAccent: ON_COMP_ACCENT,
+      title: "Record a building under construction or available space on this ground",
+      run: (target, supplyType = lastSupplyTypeRef.current) => {
+        lastSupplyTypeRef.current = supplyType;
+        if (target === "parcels") return placeCompOnSelectedParcel(supplyType);
+        const pin = droppedPin;
+        clearDecidePin();
+        if (pin) return placeCompPinAt({ lat: pin.lat, lng: pin.lon }, supplyType);
+      },
       available: () => !!onPlaceComp,
     },
     {
@@ -4103,8 +4131,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const recordLeads = orderedVerbs[0]?.key !== "site" && recordVerbs.length > 0;
   const recordInfoAnchorRef = useRef(null);
   const [recordMenuOpen, setRecordMenuOpen] = useState(false);
+  // "main" (the verb list) or "supply" (the Log supply choice: under construction / available space).
+  const [recordMenuPane, setRecordMenuPane] = useState("main");
+  const closeRecordMenu = () => { setRecordMenuOpen(false); setRecordMenuPane("main"); };
   const RECORD_VERB_META = {
     comp: { Icon: CompIcon, subtitle: "Sale, lease, or land comp" },
+    supply: { Icon: SupplyIcon, subtitle: "Under construction or available space" },
     siteplan: { Icon: SitePlanIcon, subtitle: "Attach a drawing or concept" },
     note: { Icon: NoteIcon, subtitle: "Pin a comment to the map" },
   };
@@ -4873,9 +4905,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   <Button
                     ref={recordInfoAnchorRef}
                     variant={recordLeads ? "primary" : "ghost"}
-                    onClick={() => setRecordMenuOpen((o) => !o)}
+                    onClick={() => { setRecordMenuPane("main"); setRecordMenuOpen((o) => !o); }}
                     disabled={decideBusy}
-                    title="Log a comp, place a site plan, or add a note about this ground"
+                    title="Log a comp or supply, place a site plan, or add a note about this ground"
                     aria-haspopup="menu"
                     aria-expanded={recordMenuOpen}
                     data-testid="map-decide-record-info"
@@ -4893,19 +4925,47 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                   </Button>
                   <AnchoredMenu
                     open={recordMenuOpen}
-                    onClose={() => setRecordMenuOpen(false)}
+                    onClose={closeRecordMenu}
                     anchorRef={recordInfoAnchorRef}
                     placement="below-right"
-                    width={220}
+                    width={recordMenuPane === "supply" ? 250 : 220}
                   >
-                    {recordVerbs.map((v, i) => {
+                    {recordMenuPane === "supply" ? (
+                      <>
+                        <BinBackRow testId="map-decide-supply-back" label="Log supply" onClick={() => setRecordMenuPane("main")} />
+                        {SUPPLY_CHOICES.map((c, i) => (
+                          <Fragment key={c.type}>
+                            {i > 0 && <div style={{ height: 1, background: "var(--chrome-divider)", margin: "0 14px" }} />}
+                            <MenuItem
+                              onClick={() => {
+                                const v = verbsByKey.supply;
+                                closeRecordMenu();
+                                runDecideVerb({ ...v, run: (t) => v.run(t, c.type) }, decideTarget);
+                              }}
+                              disabled={decideBusy}
+                              data-testid={`map-decide-supply-${c.type}`}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}
+                            >
+                              <span aria-hidden="true" style={{ flex: "none", width: 10, height: 10, transform: "rotate(45deg)", background: compMarkerColor(c.type) }} />
+                              <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                                <span style={{ fontSize: FONT_SIZE.control, color: PAL.chromeInk, fontWeight: 500 }}>{c.label}</span>
+                                <span style={{ fontSize: FONT_SIZE.label, color: PAL.chromeMuted, fontWeight: 500 }}>{c.subtitle}</span>
+                              </span>
+                            </MenuItem>
+                          </Fragment>
+                        ))}
+                      </>
+                    ) : recordVerbs.map((v, i) => {
                       const meta = RECORD_VERB_META[v.key];
                       const Icon = meta?.Icon;
                       return (
                         <Fragment key={v.key}>
                           {i > 0 && <div style={{ height: 1, background: "var(--chrome-divider)", margin: "0 14px" }} />}
                           <MenuItem
-                            onClick={() => { setRecordMenuOpen(false); runDecideVerb(v, decideTarget); }}
+                            onClick={() => {
+                              if (v.key === "supply") { setRecordMenuPane("supply"); return; } // the choice is inside
+                              closeRecordMenu(); runDecideVerb(v, decideTarget);
+                            }}
                             disabled={decideBusy}
                             title={v.title}
                             data-testid={`map-decide-verb-${v.key}`}

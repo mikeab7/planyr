@@ -22,7 +22,7 @@
  *  · Search NEVER triggers geocoding: the caller passes `cachedLocation(comp)`, which may only read
  *    what is already resolved (B1497889's gating stays).
  */
-import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, parseLeaseTermYears, sortCompsByRecency, ucStatusLabel } from "./comps.js";
+import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, parseLeaseTermYears, sortCompsByRecency, ucStatusLabel, avKindLabel } from "./comps.js";
 import { compSizeSf, countyLabel } from "../../../workspaces/dashboard/lib/compsCardModel.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 import { usdUpTo2 } from "../../units/numberFormat.js";
@@ -39,7 +39,7 @@ export const SORT_OPTIONS = [
   { key: "psfHigh", label: "Price/SF high to low" },
   { key: "psfLow", label: "Price/SF low to high" },
 ];
-export const TYPE_FILTER_LABEL = { land: "Land", building_sale: "Bldg Sale", lease: "Lease", under_construction: "Under construction" };
+export const TYPE_FILTER_LABEL = { land: "Land", building_sale: "Bldg Sale", lease: "Lease", under_construction: "Under construction", available: "Available" };
 const RANGE = () => ({ min: "", max: "" });
 
 export function defaultFilters() {
@@ -60,7 +60,7 @@ export function defaultFilters() {
 export function typeScope(types) {
   const none = !types || types.length === 0;
   const has = (t) => none || types.includes(t);
-  return { lease: has("lease") || has("under_construction"), sale: has("building_sale"), land: has("land"), building: none || types.some((t) => t !== "land") };
+  return { lease: has("lease") || has("under_construction") || has("available"), sale: has("building_sale"), land: has("land"), building: none || types.some((t) => t !== "land") };
 }
 
 /** `filters` with every filter its types can no longer show reset. Pure; idempotent. */
@@ -134,6 +134,7 @@ export function matchesSearch(comp, tokens, { cachedLocation } = {}) {
   const parts = [
     comp?.title, comp?.notes, comp?.partyProvider, comp?.partyAcquirer, comp?.anchor?.parcelApn,
     comp?.compType === "under_construction" ? ucStatusLabel(comp.ucStatus) : null,
+    comp?.compType === "available" ? `available ${avKindLabel(comp.avKind) || ""}` : null,
     county, countyLabel(county), cachedLocation ? cachedLocation(comp) : null,
   ];
   const hay = parts.filter(Boolean).join("\n").toLowerCase();
@@ -181,7 +182,7 @@ export function salePsf(comp) {
   if (comp?.compType === "land") return landPricePerSf(comp);
   return null;
 }
-const isRateType = (comp) => comp?.compType === "lease" || comp?.compType === "under_construction";
+const isRateType = (comp) => comp?.compType === "lease" || comp?.compType === "under_construction" || comp?.compType === "available";
 /** The lease's annualised $/SF/yr whatever period it was entered in; null for non-leases. */
 export function leaseAnnualRate(comp) {
   return isRateType(comp) ? annualLeaseRate(comp) : null; // an under-construction ASKING rate reads through the same filter
