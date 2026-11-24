@@ -14,8 +14,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 const grid = seq.slice(seq.indexOf("function GridView("), seq.indexOf("// ── HealthPicker"));
 
 describe("Schedule grid — the right-edge strip reads as the row continuing (NEW-1)", () => {

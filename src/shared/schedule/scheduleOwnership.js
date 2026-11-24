@@ -46,8 +46,8 @@
 //    next-task-id counter and any last-active pointer — because this document is the whole account
 //    in one row and orphaned keys there are unbounded growth.
 //
-// This file is the single copy. The Schedule page loads public/sequence/engine.js, a bundle that includes it
-// (src/shared/schedule/engine/pageEntry.js); after editing run `npm run build:sequence-engine`.
+// This file is the single copy. The Schedule page loads public/sequence/page.js, a bundle that includes it
+// (src/shared/schedule/engine/pageEntry.js); after editing run `npm run build:sequence-page`.
 
 /* SCHEDULE-OWNERSHIP:START */
 

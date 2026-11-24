@@ -5,7 +5,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const page = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+import { sequencePageSource } from "./helpers/sequenceSource.js";
+const page = sequencePageSource();
 const appCss = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
 
 const block = (src, re) => {

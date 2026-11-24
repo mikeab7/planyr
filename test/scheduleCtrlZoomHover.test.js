@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { installModifierForward } from "../src/workspaces/scheduler/lib/modifierForward.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 // NEW-1 (2026-11-06) — "i want ctrl zoom to always work if im hovering over the schedule".
 // The browser half is ui-audit/verify-schedule-ctrl-zoom-hover.mjs (the real Schedule inside a parent page, focus parked
 // in a parent input, red on the pre-fix behaviour). This is the CI-runnable half: the shell's forwarder, and source guards
 // on the two ends of the bridge so neither can be quietly removed.
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const FRAME = read("../public/sequence/index.html");
+const FRAME = sequencePageSource();
 const SCHEDULER = read("../src/workspaces/scheduler/Scheduler.jsx");
 
 function fakeWindow() {

@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { stepGridRow } from "../src/workspaces/scheduler/lib/gridRowNav.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const NEW = "__NEW_TASK__";
 // Full schedule in visual order: 1 Group A { 2, 3 }, 4 Group B { 5, 6, 7 }, 8, 9.
 const ALL = [
@@ -93,7 +94,7 @@ describe("drift guard — the copy inlined in public/sequence/index.html is byte
     return source.slice(start, i);
   };
   const SIG = "function stepGridRow(flat, allTasks, selectedId, dir, lastIdx, topIdx) {";
-  const html = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+  const html = sequencePageSource();
   const lib = readFileSync(new URL("../src/workspaces/scheduler/lib/gridRowNav.js", import.meta.url), "utf8");
   it("bodies match character for character", () => {
     const a = extractFn(html, SIG), b = extractFn(lib, "export " + SIG);

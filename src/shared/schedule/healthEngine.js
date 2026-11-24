@@ -2,7 +2,7 @@
 //
 // B1953795 (S2/S4/S5) — the Scheduler's task-health rule engine + the ONE "is it complete / what %"
 // answer, as a real ES module. The Dashboard imports it directly; the Schedule page gets it through the
-// generated public/sequence/engine.js bundle (npm run build:sequence-engine), so there is ONE definition —
+// generated public/sequence/page.js bundle (npm run build:sequence-page), so there is ONE definition —
 // the old pasted copy inside index.html and its parity test are gone (audit batch J1).
 //
 // WHAT THIS DOES NOT COVER (said loudly, not hidden): the meeting-bound / deadline-row risk blocks of

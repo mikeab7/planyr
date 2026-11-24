@@ -11,13 +11,18 @@
  *      without an entry here — see shortcutsData.js's own header for that half of the discipline.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { statSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SHORTCUT_SECTIONS, ALL_SHORTCUT_ITEMS } from "../src/shared/keyboard/shortcutsData.js";
 import { KEY_CONTRACT } from "../src/workspaces/site-planner/lib/keyContract.js";
 import { formatCombo, comboAriaLabel, isApplePlatform } from "../src/shared/keyboard/platform.js";
+import { sequenceModulesSource } from "./helpers/sequenceSource.js";
 
-const repoFile = (p) => readFileSync(fileURLToPath(new URL(`../${p}`, import.meta.url)), "utf8");
+const repoFile = (p) => {
+  const abs = fileURLToPath(new URL(`../${p}`, import.meta.url));
+  // A cited DIRECTORY (the Schedule page's modules) means "somewhere in the source files under it".
+  return statSync(abs).isDirectory() ? sequenceModulesSource() : readFileSync(abs, "utf8");
+};
 
 describe("shortcutsData — structure", () => {
   it("every item has a unique id", () => {
