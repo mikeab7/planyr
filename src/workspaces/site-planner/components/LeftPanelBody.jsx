@@ -300,7 +300,7 @@ export const LeftPanelBody = memo(function LeftPanelBody({
                   {origin ? (
                     <div style={addMethodCard}>
                       <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address, or a parcel number, at the county and add the lot.</div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <input
                           value={addrQuery}
@@ -362,7 +362,7 @@ export const LeftPanelBody = memo(function LeftPanelBody({
                           {origin ? (
                             <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
                               <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address, or a parcel number, at the county and add the lot.</div>
                               <div style={{ display: "flex", gap: 6 }}>
                                 <input
                                   value={addrQuery}
