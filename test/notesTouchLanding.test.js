@@ -4,12 +4,13 @@
  * the three inset numbers pinned against the stylesheet text, and the wiring of the two view-hold
  * guards (so deleting one is red here, not discovered on a phone). */
 import { describe, expect, it } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import fs from "node:fs";
 import {
   BOX_INSET_X, BOX_INSET_TOP, BOX_FIRST_LINE_MARGIN_EM, touchBoxOrigin,
 } from "../src/workspaces/notes/lib/notesBlankPaper.js";
 
-const editorSrc = fs.readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+const editorSrc = noteEditorSource();
 
 describe("touchBoxOrigin", () => {
   it("puts the first glyph on the tap: corner = tap − insets", () => {

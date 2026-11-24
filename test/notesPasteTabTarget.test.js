@@ -5,9 +5,10 @@
  * measured 24 px tall. This pins the source rule so the tab cannot fall out of the touch block again; the rendered measurement is the
  * phone harness. */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync } from "node:fs";
 
-const SRC = readFileSync(new URL("../src/workspaces/notes/components/NoteEditor.jsx", import.meta.url), "utf8");
+const SRC = noteEditorSource();
 
 describe("paste tab touch target", () => {
   const coarse = SRC.split("\n").find((l) => l.includes("@media (pointer: coarse)") && l.includes(".planyr-paste-btn")) || "";

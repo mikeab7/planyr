@@ -11,6 +11,7 @@
  * under the eye across a step.
  */
 import { readFileSync } from "node:fs";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 
 import { describe, expect, it } from "vitest";
 
@@ -140,7 +141,7 @@ describe("the screen and the paper measure an anchored block the same way", () =
     const at = css.indexOf(`${sel} {`);
     return at < 0 ? "" : css.slice(at, css.indexOf("}", at));
   };
-  const screen = rule(read("../src/workspaces/notes/components/NoteEditor.jsx"), ".planyr-note .ProseMirror .planyr-anchor");
+  const screen = rule(noteEditorSource(), ".planyr-note .ProseMirror .planyr-anchor");
   const paper = rule(read("../src/workspaces/notes/lib/notesPrint.js"), ".note-body .planyr-anchor");
 
   it("both exist — a missing rule would silently drop the position on one of them", () => {

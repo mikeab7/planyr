@@ -12,6 +12,7 @@
  *   • A NOTE COULD NOT BE PRINTED (B1314) — the pure sheet builder.
  */
 import "fake-indexeddb/auto";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -456,7 +457,7 @@ describe("the print sheet", () => {
   });
 
   it("PDF-PARITY: every construct the screen styles is styled on the sheet as well", async () => {
-    const screenCss = await import("node:fs").then((fs) => fs.readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8"));
+    const screenCss = noteEditorSource();
     const sheet = buildPrintDocument({ title: "T", pages: [] });
     for (const construct of ["h1", "h2", "h3", "h4", "blockquote", "code", "pre", "hr", "table", "th", "img", "taskList"]) {
       expect(screenCss, `the screen must style ${construct}`).toContain(construct);

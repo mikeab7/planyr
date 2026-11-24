@@ -21,6 +21,7 @@
  * expect nothing. Neither half is sufficient alone and both are required to ship.
  */
 import { describe, expect, it } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync } from "node:fs";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
@@ -554,7 +555,7 @@ describe("⛔ a nested list is the next line of the list, not a new block (Tab v
   const nestedListGapRulePrint = /\.note-body li > ul,\s*\.note-body li > ol\s*\{\s*margin-top:\s*2px;?\s*\}/;
 
   it("EDITOR_CSS gives a list nested inside a list item the item gap, not the generic 1em block margin", () => {
-    const screenCss = readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+    const screenCss = noteEditorSource();
     expect(screenCss).toMatch(nestedListGapRule);
   });
 
@@ -568,7 +569,7 @@ describe("⛔ a nested list is the next line of the list, not a new block (Tab v
   });
 
   it("the generic block-margin rule is left alone — it still spans a list that follows a paragraph", () => {
-    const screenCss = readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+    const screenCss = noteEditorSource();
     expect(screenCss).toContain(".planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 1em 0 0 0; }");
   });
 });

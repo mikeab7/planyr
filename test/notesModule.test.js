@@ -11,6 +11,7 @@
  *   • an extension admitted into the schema that the Markdown exporter cannot spell.
  */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -28,7 +29,7 @@ import { deleteNode, restoreNode } from "../src/workspaces/notes/lib/notesModel.
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const NOTES = join(REPO, "src", "workspaces", "notes");
-const read = (...p) => readFileSync(join(...p), "utf8");
+const read = (...p) => (join(...p).endsWith(join("components", "NoteEditor.jsx")) ? noteEditorSource() : readFileSync(join(...p), "utf8")); // the editor is split across sibling modules (audit L1): read it whole
 const src = (rel) => read(NOTES, rel);
 
 /* Guards must scan CODE, not prose. Every one of these files documents the rule it obeys —
@@ -1282,7 +1283,7 @@ describe("the project a notebook belongs to", () => {
    * separate times — always in a COMMENT, where it reads as ordinary prose and nothing about it
    * looks like code. The failure is a parse error hundreds of lines away from the cause. */
   it("no backtick inside the editor's or the print sheet's CSS template literal", () => {
-    for (const [file, marker] of [["components/NoteEditor.jsx", "const EDITOR_CSS = `"], ["lib/notesPrint.js", "const PRINT_CSS = `"]]) {
+    for (const [file, marker] of [["components/NoteEditor.jsx", "EDITOR_CSS = `"], ["lib/notesPrint.js", "const PRINT_CSS = `"]]) {
       const src = read(NOTES, ...file.split("/"));
       const at = src.indexOf(marker);
       expect(at, `${file} no longer has ${marker}`).toBeGreaterThan(-1);

@@ -5,9 +5,10 @@
  * multi-select, a table box, text selection still visible) is
  * ui-audit/verify-notes-spacing-popover-selection.mjs (red on main: 0.08 / 0.16 accent alpha). */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync } from "node:fs";
 
-const editor = readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+const editor = noteEditorSource();
 const css = editor.slice(editor.indexOf("const EDITOR_CSS"), editor.indexOf("function EditorStyles"));
 const rulesFor = (needle) => css.split("\n").filter((l) => l.includes(needle) && l.includes("{") && !l.trim().startsWith("/*"));
 
