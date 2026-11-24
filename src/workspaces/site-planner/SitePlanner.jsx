@@ -47,7 +47,7 @@ import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
-import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
+import { measuresUnderPoint, nextMeasureSelection, measureGrabsInterior } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { CLOUD_ARC_DEFAULT_FT, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt } from "./lib/cloudGeometry.js";
@@ -270,7 +270,6 @@ import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
-import { looksLikeParcelNumber } from "./lib/parcelNumberShape.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
 import { resolveParcelLook, parcelPatchFor, parcelResetPatch, validateLook, ptToPx } from "./lib/parcelLook.js";
@@ -520,8 +519,13 @@ import { PondInspector } from "./components/PondInspector.jsx";
 import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components/PlannerContextMenus.jsx";
 import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
 import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
+import { MultiPropsInspector } from "./components/MultiPropsInspector.jsx";
+import { selectionKinds, fieldsFor, applyBulk } from "./lib/multiProps.js";
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
 import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
+import { useDrainageCheck } from "./lib/useDrainageCheck.js";
+import { useParcelIdentifyState, useParcelIdentify } from "./lib/useParcelIdentify.js";
+import { usePrintState, usePrintHandlers } from "./lib/usePrintCompose.js";
 import { BuildingNumberConflict, BuildingFootprintSection, BuildingLoadingSection, BuildingStructureSection, BuildingAppearanceSection } from "./components/BuildingInspectorSections.jsx";
 import { EasementInspector, MarkupStyleInspector, NeutralMarkupInspector } from "./components/MarkupInspector.jsx";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
@@ -648,34 +652,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
-  const [printMode, setPrintMode] = useState(false);     // print-frame placement mode
-  const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
-  const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
-  const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
-  const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
-  const [printMapLayers, setPrintMapLayers] = useState(true); // include the live GIS map layers (floodplain, pipelines, …) in print/export (B739) — default on ("what I see prints")
-  const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
-  // B765985 — the dedicated compose screen: entered after the on-canvas frame is picked.
-  const [composeMode, setComposeMode] = useState(false);
-  const [printScale, setPrintScale] = useState(null);     // explicit feet-per-inch (e.g. 40), or null = "Fit to frame" (today's behavior)
-  const [fitWarning, setFitWarning] = useState(null);      // set when an explicit scale can't show the picked area on the chosen sheet — never silently rescaled
-  // NEW-1 (B1783056) — the page itself takes the picked frame's own aspect (long edge at the
-  // chosen paper size) instead of a fixed sheet shape. Mutually exclusive with an explicit
-  // engineering scale (that mode already derives the frame FROM the sheet's plan box, which
-  // would be circular against a page shaped by the frame) — each setter below stands the other down.
-  const [printFitToFramePage, setPrintFitToFramePage] = useState(false);
-  const [composePageOverride, setComposePageOverride] = useState(null); // { w, h, wIn, hIn } from pageSizeForFit, or null for a standard sheet
-  const [composeBoxIn, setComposeBoxIn] = useState(null);  // { planW, planH, pageW, pageH } inches, resolved through the lazy export chunk
-  const [composePreviewUrl, setComposePreviewUrl] = useState(null);
-  const [composePreviewLoading, setComposePreviewLoading] = useState(false);
-  const [composeDownloading, setComposeDownloading] = useState(false);
-  const pickedFrameRef = useRef(null); // the frame as last picked/repositioned on canvas — the fit-check compares against THIS, never the scale-locked effective frame
-  // NEW-1 (B1783056) — orientation AUTO-FLIPS to match the picked frame once, when compose is
-  // entered (a default, not a lock); this latches true the moment the owner touches the
-  // Landscape/Portrait control so that explicit choice sticks for the rest of THIS compose.
-  const orientTouchedRef = useRef(false);
-  const composePreviewUrlRef = useRef(null);
-  const preCanvasDisplayRef = useRef(null); // showDims/showAreas as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
+  // B2671311 (G2) — the print/compose state cells, phase 1 of the two-phase hook in lib/usePrintCompose.js (handlers + effects: phase 2, further down).
+  const {
+    printMode, setPrintMode, printFrame, setPrintFrame, printPaper, setPrintPaper, printOrient, setPrintOrient, printOverlay, setPrintOverlay, printMapLayers, setPrintMapLayers, exportingPDF, setExportingPDF, composeMode, setComposeMode, printScale, setPrintScale, fitWarning, setFitWarning, printFitToFramePage, setPrintFitToFramePage, composePageOverride, setComposePageOverride, composeBoxIn, setComposeBoxIn, composePreviewUrl, setComposePreviewUrl, composePreviewLoading, setComposePreviewLoading, composeDownloading, setComposeDownloading, pickedFrameRef, orientTouchedRef, composePreviewUrlRef, preCanvasDisplayRef,
+  } = usePrintState();
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   /* B1469872 — this project's own "Recently deleted" plans: siblings soft-deleted from THIS group
    * while it still has a live plan (this menu is only reachable while that's true), which the
@@ -4437,7 +4417,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
-  const pushHistory = (kind = "edit") => { if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  // NEW-1 (bulk properties) — while a bulk edit runs, only the FIRST pushHistory of the batch records a frame, so one
+  // typed value on N elements is ONE undo step (the per-element writers each call pushHistory themselves).
+  const bulkHistRef = useRef(null);
+  const pushHistory = (kind = "edit") => { if (bulkHistRef.current) { if (bulkHistRef.current.pushed) return; bulkHistRef.current.pushed = true; } if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -11879,477 +11862,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * render from the stored context + live metrics, so pond/acreage edits update the
    * readout with zero refetch. A boundary change surfaces as an honest "re-check"
    * hint (sig mismatch), the old answer stays visible with its age. */
-  const [drainCtx, setDrainCtx] = useState(null); // null | {busy,prev?} | {error,prev?} | {ctx, sig, multiParcel}
-  const drainTok = useRef(0);
-  // Signature that must change whenever the checked geometry does — parcel COUNT + area
-  // AND a coarse centroid (in feet) + the georef origin, so a pure TRANSLATION (drag the
-  // whole parcel across a jurisdiction boundary, or re-georeference) also invalidates the
-  // cached answer. Area+count alone would miss a translation (same shape, new place).
-  const drainActive = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
-  const drainCentroid = drainActive.length
-    ? drainActive.flatMap((p) => p.points).reduce((s, pt, _i, arr) => [s[0] + pt.x / arr.length, s[1] + pt.y / arr.length], [0, 0])
-    : [0, 0];
-  // B712: the fill/pond elements DEFINE the flood-fetch envelope + the mitigation
-  // footprints, so their coarse envelope joins the signature — fill drawn or dragged
-  // beyond the checked envelope must surface the "re-check" hint, never screen
-  // against never-fetched flood zones as a silent all-clear.
-  const drainElsSig = (() => {
-    let n = 0, minX = 0, minY = 0, maxX = 0, maxY = 0, first = true;
-    for (const e of els) {
-      if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
-      let r; try { r = ringOf(e); } catch (_) { continue; }
-      if (!r || r.length < 3) continue;
-      n++;
-      for (const pt of r) {
-        if (first) { minX = maxX = pt.x; minY = maxY = pt.y; first = false; continue; }
-        if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
-        if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
-      }
-    }
-    return n + "@" + [minX, minY, maxX, maxY].map((v) => Math.round(v / 50)).join(",");
-  })();
-  const drainSigNow = drainActive.length + ":" + Math.round(siteSqft) + ":" +
-    Math.round(drainCentroid[0] / 50) + "," + Math.round(drainCentroid[1] / 50) + ":" +
-    (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
-  const checkDrainage = async (opts = {}) => {
-    const isAuto = opts && opts.auto === true; // B832 — auto-revalidation runs tag themselves (status line + the remembered record)
-    // B874 — a manual ↻ is the escape hatch from a STALLED auto-refetch: clear the one-attempt-per-
-    // key guard so the same target can be auto-retried later (and the manual pull itself always runs).
-    if (!isAuto) drainAutoAttempts.current.clear();
-    if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
-    const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
-    if (!act.length) { setDrainCtx((prev) => ({ error: "No parcel boundary on the plan yet.", prev: prev?.ctx ? prev : prev?.prev })); return; }
-    const tok = ++drainTok.current; // a later click / boundary change supersedes this one
-    const sig = drainSigNow;
-    // Keep the prior good answer visible under a "checking…" hint rather than blanking
-    // the whole readout (and don't lose it if this re-check then fails).
-    setDrainCtx((prev) => ({ busy: true, auto: isAuto, prev: prev?.ctx ? prev : prev?.prev }));
-    // NEW-4 — every leg of this check is timed, and the row goes to the same production sink the
-    // performance recorder uses. `checkT0` is stamped BEFORE the lazy import below, so `total`
-    // measures the check and not the check minus its own module load.
-    const checkT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-    const [{ beginGroundElevation }, dtim] = await Promise.all([
-      import("./lib/groundElevation.js"),
-      import("./lib/drainageTiming.js"),
-    ]);
-    const { createDrainageTimer, buildDrainageTimingRow, reportDrainageTiming, wseLegName, armDrainageSaveLeg, SAVE_ATTRIBUTION_MS } = dtim;
-    const timer = createDrainageTimer(undefined, checkT0);
-    let drainGroundState = null;
-    let drainCheckError = null;
-    try {
-      // The identify takes ONE ring — use the largest active parcel (flagged when several).
-      const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
-      const ring = largest.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
-      // NEW-5 (2026-09-05, owner-reported) — the SAME whole-site containment fix `jurActiveRings`
-      // already gives the header badge (B276752-755): a multi-parcel assemblage is a coin flip
-      // weighted by lot size when only the largest parcel's ring is tested, so an ETJ that only
-      // reaches the OTHER parcels was invisible to the drainage authority / detention-rate lookup
-      // (Goose Creek's stored jurisdiction read `etj: []` while the header, testing every parcel,
-      // correctly found Baytown's ETJ). Threaded into resolveDrainageContext below so the
-      // detention rule and the header stop disagreeing about which parcels are in/out of a city.
-      const rings = act.map((p) => p.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; }));
-      const c = ring.reduce((s, [x, y]) => [s[0] + x / ring.length, s[1] + y / ring.length], [0, 0]);
-      /* ⛔ NEW-1 / NEW-2 / NEW-3 — GROUND ELEVATION. Started HERE, at t=0, in parallel with every
-       * GIS pull below rather than in front of them (B1442(d) did exactly this for three point
-       * samplers and left this one out — same fix, same shape, same reason), and CACHED on the
-       * exact request geometry so a repeat check pays nothing at all for a value that changes when
-       * USGS re-flies a county. `state` is what the panel may publish immediately; `fresh` is the
-       * late answer that patches it in. See lib/groundElevation.js for the whole rationale,
-       * including why the explicit ↻ forces a refresh WITHOUT blocking on it. */
-      timer.start("elev");
-      const groundLeg = beginGroundElevation({
-        lng: c[0], lat: c[1],
-        force: !isAuto,                 // the ↻ is the "correct a wrong cached value" button
-        cache: gisCache,
-        onFetchSettled: ({ ms }) => timer.mark("elev", ms),
-      });
-      const groundStatePromise = groundLeg.state;
-      /* `resolveDrainageContext` asks for the ground sample inside its own parallel batch; give it
-       * the already-in-flight answer instead of starting a second one. Past the publish budget
-       * this resolves to null and the context publishes WITHOUT site grade — an honest
-       * `ground-elevation-missing`, never a fabricated elevation — and the patch below fills it. */
-      const sampleGround = async () => {
-        const st = await groundStatePromise;
-        return st && st.status === "value" ? st.ft : null;
-      };
-      // B707/B712: the NFHL polygon pull rides this same explicit click (house
-      // rule: never auto-fetch on an edit), the B96 SWR cache, and the same
-      // drainSigNow staleness clock. Envelope = active parcels + the drawn
-      // fill/pond elements (fill can sit outside a parcel), padded so an
-      // edge-touching zone isn't clipped. Zones convert to site feet ONCE here
-      // (origin is stable per check; an origin change flips the sig).
-      const bboxPts = [];
-      for (const p of act) for (const pt of p.points) bboxPts.push(pt);
-      for (const e of els) {
-        if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
-        try { const r = ringOf(e); if (r && r.length >= 3) for (const pt of r) bboxPts.push(pt); } catch (_) { /* a road mid-edit can lack corners */ }
-      }
-      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-      for (const pt of bboxPts) { if (pt.x < mnX) mnX = pt.x; if (pt.x > mxX) mxX = pt.x; if (pt.y < mnY) mnY = pt.y; if (pt.y > mxY) mxY = pt.y; }
-      const llA = feetToLatLng({ x: mnX, y: mnY }, origin.lat, origin.lon);
-      const llB = feetToLatLng({ x: mxX, y: mxY }, origin.lat, origin.lon);
-      const fmBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]]) : null;
-      // B755 fix (Bain live-verify, 2026-07-18) — TWO rounds:
-      // (1) The BFE-line/cross-section derivation (deriveBfeFromLines /
-      // governingCrossSectionWsel) will accept a contour within its own search radius, but
-      // fmBbox's default 0.001° pad (~350-450 ft depending on latitude) only reaches the
-      // immediate site edge — on the real Bain plan the nearest usable S_BFE lines sit
-      // farther from the fill footprint than that pad, so the fetch returned zero lines and
-      // the field stayed "no published BFE" even though FEMA publishes usable lines nearby.
-      // Widen JUST the linear-feature pull to actually cover the engine's own search radius;
-      // the zone polygon (fmBbox, large-area features that don't need this) and the DEM grid
-      // (kept tight on purpose — an oversized elevation pull is wasted bytes) are unchanged.
-      // (2) Confirmed live: even with round (1) deployed, the Bain reach's nearest usable
-      // line measured ~2980 ft from the site's reference point — past the derivation
-      // engine's OLD 2500 ft cap, so the fetch now succeeded but the engine still rejected
-      // the result. Round (2) raised the engine's own maxLineDistFt/maxGapFt/maxDistFt (see
-      // floodplainMitigation.js) to 5000/10000/5000 ft; this pad is bumped in step so the
-      // fetch stays ahead of the engine's new ceiling (never the bottleneck again).
-      const BFE_SEARCH_PAD_DEG = 0.04;
-      const bfeSearchBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]], BFE_SEARCH_PAD_DEG) : null;
-      // Failure isolation (the channel-state pattern): a flood-geometry outage
-      // must never nuke the whole drainage check — it reads "failed" (an honest
-      // UNKNOWN downstream), never a fabricated all-clear.
-      const floodGeoP = fmBbox
-        ? fetchCached(VECTOR_SOURCES.fema, fmBbox, { cache: gisCache })
-            .then((r) => ({
-              zones: zonesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }),
-              ts: r.ts ?? null,
-              truncated: !!(r.data && r.data.truncated),
-              state: "loaded",
-            }))
-            .catch(() => ({ zones: [], ts: null, truncated: false, state: "failed" }))
-        : Promise.resolve({ zones: [], ts: null, truncated: false, state: "empty" });
-      // B755: FEMA Base Flood Elevation LINES (S_BFE) — the same explicit click, same
-      // SWR cache, a WIDER envelope (bfeSearchBbox, see above). On most AE reaches the
-      // zone polygon carries no BFE, so these whole-foot contour lines are the only
-      // published source; we interpolate one at the fill to DERIVE a screening BFE. A
-      // failure reads honestly (no lines → no derived value → the existing "no published
-      // BFE" UNKNOWN), never a fake clear.
-      const bfeLinesP = bfeSearchBbox
-        ? fetchCached(VECTOR_SOURCES.bfeLines, bfeSearchBbox, { cache: gisCache })
-            .then((r) => ({ ...bfeLinesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
-            .catch(() => ({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "failed" }))
-        : Promise.resolve({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "empty" });
-      // B762: FEMA regulatory cross-sections (S_XS) — the governing 1% water-surface
-      // elevation (WSEL_REG) at the nearest stream reach. Same explicit click + SWR cache,
-      // same widened envelope as the BFE lines (governingCrossSectionWsel's own
-      // maxDistFt=2500 ft has the identical fetch-vs-search-radius mismatch).
-      const crossSectionsP = bfeSearchBbox
-        ? fetchCached(VECTOR_SOURCES.crossSections, bfeSearchBbox, { cache: gisCache })
-            .then((r) => ({ ...crossSectionWselFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
-            .catch(() => ({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "failed" }))
-        : Promise.resolve({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "empty" });
-      // B808 — the site-extent bare-earth DEM grid (one small LERC decode) rides the same
-      // explicit click. Failure isolation: an outage reads state "failed" and the engine
-      // falls back to the labeled flat median — never a silent flat price.
-      const siteGridP = fmBbox
-        ? loadTerrain().then((t) => t.fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n }))
-            .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
-            .catch(() => ({ grid: null, req: null, state: "failed" }))
-        : Promise.resolve({ grid: null, req: null, state: "empty" });
-      // B874 — BOUND the whole pull: a black-holed fetch (no resolve, no reject) would otherwise
-      // leave `busy` stuck true forever (one half of the stuck-refresh class). Race the group
-      // against a 30 s timeout that REJECTS → the outer catch sets a terminal error state (↻ to
-      // retry), never an indefinite spinner. The per-source .catch()es still handle plain outages.
-      const DRAIN_FETCH_TIMEOUT_MS = 30000;
-      let drainTimeoutId = null;
-      // NEW-4 — one leg per source, all started already; `leg` only stamps when each settles, so
-      // the timing costs nothing and cannot change the ordering it is measuring.
-      const leg = (name, p) => { timer.start(name); return p.then((v) => { timer.end(name); return v; }, (e) => { timer.end(name); throw e; }); };
-      timer.start("gis");
-      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
-        Promise.all([
-          leg("ctx", resolveDrainageContext({ lng: c[0], lat: c[1], ring, rings }, { sampleGround })),
-          leg("flood", floodGeoP),
-          leg("bfeLines", bfeLinesP),
-          leg("xs", crossSectionsP),
-          leg("siteGrid", siteGridP),
-        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); timer.end("gis"); return r; }),
-        new Promise((_, reject) => { drainTimeoutId = setTimeout(() => reject(new Error("flood-data source timed out — ↻ Re-check")), DRAIN_FETCH_TIMEOUT_MS); }),
-      ]);
-      if (tok !== drainTok.current) return;
-      // Representative point for the derived BFE: the centroid of the fill footprints
-      // (where mitigation is priced), else the largest parcel's centroid — same site-
-      // feet frame the BFE lines converted into.
-      const bfeFillPts = [];
-      for (const e of els) {
-        if (!FM_FILL_TYPES.has(e.type)) continue;
-        try { const r = ringOf(e); if (r && r.length >= 3) for (const pt of r) bfeFillPts.push(pt); } catch (_) { /* mid-edit */ }
-      }
-      const bfePtSrc = bfeFillPts.length ? bfeFillPts : largest.points;
-      const bfePt = bfePtSrc.reduce((s, p) => ({ x: s.x + p.x / bfePtSrc.length, y: s.y + p.y / bfePtSrc.length }), { x: 0, y: 0 });
-      floodGeo.demGrid = siteGrid; // B808 — { grid, req, state }; stays in-memory only (never slimmed)
-      floodGeo.derivedBfe = bfeLines.lines.length ? deriveBfeFromLines({ point: bfePt, lines: bfeLines.lines }) : null;
-      floodGeo.bfeLineFlags = { datumExcluded: bfeLines.excludedDatum, unitExcluded: bfeLines.excludedUnit, total: bfeLines.total, usable: bfeLines.lines.length, state: bfeLines.state };
-      // B762 — governing 1% WSEL from the nearest stream reach's cross-sections (stream-
-      // matched by WTR_NM). Ranks BELOW a manual BFE, ABOVE the interpolated BFE-line value.
-      floodGeo.derivedXsWsel = xs.sections.length ? governingCrossSectionWsel({ point: bfePt, sections: xs.sections }) : null;
-      floodGeo.xsFlags = { datumExcluded: xs.excludedDatum, total: xs.total, usable: xs.sections.length, state: xs.state };
-      // B770/V279 + B807 wiring — the DRAFT WSEs from FBCDD's Atlas-14 watershed-study
-      // rasters (0.2% county-wide mosaic; 1% per-watershed multiplex), sampled at the
-      // same representative point the derived BFE uses. Fort Bend sites only (the study
-      // covers that county; elsewhere the call is a guaranteed no-data). Failure
-      // isolation PER VALUE: an outage reads that value's state "failed" (an honest
-      // UNKNOWN downstream — surfaced on the card), never a fabricated value and never
-      // poisoning the sibling sample; an out-of-coverage point reads "empty". Neither
-      // value ever overwrites a manual entry (precedence in computeMitigation — the 1%
-      // is the LAST rung) and both always carry the DRAFT label.
-      floodGeo.derivedWse02 = null;
-      floodGeo.wse02Flags = { state: "not-applicable" };
-      floodGeo.derivedWse100 = null;
-      floodGeo.wse100Flags = { state: "not-applicable" };
-      if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /fort\s*bend/i.test(String(c)))) {
-        const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-        // NEW-4 — per-RASTER timings (`wse:FortBend_500YR_WSE`, `wse:Willow_100YR_Existing_WSE`,
-        // …), which is the granularity the owner's own PerformanceResourceTiming timeline had and
-        // the app did not. `wse` is the group's wall clock.
-        const onSample = ({ service, ms }) => { const n = wseLegName(service); if (n) timer.mark(n, ms); };
-        timer.start("wse");
-        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng, { onSample }), sampleWse100Point(wLat, wLng, { onSample })]);
-        timer.end("wse");
-        if (r02.status === "fulfilled") {
-          floodGeo.derivedWse02 = r02.value != null ? { wseFt: r02.value, source: "fbcdd-wse02-draft" } : null;
-          floodGeo.wse02Flags = { state: r02.value != null ? "loaded" : "empty" };
-        } else {
-          floodGeo.wse02Flags = { state: "failed" };
-        }
-        if (r100.status === "fulfilled") {
-          floodGeo.derivedWse100 = r100.value != null ? { wseFt: r100.value.wseFt, source: "fbcdd-wse100-draft", watershed: r100.value.watershed } : null;
-          floodGeo.wse100Flags = { state: r100.value != null ? "loaded" : "empty" };
-        } else {
-          floodGeo.wse100Flags = { state: "failed" };
-        }
-        if (tok !== drainTok.current) return; // superseded while sampling
-      }
-      // B882 — FEMA/USGS InFRM Estimated BFE (EBFE / Base Level Engineering). For a FEMA
-      // Zone A / unstudied "no published BFE" area, InFRM publishes an ENGINEERED screening
-      // flood surface — a far better estimated BFE than the grade-@-boundary guess it
-      // replaces. Sampled at the SAME representative point, ANY county (InFRM is FEMA Region 6
-      // / Gulf-central, not nationwide — out of coverage returns null → the caller falls back
-      // to the grade estimate). Bounded (8 s via the sampler's AbortController, inside the
-      // B874 30 s race) + cached per location. Failure isolation: an outage reads state
-      // "failed" (→ grade fallback), NEVER a fabricated value. Layer 17 → estimated 1% BFE;
-      // layer 21 → the 0.2% (500-yr) WSE that fills the currently-blank field off Fort Bend.
-      /* ⛔ NEW-4(d) — "Also would be great to reduce how long that check takes." The three
-       * point-samplers below were STARTED one after another because they were WRITTEN one after
-       * another: MAAPnext was nested inside EBFE's block and the screening study followed both, so
-       * an unstudied-Zone-A site in Harris paid three bounded round trips end to end when none of
-       * the three depends on any other — every one of them samples the SAME `bfePt`.
-       * The fix is deliberately the smallest one that is provably equivalent: START the promises
-       * here and `await` them exactly where they were awaited before. Not one guard, assignment,
-       * `tok` check or failure branch below moves, so there is no reordering to reason about — a
-       * promise simply begins running when it is created. `.catch(() => {})` on a SEPARATE handle
-       * marks each rejection handled, because a `tok` supersede can return before the await and an
-       * un-awaited rejection would otherwise surface as an unhandled one. */
-      const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
-      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" && ctx?.authority?.jurisdiction?.state !== "CA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris (and no California county is either)
-        && (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
-      const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-      const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
-      const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
-      if (ebfeP) ebfeP.catch(() => {});
-      if (maapP) maapP.catch(() => {});
-      floodGeo.ebfe = null;
-      floodGeo.ebfeFlags = { state: "not-applicable" };
-      if (zoneAUnstudied) {
-        try {
-          const e = await ebfeP;
-          const covered = e && (e.bfe1pctFt != null || e.wse02Ft != null);
-          floodGeo.ebfe = covered ? { bfe1pctFt: e.bfe1pctFt ?? null, wse02Ft: e.wse02Ft ?? null, source: "fema-ebfe" } : null;
-          floodGeo.ebfeFlags = { state: covered ? "loaded" : "empty" };
-        } catch (_) {
-          floodGeo.ebfeFlags = { state: "failed" }; // → grade fallback, honest UNKNOWN
-        }
-        if (tok !== drainTok.current) return; // superseded while sampling
-        // B882 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
-        // Sampled behind the SAME provider interface; in Harris it OUTRANKS EBFE (enforced there).
-        // The WSE endpoints are provisional (sandbox can't confirm the raster names — V363), so
-        // the sampler is a no-op until they're filled; wired now so Harris activates by config.
-        floodGeo.maapnext = null;
-        floodGeo.maapnextFlags = { state: "not-applicable" };
-        if (inHarris) {
-          try {
-            const m = await maapP;
-            const covered = m && (m.wse1pctFt != null || m.wse02Ft != null);
-            floodGeo.maapnext = covered ? { wse1pctFt: m.wse1pctFt ?? null, wse02Ft: m.wse02Ft ?? null, source: "hcfcd-maapnext" } : null;
-            floodGeo.maapnextFlags = { state: covered ? "loaded" : (m ? "empty" : "not-configured") };
-          } catch (e) {
-            /* NEW-1 — a DECLARED outage is its own state, distinct from a one-off failure. On a
-             * Harris site this is the governing WSE provider, and MAAPnext usually runs HIGHER
-             * than the effective FIRM, so the estimate the site DOES get is likely low. That has
-             * to reach the user in words; it may never look like "no flood data here". */
-            floodGeo.maapnextFlags = e && e.outage
-              ? { state: "unavailable", since: e.outage.since, symptom: e.outage.symptom, impact: e.outage.impact, replacement: e.outage.replacement }
-              : { state: "failed" };
-          }
-          if (tok !== drainTok.current) return; // superseded while sampling
-        }
-      }
-      // NEW-1 (B1057 completion) — PLANYR'S OWN SCREENING STUDY. Everything above reads somebody
-      // else's published or modelled number; this DERIVES one, and it is the only rung that can
-      // answer at all where nobody publishes anything. It rides the same explicit user action (the
-      // house fetch rule: never view-driven), the same 30 s outer race, and the same per-source
-      // failure isolation — an outage reads as an honest UNKNOWN naming the input that is missing,
-      // never a fabricated elevation.
-      //
-      // Gated to unstudied Zone A with no published/manual 1% surface: exactly the "if not
-      // otherwise provided" case Waller §5.C(3) addresses, and the only case where the cost of
-      // three extra point fetches buys anything the app doesn't already have.
-      floodGeo.screeningBfe = null;
-      floodGeo.screeningBfeFlags = { state: "not-applicable" };
-      if (zoneAUnstudied) {
-        const sLat = ptLat, sLng = ptLng;
-        timer.start("screening");
-        try {
-          // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
-          // different extent (a site-envelope grid would delineate a few acres of a basin that
-          // really runs for miles, and hand back a confidently understated discharge).
-          const wideBounds = {
-            west: sLng - WATERSHED_PAD_DEG, east: sLng + WATERSHED_PAD_DEG,
-            south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
-          };
-          // NEW-1 — the engine is fetched CONCURRENTLY with the three data pulls it needs, and
-          // awaited only where its first function is called. Moving it off the boot path therefore
-          // costs this branch no wall-clock: the module download overlaps network round-trips that
-          // were already happening. Started BEFORE the `await` below on purpose — kick it off, then
-          // let it ride. A failed chunk fetch rejects at the await and lands in the existing catch,
-          // which reports it as the named LOUD-FAILURE "could not run" state like any other outage.
-          const enginePromise = import("./lib/screeningBfeSite.js");
-          const [wideR, pfdsR, soilsR] = await Promise.allSettled([
-            loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
-            resolvePfds({ lat: sLat, lng: sLng }),
-            resolveSoils({ lat: sLat, lng: sLng }),
-          ]);
-          const wide = wideR.status === "fulfilled" ? wideR.value : null;
-          const pfds = pfdsR.status === "fulfilled" && pfdsR.value?.ok ? pfdsR.value : null;
-          const soils = soilsR.status === "fulfilled" && soilsR.value?.ok ? soilsR.value : null;
-          const { terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite } = await enginePromise;
-
-          const terrain = terrainInputsForScreeningBfe({
-            sectionGrid: siteGrid?.grid || null,
-            sectionReq: siteGrid?.req || null,
-            watershedGrid: wide?.grid || null,
-            watershedReq: wide?.req || null,
-            siteRingsLatLng: act.map((p) => p.points.map((pt) => feetToLatLng(pt, origin.lat, origin.lon))),
-            lat: sLat,
-          });
-          const result = screeningBfeForSite({
-            terrain,
-            rainfall: atlas14Depths(pfds ? pfds.table : null),
-            hsg: soils ? soils.soils.hsg : null,
-          });
-          floodGeo.screeningBfe = {
-            ...result,
-            sources: {
-              rainfall: pfds ? pfds.source : null,
-              soils: soils ? soils.source : null,
-              hsg: soils ? soils.soils.hsg : null,
-              watershedGrid: wide ? "3DEP (wide delineation window)" : null,
-            },
-          };
-          floodGeo.screeningBfeFlags = { state: result.ok ? "loaded" : "incomplete" };
-        } catch (e) {
-          // LOUD-FAILURE: a throw is recorded as an explicit {ok:false} RESULT, not just a flag, so
-          // the panel's provenance hover states it in the same place it states every other outcome
-          // — never a quiet no-op that reads as "nothing to worry about here".
-          const reason = e && e.message ? e.message : String(e);
-          floodGeo.screeningBfe = { ok: false, stage: "fetch", missing: [`the screening study could not run: ${reason}`], notModeled: NOT_MODELED, clomrNote: CLOMR_NOTE, screening: true };
-          floodGeo.screeningBfeFlags = { state: "failed", reason };
-        }
-        timer.end("screening");
-        if (tok !== drainTok.current) return; // superseded while sampling
-      }
-      const checkedAt = Date.now();
-      // B832 — an AUTO run that came back materially DEGRADED (the authority lookup
-      // was unavailable, or the flood pull failed where the remembered check had it
-      // loaded) shows its honest live state but must NOT overwrite the good remembered
-      // snapshot — degraded sources fall to last-good. A manual ↻ keeps today's
-      // replace-always behavior (the user explicitly asked for a fresh pull).
-      const prevLC = settings.drainage?.lastCheck || null;
-      const autoDegraded = isAuto && (
-        (ctx?.authority?.flags || []).includes("jurisdiction-unavailable")
-        || (ctx?.flood?.state === "failed" && prevLC?.flood?.state === "loaded")
-      );
-      /* NEW-2(b) / NEW-4 — the GROUND-ELEVATION STATE rides the published context, and the panel
-       * is NOT gated on it. `groundState` is whatever was publishable at this moment: the cached
-       * value (instant), or an honest `pending` if the transect blew its publish budget. It is
-       * carried as a four-state object beside the bare number so a consumer can tell "still
-       * loading" from "3DEP has no value here" from "the service failed" — an unresolved number
-       * must read as UNRESOLVED, never as zero and never as a dash that looks like an answer. */
-      const groundState = await groundStatePromise;
-      // NEW-4 — the app's OWN work: the gap between the last network response and the publish.
-      // The owner measured 1,029 / 1,654 ms of it and it is recorded on B1353, which owns moving
-      // these engines off the main thread. This is a GAP IN THE NETWORK TIMELINE, which is solid;
-      // it is deliberately not called a main-thread blocking figure (FOREGROUND-OR-VOID).
-      timer.mark("calc", timer.sinceNetwork());
-      const ctxOut = { ...ctx, groundElev: groundState, floodGeo };
-      setDrainCtx({ ctx: ctxOut, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
-      // B832 — remember WHAT this check fetched (the raw feet envelope + the two
-      // point-sample anchors) so auto-revalidation can tell "moved inside the fetched
-      // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
-      const groundPt = largest.points.reduce((s, p) => ({ x: s.x + p.x / largest.points.length, y: s.y + p.y / largest.points.length }), { x: 0, y: 0 });
-      const fetchRec = {
-        // B874 — canonEnv rounds OUTWARD so the stored env always CONTAINS the measured geometry.
-        // The old Math.round shrank it (min↑ / max↓), so a fresh load with zero edits read
-        // "outgrew the fetched envelope" and the refresh spinner stuck ambiently forever.
-        env: isFinite(mnX) ? canonEnv({ mnX, mnY, mxX, mxY }) : null,
-        anchorPt: { x: Math.round(bfePt.x), y: Math.round(bfePt.y) },
-        groundPt: { x: Math.round(groundPt.x), y: Math.round(groundPt.y) },
-        mode: isAuto ? "auto" : "manual",
-      };
-      // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
-      // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
-      // settings autosave — no schema change. (B832: skipped for a degraded AUTO run.)
-      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctxOut), sig, checkedAt, fetch: fetchRec } } }));
-      /* NEW-2(b) — THE LATE ELEVATION. Either the transect was still in flight when the panel
-       * published, or the ↻ forced a refresh underneath a cached value. Patch the number (and the
-       * remembered record) in place when it lands; a superseded check never writes. */
-      const freshFetch = await groundLeg.fresh;
-      if (freshFetch) {
-        const fresh = await freshFetch;
-        if (tok === drainTok.current) {
-          setDrainCtx((prev) => (prev && prev.ctx && prev.sig === sig
-            ? { ...prev, ctx: { ...prev.ctx, groundElevFt: fresh.ft, groundElev: fresh } }
-            : prev));
-          if (!autoDegraded) {
-            setSettings((sx) => {
-              const lc = sx.drainage?.lastCheck;
-              if (!lc || lc.sig !== sig) return sx; // a newer check owns the record now
-              return { ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...lc, groundElevFt: fresh.ft ?? null } } };
-            });
-          }
-        }
-        drainGroundState = fresh;
-      } else {
-        drainGroundState = groundState;
-      }
-    } catch (e) {
-      if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
-      drainCheckError = String((e && e.message) || e);
-    } finally {
-      /* NEW-4 — ONE row per check, through the SAME production sink the recorder uses, and the
-       * SAVE leg is armed for the cloud push this check is about to trigger. Never throws. */
-      timer.mark("total", timer.elapsed());
-      let drainRowSent = false;
-      const emit = () => {
-        if (drainRowSent) return;
-        drainRowSent = true;
-        try {
-          reportDrainageTiming(buildDrainageTimingRow({ legs: timer.legs(), auto: isAuto, ground: drainGroundState }));
-        } catch (_) { /* an instrument may never break the thing it measures */ }
-      };
-      // The SAVE leg belongs to the cloud push this check is about to trigger, so wait for it —
-      // but only for the attribution window. A save that never comes (signed out, nothing
-      // changed, a degraded auto run) must NOT cost the row: an absent report and a zero-cost
-      // save look identical to a reader, which is precisely the ambiguity B265536 exists to kill.
-      if (!drainCheckError) {
-        drainSaveArmed.current = true;
-        armDrainageSaveLeg((ms) => { timer.mark("save", ms); emit(); });
-      }
-      setTimeout(() => { drainSaveArmed.current = false; emit(); }, SAVE_ATTRIBUTION_MS + 250);
-    }
-  };
+  // B2671311 (G2 step 4a) — the drainage check: state + signature + checkDrainage (lib/useDrainageCheck.js; pure signature in lib/drainageSignature.js).
+  const {
+    drainAutoAttempts, drainCtx, setDrainCtx, drainTok, drainActive, drainCentroid, drainElsSig, drainSigNow, checkDrainage,
+  } = useDrainageCheck({ drainSaveArmed, els, origin, parcels, setSettings, settings, siteSqft });
   // The context to READ from: the live result, or the prior good one preserved under a
   // busy/error state (so a re-check that fails doesn't erase what we already knew).
   const drainReadCtx = drainCtx?.ctx ? drainCtx : drainCtx?.prev || null;
@@ -13641,7 +13157,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      still about the drawing on screen" is a question that has to be answered whether or not
      anything is allowed to fetch. */
   const drainAutoEnabled = (settings.drainage?.autoFacts === true) && !!origin && drainActive.length > 0;
-  const drainAutoAttempts = useRef(new Set());
   const drainAutoLastAt = useRef(0);
   // B874 (edit-path recurrence) — the refresh WATCHDOG. `drainBusyStartRef` stamps when the current
   // in-flight fetch began; `drainArmedStartRef` stamps when a "wanted but not yet fired" auto-refetch
@@ -15356,89 +14871,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * Pick county lots, Draw / Split / Combine / Edit corners) the parcel geometry is the TOP of the drawing. One boolean, one
    * pure answer (mapStack.parcelsOnTop); it moves RENDER ORDER only — nothing is stored, no layer's order or lift changes. */
   const parcelsFront = parcelsOnTop({ leftPanel, floating, identifyMode, tool, mergePick, boundaryEdit });
-  const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
+  // B2671311 (G2) — the parcel-identify state cells, phase 1 of the hook in lib/useParcelIdentify.js (handlers + effect: phase 2, further down).
+  const {
+    identifyRes, setIdentifyRes, identAdded, setIdentAdded, outlinePhase, setOutlinePhase, addrQuery, setAddrQuery, addrBusy, setAddrBusy, identifyTok, ackRef, outlineRefused, setOutlineRefused, lotFlashRef, outlineLayersRef, identifyAddedRef,
+  } = useParcelIdentifyState();
   /* NEW-1 (Memphis radius ×2) — READ-ONLY: the identify-and-add path's last answer, for the live audit (owner / parcel id / rings
    * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
   const identifyResRef = useRef(null);
   identifyResRef.current = identifyRes;
-  const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
-  const [outlinePhase, setOutlinePhase] = useState("none"); // NEW-1 (select-parcel first paint): what the lit-up outlines are doing — loading | drawn | empty | zoom | none (lib/parcelOutlineSet.js status())
-  const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
-  const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
-  const identifyTok = useRef(0);
-  const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
-  const [outlineRefused, setOutlineRefused] = useState(false); // NEW-1 (Add parcels): a county server REFUSED part of the larger-lots band — said, never a silent blank patch
-  const lotFlashRef = useRef(null);             // NEW-1 (Add parcels): the clicked lot's outline, drawn the instant the click lands (before the county answers)
-  const outlineLayersRef = useRef(null);        // the outline set (lib/parcelOutlineSet.js) while identify mode is on — also read by the E2E hook below
-  const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
-  // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
-  // resolve ONCE against `siteCounty`, the county recorded when the site was CREATED, and cache that
-  // single URL for the life of the planner session, falling back to Harris County TX when the key
-  // didn't resolve. Panning across a county line (or opening a Colorado site whose key ever missed)
-  // meant every outline + click kept querying the wrong — sometimes a THOUSAND-MILE-wrong — service.
-  // The Map view never had this bug: it routes each point through `candidateCountiesForPoint`, re-asked
-  // fresh every time. This does the same: a per-county URL cache (shared by the outlines AND the click
-  // query, so what you SEE is what you can ADD — the B137 rule), resolved on demand and never pinned to
-  // one frozen county, and with NO Harris/any-county fallback — an unconfigured area returns no
-  // candidates rather than a wrong-but-plausible one.
-  const countyLayerUrlsRef = useRef({});         // county key -> resolved queryable layer URL (session cache)
-  const countyLayerUrlsInflightRef = useRef({}); // county key -> in-flight resolve Promise (de-dupe concurrent callers)
-  const resolveOneCountyLayer = (key) => {
-    if (countyLayerUrlsRef.current[key]) return Promise.resolve(countyLayerUrlsRef.current[key]);
-    if (countyLayerUrlsInflightRef.current[key]) return countyLayerUrlsInflightRef.current[key];
-    const cm = COUNTIES_MAP[key];
-    if (!cm) return Promise.resolve(null);
-    const p = resolveLayerUrl(cm.layerUrl || cm.mapServer)
-      .then((url) => { countyLayerUrlsRef.current[key] = url; return url; })
-      .catch(() => null)
-      .finally(() => { delete countyLayerUrlsInflightRef.current[key]; });
-    countyLayerUrlsInflightRef.current[key] = p;
-    return p;
-  };
-  // The queryable candidates for a real point, routed exactly like the Map view
-  // (`candidateCountiesForPoint`) instead of the site's frozen county — re-resolved on every call.
-  // Breaker-open sources are dropped (the always-kept statewide fallback excepted), so a click never
-  // re-hammers a host we just saw fail.
-  const candidatesAtPoint = async (lat, lng) => {
-    const keys = candidateCountiesForPoint(lat, lng);
-    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
-    const all = keys
-      .map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) }))
-      .filter((c) => c.url);
-    const realPrimaries = all.filter((c) => !c.statewide);
-    const healthy = filterHealthyCandidates(all, STATEWIDE_KEYS);
-    // NEW-2 (B1639697) — a single healthy real CAD needs no statewide co-query; see
-    // suppressRedundantStatewide's own header (sourceHealth.js) for why this is safe against the
-    // outage-resilience behavior the parallel race otherwise exists for.
-    const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
-    return { candidates, realPrimaries };
-  };
-  /* NEW-1 (Memphis line band, B2289168 ×3) — the sources of every county whose line passes near the point, asked only after
-     the routed county found no lot (lib/identifyWithFallback.js); same list the Map's click uses. */
-  const neighbourCandidatesAt = async (lat, lng) => {
-    const keys = lineNeighbourKeysForPoint(lat, lng);
-    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
-    const list = keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
-    return filterHealthyCandidates(list, STATEWIDE_KEYS);
-  };
-  // NEW-1 (Memphis line band) — breaker-skipped sources for this point, asked once, last (lib/identifyWithFallback.js).
-  const skippedCandidatesAt = async (lat, lng) => {
-    const keys = [...new Set([...candidateCountiesForPoint(lat, lng), ...lineNeighbourKeysForPoint(lat, lng)])].filter((k) => isSourceOpen(k));
-    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
-    return keys.map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) })).filter((c) => c.url);
-  };
-  // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
-  // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
-  const parcelGisKey = (attrs, rings, county) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}`, stack: county ? stackRuleForCounty(county) : null }); // NEW-1 — a layer that stacks rows on a lot (Bartow) keys the LOT (counties.js dedupeBy)
-  // rings (4326) → planner parcels in the site frame, each carrying its gisKey + attrs.
-  // Every outer part of a multipart parcel ("TRS 3 & 5") becomes its own parcel (B36c),
-  // locked by default like every county-pulled lot (B99).
-  const parcelsFromRings = (rings, addr, attrs, county) => {
-    const key = parcelGisKey(attrs, rings, county);
-    return rings
-      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
-      .filter((pc) => pc.points.length >= 3);
-  };
   // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
   // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B96).
   const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
@@ -15562,222 +15002,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the "no parcel drawn" case a real lookup (at the origin point) rather than silence, so it too is
    * "pending" while in flight — `jurBadgeSig` is only ever falsy when there is truly nothing to ask. */
   const jurPending = !!jurBadgeSig && !jurBadge;
-  // A click in identify mode ADDS the lot under the cursor straight to the plan (no
-  // preview-then-confirm) — click more lots to add more; re-click a lot you just added
-  // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
-  // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
-  /* NEW-1 (Add parcels, 2026-11-16 — Goose Creek: "I tried to click lots … no outline showed up"). The outline of the lot a click lands on is
-   * drawn the same frame, from the lot lines the map already holds (the outline set's `featureAt`), in the plan's own parcel colour and in the
-   * Parcels-in-front pane (so it is above everything). The county's point query is still the authority (B137): the flash is removed the moment
-   * it answers — by the real parcel, or by the honest "no lot". Skipped over a lot the plan already has (that one is outlined already, and a
-   * re-click removes it — a flash there would promise the opposite). */
-  const clearLotFlash = () => { const f = lotFlashRef.current; lotFlashRef.current = null; if (f) { try { f.remove(); } catch (_) { /* map gone */ } } };
-  const flashLotAt = (fp) => {
-    clearLotFlash();
-    const set = outlineLayersRef.current, m = geoMapRef.current;
-    if (!set || !m || !origin || !fp) return;
-    if (parcelAtPoint(stateRef.current.parcels || [], fp)) return;
-    const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
-    const feat = set.featureAt(lat, lng);
-    const geom = feat && feat.geometry;
-    if (!geom || !geom.coordinates) return;
-    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
-    const latlngs = polys.map((rings) => rings.map((r) => r.map(([x, y]) => [y, x])));
-    if (!latlngs.length) return;
-    try {
-      lotFlashRef.current = L.polygon(latlngs, { pane: m.getPane(PANE_PARCEL_PICK) ? PANE_PARCEL_PICK : "overlayPane", interactive: false, color: PAL.parcel, weight: 2.5, opacity: 1, fillColor: PAL.parcel, fillOpacity: 0.16, className: "lot-click-flash" }).addTo(m);
-    } catch (_) { lotFlashRef.current = null; }
-  };
-  const quickAddAt = async (fp, ack = null) => {
-    if (!origin) { ack?.cancel(); setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
-    const tok = ++identifyTok.current; // a later click supersedes this one (B53)
-    /* NEW-1 — the ring belongs to THIS click: a newer click (or Add-by-address) supersedes it, and
-     * every way out below settles it, so it can never outlive its answer. `setRes` is the one exit. */
-    ackRef.current?.cancel(); ackRef.current = ack;
-    let settled = false;
-    const setRes = (r) => {
-      settled = true;
-      if (tok === identifyTok.current) clearLotFlash(); // the real parcel (or the honest "no lot") takes over from the instant outline
-      if (tok === identifyTok.current) {
-        if (r && r.error) ack?.empty(r.noLot ? "No lot here" : "Couldn't get that lot"); else ack?.done();
-      }
-      setIdentifyRes(r);
-    };
-    /* NEW-1 — the county request goes out BEFORE the busy-state render. Setting state first made React
-     * render this whole component (a ~150 ms long task on a real plan) ahead of the fetch, so the query
-     * started ~190 ms late. The busy text now paints in a following task — and only if no answer beat it. */
-    setTimeout(() => { if (!settled && tok === identifyTok.current) { setJurInfo(null); setIdentifyRes({ busy: true }); } }, 0);
-    try {
-      const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
-      await ensureCountyGeometryAt(lat, lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
-      // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
-      const { candidates } = await candidatesAtPoint(lat, lng);
-      if (tok !== identifyTok.current) return;
-      const nearSources = await neighbourCandidatesAt(lat, lng); // NEW-1 (Memphis line band) — a county across a nearby line
-      if (tok !== identifyTok.current) return;
-      if (!candidates.length && !nearSources.length && !(await skippedCandidatesAt(lat, lng)).length) {
-        const gap = parcelGapNotice(countyIdentity(lat, lng), { lat, lng });
-        setRes({ error: gap ? `${gap.message} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again.", ...(gap ? { request: gap.href } : {}) });
-        return;
-      }
-      const res = await identifyWithLineFallback({
-        primary: candidates, lng, lat, neighbours: () => nearSources, skipped: () => skippedCandidatesAt(lat, lng),
-        fallbacks: async ({ silent }) => filterHealthyCandidates(await fallbackCandidates(fallbackSpecsFor({ failed: silent, lat, lng }), resolveOneCountyLayer), STATEWIDE_KEYS), // NEW-2 — the county did not answer: its state's layer (where it holds the county), then a town layer
-        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok, Date.now(), { ms: s.ms })),
-      });
-      if (tok !== identifyTok.current) return; // superseded by a newer click
-      if (!res.hits.length) {
-        // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
-        // genuinely found no lot here, this county has no parcel source wired at all, or every
-        // source that could have answered this point was unreachable this click.
-        const gap = parcelGapNotice(countyIdentity(lat, lng), { lat, lng });
-        // NEW-1 (Memphis line band) — a county with no source only asked a NEIGHBOUR; its silence is not this county's outage.
-        if (res.responded === 0 && !(gap && !candidates.length)) { setRes({ error: `${silentServerPhrase(res.silent)} isn't responding right now — try again in a moment.` }); return; }
-        setRes({ error: gap ? `${gap.message} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true, ...(gap ? { request: gap.href } : {}) });
-        return;
-      }
-      const hit = res.hits[0]; // first county whose service answered owns the lot
-      const feat = hit.feature;
-      const rings = outerRingsLngLat(feat); // every part of a multipart parcel
-      if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
-      const attrs = feat.attributes || {};
-      const addr = situsFor(hit.county, attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder); a county that declares split situs columns is composed (addrParts)
-      const key = parcelGisKey(attrs, rings, hit.county);
-      // Re-click a lot added THIS session → toggle it back off.
-      if (identifyAddedRef.current.has(key)) {
-        const ids = identifyAddedRef.current.get(key);
-        identifyAddedRef.current.delete(key);
-        pushHistory();
-        setParcels((a) => a.filter((p) => !ids.includes(p.id)));
-        tombstone(ids); // NEW-1 — the toggled-off identify lot(s) stay gone across a merge + a multipart lot's ≥2 drop doesn't trip the thin-clobber guard
-        setSel(null); setIdentAdded(identifyAddedRef.current.size);
-        setRes({ removed: true, addr });
-        return;
-      }
-      // Already in the plan from before → select + inform, never add a duplicate.
-      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key || p.gisKey === key); // recomputed from attrs — legacy geo: gisKeys still match; a lot keyed by its stack field (pid:) matches its own stored gisKey
-      if (dupe.length) {
-        setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
-        setRes({ already: true, addr });
-        return;
-      }
-      const pcs = parcelsFromRings(rings, addr, attrs, hit.county);
-      if (!pcs.length) { setRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
-      pushHistory();
-      setParcels((a) => [...a, ...pcs]);
-      identifyAddedRef.current.set(key, pcs.map((p) => p.id));
-      setIdentAdded(identifyAddedRef.current.size);
-      setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
-      // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr, county: hit.county, stackNote: stackNote(feat), ...(hit.fallback ? { fromFallback: fallbackNoticeText({ failedKey: hit.fallback.failed, label: hit.fallback.label }) } : {}) });
-    } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
-  };
-  // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
-  // hit into the site's feet frame, and run the SAME identify-and-add path (quickAddAt) the click
-  // flow uses. One pipeline (shared lib/geocode + the existing quickAddAt) — never a fork (B383).
-  const addByAddress = async () => {
-    const q = addrQuery.trim();
-    if (!q || addrBusy) return;
-    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring a parcel in from the map first." }); return; }
-    setAddParcelMenu(false);
-    ensureBasemapOn(); setJurInfo(null);
-    setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
-    try {
-      /* NEW-1 (Meriwether GA, 2026-11-24) — a typed parcel NUMBER ("023 012", "069A 009") is looked up in the county the plan sits in (lib/viewParcelId.js, the same front door as the Map's search)
-       * and the lot added; a miss says where it looked, a server that did not answer says so. Anything that is not a number goes to the geocoder as before. */
-      if (looksLikeParcelNumber(q)) {
-        const { resolveViewParcelId, viewParcelIdMessage } = await import("./lib/viewParcelId.js");
-        const vr = await resolveViewParcelId(q, { lat: origin.lat, lng: origin.lon });
-        if (vr.status === "found") {
-          const [fp] = lngLatRingToFeet([[vr.point.lng, vr.point.lat]], origin.lon, origin.lat);
-          setAddrQuery("");
-          await quickAddAt(fp);
-          return;
-        }
-        if (vr.status === "notfound" || vr.status === "unavailable") { setIdentifyRes({ error: viewParcelIdMessage(vr, q) }); return; }
-      }
-      const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
-      if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
-      if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
-      const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
-      setAddrQuery("");
-      await quickAddAt(fp); // identifies the lot at the geocoded point and adds it (or reports no lot there)
-    } finally { setAddrBusy(false); }
-  };
-  // Light up the county parcel outlines on the basemap while identify mode is armed
-  // (B383) — the SAME parcel-outline layers the map's Select-parcels tool uses
-  // (makeParcelDisplayLayer: magenta vector lines for a queryable CAD, a server /export
-  // image for the query-disabled statewide source). Turn the aerial on so there's
-  // context to see them over; pull the layers + reset the session toggle-set when
-  // identify mode ends.
-  // NEW-1 (parcel routing) — every configured county lights up, not only the site's frozen
-  // `siteCounty`: this is the same set `candidatesAtPoint` will ever route a click to, so
-  // panning out of the site's original county still shows lots there (and a click there still
-  // selects them) instead of going dark, exactly like the Map view already does.
-  useEffect(() => {
-    if (!origin) return;
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); setOutlinePhase("none"); setOutlineRefused(false); return; }
-    ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
-    /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
-     * to mount every county source in the country (36+ full-viewport images) and the statewide
-     * composite sat under the county's own layer, flashing gold whenever the county image reloaded. */
-    const set = createOutlineSet({
-      getMap: () => geoMapRef.current,
-      boundsOf: (m) => { const b = m.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; },
-      resolveUrl: (key) => resolveOneCountyLayer(key),
-      // NEW-1 (2026-10-04) — Planyr draws the county lot numbers; they must clear this plan's own parcel chips.
-      /* NEW-1 — the county lots on offer mount in the Parcels-in-front panes (a host INSIDE the plan SVG, under the plan's own
-       * parcels), so a building / overlay / markup / GIS layer can never cover a lot you are picking. LOUD-FAILURE: if the host
-       * is not there the lots would silently draw UNDER the plan again, so say so and fall back to the old pane. */
-      makeLayer: (url) => {
-        const m = geoMapRef.current;
-        const hosted = !!(m && m.getPane(PANE_PARCEL_PICK) && m.getPane(PANE_PARCEL_PICK_LABEL));
-        if (!hosted) console.error("[planyr] the Parcels-in-front panes are missing — county lots would draw under the plan");
-        return makeParcelDisplayLayer(url, {
-          getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current,
-          wide: true, // NEW-1 (click-a-lot) — the larger lots from two zoom steps further out, exactly like the Map's picker (parcelWideLayer.js); a source with no verified size column keeps its own floor
-          ...(hosted ? { pane: PANE_PARCEL_PICK, labelPane: PANE_PARCEL_PICK_LABEL } : null),
-        });
-      },
-      sourcesForView: displaySourcesForView,
-      statewideKeysForState,
-      stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
-      isStatewideUrl: isStatewideLayerUrl,
-      scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
-      coversCounty: stateLayerCoversCounty, // NEW-2 — a state layer that declares the failed county missing is never pulled in for it
-      onChange: () => { const st = set.status(); setOutlinePhase(st.phase); setOutlineRefused(!!st.refused); },
-    });
-    outlineLayersRef.current = set;
-    setOutlinePhase("loading"); // the tool is armed: outlines are on their way until the set says otherwise
-    let map = null, poll = null, tries = 0;
-    const onMoved = () => set.sync();
-    let gone = false;
-    // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
-    const attach = () => {
-      poll = null;
-      const m = geoMapRef.current;
-      if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); else setOutlinePhase("none"); return; }
-      map = m; m.on("moveend", onMoved); set.sync();
-    };
-    /* NEW-1 (Add parcels) — the larger-lots module + the verified size-column table load BEFORE the first layer is built (`makeParcelLayer` reads
-     * them once, at build): a layer built first would never get its band. A failed load is reported by the loader and leaves today's floor. */
-    const ready = Promise.resolve(wideViewReady()).catch(() => null);
-    ready.then(() => { if (!gone) attach(); });
-    // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
-    Promise.all([ready, Promise.resolve(loadCountyPolygons()).catch(() => null)]).then(() => { if (!gone) set.sync(); });
-    // Batch K stage 2 — and again when a state's county table lands (the view answer is `pending` until the rows of the state it is over are in).
-    const offTables = onParcelTablesLoaded(() => { if (!gone) set.sync(); });
-    return () => {
-      gone = true;
-      offTables();
-      clearLotFlash();
-      if (poll) clearTimeout(poll);
-      if (map) map.off("moveend", onMoved);
-      set.dispose();
-      outlineLayersRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identifyMode, origin]);
+  // B2671311 (G2) — phase 2 of the parcel-identify hook (lib/useParcelIdentify.js): the layer cache, candidate routing, quickAddAt, addByAddress and the outline-set effect.
+  const {
+    countyLayerUrlsRef, countyLayerUrlsInflightRef, resolveOneCountyLayer, candidatesAtPoint, neighbourCandidatesAt, skippedCandidatesAt, parcelGisKey, parcelsFromRings, clearLotFlash, flashLotAt, quickAddAt, addByAddress,
+  } = useParcelIdentify({
+    identifyRes, setIdentifyRes, identAdded, setIdentAdded, outlinePhase, setOutlinePhase, addrQuery, setAddrQuery, addrBusy, setAddrBusy, identifyTok, ackRef, outlineRefused, setOutlineRefused, lotFlashRef, outlineLayersRef, identifyAddedRef,
+    PAL, ensureBasemapOn, geoMapRef, identifyMode, lotNoInsetRef, lotNoObstaclesRef, origin, pushHistory, setAddParcelMenu, setJurInfo, setParcels, setSel, settings, stateRef, tombstone,
+  });
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
@@ -16267,190 +15498,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return bars;
   };
 
-  /* ------------ print-frame placement ------------ */
-  // The on-canvas crop matches the PRINTED PLAN BOX (B200), not the raw paper: the plan
-  // box is the sheet minus the title block and the metrics band. So the frame the owner
-  // draws is exactly what fills the printed plan area (WYSIWYG), computed from the same
-  // layout the print routine uses.
-  // B1042 — the layout that yields this aspect now lives in the lazy export chunk, but the
-  // frame-resize DRAG reads the aspect on every pointermove, which can never await. So the
-  // value is RESOLVED once per (paper · orientation · content) key and cached in a ref;
-  // `printAspect()` stays a synchronous read. `refreshPrintAspect()` is awaited before print
-  // mode is ever entered, so the ref is always populated before a frame exists to drag —
-  // the fallback below is a last-resort guard, not a path the UI takes.
-  const printAspectRef = useRef(null);
-  const printAspect = () => printAspectRef.current || (11 / 8.5); // letter-landscape paper, guard only
-  const refreshPrintAspect = async () => {
-    const { sheetPlanAspect } = await loadExportSheet();
-    printAspectRef.current = sheetPlanAspect({
-      paper: printPaper, orient: printOrient,
-      metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
-      includeMetrics: settings.printMetricsBand !== false,
-    });
-    return printAspectRef.current;
-  };
-  // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
-  const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
-  const enterPrintMode = async () => {
-    const aspect = await refreshPrintAspect(); // resolves the lazy chunk before any frame exists
-    const dev = devExtent();
-    let base;
-    if (dev) base = { cx: dev.cx, cy: dev.cy, w: dev.w + 80, h: dev.h + 80 };
-    else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
-    setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
-    setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
-    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false };
-    setPrintMode(true); setComposeMode(false); setExportMenu(false); setSel(null);
-    import("./components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
-  };
-  const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
-  // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
-  // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
-  const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
-  const buildingsTablePrintable = els.some(isBuilding); // B1934529 — no dead "Buildings table" control on a plan with nothing to list
-  const startPrintMove = (e) => {
-    e.stopPropagation();
-    const fp = p2f(e.clientX, e.clientY);
-    drag.current = { mode: "printMove", fx: fp.x, fy: fp.y, cx: printFrame.cx, cy: printFrame.cy, ...startGate(e, { hist: false }) };
-    svgRef.current.setPointerCapture(e.pointerId);
-  };
-  const startPrintResize = (e, sx, sy) => {
-    e.stopPropagation();
-    // NEW-1 (B1783056) — `wFt0`/`hFt0` (the frame's size at drag start) are what an edge grip's
-    // untouched axis holds onto for the whole gesture; frameGripAnchor/resizeFrame are the same
-    // generic pair a corner grip uses, so there's one drag formula for all eight grips.
-    drag.current = { mode: "printResize", sx, sy, opp: frameGripAnchor(printFrame, sx, sy), wFt0: printFrame.wFt, hFt0: printFrame.hFt, ...startGate(e, { hist: false }) };
-    svgRef.current.setPointerCapture(e.pointerId);
-  };
-  /* B765985 — THE COMPOSE SCREEN. Picking the frame (above) is unchanged; everything else —
-   * paper, orientation, an explicit engineering scale, the title block, what's on the sheet —
-   * now lives on a dedicated full-screen surface entered via "Continue". `pickedFrameRef`
-   * holds the frame as last positioned on canvas; an explicit scale locks the EFFECTIVE frame
-   * to a stated ratio (plan-box inches × ft-per-inch) around that same center, and if the
-   * picked area doesn't fit at that ratio we say so — never silently rescale (`checkScaleFits`). */
-  const recomputeCompose = async () => {
-    const { sheetLayoutBoxesIn, pageSizeForFit } = await loadExportSheet();
-    const pf = pickedFrameRef.current;
-    // NEW-1 (B1783056) — Fit-to-frame page: the page itself is shaped to the PICKED frame's
-    // own aspect (long edge at the chosen paper size), computed ONCE here so every downstream
-    // consumer (this compose box, the live preview, the final PDF) reads the identical page.
-    const pageOverride = printFitToFramePage && pf ? pageSizeForFit(printPaper, pf.wFt / pf.hFt) : null;
-    setComposePageOverride(pageOverride);
-    const box = sheetLayoutBoxesIn({
-      paper: printPaper, orient: printOrient,
-      metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
-      titleBlockExtra: !!printScale,
-      includeMetrics: settings.printMetricsBand !== false,
-      page: pageOverride,
-    });
-    setComposeBoxIn(box);
-    // Keep the Shift-snap aspect current for whenever the owner returns to the canvas (◂
-    // Reposition) — a paper/orientation change made here must be what a shift-held drag out
-    // there snaps to, never a stale value from when print mode was first entered. Skipped for a
-    // fit-to-frame page (its aspect is circularly the frame's own — nothing meaningful to snap to).
-    if (!pageOverride) printAspectRef.current = box.planW / box.planH;
-    if (!pf) return;
-    if (printScale) {
-      const effective = frameFootprintForScale(printScale, { w: box.planW, h: box.planH });
-      setPrintFrame({ cx: pf.cx, cy: pf.cy, wFt: effective.wFt, hFt: effective.hFt });
-      setFitWarning(checkScaleFits(printScale, pf, effective).message || null);
-    } else {
-      // NEW-1 — the frame KEEPS the exact shape the owner picked; the sheet's plan window fits
-      // IT (exportSheet.js nests the plan with preserveAspectRatio="meet", which already fits
-      // any aspect), never the other way around. Re-fitting the frame's aspect to the plan box
-      // here — what this branch used to do on every paper/orientation change — is the exact bug
-      // this item fixes: it silently undid a free-form drag the moment the sheet changed.
-      setPrintFrame(pf);
-      setFitWarning(null);
-    }
-  };
-  useEffect(() => {
-    if (!composeMode) return;
-    recomputeCompose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composeMode, printPaper, printOrient, printScale, printFitToFramePage, settings.printMetricsBand]);
-  // The live sheet preview — debounced, and built through the SAME `buildComposedSheet` the
-  // final PDF rasterizes (PDF-PARITY by construction, not by inspection). Re-runs on every
-  // knob the sheet's CONTENTS depend on; paper/orient/scale changes reach here indirectly
-  // through the printFrame update the effect above already made.
-  const composeKey = composeMode && printFrame
-    ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
-      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false,
-      settings.printBuildingsTable !== false, settings.printScaleBar !== false,
-      composePageOverride ? `${composePageOverride.w}x${composePageOverride.h}` : ""].join("|")
-    : null;
-  useEffect(() => {
-    if (!composeKey) return;
-    let cancelled = false;
-    setComposePreviewLoading(true);
-    const t = setTimeout(async () => {
-      try {
-        const scaleText = printScale ? scaleLabel(printScale) : "";
-        const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, false, settings.printScaleBar !== false));
-        if (cancelled) return;
-        if (!composed) { setComposePreviewUrl(null); return; }
-        const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
-        if (composePreviewUrlRef.current) URL.revokeObjectURL(composePreviewUrlRef.current);
-        composePreviewUrlRef.current = url;
-        setComposePreviewUrl(url);
-      } catch (_) { /* a preview hiccup is non-fatal — Download PDF re-runs the same pipeline and surfaces a real error if it still fails */ }
-      finally { if (!cancelled) setComposePreviewLoading(false); }
-    }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composeKey]);
-  useEffect(() => () => { if (composePreviewUrlRef.current) URL.revokeObjectURL(composePreviewUrlRef.current); }, []);
-  // "Today" for the compose screen's title-block readout, in the same YYYY.MM.DD shape the
-  // printed sheet uses (`printSheet.js`'s `formatDateStamp`, which stays in the lazy chunk —
-  // this is a tiny standalone copy so the compose panel can show the date before that chunk loads).
-  const composeTodayStamp = () => {
-    const d = new Date();
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
-  };
-  // NEW-1 (B1783056) — orientation auto-flip: default the sheet to whichever orientation
-  // matches the picked frame (less wasted paper), but only as a DEFAULT — never re-applied
-  // once the owner has touched the Landscape/Portrait control this compose (orientTouchedRef).
-  const enterCompose = () => {
-    pickedFrameRef.current = printFrame;
-    orientTouchedRef.current = false;
-    if (printFrame) {
-      const wanted = orientationForAspect(printFrame.wFt / printFrame.hFt);
-      if (wanted !== printOrient) setPrintOrient(wanted);
-    }
-    setComposeMode(true);
-  };
-  const setPrintOrientTouched = (o) => { orientTouchedRef.current = true; setPrintOrient(o); };
-  const setPrintFitToFramePageTouched = (v) => { setPrintFitToFramePage(v); if (v) setPrintScale(null); };
-  const setPrintScaleTouched = (v) => { setPrintScale(v); if (v) setPrintFitToFramePage(false); };
-  const exitToReposition = () => setComposeMode(false); // non-destructive: printFrame/paper/scale/toggles are all untouched
-  const cancelPrint = () => {
-    setComposeMode(false); setPrintMode(false); setPrintFrame(null); setFitWarning(null);
-    pickedFrameRef.current = null;
-    if (composePreviewUrlRef.current) { URL.revokeObjectURL(composePreviewUrlRef.current); composePreviewUrlRef.current = null; }
-    setComposePreviewUrl(null);
-    // Dimensions/area-label toggles are shared with the live View menu (WYSIWYG, no duplicate
-    // filtering path) — but a print session must still be non-destructive to the editing view,
-    // so whatever the compose screen changed is put back the moment the whole flow ends,
-    // whether that's a Cancel or a completed Download.
-    const pre = preCanvasDisplayRef.current;
-    if (pre) {
-      setSettings((s) => (s.showDims === pre.showDims && s.showAreas === pre.showAreas) ? s : { ...s, showDims: pre.showDims, showAreas: pre.showAreas });
-      preCanvasDisplayRef.current = null;
-    }
-  };
-  // Read at CALL time off the one shared prefs snapshot (never a mount-time copy of it).
-  const flattenMarkupsPref = () => getPrefsSnapshot().exportPrefs?.flattenMarkups === true;
-  const doPrint = async () => {
-    setComposeDownloading(true);
-    try {
-      const scaleText = printScale ? scaleLabel(printScale) : "";
-      const preparedBy = (settings.printPreparedBy || "").trim();
-      // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref(), settings.printScaleBar !== false);
-      cancelPrint();
-    } finally { setComposeDownloading(false); }
-  };
+  /* ------------ print-frame placement + the compose screen (phase 2 of the print hook; see lib/usePrintCompose.js) ------------ */
+  const {
+    printAspectRef, printAspect, refreshPrintAspect, fitFrame, enterPrintMode, overlayPrintable, mapLayersPrintable, buildingsTablePrintable, startPrintMove, startPrintResize, recomputeCompose, composeKey, composeTodayStamp, enterCompose, setPrintOrientTouched, setPrintFitToFramePageTouched, setPrintScaleTouched, exitToReposition, cancelPrint, flattenMarkupsPref, doPrint,
+  } = usePrintHandlers({
+    setPrintMode, printFrame, setPrintFrame, printPaper, printOrient, setPrintOrient, printOverlay, setPrintOverlay, printMapLayers, composeMode, setComposeMode, printScale, setPrintScale, setFitWarning, printFitToFramePage, setPrintFitToFramePage, composePageOverride, setComposePageOverride, setComposeBoxIn, setComposePreviewUrl, setComposePreviewLoading, setComposeDownloading, pickedFrameRef, orientTouchedRef, composePreviewUrlRef, preCanvasDisplayRef,
+    devExtent, drag, els, exportPDF, loadExportSheet, overlays, p2f, getP2fStatic: () => p2fStatic, printMetricPairs, printStormwaterBars,
+    setExportMenu, setSel, setSettings, settings, sheetOverlays, showAerial, size, startGate, svgRef, withExportSheet,
+  });
 
   const cullKeep = useMemo(() => {
     const s = new Set();
@@ -20260,6 +19315,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }).filter(Boolean)
     : [];
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
+  // NEW-1 — bulk PROPERTIES (size, rotation, stall spec, structure…) for a multi-selection of elements: the fields every
+  // member shares (lib/multiProps.js), written through the SAME by-element writers the single panels use, in ONE undo step.
+  const multiKinds = multiStyleable ? selectionKinds(multi, els) : null;
+  const multiPropFields = multiKinds && multiKinds.members.length > 1 ? fieldsFor(multiKinds.type) : [];
+  const multiPropOps = {
+    resizeTo: (el, axisKey, v) => resizeElToValue(el, axisKey, v),
+    rotateTo: (el, deg) => rotateAssemblyTo(el, deg),
+    patch: (el, patch) => setEls((a) => a.map((x) => (x.id === el.id ? { ...x, ...patch } : x))),
+    setRoadTravel: (el, v) => setRoadTravel(el, v),
+    setParkCfg: (el, patch) => setParkCfg(el, patch),
+    setTrailerSpec: (id, key, v) => setTrailerSpec(id, key, v),
+    toggleLabel: (id) => toggleElLabel(id),
+  };
+  const multiPropCtx = { cfgOf, roadTravel };
+  const writeMultiProp = (field, value) => {
+    if (!multiKinds) return;
+    bulkHistRef.current = { pushed: false };
+    try { applyBulk(multiKinds.members, field, value, multiPropOps); } finally { bulkHistRef.current = null; }
+  };
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
 
@@ -21846,7 +20920,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? (measureGrabsInterior(m) ? "all" : "stroke") : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={hitLive ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
@@ -21905,7 +20979,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ? { fill: `url(#pat-markup-${m.id})` }
                   : closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
                 const visibleStroke = { strokeOpacity: m.strokeOpacity ?? 1 };
-                const closedHitPE = (closedFill || !m.locked) ? "all" : "stroke"; // whole-body vs stroke-only grab (B920/NEW-1)
+                const closedHitPE = closedFill ? "all" : "stroke"; // 2026-11-24: whole-body ONLY when visibly filled/hatched; else outline-only (lock no longer matters)
                 // Top-centre screen anchor for the selected-locked 🔒 cue (B922/NEW-3), per markup kind.
                 const mkLockAnchor = () => {
                   const pts = m.kind === "line" ? [m.a, m.b]
@@ -24933,6 +24007,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}
+          {multiStyleable && multiPropFields.length > 0 && <MultiPropsInspector
+                  members={multiKinds.members}
+                  type={multiKinds.type}
+                  fields={multiPropFields}
+                  ctx={multiPropCtx}
+                  onWrite={writeMultiProp}
+                  muted={PAL.muted}
+                />}
           {multiStyleable && multiStyle && <MultiStyleInspector
                   PAL={PAL}
                   applyMultiStyle={applyMultiStyle}
