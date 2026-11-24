@@ -15423,14 +15423,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  // B2671333 — where a NEW print frame is centred: the development AND the visible property lines together,
-  // so the site (boundary + elements) lands in the middle of the sheet. devExtent itself is untouched (export crop).
+  // B2671333 — where a NEW print frame is centred: the PROPERTY LINE (visible parcels) when there is one, so the site sits in the
+  // middle of the sheet; the development extent only when no parcel is drawn. devExtent itself is untouched (export crop).
   const printSeedExtent = () => {
-    const dev = devExtent();
     const pts = [];
-    if (dev) pts.push({ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 });
     visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
-    if (!pts.length) return null;
+    if (!pts.length) return devExtent();
     const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
     const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };

@@ -14,7 +14,7 @@ import { getPrefsSnapshot } from "./userPrefs.js";
 import { hasPrintableOverlay } from "./overlayPrint.js";
 import { isBuilding } from "./siteModel.js";
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./printScale.js";
-import { frameGripAnchor, orientationForAspect, frameToAspect } from "./printFrameDrag.js";
+import { frameGripAnchor, orientationForAspect } from "./printFrameDrag.js";
 export function usePrintState() {
   const [printMode, setPrintMode] = useState(false);     // print-frame placement mode
   const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
@@ -138,11 +138,14 @@ export function usePrintHandlers({ composeMode, composePageOverride, composePrev
       setPrintFrame({ cx: pf.cx, cy: pf.cy, wFt: effective.wFt, hFt: effective.hFt });
       setFitWarning(checkScaleFits(printScale, pf, effective).message || null);
     } else {
-      // B2671333 — the picked area is always kept whole and centred, but the frame is GROWN to the
-      // plan window's own shape (frameToAspect) so the aerial and plan fill the window edge to edge
-      // instead of floating in a letterbox of white. `pf` itself is never overwritten, so a later
-      // paper/orientation change re-derives from what the owner actually picked.
-      setPrintFrame(frameToAspect(pf, box.planW / box.planH));
+      // NEW-1 — the frame KEEPS the exact shape the owner picked; the sheet's plan window fits
+      // IT (exportSheet.js nests the plan with preserveAspectRatio="meet", which already fits
+      // any aspect), never the other way around. Re-fitting the frame's aspect to the plan box
+      // here — what this branch used to do on every paper/orientation change — is the exact bug
+      // this item fixes: it silently undid a free-form drag the moment the sheet changed.
+      // B2671333 (owner 2026-11-24): the white margin that "meet" leaves is what keeps the site
+      // CENTRED, so it stays; centring is done by where the frame is seeded (printSeedExtent).
+      setPrintFrame(pf);
       setFitWarning(null);
     }
   };
