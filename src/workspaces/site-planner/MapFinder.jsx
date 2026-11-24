@@ -1131,7 +1131,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const { dropIntakeRef, fileDragActive, onRejectDroppedFile } = useMapFileDrop({ visible, isActive, mapRef, setErr, setPanelTab, sitesPanelOpen, toggleSitesPanel });
 
 
-  useMapFocusRequests({ pendingCompAnchor, focusCompId, focusMissingLocations, setPanelTab, setSitesPanelOpen, setLocationFilterOnly });
   // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
   // covering the search bar; desktop keeps it always-open as before.
   /* B427409 — the panel's open state now PERSISTS, on the `sitesPanelClosed` pattern one state
@@ -1223,6 +1222,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // projects with no origin, so arriving here actually answers "which ones" instead of handing
   // back the same unfiltered list a plain tab click would. Cleared by the "Show all" chip.
   const [locationFilterOnly, setLocationFilterOnly] = useState(false);
+  useMapFocusRequests({ pendingCompAnchor, focusCompId, focusMissingLocations, setPanelTab, setSitesPanelOpen, setLocationFilterOnly });
   // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's own cross-device arrangement:
   // which group order the user dragged into, which groups are collapsed, and which sites are
   // pinned to the top. ONE account-scope bag (lib/userPrefs.js's `sitesPanel`), same
