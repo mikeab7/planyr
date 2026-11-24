@@ -62,7 +62,8 @@ describe("a stray tap cannot retarget or discard the note", () => {
 
   it("site, comp and note markers, identify popups, the pin drop and parcel picks all yield too", () => {
     expect(finder).toMatch(/const openSiteNow = \(\) => \{ if \(editingNoteRef\.current\) return;/);
-    expect(finder).toMatch(/marker\.on\("click", \(\) => \{ if \(editingNoteRef\.current\) return;/);
+    // (e) since B2671329: the handler also tells a stack-badge press from a pin press, AFTER this guard
+    expect(finder.match(/marker\.on\("click", \(e?\) => \{ if \(editingNoteRef\.current\) return;/g)).toHaveLength(2);
     expect(finder.match(/identifyOk: \(\) => !selectModeRef\.current && !editingNoteRef\.current/g)).toHaveLength(2);
     expect(finder).toMatch(/const markDecidePin = \(latlng\) => \{\s*\n\s*if \(editingNoteRef\.current\) return;/);
     expect(finder).toMatch(/const addParcelHit = \(hit, at\) => \{\s*\n\s*if \(editingNoteRef\.current\) return null;/);
