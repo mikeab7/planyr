@@ -95,6 +95,8 @@ export const DECLARATIONS = Object.freeze([
   { name: "startRoadEnd", verdict: U, why: "Begins a drag on the selected road's endpoint." },
   { name: "checkDrainage", verdict: U,
     why: "ENGINEERING. The drainage pass prices the whole site; hiding a building must not change a detention volume." },
+  { name: "useDrainageCheck", verdict: U,
+    why: "ENGINEERING. The hook that hosts checkDrainage (audit batch G2) also computes the check's invalidation signature from the fill / pond elements: it must see the WHOLE model, because hiding a pond must not make a stored drainage answer look current." },
   { name: "drainFactsNow", verdict: U, why: "The same engineering tier as checkDrainage — a drainage number, not a picture." },
   { name: "corridorBboxSig", verdict: U, why: "A cache signature over the GIS fetch envelope — a network decision, not a picture." },
   { name: "findOpenPondCenter", verdict: U,
