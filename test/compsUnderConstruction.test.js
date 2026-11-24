@@ -74,6 +74,15 @@ describe("under-construction comp type", () => {
     expect(JSON.stringify(summarizeLeaseComps([lease, uc]))).toBe(onlyLease);
     expect(JSON.stringify(summarizeSaleComps([uc], "building_sale"))).toBe(JSON.stringify(summarizeSaleComps([], "building_sale")));
   });
+  it("converts from ANY status and keeps the building's details on the new record", () => {
+    const comp = { ...rowToComp(row), ucStatus: "under_construction", notes: "n", partyAcquirer: "Tenant Co", powerAmps: 2000, powerVolts: 480, powerPhase: 3 };
+    for (const to of ["lease", "building_sale"]) {
+      const d = convertDeliveredComp(comp, to);
+      expect(d).toMatchObject({ id: "u1", compType: to, title: "Katy Spec 3", notes: "n", partyProvider: "Acme Dev", partyAcquirer: "Tenant Co", clearHeightFt: "36", dockDoors: "48", powerAmps: "2000", powerVolts: "480", powerPhase: "3", compDate: "" });
+      expect(d.anchor).toEqual(comp.anchor);
+      expect(d.leaseSizeSf === "250000" || d.bldgSizeSf === "250000").toBe(true);
+    }
+  });
   it("converts a delivered building to a lease or sale record in place, executed date blank", () => {
     const comp = { ...rowToComp(row), ucStatus: "delivered" };
     const lease = convertDeliveredComp(comp, "lease");
