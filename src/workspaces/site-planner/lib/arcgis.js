@@ -464,8 +464,8 @@ export function lngLatFeatureToParcel(feature) {
   const best = largestRing(rings);
   const [lon0, lat0] = ringCentroid(best);
   const ring = ringClosed(best) ? best.slice(0, -1) : best;
-  const FT_PER_DEG_LAT = 365223; // feet per degree latitude (Web-Mercator sphere base)
-  const FT_PER_DEG_LON = 365223 * Math.cos((lat0 * Math.PI) / 180);
+  const FT_PER_DEG_LAT = FT_PER_DEG; // feet per degree latitude (Web-Mercator sphere base; mapLock.js owns the number)
+  const FT_PER_DEG_LON = FT_PER_DEG * Math.cos((lat0 * Math.PI) / 180);
   const points = ring.map(([lon, lat]) => ({
     x: (lon - lon0) * FT_PER_DEG_LON,
     y: -(lat - lat0) * FT_PER_DEG_LAT,

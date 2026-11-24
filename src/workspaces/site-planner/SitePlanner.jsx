@@ -377,7 +377,7 @@ import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js"
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { pointInRing, projectOntoSegment } from "./lib/ringMath.js";
+import { pointInRing, projectOntoSegment, distToSegment as segDist } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { pondLedgerSignature, createIdentityToken } from "./lib/pondLedgerKey.js";
@@ -11151,12 +11151,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ align rotation to a target (parcel edge / element) ------------ */
-  const segDist = (p, a, b) => {
-    const vx = b.x - a.x, vy = b.y - a.y, wx = p.x - a.x, wy = p.y - a.y;
-    const L2 = vx * vx + vy * vy || 1;
-    let t = (wx * vx + wy * vy) / L2; t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
-  };
   // Snap an element from curRot to be parallel to a line at `ang°`, choosing the
   // nearest of the four 90°-equivalent orientations (least rotation).
   const snapParallel = (curRot, ang) => {

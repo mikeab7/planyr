@@ -12,12 +12,10 @@
  * signature ring-only so that lands without rework.
  */
 import { polyIntersectArea } from "./polyClip.js";
+import { extentOfRings } from "./ringMath.js";
 
-const bboxOf = (ring) => {
-  let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-  for (const p of ring) { if (p.x < mnX) mnX = p.x; if (p.x > mxX) mxX = p.x; if (p.y < mnY) mnY = p.y; if (p.y > mxY) mxY = p.y; }
-  return { mnX, mnY, mxX, mxY };
-};
+const toBox = ([mnX, mnY, mxX, mxY]) => ({ mnX, mnY, mxX, mxY });
+const bboxOf = (ring) => toBox(extentOfRings([ring]));
 const bboxesTouch = (a, b) => a.mnX <= b.mxX && b.mnX <= a.mxX && a.mnY <= b.mxY && b.mnY <= a.mxY;
 
 /* ponds: [{ id, ring }] · easements: [{ id, ring, label }] · corridorRings: [[{x,y},…]]

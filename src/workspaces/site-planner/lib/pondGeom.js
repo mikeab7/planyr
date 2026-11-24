@@ -14,7 +14,7 @@
 import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { polyArea } from "./polygonSplit.js";
 import { crestTopRing } from "./inwardBerm.js";
-import { pointInRing } from "./ringMath.js";
+import { pointInRing, distToSegment as distToSeg } from "./ringMath.js";
 import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 
 // Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})? Re-exported because
@@ -22,12 +22,6 @@ import { CF_PER_ACFT, SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 export { pointInRing };
 
 // Shortest distance from point `p` to segment a→b.
-const distToSeg = (p, a, b) => {
-  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
-  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-};
 
 // Shortest distance from point `p` to the closed ring `ring` (includes the closing edge).
 const distToRing = (p, ring) => {

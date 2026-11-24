@@ -42,6 +42,7 @@
  */
 import { parcelsOf, elementsOf } from "./siteModel.js";
 import { elToRingFeet, TYPE, elStyle, byZ } from "./planStyle.js";
+import { distToSegment as segDist } from "./ringMath.js";
 import { sortElsForPaint } from "./trailerOverRoads.js"; // NEW-1 (2026-11-05) — trailer parking always draws above roads, same as the canvas
 
 const VB_W = 400, VB_H = 300; // 4:3 — arbitrary viewBox units; vector output scales to any render size
@@ -80,14 +81,6 @@ function xmlAttr(v) {
 }
 
 /** Perpendicular distance from `p` to the segment `a`-`b`. */
-function segDist(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
 
 /** Ramer-Douglas-Peucker on an OPEN polyline. Iterative (an explicit stack, never recursion): a
  * surveyed ring can carry thousands of vertices and this runs on the main thread right after a

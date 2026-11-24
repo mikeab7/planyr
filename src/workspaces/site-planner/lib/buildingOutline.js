@@ -14,6 +14,7 @@
  */
 import ClipperLib from "clipper-lib";
 import { isDogEarSide } from "./dogEar.js";
+import { pointInRing } from "./ringMath.js";
 
 const SCALE = 100;             // feet → centi-feet, matching roadNetwork.js / pondOffset.js / polyClip.js
 const CLEAN_DELTA = SCALE * 0.01;
@@ -35,14 +36,6 @@ export function bumpOutsOf(els, host) {
 
 const toPath = (ring) => ring.map((p) => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }));
 const fromPath = (path) => path.map((c) => ({ x: c.X / SCALE, y: c.Y / SCALE }));
-const pointInRing = (p, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-};
 
 /**
  * The building's outline including its bump-outs, as one ring in feet.

@@ -22,6 +22,7 @@
  *   - A drive within ~10° of the face (a skim, roadJunctions SKIM_MAX_PHI_DEG) crosses nothing and removes nothing.
  */
 import { carStalls } from "./siteGeometry.js";
+import { pointInRing as pointInPoly } from "./ringMath.js";
 
 export const AISLE_SNAP_EXTRA_FT = 6;      // a landing within (half the aisle + 6 ft) of an aisle's centreline snaps to it
 export const END_FACE_TOL_FT = 1.0;        // "on the end face": within this of local x = 0 or x = w
@@ -200,14 +201,6 @@ export function throughDrivesOf(el, settings, roads, stripOf, snapFt = 6) {
     out.push({ roadId: r.id, removed });
   }
   return out;
-}
-function pointInPoly(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
 }
 
 /** The stalls of field `el` that a drive takes: `{ base, removed:[{band,k}], count, set:Set("band:k"), corridors:[world rings] }` | null for a non-rect field.

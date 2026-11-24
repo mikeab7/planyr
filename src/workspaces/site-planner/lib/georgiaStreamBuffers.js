@@ -31,6 +31,7 @@
  */
 import { corridorRingLngLat } from "./pipelineCorridor.js";
 import { inTidalReach, inMrpaReachBox, makeRingIndex, nearRingIndexes, MRPA_EDGE_DEG } from "./georgiaRiverExclusions.js";
+import { pointInPairRing } from "./ringMath.js";
 const MRPA_BOX_PAD_DEG = 0.01, CLIP_STEP_DEG = 0.0005;
 export { inTidalReach, riverExclusionAt, inMrpaReachBox, inMrpaReach, MRPA_REACH_BOX } from "./georgiaRiverExclusions.js";
 
@@ -59,14 +60,7 @@ export function tierFor({ inDistrict = false, trout = false } = {}) {
 }
 
 /* Ray-cast point-in-ring ([lng,lat] vertices, either winding). Pure. */
-export function pointInRing(lng, lat, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
+export const pointInRing = (lng, lat, ring) => pointInPairRing(ring, lng, lat);
 
 /* The outer rings of every Polygon / MultiPolygon in a GeoJSON FeatureCollection. Holes are ignored on purpose: the
  * District outline has none, and a hole would only ever make "inside the District" LESS true (fail toward the
