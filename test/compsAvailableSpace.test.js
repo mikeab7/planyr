@@ -141,6 +141,15 @@ describe("available space in the sheet, filters, map and the Log supply menu", (
     const [{ draft }] = parsePasteBlock(`${header.join("\t")}\n${r.join("\t")}`);
     expect(draft).toMatchObject({ compType: "available", leaseSizeSf: "120000", avKind: "sublease", avDate: "2027-02-01", leaseRate: "0.58", leaseRatePeriod: "monthly" });
   });
+  it("a Bldg SF column is the building size on an Available row, and stays a Notes fact on a lease", () => {
+    const header = ["Type", "Property", "Leased SF", "Bldg SF"];
+    const [{ draft: av }] = parsePasteBlock(`${header.join("\t")}\nAvailable\tR45\t100000\t347387`);
+    expect(av).toMatchObject({ compType: "available", leaseSizeSf: "100000", bldgSizeSf: "347387" });
+    expect(av.notes || "").not.toMatch(/Bldg SF/);
+    const [{ draft: ls }] = parsePasteBlock(`${header.join("\t")}\nLease\tR45\t100000\t347387`);
+    expect(ls.compType).toBe("lease");
+    expect(ls.notes).toMatch(/Bldg SF: 347387/);
+  });
   it("the map menu row reads 'Log supply'", () => {
     expect(verbLabel("supply", 1)).toBe("Log supply");
     // source-scan: the Record info menu holds the choice INSIDE the one row (owner-approved shape)

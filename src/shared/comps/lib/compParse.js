@@ -780,6 +780,9 @@ function emptyGeneric() {
     ucStatus: null, ucDeliveryKind: null, ucStartDate: null, ucDeliveryDate: null, ucPreleasedPct: null,
     // Available-space facts (db/comps_available_space.sql) — likewise only from a sheet that names them.
     avKind: null, avDate: null,
+    // Whole-building SF from a "Bldg SF" column next to a leased/available size (building size on an
+    // Available row; a Notes fact on every other type).
+    buildingSf: null, buildingSfNote: null,
   };
 }
 
@@ -1313,6 +1316,7 @@ function genericToDraft(generic) {
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
     d.leaseRateExpense = generic.rateBasis || "nnn";
+    if (generic.buildingSf != null) d.bldgSizeSf = String(generic.buildingSf);
     d.avKind = generic.avKind || "direct";
     if (generic.avDate) d.avDate = generic.avDate;
   } else if (d.compType === "lease") {
@@ -1772,7 +1776,9 @@ function resolveHeaderMap(map) {
   const hasSize = map.some((m) => m && m.key === "sizeValue");
   return map.map((m) => {
     if (!m || m.key !== "buildingSf") return m;
-    return hasSize ? { ...m, key: "extra" } : { ...m, key: "sizeValue" };
+    // Kept as its own key (not "extra"): an Available-space row stores it as the building size.
+    // Every other type still reads it as a Notes fact (see the "buildingSf" cell case).
+    return hasSize ? { ...m, key: "buildingSf" } : { ...m, key: "sizeValue" };
   });
 }
 
@@ -1887,6 +1893,13 @@ function assignHeaderCell(generic, flags, ctx, col, val) {
       if (n) { generic.sizeValue = n.value; if (n.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value."); }
       else { const x = cellNumber(val); if (x != null && x > 0) generic.sizeValue = x; }
       if ((/\bac/i.test(val) || /\bac|acre/i.test(col.label)) && !/sf|square/i.test(val)) generic.sizeUnit = "ac";
+      break;
+    }
+    case "buildingSf": {
+      const note = `${col.label}: ${val}`;
+      const x = cellNumber(val);
+      if (x != null && x > 0) { generic.buildingSf = x; generic.buildingSfNote = note; }
+      ctx.extras.push(note);
       break;
     }
     case "sizeUnit": generic.sizeUnit = /ac/i.test(val) ? "ac" : "sf"; break;
@@ -2060,6 +2073,10 @@ function parseSpreadsheetRow(cells, headerMap, sheetType) {
       const inferred = inferTypeFromCapturedFields(generic);
       if (inferred) { generic.compType = inferred; flags.compType = { level: "soft", reason: "Type wasn't a column — guessed from which figures were given." }; }
     }
+  }
+  // The Bldg SF column is the building size on an Available row, so it is not repeated in Notes there.
+  if (generic.compType === "available" && generic.buildingSf != null && generic.buildingSfNote && generic.notes) {
+    generic.notes = generic.notes.split("; ").filter((x) => x !== generic.buildingSfNote).join("; ") || null;
   }
   const row = finalizeGenericRow(generic, flags, cells.join("\t"));
   // No coordinate but an address: the grid geocodes it (the map search's own forward lookup).
