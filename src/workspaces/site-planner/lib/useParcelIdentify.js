@@ -7,6 +7,7 @@
 import { useState, useRef, useEffect } from "react";
 import { feetToLatLng, humanizeError, largestRingLngLat, lngLatRingToFeet, outerRingsLngLat, resolveLayerUrl } from "./arcgis.js";
 import { COUNTIES_MAP, STATEWIDE_KEYS, candidateCountiesForPoint, countyIdentity, displaySourcesForView, ensureCountyGeometryAt, isStatewideLayerUrl, lineNeighbourKeysForPoint, loadCountyPolygons, onParcelTablesLoaded, silentServerPhrase, stackRuleForCounty, statewideBackupScope, statewideKeysForState } from "./counties.js";
+import { looksLikeParcelNumber } from "./parcelNumberShape.js";
 import { geocodeAddress } from "./geocode.js";
 import { identifyWithLineFallback } from "./identifyWithFallback.js";
 import { PANE_PARCEL_PICK, PANE_PARCEL_PICK_LABEL } from "./mapStack.js";
@@ -228,6 +229,19 @@ export function useParcelIdentify({ PAL, ackRef, addrBusy, addrQuery, ensureBase
     ensureBasemapOn(); setJurInfo(null);
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
+      /* NEW-1 (Meriwether GA, 2026-11-24) — a typed parcel NUMBER ("023 012", "069A 009") is looked up in the county the plan sits in (lib/viewParcelId.js, the same front door as the Map's search)
+       * and the lot added; a miss says where it looked, a server that did not answer says so. Anything that is not a number goes to the geocoder as before. */
+      if (looksLikeParcelNumber(q)) {
+        const { resolveViewParcelId, viewParcelIdMessage } = await import("./viewParcelId.js");
+        const vr = await resolveViewParcelId(q, { lat: origin.lat, lng: origin.lon });
+        if (vr.status === "found") {
+          const [fp] = lngLatRingToFeet([[vr.point.lng, vr.point.lat]], origin.lon, origin.lat);
+          setAddrQuery("");
+          await quickAddAt(fp);
+          return;
+        }
+        if (vr.status === "notfound" || vr.status === "unavailable") { setIdentifyRes({ error: viewParcelIdMessage(vr, q) }); return; }
+      }
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
       if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
