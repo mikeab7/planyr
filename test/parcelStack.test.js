@@ -35,7 +35,7 @@ function fakeBartow() {
   const calls = [];
   const matches = (where) => {
     let m = where.match(/UPPER\((\w+)\) LIKE UPPER\('%(.*)%'\)/);
-    if (m) return BARTOW_ROWS.filter((r) => String(r.attributes[m[1]]).toUpperCase().includes(m[2].toUpperCase()));
+    if (m) return BARTOW_ROWS.filter((r) => new RegExp(m[2].split("%").map((t) => t.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")).test(String(r.attributes[m[1]]).toUpperCase())); // % inside the pattern is a wildcard, as on the real server
     m = where.match(/^(\w+) = '(.*)'$/);
     if (m) return BARTOW_ROWS.filter((r) => r.attributes[m[1]] === m[2].replace(/''/g, "'"));
     return BARTOW_ROWS;
