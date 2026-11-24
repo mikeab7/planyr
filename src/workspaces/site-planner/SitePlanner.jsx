@@ -519,6 +519,8 @@ import { PondInspector } from "./components/PondInspector.jsx";
 import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components/PlannerContextMenus.jsx";
 import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
 import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
+import { MultiPropsInspector } from "./components/MultiPropsInspector.jsx";
+import { selectionKinds, fieldsFor, applyBulk } from "./lib/multiProps.js";
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
 import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
 import { BuildingNumberConflict, BuildingFootprintSection, BuildingLoadingSection, BuildingStructureSection, BuildingAppearanceSection } from "./components/BuildingInspectorSections.jsx";
@@ -4444,7 +4446,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
     easeLabelMove: "move", easeLabelRot: "rotate",
   };
-  const pushHistory = (kind = "edit") => { if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  // NEW-1 (bulk properties) — while a bulk edit runs, only the FIRST pushHistory of the batch records a frame, so one
+  // typed value on N elements is ONE undo step (the per-element writers each call pushHistory themselves).
+  const bulkHistRef = useRef(null);
+  const pushHistory = (kind = "edit") => { if (bulkHistRef.current) { if (bulkHistRef.current.pushed) return; bulkHistRef.current.pushed = true; } if (carryRef.current) checkCarried(true); opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -20265,6 +20270,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }).filter(Boolean)
     : [];
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
+  // NEW-1 — bulk PROPERTIES (size, rotation, stall spec, structure…) for a multi-selection of elements: the fields every
+  // member shares (lib/multiProps.js), written through the SAME by-element writers the single panels use, in ONE undo step.
+  const multiKinds = multiStyleable ? selectionKinds(multi, els) : null;
+  const multiPropFields = multiKinds && multiKinds.members.length > 1 ? fieldsFor(multiKinds.type) : [];
+  const multiPropOps = {
+    resizeTo: (el, axisKey, v) => resizeElToValue(el, axisKey, v),
+    rotateTo: (el, deg) => rotateAssemblyTo(el, deg),
+    patch: (el, patch) => setEls((a) => a.map((x) => (x.id === el.id ? { ...x, ...patch } : x))),
+    setRoadTravel: (el, v) => setRoadTravel(el, v),
+    setParkCfg: (el, patch) => setParkCfg(el, patch),
+    setTrailerSpec: (id, key, v) => setTrailerSpec(id, key, v),
+    toggleLabel: (id) => toggleElLabel(id),
+  };
+  const multiPropCtx = { cfgOf, roadTravel };
+  const writeMultiProp = (field, value) => {
+    if (!multiKinds) return;
+    bulkHistRef.current = { pushed: false };
+    try { applyBulk(multiKinds.members, field, value, multiPropOps); } finally { bulkHistRef.current = null; }
+  };
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
 
@@ -24938,6 +24962,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}
+          {multiStyleable && multiPropFields.length > 0 && <MultiPropsInspector
+                  members={multiKinds.members}
+                  type={multiKinds.type}
+                  fields={multiPropFields}
+                  ctx={multiPropCtx}
+                  onWrite={writeMultiProp}
+                  muted={PAL.muted}
+                />}
           {multiStyleable && multiStyle && <MultiStyleInspector
                   PAL={PAL}
                   applyMultiStyle={applyMultiStyle}
