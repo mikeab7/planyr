@@ -29,6 +29,18 @@ export const TX_CITY_ZONING_FIXTURES = {
     { label: "South Webster — planned development", point: [-95.1249, 29.51375], expectMinCount: 1 }, // bbox: 14
     { label: "North-east Webster — planned development", point: [-95.10681, 29.52948], expectMinCount: 1 }, // bbox: 21
   ] },
+  katyZoning: { fixtures: [
+    { label: "North Katy — M (Industrial District)", point: [-95.81796, 29.83364], expectMinCount: 1 }, // a deepest point of the M polygon, read from the layer's own geometry
+    { label: "West Katy — Cane Island MPC", point: [-95.84841, 29.80135], expectMinCount: 1 },
+  ] },
+  katyFutureLandUse: { fixtures: [
+    { label: "Downtown Katy — GC parcel", point: [-95.81458, 29.7832], expectMinCount: 1 },
+    { label: "South-west Katy — Industrial parcel", point: [-95.83953, 29.77406], expectMinCount: 1 },
+  ] },
+  katyThoroughfare: { fixtures: [
+    { label: "Katy — a Major Street", point: [-95.82447, 29.79327], expectMinCount: 1 }, // a vertex of a Major centreline
+    { label: "East Katy — a Major Street", point: [-95.80176, 29.7822], expectMinCount: 1 },
+  ] },
 };
 
 export const TX_CITY_ZONING_DOCS = {
@@ -38,4 +50,7 @@ export const TX_CITY_ZONING_DOCS = {
   staffordZoning: { notes: "The City of Stafford's zoning designations (11). Names are the layer's own descriptions; CODE_LINK is a Municode link on ten (MU-2 holds an ordinance-number note instead). Layer edited 2024-04-10." },
   websterZoning: { notes: "The City of Webster's base zoning districts (226): C1, C2, C3, NP, O, M1, R1, R1A, R2. Names are the layer's own renderer labels. Same MapServer as the planned-development layer; read through /gis-proxy. Layer edited 2025-12-29." },
   websterPlannedDev: { notes: "The City of Webster's planned development districts (45; 17 with a named development guide). Do not overlap the base layer. PD_Guide_Hyperlink is typed with backslashes on most rows (mended before use). Layer edited 2025-12-29." },
+  katyZoning: { notes: "The City of Katy's zoning (18): C-1, C-2, M, R-1, MH, OKD and ten planned districts whose code is the development's name. Names are the layer's ZONDESC; LINK is an ecode360 section of the city's code. Planning_Map layer 11; edited 2024-12-02." },
+  katyFutureLandUse: { notes: "The City of Katy's future land use (10,967 parcel-shaped polygons; City of Katy and Katy ETJ). Names and colours are the layer's renderer; ROW and blank are not on the city's legend. Owner / address / parcel-number fields are never requested. Planning_Map layer 15; edited 2024-12-02." },
+  katyThoroughfare: { notes: "The City of Katy's thoroughfare plan (391 centrelines): Major, Collector, Interstate Freeway and the proposed Major / Collector (dashed). Planning_Map layer 25; edited 2024-12-02." },
 };

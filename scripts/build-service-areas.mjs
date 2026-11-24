@@ -124,6 +124,19 @@ for (const [key, name] of [["richmond", "Richmond"], ["fulshear", "Fulshear"], [
   if (!gj.features.length) throw new Error(`TxGIO City_Boundaries holds no city_name='${name}'`);
   areas[key] = { label: `City of ${name} limits`, source: `TxGIO Texas_City_Boundaries (city_name='${name}'), full-purpose city limits`, polys: polysOf(gj) };
 }
+if (want("katy")) {
+  /* NEW-1 / NEW-2 (Katy zoning, future land use, thoroughfare plan, 2026-11-24): the City of Katy's limits (layer 7) ∪ its ETJ (layer 8), both from the city's own Planning_Map service (public ArcGIS Online,
+   * services8.arcgis.com/ihZy0ZJt5Ea5u0dK, CORS-open). Zoning applies inside the limits; the city's future land use and thoroughfare plan also cover its ETJ — one area serves all three rows. Esri JSON; every ring is its
+   * own polygon (a hole is filled — an area may only err toward SHOWING a layer). */
+  const KT = "https://services8.arcgis.com/ihZy0ZJt5Ea5u0dK/arcgis/rest/services/Planning_Map/FeatureServer";
+  const polys = [];
+  for (const layer of [7, 8]) {
+    const gj = await q(`${KT}/${layer}/query`, { f: "json", where: "1=1", outFields: "OBJECTID", returnGeometry: "true", maxAllowableOffset: 0.0004 });
+    if (!gj.features || !gj.features.length) throw new Error(`Katy Planning_Map layer ${layer} holds no features`);
+    for (const f of gj.features) for (const ring of f.geometry.rings) polys.push([ring.map(([x, y]) => [round(x), round(y)])]);
+  }
+  areas.katy = { label: "City of Katy limits and ETJ", source: "City of Katy Planning_Map layers 7 (City Limits) and 8 (Katy ETJ), services8.arcgis.com/ihZy0ZJt5Ea5u0dK", polys };
+}
 if (want("sugarland")) {
   /* NEW-1 (Sugar Land city layers, 2026-11-02): the City of Sugar Land's limits (layer 0, one polygon) ∪ its ETJ (layer 1, 14 polygons), from the city's own CityLimits_ETJ map service.
    * The city's ArcGIS Server is not reachable from a build sandbox, so it is read through planyr.io's same-origin relay (a browser-style User-Agent is needed: Cloudflare refuses a bare
