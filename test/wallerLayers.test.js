@@ -101,6 +101,19 @@ describe("every row reads a registry source at the county's own ArcGIS Online or
     expect(GIS_SOURCES.bkdd.serviceUrl).toMatch(/Brookshire_Katy_Drainage_District1\/FeatureServer$/);
     expect(GIS_SOURCES.bkdd.layerId).toBe(54);
   });
+  it("the file production actually loads says the same: the lazy pack loader, the all-packs tooling copy and the file text on disk all carry the measured URLs", async () => {
+    const { SOURCE_PACKS } = await import("../src/shared/gis/sourcePacks.js");
+    const { PACKS_ALL } = await import("../src/shared/gis/sourcePacksAll.js");
+    const { readFileSync } = await import("node:fs");
+    const loaded = await SOURCE_PACKS.find((p) => p.id === "waller").load(); // the exact path lazyLayerFiles.js takes in production
+    for (const [key, url] of Object.entries(URLS)) {
+      expect(loaded.sources[key].serviceUrl, `lazy pack ${key}`).toBe(url);
+      expect(PACKS_ALL.waller.sources[key].serviceUrl, `all-packs ${key}`).toBe(url);
+    }
+    const text = readFileSync(new URL("../src/shared/gis/sourcesWaller.js", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(text).not.toMatch(/Brookshire_Katy_Drainage_District/);
+    for (const svc of ["Proposed_Thoroughfare", "CPC_Protected_Properties_2024", "CPC_owned_2024", "CCN_Boundaries", "MUDs", "Floodway_Buffer_100ft"]) expect(text, svc).toContain(svc);
+  });
   it("every service URL is shaped <org>/<Service>/FeatureServer/<layer>", () => {
     for (const [key, url] of Object.entries(URLS)) expect(url, key).toMatch(/^https:\/\/services1\.arcgis\.com\/BqVKz0o32DERqyE4\/arcgis\/rest\/services\/[A-Za-z0-9_]+\/FeatureServer\/\d+$/);
   });
