@@ -124,3 +124,30 @@ describe("orientationForAspect", () => {
     expect(orientationForAspect(1 / 3)).toBe("portrait");
   });
 });
+
+import { frameToAspect } from "../src/workspaces/site-planner/lib/printFrameDrag.js";
+describe("frameToAspect (B2671333: the frame fills the plan window, centred, no letterbox)", () => {
+  const A = 1.4; // plan window aspect
+  it("a frame wider than the window grows TALLER, same centre, same width", () => {
+    const r = frameToAspect({ cx: 10, cy: 20, wFt: 1400, hFt: 500 }, A);
+    expect(r.wFt).toBe(1400); expect(r.hFt).toBeCloseTo(1000); expect([r.cx, r.cy]).toEqual([10, 20]);
+  });
+  it("a frame taller than the window grows WIDER, same centre, same height", () => {
+    const r = frameToAspect({ cx: -5, cy: 7, wFt: 700, hFt: 1000 }, A);
+    expect(r.hFt).toBeCloseTo(1000); expect(r.wFt).toBeCloseTo(1400); expect([r.cx, r.cy]).toEqual([-5, 7]);
+  });
+  it("always contains the picked frame and ends at exactly the window aspect (grow AND shrink the window)", () => {
+    for (const a of [0.5, 0.77, 1, 1.29, 1.4, 2.4]) for (const f of [{ wFt: 900, hFt: 300 }, { wFt: 300, hFt: 900 }, { wFt: 500, hFt: 500 }]) {
+      const r = frameToAspect({ cx: 0, cy: 0, ...f }, a);
+      expect(r.wFt).toBeGreaterThanOrEqual(f.wFt - 1e-9); expect(r.hFt).toBeGreaterThanOrEqual(f.hFt - 1e-9);
+      expect(r.wFt / r.hFt).toBeCloseTo(a, 9);
+    }
+  });
+  it("is idempotent and leaves unusable input alone", () => {
+    const r = frameToAspect({ cx: 1, cy: 2, wFt: 800, hFt: 200 }, A);
+    expect(frameToAspect(r, A)).toEqual(r);
+    expect(frameToAspect(null, A)).toBe(null);
+    const bad = { cx: 0, cy: 0, wFt: 0, hFt: 5 }; expect(frameToAspect(bad, A)).toBe(bad);
+    const f = { cx: 0, cy: 0, wFt: 5, hFt: 5 }; expect(frameToAspect(f, 0)).toBe(f);
+  });
+});

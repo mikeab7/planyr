@@ -14,7 +14,7 @@ import { getPrefsSnapshot } from "./userPrefs.js";
 import { hasPrintableOverlay } from "./overlayPrint.js";
 import { isBuilding } from "./siteModel.js";
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./printScale.js";
-import { frameGripAnchor, orientationForAspect } from "./printFrameDrag.js";
+import { frameGripAnchor, orientationForAspect, frameToAspect } from "./printFrameDrag.js";
 export function usePrintState() {
   const [printMode, setPrintMode] = useState(false);     // print-frame placement mode
   const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
@@ -47,7 +47,7 @@ export function usePrintState() {
   return { printMode, setPrintMode, printFrame, setPrintFrame, printPaper, setPrintPaper, printOrient, setPrintOrient, printOverlay, setPrintOverlay, printMapLayers, setPrintMapLayers, exportingPDF, setExportingPDF, composeMode, setComposeMode, printScale, setPrintScale, fitWarning, setFitWarning, printFitToFramePage, setPrintFitToFramePage, composePageOverride, setComposePageOverride, composeBoxIn, setComposeBoxIn, composePreviewUrl, setComposePreviewUrl, composePreviewLoading, setComposePreviewLoading, composeDownloading, setComposeDownloading, pickedFrameRef, orientTouchedRef, composePreviewUrlRef, preCanvasDisplayRef };
 }
 
-export function usePrintHandlers({ composeMode, composePageOverride, composePreviewUrlRef, devExtent, drag, els, exportPDF, loadExportSheet, orientTouchedRef, overlays, p2f, pickedFrameRef, preCanvasDisplayRef, printFitToFramePage, printFrame, printMapLayers, printMetricPairs, printOrient, printOverlay, printPaper, printScale, printStormwaterBars, setComposeBoxIn, setComposeDownloading, setComposeMode, setComposePageOverride, setComposePreviewLoading, setComposePreviewUrl, setExportMenu, setFitWarning, setPrintFitToFramePage, setPrintFrame, setPrintMode, setPrintOrient, setPrintOverlay, setPrintScale, setSel, setSettings, settings, sheetOverlays, showAerial, size, startGate, svgRef, withExportSheet, getP2fStatic }) {
+export function usePrintHandlers({ composeMode, composePageOverride, composePreviewUrlRef, devExtent, drag, els, exportPDF, loadExportSheet, orientTouchedRef, overlays, p2f, pickedFrameRef, preCanvasDisplayRef, printFitToFramePage, printFrame, printMapLayers, printMetricPairs, printOrient, printOverlay, printPaper, printScale, printSeedExtent, printStormwaterBars, setComposeBoxIn, setComposeDownloading, setComposeMode, setComposePageOverride, setComposePreviewLoading, setComposePreviewUrl, setExportMenu, setFitWarning, setPrintFitToFramePage, setPrintFrame, setPrintMode, setPrintOrient, setPrintOverlay, setPrintScale, setSel, setSettings, settings, sheetOverlays, showAerial, size, startGate, svgRef, withExportSheet, getP2fStatic }) {
   // p2fStatic is declared AFTER this hook's call site in SitePlanner (const, so reading it here would throw a TDZ error): a getter defers the read to event time.
   const p2fStatic = (px, py) => getP2fStatic()(px, py);
   /* ------------ print-frame placement ------------ */
@@ -76,7 +76,7 @@ export function usePrintHandlers({ composeMode, composePageOverride, composePrev
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = async () => {
     const aspect = await refreshPrintAspect(); // resolves the lazy chunk before any frame exists
-    const dev = devExtent();
+    const dev = (printSeedExtent || devExtent)();
     let base;
     if (dev) base = { cx: dev.cx, cy: dev.cy, w: dev.w + 80, h: dev.h + 80 };
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
@@ -138,12 +138,11 @@ export function usePrintHandlers({ composeMode, composePageOverride, composePrev
       setPrintFrame({ cx: pf.cx, cy: pf.cy, wFt: effective.wFt, hFt: effective.hFt });
       setFitWarning(checkScaleFits(printScale, pf, effective).message || null);
     } else {
-      // NEW-1 — the frame KEEPS the exact shape the owner picked; the sheet's plan window fits
-      // IT (exportSheet.js nests the plan with preserveAspectRatio="meet", which already fits
-      // any aspect), never the other way around. Re-fitting the frame's aspect to the plan box
-      // here — what this branch used to do on every paper/orientation change — is the exact bug
-      // this item fixes: it silently undid a free-form drag the moment the sheet changed.
-      setPrintFrame(pf);
+      // B2671333 — the picked area is always kept whole and centred, but the frame is GROWN to the
+      // plan window's own shape (frameToAspect) so the aerial and plan fill the window edge to edge
+      // instead of floating in a letterbox of white. `pf` itself is never overwritten, so a later
+      // paper/orientation change re-derives from what the owner actually picked.
+      setPrintFrame(frameToAspect(pf, box.planW / box.planH));
       setFitWarning(null);
     }
   };
