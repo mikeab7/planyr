@@ -147,6 +147,7 @@ export async function openSignedIn({ account = "primary", base = "https://planyr
   }
   try {
     const context = await browser.newContext({ ...(viewport ? { viewport } : {}), ...contextOptions }); // contextOptions: e.g. a Playwright device descriptor (isMobile/hasTouch) for a phone check
+    await context.addInitScript(() => { try { sessionStorage.setItem("planyr:diag", "1"); } catch (_) {} }); // arm the diagnostic gate: window.pfSupabase answers only when armed (audit M2)
     for (const [fn, arg] of initScripts) await context.addInitScript(fn, arg); // before any navigation (e.g. the iOS keyboard model)
     const page = await context.newPage();
     const errors = [];

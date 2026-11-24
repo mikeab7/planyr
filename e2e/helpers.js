@@ -24,6 +24,7 @@ export async function signIn(page) {
       return { status: res.status, body: await res.json().catch(() => null) };
     }, E2E_LOGIN_KEY);
     if (r.status !== 200 || !r.body?.access_token) throw new Error(`e2e-session route answered ${r.status} (404 = E2E_LOGIN_KEY not set/wrong on that deploy)`);
+    await page.evaluate(() => { try { sessionStorage.setItem("planyr:diag", "1"); } catch (_) {} }); // window.pfSupabase answers only when armed (audit M2)
     await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20_000 });
     await page.evaluate(({ access_token, refresh_token }) => window.pfSupabase.auth.setSession({ access_token, refresh_token }), r.body);
     // Proven by something only the signed-in owner sees — not by tabs, which also render signed out.
