@@ -54,6 +54,7 @@ import {
 import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { shortDateWithYear } from "../../../shared/units/dateFormat.js";
 
 // Cross-project category tree: remembered set of OPEN categories (default: all collapsed).
 // Category names are stable canonical labels, so one shared key works across sessions.
@@ -65,7 +66,7 @@ const SORT_KEY = "planyr:library:sort:v1";
 // Is this drag carrying OS files (vs. a text/element drag we must ignore)?
 const hasFilesDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
 
-const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
+const fmtDate = (f) => shortDateWithYear(f.docDate || f.updatedAt);
 
 // ---- small styled atoms (theme tokens only — WCAG AA in light + dark) ----
 const Badge = ({ children, tone = "neutral", title }) => {
@@ -1157,7 +1158,7 @@ function MoveRow({ choices, folderId, currentId, busy, onChange, onMove, onCance
 }
 
 /* The file row's context menu — the shared ContextMenu primitive (portal, viewport-aware, Escape / outside-click
- * close) plus roving focus: the first item takes focus, ↑/↓ move, Enter/Space activate (native buttons). */
+ * close) plus roving focus: the first item takes focus, ↑/↓/Home/End move (the shared ContextMenu owns those keys), Enter/Space activate (native buttons). */
 function FileRowMenu({ x, y, title, items, onClose, onPick }) {
   const ref = useRef(null);
   // ContextMenu keeps its panel `visibility:hidden` until it has measured + placed it, and a hidden element cannot take
@@ -1172,17 +1173,9 @@ function FileRowMenu({ x, y, title, items, onClose, onPick }) {
     raf = requestAnimationFrame(go);
     return () => cancelAnimationFrame(raf);
   }, []);
-  const onKeyDown = (e) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-    e.preventDefault();
-    const els = Array.from(ref.current.querySelectorAll('[role="menuitem"]'));
-    const i = els.indexOf(document.activeElement);
-    const n = e.key === "Home" ? 0 : e.key === "End" ? els.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + els.length) % els.length;
-    els[n]?.focus();
-  };
   return (
     <ContextMenu x={x} y={y} onClose={onClose} minWidth={210} zIndex={5000} className="" role="menu" ariaLabel={`Actions for ${title}`} testId="library-file-menu" panelStyle={menuPanelStyle}>
-      <div ref={ref} onKeyDown={onKeyDown}>
+      <div ref={ref}>
         <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{title}</div>
         {items.map((it, i) => it.sep
           ? <div key={`sep${i}`} role="separator" style={{ height: 1, margin: "4px 6px", background: "var(--border-default)" }} />

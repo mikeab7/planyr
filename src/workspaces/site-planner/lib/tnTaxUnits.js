@@ -37,6 +37,7 @@
  * ASSESSMENT RATIOS (Tenn. Const. art. II §28; TCA 67-5-801), Rutherford only because it is the one county whose layer
  * carries a class: industrial & commercial 40% · residential & farm 25% · personal 30% · public utility 55%. Davidson's
  * layer has no class field (LUCode / LUDesc is the only basis) → rate table, NO dollar estimate. */
+import { usdWhole } from "../../../shared/units/numberFormat.js";
 
 const r6 = (n) => Math.round(n * 1e6) / 1e6; // (taxRates.js owns the same helper; not imported to keep this file import-free and cycle-free)
 
@@ -93,7 +94,7 @@ export function leadCode(v) {
   return m ? m[1].toUpperCase() : null;
 }
 
-const money = (n) => `$${Math.round(n).toLocaleString("en-US")}`;
+const money = usdWhole;
 
 function rutherfordTable(attrs) {
   const group = leadCode(attrs.DistrictGroup);
