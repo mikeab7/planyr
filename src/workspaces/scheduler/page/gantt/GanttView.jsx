@@ -429,7 +429,7 @@ export function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef,
     return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
       left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
       fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold || task.cellFmt?.name?.bold),
-      fontStyle:(task.italic || task.cellFmt?.name?.italic)?"italic":"normal", textDecoration:(task.underline || task.cellFmt?.name?.underline)?"underline":"none", color:GANTT_INK,
+      fontStyle:(task.italic || task.cellFmt?.name?.italic)?"italic":"normal", textDecoration:(task.underline || task.cellFmt?.name?.underline)?"underline":"none", color:"var(--gantt-ink)",
       fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7}}>{task.name}</span>;
   };
 
@@ -632,7 +632,7 @@ export function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef,
               // Leaf tasks: apply computeDisplayHealth (overdue, due-soon, etc.)
               : computeDisplayHealth(task, settings, taskById);
             const _h = HEALTH[displayHealth] || HEALTH["gray"];
-            const rowBg = task.rowColor || (isExpandedParent ? (ri%2?"#f8fafc":"var(--bg)") : (displayHealth==="red"?"#ffdfdf":displayHealth==="yellow"?"#fff7b9":displayHealth==="green"?"#d6fae2":displayHealth==="paused"?"#f3f4f6":ri%2?"#f8fafc":"var(--bg)"));
+            const rowBg = task.rowColor || (isExpandedParent ? (ri%2?"var(--row-alt)":"var(--bg)") : (displayHealth==="red"?"var(--row-red)":displayHealth==="yellow"?"var(--row-yellow)":displayHealth==="green"?"var(--row-green)":displayHealth==="paused"?"var(--row-paused)":ri%2?"var(--row-alt)":"var(--bg)"));
             const isGanttSel = selectedId === task.id;
             // Leaf bars: slim enough to sit just under the deepest parent bracket (monotonic
             // by depth), bottom-aligned with the brackets so baselines line up across the chart.
@@ -649,7 +649,7 @@ export function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef,
                   display:"flex",alignItems:"center",
                   borderBottom:"1px solid rgba(0,0,0,0.1)",
                   borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",
-                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg}}>
+                  background:isGanttSel?(task.rowColor||"var(--row-focus)"):rowBg}}>
                 <span style={{position:"sticky",left:8,display:"inline-flex",alignItems:"center",
                   height:14,padding:"0 6px",fontSize:8,fontWeight:600,letterSpacing:".05em",
                   textTransform:"uppercase",color:"#6b7280",background:"var(--bg)",
@@ -659,7 +659,7 @@ export function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef,
             }
 
             return (
-              <div key={task.id} data-gantt-row={task.id} onClick={()=>setSelectedId?.(task.id)} style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,borderBottom:"1px solid rgba(0,0,0,0.1)",borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg}}>
+              <div key={task.id} data-gantt-row={task.id} onClick={()=>setSelectedId?.(task.id)} style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,borderBottom:"1px solid rgba(0,0,0,0.1)",borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",background:isGanttSel?(task.rowColor||"var(--row-focus)"):rowBg}}>
 
                 {/* B222 — Bars, milestone diamonds and summary brackets keep their OWN identity
                     hue (neutral gray / depth-navy), INDEPENDENT of the row fill. rowColor paints

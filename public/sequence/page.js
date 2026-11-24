@@ -7869,11 +7869,11 @@ ${extraNote}` : list;
             ), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 15, fontWeight: 700, color: "var(--txt)", letterSpacing: "-.01em" } }, label), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, background: "#dbeafe", color: "#1d4ed8", borderRadius: 8, padding: "1px 7px", verticalAlign: "middle" } }, gRows.length), showCtl && /* @__PURE__ */ React.createElement(GroupOrderMenu, { label, isFirst: pos === 0, isLast: pos === movableIds.length - 1, onPick: (to) => pickGroupMenu(siteId, to) })))),
             ...gRows.map((t, gri) => {
               const ri = sortedRows.indexOf(t);
-              return /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (gri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }));
+              return /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (gri % 2 ? "var(--row-alt)" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }));
             })
           ];
         });
-      })() : sortedRows.map((t, ri) => /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (ri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }))), sortedRows.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: { padding: 40, textAlign: "center", color: "var(--mut)", fontSize: 12, borderBottom: "1px solid var(--bd)" } }, totalTaskCount === 0 ? "No tasks in this project yet." : levelRows.length > 0 && filterCount > 0 ? /* @__PURE__ */ React.createElement("span", { "data-filter-empty": true }, "No tasks match the filter (", reportFilterPhrase(statusKeys.map((k) => statusName(statusOptions.find((o) => o.k === k))), projectKeys.map((id) => (projectChoices.find((g2) => String(g2.projId) === id) || {}).label || id)), "). ", /* @__PURE__ */ React.createElement(
+      })() : sortedRows.map((t, ri) => /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (ri % 2 ? "var(--row-alt)" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }))), sortedRows.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: { padding: 40, textAlign: "center", color: "var(--mut)", fontSize: 12, borderBottom: "1px solid var(--bd)" } }, totalTaskCount === 0 ? "No tasks in this project yet." : levelRows.length > 0 && filterCount > 0 ? /* @__PURE__ */ React.createElement("span", { "data-filter-empty": true }, "No tasks match the filter (", reportFilterPhrase(statusKeys.map((k) => statusName(statusOptions.find((o) => o.k === k))), projectKeys.map((id) => (projectChoices.find((g2) => String(g2.projId) === id) || {}).label || id)), "). ", /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -8252,7 +8252,7 @@ ${extraNote}` : list;
         fontWeight: ganttNameWeight(task.level, kind, task.bold || task.cellFmt?.name?.bold),
         fontStyle: task.italic || task.cellFmt?.name?.italic ? "italic" : "normal",
         textDecoration: task.underline || task.cellFmt?.name?.underline ? "underline" : "none",
-        color: GANTT_INK,
+        color: "var(--gantt-ink)",
         fontFamily: "'Inter',system-ui,sans-serif",
         whiteSpace: "nowrap",
         pointerEvents: "none",
@@ -8434,7 +8434,7 @@ ${extraNote}` : list;
           const isExpandedParent = isSummary && task.isExpanded;
           const displayHealth2 = isSummary ? rolledHealthMap?.[task.id] || task.health : computeDisplayHealth(task, settings, taskById);
           const _h = HEALTH[displayHealth2] || HEALTH["gray"];
-          const rowBg = task.rowColor || (isExpandedParent ? ri % 2 ? "#f8fafc" : "var(--bg)" : displayHealth2 === "red" ? "#ffdfdf" : displayHealth2 === "yellow" ? "#fff7b9" : displayHealth2 === "green" ? "#d6fae2" : displayHealth2 === "paused" ? "#f3f4f6" : ri % 2 ? "#f8fafc" : "var(--bg)");
+          const rowBg = task.rowColor || (isExpandedParent ? ri % 2 ? "var(--row-alt)" : "var(--bg)" : displayHealth2 === "red" ? "var(--row-red)" : displayHealth2 === "yellow" ? "var(--row-yellow)" : displayHealth2 === "green" ? "var(--row-green)" : displayHealth2 === "paused" ? "var(--row-paused)" : ri % 2 ? "var(--row-alt)" : "var(--bg)");
           const isGanttSel = selectedId === task.id;
           const LEAF_H = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).h;
           if (isBlankDates) {
@@ -8454,7 +8454,7 @@ ${extraNote}` : list;
                   alignItems: "center",
                   borderBottom: "1px solid rgba(0,0,0,0.1)",
                   borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent",
-                  background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg
+                  background: isGanttSel ? task.rowColor || "var(--row-focus)" : rowBg
                 }
               },
               /* @__PURE__ */ React.createElement("span", { style: {
@@ -8478,7 +8478,7 @@ ${extraNote}` : list;
               } }, "Unscheduled")
             );
           }
-          return /* @__PURE__ */ React.createElement("div", { key: task.id, "data-gantt-row": task.id, onClick: () => setSelectedId?.(task.id), style: { position: "absolute", top: ri * ROW_H, left: 0, right: 0, height: ROW_H, borderBottom: "1px solid rgba(0,0,0,0.1)", borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent", background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg } }, isMilestone && !isSummary ? /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
+          return /* @__PURE__ */ React.createElement("div", { key: task.id, "data-gantt-row": task.id, onClick: () => setSelectedId?.(task.id), style: { position: "absolute", top: ri * ROW_H, left: 0, right: 0, height: ROW_H, borderBottom: "1px solid rgba(0,0,0,0.1)", borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent", background: isGanttSel ? task.rowColor || "var(--row-focus)" : rowBg } }, isMilestone && !isSummary ? /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
             const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level);
             const fs = fitCaptionFs(NAME_SIZE(task.level), mg.top);
             const place = placeGanttLabel({
@@ -11604,7 +11604,7 @@ ${resizeScript}
           const fSize = cf2?.size ?? task.fontSize ?? ls.fontSize;
           const fColor = cf2?.color ?? task.textColor;
           const fUnderline = task.underline || cf2?.underline ? "underline" : "none";
-          return /* @__PURE__ */ React.createElement("span", { title: task.name || void 0, "data-task-name": true, style: { overflow: "hidden", textOverflow: "ellipsis", color: isEmpty ? "var(--mut)" : fColor || "#1f2328", fontStyle: fs, fontSize: fSize, fontWeight: fw, textDecoration: fUnderline, minWidth: 0 } }, task.name || "New task");
+          return /* @__PURE__ */ React.createElement("span", { title: task.name || void 0, "data-task-name": true, style: { overflow: "hidden", textOverflow: "ellipsis", color: isEmpty ? "var(--mut)" : fColor || "var(--txt)", fontStyle: fs, fontSize: fSize, fontWeight: fw, textDecoration: fUnderline, minWidth: 0 } }, task.name || "New task");
         })(), !task.isExpanded && task.hasChildren && /* @__PURE__ */ React.createElement(PhaseIconSummary, { tasks: proj?.tasks, taskId: task.id }), rowCanFocus(task) && /* @__PURE__ */ React.createElement(
           "span",
           {
@@ -12987,7 +12987,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
           return String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
         };
         const creating = !!(rv && rv.isCreate);
-        return /* @__PURE__ */ React.createElement("div", { key: "__rvprop", className: "drow rv-prow", style: { top: ri * ROW_H, height: ROW_H, minWidth: totalW, background: creating ? "#ecfdf3" : "#f3f0ff", borderLeft: creating ? "2px solid #16a34a" : "2px solid var(--amber)" } }, orderedCols.map((c) => {
+        return /* @__PURE__ */ React.createElement("div", { key: "__rvprop", className: "drow rv-prow", style: { top: ri * ROW_H, height: ROW_H, minWidth: totalW, background: creating ? "var(--row-create)" : "var(--row-target)", borderLeft: creating ? "2px solid #16a34a" : "2px solid var(--amber)" } }, orderedCols.map((c) => {
           const w = dispW[c.k];
           let inner = /* @__PURE__ */ React.createElement("span", { style: cs });
           if (c.k === "name") inner = creating ? /* @__PURE__ */ React.createElement("span", { style: { ...cs, paddingLeft: 4 + lvl * 14, gap: 0, flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 16, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#16a34a" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-plus", style: { fontSize: 12 } })), /* @__PURE__ */ React.createElement("span", { style: { color: "#15803d", fontWeight: 600, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 } }, rv.newName || "New task"), /* @__PURE__ */ React.createElement("span", { style: { flexShrink: 0, marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: "#15803d", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 4, padding: "1px 4px", letterSpacing: ".04em" } }, "NEW")) : /* @__PURE__ */ React.createElement("span", { style: { ...cs, paddingLeft: 4 + lvl * 14, gap: 0, flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 16, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--amber)" } }, /* @__PURE__ */ React.createElement("i", { className: "ti ti-corner-down-right", style: { fontSize: 12 } })), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--amber)", fontWeight: 600, fontStyle: "italic", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 } }, "proposed"));
@@ -13076,7 +13076,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
             overflow: c.k === "health" ? "visible" : "hidden",
             borderRight: GRID_LINE,
             borderBottom: GRID_LINE,
-            ...pinStyle(c.k, [creating ? "#ecfdf3" : "#f3f0ff"], 5) || {}
+            ...pinStyle(c.k, [creating ? "var(--row-create)" : "var(--row-target)"], 5) || {}
           };
           return /* @__PURE__ */ React.createElement("div", { key: c.k, "data-row-line": true, className: pinCls(c.k) || void 0, style: wrap }, inner);
         }), /* @__PURE__ */ React.createElement("div", { "data-grid-strip": true, style: { flex: "1 1 0", minWidth: 0, height: ROW_H, position: "relative", borderBottom: GRID_LINE } }));
@@ -13084,7 +13084,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       const isFocused = selectedId === task.id;
       const displayHealth2 = task.hasChildren ? rolledHealthMap?.[task.id] || task.health : computeDisplayHealth(task, data.settings, taskById);
       const isExpandedParent = task.hasChildren && task.isExpanded;
-      const rowBg = task.__rvMover ? "#fff8ee" : task.__rvTarget ? "#f3f0ff" : task.rowColor || (isExpandedParent ? ri % 2 ? "#f8fafc" : "var(--bg)" : displayHealth2 === "red" ? "#ffdfdf" : displayHealth2 === "yellow" ? "#fff7b9" : displayHealth2 === "green" ? "#d6fae2" : displayHealth2 === "paused" ? "#f3f4f6" : ri % 2 ? "#f8fafc" : "var(--bg)");
+      const rowBg = task.__rvMover ? "var(--row-mover)" : task.__rvTarget ? "var(--row-target)" : task.rowColor || (isExpandedParent ? ri % 2 ? "var(--row-alt)" : "var(--bg)" : displayHealth2 === "red" ? "var(--row-red)" : displayHealth2 === "yellow" ? "var(--row-yellow)" : displayHealth2 === "green" ? "var(--row-green)" : displayHealth2 === "paused" ? "var(--row-paused)" : ri % 2 ? "var(--row-alt)" : "var(--bg)");
       return /* @__PURE__ */ React.createElement(
         "div",
         {
@@ -13243,7 +13243,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
             top: ri * ROW_H,
             height: ROW_H,
             borderLeft: isNewTaskFocused ? "2px solid var(--blue)" : "2px solid transparent",
-            background: isNewTaskFocused ? "#eff6ff" : ri % 2 ? "#f8fafc" : "var(--bg)",
+            background: isNewTaskFocused ? "var(--row-focus)" : ri % 2 ? "var(--row-alt)" : "var(--bg)",
             cursor: ri === tasks.length ? "pointer" : "default"
           }
         },
@@ -13254,7 +13254,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
           borderBottom: GRID_LINE,
           height: ROW_H,
           position: "relative",
-          ...pinStyle(c.k, [isNewTaskFocused ? "#eff6ff" : ri % 2 ? "#f8fafc" : "var(--bg)"], 5) || {},
+          ...pinStyle(c.k, [isNewTaskFocused ? "var(--row-focus)" : ri % 2 ? "var(--row-alt)" : "var(--bg)"], 5) || {},
           ...ri === tasks.length && c.k === "name" ? {
             color: isNewTaskFocused ? "var(--blue)" : "var(--mut)",
             fontSize: 11,

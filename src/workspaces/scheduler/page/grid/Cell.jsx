@@ -204,7 +204,7 @@ export function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAnd
         {(() => { const ls=[{fontSize:13,fontWeight:600},{fontSize:12,fontWeight:500},{fontSize:11.5,fontWeight:400},{fontSize:11,fontWeight:400}][Math.min(task.level,3)]; const cf = task.cellFmt?.name; const isEmpty = !task.name; const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight; const fs = (task.italic || cf?.italic || isEmpty) ? "italic" : "normal";
           // NEW-2 — same cell-overrides-row-overrides-default precedence as fw/fs, for a value not a boolean.
           const fSize = cf?.size ?? task.fontSize ?? ls.fontSize; const fColor = cf?.color ?? task.textColor; const fUnderline = (task.underline || cf?.underline) ? "underline" : "none"; return (
-          <span title={task.name || undefined} data-task-name style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":(fColor||"#1f2328"),fontStyle:fs,fontSize:fSize,fontWeight:fw,textDecoration:fUnderline,minWidth:0}}>
+          <span title={task.name || undefined} data-task-name style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":(fColor||"var(--txt)"),fontStyle:fs,fontSize:fSize,fontWeight:fw,textDecoration:fUnderline,minWidth:0}}>
             {task.name || "New task"}
           </span>
         ); })()}

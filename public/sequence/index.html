@@ -25,7 +25,8 @@
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:#ffffff; --surf:#f6f8fa; --bd:#e1e4e8; --bd2:#d0d7de;
+  --bg:#ffffff; --surf:#f6f8fa; --bd:#e1e4e8; --bd2:#d0d7de; --row-alt:#f8fafc;
+  --row-red:#ffdfdf; --row-yellow:#fff7b9; --row-green:#d6fae2; --row-paused:#f3f4f6; --row-focus:#eff6ff; --row-mover:#fff8ee; --row-target:#f3f0ff; --row-create:#ecfdf3; --gantt-ink:#1a1a1a;
   --amber:#4f46e5; --blue:#0969da; --txt:#1f2328; --mut:#57606a;
 }
 
@@ -34,7 +35,8 @@
    --text-tertiary), copied here because an iframe does not inherit the parent's CSS variables. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg:#1D2027; --surf:#14171C; --bd:#2A2E37; --bd2:#3A3F4B;
+  --bg:#1D2027; --surf:#14171C; --bd:#2A2E37; --bd2:#3A3F4B; --row-alt:#23272F;
+  --row-red:#4A2A30; --row-yellow:#45401F; --row-green:#1F4030; --row-paused:#2A2E36; --row-focus:#1F2A44; --row-mover:#3D3322; --row-target:#2B2745; --row-create:#1B3A2C; --gantt-ink:#E8EBF0;
   --amber:#A5B4FC; --blue:#58A6FF; --txt:#E8EBF0; --mut:#A4ABB8;
 }
 :root[data-theme="dark"] body { background:var(--bg); color:var(--txt); }
