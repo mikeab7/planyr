@@ -64,6 +64,8 @@ export const TAX_COVERAGE = {
    * Red Top Mtn CID — they are in GA DOR's 2025 millage PDF (dor.georgia.gov is blocked from the build sandbox; read it with
    * pdfplumber from a network that reaches it). District 12 (E Main Street TAD #1) also needs its base jurisdiction named.
    * Flip `covered` to true only when `pendingDistricts(bartowMillage)` is empty (test/georgiaMillage.test.js enforces it). */
+  // Colorado (NEW-1, 2026-11-24): rendered by ParcelPage via lib/adamsCoTax.js — PIN → Property_Values (AREAID + MILLLEVY) → Tax_Districts authorities; shown only when they sum to the account's levy. `covered` stays the static-file flag.
+  co_adams: { covered: false, server: true, reason: "Rendered from the county's own ArcGIS tables (lib/adamsCoTax.js): per-authority mill levies for the account's tax district, shown only when they add up exactly to the account's mill levy; otherwise hidden. Mills, primary levy only (the alternate levy's meaning is unconfirmed); no bill estimate." },
   ga_bartow: { covered: false, reason: "Bartow tax-district table built; 2025 millage not yet transcribed for Emerson, Euharlee, Kingston, Taylorsville, White, the Cartersville parks bond and Red Top Mtn CID (GA DOR 2025 digest PDF), and district 12's base jurisdiction is unnamed — hidden until complete." },
 };
 

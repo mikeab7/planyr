@@ -25,7 +25,9 @@ export default defineConfig({
   // aliasing the (null-in-production) preload seam to a module that imports every file statically. See lazyLayerPreload.js.
   resolve: { alias: [{ find: /^(.*)\/lazyLayerPreload\.js$/, replacement: path.resolve("test/helpers/lazyLayerPreloadAll.js") },
     // Batch K stage 2: same seam for the per-state county parcel tables (parcelTablesPreload.js).
-    { find: /^(.*)\/parcelTablesPreload\.js$/, replacement: path.resolve("test/helpers/parcelTablesPreloadAll.js") }] },
+    { find: /^(.*)\/parcelTablesPreload\.js$/, replacement: path.resolve("test/helpers/parcelTablesPreloadAll.js") },
+    // Batch K stage 3: same seam for the GIS source packs (sourcePacksPreload.js).
+    { find: /^(.*)\/sourcePacksPreload\.js$/, replacement: path.resolve("test/helpers/sourcePacksPreloadAll.js") }] },
   // JSX, automatic runtime. A handful of suites render a small, DOM-free component to
   // static markup with `react-dom/server` (test/parcelCard.test.js) — that needs the JSX
   // transform, but NOT jsdom: renderToStaticMarkup produces a string, so the environment

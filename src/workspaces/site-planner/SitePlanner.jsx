@@ -9,7 +9,7 @@ import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } 
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
 import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
@@ -17,10 +17,9 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale } from "../../shared/telemetry/perfRecorderHandle.js";
-import { installPlannerPerf } from "./lib/plannerPerf.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
+import { createOperationTracker, undoOwnership, undoRiskEnvelope } from "./lib/operationEnvelope.js";
 import { planDelete } from "./lib/deletePlan.js";
 import { SCOPE, focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/keyboard/keyScope.js";
@@ -50,20 +49,17 @@ import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
-import { markupsUnderPoint, nextMarkupSelection, boxCorners, closedMarkupSize, openMarkupLength } from "./lib/markupPick.js";
-import {
-  CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
-  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt,
-} from "./lib/cloudGeometry.js";
+import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
+import { CLOUD_ARC_DEFAULT_FT, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
-import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
+import { isDiagArmed } from "./lib/diagArm.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
-import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
+import { createViewChangeRecorder } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR, CHROME_ATTR, gestureAnchorKey, chromePressFacts } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, freeParkStack } from "./lib/parking.js";
 import { trailerRowLabel, elementLabelHidden, labelHiddenPatch, trailerCfgPatch, drawnTrailerCfg, TRAILER_FIELD_MIN } from "./lib/trailerRows.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
@@ -72,7 +68,7 @@ import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsR
 import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, liveRefOpacities, liveRefFeatureCount, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
 import { buildingFloodExposure } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
@@ -133,7 +129,6 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 const GradingController = lazy(() => import("./components/GradingController.jsx"));
-const GradingPanel = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingPanel })));
 // NEW-1 (2026-11-11): the owner-only 3D grading viewer — its own lazy chunk, and the ONLY one that loads three.js (lib/grading3d/threeScene.js).
 const Grading3DViewer = lazy(() => import("./components/Grading3DViewer.jsx"));
 const GradingCanvas = lazy(() => import("./components/GradingPanels.jsx").then((m) => ({ default: m.GradingCanvas })));
@@ -157,7 +152,6 @@ import PresenceChip from "./components/PresenceChip.jsx";
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
  * Behind LazyPanel: space is reserved so the panel does not jump in, and a chunk that fails to
  * load is contained to this panel instead of taking the planner down. */
-const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
 /* LAZY (B1064 tranche). The county appraisal record + the taxing-unit list render ONLY for a lot
  * that came from a county identify, and only while the Parcels panel is the open one — never at
  * first paint. Both bodies come from the same module, so they share one chunk and one load. */
@@ -171,7 +165,6 @@ const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionD
 // NEW-1 (B1838704) — the OVERLAYS panel's visual Crop… (rectangle + polygon). Opened rarely.
 const OverlayCropDialog = lazy(() => import("./components/OverlayCropDialog.jsx"));
 // NEW-1 (2026-10-08, Overlays redesign) — the panel body is lazy: it only exists once the Overlays tab is opened, and a static import put ~12 KB on the Site route's critical path (perf budget bundle.siteRouteJsBytes).
-const OverlaysPanel = lazy(() => import("./components/OverlaysPanel.jsx"));
 /* NEW-1 / NEW-3 — the Parcel panel's record body, lazily loaded for exactly the reason the appraisal
  * panels above are: it renders only inside the Parcel panel, only for a selected lot, and the Site
  * route's largest chunk has no headroom to spend on code most sessions never reach. */
@@ -228,8 +221,8 @@ import {
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
   draftDirty, mergeDraftIntoSettings,
 } from "./lib/standardsApply.js";
-import { MEASURE_LINE, measureStyle, measureDefaultStyle, measureLabelVisible, labelRevealNote } from "./lib/measureStyle.js";
-import { measureLabelModel, measureChipLines, headlineIndex, measureSegments, fmtInt, fmtSf, fmtAcres, fmtFeet } from "./lib/measureLabel.js";
+import { measureStyle, measureDefaultStyle, measureLabelVisible } from "./lib/measureStyle.js";
+import { measureLabelModel, measureChipLines, headlineIndex, measureSegments } from "./lib/measureLabel.js";
 // NEW-1 — the EXPORT's view of a measurement: drafting terminators in place of the editing discs,
 // and the attribute names the sheet's "never print geometry without its value" invariant reads.
 import {
@@ -254,14 +247,12 @@ import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/sel
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
 import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — measured text width, never a char-count guess
-import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
+ // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForName, countyKeyForNameLoaded, onParcelTablesLoaded, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, stackRuleForCounty, countyKeyForNameLoaded, onParcelTablesLoaded, candidateCountiesForPoint, lineNeighbourKeysForPoint, silentServerPhrase, STATEWIDE_KEYS, countyIdentity, ensureCountyGeometryAt, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { useParcelTablesVersion } from "./lib/useParcelTablesVersion.js";
 import { parcelGapNotice } from "./lib/parcelGaps.js";
-import ParcelRequestLink from "./components/ParcelRequestLink.jsx";
-const ParcelCopyNote = lazy(() => import("./components/ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line
 import { situsFor } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -274,12 +265,11 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide, isSourceOpen } from "./lib/sourceHealth.js";
 import { fallbackSpecsFor, fallbackCandidates, fallbackNoticeText, stateLayerCoversCounty } from "./lib/parcelFallbacks.js"; // NEW-2 (2026-10-28) — the county did not answer: its state's layer (when it holds the county), then a town layer
 import { identifyWithLineFallback } from "./lib/identifyWithFallback.js"; // NEW-1 (Memphis line band) — primary → retry → the county across the line
-import { apprRows, apprVal } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
 import { resolveParcelLook, parcelPatchFor, parcelResetPatch, validateLook, ptToPx } from "./lib/parcelLook.js";
 import { createTrailingWriter } from "./lib/trailingWrite.js";
@@ -297,9 +287,8 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementLabel, easementRecordingSummary, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
-import { HATCH_OPTIONS } from "../../shared/style/hatchPatterns.js";
 import { hatchPatternTransform, hatchAnchorFor } from "./lib/hatchAnchor.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // NEW-1 / NEW-2 / NEW-3 — the parcel-chrome declutter trio. `setbackChipRuns` groups the boundary
@@ -340,64 +329,62 @@ import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnal
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import SourceTag from "./components/SourceTag.jsx";
 import ActionLink from "./components/ActionLink.jsx";
-import WatchOutChip from "./components/WatchOutChip.jsx";
-import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
 import { SegmentedControl, Button as UiButton } from "../../shared/ui/controls.jsx";
 import { roadRadiusReviewOn } from "./lib/roadRadiusFeature.js";
-import { roadPanelTitle, roadPanelSubtitle, xsStripBands, xsCaption, xsSummary, labelSummary as roadLabelSummary, xsButtonLabel } from "./lib/roadPanelModel.js";
-import { RoadGlyph, RoadXSectionStrip, RoadStripCaption } from "./components/RoadPanelParts.jsx";
-import Chip from "../../shared/ui/Chip.jsx";
-import RowInfo from "../../shared/ui/RowInfo.jsx";
+import { xsStripBands, xsCaption, xsSummary, labelSummary as roadLabelSummary, xsButtonLabel } from "./lib/roadPanelModel.js";
+import { RoadXSectionStrip, RoadStripCaption } from "./components/RoadPanelParts.jsx";
 import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
-import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
+import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, roadStripBBox, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
 import { regionPathD, polylinesPathD, roadSurfaceRing } from "./lib/roadNetwork.js";
 import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
-import { followDrives } from "./lib/driveFollow.js";
-import { RAMP_DEFAULTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, rampLengthFt, rampRiseFt, rampLayout, rampFlags, refitRamps, wallFrame, moduleStops, dockHeightInOf, rampGeometry, fitAlongTheWall, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
+import { seamElements } from "./lib/elsSeam.js";
+import { useLatestRender, useLatestEffect } from "./lib/useLatest.js";
+import { RAMP_DEFAULTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, refitRamps, wallFrame, dockHeightInOf, rampGeometry, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import { TAPER_MAX_FT } from "./lib/roadTaper.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
-import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS } from "./lib/roadClasses.js";
+import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun, hasWallExtent, extentFieldsFor, flushKidBoxFor, sideParkStack } from "./lib/dogEar.js";
-import { costRollup } from "./lib/costTakeoff.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack } from "./lib/dogEar.js";
 import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth } from "./lib/roadCrossSection.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
-import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, showAreaOn, normDeg } from "./lib/easementLabelPull.js";
+import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { ffeLineText, buildingFfeFt } from "./lib/buildingFfeLabel.js";
 import { layoutBuildingButtons, buildingButtonWalls, RAMP_BTN_R, HOVER_BUTTON_REACH_PX, ROTATE_GRIP_OFFSET_PX } from "./lib/buildingButtons.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle, calloutTextDecoration } from "./lib/calloutStyle.js";
-import { splitOverlayBands, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
+import { splitOverlayBands, reorderOverlays, setOverlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { scaledPatch } from "./lib/overlayPanelModel.js";
 import { cropClipShapeScreen, cropEditBlock, normalizeCropShape, recropForRaster, withCropOff } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, healDockAxes, dockSideCompassLabel } from "./lib/dockZones.js";
+import { resyncBondedRot, WALL_KID_TYPES, SIDEWALK_W, OPP_TRAILER_W, SIDE_N, makeStrip, makeDogEar, SIDE_PARK_ANGLE, isSideParkPad, findCourtIn, findZoneIn, stackCountIn, zoneIndexOf, isDockLayerEl, zoneSideOf, zoneDepthOfIn, courtBumpOpts, wallExtentCtx, dockChainOnSide, relayoutSideIn, relayoutAllSidesIn, killSetWithChildren, removeWithChildren, baseZone, makeCourtZoneIn, makeTrailerZoneIn, makeBufferZoneIn, makeChainZoneIn, buildNextZoneIn, sideOuterPerp, wallOutermostExtent, refitChildrenIn, isWallStrip, sidewalkFullRunPatch, isWallTrailer, relayoutWallKids, relayoutBumpSidewalks, rampsOnHost, sideOfKid, swSideOn, outwardUnit } from "./lib/assemblyOps.js";
+import { usePlannerDiagnostics } from "./lib/usePlannerDiagnostics.js";
+import { useVersionHistory } from "./lib/useVersionHistory.js";
 import { wallClickPatch, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
-import { dockLayerTitleWord, dockLayerPosition, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull } from "./lib/dockLayerPanel.js";
-import { wallRowPlan, KIND_LABEL, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
+import { dockLayerTitleWord, dockLayerName, dockRemovalPlan, autoField, slopeBandNotice, lengthIsFull } from "./lib/dockLayerPanel.js";
+import { wallRowPlan, KIND_LABEL, clampTrailerRows, trailerSpec, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js";
-import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent } from "./lib/footprintEdit.js";
+import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { pointInRing, projectOntoSegment } from "./lib/ringMath.js";
-import { addedAreaLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
-import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
+import { addedAreaLabelPoint, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
+import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { pondLedgerSignature, createIdentityToken } from "./lib/pondLedgerKey.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 // NEW-1/NEW-2 — the ONE derivation of the pond inspector's detention + mitigation verdict
 // strings (heading names its ledger; buildability + over-provision ride the qualifier line).
-import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";
+import { overdugAcFt, overProvision } from "./lib/pondVerdict.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, factsFreshness, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS } from "./lib/factRevalidation.js";
 import { stormwaterBarSpecs } from "./lib/yieldBar.js";
@@ -415,7 +402,6 @@ import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea } from "./lib/pondOffset.js";
 import { gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
-import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
 /* NEW-2/NEW-3 (B1428/B1429) — the honest device-save retry lives in shared/storage/, and it is
@@ -448,36 +434,30 @@ import { resolveSoils } from "./lib/soils.js";
 // is what notices — run it before pushing any change to this import block.
 import { screeningBfeHeadline, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG, bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
-import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, slopeBand, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
-import { noteReadoutDash, noteReadoutNoSurface, readoutDashFacts } from "./lib/readoutDash.js";
-import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
+import { buildProposedSurface, classifyGradeElement, slopeBand, sampleProposedAt } from "./lib/proposedSurface.js";
+import { noteReadoutDash, noteReadoutNoSurface } from "./lib/readoutDash.js";
 // Owner-only grading layer (NEW-1..NEW-3). Only the gate and the tiny glue are static; the controller, panels
 // and painters load on demand and never reach an account the gate refuses (see lib/gradingGate.js).
 import { useGradingEnabled } from "./lib/gradingGate.js";
 import { useGradingBase, hostIdMap, gradingCfg } from "./lib/gradingBase.js";
-import { driveTieOf, driveRingOnSite, propertyLineRings, driveDiagnose, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
+import { driveTieOf, driveRingOnSite, propertyLineRings, roadLimitRings, driveFenceFor } from "./lib/driveGrade.js";   // NEW-1 (2026-11-11): a drive ties into the road's grade at the property line (owner-only grading layer)
 import { withGradingTab, panelIdAllowed } from "./lib/gradingDock.js";
 import { useGradeSurface, newGradeBuildStats } from "./lib/useGradeSurface.js";
 import { zonesFromFeatureCollection, computeMitigation, combineMitigation, ringInTrigger, pondFloodplainTier, wedgeMitigation, pointInZone, floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines, crossSectionWselFromFeatureCollection, governingCrossSectionWsel, estimateZoneAWse, hagForRing, sampleRingGrades, isEstimatedWseSrc, wseProvLabel } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, patchFloodplainRule, subscribeFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
-import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
+import { loadPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe } from "./lib/buildability.js";
-import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
-import { assessBuildability as assessPondEnvelope, makeItBuildableOptions, requirementNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
-import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
-import { deriveTailwater, tailwaterNote } from "./lib/tailwaterSource.js";
-import { pondGroundwaterScreen } from "./lib/groundwater.js";
-import { subsidenceFlag } from "./lib/subsidence.js";
-import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance, jurKeyForAuthority } from "./lib/detentionCriteria.js";
-import { selectDetentionMethod } from "./lib/detentionMethod.js";
+import { sizePondForTargets, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
+import { assessBuildability as assessPondEnvelope } from "./lib/buildableEnvelope.js";
+import { estDepthToWaterFt, estMaxExcavDepthFt } from "./lib/pondScreeningDefaults.js";
+import { deriveTailwater } from "./lib/tailwaterSource.js";
+import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, jurKeyForAuthority } from "./lib/detentionCriteria.js";
 import { computeTimeOfConcentration } from "./lib/timeOfConcentration.js";
-import { outletProblems } from "./lib/outletStructure.js";
-import { assessRoutedDetention, suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
-import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
+import { suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
 import { optimizePond } from "./lib/pondOptimizer.js";
-import { optimizeAffordance, materialAlternative } from "./lib/pondOptimizeAffordance.js";
-import { computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall, solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues, resolveDrainageContext, computeRateBasedDetention, DESIGN_STORM_PERIODS, effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES, slimDrainageContext, hydrateDrainageContext } from "./lib/detentionRules.js";
+import { materialAlternative } from "./lib/pondOptimizeAffordance.js";
+import { computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall, solvePondExpansion, deadStoragePoolDepthFt, pondAutoValues, resolveDrainageContext, effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES, slimDrainageContext, hydrateDrainageContext } from "./lib/detentionRules.js";
 /* NEW-8 — only the STATE resolution is on the boot path. The Colorado tier proper (regime
  * records, the CWCB standard, the capability matrix, the drawdown statute) is mostly PROSE that a
  * Texas user has no use for, and importing it statically breached the Site route's bundle budget.
@@ -488,11 +468,8 @@ import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { jurisdictionSourceName } from "./lib/georgiaJurisdiction.js";
 import { isNjNyState } from "./lib/njnyJurisdiction.js"; // NEW-1 (New Jersey + New York)
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
-import ParcelsPanel from "./components/ParcelsPanel.jsx";
-import ParcelContextMenu from "./components/ParcelContextMenu.jsx";
 import { planParcelDelete } from "./lib/parcelDelete.js";
-import { isRenameable } from "./lib/parcelMenu.js";
-import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
+import { overlappingParcelPairs, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 import { MAP_CORNER_PX, MAP_CORNER_GAP_PX, paneInsetFor, cornerGroupWidth, cursorChipFit } from "./lib/mapCorners.js";
 import { ROTATE_CURSOR, gripCursor, dragCursorFor, canvasRootCursor, parcelBodyCursor, pinDragCursor, unpinDragCursor, installPlannerCursorStyle, deferTask } from "./lib/plannerCursors.js";
@@ -502,7 +479,7 @@ import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printS
 // NEW-1 (B1783056) — pure, dependency-free (safe on the boot path, same reasoning as
 // printScale.js above): the free-aspect export-frame grip math the on-canvas drag reads.
 import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
-import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
+import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 import { carryKeyOf, graftOverlaySrc, stashMemory, takeMemory, persistDisk, loadDisk } from "./lib/historyCarry.js"; // NEW-1 (2026-11-13) — undo history survives leaving a plan
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
@@ -515,7 +492,7 @@ let placeCmds = null;
 const loadPlaceCmds = () => import("./lib/plannerPlacementCmds.js").then((m) => (placeCmds = m));
 /* NEW-2 / NEW-3 — the parcel RECORD: provenance (drawn / from a deed / from the county), the typed
  * fields a hand-drawn lot never had, and the ONE net-of-exceptions area every consumer reads. */
-import { parseAcres, parcelNetSqft, acreageComparison } from "./lib/parcelArea.js";
+import { parseAcres, parcelNetSqft } from "./lib/parcelArea.js";
 import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
@@ -536,17 +513,22 @@ import {
 import { CF_PER_ACFT } from "../../shared/units/areaUnits.js";
 import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 // B1064 step 1 — code that used to sit below/above the component, now in its own modules (never imported back):
-import { BORDER_1, PondSection, ROWB6, SURF_RAISED } from "./lib/plannerShared.js";
-import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
+import { BORDER_1, ROWB6, SURF_RAISED } from "./lib/plannerShared.js";
+import { PondInspector } from "./components/PondInspector.jsx";
+import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components/PlannerContextMenus.jsx";
+import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
+import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
+import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
+import { EasementInspector, MarkupStyleInspector, NeutralMarkupInspector } from "./components/MarkupInspector.jsx";
+import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
 import { ElNode, dimSlideFor, dockDoorRun, rampDoorRunOf, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
-import { CostDisclosure, DesignChangeSummaryCard, DrainagePanel, ProvenanceLegend, YieldPanel } from "./components/YieldDrainagePanels.jsx";
 import { bandSetter } from "./lib/bandSetter.js";
 import { FM_FILL_TYPES, ringHash, mitigationForFootprint, pondFloodFacts } from "./lib/floodFootprintMemo.js";
 import { cleanText, GEO_REG_EFFECT, GEO_REG_DEPS, ZERO_REG_SHIFT, PANEL_SHIFT_EFFECT, PANEL_SHIFT_DEPS, LEFT_PANEL_SURFACE, MONO_FONT, POND_ADD_MIN_SF, FEAT_BTN_MIN_PX, PARCEL_CLICK_SLOP_PX, PARCEL_CLICK_MS, CANVAS_IDENTIFY_SLOP_PX, DRAIN_AUTO_IDLE_TIMEOUT_MS, FT_PER_DEG_MIN, BOOT_FRAMING_RETRY_MS, TOOLS, DRAW_TYPES, MARKUP_TOOLS, MEASURE_MODES, roadWidthPresets, DEFAULT_ROAD_WIDTH, MEASURE_HINTS, measureModeLabel, MAX_DIM, detachClone, MOD_LABEL, journalSid, MK_DEFAULT, MK_CLOUD_DEFAULT, COLOR_SEED, dashArray, SEL_BLUE, SEL_HANDLE_FILL, SEL_OUTLINE_GAP_PX, strokeZoom, snap45, labelInk, resizeCursor, edgeSnapCenter, polySelfIntersects, measPts, measMode, MK_VERTEX_KINDS, MK_BOX_KINDS, NEUTRAL_MARKUP_KINDS, MK_HIT_PX, CALLOUT_BORDER_BAND_PX, mkPts, setMkPts, mkMinPts, projToSeg, pathLen, ROW6, ROW4, INK_HALO, EASE_LABEL_BASE_PX, ENCUMBER_LABEL_BASE_PX, PARCEL_FILL_DEFAULT, easementInsetOpts, expandPolygon, nearestOnSeg, ROAD_CONNECT_MAX_FT, ROAD_FIX_MAX_NUDGE_FT, ROAD_FIX_MAX_EXTEND_FT, ROAD_FLAG_LABEL_PPF, roadCenterlineLength, shiftEl, roadRadiusStatus, uid, ensureIdAbove, loadSnapPref, saveSnapPref, DEFAULT_SETTINGS, hexA } from "./lib/plannerConstants.js";
-import { Section, ROAD_GUTTER_W, ROAD_SELECT_STYLE, Field, PairedField, PairedFieldHead, DriveInRampPanel, DockLayerPanel, PercentField, AisleSideCard, StdSubLabel, AlignIcon, VAlignIcon, RotationField, BuildingNumberField, withoutStyleOverrides, LoadingWallPicker, InspectorMoreMenu, LineSample } from "./components/PropFields.jsx";
+import { Section, ROAD_GUTTER_W, ROAD_SELECT_STYLE, Field, PairedField, PairedFieldHead, DockLayerPanel, PercentField, AisleSideCard, StdSubLabel, RotationField, withoutStyleOverrides, LoadingWallPicker, InspectorMoreMenu, LineSample } from "./components/PropFields.jsx";
 import { WallRows, PadElevRow } from "./components/WallRows.jsx";
-import { HatchPatternDef, ToolIcon, RailIcon, DASH_OPTIONS } from "./components/PlannerIcons.jsx";
+import { HatchPatternDef, ToolIcon, RailIcon } from "./components/PlannerIcons.jsx";
 
 
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, onGoDashboard, onSelectOrg, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
@@ -632,10 +614,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
-    setElsRaw((prev) => {
-      const next = followDrives(gestureBase || prev, prev, typeof u === "function" ? u(prev) : u, { restrip: reRoad });
-      return refitRamps(reseatRamps(gestureBase || prev, prev, next, rampSeatCtx()), (h) => dockSidesFor(h).dockSides, rampDockInRef.current);
-    });
+    setElsRaw((prev) => seamElements(prev, u, { gestureBase, restrip: reRoad, rampSeatCtx, dockSidesOf: (h) => dockSidesFor(h).dockSides, dockIn: rampDockInRef.current }));
   };
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
@@ -710,20 +689,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
     planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null),
     undoAnchor = useRef(null), redoAnchor = useRef(null);
-  const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
-  const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
-  /* B472048 (NEW-7 · NEW-3) — PLAN ACTIVITY: a second tab in the SAME dialog (per the item's own
-   * instruction to extend the existing clock/history control rather than build a second one).
-   * Version history is a per-DEVICE ring of whole-plan snapshots with no actor; it cannot answer
-   * "who did this" by construction. Activity reads the opposite source — the site_elements ROWS
-   * themselves, which now carry an operation envelope (db/commit_elements_op_envelope.sql) — and
-   * is therefore the one surface in the app that is genuinely CROSS-SESSION: unlike the local
-   * Undo/Redo history dropdown (B648353's `describeHistoryStep`, which can only ever describe
-   * frames THIS tab pushed), it names what a DIFFERENT session did too. */
-  const [activityTab, setActivityTab] = useState("versions"); // "versions" | "activity"
-  const [activityRows, setActivityRows] = useState(null);     // null = not loaded yet; [] = loaded, empty
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [activityErr, setActivityErr] = useState("");
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
   // NEW-1 (poppable panels): panels detached over the map. { [panelId]: {x,y} } in viewport px.
   // A panel is EXACTLY one of docked (leftPanel===id), floating (id in `floating`), or closed.
@@ -1059,19 +1024,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (rec) { try { rec.recordChange({ from: v, to: next, stack, visibility }); } catch (_) { /* a diagnostic never breaks the app */ } }
       return next;
     });
-  }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const rec = viewRecRef.current;
-    const hook = () => (rec && isDiagArmed(window) ? rec.snapshot() : null);
-    window.__plannerViewChanges = hook;
-    const detach = rec ? attachTimeline(window, rec) : null;
-    if (rec) rec.noteEvent("planner:mount");
-    return () => {
-      if (window.__plannerViewChanges === hook) window.__plannerViewChanges = null;
-      if (rec) rec.noteEvent("planner:unmount");
-      if (detach) detach();
-    };
   }, []);
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
@@ -3114,8 +3066,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — `origin` rides the snapshot too, so setting or adjusting the plan's location is a
   // normal undoable frame (and a rotate, which moves geometry AND is paired with an anchor, undoes
   // as ONE step rather than leaving the drawing turned under the old anchor).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {}, origin: null });
-  stateRef.current = { parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin };
+  const stateRef = useLatestRender({ parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin });   // G2 — lib/useLatest.js
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -3448,8 +3399,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return ok;
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
-  const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
+  const liveRef = useLatestEffect({ parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove });   // G2 — lib/useLatest.js
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -4755,6 +4705,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `/CLAUDE.md`'s owner-constraints entry 10. With no type bands, what that control did — draw one
      element over everything, or under everything — is already ordinary Bring to Front / Send to
      Back (`arrangeSel`, above), so it needed no separate mechanism to survive the reversal. */
+  /* G2 — the ONE whole-plan content replacement, for undo / redo, the take-over merge, a version restore and a collection adoption. They used to
+     each spell the six setters out and differed by accident (one never set `deletedIds`, two lacked the `|| []` guards). `withDeleted: false` keeps
+     the tombstone list untouched (the seed adoption, which has none to give). Raw element write on purpose — see lib/elsSeam.js. */
+  const replacePlanContents = (c, { withDeleted = true } = {}) => {
+    setParcels(c.parcels || []); setElsRaw(c.els || []); setMeasures(c.measures || []);
+    setCallouts(c.callouts || []); setMarkups(c.markups || []); setSheetOverlays(c.sheetOverlays || []);
+    if (withDeleted) setDeletedIds(c.deletedIds || []);
+  };
   const applySnapshot = (s) => {
     // NEW-1 — the REVERT seam. An undo/redo restores a whole-canvas snapshot, so the restore itself
     // is assembly-whole; what it cannot fix is a snapshot that was ALREADY torn when it was pushed
@@ -4779,7 +4737,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // an echo landing in the window right after the restore is kept off the canvas too.
     pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
     try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
-    setParcels(s.parcels); setElsRaw(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    replacePlanContents(s);
     // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
     // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
     // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
@@ -5020,10 +4978,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       cloudActive: isCloudActive, loadSite, saveSite, pushModelToCloud, onSiteSaved,
       report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
       setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
-      setCollections: (n) => {
-        setParcels(n.parcels || []); setElsRaw(n.els || []); setMeasures(n.measures || []);
-        setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
-      },
+      setCollections: (n) => replacePlanContents(n, { withDeleted: false }),
       addParcel: (pc) => setParcels((a) => [...a, pc]),
       selectParcel: (id) => { setSel({ kind: "parcel", id }); setLeftPanel("parcel"); },
       parcelDefaultStyle: () => parcelDefaultStyle(settings),
@@ -5189,28 +5144,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [view]);
   const probeRef = useRef({});
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = {
-      get: () => ({ ...view, w: size.w, h: size.h, identityEpoch: viewIdentityEpoch.current }),
-      centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
-      // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
-      // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
-      registration: () => ({ ...probeRef.current.regShift }),
-      cursor: () => (probeRef.current.cursorLL
-        ? { ft: { ...probeRef.current.cursorFt }, lat: probeRef.current.cursorLL.lat, lng: probeRef.current.cursorLL.lng }
-        : null),
-      measures: () => JSON.parse(JSON.stringify(probeRef.current.measures || [])),
-    };
-    window.__plannerView = hook;
-    /* NEW-3 — NULL IT ON UNMOUNT. These hooks close over the live render (`setView`, `probeRef`,
-       `exportCtx()` → `svgRef`/`wrapRef`), so a hook left on `window` after the component unmounts
-       keeps that whole tree — and its detached SVG — reachable from a GC root. The neighbouring
-       `window.__geoMap` hook (:2612) has always done this; these four did not. It is dev-gated
-       code, but it is dev-gated code that EVERY performance harness here arms, so a measurement
-       taken through it was measuring the instrument as much as the product (B1439). */
-    return () => { if (window.__plannerView === hook) window.__plannerView = null; };
-  }, [view, size.w, size.h, setView]);
   /* NEW-1 — E2E/self-audit hook for the LAYER SET (same `window.__PLANYR_E2E` gate as above; never
    * runs in production). `ui-audit/boot-tail.mjs` has to build a plan that OPENS WITH N LAYERS ON,
    * because the reference fixture saves none and `defaultOverlayState()` starts every layer off —
@@ -5228,29 +5161,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * check can assert rather than something a human has to catch out of the corner of their eye.
    * (DANGEROUS-MEANS-UNOBSERVABLE: build the missing instrument first.) */
   const layerIdentityEpoch = useRef(0);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    layerIdentityEpoch.current += 1;
-    const epoch = layerIdentityEpoch.current;
-    const hook = () => ({
-      ids: Object.keys(overlays || {}),
-      on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
-      // NEW-1 (Imagery & Layers) — what the map is actually told to draw (Hide Layers / hidden-here applied) and what has a LIVE layer right now.
-      drawn: Object.keys(overlaysDrawn || {}).filter((k) => overlaysDrawn[k] && overlaysDrawn[k].on),
-      live: Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k] && overlayRefs.current[k] !== "pending"),
-      // What each live layer is really drawn at (NEW-2: "set 60% on an off layer" is asserted on the map's own layer, not the saved number).
-      opacities: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefOpacities(overlayRefs.current[k])])),
-      // B2528688 — features each live vector layer has painted (null for a raster): the harness's "it drew real features" observable.
-      features: Object.fromEntries(Object.keys(overlayRefs.current || {}).map((k) => [k, liveRefFeatureCount(overlayRefs.current[k])])),
-      identityEpoch: epoch,
-      /* B2472945 — what a live vector layer has PAINTED at a point (its own `identifyAt`, the same hit-test the canvas click uses over the
-       * same GeoJSON the map draws). The drawn ETJ layer's "is anything shaded here?" has no other observable: the DOM holds Leaflet
-       * paths, not ground truth. Read-only, E2E-gated, null for a layer that is off or has no identify. */
-      identify: (id, at) => { const g = overlayRefs.current && overlayRefs.current[id]; return g && g !== "pending" && typeof g.identifyAt === "function" ? g.identifyAt(at) : null; },
-    });
-    window.__plannerLayers = hook;
-    return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
-  }, [overlays, overlaysDrawn]);
   /* B2335056 — click-ack rings riding the LIVE view (see beginIdentifyPress). Layout effect: re-projected
      in the same frame as the view change, never a frame behind it. */
   const ackMoversRef = useRef(new Set());
@@ -9799,30 +9709,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       };
     };
   });
-  /* ⛔ NEW-1 (B280403) — INSTALLED UNCONDITIONALLY, ANSWERED ONLY WHEN ARMED, AND THE GATE IS READ AT
-   * CALL TIME. These two are the DIAGNOSTIC hooks, and they were gated the way every other probe
-   * here is: on `window.__PLANYR_E2E`, read once at mount by an effect with `[]` deps. That made
-   * them unreachable in the one place the defects they exist for actually live — the owner's
-   * signed-in production tab — because arming the flag there did nothing until `SitePlanner`
-   * remounted. The session that needed them got in by setting the flag and then switching plans and
-   * back, which is folklore that requires knowing this dependency array.
-   * Now: the functions always exist and return `null` until `isDiagArmed()` says otherwise, so
-   * arming can never require a remount. `?planyrDiag=1` arms a tab with no console at all (it
-   * latches into sessionStorage so an in-app plan switch keeps it); `window.__PLANYR_E2E = true`
-   * still works, so every existing harness is untouched. READ-ONLY: they answer questions, they
-   * change nothing — see lib/diagArm.js for why that boundary is the whole safety argument. */
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    latchDiagArm(window);
-    const hook = (x, y) => (isDiagArmed(window) && dblResolveRef.current ? dblResolveRef.current(x, y) : null);
-    const why = (x, y) => (isDiagArmed(window) && dblWhyRef.current ? dblWhyRef.current(x, y) : null);
-    window.__plannerHitTarget = hook;
-    window.__plannerHitWhy = why;
-    return () => {
-      if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null;
-      if (window.__plannerHitWhy === why) window.__plannerHitWhy = null;
-    };
-  }, []);
 
 
   /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
@@ -10051,25 +9937,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel(null); setSelOverlay(ov.id); setLeftPanel("references");
     flashWarn(`Showing “${ov.name}” from ${row.planName}.`, 3500);
   };
-  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the others; read-only answers + the same two
-  // actions the panel row calls — it is a driver for the live acceptance, not a second code path).
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = {
-      siteId: () => siteId,
-      rows: () => foreignOverlays.rows.map((r) => ({ key: r.key, planName: r.planName, name: r.overlay.name, page: r.overlay.page || 1 })),
-      status: () => ({ status: foreignOverlays.status, error: foreignOverlays.error }),
-      refresh: () => refreshSiblings(),
-      show: (key) => showForeignOverlay(foreignOverlays.rows.find((r) => r.key === key)),
-      remove: (id) => removeOverlay(id),
-      crop: (id, crop) => setOverlayCrop(id, crop), // the exact write the Crop… dialog commits through
-      duplicate: (id) => duplicateOverlay(id),
-      setPage: (id, page) => setOverlayPage(id, page),
-      own: () => stateRef.current.sheetOverlays.map((o) => ({ id: o.id, name: o.name, page: o.page || 1, x: o.x, y: o.y, crop: o.crop || null, sharedFrom: o.sharedFrom || null, storageKey: o.storageKey || null, idbKey: o.idbKey || null, hasSrc: !!o.src })),
-    };
-    window.__plannerForeign = hook;
-    return () => { if (window.__plannerForeign === hook) window.__plannerForeign = null; };
-  });
   // Release a removed overlay's stored bytes only when NO plan references them — this site's other plans
   // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
   const releaseOverlayAssets = async (o) => {
@@ -10604,20 +10471,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // move and rotate as one assembly and can't be separated by dragging.
   const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
   const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
-  // Re-derive every bonded box child's angle from its host (B363): a child's rot is always
-  // host.rot + its fixed quarter-turn offset, so this removes any stored drift. Pure; preserves
-  // object identity for children that are already in sync. Called from EVERY host-geometry path
-  // (resize via refitChildren, rotate via rotateAssemblyTo + the rotate drag) so a child can't
-  // be left visibly off-angle from its building.
-  const resyncBondedRot = (list, hostId) => {
-    const host = list.find((x) => x.id === hostId);
-    if (!host || host.points || typeof host.rot !== "number") return list;
-    return list.map((x) => {
-      if (x.attachedTo !== hostId || x.points || typeof x.rot !== "number") return x;
-      const want = bondedChildRot(x.rot, host.rot);
-      return Math.abs((((x.rot % 360) + 360) % 360) - want) > 1e-6 ? { ...x, rot: want } : x;
-    });
-  };
   // Axis-aligned bounding box of a rect element at any quarter-turn (0/90/180/270),
   // swapping w/h for 90/270. Returns {cx,cy,w,h,rot:0} or null if not orthogonal.
   const ortho = (el) => {
@@ -10639,11 +10492,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
-  // Sidewalks / parking / trailer fields attached to a building track the wall
-  // they hug when the building is resized. At drag start, capture each child in
-  // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
-  // its fixed depth, and its position/length along the wall.
-  const WALL_KID_TYPES = ["sidewalk", "landscape", "parking", "trailer", "paving", "road"];
   // noFit children (dog-ears, the rotated opposite-dock trailer strip) keep their
   // fixed size/position when the building is resized instead of scaling with a wall.
   // Dock-zone stack members (court/trailer/buffer) are positioned by relayoutSide, not
@@ -10665,57 +10513,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? { id: c.id, perpIsY: true, cross, rot0: c.rot, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: dimBY, perpGap: Math.abs(l.y) - b.h / 2 - dimBY / 2, alongCenter: l.x, alongHalf: dimBX / 2, oldAlongHalf: b.w / 2 }
       : { id: c.id, perpIsY: false, cross, rot0: c.rot, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: dimBX, perpGap: Math.abs(l.x) - b.w / 2 - dimBX / 2, alongCenter: l.y, alongHalf: dimBY / 2, oldAlongHalf: b.h / 2 };
   });
-  // ...then re-fit each child: it stays flush against the wall and keeps its
-  // depth, while its length/position ALONG the wall scale with that wall.
-  const fitKid = (nb, k) => {
-    const newAlongHalf = (k.perpIsY ? nb.w : nb.h) / 2;
-    const newPerpHalf = (k.perpIsY ? nb.h : nb.w) / 2;
-    const ratio = k.oldAlongHalf ? newAlongHalf / k.oldAlongHalf : 1;
-    const along = k.alongCenter * ratio;          // position along the wall
-    const alongDim = 2 * k.alongHalf * ratio;      // length along the wall
-    const perp = k.sidePerp * (newPerpHalf + k.perpDepth / 2 + Math.max(0, k.perpGap || 0)); // keep its clearance outside the wall
-    const lx = k.perpIsY ? along : perp, ly = k.perpIsY ? perp : along;
-    const dimBX = k.perpIsY ? alongDim : k.perpDepth; // child extent on building X
-    const dimBY = k.perpIsY ? k.perpDepth : alongDim; // child extent on building Y
-    const w = k.cross ? dimBY : dimBX, h = k.cross ? dimBX : dimBY; // back to the child's own w/h
-    const off = rot2(lx, ly, nb.rot);
-    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w, h, rot: k.rot0 != null ? k.rot0 : ((nb.rot % 360) + 360) % 360 };
-  };
-  // Add a sidewalk strip flush against whichever side of the building was clicked.
-  const SIDEWALK_W = 5;
-  const OPP_TRAILER_W = 12;  // default trailer-stall width for a single striped dock-zone row
-  const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
   // Dock-capable sides run along a building's TWO LONG sides (cross-dock = both, single-load =
   // one, none = neither; existing buildings with no `dock` field keep both long sides). The
   // rule is the shared, pure `dockSidesFor` so the canvas, the panel, the depth readout and
   // the stranded-zone guard can never disagree (B416/B417).
   const dockSidesOf = dockSidesFor;
-  // Build (don't commit) a full-wall strip element flush against one building side.
-  const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
-    const w = nx !== 0 ? depth : b.w;
-    const h = ny !== 0 ? depth : b.h;
-    const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
-    return { id: uid(), type, cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra };
-  };
-  // Build a 55′×60′ dog-ear bump-out at one corner (sign = ±1 along the wall) of a
-  // dock side. A dog-ear is part of the building: it sits flush at the end of the
-  // dock wall and projects out into the court, taking that span out of dock use.
-  // It's a building element (adds to SF), with no docks/label of its own.
-  // Bump-out box geometry (dogEarGeom) + the size-by-wall helper (dogEarSize) are pure, in
-  // lib/dogEar.js (B362). `de` carries the corner (side/sign) and, once resized, its stored
-  // span along the wall + projection (`along`/`proj`); absent → the 55′×60′ default.
-  // `size` ({along, proj}) is optional: a corner added beside a bump-out the user already sized adopts it.
-  const makeDogEar = (b, side, sign, size) => {
-    const de = size && size.along > 0 && size.proj > 0 ? { side, sign, along: size.along, proj: size.proj } : { side, sign };
-    return {
-      id: uid(), type: "building", ...dogEarGeom(b, de),
-      attachedTo: b.id, noFit: true, noLabel: true, dock: "none", dogEar: de,
-    };
-  };
-  // Re-anchor a dog-ear to the building corner when the building is resized: slides to the
-  // new corner / dock face and re-derives the host angle, while KEEPING its size — the
-  // user's if it was resized (B362), else the 55′×60′ default.
-  const fitDogEar = (nb, de) => dogEarGeom(nb, de);
   // Remove a building feature (and anything that hangs off it — a court's trailer, a
   // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
   const removeFeature = (id) => {
@@ -10732,24 +10534,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     tombstone([...killed]);
   };
-  // Add a single row of parking + drive aisle flush against a building side, the
-  // wall's full length, oriented so it grows OUTWARD (drive on the building side).
-  const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
-  /* ---- NEW-2: "what is on this wall?" is answered by GEOMETRY, with the tag as a fast path ------
-   *
-   * `sideParkingOn` / `empSidePark` used to test `x.sideParkSide === name` and NOTHING else. That
-   * made the answer depend on a tag surviving every write path — and it did not: `splitParkingRows`
-   * dropped it off every Explode piece, so a wall carrying a full 60 ft parking module answered
-   * "nothing here". `empSideSidewalk` beside it has always used the forgiving test (bonded + a
-   * strip type + `sideOfKid`), which is why the sidewalk stayed visible while the parking vanished,
-   * and therefore why the "−" ladder fell through to the sidewalk rung with pavement still bonded
-   * to that wall. Same forgiving test here: a bonded, non-stack, non-strip pad whose side resolves
-   * to this wall IS parking on this wall, tagged or not. A future tag-loss bug can then only cost a
-   * label — never geometry. Returned INNER→OUTER, because an exploded field is a stack and the
-   * ladder must always act on the outermost piece. */
-  const SIDE_PARK_PAD_TYPES = new Set(["parking", "paving"]);
-  const isSideParkPad = (x, b) => SIDE_PARK_PAD_TYPES.has(x.type) && x.attachedTo === b.id && !x.points
-    && !x.dogEar && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && !isWallStrip(x);
   const sideParkPadsOn = (b, name) => {
     const pads = els.filter((x) => isSideParkPad(x, b) && (x.sideParkSide ? x.sideParkSide === name : sideOfKid(b, x) === name));
     return sideParkStack(b, name, pads, 0).map((r) => r.el);   // one ordering, shared with the refit
@@ -10858,39 +10642,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // docks — exactly the non-dock-side trailer this bug forbids — and nothing created its
   // `oppSide` tag anymore, so it was dead weight that could only re-introduce the defect.)
 
-  /* ---- Building-anchored dock-zone stack (B228): truck court → trailer parking →
-     buffer, stacked OUTWARD from each dock face. The building footprint is the
-     control hub: one "+" walks the stack outward, one "−" peels the outermost off
-     (LIFO). A single pure layout (lib/dockZones `layoutZone`) positions all three
-     from their stored depths (`zd`), so they stay flush + depth-correct on add /
-     remove / inline depth-edit / building-resize. Truck court + trailer parking REUSE
-     the existing `truckCourt` / `forCourt` tags; the buffer is the new zone (a sage
-     `landscape` clear strip), bonded to its trailer via `forTrailer`. Car parking and
-     bump-outs are deliberately NOT in this stack (see growEmployeeSide / dog-ears). ---- */
-  // Find the stack members on a side, within a given element array (pure).
-  const findCourtIn = (arr, b, side) => arr.find((x) => x.attachedTo === b.id && x.truckCourt && x.truckCourt.side === side && !x.points);
-  const findTrailerIn = (arr, court) => (court ? arr.find((x) => x.forCourt === court.id && !x.points) : null);
-  const findBufferIn = (arr, trailer) => (trailer ? arr.find((x) => x.forTrailer === trailer.id && !x.points) : null);
-  const findZoneIn = (arr, b, side, i) => { const c = findCourtIn(arr, b, side); if (i === 0) return c; const t = findTrailerIn(arr, c); if (i === 1) return t; return findBufferIn(arr, t); };
-  // How many zones are present on a side (0..3), within `arr`.
-  const stackCountIn = (arr, b, side) => { const c = findCourtIn(arr, b, side); if (!c) return 0; const t = findTrailerIn(arr, c); if (!t) return 1; return findBufferIn(arr, t) ? 3 : 2; };
-  // Is this element a member of a dock-zone stack, and which zone (0 court / 1 trailer / 2 buffer)?
-  const isDockZone = (el) => !!el && !el.points && !!(el.truckCourt || el.forCourt || el.forTrailer);
-  const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
-  // NEW-1 — the dock-layer Properties panel also covers a BUFFER added from the Building panel's "Docks & walls" strip
-  // (`makeChainZone`: bonded by `prevZone` + `stackSide`, no `forTrailer`), which `isDockZone` deliberately does not claim.
-  const isDockLayerEl = (el) => isDockZone(el) || (!!el && !el.points && !!el.buffer && !!el.noFit && !!el.stackSide && !!el.attachedTo);
-  // The min / max stack depth across a building's dock sides (the "+"/"−" operate on
-  // the whole set as a unit, so the min level advances together and the max peels off).
-  // The dock side a stack zone belongs to (court carries it; trailer/buffer inherit via their chain).
-  const zoneSideOf = (arr, z) => {
-    if (!z) return null;
-    if (z.truckCourt) return z.truckCourt.side;
-    if (z.forCourt) { const c = arr.find((x) => x.id === z.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
-    if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
-    if (z.stackSide) return z.stackSide;   // an appended chain layer carries its wall
-    return null;
-  };
   // NEW-2 (B1818257) — a compass-suffixed display label for a dock-zone stack member, so a
   // cross-dock building's two otherwise-identical truck courts (both type "paving") are
   // distinguishable in the selection header and the Properties panel title. A single-dock
@@ -10909,203 +10660,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { dockSides } = dockSidesOf(b);
     return dockSides.length > 1 ? `${base} · ${dockSideCompassLabel(side, b.rot || 0)}` : base;
   };
-  // A zone's depth (feet): stored `zd` wins; else derive its extent along the side
-  // normal (so a legacy court/trailer survives); else fall back to the configured default.
-  const zoneDepthOf = (z, b, side, i) => {
-    if (Number.isFinite(z.zd) && z.zd > 0) return z.zd;
-    const u = outwardUnit(b, side);
-    const ax = rot2(z.w / 2, 0, z.rot || 0), ay = rot2(0, z.h / 2, z.rot || 0);
-    const derived = 2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y));
-    return derived > 0.5 ? derived : zoneDepthDefaults(settings)[i];
-  };
-  // The along-wall span a corner bump-out consumes at one end (sign ±1) of a dock side — the same
-  // measure the dock-door renderer uses, so the truck court pulls in to exactly the doors' clear span.
-  const bumpAlongOnSide = (arr, b, side, sign) => {
-    const horiz = side === "top" || side === "bottom";
-    const d = arr.find((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign);
-    return d ? (horiz ? d.w : d.h) : 0;
-  };
-  // Truck-court (zone 0) along-span + centre shift on a dock side (B492): pulled IN to the clear
-  // dock face between the corner bump-outs, then capped by an optional manual length (court.alongLen)
-  // so a typed length never re-overlaps a bump. The WHOLE outward stack (trailer parking + buffer +
-  // any appended layer) now follows this same span, so the trailer never over-hangs the court.
-  const courtBumpOpts = (arr, b, side) => {
-    const horiz = side === "top" || side === "bottom";
-    const full = horiz ? b.w : b.h;
-    let insStart = bumpAlongOnSide(arr, b, side, -1), insEnd = bumpAlongOnSide(arr, b, side, 1);
-    // NEW-1/B872 — on a reshaped building the loaded wall may be shorter than the bounding box (a
-    // clipped corner / angled end). Pull the truck court (and the whole outward stack) in to the TRUE
-    // wall span, reusing the same B492 clear-span mechanism the corner bump-outs use.
-    if (b.footEdit) { const seg = dockSegExtent(b, side); if (seg) { insStart = Math.max(insStart, seg.startF); insEnd = Math.max(insEnd, seg.L - seg.endF); } }
-    const { along: usable, shift } = usableCourtSpan(full, insStart, insEnd);
-    const court = findCourtIn(arr, b, side);
-    // NEW-1 — the court's own length is ANCHORED too: shorten it from one end and that end is the
-    // one that moves. Its clamp window is the CLEAR FACE (not the whole wall), so an anchored court
-    // can never slide onto a corner bump-out. With no anchor stored this is byte-identical to the
-    // old `Math.min(court.alongLen, usable)` centred on `shift`.
-    const fit = anchoredAlongSpan({
-      stored: court && court.alongLen, anchor: court && court.alongAnchor, off: court && court.alongOff,
-      chainAlong: usable, chainShift: shift, fullAlong: full, limitAlong: usable, limitShift: shift,
-    });
-    // `faceAlong`/`faceShift` are the clear bump-out face itself — the reference the COURT's own
-    // anchor is measured against (every outward zone anchors against the court's resolved span).
-    return { along: fit.along, alongShift: fit.shift, faceAlong: usable, faceShift: shift };
-  };
-  // The along-wall frame a dock wall's layers are measured in (wallRows.js extent helpers): the court's resolved span
-  // (what a plain layer tracks), its centre shift, and the whole wall.
-  const wallExtentCtx = (arr, b, side) => { const o = courtBumpOpts(arr, b, side); return { chainAlong: o.along, chainShift: o.alongShift, fullAlong: (side === "top" || side === "bottom") ? b.w : b.h }; };
-  /* ---- Generic outward-stack chain (B495). The dock sequence (court → trailer → buffer) plus any
-     menu-appended layers (landscape buffer / road) form ONE linked list rooted at the wall, bonded
-     by the generic `prevZone` id. `nextInChain` follows `prevZone` first and FALLS BACK to the legacy
-     forCourt/forTrailer bonds, so old saved plans (no `prevZone`) walk identically with no migration.
-     Appended dock layers are `noFit` like the trailer/buffer, so relayoutSide owns their geometry. ---- */
-  const nextInChain = (arr, el) => {
-    if (!el) return null;
-    const byPrev = arr.find((x) => x.prevZone === el.id && !x.points);
-    if (byPrev) return byPrev;
-    if (el.truckCourt) return findTrailerIn(arr, el);   // legacy court → trailer
-    if (el.type === "trailer") return findBufferIn(arr, el); // legacy trailer → buffer
-    return null;
-  };
-  const chainFromHead = (arr, head) => {
-    const out = []; const seen = new Set(); let cur = head;
-    while (cur && !seen.has(cur.id)) { seen.add(cur.id); out.push(cur); cur = nextInChain(arr, cur); }
-    return out;
-  };
-  // Building panel v3 — a dock wall's chain is normally rooted at its truck court, but the court's bin removes ONLY
-  // the court (and its trailer parking): the buffer / walk / road outside it stay, close in against the wall, and the
-  // innermost of them heads the chain — a stack member stamped with this `stackSide` whose inboard neighbour is gone.
-  // (Trailer parking can never head one: it opens off a court. A non-dock wall's layers carry no `noFit`.)
-  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && x.noFit
-    && x.stackSide === side && !x.truckCourt && !x.forCourt && x.type !== "trailer"
-    && !arr.some((y) => y.id === x.prevZone || y.id === x.forTrailer));
-  // The full dock-zone chain on a side (head → outward), within `arr`.
-  const dockChainOnSide = (arr, b, side) => { const c = findHeadIn(arr, b, side); return c ? chainFromHead(arr, c) : []; };
-  // The layout kind for layoutZoneByKind: only the trailer is special; everything else is a strip
-  // (court/buffer/sidewalk/road laid flush, full wall length — a road's curbs are a render detail).
-  const chainKindOf = (z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip");
-  // Re-lay the whole chain on one side of building `b` (pure over `arr`): each present zone
-  // flush-outward from the building face, depth-correct. The truck court (head) pulls in to the
-  // clear face between corner bump-outs (B492), and the trailer parking + buffer + any appended
-  // layer track that SAME span, so nothing stacked outward ever over-hangs the court.
-  const relayoutSide = (arr, b, side) => {
-    const zones = dockChainOnSide(arr, b, side);
-    if (!zones.length) return arr;
-    const kinds = zones.map(chainKindOf);
-    // A trailer zone with its own row depths (v3) is exactly as deep as those rows + aisles say, whatever `zd` holds.
-    const depths = zones.map((z, i) => (z.type === "trailer" && storedRowDepths(z, clampTrailerRows(z.trailerRows)) ? trailerSpec(z, settings.trailerAisle).total : zoneDepthOf(z, b, side, i)));
-    const courtOpts = courtBumpOpts(arr, b, side);
-    // Per-zone LENGTH override. The chain still shares the court's span BY DEFAULT (the 2026-06-30
-    // fix that stopped the trailer over-hanging the court), but a zone the user has actually given
-    // a length keeps it — clamped to the wall, never reset. Index 0 is excluded: the court's own
-    // alongLen is already folded into courtOpts.along, capped to the clear bump-out face (B492).
-    const alongs = zones.map((z, i) => (i === 0 ? null : (Number.isFinite(z.alongLen) && z.alongLen > 0 ? z.alongLen : null)));
-    // NEW-1 — WHICH END that length is anchored from. Index 0 is 0/0 because the court's own anchor
-    // is already resolved into `courtOpts.alongShift`; every outward zone anchors against that.
-    const anchors = zones.map((z, i) => (i === 0 ? 0 : z.alongAnchor));
-    const offs = zones.map((z, i) => (i === 0 ? 0 : z.alongOff));
-    const patch = new Map();
-    zones.forEach((z, i) => {
-      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs, anchors, offs });
-      // NEW-3 (Building panel v2) — a trailer zone may carry 1–4 rows: rows / aisle ride the zone, the
-      // total depth (`zd`) is rows × row + ⌊rows / 2⌋ × aisle, and the cfg is the band · aisle · band
-      // pattern `trailerStalls` already draws. One row is byte-identical to the old single strip.
-      patch.set(z.id, z.type === "trailer"
-        ? { ...g, cfg: trailerCfg(z.cfg, trailerSpec({ ...z, zd: depths[i] }, settings.trailerAisle), (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, side) }
-        : g);
-    });
-    return arr.map((x) => (patch.has(x.id) ? { ...x, ...patch.get(x.id) } : x));
-  };
-  // Relayout every dock side of `b` that currently carries a court.
-  const relayoutAllSides = (arr, b) => {
-    const sides = new Set(arr.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
-    // …and the dock walls whose court was binned but whose outer layers stayed (headed by findHeadIn).
-    dockSidesOf(b).dockSides.forEach((sd) => { if (!sides.has(sd) && findHeadIn(arr, b, sd)) sides.add(sd); });
-    let next = arr; sides.forEach((s) => { next = relayoutSide(next, b, s); }); return next;
-  };
-  // Remove ids + anything bonded to them (legacy forCourt/forTrailer + the generic prevZone chain, so
-  // appended road/landscape peel with their host — LIFO preserved by removing the outermost first).
-  // Pure — the FULL transitive set of ids a removeWithChildren() drop takes out: the seed ids plus
-  // everything bonded OUTWARD of them (a court's trailer, a trailer's buffer, any prevZone chain).
-  // Surfaced separately so a delete handler can TOMBSTONE the whole cascade, not just the clicked
-  // element (B556/NEW-1). Without tombstoning every killed id, two things break: (1) a cloud /
-  // cross-tab / cross-device union-merge (mergeSiteContent) RESURRECTS the bonded children — the
-  // truck-court→trailer-parking-comes-back the owner hit; (2) dropping ≥2 items with no tombstone to
-  // explain them trips the B459 thin-clobber guard, which the caller surfaces as a FALSE "changed in
-  // another session" conflict (the phantom "Take over editing" re-prompt → resurrect → re-prompt loop).
-  const killSetWithChildren = (arr, ids) => {
-    const kill = new Set(ids);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      arr.forEach((x) => { if (!kill.has(x.id) && ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer)) || (x.prevZone && kill.has(x.prevZone)))) { kill.add(x.id); grew = true; } });
-    }
-    return kill;
-  };
-  const removeWithChildren = (arr, ids) => { const kill = killSetWithChildren(arr, ids); return arr.filter((x) => !kill.has(x.id)); };
-  // Zone element factories (final geometry is set by relayoutSide).
-  const baseZone = (b, extra) => ({ id: uid(), cx: b.cx, cy: b.cy, w: 1, h: 1, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra });
-  const makeCourtZone = (b, side) => baseZone(b, { type: "paving", truckCourt: { side }, zd: zoneDepthDefaults(settings)[0] });
-  const makeTrailerZone = (b, court) => baseZone(b, { type: "trailer", forCourt: court.id, prevZone: court.id, noFit: true, zd: zoneDepthDefaults(settings)[1], cfg: { trailerW: settings.trailerW || OPP_TRAILER_W, trailerL: zoneDepthDefaults(settings)[1], trailerAisle: 0, single: true } });
-  const makeBufferZone = (b, trailer) => baseZone(b, { type: "landscape", forTrailer: trailer.id, prevZone: trailer.id, buffer: true, noFit: true, zd: zoneDepthDefaults(settings)[2] });
-  // A catalog-driven appended dock layer (landscape buffer / road / sidewalk) bonded OUTWARD of
-  // `prevEl` via prevZone. noFit ⇒ relayoutSide owns its geometry; road carries travelW/curb so the
-  // curb-line renderer + roadTravelWidth keep working and its depth = travelW + 2·curb.
-  const makeChainZone = (b, side, key, prevEl) => {
-    const c = ZONE_CATALOG[key];
-    const base = { type: c.elType, prevZone: prevEl ? prevEl.id : null, stackSide: side, noFit: true, ...(c.tag || {}) };
-    if (key === "road") {
-      const travelW = catalogDepthDefault("road", settings) || 24;
-      const curb = (+settings.roadCurb || CURB);
-      return baseZone(b, { ...base, travelW, curb, zd: travelW + 2 * curb });
-    }
-    return baseZone(b, { ...base, zd: catalogDepthDefault(key, settings) });
-  };
-  // The next-zone element (index = present count) for a side, within `arr`.
-  const buildNextZone = (arr, b, side) => {
-    const n = stackCountIn(arr, b, side);
-    if (dockChainOnSide(arr, b, side).length > n && n > 0) return null;   // repeat trailer rows / appended layers: extend from "Docks & walls", never fork the chain
-    if (n === 0 && findHeadIn(arr, b, side)) return null;   // court binned, outer layers stayed: extend from "Docks & walls", not by a second court
-    if (n === 0) return makeCourtZone(b, side);
-    if (n === 1) { const c = findCourtIn(arr, b, side); return c ? makeTrailerZone(b, c) : null; }
-    if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
-    return null; // full default sequence (appended layers come via the "Add layer" chooser)
-  };
+  // AUDIT BATCH G3 — the assembly engine lives in lib/assemblyOps.js as pure functions of the element array; these are the
+  // thin wrappers that hand it the live `settings` (the only component state any of it read), keeping every old signature.
+  const zoneDepthOf = (z, b, side, i) => zoneDepthOfIn(z, b, side, i, settings);
+  const relayoutSide = (arr, b, side) => relayoutSideIn(arr, b, side, settings);
+  const relayoutAllSides = (arr, b) => relayoutAllSidesIn(arr, b, settings);
+  const makeCourtZone = (b, side) => makeCourtZoneIn(b, side, settings);
+  const makeTrailerZone = (b, court) => makeTrailerZoneIn(b, court, settings);
+  const makeBufferZone = (b, trailer) => makeBufferZoneIn(b, trailer, settings);
+  const makeChainZone = (b, side, key, prevEl) => makeChainZoneIn(b, side, key, prevEl, settings);
+  const buildNextZone = (arr, b, side) => buildNextZoneIn(arr, b, side, settings);
+  const refitChildren = (a, buildingId, nb, kids, opts = {}) => refitChildrenIn(a, buildingId, nb, kids, opts, settings);
   // Remove the outermost zone on ONE dock side (the on-canvas per-side "−"): peel the LAST element of
   // the chain (an appended road/landscape first, then buffer → trailer → court). removeFeature
   // cascades children + re-lays the side.
   const removeOuterZoneOnSide = (b, side) => {
     const chain = dockChainOnSide(els, b, side);
     if (chain.length) removeFeature(chain[chain.length - 1].id);
-  };
-  /* ---- "Add layer ▾" chooser (B495): the fast "+" keeps the preset sequence; this lets the user
-     pick a specific outward layer (landscape buffer / sidewalk / parking / road) per the catalog. ---- */
-  // The outward perpendicular distance (feet, from building centre) to the OUTER face of the
-  // furthest bonded element on `side` — i.e. where the next appended layer must start to sit flush.
-  const sideOuterPerp = (arr, b, side) => {
-    const [nx, ny] = SIDE_N[side]; const isH = ny !== 0, s = isH ? ny : nx;
-    let maxOut = (isH ? b.h : b.w) / 2;                       // the wall face itself
-    const u = outwardUnit(b, side);
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && sideOfKid(b, x) === side).forEach((x) => {
-      const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
-      const c = s * (isH ? l.y : l.x);                       // signed perp distance of the element centre
-      const ax = rot2(x.w / 2, 0, x.rot || 0), ay = rot2(0, x.h / 2, x.rot || 0);
-      const half = Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y);
-      maxOut = Math.max(maxOut, c + half);
-    });
-    return maxOut;
-  };
-  // B2268801 — the { run, alongShift } (host frame) of the layer a NEW layer on a rear / end wall would sit outside of: the
-  // outermost bonded layer on that wall (strip, road, trailer or parking), or null when the wall holds none.
-  const wallOutermostExtent = (arr, b, side) => {
-    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
-    let best = null, bestOut = -Infinity;
-    arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.type !== "driveInRamp" && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side
-      && (isWallStrip(x) || x.type === "road" || isWallTrailer(x) || x.sideParkSide || SIDE_PARK_PAD_TYPES.has(x.type))).forEach((x) => {
-      const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot), out = sg * (isH ? l.y : l.x);
-      if (out > bestOut) { bestOut = out; best = x; }
-    });
-    return best ? wallKidAlong(b, side, best) : null;
   };
   // Append catalog layer `key` as a new OUTERMOST layer on `side`. Dock sides extend the relayout
   // chain (noFit, prevZone); non-dock sides place an ordinary wall-kid flush beyond the outermost
@@ -11235,298 +10806,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone(killed);
   };
 
-  // Re-fit every feature bonded to a resized building so the whole assembly stays
-  // stuck together: dog-ears slide to the corner, wall strips scale, the
-  // opposite-side trailer re-hugs its wall, and a court's trailer follows the
-  // (re-scaled) court's far edge.
-  // `opts` (B1123) carries the GESTURE's intent, which the geometry alone cannot express:
-  //   · userResize      — this refit is a resize aimed AT `buildingId`. Only then may a dock zone
-  //                       pin its along-wall length. A relayout / rotation / heal passes nothing.
-  //   · dragAxis        — {w,h}: which local dimension an EDGE drag moved, so a depth-only drag can
-  //                       never be mistaken for a length drag. Absent for a corner drag / a typed
-  //                       dimension (both may legitimately change the length).
-  const refitChildren = (a, buildingId, nb, kids, opts = {}) => {
-    const resized = a.find((x) => x.id === buildingId);
-    const hostIsBuilding = !!resized && resized.type === "building" && !resized.dogEar;
-    /* NEW-2 (B385041) — ESTABLISH THE DOCK ORIENTATION BEFORE THE FOOTPRINT MOVES.
-       This is the one funnel every building resize goes through (grip drag, edge drag, typed
-       Length/Depth, the on-canvas dimension editor), so stamping here — from the PRE-resize
-       `resized`, i.e. from what the building looks like at the instant the user grabs it — is what
-       makes "derive by default, preserve once established" true for a building whose record predates
-       `dockAxis` and which has not been through the load heal (a row seeded mid-session by the sync
-       engine, say). A building that is already stamped is untouched. */
-    const axisStamp = hostIsBuilding ? withDockAxis(resized) : resized;
-    const dockAxisPatch = axisStamp !== resized ? { dockAxis: axisStamp.dockAxis, ...(axisStamp.dockSide !== resized.dockSide ? { dockSide: axisStamp.dockSide } : {}) } : null;
-    let next = a.map((x) => {
-      if (x.id === buildingId) {
-        // A bump-out resized on its own stays GLUED to its building corner: update its stored span
-        // along the dock wall + projection (B362), then RE-DERIVE its box from the host via
-        // dogEarGeom so it can never slide away along the wall. Without this re-anchor the free drag
-        // position let the bump float off the corner, opening a gap between it and the dock doors —
-        // even when only the projection (the away-from-the-dock direction) was dragged. Its inner
-        // edge stays pinned to the dock face and its outer end to the building corner; only along /
-        // projection change, so the doors (which start at the bump's along-edge) stay flush.
-        if (x.dogEar) {
-          const de = { ...x.dogEar, ...dogEarSize(x.dogEar, nb.w, nb.h) };
-          const host = a.find((h) => h.id === x.attachedTo && h.type === "building" && !h.points);
-          return host ? { ...x, dogEar: de, ...dogEarGeom(host, de) }
-            : { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, dogEar: de, ...(nb.rot != null ? { rot: nb.rot } : {}) };
-        }
-        return { ...x, ...(dockAxisPatch || {}), cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
-      }
-      if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
-      // NEW-2 / NEW-3 — wall strips and side-parking rows are DERIVED by relayoutWallKids below
-      // (span rule / flush-against-the-sidewalk), never ratio-scaled here. fitKid's
-      // `alongDim = 2 * alongHalf * ratio` rescaled a strip's stored run instead of recomputing it
-      // from the span, and its `perpGap` replayed a clearance captured before the sidewalk changed
-      // — the two drifts the owner reported on Building 3.
-      if (hostIsBuilding && (ownedWallStrip(x, resized) || ownedSidePark(x, resized))) return x;
-      const k = kids?.find((kk) => kk.id === x.id);
-      if (k) return { ...x, ...fitKid(nb, k) };
-      return x;
-    });
-    // Re-lay the dock-zone stack from stored depths so court → trailer → buffer stay
-    // flush + depth-correct. The resized element may be the building (relay its dock
-    // sides) or a stack zone itself (re-derive that zone's depth from its new box, then
-    // relay its side so the trailer/buffer beyond it follow — the old "court drags its
-    // trailer" behaviour, now extended through the buffer).
-    if (hostIsBuilding) {
-      const newB = { ...resized, ...(dockAxisPatch || {}), cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot };
-      next = relayoutAllSides(next, newB);
-      // NEW-2 / NEW-3 — the branch that was MISSING: on a host resize the wall strips and side
-      // parking must be re-derived from the span rule + the live sidewalk, not left to fitKid's
-      // proportional replay. `resized` (the PRE-resize host) is the side reference so an untagged
-      // strip can't be inferred onto the wrong wall part-way through a big drag.
-      next = relayoutWallKids(next, newB, resized);
-    } else if (resized && resized.dogEar) {
-      // A bump-out resized on its own (B492): re-lay the host's full-side sidewalks and pull its
-      // truck court in to the new clear face between the (now-resized) bump-outs.
-      const host = next.find((x) => x.id === resized.attachedTo);
-      if (host) { next = relayoutBumpSidewalks(next, host); next = relayoutSide(next, host, resized.dogEar.side); }
-    } else if (resized && (resized.truckCourt || resized.forCourt || resized.forTrailer)) {
-      const b = next.find((x) => x.id === resized.attachedTo);
-      const side = zoneSideOf(next, resized);
-      if (b && side) {
-        const u = outwardUnit(b, side), rr = nb.rot != null ? nb.rot : resized.rot;
-        const box = { w: nb.w, h: nb.h, rot: rr };
-        const newDepth = Math.max(1, Math.round(boxExtentAlong(box, u)));
-        // Did the drag change the ALONG-wall axis too? If so the user is setting this zone's
-        // LENGTH, so remember it on the zone (derive-by-default / preserve-once-touched) instead of
-        // letting the relayout snap it back to the court's span. A pure depth drag stores nothing,
-        // so an untouched trailer keeps tracking the court exactly as before. The court head keeps
-        // its own alongLen path (B492), which is capped to the clear bump-out face.
-        //
-        // B1123 — two things were wrong here, and the SECOND is the one that mattered.
-        //  (1) The spans were compared as bounding-box PROJECTIONS (`boxExtentAlong(…, alongUnit(b,
-        //      side))`), which leak the depth into the along measurement as h·|sin δ| once the zone's
-        //      angle drifts off its host's — and it does drift in real plans. `zoneAlongExtent` reads
-        //      the along DIMENSION in the host's frame instead, so a depth change moves it by zero.
-        //  (2) There was no notion of INTENT at all: whether the owner had set a length was inferred
-        //      from geometry alone, so anything that reached this branch could pin `alongLen` — and a
-        //      pin is by design never reset, which is why the trailer never tracked its court again.
-        //      The stamp now requires the gesture to BE a user resize OF THIS ZONE, and an edge drag
-        //      must have moved the along axis. A host refit, a relayout, a rotation, a court depth
-        //      change and the load-time heal are all structurally incapable of stamping.
-        //
-        // NEW-1 — the length was stored with no ANCHOR, so the relayout re-centred it on the wall and
-        // both ends walked inward by half the reduction ("when I shrink the trailer parking, it
-        // shrinks from both sides"). The gesture knows which end it held — an edge drag pins the
-        // opposite edge exactly — so store that with the length. The truck court is no longer excluded:
-        // it shares the defect (its typed length re-centred too), and `courtBumpOpts` still caps it to
-        // the clear bump-out face, so B492 is unchanged.
-        const isTrailerZone = resized.type === "trailer" || !!resized.forCourt;
-        const alongIsW = isTrailerZone || side === "top" || side === "bottom";
-        const alongAxisDragged = opts.dragAxis ? !!(alongIsW ? opts.dragAxis.w : opts.dragAxis.h) : null;
-        const cOpts = courtBumpOpts(next, b, side);
-        const fit = resizedZoneAlongFit(resized, { ...box, cx: nb.cx, cy: nb.cy }, {
-          host: b, side, userResize: !!opts.userResize, alongAxisDragged,
-          // The court head anchors against the clear bump-out FACE; everything outward of it anchors
-          // against the court's own resolved span.
-          chainAlong: resized.truckCourt ? cOpts.faceAlong : cOpts.along,
-          chainShift: resized.truckCourt ? cOpts.faceShift : cOpts.alongShift,
-        });
-        next = next.map((x) => (x.id === buildingId
-          ? { ...x, zd: newDepth, ...(fit ? { alongLen: fit.len, alongAnchor: fit.anchor, alongOff: fit.off } : {}) }
-          : x));
-        next = relayoutSide(next, b, side);
-      }
-    } else if (resized && (isWallStrip(resized) || resized.sideParkSide)) {
-      // NEW-3 — a wall strip or the parking row itself was resized: re-derive the whole side so the
-      // parking stays flush against the strip's new thickness (and the strip back onto its span).
-      // A resize of the parking field's RUN is user intent, so the pin rule in relayoutWallKids
-      // keeps it; only its distance out from the wall is re-resolved.
-      const host = next.find((x) => x.id === resized.attachedTo);
-      // NEW-1 (2026-11-03) — a rear / end wall's Walk or Buffer is DERIVED from the wall span, so a handle drag that shortens it
-      // must RECORD the length and the end it was held from (the same three keys a typed length used to write, `extentFieldsFor`):
-      // otherwise the relayout below re-derives the full wall (or re-centres it) and the dragged end snaps back. Only a user
-      // resize that really changed the run along the wall stamps anything — a depth-only drag, a host refit, a heal never do.
-      if (host && host.type === "building" && !host.dogEar && opts.userResize && ownedWallStrip(resized, host)) {
-        const wside = swSideOn(host, resized);
-        const was = wallKidAlong(host, wside, resized), now = wallKidAlong(host, wside, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h });
-        if (Math.abs(was.run - now.run) > 0.5) {
-          const keys = extentFieldsFor({ run: now.run, alongShift: now.alongShift }, sidewalkSpanForBumps(host, wside, bumpsOfHost(next, host)));
-          next = next.map((x) => (x.id === resized.id ? applyZonePatch(x, keys) : x));
-        }
-      }
-      // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
-      if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
-    } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
-      /* NEW-1 (dispatch: parking snaps back once split) — a direct canvas resize of one piece of a
-         FREESTANDING split stack (no host wall to relay against) never moved its siblings, so
-         growing/shrinking one row/aisle overlapped the next piece instead of pushing it — the
-         paint order then buries the grown edge under an untouched, opaque sibling, which is what
-         reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
-         ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
-         remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
-         the stack via the shared pure helper (`relayoutFreeStack`), the freestanding twin of
-         `relayoutWallKids` — it propagates the gap/overlap that opened on whichever side of the
-         dragged piece moved, so undisturbed siblings on the OTHER side never move.
-
-         ⛔ NEW-1 (dispatch: parking STILL snaps back on expand, reopening the above) — membership
-         is resolved from `opts.freeStackIds`, captured ONCE (by the caller, before any change —
-         see `freeStackIdsFor`) rather than re-derived here from `next`. Re-deriving it here from
-         `next` was the original (still-broken) shape: `next`'s resized piece already carries THIS
-         frame's new geometry, and a CORNER (or along-wall edge) drag moves `w` along with `h`, so
-         `freeParkStack`'s own width-match test — the thing that tells this stack's pieces apart
-         from an unrelated field sitting nearby — silently found a chain of ONE the instant width
-         diverged, and the depth relayout below never ran. A pure depth-edge drag (never touches
-         `w`) always looked fixed, which is exactly why B1754864's own tests never caught it. */
-      const ids = opts.freeStackIds && opts.freeStackIds.length > 1
-        ? opts.freeStackIds
-        : freeParkStack(next.find((x) => x.id === resized.id) || resized, next).map((p) => p.id); // no pre-captured membership — degrade to the old (width-sensitive) derivation rather than skip relayout outright
-      if (ids.length > 1) {
-        const byId = new Map(next.map((x) => [x.id, x]));
-        const stack = ids.map((pid) => byId.get(pid)).filter(Boolean);
-        if (stack.length > 1) {
-          const relaid = relayoutFreeStack(stack, resized.id);
-          if (relaid !== stack) {
-            const relaidById = new Map(relaid.map((p) => [p.id, p]));
-            next = next.map((x) => (relaidById.has(x.id) ? { ...x, ...relaidById.get(x.id) } : x));
-          }
-        }
-      }
-    }
-    // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
-    // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
-    return resyncBondedRot(next, resized && resized.attachedTo ? resized.attachedTo : buildingId);
-  };
-  // Trailer parking flush against the FAR (outer) edge of a truck court — where trailers
-  // actually back in. Routes through the stack ("+" adds the next zone, here the trailer).
-  const isWallStrip = (x) => x.type === "sidewalk" || x.type === "landscape"; // 5′ wall strips
-  // Recompute a wall strip's run + along-centre to span the FULL building side, folding in any
-  // corner bump-outs that lengthen that wall (B492). Preserves the strip's thickness and its
-  // outward offset from the wall — only its length along the wall and its centre move. So a
-  // bump-out added/edited/removed keeps the sidewalk covering the whole side, at the real bump size.
-  const sidewalkFullRunPatch = (arr, b, sw, sideRef = b) => {
-    const side = swSideOn(sideRef, sw);
-    const { cross, dimBX, dimBY } = hostAxisExtents(b, sw);
-    const isVert = side === "left" || side === "right";
-    const depth = isVert ? dimBX : dimBY;                // thickness: perpendicular to the wall
-    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && k.type !== "driveInRamp" && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
-    const off = rot2(box.lx, box.ly, b.rot);
-    return { ...sw, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
-  };
-  // A wall-hugging child this relayout OWNS: a free sidewalk/landscape strip or a side-parking
-  // row bonded straight to the building. Dock-zone stack members and appended "Add layer" chain
-  // zones (both `noFit`, positioned by relayoutSide) are deliberately excluded — the old
-  // relayoutBumpSidewalks filter caught a chain-zone landscape buffer as if it were a sidewalk.
-  const ownedWallStrip = (x, b) => isWallStrip(x) && x.attachedTo === b.id && !x.points && !x.noFit
-    && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone;
-  /* NEW-2 — geometric, with the tag as the fast path (same rule as `sideParkPadsOn`). An untagged
-   * Explode piece used to fail this test and therefore never re-flushed when its host moved or was
-   * resized — the "the parking is entirely separated from the building" class. */
-  const ownedSidePark = (x, b) => isSideParkPad(x, b) && !!sideOfKid(b, x);
-  // B2268801 — a Road or Trailer layer on a rear / end wall: a FLUSH layer (placed beyond what is inboard, repacked by
-  // repackFlushBeyond), never a dock-chain member (no noFit / forCourt / prevZone).
-  const isWallTrailer = (x) => !!x && x.type === "trailer" && !!x.wallTrailer && !x.points;
-  const ownedFlushKid = (x, b) => !!x && (x.type === "road" || isWallTrailer(x)) && x.attachedTo === b.id && !x.points && !x.dogEar
-    && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && !isCenterlineRoad(x);
-  const sideParkSideOf = (b, x) => x.sideParkSide || sideOfKid(b, x);
-  /* Re-lay every wall-hugging child of `b` from the RULE rather than from a remembered box
-     (NEW-2 / NEW-3). `sideRef` is the host box used only to infer an untagged child's side — on a
-     resize that's the PRE-resize host, so a big drag can't flip a strip onto the wrong wall.
-
-     Two different contracts, deliberately:
-       • Wall STRIPS (sidewalk / landscape) — fully derived, and the span rule is ABSOLUTE
-         (owner rule): the strip spans exactly the extended side (building depth + the projection
-         of any corner bump-out that lengthens that wall), centred on that span, flush to the wall.
-         So a host resize, a bump-out add/delete/resize and a strip width edit all land on the same
-         number, and deleting the bump collapses the strip back to the bare side.
-       • SIDE PARKING — split by axis (owner amendment). PERPENDICULAR is always derived and always
-         flush against the live sidewalk on that side (or the wall when there is none); replaying a
-         `perpGap` captured before the sidewalk changed is the whole bug. ALONG the wall is USER
-         INTENT: a field whose run + centre already match the span default is UNTOUCHED and tracks
-         the span; anything else has been positioned by hand (the owner slid Building 3's east field
-         to get the curb return right where the fire lane ties in) and is carried through every
-         refit unchanged, only its run clamped to the span — with the unclamped intent stamped on
-         `sideParkFit` so it springs back when the host grows again, exactly like a dog-ear's
-         stored along/proj. */
-  /* NEW-1 — `pinFrom` is the id of the field the CURRENT gesture is aimed at, and it is the only
-     thing allowed to pin an over-length run (lib/dogEar `sideParkAlongRun`). A host refit passes
-     nothing, so a resize can no longer stamp a `sideParkFit` remembering the host's OLD length. */
-  const relayoutWallKids = (arr, b, sideRef = b, { pinFrom = null } = {}) => {
-    const bumps = bumpsOfHost(arr, b);
-    // The strip (if any) each parking row has to clear, keyed by side — resolved from the array
-    // being built, so a just-added / just-deleted / just-widened sidewalk is already reflected.
-    const stripBySide = {};
-    arr.forEach((x) => { if (ownedWallStrip(x, b) && !isFlushWallLayer(x)) { const s = swSideOn(sideRef, x); if (!stripBySide[s]) stripBySide[s] = x; } });
-    /* NEW-1 — a wall's side parking may be an exploded STACK (stall row | drive aisle | stall row),
-       so each piece clears the strip PLUS everything stacked inboard of it. One shared derivation
-       with the load-time heal (lib/dogEar `sideParkStack`); a single un-exploded field still
-       resolves to the bare strip thickness, so this is identity for a plan never exploded. */
-    const gapById = new Map();
-    {
-      const byWall = new Map();
-      arr.forEach((x) => {
-        if (!ownedSidePark(x, b)) return;
-        const s = sideParkSideOf(b, x);
-        if (!byWall.has(s)) byWall.set(s, []);
-        byWall.get(s).push(x);
-      });
-      byWall.forEach((pads, s) => {
-        const strip = stripBySide[s];
-        const isV = s === "left" || s === "right";
-        const sd = strip ? (isV ? hostAxisExtents(b, strip).dimBX : hostAxisExtents(b, strip).dimBY) : 0;
-        sideParkStack(b, s, pads, sd).forEach((r) => gapById.set(r.el.id, r.gap));
-      });
-    }
-    const placed = arr.map((x) => {
-      if (ownedWallStrip(x, b)) return sidewalkFullRunPatch(arr, b, x, sideRef);
-      // B2268801 — a rear / end wall's Road or Trailer layer with its own along extent re-derives its length + position
-      // from it (a layer with none is left exactly as before: its stored box, scaled with the wall on a resize).
-      if (ownedFlushKid(x, b) && hasWallExtent(x)) {
-        const fside = sideOfKid(sideRef, x), fbox = flushKidBoxFor(b, fside, bumps, x);
-        const { cross: fcross } = hostAxisExtents(b, x), foff = rot2(fbox.lx, fbox.ly, b.rot);
-        return { ...x, ...ownExtents(fcross, fbox.dimBX, fbox.dimBY), cx: b.cx + foff.x, cy: b.cy + foff.y };
-      }
-      if (!ownedSidePark(x, b)) return x;
-      const side = sideParkSideOf(b, x);
-      const { cross } = hostAxisExtents(b, x);
-      const cur = wallKidAlong(b, side, x);                       // its live run / centre / depth
-      // Only the strip's THICKNESS may become part of the gap — never its run (a rotated strip
-      // would otherwise leak a wall-length value here, the swThick guard from addParkingRowSide).
-      const gap = gapById.has(x.id) ? gapById.get(x.id) : 0;
-      const span = sidewalkSpanForBumps(b, side, bumps);
-      // NEW-1 — the along-wall decision is the ONE shared rule (lib/dogEar `sideParkAlongRun`), so
-      // the canvas refit and the load-time heal cannot answer "is this run user intent?" differently.
-      const res = sideParkAlongRun({ cur, span, stamp: x.sideParkFit || null, pinAllowed: pinFrom === x.id });
-      const box = wallKidBox(b, side, { depth: cur.depth, gap, run: res.run, alongShift: res.alongShift });
-      const off = rot2(box.lx, box.ly, b.rot);
-      const out = { ...x, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
-      if (res.stamp === null) delete out.sideParkFit;             // an impossible stamp is dropped, not clamped
-      else if (res.stamp) out.sideParkFit = res.stamp;
-      return out;
-    });
-    // Preserve object identity when nothing actually moved (no dirty flag / no cloud re-save
-    // churn on a plan that is already correct — the same idempotency contract as dogEarGeom).
-    const near = (p, q) => Math.abs(p - q) <= 1e-6;
-    return placed.map((x, i) => {
-      const o = arr[i];
-      return (x !== o && near(x.cx, o.cx) && near(x.cy, o.cy) && near(x.w, o.w) && near(x.h, o.h)
-        && x.sideParkFit === o.sideParkFit) ? o : x;
-    });
-  };
-  const relayoutBumpSidewalks = (arr, b, sideRef = b) => relayoutWallKids(arr, b, sideRef);
   // Add dog-ears at the given corners; re-lay the perpendicular sidewalks to the full building
   // side and pull the truck court in to the clear face between the new bump-outs (B492).
   const placeDogEars = (b, corners, sizeFor) => {
@@ -11572,12 +10851,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
   };
-  /* ---- Drive-in ramps (NEW-1 / NEW-2, 2026-10-30 — lib/driveInRamp.js owns every rule) -------------------------------------------------------
-   * One building-attached `driveInRamp` element per ramp. The "+" beside a purple corner "+" drops one at the end of the belt by that corner (there is no
-   * ramp button at a wall's middle — owner 2026-11-02); it then opens the ramp's Properties. A wall that is not a dock wall
-   * takes a door MARKER instead (no ramp: the floor is at grade there). The door run it reads is `dockDoorRun` WITHOUT ramps — the module grid is the
-   * building's, not the ramps'. */
-  const rampsOnHost = (arr, b) => arr.filter((x) => x.type === "driveInRamp" && x.attachedTo === b.id);
   const rampDoorRun = (b, side) => rampDoorRunOf(b, side, els, settings);
   const planRampAt = (b, side, where) => {
     const isDock = dockSidesOf(b).dockSides.includes(side);
@@ -11600,21 +10873,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Properties edits go through the host's own geometry: the patch lands on the `ramp` record and the write seam re-derives the box.
   const setRampPatch = (id, patch) => { pushHistory(); setEls((a) => a.map((x) => (x.id === id ? { ...x, ramp: { ...x.ramp, ...patch } } : x))); };
-  // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
-  // from the kid's position (so legacy / untagged strips are still recognised).
-  const sideOfKid = (b, kid) => {
-    if (kid.sidewalkSide) return kid.sidewalkSide;
-    const c = kid.points ? centroid(kid.points) : { x: kid.cx, y: kid.cy };
-    const l = rot2(c.x - b.cx, c.y - b.cy, -b.rot);
-    const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
-    return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
-  };
   /* ---- wall-strip (sidewalk/landscape) geometry & flushness ---- */
   const buildingOf = (el) => els.find((x) => x.id === el.attachedTo);
-  // Which building side a strip hugs, and whether its thickness is on the h axis.
-  // Which side a strip hugs, resolved against an EXPLICIT host box — so a relayout mid-resize can
-  // infer from the pre-resize host instead of whatever `els` happens to hold.
-  const swSideOn = (b, el) => el.sidewalkSide || (b ? sideOfKid(b, el) : (el.w >= el.h ? "bottom" : "right"));
   const swSide = (el) => swSideOn(el.sidewalkSide ? null : buildingOf(el), el);
   const swThickIsH = (el) => SIDE_N[swSide(el)][1] !== 0; // top/bottom → thickness is h
   const swThick = (el) => (swThickIsH(el) ? el.h : el.w);
@@ -11631,7 +10891,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return sideOfKid(b, x) === side && s * (isH ? l.y : l.x) > refOutPerp + 1;
     });
   };
-  const outwardUnit = (b, side) => { const [nx, ny] = SIDE_N[side]; return rot2(nx, ny, b.rot); };
   /* B1128's ratchet caught an ALONG-wall unit helper here that nothing called — and its comment
    * claimed it kept "screen math and layout math" in agreement, which is exactly the kind of dead
    * code that reads as load-bearing and is not. Deleted rather than `_`-prefixed: it was never
@@ -13692,70 +12951,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the owner's tab, or the E2E flag; otherwise it returns null. */
   const gradeReadoutRef = useRef(null);
   gradeReadoutRef.current = { cursor, cursorProp, gradeSurface, grOn, gsEnabled };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = () => {
-      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
-      const L = gradeReadoutRef.current || {}, st = gsStatsRef.current || {};
-      const kept = lastGridRef.current, grid = (L.gradeSurface && L.gradeSurface.grid) || (L.grOn ? kept : null);
-      const f = grid && L.cursor ? readoutDashFacts(grid, L.cursor, L.cursorProp, !(L.gradeSurface && L.gradeSurface.grid)) : null;
-      const now = Date.now();
-      return {
-        enabled: !!L.gsEnabled, grOn: !!L.grOn, hasBuilt: !!(L.gradeSurface && L.gradeSurface.grid), hasKept: !!kept,
-        buildSeq: st.buildSeq || 0, lastBuildMs: st.lastBuildMs ?? null, lastBuildOutcome: st.lastBuildOutcome || null,
-        isDragging: !!drag.current, sigChangesLast10s: (st.sigChanges || []).filter((t) => now - t <= 10000).length,
-        cursor: L.cursor ? { x: Math.round(L.cursor.x * 10) / 10, y: Math.round(L.cursor.y * 10) / 10 } : null,
-        cursorStatus: L.cursorProp ? L.cursorProp.status : null, cursorReason: L.cursorProp ? L.cursorProp.reason || (L.cursorProp.undisturbed ? "undisturbed" : null) : null,
-        cursorFt: L.cursorProp && Number.isFinite(L.cursorProp.ft) ? Math.round(L.cursorProp.ft * 10) / 10 : null,
-        inLimit: f ? f.inLimit : null, limitMode: f ? f.mode : null, limitRegionCount: f ? f.limitRegionCount : 0, limitBbox: f ? f.limitBbox : null,
-        cursorBbox: L.cursor ? [L.cursor.x, L.cursor.y, L.cursor.x, L.cursor.y].map((v) => Math.round(v * 10) / 10) : null,
-      };
-    };
-    window.__plannerGradeReadout = hook;
-    return () => { if (window.__plannerGradeReadout === hook) window.__plannerGradeReadout = null; };
-  }, [grOn]);
   /* NEW-1 (2026-11-12, V2115881 re-opened) — `window.__plannerGradeDrive()`: WHY each road is or is not graded as a drive, and who owns the grading past the property line, in ONE call
    * — so a live check answers "is this plain Road a drive?" without a reproduction. Owner-only (installed while the grading gate is on), READ-ONLY, armed at CALL time
    * (FOREGROUND-OR-VOID §5): `?planyrDiag=1` on the tab, or the E2E flag; otherwise it returns null. */
   const gradeDriveRef = useRef(null);
   gradeDriveRef.current = { els, gsEls, gradeSurface, grDriveTies, grDriveParcels, grOn, settings };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = () => {
-      if (!(window.__PLANYR_E2E || isDiagArmed(window))) return null;
-      const L = gradeDriveRef.current || {};
-      const surf = L.gradeSurface || null, planes = surf && surf.planes ? surf.planes : new Map(), why = surf && surf.driveWhy ? surf.driveWhy : new Map();
-      const line = propertyLineRings(L.grDriveParcels || []);
-      const roads = (L.els || []).filter(isCenterlineRoad).map((e) => {
-        const tie = L.grDriveTies && L.grDriveTies.get(e.id);
-        const pl = planes.get(e.id);
-        return {
-          id: e.id, travelW: e.travelW ?? null, points: e.pts.length, ends: [e.pts[0], e.pts[e.pts.length - 1]].map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })),
-          diagnose: driveDiagnose(e.pts, line), tied: !!tie, inGraded: !!(L.gsEls || []).find((g) => g.id === e.id && g.type === "drive"),
-          plane: pl && pl.drive ? { zTie: Math.round(pl.drive.zTie * 10) / 10, zEnd: Math.round(pl.drive.zEnd * 10) / 10, lengthFt: Math.round(pl.drive.lengthFt), gradePct: Math.round(pl.drive.gradePct * 10) / 10, tooSteep: !!pl.drive.tooSteep, target: pl.drive.targetId, servedBy: pl.drive.servedBy || null, nearestElementFt: pl.drive.nearestFt != null ? Math.round(pl.drive.nearestFt) : null } : null,
-          notAPlaneBecause: why.get(e.id) || null,
-        };
-      });
-      const out = surf && surf.grid && surf.grid.outside ? surf.grid.outside : null;
-      return {
-        grOn: !!L.grOn, hasSurface: !!surf, build: surf ? surf.surfaceKey && String(surf.surfaceKey).length : null, roads,
-        pastLine: out ? { cells: out.count, beyondParcel: out.beyondParcel ?? null, perElement: Object.entries(out.perEl || {}).map(([id, p]) => ({ id, type: ((L.gsEls || []).find((g) => g.id === id) || {}).type || null, cells: p.count, maxPastFt: Math.round(p.maxPastFt * 10) / 10, at: { x: Math.round(p.centroid.x), y: Math.round(p.centroid.y) } })) } : null,
-      };
-    };
-    window.__plannerGradeDrive = hook;
-    return () => { if (window.__plannerGradeDrive === hook) window.__plannerGradeDrive = null; };
-  }, [grOn]);
   /* NEW-1 (2026-11-01) — `window.__plannerPerf()`: the last minute of long frames WITH script attribution, the blocked-vs-waiting
    * split, repeating timers and which grading layers were drawn — so a "the graded plan is slow" report is answered in one call,
    * not a guess (lib/plannerPerf.js). Same gate and arming as `__plannerGradeReadout`: owner-only (installed while the grading gate
    * is on), read-only, armed at call time by `?planyrDiag=1`. */
   const plannerPerfRef = useRef(null);
   plannerPerfRef.current = { ppf: view.ppf, grOn, gsEnabled, buildMs: (gsStatsRef.current || {}).lastBuildMs ?? null };
-  useEffect(() => {
-    if (typeof window === "undefined" || !grOn) return undefined;
-    const hook = installPlannerPerf(window, { extra: () => { const P = plannerPerfRef.current || {}; return { ppf: Number.isFinite(P.ppf) ? Math.round(P.ppf * 1000) / 1000 : null, gradingPlanOn: !!P.gsEnabled, lastGradeBuildMs: P.buildMs }; } });
-    return () => { if (window.__plannerPerf === hook) window.__plannerPerf = null; };
-  }, [grOn]);
   /* ---- Owner-only grading layer (NEW-1..NEW-3): the model GradingController publishes, the selected building,
    * and the few edit callbacks it needs. Every one of these is an ORDINARY element/settings edit through the
    * planner's existing paths (pushHistory + setEls / setSettings) — so each is undoable and no second write
@@ -13851,12 +13057,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // button off for every test account, so e2e/fit-building-apply drives the planner's real apply path through this.
   const grFitDoorRef = useRef(null);
   grFitDoorRef.current = { source: grFitSource, apply: grApplyFit };
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return undefined;
-    const hook = { source: (...a) => grFitDoorRef.current.source(...a), apply: (...a) => grFitDoorRef.current.apply(...a) };
-    window.__plannerFit = hook;
-    return () => { if (window.__plannerFit === hook) window.__plannerFit = null; };
-  }, []);
   const grBldgName = (id) => { const b = els.find((e) => e.id === id); return b ? ((b.name && b.name.trim()) || `Building ${buildingNumbers(els).get(id) ?? ""}`.trim()) : null; };
   // ROUND 4 — the grading limit's edit actions (every one an ordinary settings edit: undoable, one write path)
   const grLimitRingNow = () => { const g = gradeSurface && gradeSurface.grid && gradeSurface.grid.limit; const regs = g && g.limitRegions ? g.limitRegions : []; let best = null; for (const r of regs) if (!best || polyArea(r.outer) > polyArea(best.outer)) best = r; return best ? best.outer.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })) : null; };
@@ -16169,12 +15369,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
   const identifyResRef = useRef(null);
   identifyResRef.current = identifyRes;
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const hook = () => (window.__PLANYR_E2E ? identifyResRef.current : null);
-    window.__plannerIdentifyResult = hook;
-    return () => { if (window.__plannerIdentifyResult === hook) window.__plannerIdentifyResult = null; };
-  }, []);
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const [outlinePhase, setOutlinePhase] = useState("none"); // NEW-1 (select-parcel first paint): what the lit-up outlines are doing — loading | drawn | empty | zoom | none (lib/parcelOutlineSet.js status())
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
@@ -16579,13 +15773,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
-  /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
-   * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
-  useEffect(() => {
-    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted(), ...outlineLayersRef.current.status() } : null);
-    window.__plannerParcelOutlines = hook;
-    return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
-  }, []);
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
@@ -16691,8 +15878,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // any content this union commits (this tab's own work made while read-only, never yet synced)
       // would otherwise land with `op_kind: "unknown"`. Guard: test/opEnvelopeSeedCoverage.test.js.
       opTrackerRef.current.beginOperation("create");
-      setParcels(merged.parcels); setElsRaw(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
+      replacePlanContents(merged);
       saveSite(merged);                     // write the union to the device mirror immediately
     } else {
       cloudPushWithWatchdog(siteId);        // couldn't fetch the cloud row (offline) → push the live work at the version we have
@@ -16815,71 +16001,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }).catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); });  // B507: a rejected push must clear the transient banner + surface the honest failure
     } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
-  // Version history (automatic local backups, B126): open the dialog with this plan's
-  // saved snapshots, and restore one into the canvas (which then autosaves as the newest
-  // version — and the thinner state it replaces is itself snapshotted, so a restore is
-  // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
-  const openVersionHistory = () => { setVersionList(listVersions(siteId)); initHistoryStore().then(() => setVersionList(listVersions(siteId))).catch(() => {}); /* B2236000 — the ring hydrates off the boot path; re-list once it has */ setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
-  // B472048 (NEW-7 · NEW-3) — the Activity tab's data, fetched lazily on first switch (not on
-  // every dialog open) so opening "Version history" for its ordinary purpose costs nothing new.
-  // `groupRowsIntoOperations` + `describeOperation` are the ALREADY-SHIPPED, unit-tested pure
-  // model from lib/operationEnvelope.js (B472048's foundation PR) — this is the wiring, not a
-  // reimplementation. Names are resolved through the SAME roster resolver B673's conflict toasts
-  // use (`nameResolverRef`), so a teammate's name can never disagree between the two surfaces.
-  const loadPlanActivity = async () => {
-    if (!siteId || !isCloudActive()) { setActivityRows([]); return; }
-    setActivityLoading(true); setActivityErr("");
-    try {
-      const r = await fetchElements(supabase, siteId);
-      if (!r.ok) { setActivityErr("Couldn't load activity — try again."); setActivityRows([]); return; }
-      const ops = groupRowsIntoOperations(r.rows, { selfSessionId: journalSid }).slice(0, 40);
-      const uids = [...new Set(ops.filter((o) => !o.isMine && o.userId).map((o) => o.userId))];
-      const names = new Map();
-      await Promise.all(uids.map(async (u) => {
-        try { const a = await nameResolverRef.current(u); if (a && !a.self && a.name) names.set(u, a.name); } catch (_) { /* falls back to "Someone" below */ }
-      }));
-      setActivityRows(ops.map((op) => ({
-        opId: op.opId, at: op.at, rowCount: op.rowCount,
-        text: describeOperation(op, { nameOf: (sessionId, userId) => names.get(userId) || "Someone" }),
-        created: op.created, deleted: op.deleted, updated: op.updated,
-      })));
-    } catch (_) {
-      setActivityErr("Couldn't load activity — try again.");
-      setActivityRows([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  };
-  const openActivityTab = () => { setActivityTab("activity"); if (activityRows === null && !activityLoading) loadPlanActivity(); };
-  const restoreVersion = async (at) => {
-    // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
-    // able to overwrite the canvas; block it loudly with the way out.
-    if (readOnly) { flashWarn("⚠ This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
-    const v = getVersion(siteId, at);
-    if (!v) return;
-    // B467/NEW-4 — VERIFY the dialog's "your current version is backed up too, so a restore can be
-    // undone" promise BEFORE destroying the current canvas. Flush the live state to the mirror, then
-    // force a backup snapshot and confirm it actually persisted; if it couldn't (device storage full),
-    // CANCEL rather than overwrite current work with no real undo.
-    flushSite();
-    if (!(historyIdbOnly() ? await backupNowVerified(siteId) : backupNow(siteId))) {   // B2200385 — on a device whose ring lives only in IndexedDB the backup is awaited, committed and read back before it is claimed
-      reportClientEvent("restore-backup-failed", "pre-restore backup could not be written — restore blocked", { id: siteId, at });
-      flashWarn("Couldn't back up your current version, so the restore was cancelled — your current work is safe. (Your device's storage may be full.)", 11000);
-      return;
-    }
-    pushHistory();
-    setParcels(v.parcels); setElsRaw(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
-    setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
-    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
-    // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
-    // still round-trips and must survive a version restore (else a restored version would keep the
-    // CURRENT drawings — a mixed-version state). The stored version captures parcelDrawings, so
-    // durably re-apply them via a saveSite MERGE ({...existing, ...partial} preserves the rest).
-    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard — a restore to a
-    // thinner version now diffs into per-element deletes through the rev-checked path.)
-    if (siteId) saveSite({ id: siteId, parcelDrawings: v.parcelDrawings || [] });
-    setSel(null); setMulti([]); setVersionsOpen(false);
-  };
+  const { activityErr, activityLoading, activityRows, activityTab, openActivityTab, openVersionHistory, restoreVersion, setActivityTab, setVersionsOpen, versionList, versionsOpen } = useVersionHistory({ closeHdrMenus, flashWarn, flushSite, nameResolverRef, pushHistory, readOnly, replacePlanContents, setMulti, setSel, siteId });
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   // NEW-1 (2026-11-04) — Duplicate for ANY plan of the site: the footer's button passes the current plan, a plan's ⋯ / right-click passes that plan.
@@ -21957,884 +21079,167 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     sliderHistory,
     pushHistory,
   };
-  const renderPanelBody = (_pid) => (<>
-          {/* Overlays (B654; user-facing name via B966630; data model unified in B848736) — every
-              backdrop the plan sits over, in ONE list, ONE add flow, and ONE shared calibration
-              (the ovCalib trace/align flow). An aerial captured from the Map (top-left) is just a
-              reference that happens to be a photo — it lands in `sheetOverlays` like everything
-              else, bottom-pinned (lib/overlayOrder.js's `isPinnedMapReference`) so it still renders
-              beneath everything, matching the old dedicated aerial slot's position. There is no
-              second card and no second concept: dropping a screenshot here (or on the map) adds it
-              to this same list, through the same dropzone below. */}
-          {_pid === "references" && (
-          <Section>
-            {/* NEW-1 (2026-10-08 redesign) — the panel body lives in components/OverlaysPanel.jsx; every
-                handler below is one of this file's EXISTING overlay functions. */}
-            <LazyPanel name="Overlays" minHeight={180} label="Loading overlays…">
-            <OverlaysPanel
-              overlays={[...refRows, ...foreignOverlays.rows.map((r) => ({ ...r.overlay, id: "foreign:" + r.key, foreign: { planName: r.planName }, _fr: r }))]} selId={selOverlay} showAerial={showAerial} hasParcel={parcels.length > 0}
-              busy={overlayBusy} loadErr={overlayLoadErr} basemapNote={!!(origin && basemapOn && showAerial)}
-              calib={ovCalib} calibMsg={ovCalibMsg()} menuId={ovRowMenu} renamingId={ovRenaming} pageFocusTick={ovPageFocus}
-              onShowForeign={(row) => showForeignOverlay(row._fr)}
-              handlers={overlayPanelHandlers} />
-            </LazyPanel>
-          </Section>
-          )}
-
-          {/* Parcel menu — empty hint when no parcel is selected */}
-          {/* every parcel in this plan — click to select */}
-          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
-              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
-          {_pid === "analysis" && (
-            <Section>
-              {!origin ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
-              ) : (() => {
-                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
-                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
-                const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
-                // NEW-1 — save-and-except carve-outs ride along as HOLES, so every area fraction the panel states is of the
-                // land that is actually the property (parcelArea.js: the same deduction every acreage number takes).
-                const holeRings = act.flatMap((p) => (Array.isArray(p.exceptions) ? p.exceptions : [])
-                  .map((h) => (h && Array.isArray(h.pts) ? h.pts : Array.isArray(h) ? h : null))
-                  .filter((pts) => pts && pts.length >= 3)
-                  .map((pts) => pts.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; })));
-                const analysisNode = (
-                  <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
-                    isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
-                    callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
-                    onOpenDrainage={() => setLeftPanel("drainage")}
-                    onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
-                );
-                // Site Analysis carries NO grading or ground rows (NEW-1, amends B2315856): the owner-only Grading panel is its own
-                // left-dock item beside Drainage and Yield.
-                return (
-                  <>
-                    <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
-                      {analysisNode}
-                    </LazyPanel>
-                  </>
-                );
-              })()}
-            </Section>
-          )}
-          {_pid === "parcel" && (
-            // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
-            // counted parcel, so splitting one lot into two still reads "Parcels · 2".
-            <Section>
-              {/* NEW-1 — THE LOAD-BEARING ROW. Un-located plan (drawn while the county service was
-                  down): this is the way back to the real world, and it sits at the top of the panel
-                  the owner is already in when drawing a boundary. */}
-              {!origin && (
-                <button data-testid="set-location-cta" onClick={() => setSetLocOpen(true)}
-                  title="Say where this plan sits on the earth — the aerial, flood layer, contours and county rules switch on. Nothing you drew moves."
-                  style={{ ...chip, width: "100%", marginBottom: 9, background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 700 }}>
-                  📍 Set this plan's location
-                </button>
-              )}
-              {/* NEW-1 (B1239328) — the Land tab is a LIST OF LAND, not a tool tray: the old Add ▾ /
-                  Split / Merge / Select-parcels row is gone (Split and Merge already live in the
-                  Parcel tools flyout as "Split a parcel" / "Combine parcels"; Select parcels is gone
-                  entirely, replaced by per-parcel Lock — see startMoveParcel). ＋ Add survives as ONE
-                  icon control, in the header, opening the same four add-methods menu it always did
-                  (now including the deed/title path, which used to live only in the right rail). */}
-              {parcels.length === 0 ? (
-                <>
-                  <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6, marginBottom: 10 }}>No land in this plan yet — add it one of four ways:</div>
-                  {origin ? (
-                    <button style={addMethodCard} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }}>
-                      <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
-                    </button>
-                  ) : (
-                    <button style={addMethodCard} onClick={() => setSetLocOpen(true)}>
-                      <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
-                    </button>
-                  )}
-                  {origin ? (
-                    <div style={addMethodCard}>
-                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input
-                          value={addrQuery}
-                          onChange={(e) => setAddrQuery(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); addByAddress(); } }}
-                          placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
-                        <button
-                          onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
-                          title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy ? "progress" : (!addrQuery.trim() ? "default" : "pointer") }}>
-                          {addrBusy ? "…" : "Find"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button style={addMethodCard} onClick={() => setSetLocOpen(true)}>
-                      <div style={{ fontWeight: 650, fontSize: 13 }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
-                    </button>
-                  )}
-                  <button style={addMethodCard} onClick={() => selectTool("parcel")}>
-                    <div style={{ fontWeight: 650, fontSize: 13 }}>✏️ Draw a new boundary</div>
-                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
-                  </button>
-                  <button style={{ ...addMethodCard, marginBottom: 0 }} onClick={() => { setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
-                    <div style={{ fontWeight: 650, fontSize: 13 }}>📜 Deed / Title — metes &amp; bounds…</div>
-                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Type in the legal description's calls and it plots the boundary for you.</div>
-                  </button>
-                </>
-              ) : (() => {
-                // VIEW-INDEPENDENT-ONCE: the rows / site acres are functions of `parcels` alone — memoised at the top
-                // level (parcelRows / parcelSiteAcres), so a pan or zoom never re-derives them.
-                const addParcelNode = (
-                  <div ref={addParcelAnchor} style={{ position: "relative", flex: 1 }}>
-                        <button
-                          aria-haspopup="menu" aria-expanded={addParcelMenu} aria-label="Add parcels" data-testid="land-add-btn"
-                          style={{ ...chip, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontWeight: 600 }}
-                          onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — click lots on the map, draw a boundary, or plot a deed">
-                          + Add parcels ▾
-                        </button>
-                        <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
-                          {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
-                          {origin ? (
-                            <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
-                              <div style={{ fontWeight: 650, fontSize: 13 }}>Pick lots on the map</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County property lines light up on the aerial — click one lot or several.</div>
-                            </button>
-                          ) : (
-                            // NEW-1 — a dead end no more: the reason this is off is that the plan has no
-                            // location, and that is now fixable right here.
-                            <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
-                              <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
-                            </button>
-                          )}
-                          {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
-                              at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
-                          {origin ? (
-                            <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
-                              <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
-                              <div style={{ display: "flex", gap: 6 }}>
-                                <input
-                                  value={addrQuery}
-                                  onChange={(e) => setAddrQuery(e.target.value)}
-                                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); addByAddress(); } }}
-                                  placeholder="123 Main St, Katy TX"
-                                  style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
-                                <button
-                                  onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
-                                  title="Find this address and add its parcel"
-                                  style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy ? "progress" : (!addrQuery.trim() ? "default" : "pointer") }}>
-                                  {addrBusy ? "…" : "Find"}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
-                              <div style={{ fontWeight: 650, fontSize: 13 }}>📍 Add by address</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
-                            </button>
-                          )}
-                          {/* Draw a new boundary — always available (no GIS frame needed). */}
-                          <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
-                            <div style={{ fontWeight: 650, fontSize: 13 }}>Draw a parcel</div>
-                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
-                          </button>
-                          {/* Deed / Title metes & bounds (NEW-1, B1239328) — used to live only in the
-                              right rail's Parcel tools flyout; folded in here so ＋ Add is the one
-                              place that offers every way to add land. Same handler the rail uses. */}
-                          <button style={menuItem(false)} onClick={() => { setAddParcelMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
-                            <div style={{ fontWeight: 650, fontSize: 13 }}>Plot from a deed</div>
-                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Type in the legal description's calls and it plots the boundary for you.</div>
-                          </button>
-                        </AnchoredMenu>
-                      </div>
-                );
-                const splitRow = splitTarget ? parcelRows.find((r) => r.id === splitTarget) : null;
-                if (pageOpen) return renderParcelPage();
-                return (
-                  <ParcelsPanel
-                    rows={parcelRows} siteAcres={parcelSiteAcres} addMenu={addParcelNode}
-                    splitMode={splitRow ? { name: splitRow.name, acres: splitRow.acres } : null}
-                    selectedId={selParcel?.id || null} pickMode={mergePick} pickedIds={pickedParcelIds}
-                    combinePreview={parcelPanelH.combinePreview} handlers={parcelPanelH} />
-                );
-              })()}
-              {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
-                  "Identify from county GIS" path. The entry point lives in ＋ Add above; no
-                  duplicate toggle down here. The status row is the off-switch (so is Esc). */}
-              {(identifyMode || identifyRes) && (
-                <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
-                {identifyMode && (
-                  <>
-                    <button style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent }}
-                      onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
-                      {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
-                    </button>
-                    {/* NEW-1 (select-parcel first paint) — one short status line, from the outline set's own state; it replaces the old zoom-only hint. */}
-                    {(outlinePhase === "loading" || outlinePhase === "empty" || outlinePhase === "zoom" || outlineRefused) && (
-                      <div data-testid="parcel-outline-status" data-phase={outlineRefused && outlinePhase !== "zoom" && outlinePhase !== "empty" ? "refused" : outlinePhase} role="status" style={{ fontSize: 10.5, color: outlinePhase === "zoom" || outlineRefused ? "var(--warn-text)" : PAL.muted, lineHeight: 1.4, marginTop: 5 }}>
-                        {outlinePhase === "zoom" ? "Zoom in to see the county lot lines (a click still adds the lot)."
-                          : outlineRefused ? "The county server wouldn't send some of the lot lines here — zoom in, or click a lot anyway."
-                          : outlinePhase === "loading" ? "Loading parcels…" : "No parcels here"}
-                      </div>
-                    )}
-                  </>
-                )}
-                {identifyRes && (
-                  <div data-testid="identify-result" style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
-                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
-                      : identifyRes.error ? <><span style={{ color: PAL.warn }}>{identifyRes.error}</span>{identifyRes.request && <ParcelRequestLink href={identifyRes.request} testId="identify-gap-request" />}</>
-                      : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
-                      : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>
-                      : <>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                            <span style={{ color: "#15803d", fontWeight: 800, fontSize: 13, lineHeight: 1 }}>✓</span>
-                            <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
-                          </div>
-                          {identifyRes.fromFallback && <div data-testid="identify-from-fallback" style={{ color: PAL.warn, marginBottom: 5 }}>{identifyRes.fromFallback}</div>}
-                          {identifyRes.stackNote && <div data-testid="identify-stack" style={{ color: PAL.muted, marginBottom: 4 }}>{identifyRes.stackNote}</div>}
-                          {identifyRes.county && <Suspense fallback={null}><ParcelCopyNote county={identifyRes.county} point={{ lat: identifyRes.lat, lng: identifyRes.lng }} testId="identify-copy" style={{ marginTop: 6, marginBottom: 4 }} /></Suspense>}
-                          {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
-                            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
-                              <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
-                            </div>
-                          ))}
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
-                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
-                          </button>
-                          {jurInfo && !jurInfo.busy && (
-                            <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
-                              {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
-                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
-                                {jurRow("City", jurInfo.j.unincorporated ? (jurInfo.j.etjUnavailable ? "Outside city limits" : "Unincorporated") : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.etjUndetermined || []).length ? "ETJ undetermined (disputed)" : (jurInfo.j.etjReleased || []).length ? `${jurInfo.j.etjReleased.join(" + ")} ETJ release area (SB 2038)` : jurInfo.j.etjUnavailable ? "ETJ data unavailable here" : (jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
-                                {Array.isArray(jurInfo.j.isd) && jurRow("School dist.", jurInfo.j.isd.length ? jurInfo.j.isd.join(" + ") : "—", jurInfo.j.ages.isd)}
-                                {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
-                                {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
-                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
-                              </>}
-                            </div>
-                          )}
-                        </>}
-                  </div>
-                )}
-              </div>
-              )}
-            </Section>
-          )}
-          {/* Stated-vs-measured acreage for a parcel that carries a typed deed / stated figure. The county's own
-              acreage now sits BESIDE the drawn acres inside the parcel page's county record (B2191xxx), and the
-              old Geometry check / Appraisal data / Taxes blocks that used to follow are gone. */}
-          {_pid === "parcel" && pageOpen && selParcel && (() => {
-            const cmp = acreageComparison(selParcel);
-            if (!(cmp.stated && cmp.measured)) return null;
-            const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-            return (
-              <Section>
-                <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, lineHeight: 1.5 }}>
-                  <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
-                </div>
-              </Section>
-            );
-          })()}
-          {/* metrics. NEW-1 — `data-testid="yield-metrics"` marks the numbers as ONE readable
-              region: the content-visibility harness compares this subtree's text before and after
-              every hide, and its first cut scoped to `[data-surface="planner"]`'s parent instead,
-              which resolved to most of the page — so it was diffing canvas labels and the View
-              menu's own chrome and reported six false failures. A panel worth asserting on is
-              worth being able to select. */}
-          {_pid === "yield" && (<div data-testid="yield-metrics" style={{ display: "contents" }}>
-          <YieldPanel
-            buildingCount={els.filter((e) => e.type === "building" && !e.dogEar).length}
-            siteSqft={siteSqft} bldg={bldg} cov={cov} stalls={stalls} ratio={ratio}
-            providedDetCf={providedDetCf} pondCount={pondCount}
-            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
-            pondBermRingSf={pondBermRingSf}
-            bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
-            inactiveCount={parcels.filter((p) => p.active === false).length}
-            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
-            parcelOverlaps={parcelOverlaps}
-            onOpenDrainage={() => setLeftPanel("drainage")} // NEW-1 — the pond's one Land Use line links into Drainage
-          />
-          {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
-              "not priced yet" until unit prices are entered; once priced it shows the totals. */}
-          {(() => {
-          const costP = settings.prices || {};
-          const costRoad = costRollup(els, roadPavedWidth, roadLengthOf, costP).total;
-          const costEarthPriced = Number.isFinite(costP.earthworkCy) && +costP.earthworkCy > 0;
-          const costSummary = (costRoad == null && !costEarthPriced) ? "not priced yet"
-            : (costRoad != null ? `$${Math.round(costRoad).toLocaleString()} road${costEarthPriced ? " + earthwork" : ""}` : "earthwork priced");
-          return (
-          <Collapse sectionId="yield-costs" title="Costs" defaultOpen={false} summary={costSummary}>
-          {(() => {
-            // B712 — earthwork cost lines: the floodplain-mitigation CUT + pond
-            // excavation, in CY, priced ONLY by the user (the road-cost pattern —
-            // never a hardcoded rate). An unchecked drainage screen renders an
-            // explicit not-checked state; an un-priceable mitigation volume renders
-            // UNKNOWN — NEVER a silent 0 CY in a priced takeoff.
-            const prices = settings.prices || {};
-            const pondCy = pondExcavationCf / 27;
-            // B907 — when a basin reuses an existing pond/depression (det.baseline, the
-            // "Expand this pond" flow), pondExcavationCf is already the INCREMENTAL cut
-            // (incrementalExcavationCf, wired at the ledger build) — flag it here so the
-            // line reads honestly, not as a from-scratch dig.
-            const anyIncrementalExc = pondLedger.perPond.some((p) => p.excavationIncremental);
-            const drainageChecked = !!drainCtxData;
-            // NEW-2 — fmResultView carries the remembered mitigation summary on a restored check
-            // (fmResult is null then), so the earthwork cut line survives a reload too.
-            const mitKnown = fmResultView && fmResultView.volumeCf != null;
-            const mitCy = mitKnown ? fmResultView.cutCy : null;
-            const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
-            const mitRelevant = drainageChecked && ((fmResultView && fmResultView.intersectAcres > 0) || fmGeoFailed);
-            // B826 — the graded-surface earthwork (cut/fill off the auto-graded planes)
-            // joins this section: rows render whenever the surface engine could build
-            // (elements + an FFE), UNKNOWN — never 0 CY — when no ground elevation exists.
-            const gsG = gradeSurface ? gradeSurface.grid : null;
-            const gsPriced = gsG && gsG.fillCy != null;
-            if (!(pondCy > 0) && !mitRelevant && !gsG) return null;
-            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
-            const pEarthRaw = prices.earthworkCy;
-            const pEarth = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
-            const setPrice = (k, v) => setSettings((sx) => ({ ...sx, prices: { ...(sx.prices || {}), [k]: v } }));
-            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0) + (gsPriced ? gsG.cutCy : 0);
-            const shrinkFactor = 1 + (gsShrinkPct ?? 0) / 100;
-            const borrowCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
-            // B833(e) — pond berms are PLACED FILL: they join the fill side of the net
-            // (an upland berm is earthwork only; its in-floodplain share already joined
-            // the mitigation requirement above).
-            const bermCy = pondBermFillCf / 27;
-            const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy + bermCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
-            const setGrading = (patch) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } }));
-            // B895 — "Set unit prices" jumps to + focuses the (one shared) $/CY bid field below.
-            const jumpToEarthPrice = () => {
-              const el = typeof document !== "undefined" ? document.getElementById("price-field-earthworkCy") : null;
-              if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
-            };
-            const earthPriceCell = (cy) => pEarth != null ? usd(cy * pEarth) : <ActionLink onClick={jumpToEarthPrice}>Set $/CY →</ActionLink>;
-            return (
-              <CostDisclosure label="Earthwork">
-                {pondCy > 0 && metricRow(anyIncrementalExc ? "Pond excavation (incremental)" : "Pond excavation", `${f0(pondCy)} CY`, earthPriceCell(pondCy),
-                  { code: "plan", basis: anyIncrementalExc ? "One or more basins reuse an existing pond/depression (Expand this pond) — this nets out the pre-expansion basin's own cut, pricing only the ADDED dirt, not a from-scratch re-dig." : undefined })}
-                {bermCy > 0 && metricRow("Pond berms — fill", `${f0(bermCy)} CY`, `modeled embankment · ${gsApronRatio}:1 face`, { code: "plan" })}
-                {bermCy > 0 && <WatchOutChip style={{ margin: "0 0 3px" }}>Netted against basin cut below — the berm can be built from basin spoil (haul/compaction math is your engineer's).</WatchOutChip>}
-                {mitRelevant && (mitKnown
-                  ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, earthPriceCell(mitCy), { code: "plan" })
-                  : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
-                {gsG && (gsPriced ? (<>
-                  {metricRow("Graded surface — cut", `${f0(gsG.cutCy)} CY`, earthPriceCell(gsG.cutCy), { code: "plan" })}
-                  {metricRow("Graded surface — fill", `${f0(gsG.fillCy)} CY`, "placed (compacted)", { code: "plan" })}
-                  {gsG.wedgeFillCy > 0.5 && metricRow("· incl. transition wedges", `${f0(gsG.wedgeFillCy)} CY`, `daylight fringe @ ${gsApronRatio}:1`)}
-                  {metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`,
-                    gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`, { code: "plan" })}
-                </>) : (
-                  metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
-                ))}
-                {pondBermFloodCount > 0 && (
-                  <WatchOutChip info="This pond's earthen berm sits inside the drawn footprint, in the mapped floodplain (the drawn outline is the berm's outer toe; the embankment rises inward from it). The part of that fill below the flood water surface displaces flood storage, so its below-WSE share already joined the mitigation requirement (screening: sampled berm cells times the below-WSE slice). Engineer confirms.">
-                    {pondBermFloodCount} pond berm{pondBermFloodCount > 1 ? "s" : ""} in the mapped floodplain: {pondBermFloodCount > 1 ? "their" : "its"} below-flood fill is priced into mitigation.
-                  </WatchOutChip>
-                )}
-                {!drainageChecked && (
-                  <WatchOutChip>Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.</WatchOutChip>
-                )}
-                {/* B826 — violation flags off the auto-graded surface: one WatchOutChip each
-                    (the B823 cap); ADA/TAS is LEGAL (danger token), the rest screening. */}
-                {gradeSurface && gradeSurface.violations.map((v) => (
-                  <WatchOutChip key={v.kind} info={v.detail} danger={v.legal}>{v.legal ? "⚑ " : ""}{v.short}</WatchOutChip>
-                ))}
-                {gsG && (
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                    <button style={chip} disabled={!gsPriced}
-                      title="One click: finds the uniform paving-field lower/raise (sweeping every floating class between its band floor and cap — the threshold tie at the doors holds by construction) that nets the dirt closest to zero, and applies it."
-                      onClick={() => {
-                        // B833 — berm fill rides the fill side of the balance target too.
-                        const res = balanceAssist({ buildAtT: gsBuildAtT, shrinkFactor, borrowCy: borrowCy - bermCy * shrinkFactor });
-                        if (res) { pushHistory(); setGrading({ fieldT: res.t }); }
-                      }}>⚖ Balance the dirt</button>
-                    {gsFieldT > 0 && (
-                      <button style={chip} title="Back to the flattest class-band slopes (highest paving field)"
-                        onClick={() => { pushHistory(); setGrading({ fieldT: null }); }}>× Reset field</button>
-                    )}
-                    {gsFieldT > 0 && <span style={{ fontSize: 10.5, color: PAL.muted }}>field slopes at {Math.round(gsFieldT * 100)}% of class band</span>}
-                  </div>
-                )}
-                {/* DECISION 3 (grading milestone) — the balance-optimal finished floor. The pad
-                    floats UP off its regulatory code minimum (fmAutoFfeFt) to reuse basin spoil
-                    as fill, never below it; the dual readout decomposes floor + balance uplift.
-                    Auto pad only — a manually typed pad FFE wins outright. */}
-                {gsG && fmManualPadFt == null && Number.isFinite(fmAutoFfeFt) && (() => {
-                  const ffeDual = ffeDualDisplay({ ffeFt: fmEffectivePadFt, regMinFfeFt: fmAutoFfeFt });
-                  const applied = fmBalanceRaiseFt > 0.05;
-                  const exporting = gsPriced && netCy != null && netCy < -10; // hauling spoil off at the current floor
-                  const raiseFfeToBalance = () => {
-                    const netAtFfe = (ffe) => {
-                      const g = gsBuildAtFfe(ffe);
-                      return g && g.fillCy != null ? netImportCy({ fillCy: g.fillCy + bermCy, cutCy: g.cutCy, borrowCy, shrinkFactor }) : null;
-                    };
-                    const sol = solveBalanceFfe({ netAtFfe, regMinFfeFt: fmAutoFfeFt });
-                    if (sol && sol.balanceRaiseFt > 0.05) { pushHistory(); setGrading({ ffeBalanceRaiseFt: sol.balanceRaiseFt }); }
-                    else if (sol && sol.clamped === "imports-at-floor") flashWarn("The site already needs fill trucked in; raising the finished floor only adds more. No balance raise made.", 5000);
-                    else flashWarn("The finished floor already balances the on-site dirt.", 5000);
-                  };
-                  return (
-                    <div style={{ marginTop: 8 }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                        {!applied && exporting && (
-                          <button style={chip}
-                            title="One click: raises the finished floor off its regulatory code minimum just enough to reuse the basin spoil as pad fill instead of hauling it off. It never drops below the code floor; × Reset floor returns it to the minimum."
-                            onClick={raiseFfeToBalance}>⚖ Raise FFE to balance</button>
-                        )}
-                        {applied && (
-                          <button style={chip} title="Return the finished floor to its regulatory code minimum (BFE + the jurisdiction's freeboard)."
-                            onClick={() => { pushHistory(); setGrading({ ffeBalanceRaiseFt: null }); }}>× Reset floor to code min</button>
-                        )}
-                      </div>
-                      {ffeDual && (
-                        <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }} title="The finished floor sits at the regulatory code minimum (the base-flood elevation plus the jurisdiction's required freeboard). When the site would haul spoil off, raising it for balance reuses that dirt on the pads as fill.">{ffeDual.full}</div>
-                      )}
-                    </div>
-                  );
-                })()}
-                {gsG && (
-                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 8 }}
-                    title="Paints proposed − existing per cell over the plan — warm = fill, cool = cut, grey hatch = no ground data. Same cells these rows summed (engine truth). Turns the fill-depth heat map off while on — one exhibit at a time. The dashed daylight line (where fill/cut tapers to existing ground) rides either exhibit.">
-                    <input type="checkbox" checked={cfHeatUser} onChange={(e) => setCfHeatUser(e.target.checked)} /> Cut/fill map on the plan
-                  </label>
-                )}
-                {gsG && (
-                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 6 }}
-                    title="B833 — grade each paving field toward the drainage target at its class slope CEILING (the steepest maintainable rate), so the surface gets down to existing ground sooner and the transition wedge past each edge starts lower and daylights earlier — less fill in the floodplain. While on, the ⚖ balance sweep has nothing left to vary (an explicit per-element slope override still wins).">
-                    <input type="checkbox" checked={gsDaylightAsap} onChange={(e) => { pushHistory(); setGrading({ daylightAsap: e.target.checked || null }); }} /> Daylight ASAP (steepest legal field)
-                  </label>
-                )}
-                {gsG && (
-                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 6 }}
-                    title="B833 — the daylight wedges default to the 3:1 maximum tie-down (the steepest allowed, smallest fringe). Check for the 4:1 mowable preference — a gentler face that takes more room and more fill; the mitigation and earthwork numbers follow.">
-                    <input type="checkbox" checked={!!gsSettings.apron41} onChange={(e) => { pushHistory(); setGrading({ apron41: e.target.checked || null }); }} /> 4:1 transition slopes (mowable)
-                  </label>
-                )}
-                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
-                <div id="price-field-earthworkCy">
-                  <Field label="Excavation / cut">
-                    <span style={ROW4}>
-                      <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
-                      <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
-                      <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
-                    </span>
-                  </Field>
-                </div>
-                {gsG && (
-                  <Field label="Fill shrink/swell (%)">
-                    <span style={ROW4}>
-                      <NumInput allowClear style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
-                        onCommit={(n) => setGrading({ shrinkPct: Number.isFinite(n) ? n : null })} />
-                      <span style={{ fontSize: 11, color: PAL.muted }} title="Compacted fill needs MORE bank dirt than its placed volume (clay placed at 95% Proctor commonly shrinks 10–25%). Blank = none applied — enter your geotech's number.">bank→placed ⓘ</span>
-                    </span>
-                  </Field>
-                )}
-                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced cut lines", { code: "yours", basis: "Priced off the unit-price bid you entered above." })}
-                {gsG && (
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, margin: "6px 0 0" }}>
-                    Auto-graded planes (B826 screening): pads flat at FFE{fmEffectivePadFt != null ? ` ${f1(fmEffectivePadFt)}′` : ""}; dock courts −{f1(gsDockDrop)}′ falling away; paving ties at FFE − {TIE_DROP_FT}′ and falls toward {gsTarget ? "the detention pond" : "the low side"}; existing ground from {fmGradeAt ? "the 3DEP per-cell grid" : "the flat site median (screening)"}. Confirm with your civil engineer.
-                  </div>
-                )}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Pond excavation is the full basin cut (top of bank → achievable floor){anyIncrementalExc ? " — except a basin reusing an existing pond/depression, which nets to only its ADDED cut" : ""}. Pond + mitigation cut count as on-site borrow in the net-dirt line — the same dirt raises the pad; volumes stay separate ledgers.
-                </div>
-              </CostDisclosure>
-            );
-          })()}
-          {(() => {
-            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
-            // (LF, both sides), split by curb type so each rides its own unit price.
-            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
-            const prices = settings.prices || {};
-            const cost = costRollup(els, roadPavedWidth, roadLengthOf, prices);
-            if (!cost.segments) return null;
-            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
-            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
-            const priceField = (label, k, unit) => (
-              <div id={`price-field-${k}`}>
-                <Field label={label}>
-                  <span style={ROW4}>
-                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
-                    <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
-                    <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
-                  </span>
-                </Field>
-              </div>
-            );
-            // B895 — "Set unit prices" jumps to + focuses the matching bid field below.
-            const jumpToPrice = (k) => {
-              const el = typeof document !== "undefined" ? document.getElementById(`price-field-${k}`) : null;
-              if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
-            };
-            const priceCell = (costVal, k) => costVal != null ? usd(costVal) : <ActionLink onClick={() => jumpToPrice(k)}>Set $/{k === "pavingSy" ? "SY" : "LF"} →</ActionLink>;
-            return (
-              <CostDisclosure label="Road">
-                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, priceCell(cost.pavingCost, "pavingSy"), { code: "plan" })}
-                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, priceCell(cost.curbBarrierCost, "curbBarrierLf"), { code: "plan" })}
-                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, priceCell(cost.curbGutterCost, "curbGutterLf"), { code: "plan" })}
-                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
-                {priceField("Paving", "pavingSy", "/SY")}
-                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
-                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
-                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines", { code: "yours", basis: "Priced off the unit-price bids you entered above." })}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving.
-                </div>
-              </CostDisclosure>
-            );
-          })()}
-          </Collapse>
-          ); })()}
-          {/* v3 A8→A9 — the panel FOOTER renders after the COSTS group (last, per the spec order):
-              the ONE screening disclaimer + the provenance legend (four quiet outlined chips with a
-              muted plain-English definition; Yield panel only). */}
-          <YieldFooterDisclaimer />
-          <ProvenanceLegend style={{ marginTop: 7, marginBottom: 9 }} />
-          </div>)}
-
-          {/* NEW-1 (2026-09-05, owner directive) — DRAINAGE owns the flood/detention/mitigation
-              working surface split out of Yield's old "Stormwater" section: the governing
-              authority + rule, required-vs-provided detention, pond sizing + storage
-              reconciliation, mitigation, finished-floor/freeboard, and the buildings-in-
-              floodplain check. Reads the SAME `drainFacts()` (ONE fetch, ONE cache, ONE
-              timestamp) Yield used to. */}
-          {_pid === "drainage" && (<div data-testid="drainage-metrics" style={{ display: "contents" }}>
-          <DrainagePanel
-            headerSlot={dockActionsEl || floatActionsEl}
-            drainage={drainFacts()}
-            heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
-            floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, its own Collapse here
-            onMitOpenChange={setFmMitOpen}
-            siteId={siteId} siteState={siteStateId} // B877440/B877441 — the "Request criteria" action on a no-data detention row
-          />
-          </div>)}
-
-          {/* Grading (owner-only; NEW-1, amends B2315856) — the per-building cards + the Ground rows. It only READS grModel:
-              the controller is mounted from this component (below) whether or not the panel is open, so the Cut & Fill layer and
-              the suggested FFE paint with the panel closed and opening it never starts a build. */}
-          {_pid === "grading" && gradingOn && (<div data-testid="grading-metrics" style={{ display: "contents" }}>
-            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted }}>Loading grading…</div>}>
-              <GradingPanel planOn={grOn} showOnMap={!!(settings.grading || {}).layers?.cutfill} onPlanOn={(v) => grSetCfg({ enabled: v ? true : null })}
-                onShowOnMap={(v) => grSetLayer("cutfill", v)} model={grOn ? (grModel || null) : null} headerSlot={isFloating("grading") ? gradFloatActionsEl : gradDockActionsEl}
-                showContours={!!(settings.grading || {}).layers?.contours} onShowContours={(v) => grSetLayer("contours", v)}
-                showPaper={(settings.grading || {}).layers?.paper !== false} onShowPaper={(v) => grSetLayer("paper", v)}
-                showSpots={(settings.grading || {}).layers?.spots !== false} onShowSpots={(v) => grSetLayer("spots", v)} PAL={PAL}
-                onPullLimit={(id, span) => grEditLimit(span)}
-                buildableOn={!!(grModel && grModel.cfg && grModel.cfg.layers.buildable)} onToggleBuildable={grToggleBuildable}
-                dockDropFt={gsDockDrop} onCfg={grSetCfg}
-                onDockDrop={(v) => { pushHistory(); setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), dockDropFt: v } })); }}
-                onSelectBuilding={(id) => { setMulti([]); setSel({ kind: "el", id }); }}
-                onApplyFfeFix={(id, fx) => grPatchBuilding(id, { padElevFt: fx.ffe, ffeBasis: "typed" }, { history: true })}
-                onApplyMoveFix={(id, mv) => grModel.actions.applyMoveFix(id, mv)} />
-            </Suspense>
-          </div>)}
-
-          {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
-              toggles + grid/snap moved to the on-canvas View (eye) menu; each section
-              below is one element type, deep-linkable from that type's inspector via
-              standardsFocus (the remount key opens the focused section). */}
-          {_pid === "standards" && (<>
-          <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
-            <b style={{ color: PAL.ink }}>Starting values</b> for new objects. Select an object to override just that one.
-          </div>
-
-          <div data-std-sec="parcels">
-          <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
-            <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
-                (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
-                inspector). livePick uses hist=false since these touch settings only (RC-6). */}
-            {/* NEW-2 — every edit here lands in the PENDING DRAFT (draftParcelStd). Nothing is
-                stored until one of the footer's three actions commits it, which is what makes
-                "Save for this plan" mean something. Values read draft-first, then this plan's
-                copy, then the account default (see parcelStdValue).
-                NEW-1 — the section styles TWO different lines, so each group is labelled: an
-                unlabelled pair of colour rows left it guessing which line you were editing. */}
-            <StdSubLabel>Parcel line</StdSubLabel>
-            <PairedFieldHead left="Outline" right="Fill" />
-            <PairedField label="Colour"
-              left={<ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED} {...colorCtl((v) => draftParcelStd({ stroke: v }), false)} />}
-              right={parcelStdValue("fill") ? <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED} {...colorCtl((v) => draftParcelStd({ fill: v }), false)} /> : undefined}
-            />
-            <PairedField label="Width"
-              left={<NumInput style={{ ...numInput, width: "100%" }} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftParcelStd({ weight: n })} />}
-            />
-            <PairedField label="Pattern"
-              left={<select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
-            />
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => draftParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
-            </label>
-            {parcelStdValue("fill") && (
-              <PairedField label="Opacity"
-                right={<PercentField value={parcelStdValue("fillOpacity") ?? 0.12} max={60} onCommit={(v) => draftParcelStd({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
-              />
-            )}
-            {/* NEW-1 — the SETBACK line, with the same three controls as the boundary above. It
-                had none at all: colour, weight and dash were hardcoded at the one place it was
-                drawn. Defaults match today's look exactly, so an existing plan is unchanged. */}
-            <StdSubLabel>Setback line</StdSubLabel>
-            <Field label="Line color">
-              <ColorField value={toHex6(parcelStdValue("sbStroke") ?? PAL.setback)} title="Setback line color" seed={COLOR_SEED}
-                {...colorCtl((v) => draftParcelStd({ sbStroke: v }), false)} />
-            </Field>
-            <Field label="Line weight">
-              <NumInput style={numInput} value={parcelStdValue("sbWeight") ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => draftParcelStd({ sbWeight: n })} />
-            </Field>
-            <Field label="Line style">
-              <select value={parcelStdValue("sbDash") ?? SETBACK_LINE.dash} onChange={(e) => draftParcelStd({ sbDash: e.target.value })}
-                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                {DASH_OPTIONS}
-              </select>
-            </Field>
-            {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
-                property of the parcel itself, not a global default — say so here so nobody hunts
-                for a per-edge control on this panel. */}
-            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "6px 2px 2px" }}>Per-edge setbacks live on the parcel — select it on the canvas.</div>
-          </Section>
-          </div>
-
-          {/* NEW-1 — MEASUREMENTS. Measurements are the only drawn object that had no standards at
-              all: their colour was hardcoded at the one place they were painted. Same shape as the
-              Parcels section above (draft-first reads, one footer Apply), same mechanic (stamped at
-              creation via measureDefaultStyle), so a measurement is born with these and the footer's
-              Apply pushes them onto measurements already drawn. */}
-          <div data-std-sec="measure">
-          <Section key={`std-measure:${standardsFocus === "measure"}`} title="Measurements" collapsed={standardsFocus !== "measure"}>
-            <PairedFieldHead left="Line" right="Fill" />
-            <PairedField label="Colour"
-              left={<ColorField value={toHex6(measureStdValueUI("stroke") ?? PAL.accent)} title="Measurement line color" seed={COLOR_SEED} {...colorCtl((v) => draftMeasureStd({ stroke: v }), false)} />}
-              right={measureStdValueUI("fill") ? <ColorField value={toHex6(measureStdValueUI("fill"))} title="Measurement fill color" seed={COLOR_SEED} {...colorCtl((v) => draftMeasureStd({ fill: v }), false)} /> : undefined}
-            />
-            <PairedField label="Width"
-              left={<NumInput style={{ ...numInput, width: "100%" }} value={measureStdValueUI("weight") ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftMeasureStd({ weight: n })} />}
-            />
-            <PairedField label="Pattern"
-              left={<select value={measureStdValueUI("dash") ?? MEASURE_LINE.dash} onChange={(e) => draftMeasureStd({ dash: e.target.value })} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
-            />
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!measureStdValueUI("fill")} onChange={(e) => draftMeasureStd(e.target.checked ? { fill: PAL.accent } : { fill: null, fillOpacity: null })} /> Use a separate fill colour
-            </label>
-            <PairedField label="Opacity"
-              right={<PercentField value={measureStdValueUI("fillOpacity") ?? MEASURE_LINE.fillOpacity} onCommit={(v) => draftMeasureStd({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
-            />
-            {/* NEW-2 — the project-level reveal zoom. Same one-click capture as the per-measurement
-                control, so nobody ever types a zoom number. */}
-            <StdSubLabel>Labels</StdSubLabel>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
-              <button style={chip} title="Zoom to where you want measurement labels to start showing, then click this."
-                onClick={() => draftMeasureStd({ labelPpf: view.ppf })}>Set at current zoom</button>
-              {measureStdValueUI("labelPpf") != null && <button style={chip} onClick={() => draftMeasureStd({ labelPpf: null })}>Reset to default</button>}
-            </div>
-            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 2px" }}>
-              {labelRevealNote({}, { measureStyle: { labelPpf: measureStdValueUI("labelPpf") } }, DIM_CALLOUT_MIN_PPF)}
-            </div>
-          </Section>
-          </div>
-
-          {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
-              These are the plan-wide defaults; a single building can pin its own in its inspector. */}
-          <div data-std-sec="building">
-          <Section key={`std-building:${standardsFocus === "building"}`} title="Buildings — structural grid" collapsed={standardsFocus !== "building"}>
-            <Field label="Speed bay (ft)"><NumInput style={numInput} value={settings.speedBay} min={1} onCommit={(n) => setSettings((s) => ({ ...s, speedBay: n }))} /></Field>
-            <Field label="Typ. bay — length"><NumInput style={numInput} value={settings.bayLengthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayLengthTarget: n }))} /></Field>
-            <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
-            <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
-            <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
-          </Section>
-          </div>
-
-          {/* NEW-1 — BUILDINGS: PROGRAM. Clear height & slab thickness by building size — the
-              selected-building panel's CLEAR/SLAB fields (effectiveBuildingProps) come from this
-              tier table, exactly the way the column-grid math above reads the structural-grid
-              fields. (Also fed the printed buildings table, B197, and its per-building overrides
-              list on the compose screen, until both were removed — B1804993.)
-              Same direct-commit model as that sibling section (an edit
-              here IS saved to this plan immediately — there is nothing to "Apply", since a
-              building resolves its clear height/slab live, same as the grid); "Save for all
-              projects" below additionally promotes it to the account, same button that already
-              carries Parcels/Measurements/Colors. Per-building overrides live on the building
-              itself (Properties → Structure) and always win — this table is the auto/default
-              only, exactly like the grid's own per-building overrides. Shares the "building"
-              focus key with the structural-grid section above so `jumpToStandards("building")`
-              (the Properties-panel pointer, NEW-2) opens and scrolls to both together. */}
-          <div data-std-sec="building">
-          {(() => {
-            const tinyNum = { ...numInput, width: 68, padding: "4px 7px", fontSize: 11.5 };
-            const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
-            const moveBtn = (on) => ({ width: 16, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 8, lineHeight: 1, border: BORDER_1, borderRadius: 3, background: SURF_RAISED, fontFamily: "inherit", cursor: on ? "pointer" : "default", color: on ? PAL.ink : "#cfc7b5", opacity: on ? 1 : 0.5 });
-            // Order is COSMETIC ONLY (evalTier resolves the smallest qualifying threshold
-            // regardless of array position — see buildingProps.js) — ▲▼ let the owner arrange
-            // rows for readability without any risk of changing which tier a size resolves to.
-            const tierRow = (key, t, i, unit, count) => (
-              <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 2px", fontSize: 11.5, color: PAL.ink }}>
-                <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  <button title="Move up" disabled={i === 0} onClick={() => moveRuleTier(key, i, -1)} style={moveBtn(i > 0)}>▲</button>
-                  <button title="Move down" disabled={i === count - 1} onClick={() => moveRuleTier(key, i, 1)} style={moveBtn(i < count - 1)}>▼</button>
-                </span>
-                {t.upTo != null ? (
-                  <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>SF</span></>
-                ) : (
-                  <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{maxFiniteUpTo(buildingRules[key]) != null ? `${maxFiniteUpTo(buildingRules[key]).toLocaleString()} SF & above` : "and above"}</span>
-                )}
-                <span style={{ flex: 1 }} />
-                <span style={{ color: PAL.muted }}>→</span>
-                <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
-                <button title="Remove this tier" disabled={count <= 1} onClick={() => removeRuleTier(key, i)} style={{ ...chip, padding: "2px 6px", fontSize: 10, opacity: count <= 1 ? 0.4 : 1 }}>✕</button>
-              </div>
-            );
-            return (
-              <Section key={`std-buildingprogram:${standardsFocus === "building"}`} title="Buildings — program" collapsed={standardsFocus !== "building"}>
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, margin: "0 2px 8px" }}>
-                  A building steps up automatically when it crosses a threshold below, unless it's been overridden on that building itself.
-                </div>
-                <StdSubLabel>Clear height (ft)</StdSubLabel>
-                {buildingRules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft", buildingRules.clearHeight.length))}
-                <button style={{ ...chip, fontSize: 11, padding: "4px 8px", marginTop: 3 }} onClick={() => addRuleTier("clearHeight")}>+ Add tier</button>
-                <StdSubLabel>Slab thickness (in)</StdSubLabel>
-                {buildingRules.slab.map((t, i) => tierRow("slab", t, i, "in", buildingRules.slab.length))}
-                <button style={{ ...chip, fontSize: 11, padding: "4px 8px", marginTop: 3 }} onClick={() => addRuleTier("slab")}>+ Add tier</button>
-                <button style={{ ...chip, width: "100%", marginTop: 10, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
-              </Section>
-            );
-          })()}
-          </div>
-
-          <div data-std-sec="parking">
-          <Section key={`std-parking:${standardsFocus === "parking"}`} title="Parking" collapsed={standardsFocus !== "parking"}>
-            <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
-            <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
-            <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
-          </Section>
-          </div>
-
-          <div data-std-sec="trailers">
-          <Section key={`std-trailers:${standardsFocus === "trailers"}`} title="Trailers" collapsed={standardsFocus !== "trailers"}>
-            <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
-            <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
-          </Section>
-
-          </div>
-
-          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
-              the dock face. Editable per plan — the building "+" reads these. */}
-          <div data-std-sec="dockzones">
-          <Section key={`std-dockzones:${standardsFocus === "dockzones"}`} title="Dock zones" collapsed={standardsFocus !== "dockzones"}>
-            <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
-            <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
-            <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
-          </Section>
-          </div>
-
-          {/* B825 — the grading-standards registry, read-only reference: per-surface-class
-              slope limits with their cites (lib/gradingRules.js). The ADA/TAS cap is a LEGAL
-              requirement and renders with the danger token — never a stylistic note. Values
-              are consumed by the future B826 proposed-surface engine; per-element overrides
-              ride each element's gradeOverride when that engine lands. */}
-          <div data-std-sec="grading">
-          <Section key={`std-grading:${standardsFocus === "grading"}`} title="Grading standards" collapsed={standardsFocus !== "grading"}>
-            {Object.values(GRADING_RULES).map((gr) => (
-              <div key={gr.id}
-                title={`${gr.appliesTo}. ${gr.basis === "published" ? `${gr.source?.name || "Published"} — ${gr.source?.section || ""}${gr.sourceDate ? ` (checked ${gr.sourceDate})` : ""}` : "Planyr screening convention — not a published standard; verify with your civil engineer."} ${gr.note}`}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}`, cursor: "help" }}>
-                <span style={{ fontSize: 11.5, color: PAL.ink }}>
-                  {gr.label}
-                  {gr.legalClass && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, letterSpacing: "0.05em", color: PAL.danger, border: `1px solid ${PAL.danger}`, borderRadius: 4, padding: "0 4px" }} title="Legal requirement (ADA/TAS) — violations are legal, not stylistic">LEGAL</span>}
-                  <span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span>
-                </span>
-                <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 11, color: gr.legalClass ? PAL.danger : PAL.ink, fontWeight: 650, whiteSpace: "nowrap" }}>{gradingChipLabel(gr)}</span>
-              </div>
-            ))}
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-              Reference values for the grading concept (screening). Published rows carry their cite in the ⓘ; convention rows are Planyr screening conventions, never implied-published. The proposed-surface engine (B826) will grade to these.
-            </div>
-          </Section>
-          </div>
-
-          <div data-std-sec="roads">
-          <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
-            <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
-            <Field label="Road widths (ft)">
-              <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
-                onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
-            </Field>
-            {/* Road classes — civil defaults + min-radius warning thresholds (B599/NEW-4). */}
-            {(() => {
-              const setRCC = (key, patch) => setSettings((s) => {
-                const list = (Array.isArray(s.roadClasses) && s.roadClasses.length ? s.roadClasses : ROAD_CLASS_SEEDS).map((c) => ({ ...c }));
-                const i = list.findIndex((c) => c.key === key);
-                if (i >= 0) list[i] = { ...list[i], ...patch };
-                return { ...s, roadClasses: list };
-              });
-              return (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 4px" }}>Road classes — civil defaults</div>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 6 }}>Default curve radius for new vertices + a min-radius warning per class. Seeds are starting points — verify against current AASHTO / the adopted fire code; nothing here is authoritative.</div>
-                  {roadClassesOf(settings).map((c) => (
-                    <div key={c.key} style={{ marginBottom: 7 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink, marginBottom: 2 }}>{c.label}</div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Default R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.defaultRadius ?? 50)} min={1} onCommit={(n) => setRCC(c.key, { defaultRadius: n })} /></label>
-                        {c.designSpeed != null ? (
-                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Design mph <NumInput style={{ ...numInput, width: 48 }} value={Math.round(c.designSpeed)} min={0} onCommit={(n) => setRCC(c.key, { designSpeed: n })} /></label>
-                        ) : (
-                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
-                        )}
-                        <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </Section>
-
-          </div>
-
-          {/* element default colors — edit without selecting anything */}
-          <div data-std-sec="colors">
-          <Section key={`std-colors:${standardsFocus === "colors"}`} title="Colors" collapsed={standardsFocus !== "colors"}>
-            {Object.keys(TYPE).map((k) => {
-              const st = typeStyle(k, settings);
-              return (
-                <div key={k} style={{ marginBottom: 7 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, minWidth: 90 }}>{TYPE[k].label.split(" / ")[0]}</span>
-                    {/* NEW-2 — draft edits. The canvas still previews them live (typeStyle reads
-                        the draft's preview layer), but nothing is stored until a footer action. */}
-                    <ColorField title="Fill" value={toHex6(st.fill)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => draftTypeStd(k, { fill: v }), false)} />
-                    <ColorField title="Line" value={toHex6(st.stroke)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => draftTypeStd(k, { stroke: v }), false)} />
-                    {/* NEW-8 — the type's default OUTLINE opacity and width, beside its two colours. */}
-                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} outline opacity (%)`} value={Math.round((st.strokeOpacity ?? 1) * 100)} min={0} max={100} step={5}
-                      onCommit={(n) => draftTypeStd(k, { strokeOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
-                    <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>%</span>
-                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} line weight`} value={st.strokeWidth ?? st.weight ?? 1} min={0.5} max={12} step={0.5} coarse={2}
-                      onCommit={(n) => draftTypeStd(k, { strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
-                  </div>
-                </div>
-              );
-            })}
-            {/* NEW-2 — a reset is a draft edit like any other (a null per key = "clear it"), so it
-                previews immediately but still goes through one of the footer's three actions. */}
-            <button style={{ ...chip, marginTop: 4, color: PAL.accent }}
-              onClick={() => setStdDraft({ ...stdDraft, typeStyles: Object.fromEntries(Object.keys(TYPE).map((t) => [t, { fill: null, stroke: null, strokeOpacity: null, strokeWidth: null }])) })}>Reset all to built-in</button>
-          </Section>
-          </div>
-
-          </>)}
-  </>);
+  const renderPanelBody = (_pid) => (<LeftPanelBody
+        PAL={PAL}
+        addByAddress={addByAddress}
+        addMethodCard={addMethodCard}
+        addParcelAnchor={addParcelAnchor}
+        addParcelMenu={addParcelMenu}
+        addRuleTier={addRuleTier}
+        addrBusy={addrBusy}
+        addrQuery={addrQuery}
+        analysisLayerZoomNote={analysisLayerZoomNote}
+        basemapOn={basemapOn}
+        bldg={bldg}
+        buildingRules={buildingRules}
+        bumpArea={bumpArea}
+        bumpCount={bumpCount}
+        bumpsUniform={bumpsUniform}
+        cfHeatUser={cfHeatUser}
+        checkJurisdiction={checkJurisdiction}
+        chip={chip}
+        colorCtl={colorCtl}
+        cov={cov}
+        detPct={detPct}
+        dockActionsEl={dockActionsEl}
+        draftMeasureStd={draftMeasureStd}
+        draftParcelStd={draftParcelStd}
+        draftTypeStd={draftTypeStd}
+        drainCtxData={drainCtxData}
+        drainFacts={drainFacts}
+        easeAll={easeAll}
+        easeArea={easeArea}
+        easeBldgArea={easeBldgArea}
+        easePaveArea={easePaveArea}
+        els={els}
+        ensureBasemapOn={ensureBasemapOn}
+        flashWarn={flashWarn}
+        floatActionsEl={floatActionsEl}
+        floodExposure={floodExposure}
+        fmAutoFfeFt={fmAutoFfeFt}
+        fmBalanceRaiseFt={fmBalanceRaiseFt}
+        fmEffectivePadFt={fmEffectivePadFt}
+        fmGradeAt={fmGradeAt}
+        fmHeat={fmHeat}
+        fmHeatOn={fmHeatOn}
+        fmHeatTotals={fmHeatTotals}
+        fmHeatUser={fmHeatUser}
+        fmManualPadFt={fmManualPadFt}
+        fmResultView={fmResultView}
+        foreignOverlays={foreignOverlays}
+        grEditLimit={grEditLimit}
+        grModel={grModel}
+        grOn={grOn}
+        grPatchBuilding={grPatchBuilding}
+        grSetCfg={grSetCfg}
+        grSetLayer={grSetLayer}
+        grToggleBuildable={grToggleBuildable}
+        gradDockActionsEl={gradDockActionsEl}
+        gradFloatActionsEl={gradFloatActionsEl}
+        gradeSurface={gradeSurface}
+        gradingOn={gradingOn}
+        gsApronRatio={gsApronRatio}
+        gsBuildAtFfe={gsBuildAtFfe}
+        gsBuildAtT={gsBuildAtT}
+        gsDaylightAsap={gsDaylightAsap}
+        gsDockDrop={gsDockDrop}
+        gsFieldT={gsFieldT}
+        gsSettings={gsSettings}
+        gsShrinkPct={gsShrinkPct}
+        gsTarget={gsTarget}
+        identAdded={identAdded}
+        identifyMode={identifyMode}
+        identifyRes={identifyRes}
+        impPct={impPct}
+        isFloating={isFloating}
+        jurInfo={jurInfo}
+        jurRow={jurRow}
+        layerStatus={layerStatus}
+        leftWidth={leftWidth}
+        measureStdValueUI={measureStdValueUI}
+        menuItem={menuItem}
+        menuPanel={menuPanel}
+        mergePick={mergePick}
+        metricRow={metricRow}
+        moveRuleTier={moveRuleTier}
+        numInput={numInput}
+        open={open}
+        origin={origin}
+        outlinePhase={outlinePhase}
+        outlineRefused={outlineRefused}
+        ovCalib={ovCalib}
+        ovCalibMsg={ovCalibMsg}
+        ovPageFocus={ovPageFocus}
+        ovRenaming={ovRenaming}
+        ovRowMenu={ovRowMenu}
+        overlayBusy={overlayBusy}
+        overlayLoadErr={overlayLoadErr}
+        overlayPanelHandlers={overlayPanelHandlers}
+        overlays={overlays}
+        pageOpen={pageOpen}
+        parcelOverlaps={parcelOverlaps}
+        parcelPanelH={parcelPanelH}
+        parcelRows={parcelRows}
+        parcelSiteAcres={parcelSiteAcres}
+        parcelStdValue={parcelStdValue}
+        parcels={parcels}
+        pickedParcelIds={pickedParcelIds}
+        pondArea={pondArea}
+        pondBermFillCf={pondBermFillCf}
+        pondBermFloodCount={pondBermFloodCount}
+        pondBermRingSf={pondBermRingSf}
+        pondCount={pondCount}
+        pondExcavationCf={pondExcavationCf}
+        pondLedger={pondLedger}
+        providedDetCf={providedDetCf}
+        pushHistory={pushHistory}
+        ratio={ratio}
+        refRows={refRows}
+        removeRuleTier={removeRuleTier}
+        renderParcelPage={renderParcelPage}
+        resetBuildingRules={resetBuildingRules}
+        roadLengthOf={roadLengthOf}
+        roadPavedWidth={roadPavedWidth}
+        selOverlay={selOverlay}
+        selParcel={selParcel}
+        selectTool={selectTool}
+        setAddParcelMenu={setAddParcelMenu}
+        setAddrQuery={setAddrQuery}
+        setAnalysisWetlands={setAnalysisWetlands}
+        setCfHeatUser={setCfHeatUser}
+        setDeedBusy={setDeedBusy}
+        setDeedErr={setDeedErr}
+        setFmHeatUser={setFmHeatUser}
+        setFmMitOpen={setFmMitOpen}
+        setIdentifyMode={setIdentifyMode}
+        setIdentifyRes={setIdentifyRes}
+        setJurInfo={setJurInfo}
+        setLeftPanel={setLeftPanel}
+        setMulti={setMulti}
+        setRuleTier={setRuleTier}
+        setSel={setSel}
+        setSetLocOpen={setSetLocOpen}
+        setSettings={setSettings}
+        setStdDraft={setStdDraft}
+        setTitleErr={setTitleErr}
+        setTitleOpen={setTitleOpen}
+        settings={settings}
+        showAerial={showAerial}
+        showForeignOverlay={showForeignOverlay}
+        siteId={siteId}
+        siteSqft={siteSqft}
+        siteStateId={siteStateId}
+        splitTarget={splitTarget}
+        stalls={stalls}
+        standardsFocus={standardsFocus}
+        stdDraft={stdDraft}
+        toggleAnalysisCall={toggleAnalysisCall}
+        toggleAnalysisLayer={toggleAnalysisLayer}
+        tool={tool}
+        trailers={trailers}
+        view={view}
+        _pid={_pid}
+      />);
 
   /* NEW-2 — the Standards footer, rendered as a real footer BELOW the panel's scrolling body
    * (a sibling of the scroll container, in BOTH the docked and the floating host) rather than as
@@ -23274,91 +21679,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return out;
   }, [els, settings, hiddenGroups, radiusReviewOn]);
-  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
-  // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
-  // instead of inferring it from pixels.
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = () => ({
-      regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
-      tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length), cornerR: t.geom.gaps.map((g) => g.R), arcs: t.geom.gaps.map((g) => (g.a === 2 || g.b === 2) && g.R > 0 ? g.arc.map((p) => ({ x: p.x, y: p.y })) : null) })),
-      /* NEW-1/NEW-2 (2026-10-15) — what the junction-paint acceptance reads: where each road's decoration may paint (`deco`, rings in world feet) and the
-         trimmed face-of-curb stripes (`stripes`), against the dissolved `regions` above. */
-      roads: (els || []).filter((e) => isCenterlineRoad(e) && !e.attachedTo).map((e) => ({ id: e.id, pts: e.pts.map((p) => ({ x: p.x, y: p.y })) })),   // AFTER the load-time cleanup — what the geometry is really built from
-      deco: [...(roadNet.decoDomains || [])].map(([id, rings]) => ({ id, rings })),
-      /* NEW-1 (road → parking) — what each car field does about the roads around it: the stalls a drive took (`removed` = "band:column" cells, `count` = what the Yield
-         reads) and the openings in its outline (`mouths`, world feet). Read-only; same E2E gate. */
-      stallClips: [...(roadNet.stallClips || [])].map(([id, c]) => ({ id, base: c.base, count: c.count, removed: c.removed.map((r) => `${r.band}:${r.k}`) })),
-      mouths: [...(roadNet.mouths || [])].map(([id, m]) => ({ id, mouths: m.map((x) => ({ a: { x: x.a.x, y: x.a.y }, b: { x: x.b.x, y: x.b.y } })) })),
-      stripes: [...(roadNet.stripes || [])].map(([id, lines]) => ({ id, lines })),
-      // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
-      // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
-      // requested. Six rounds of this item shipped green because every check read the requested arc
-      // (`returns`, below, which is always complete) and none read the finished boundary against it;
-      // the corner is what makes that comparison possible (a complete return of radius R across a
-      // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
-      // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
-      drives: driveJunctions.map((d) => ({
-        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length, cornerR: (d.geom.returns || []).map(() => d.geom.R),
-        corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
-        returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
-      })),
-      // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
-      // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
-      // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.
-      pads: driveJunctions.map((d) => {
-        const T = (els || []).find((e) => e.id === d.targetId);
-        if (!T) return null;
-        if (Array.isArray(T.points) && T.points.length >= 3) return { targetId: T.id, ring: T.points };
-        if (typeof T.cx === "number" && T.w > 0 && T.h > 0) {
-          return { targetId: T.id, ring: rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a) };
-        }
-        return null;
-      }).filter(Boolean),
-    });
-    window.__plannerRoadNet = hook;
-    return () => { if (window.__plannerRoadNet === hook) window.__plannerRoadNet = null; }; // NEW-3 — see the note on __plannerView
-  }, [roadNet, teeJunctions, driveJunctions, els]);
-  /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
-     production). The measurement/export defect is invisible to any source reading — it only exists in
-     the CLONE the sheet is built from — so the guard spec has to inspect the real built sheet. No dep
-     array on purpose: `exportCtx()` closes over the current render, and the hook must never hand the
-     sheet a stale one. */
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = async (frame = null) => {
-      const { createExportSheet } = await loadExportSheet();
-      const built = createExportSheet(exportCtx())
-        .buildExportSvg(frame, true, PAL.paper, null, null, false, null, "letter", "landscape");
-      return built && built.clone ? built.clone.outerHTML : null;
-    };
-    window.__plannerExportSvg = hook;
-    /* NEW-1 (print ignores send-to-back) — the REAL editable-PDF composition (the default "Flatten markups" OFF
-       path): which annotations became native PDF annotations (they paint ABOVE the page) and which stayed in the
-       page picture. Read-only; same gate. */
-    const composedHook = async (o = {}) => {
-      const { createExportSheet } = await loadExportSheet();
-      // `o` (E2E only): { paper, orient, buildingsTable, annotate, scaleBar, scaleText } — the sheet shape under test; defaults are the editable-PDF Letter sheet
-      const c = await createExportSheet(exportCtx()).buildComposedSheet(o.paper || "letter", o.orient || "landscape", true, true, o.scaleText || "", "", true, o.page || null, o.buildingsTable !== false, o.annotate !== false, o.scaleBar !== false);
-      if (!c) return null;
-      return {
-        sheetSvg: c.sheetSvg,
-        annotRects: (c.annotationSet?.annots || []).map((a) => ({ nm: a.nm, family: a.family, subtype: a.subtype, rect: a.rect })),
-        liftedIds: (c.annotationSet?.annots || []).length,
-        keptInPage: c.annotationsKeptInPage || 0,
-        pins: c.annotationPins || [],
-        annots: (c.annotationSet?.annots || []).map((a) => ({ subtype: a.subtype, nm: a.nm, subj: a.subj, contents: a.contents, family: a.family, kind: a.kind })),
-        degraded: c.annotationSet?.degraded || [],
-        hasViewport: !!c.annotationSet?.viewport, // the PDF's embedded measurement scale (/VP + /Measure) — independent of the drawn scale bar
-      };
-    };
-    window.__plannerExportComposed = composedHook;
-    /* NEW-1 (2026-10-20) — the feet → clone-unit map the export used, as an affine (origin, +x foot, +y foot), so a test
-       fixture captured from __plannerExportSvg can be replayed through the extractor in node. Read-only; same gate. */
-    const f2pHook = () => { const c = exportCtx(); return [c.f2p({ x: 0, y: 0 }), c.f2p({ x: 1, y: 0 }), c.f2p({ x: 0, y: 1 })]; };
-    window.__plannerExportF2p = f2pHook;
-    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; if (window.__plannerExportF2p === f2pHook) window.__plannerExportF2p = null; }; // NEW-3 — see the note on __plannerView
-  });
+  usePlannerDiagnostics({ PAL, dblResolveRef, dblWhyRef, drag, driveJunctions, duplicateOverlay, els, exportCtx, foreignOverlays, grFitDoorRef, grOn, gradeDriveRef, gradeReadoutRef, gsStatsRef, identifyResRef, lastGridRef, layerIdentityEpoch, loadExportSheet, outlineLayersRef, overlayRefs, overlays, overlaysDrawn, plannerPerfRef, probeRef, refreshSiblings, removeOverlay, roadNet, setOverlayCrop, setOverlayPage, setView, showForeignOverlay, siteId, size, stateRef, teeJunctions, view, viewIdentityEpoch, viewRecRef });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   /* NEW-2 — ONE MEASUREMENT → ITS SVG NODE. Extracted from the old inline map so a measurement can
@@ -26525,95 +24846,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the inspector is open. */}
           {(companionOpen || propsTab) && companionSel && (
           <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? BORDER_1 : "none" }}>
-          {bldgPanel && (() => {
-            // NEW-1 — the building inspector's header: [icon] Building [ number ]   lock · ⋯ · ✕, then ONE
-            // summary line. The number is the ONLY place a building's assigned number can be edited (the
-            // on-canvas label stays display-only); its conflict dialog is rendered by the body below.
-            // The old "📌 Pin" chip at the bottom is this padlock now (the owner did not know what Pin was).
-            const b = selEl;
-            const hm = buildingMetrics(b);
-            const HB = CONTROL_H.lg;
-            // Building panel v3 (NEW-1) — lock · ⋯ · ✕ are BORDERLESS icon buttons (hover wash only, via `.bldg-hdr-btn`;
-            // the lock's state still rides its glyph). The number is a small field that reads as editable.
-            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
-            const lockStyle = hdrBtn; // NEW-2 — greyscale: state rides the glyph's shape/weight (LockGlyph), never an accent fill
-            const bldgNo = buildingNumbers(els).get(b.id);
-            const digits = Math.max(1, Math.min(3, String(bldgNo == null ? "" : bldgNo).length));
-            // Sized to its digits (≈ 24 / 32 / 40 wide), one step smaller and lighter than the "Building" title; the outline
-            // (the STRONGER border token) comes from `.bldg-num-box`, which also darkens it on hover.
-            const numBox = { width: 16 + 8 * digits, height: CONTROL_H.sm, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, borderRadius: RADIUS.sm, color: "var(--text-primary)", flex: "none" };
-            return (
-              <div data-testid="building-header" style={{ padding: "2px 0 8px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
-                  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flex: "none", color: "var(--text-secondary)" }}>
-                    <rect x="1.5" y="4" width="13" height="8.5" rx="1" /><path d="M4.5 12.5v-2.5M8 12.5v-2.5M11.5 12.5v-2.5" />
-                  </svg>
-                  <span style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)" }}>Building</span>
-                  <BuildingNumberField
-                    id={b.id}
-                    value={bldgNo}
-                    className="bldg-num-box"
-                    style={numBox}
-                    resetToken={bldgNumResetSeq}
-                    onAttempt={(n) => attemptBuildingNumber(b.id, n)}
-                    onCancelConflict={() => setBldgNumConflict(null)}
-                  />
-                  <span style={{ flex: 1 }} />
-                  <button type="button" data-testid="building-lock" className="bldg-hdr-btn" style={lockStyle} aria-pressed={!!b.locked}
-                    aria-label={b.locked ? "Unlock — allow moving and resizing" : "Lock in place"}
-                    title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
-                    <LockGlyph locked={!!b.locked} size={16} />
-                  </button>
-                  <InspectorMoreMenu testId="building-more" label="More building actions" btnStyle={hdrBtn} btnClassName="bldg-hdr-btn"
-                    panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
-                    {(close) => (
-                      <button type="button" data-testid="building-delete" style={{ ...chip, width: "100%", border: "none", color: "var(--danger)", textAlign: "left" }}
-                        onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete building</button>
-                    )}
-                  </InspectorMoreMenu>
-                  <button type="button" data-testid="building-close" className="bldg-hdr-btn" style={{ ...hdrBtn, color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
-                </div>
-                <div data-testid="building-summary" title={`${f0(hm.footprint)} SF footprint + ${hm.bumpN} bump-out${hm.bumpN === 1 ? "" : "s"} (${f0(hm.extra)} SF)`} style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
-                  {f0(hm.total)} SF · {f0(hm.doors)} {hm.doors === 1 ? "door" : "doors"}{b.locked ? " · locked" : ""}
-                </div>
-              </div>
-            );
-          })()}
-          {roadPanel && (() => {
-            // Road-panel redesign (NEW-1) — the building inspector's header, for a road: [glyph] name (or "Road") ·
-            // padlock (= Pin) · ⋯ (Duplicate · Bring to front · Delete road) · ✕, then ONE summary line:
-            // length · width · ROW (only when a ROW is designated). The title truncates ONLY when the panel is
-            // genuinely narrow (flex-shrink on the title, never on the buttons).
-            const r = selEl;
-            const HB = CONTROL_H.lg;
-            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none", flex: "none" };
-            const title = roadPanelTitle(r);
-            const sub = roadPanelSubtitle(r, { lengthFt: roadLengthOf(r), widthFt: roadTravel(r) });
-            const menuRow = { ...chip, width: "100%", border: "none", textAlign: "left", display: "block" };
-            return (
-              <div data-testid="road-header" style={{ padding: "2px 0 8px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
-                  <RoadGlyph />
-                  <span data-testid="road-title" title={title} style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)", flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-                  <button type="button" data-testid="road-lock" className="bldg-hdr-btn" style={hdrBtn} aria-pressed={!!r.locked}
-                    aria-label={r.locked ? "Unlock — allow moving and resizing" : "Pin in place"}
-                    title="Pin in place so it can't be moved or resized by accident" onClick={() => toggleLock(r.id)}>
-                    <LockGlyph locked={!!r.locked} size={16} />
-                  </button>
-                  <InspectorMoreMenu testId="road-more" label="More road actions" btnStyle={hdrBtn} btnClassName="bldg-hdr-btn"
-                    panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
-                    {(close) => (<>
-                      <button type="button" data-testid="road-duplicate" style={menuRow} onClick={() => { close(); duplicateEl(r.id); }}>Duplicate</button>
-                      <button type="button" data-testid="road-front" style={menuRow} onClick={() => { close(); arrangeSel("front", { kind: "el", id: r.id }); }}>Bring to front</button>
-                      <button type="button" data-testid="road-delete" style={{ ...menuRow, color: "var(--danger)" }} onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete road</button>
-                    </>)}
-                  </InspectorMoreMenu>
-                  <button type="button" data-testid="road-close" className="bldg-hdr-btn" style={{ ...hdrBtn, color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
-                </div>
-                <div data-testid="road-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>{sub}</div>
-              </div>
-            );
-          })()}
+          {bldgPanel && <BuildingInspectorHeader
+                  attemptBuildingNumber={attemptBuildingNumber}
+                  bldgNumResetSeq={bldgNumResetSeq}
+                  buildingMetrics={buildingMetrics}
+                  chip={chip}
+                  closeInspector={closeInspector}
+                  deleteSel={deleteSel}
+                  els={els}
+                  selEl={selEl}
+                  setBldgNumConflict={setBldgNumConflict}
+                  toggleLock={toggleLock}
+                />}
+          {roadPanel && <RoadInspectorHeader
+                  arrangeSel={arrangeSel}
+                  chip={chip}
+                  closeInspector={closeInspector}
+                  deleteSel={deleteSel}
+                  duplicateEl={duplicateEl}
+                  roadLengthOf={roadLengthOf}
+                  roadTravel={roadTravel}
+                  selEl={selEl}
+                  toggleLock={toggleLock}
+                />}
           {!bldgPanel && !roadPanel && (
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
@@ -26656,19 +24911,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           )}
-          {dockPanelOn && !propsCollapsed && (() => {
-            // NEW-1 — the dock layer's one sub-line: the host building (a link that selects it, which is how you grow /
-            // shrink every dock side at once) and the layer's place in the default sequence. Nothing else.
-            const hb = els.find((x) => x.id === selEl.attachedTo);
-            const hbNo = hb ? buildingNumbers(els).get(hb.id) : null;
-            return (
-              <div data-testid="dock-subline" style={{ display: "flex", alignItems: "baseline", gap: SPACE.md, fontSize: FONT_SIZE.label, color: "var(--text-secondary)", padding: "0 0 4px" }}>
-                {hb && <button type="button" data-testid="dock-host-link" onClick={() => setSel({ kind: "el", id: hb.id })} title="Select the building — grow or shrink every dock side at once"
-                  style={{ padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, color: "var(--accent-site-text)", textDecoration: "underline", textUnderlineOffset: 2 }}>{`Building${hbNo != null ? ` ${hbNo}` : ""} ›`}</button>}
-                <span>{dockLayerPosition(zoneIndexOf(selEl))}</span>
-              </div>
-            );
-          })()}
+          {dockPanelOn && !propsCollapsed && <DockLayerInspector
+                  els={els}
+                  selEl={selEl}
+                  setSel={setSel}
+                />}
           {dockRemoved && histTick === dockRemoved.tick && selEl && selEl.id === dockRemoved.hostId && (
             <div data-testid="dock-removed-note" role="status" style={{ display: "flex", alignItems: "baseline", gap: SPACE.md, fontSize: FONT_SIZE.label, color: "var(--text-primary)", padding: "2px 0 8px" }}>
               <span>{dockRemoved.text}</span>
@@ -26681,504 +24928,98 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}
-          {multiStyleable && multiStyle && (() => {
-            const { caps, props } = multiStyle;
-            const hasEl = multiMembers.some((m) => m.kind === "el");
-            const mixNote = { fontSize: 11, color: PAL.muted };
-            // The SAME one-chip colour control as everywhere else, with a hatched "Mixed" chip when
-            // the selection disagrees (a colour has no indeterminate state). Its picker paints the
-            // WHOLE selection: a swatch click in ONE undo frame (applyMultiStyle), the "Custom…"
-            // wheel live with one frame per picking session — no dialog box (inline-editors rule).
-            // Returns the swatch content alone (no Field wrapper) — B1618656 NEW-1 places it inside
-            // a PairedField's own OUTLINE/FILL column instead.
-            const colorSwatch = (label, prop) => {
-              const st = props[prop]; if (!st) return undefined;
-              return (
-                <span key={prop} style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
-                  <ColorField title={label} value={st.mixed ? "#808080" : toHex6(st.value)} mixed={st.mixed} seed={COLOR_SEED}
-                    pick={livePick((v) => liveMultiStyle({ [prop]: v }))}
-                    onSwatch={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
-                  {st.mixed && <span style={mixNote}>Mixed</span>}
-                </span>
-              );
-            };
-            return (
-              // NEW-1 — plain wrapper: the OUTER dock panel (line ~13873) already carries the canonical
-              // data-testid="property-panel"; a second copy here made getByTestId("property-panel")
-              // resolve to 2 elements (a Playwright strict-mode violation) any time a multi-selection's
-              // Properties was open.
-              <div>
-              {/* B1215682/NEW-2 — on the phone bottom sheet, the chrome row directly above (the
-                  "Element" collapse header) already reads "N selected" verbatim — an exact
-                  byte-for-byte duplicate, unlike the desktop docked panel where this Section is
-                  the ONLY place that count appears. Suppressing it here (not on desktop) reclaims
-                  a whole card's worth of vertical space with zero information loss. */}
-              <Section title={null}>
-                {(caps.includes("fill") || caps.includes("stroke")) && (<>
-                  <PairedFieldHead left="Outline" right="Fill" />
-                  <PairedField label="Colour"
-                    left={caps.includes("stroke") ? colorSwatch("Outline", "stroke") : undefined}
-                    right={caps.includes("fill") ? colorSwatch("Fill", "fill") : undefined}
-                  />
-                </>)}
-                {caps.includes("weight") && (
-                  <PairedField label="Weight"
-                    left={<NumInput style={{ ...numInput, width: "100%" }} value={props.weight.mixed ? null : props.weight.value} placeholder="—" min={0.5} step={0.5} coarse={2} onCommit={(n) => applyMultiStyle({ weight: n })} />}
-                  />
-                )}
-                {caps.includes("strokeWidth") && (
-                  <PairedField label="Line weight"
-                    left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0, flexWrap: "wrap" }}>
-                      <NumInput style={{ ...numInput, width: 46, minWidth: 0 }} value={props.strokeWidth.mixed ? null : props.strokeWidth.value} placeholder="—" min={0.5} max={12} step={0.5} coarse={2}
-                        ariaLabel="Line weight" onCommit={(n) => applyMultiStyle({ strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
-                      {!props.strokeWidth.mixed && <LineSample weight={props.strokeWidth.value} />}
-                      {props.strokeWidth.mixed && <span style={mixNote}>Mixed</span>}
-                    </span>}
-                  />
-                )}
-                {caps.includes("dash") && (
-                  <PairedField label="Pattern"
-                    left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
-                      {props.dash.mixed && <option value="" disabled>Mixed</option>}
-                      {DASH_OPTIONS}
-                    </select>}
-                  />
-                )}
-                {(caps.includes("fillOpacity") || caps.includes("strokeOpacity")) && (
-                  <PairedField label="Opacity"
-                    left={caps.includes("strokeOpacity") ? (
-                      <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
-                        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.strokeOpacity.mixed ? null : Math.round(props.strokeOpacity.value * 100)} placeholder="—" min={0} max={100} step={5}
-                          ariaLabel="Outline opacity" onCommit={(n) => applyMultiStyle({ strokeOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
-                        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
-                        {props.strokeOpacity.mixed && <span style={mixNote}>Mixed</span>}
-                      </span>
-                    ) : undefined}
-                    right={caps.includes("fillOpacity") ? (
-                      /* Mixed → no committed value to show (matches Weight's own "—" placeholder
-                         above); typing any number, including 100, is a real change written to every
-                         member, same as the slider it replaces. */
-                      <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
-                        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.fillOpacity.mixed ? null : Math.round(props.fillOpacity.value * 100)} placeholder="—" min={0} max={100} step={5}
-                          ariaLabel="Fill opacity" onCommit={(n) => applyMultiStyle({ fillOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
-                        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
-                        {props.fillOpacity.mixed && <span style={mixNote}>Mixed</span>}
-                      </span>
-                    ) : undefined}
-                  />
-                )}
-                {hasEl && (
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    <button style={{ ...chip, flex: 1 }} onClick={clearMultiElStyle} title="Revert every selected element to its type default colors">Reset</button>
-                  </div>
-                )}
-                <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>Editing {multiMembers.length} item{multiMembers.length === 1 ? "" : "s"}. Only the properties they share are shown.</div>
-              </Section>
-              </div>
-            );
-          })()}
+          {multiStyleable && multiStyle && <MultiStyleInspector
+                  PAL={PAL}
+                  applyMultiStyle={applyMultiStyle}
+                  chip={chip}
+                  clearMultiElStyle={clearMultiElStyle}
+                  liveMultiStyle={liveMultiStyle}
+                  livePick={livePick}
+                  multiMembers={multiMembers}
+                  multiStyle={multiStyle}
+                  numInput={numInput}
+                />}
           {/* selected easement — first-class attributes (NEW-1) */}
-          {!multiStyleable && selMarkup && selMarkup.kind === "easement" && (() => {
-            const e = selMarkup;
-            const t = easementType(e.easeType);
-            const area = easementArea(e);
-            const isStrip = e.mode !== "boundary";
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
-            const txt = { ...numInput, width: 150, fontFamily: "inherit" };
-            // NEW-EASE-STYLE — resolved appearance (type default, or this easement's own override).
-            const est = easementStyle(e);
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const check = (label, val, key) => (
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
-                <input type="checkbox" checked={!!val} onChange={(ev) => setSelEasement({ [key]: ev.target.checked })} /> {label}
-              </label>
-            );
-            return (
-              <Section title={null}>
-                {/* Map label — what the map and the PDF draw. Empty = the automatic name (type + width),
-                    which keeps tracking those while no custom text is set. One undo frame per typing session. */}
-                <Field label={<b style={{ color: PAL.ink }}>Map label</b>}>
-                  <input value={e.labelOverride || ""} maxLength={120} data-testid="easement-map-label"
-                    onChange={(ev) => { const v = ev.target.value; coalesceLabelWrite(`ease-label-${e.id}`, (p) => setMarkups((a) => a.map((m) => (m.id === e.id ? withEaseRing(m, p) : m))))({ labelOverride: v }, { live: true }); }}
-                    onBlur={() => { labelSessionRef.current = null; }}
-                    placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
-                </Field>
-                {/* NEW-2 — the area line under the label is OFF by default; this is the same toggle the label's right-click menu carries. */}
-                {check("Show area on label", e.showArea === true, "showArea")}
-                <Field label="Type">
-                  <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
-                    <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
-                  </button>
-                  <AnchoredMenu open={easeTypeMenu} onClose={() => setEaseTypeMenu(false)} anchorRef={easeTypeAnchor} placement="below-right" width={224} panelStyle={menuPanel}>
-                    {EASEMENT_TYPES.map((ty) => (
-                      <button key={ty.key} style={{ ...menuItem(e.easeType === ty.key), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setSelEasement({ easeType: ty.key }); setEaseType(ty.key); setEaseTypeMenu(false); }}>
-                        <span style={{ width: 9, height: 9, borderRadius: 2, background: ty.color }} /> {ty.label}
-                      </button>
-                    ))}
-                  </AnchoredMenu>
-                </Field>
-                {isStrip && <Field label="Width (ft)"><NumInput boxed fill ariaLabel="Width" value={Math.round(e.width || 0)} min={1} step={1} coarse={10} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
-                <Field label="Status">
-                  <span style={{ display: "flex", gap: 5, width: 150 }}>
-                    <button style={seg(e.status !== "proposed")} onClick={() => setSelEasement({ status: "existing" })}>Existing</button>
-                    <button style={seg(e.status === "proposed")} onClick={() => setSelEasement({ status: "proposed" })}>Proposed</button>
-                  </span>
-                </Field>
-                <Collapse sectionId="easement-recording" title="Recording details" defaultOpen={false} summary={easementRecordingSummary(e)}>
-                  <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
-                  <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
-                  {check("Exclusive easement", e.exclusive, "exclusive")}
-                </Collapse>
-                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                  {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
-                  {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
-                </div>
-                <StdSubLabel section="text">Text</StdSubLabel>
-                {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
-                    easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
-                    onFocus pushes one undo frame per edit. */}
-                <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input value={e.inlineLabel || ""} maxLength={120}
-                  onFocus={() => pushHistory()}
-                  onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
-                  placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
-                {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
-                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
-                {/* NEW-EASE-STYLE — colour / fill / hatch, editable per easement. Defaults to this
-                    easement's TYPE colour (above) until touched; "Reset" clears back to the type
-                    default rather than leaving a stale override behind. */}
-                <div>
-                  <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                  <PairedFieldHead left="Outline" right="Fill" />
-                  <PairedField label="Colour"
-                    left={<ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                    right={<ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                  />
-                  <PairedField label="Opacity"
-                    right={<PercentField boxed value={est.fillOpacity} max={60} onCommit={(v) => setSelEasement({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                  />
-                  <PairedField label="Pattern"
-                    right={<select autoComplete="off" aria-label="Fill pattern" style={{ ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
-                  />
-                  {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
-                </div>
-                {/* NEW-3 (layout "A") — SIZE & POSITION: the area it covers (the strip's Width (ft) stays with the easement's attributes up top — the
-                    Map label → Type → Width → Status order is guarded by e2e easement-map-label). The instruction line that used to follow
-                    ("Drag a centerline dot to reshape … Shift-click an edge to add a point, right-click a dot to remove one") restated how to
-                    drag / reshape and is gone (PANEL-BREVITY). */}
-                <StdSubLabel section="size">Size & position</StdSubLabel>
-                <Field label="Area"><span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink }}>{fmtSf(area)} · {fmtAcres(area / SQFT_PER_ACRE)}</span></Field>
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(e.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!e.locked} size={13} />{e.locked ? "Unlock" : "Lock"}</span></button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
-                </div>
-              </Section>
-            );
-          })()}
+          {!multiStyleable && selMarkup && selMarkup.kind === "easement" && <EasementInspector
+                  PAL={PAL}
+                  chip={chip}
+                  coalesceLabelWrite={coalesceLabelWrite}
+                  colorCtl={colorCtl}
+                  deleteSel={deleteSel}
+                  easeTypeAnchor={easeTypeAnchor}
+                  easeTypeMenu={easeTypeMenu}
+                  inlineLabelControls={inlineLabelControls}
+                  labelSessionRef={labelSessionRef}
+                  menuItem={menuItem}
+                  menuPanel={menuPanel}
+                  numInput={numInput}
+                  pushHistory={pushHistory}
+                  selMarkup={selMarkup}
+                  setEaseType={setEaseType}
+                  setEaseTypeMenu={setEaseTypeMenu}
+                  setMarkups={setMarkups}
+                  setSelEasement={setSelEasement}
+                  toggleMarkupLock={toggleMarkupLock}
+                  withEaseRing={withEaseRing}
+                />}
           {/* NEW-1 (layout "A", owner-approved 2026-10-20) — the neutral markups (line · polyline · rectangle · ellipse · polygon · cloud)
               share ONE three-section inspector: TEXT (text boxes / callouts only — below) · APPEARANCE · SIZE & POSITION. Closed shapes and
               the cloud use the OUTLINE | FILL table; a line / polyline is one column. Weight has no unit, pattern selects are right-aligned,
               and every number box fills its column so the right edges line up. Layout A's shell (2026-10-21) now also covers the measurement, easement and
               deed panels and every element panel (CLAUDE.md constraint #29). */}
-          {!multiStyleable && selMarkup && NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {
-            // NO `background` on the swatch — ColorField paints the current colour as the chip's background and spreads this on top.
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
-            const isCloud = selMarkup.kind === "cloud";
-            const closed = selMarkup.kind !== "line" && selMarkup.kind !== "polyline";
-            const isBox = MK_BOX_KINDS.includes(selMarkup.kind);
-            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other markup tool draws from next.
-            const setStyle = isCloud ? setSelMarkupCloud : setSelMarkup;
-            const liveStyle = isCloud ? liveMarkupCloud : liveMarkup;
-            const hatchOn = closed && !!selMarkup.hatch && selMarkup.hatch !== "none";
-            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
-            const dashSel = <select autoComplete="off" aria-label="Line pattern" style={patSel} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>{DASH_OPTIONS}</select>;
-            const weightBox = <NumInput boxed fill ariaLabel="Line weight" testid="markup-weight" value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} />;
-            const size = closed ? closedMarkupSize(selMarkup) : null;
-            return (
-              <div>
-              <Section title={null}>
-                <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                {closed ? (<>
-                  <PairedFieldHead left="Outline" right="Fill" />
-                  <PairedField label="Colour"
-                    left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                    right={<ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                  />
-                  <PairedField label="Opacity"
-                    left={<PercentField boxed value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} ariaLabel="Outline opacity" />}
-                    right={<PercentField boxed value={selMarkup.fillOpacity ?? 0} onCommit={(v) => setStyle({ fillOpacity: v })} ariaLabel="Fill opacity" />}
-                  />
-                  <PairedField label="Weight" left={weightBox} />
-                  <PairedField label="Pattern"
-                    left={dashSel}
-                    right={<select autoComplete="off" aria-label="Fill pattern" style={patSel} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.key === "none" ? "Flat" : h.label}</option>)}</select>}
-                  />
-                  {hatchOn && (
-                    <PairedField label="Hatch colour"
-                      right={<ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} />}
-                    />
-                  )}
-                </>) : (<>
-                  <Field label="Colour"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} /></Field>
-                  <Field label="Opacity"><PercentField boxed value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} ariaLabel="Line opacity" /></Field>
-                  <Field label="Weight">{weightBox}</Field>
-                  <Field label="Pattern">{dashSel}</Field>
-                </>)}
-
-                <StdSubLabel section="size">Size & position</StdSubLabel>
-                {/* A closed shape's SIZE, read off the SAME geometry the canvas draws (markupPick.js's `closedMarkupSize`). */}
-                {size && (<>
-                  <Field label="Area"><span style={valStyle}>{fmtSf(size.area)} · {fmtAcres(size.area / SQFT_PER_ACRE)}</span></Field>
-                  <Field label="Perimeter"><span style={valStyle}>{fmtFeet(size.perimeter)}</span></Field>
-                </>)}
-                {isBox && (<>
-                  <Field label="Width"><NumInput boxed fill unit="ft" ariaLabel="Width" value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} /></Field>
-                  <Field label="Height"><NumInput boxed fill unit="ft" ariaLabel="Height" value={Math.round(selMarkup.h)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ h: n })} /></Field>
-                </>)}
-                {isCloud && (
-                  <Field label="Arc size"><NumInput boxed fill unit="ft" ariaLabel="Arc size" value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={CLOUD_ARC_STEP_FT} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} /></Field>
-                )}
-                {isBox && (
-                  <Field label="Rotation"><RotationField value={selMarkup.rot || 0} locked={!!selMarkup.locked} lockedReason="Unlock this markup to rotate it"
-                    onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
-                    onStep={(d) => setSelMarkupGeom({ rot: normalizeDeg((selMarkup.rot || 0) + d) })} /></Field>
-                )}
-                {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in place). NON-sticky
-                    (direct setMarkups, never setMkStyle); onFocus pushes ONE undo frame per edit (not one per keystroke). */}
-                {!closed && (<>
-                  <Field label="Length"><span style={valStyle}>{fmtFeet(openMarkupLength(selMarkup) || 0)}</span></Field>
-                  <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input autoComplete="off" value={selMarkup.inlineLabel || ""} maxLength={120}
-                    onFocus={() => pushHistory()}
-                    onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
-                    placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...textInput, width: "100%", minWidth: 0 }} /></Field>
-                  {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                  {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
-                </>)}
-                {isCloud && (() => {
-                  const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleString() : "—"; } catch (_) { return "—"; } };
-                  const cs = { display: "flex", gap: 5, width: 150 };
-                  return (
-                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                      {/* NEW-4 — the reviewer metadata the owner never uses is tucked into ONE collapsed "More" (nothing deleted: every value still round-trips when expanded and edited). */}
-                      <Collapse sectionId="cloud-more" title="More" defaultOpen={false}>
-                      <Field label="Subject"><input autoComplete="off" value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
-                      <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
-                      <Field label="Status">
-                        <span style={cs}>
-                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selMarkup.status ?? "None"} onChange={(e) => setSelMarkupCloud({ status: e.target.value })}>
-                            {CLOUD_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </span>
-                      </Field>
-                      <Field label="Label"><input autoComplete="off" value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
-                      <Field label="Layer"><input autoComplete="off" value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
-                      <Field label="Author"><input autoComplete="off" value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
-                        Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
-                      </div>
-                      </Collapse>
-                    </div>
-                  );
-                })()}
-                {/* NEW-5 — the Cloud panel carries NO how-to text (owner 2026-10-08); the gestures themselves are unchanged. */}
-                {!isCloud && (
-                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                    {/* B922/NEW-3 — a locked markup renders no reshape dots, so say so instead of "drag a dot". */}
-                    {selMarkup.locked
-                      ? "Locked — click Unlock below to move or reshape it."
-                      : isBox
-                      ? "Drag the corner/edge grips to resize, the top handle to rotate."
-                      : selMarkup.kind === "line"
-                        ? "Drag either end dot to move it."
-                        // NEW-1/B649504 — Shift-click never removed a point (only adds, on an edge); removal is right-click a dot, or select + Delete.
-                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
-                  </div>
-                )}
-                {!["rect", "ellipse", "polygon"].includes(selMarkup.kind) && <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
-                </div>}
-              </Section>
-              </div>
-            );
-          })()}
+          {!multiStyleable && selMarkup && NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && <NeutralMarkupInspector
+                  PAL={PAL}
+                  chip={chip}
+                  coalesceLabelWrite={coalesceLabelWrite}
+                  colorCtl={colorCtl}
+                  deleteSel={deleteSel}
+                  inlineLabelControls={inlineLabelControls}
+                  liveMarkup={liveMarkup}
+                  liveMarkupCloud={liveMarkupCloud}
+                  numInput={numInput}
+                  pushHistory={pushHistory}
+                  selMarkup={selMarkup}
+                  setMarkups={setMarkups}
+                  setSelMarkup={setSelMarkup}
+                  setSelMarkupCloud={setSelMarkupCloud}
+                  setSelMarkupGeom={setSelMarkupGeom}
+                  textInput={textInput}
+                  toggleMarkupLock={toggleMarkupLock}
+                />}
           {/* selected markup shape — geometry + style. The neutral kinds have their own three-section panel above; this is the
               remaining non-neutral kind (a deed encumbrance), unchanged. */}
-          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && !NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {
-            // NEW-1 — NO `background` here. ColorField paints the CURRENT COLOUR as the chip's background and then spreads this override on top.
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            return (
-              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
-              <div>
-              <Section title={null}>
-                {/* NEW-3 (layout "A") — the deed / title tract: APPEARANCE (Outline | Fill table — colour, opacity as a typed % box instead of the old
-                    slider, weight with no unit, right-aligned pattern selects; a deed's fill pattern is its hatch) then SIZE & POSITION (the closure
-                    read-out, Show calls, the align / promote actions and Rotation). An encumbrance shares the easement appearance model
-                    (fill / fill opacity / hatch, type default + per-element override). */}
-                {(() => {
-                  const isDeed = selMarkup.kind === "encumbrance";
-                  const est = isDeed ? encumbranceStyle(selMarkup) : null;
-                  const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
-                  return (<>
-                    <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                    <PairedFieldHead left="Outline" right={isDeed ? "Fill" : ""} />
-                    <PairedField label="Colour"
-                      left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                      right={isDeed ? <ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /> : undefined}
-                    />
-                    {isDeed && <PairedField label="Opacity" right={<PercentField boxed value={est.fillOpacity} max={60} onCommit={(v) => setSelMarkup({ fillOpacity: v })} ariaLabel="Fill opacity" />} />}
-                    <PairedField label="Weight" left={<NumInput boxed fill ariaLabel="Line weight" testid="markup-weight" value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} />} />
-                    <PairedField label="Pattern"
-                      left={<select autoComplete="off" aria-label="Line pattern" style={patSel} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
-                      right={isDeed ? <select autoComplete="off" aria-label="Fill pattern" style={patSel} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select> : undefined}
-                    />
-                    {isDeed && est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
-                    <StdSubLabel section="size">Size & position</StdSubLabel>
-                  </>);
-                })()}
-                {selMarkup.kind === "encumbrance" && (() => {
-                  const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
-                  const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
-                  const gapInfo = deedGapText(deedTrace(selMarkup));
-                  return (
-                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
-                      {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
-                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.danger }}>
-                        {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
-                      </div>
-                      {/* NEW-1 — per-shape "Show calls" (default OFF, saved on the shape, one undo frame). Uses
-                          setSelMarkupGeom, NOT setSelMarkup: that one also writes the shared mkStyle, which new
-                          markups inherit. Not-closing warning above stays here regardless of the toggle. */}
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer", marginBottom: 6 }}>
-                        <input type="checkbox" data-testid="deed-show-calls" checked={deedCallsShown(selMarkup)} onChange={(e) => setSelMarkupGeom({ showCalls: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
-                        <span>Show calls</span>
-                      </label>
-                      {(selMarkup.calls || []).length > 0 && (
-                        <details data-testid="deed-courses-list" style={{ fontSize: 11, color: PAL.ink, marginBottom: 8 }}>
-                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Courses ({selMarkup.calls.length})</summary>
-                          <ol style={{ margin: "4px 0 0", paddingLeft: 18, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>
-                            {selMarkup.calls.map((c, i) => <li key={i}>{c.label}</li>)}
-                          </ol>
-                        </details>
-                      )}
-                      <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
-                        onClick={() => alignDeedToParcel(dm.id)}>
-                        📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
-                      </button>
-                      {/* NEW-2 — promote the plotted deed to a real parcel boundary. */}
-                      <button data-testid="deed-promote" style={{ ...chip, width: "100%", fontWeight: 700, marginTop: 6 }}
-                        disabled={deedAlreadyPromoted(dm)}
-                        title={deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it"}
-                        onClick={() => promoteDeedToParcel(dm.id)}>
-                        ▦ {deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary"}
-                      </button>
-                      {!deedAlreadyPromoted(dm) && (
-                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
-                          With the county map down, the legal description is the best boundary you have. The deed stays on the plan either way.
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
-                        {hasParcel
-                          ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
-                          : "No county parcel loaded to fit to — this applies the State Plane grid-north correction for this location. Load the parcel (Add parcel → Identify) for an exact fit, or nudge below."}
-                      </div>
-                      <Field label="Rotation"><RotationField value={dm.rotApplied || 0} locked={!!selMarkup.locked} lockedReason="Unlock this deed to rotate it"
-                        onCommit={(deg) => rotateDeedTo(dm.id, deg)}
-                        onStep={(d) => rotateDeedTo(dm.id, normalizeDeg((dm.rotApplied || 0) + d))} /></Field>
-                    </div>
-                  );
-                })()}
-                {selMarkup.locked && <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
-                </div>
-              </Section>
-              </div>
-            );
-          })()}
+          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && !NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && <MarkupStyleInspector
+                  PAL={PAL}
+                  alignDeedToParcel={alignDeedToParcel}
+                  chip={chip}
+                  colorCtl={colorCtl}
+                  deedAlreadyPromoted={deedAlreadyPromoted}
+                  deedGroupMembers={deedGroupMembers}
+                  deedMainOf={deedMainOf}
+                  deleteSel={deleteSel}
+                  liveMarkup={liveMarkup}
+                  numInput={numInput}
+                  parcels={parcels}
+                  promoteDeedToParcel={promoteDeedToParcel}
+                  rotateDeedTo={rotateDeedTo}
+                  selMarkup={selMarkup}
+                  setSelMarkup={setSelMarkup}
+                  setSelMarkupGeom={setSelMarkupGeom}
+                  toggleMarkupLock={toggleMarkupLock}
+                />}
           {/* selected callout / text box — NEW-1 (layout "A", owner-approved 2026-10-20): ✎ Edit text on top, then TEXT · APPEARANCE · SIZE & POSITION. */}
-          {!multiStyleable && selCallout && (() => {
-            const cs = calloutStyle(selCallout);
-            // NO `background` on the swatch — ColorField paints the current colour as the chip's background and spreads this on top.
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            // B1765730 — a small, fixed-size icon-button toggle (never flex:1).
-            const segSm = (on) => ({ width: 26, height: 26, flex: "none", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS.sm, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "var(--on-accent)" : PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12 });
-            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
-            const vAlignHint = "shows once the box is taller than its text — drag the box's top or bottom grip";
-            const fixedExtent = selCallout.boxW != null || selCallout.boxH != null;
-            return (
-              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
-              <div>
-              <Section title={null}>
-                {/* A plain (white, normal border) full-width button at the very top — it moved up from the bottom. */}
-                <button type="button" data-testid="callout-edit-text" style={{ ...chip, width: "100%", marginBottom: SPACE.sm }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
-
-                <StdSubLabel section="text">Text</StdSubLabel>
-                <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
-                <Field label="Size"><NumInput boxed fill unit="pt" ariaLabel="Text size" value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
-                <Field label="Style">
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                    <button type="button" style={{ ...segSm(cs.bold), fontWeight: 800 }} title="Bold" aria-label="Bold" aria-pressed={cs.bold} onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                    <button type="button" style={{ ...segSm(cs.italic), fontStyle: "italic" }} title="Italic" aria-label="Italic" aria-pressed={cs.italic} onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                    <button type="button" style={{ ...segSm(cs.underline), textDecoration: "underline" }} title="Underline" aria-label="Underline" aria-pressed={cs.underline} onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
-                    <button type="button" data-testid="callout-strike" style={{ ...segSm(cs.strike), textDecoration: "line-through" }} title="Strikethrough" aria-label="Strikethrough" aria-pressed={cs.strike} onClick={() => setSelCallout({ strike: !cs.strike })}>S</button>
-                    <button type="button" data-testid="callout-caps" style={{ ...segSm(cs.caps), fontSize: 10.5, fontWeight: 700, letterSpacing: "-0.02em" }} title="All caps (display only — the typed text is not changed)" aria-label="All caps" aria-pressed={cs.caps} onClick={() => setSelCallout({ caps: !cs.caps })}>AA</button>
-                  </div>
-                </Field>
-                <Field label="Align">
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                    {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
-                      <button type="button" key={a} style={segSm(cs.align === a)} title={lbl} aria-label={lbl} aria-pressed={cs.align === a} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
-                    ))}
-                    <div aria-hidden="true" style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 2px", flex: "none" }} />
-                    {[["top", "Align text to the top"], ["middle", "Align text to the middle"], ["bottom", "Align text to the bottom"]].map(([a, lbl]) => (
-                      <button type="button" key={a} data-testid={`callout-valign-${a}`} style={segSm(cs.valign === a)} title={`${lbl} (${vAlignHint})`} aria-label={lbl} aria-pressed={cs.valign === a} onClick={() => setSelCallout({ valign: a })}><VAlignIcon dir={a} /></button>
-                    ))}
-                  </div>
-                </Field>
-                <Field label="Spacing"><NumInput boxed fill unit="×" ariaLabel="Line spacing" value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
-
-                <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                {/* NEW-1/NEW-2 (B1652704/B1652705) — the outline carries a weight, a dash pattern and its own opacity (lib/calloutStyle.js +
-                    the shared DASH_OPTIONS list), and the fill its own opacity. Fill has no weight / pattern, so those cells carry the shared em-dash. */}
-                <PairedFieldHead left="Outline" right="Fill" />
-                <PairedField label="Colour"
-                  left={<ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                  right={<ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                />
-                <PairedField label="Opacity"
-                  left={<PercentField boxed value={cs.opacity} onCommit={(v) => setSelCallout({ opacity: v })} ariaLabel="Outline opacity" />}
-                  right={<PercentField boxed value={cs.fillOpacity} onCommit={(v) => setSelCallout({ fillOpacity: v })} ariaLabel="Fill opacity" />}
-                />
-                <PairedField label="Weight" left={<NumInput boxed fill ariaLabel="Line weight" testid="callout-weight" value={cs.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelCallout({ weight: n })} />} />
-                <PairedField label="Pattern" left={<select autoComplete="off" aria-label="Line pattern" style={patSel} value={cs.dash} onChange={(e) => setSelCallout({ dash: e.target.value })}>{DASH_OPTIONS}</select>} />
-
-                <StdSubLabel section="size">Size & position</StdSubLabel>
-                <PairedFieldHead left="X" right="Y" />
-                <PairedField label="Margin"
-                  left={<NumInput boxed fill ariaLabel="Margin X" value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} />}
-                  right={<NumInput boxed fill ariaLabel="Margin Y" value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} />}
-                />
-                {/* NEW-2 (B1612641) — the same rotation control every other rotatable object uses, now with the angle glyph, quarter turns and Level. */}
-                <Field label="Rotation"><RotationField value={selCallout.rot || 0} locked={!!selCallout.locked} lockedReason="Unlock this callout to rotate it"
-                  onCommit={(deg) => setSelCallout({ rot: deg })}
-                  onStep={(d) => setSelCallout({ rot: normalizeDeg((selCallout.rot || 0) + d) })} /></Field>
-                {/* B913 — a fixed width (side grip) and/or fixed height (top / bottom grip) was set. "Fit to text" clears both so the box
-                    auto-sizes to its content again (matches the per-element inspector). */}
-                {fixedExtent && (
-                  <button type="button" style={{ ...chip, width: "100%" }} title="Clear the fixed width and height — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null, boxH: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
-                )}
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; an annotation was the one drawn object with no lock control. */}
-                  <button style={chip} onClick={() => toggleCalloutLock(selCallout.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selCallout.locked} size={13} />{selCallout.locked ? "Unlock" : "Lock"}</span></button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:callout" })}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
-                </div>
-              </Section>
-              </div>
-            );
-          })()}
+          {!multiStyleable && selCallout && <CalloutInspector
+                  PAL={PAL}
+                  beginEditCallout={beginEditCallout}
+                  chip={chip}
+                  colorCtl={colorCtl}
+                  deleteSel={deleteSel}
+                  liveCallout={liveCallout}
+                  numInput={numInput}
+                  selCallout={selCallout}
+                  setSelCallout={setSelCallout}
+                  toggleCalloutLock={toggleCalloutLock}
+                />}
           {/* NEW-2 (layout "A", owner 2026-10-21) — selected measurement inspector: Label, then APPEARANCE · SIZE & POSITION, the same three-section
               shell as the markup panel. Area is the Outline | Fill table; a distance / polyline / count is one column. The old LAYER block
               (the right-click menu carries Bring to front / Send to back / Send behind the plan — measure menu, `mapMenu.kind === "measure"`)
@@ -27186,74 +25027,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               shows; Standards → Measurements keeps the plan-wide default) are gone, and so is the sentence "Drag the line to move it, or a
               square grip to reshape." (PANEL-BREVITY). Outline opacity: the measurement style has no stroke-opacity key (and the canvas, the
               PDF annotation and the Standards defaults would all have to learn one), so the Outline cell of the Opacity row is the shared dash. */}
-          {!multiStyleable && selMeasure && (() => {
-            const m = selMeasure;
-            const mode = measMode(m);
-            const fpts = measPts(m);
-            const rows = [];
-            // NEW-3 (f) — the panel reads the SAME formatters as the canvas chip, so screen,
-            // panel and paper can never disagree about how a number is written.
-            if (mode === "count") rows.push(["Items", fmtInt(fpts.length)]);
-            else if (mode === "area") { rows.push(["Area", `${fmtSf(polyArea(fpts))} · ${fmtAcres(polyArea(fpts) / SQFT_PER_ACRE)}`]); rows.push(["Perimeter", fmtFeet(pathLen([...fpts, fpts[0]]))]); }
-            else rows.push(["Length", fmtFeet(pathLen(fpts))]);
-            const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
-            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
-            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
-            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
-            // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
-            const closed = mode === "area";
-            const stylable = mode !== "count";
-            const uncal = calibrationState === "uncalibrated";
-            const hasOverride = MEASURE_STD_KEYS.some((k) => m[k] !== undefined) || !!m.labelOffset;
-            const ms = measureStyle(m);
-            const weightBox = <NumInput boxed fill ariaLabel="Line weight" testid="measure-weight" value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />;
-            const dashSel = <select autoComplete="off" aria-label="Line pattern" style={patSel} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>{DASH_OPTIONS}</select>;
-            return (
-              <div>
-              <Section title={null}>
-                {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
-                <Field label="Label"><input value={m.label || ""} maxLength={80}
-                  onFocus={() => pushHistory()}
-                  onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
-                  placeholder="e.g. Front setback" style={textInput} /></Field>
-
-                <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                {/* Line + fill, routed through the shared ColorField (so it inherits the recently used colours) and the shared
-                    DASH_OPTIONS list. Every mode gets the line controls; only a closed area gets a fill — and only then is there a
-                    second side to pair against, so a non-closed measurement is one column. */}
-                {closed ? (<>
-                  <PairedFieldHead left="Outline" right="Fill" />
-                  <PairedField label="Colour"
-                    left={<ColorField value={toHex6(ms.stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                    right={<ColorField value={toHex6(ms.fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
-                  />
-                  <PairedField label="Opacity"
-                    right={<PercentField boxed value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} onCommit={(v) => setSelMeasure({ fillOpacity: v })} ariaLabel="Fill opacity" />}
-                  />
-                  <PairedField label="Weight" left={weightBox} />
-                  <PairedField label="Pattern" left={dashSel} />
-                </>) : (<>
-                  <Field label={mode === "count" ? "Markers" : "Colour"}><ColorField value={toHex6(ms.stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title={mode === "count" ? "Marker color" : "Line color"} style={swatch} /></Field>
-                  <Field label="Weight">{weightBox}</Field>
-                  {stylable && <Field label="Pattern">{dashSel}</Field>}
-                </>)}
-                {uncal && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "2px 2px 6px" }}>Your colour is saved, but this measurement stays amber on the drawing until the sheet is calibrated — that amber means “this number isn’t real feet yet”.</div>}
-
-                <StdSubLabel section="size">Size & position</StdSubLabel>
-                {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
-                {m.locked && <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
-                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                  <button style={chip} onClick={() => toggleMeasureLock(m.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!m.locked} size={13} />{m.locked ? "Unlock" : "Lock"}</span></button>
-                  {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
-                    onClick={() => setSelMeasure({ ...Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, null])), labelOffset: null })}>Reset style</button>}
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:measure" })}>Delete</button>
-                </div>
-              </Section>
-              </div>
-            );
-          })()}
+          {!multiStyleable && selMeasure && <MeasureInspector
+                  PAL={PAL}
+                  calibrationState={calibrationState}
+                  chip={chip}
+                  colorCtl={colorCtl}
+                  deleteSel={deleteSel}
+                  liveMeasure={liveMeasure}
+                  numInput={numInput}
+                  pushHistory={pushHistory}
+                  selMeasure={selMeasure}
+                  setMeasures={setMeasures}
+                  setSelMeasure={setSelMeasure}
+                  textInput={textInput}
+                  toggleMeasureLock={toggleMeasureLock}
+                />}
           {/* selected element */}
           {/* v3 B7.3 — a pond passes NO Section title (bare, always-open card): the panel-chrome
               row above already reads "ELEMENT · DETENTION POND" and carries the collapse chevron, so
@@ -27274,40 +25062,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (renderElAppearance is the ONE body; the two call sites differ only by `roadPanel`).
               Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6), so the standalone section is suppressed for them.
               Car parking renders its own "Appearance" group inside the spec sheet (B1790016 NEW-1), so it is suppressed here too. */}
-          {!multiStyleable && selEl && selEl.type === "driveInRamp" && (() => {
-            // NEW-3 (2026-10-30) — the drive-in ramp's own panel. Everything it quotes is read from lib/driveInRamp.js off the HOST, so the panel, the
-            // canvas, the door belt and the grading plane cannot disagree; every edit is one history frame and the write seam re-derives the box.
-            const host = els.find((x) => x.id === selEl.attachedTo && x.type === "building" && !x.points) || null;
-            const rec = selEl.ramp || null;
-            if (!host || !rec) return <Section title={null}><div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>This ramp is no longer attached to a building.</div><button type="button" style={chip} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete</button></Section>;
-            const dockSides = dockSidesFor(host).dockSides, marker = !dockSides.includes(rec.side);
-            const court = els.find((x) => x.attachedTo === host.id && x.truckCourt && x.truckCourt.side === rec.side && !x.points);
-            const courtDepth = court ? (rec.side === "top" || rec.side === "bottom" ? hostAxisExtents(host, court).dimBY : hostAxisExtents(host, court).dimBX) : null;
-            const stackIds = new Set(els.filter((x) => x.attachedTo === host.id && (x.truckCourt || x.forCourt || x.forTrailer || x.prevZone || x.stackSide)).map((x) => x.id));
-            const flagRing = (x) => { try { return isCenterlineRoad(x) ? roadStripRing(x, settings, sharpFor(x), roundTrim(x)) : ringOf(x); } catch (_) { return null; } };
-            const others = els.filter((x) => x.id !== selEl.id && x.id !== host.id && !stackIds.has(x.id))
-              .map((x) => ({ id: x.id, name: x.dogEar ? "the corner bump-out" : `the ${(TYPE[x.type]?.label || "another element").split(" / ")[0].toLowerCase()}`, ring: flagRing(x) }));
-            const allowedRings = parcels.filter((pc) => pc.active !== false && pc.points && pc.points.length >= 3).map((pc) => { const sb = parcelSetbacks(pc); return (sb.some((v) => v > 0) ? offsetPolygon(pc.points, sb) : null) || pc.points; });
-            const flags = rampFlags(host, rec, { dockSides, dockHeightIn: rampDockIn, courtDepthFt: courtDepth, others, allowedRings });
-            const sp = rampSpan(rec, { marker, dockHeightIn: rampDockIn });
-            const doorsNow = rampDoorRun(host, rec.side).doors, leaf = resolveGridSettings(host, settings).doorWidth;
-            const doorsTaken = marker ? 0 : doorsNow.filter((c) => Math.min(c + leaf / 2, sp.u1) - Math.max(c - leaf / 2, sp.u0) > 1).length;
-            return (
-              <Section title={null}>
-                <DriveInRampPanel ramp={rec} marker={marker} lengthFt={rampLengthFt(rec, rampDockIn)} riseIn={rampRiseFt(rec, rampDockIn) * 12} dockHeightIn={rampDockIn}
-                  doorsTaken={doorsTaken} flags={flags}
-                  onPatch={(patch) => {
-                    // turning it ALONG the wall, or flipping which way it runs, keeps the footprint on the wall (a door position that would overrun it slides in)
-                    const turning = patch.layout === "along" || (rampLayout(rec) === "along" && patch.dir != null);
-                    const fit = turning ? fitAlongTheWall({ ...rec, ...patch }, { L: wallFrame(host, rec.side).L, stops: moduleStops(doorsNow), dockHeightIn: rampDockIn, keepDir: patch.dir != null ? patch.dir : null }) : null;
-                    setRampPatch(selEl.id, fit ? { ...patch, ...fit } : patch);
-                  }}
-                  onAt={(n) => { const stops = moduleStops(doorsNow); const want = Number.isFinite(n) ? n : rec.at; setRampPatch(selEl.id, { at: Math.round((stops.length ? stops.reduce((b, v) => (Math.abs(v - want) < Math.abs(b - want) ? v : b), stops[0]) : want) * 100) / 100 }); }}
-                  onRise={(n) => setRampPatch(selEl.id, { riseIn: Number.isFinite(n) ? n : null })}
-                  onDelete={() => deleteSel(null, { entry: "panel:element" })} />
-              </Section>
-            );
-          })()}
+          {!multiStyleable && selEl && selEl.type === "driveInRamp" && <DriveInRampInspector
+                  chip={chip}
+                  deleteSel={deleteSel}
+                  els={els}
+                  parcelSetbacks={parcelSetbacks}
+                  parcels={parcels}
+                  rampDockIn={rampDockIn}
+                  rampDoorRun={rampDoorRun}
+                  roundTrim={roundTrim}
+                  selEl={selEl}
+                  setRampPatch={setRampPatch}
+                  settings={settings}
+                  sharpFor={sharpFor}
+                />}
           {!roadPanel && elAppearanceOn && renderElAppearance()}
           {/* NEW-3 (2026-10-30) — a drive-in ramp has its own panel (above); the generic element card below is for everything else. */}
           {selEl && selEl.type === "driveInRamp" ? null : (<>
@@ -28134,1516 +25902,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
               </div>
               )}
-              {selEl.type === "pond" && (() => {
-                const det = selEl.det || {};
-                // B822 — the effective values: manual wins, else the criteria/terrain autos
-                // (pondAuto — provenance-carrying), else the old screening defaults.
-                const depth = det.depth ?? 8, fb = det.freeboard ?? pondAuto.freeboard.value, slope = det.slope ?? pondAuto.slope.value;
-                const tobEff = det.tobElev ?? (pondAuto.tobElev ? pondAuto.tobElev.value : null);
-                const ring = selEl.points ? selEl.points : elCorners(selEl);
-                const r = detentionStorage(ring, depth, fb, slope);
-                // B822 layer (c) — the per-pond AUTO depth: the smallest depth closing the
-                // site's REMAINING deficit (B640 solver), offered as a one-click apply (an
-                // implicit depth would feed back into the provided volume it solves against).
-                const depthSolve = (() => {
-                  if (det.depth != null) return null; // manual depth — nothing to suggest
-                  if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
-                  const otherCf = Math.max(0, providedDetCf - r.vol);
-                  const targetCf = detReq.requiredAcFt * CF_PER_ACFT - otherCf;
-                  if (!(targetCf > 0)) return null;
-                  return solvePondDepth({
-                    requiredCf: targetCf,
-                    volumeAtDepth: (dft) => detentionStorage(ring, dft, fb, slope),
-                    startDepthFt: 2,
-                  });
-                })();
-                const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
-                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B567: no-history sibling for live color picking
-                // --- Expand this pond (B139): baseline + steppers; both steppers and free
-                // drag feed the one Existing→Proposed readout. Baseline freezes the original
-                // footprint + depth/slope so the delta is apples-to-apples. ---
-                const base = det.baseline, inMode = !!base;
-                const snapshotGeom = () => selEl.points ? { points: selEl.points.map((p) => ({ x: p.x, y: p.y })) } : { w: selEl.w, h: selEl.h, cx: selEl.cx, cy: selEl.cy, rot: selEl.rot };
-                const startExpand = () => {
-                  pushHistory();
-                  setSelEl({ det: { ...det, depth, freeboard: fb, slope, expandFt: 0, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope } } });
-                  flashWarn("Expanding this pond — push the banks out or dig deeper, and watch the storage gained.", 4500);
-                };
-                const pushBanksOut = (n) => {
-                  const N = Math.max(0, Math.round(n));
-                  if (base.geom.points) {
-                    const grown = N > 0 ? expandPolygon(base.geom.points, N) : base.geom.points.map((p) => ({ x: p.x, y: p.y }));
-                    if (!grown || polySelfIntersects(grown)) { flashWarn("Can't push the banks out cleanly on this shape — the corners would cross. Drag the pond's edges on the map instead.", 6000); return; }
-                    pushHistory();
-                    setSelEl({ points: grown, det: { ...det, expandFt: N } });
-                  } else {
-                    pushHistory();
-                    setSelEl({ w: base.geom.w + 2 * N, h: base.geom.h + 2 * N, cx: base.geom.cx, cy: base.geom.cy, rot: base.geom.rot, det: { ...det, expandFt: N } });
-                  }
-                };
-                const digDeeper = (m) => setDet({ depth: base.depth + Math.max(0, Math.round(m)) });
-                const resetExisting = () => {
-                  pushHistory();
-                  const g = base.geom.points ? { points: base.geom.points.map((p) => ({ x: p.x, y: p.y })) } : { w: base.geom.w, h: base.geom.h, cx: base.geom.cx, cy: base.geom.cy, rot: base.geom.rot };
-                  setSelEl({ ...g, det: { ...det, depth: base.depth, freeboard: base.freeboard, slope: base.slope, expandFt: 0 } });
-                };
-                const doneExpand = () => { pushHistory(); const { baseline, expandFt, ...rest } = det; setSelEl({ det: rest }); flashWarn("Expansion kept — the pond now uses its new size everywhere.", 3500); };
-                const stepRow = (label, val, step, apply) => (
-                  <Field label={label}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <button style={{ ...spinBtn, width: 22, height: 22, fontSize: 13 }} onClick={() => apply(val - step)} title={`−${step} ft`}>−</button>
-                      <NumInput style={{ ...numInput, width: 52, textAlign: "center" }} value={val} min={0} onCommit={(v) => apply(v)} />
-                      <button style={{ ...spinBtn, width: 22, height: 22, fontSize: 13 }} onClick={() => apply(val + step)} title={`+${step} ft`}>＋</button>
-                    </span>
-                  </Field>
-                );
-                // B895 — `tag` is an optional { code, basis } SourceTag for this row's figure.
-                const pondRow = (label, val, tag) => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0", gap: 8 }}>
-                    <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                    <span style={ROWB6}>
-                      <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{val}</span>
-                      {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
-                    </span>
-                  </div>
-                );
-                // B909 round 2 (owner correction, live test) — the pond inspector used to
-                // open on a wall of technical fields with no plain-English orientation: a
-                // user had no way to tell, at a glance, whether THIS pond was actually
-                // doing its job. One status line up top says so directly, in the same
-                // terms the Yield panel's cards use ("required detention" / "required
-                // floodplain mitigation"), and — per the same correction — never claims a
-                // requirement is met when that requirement is actually zero.
-                // v3 UI SPEC B2 — the STATUS CARD is the ONE place in this panel the
-                // provided/required pair is stated (G1). Detention always; mitigation only when
-                // its requirement rounds above zero. Each card: SHORT (red) / OK (green), a
-                // one-line "P of R ac-ft required" heading, an optional plain-English body, and
-                // the ⚡ Optimize pond button when short. Presentation only — the numbers are the
-                // same site provided/required the Yield verdict shows.
-                // NEW-1 — the two REQUIREMENT figures are hoisted out of the statusCards IIFE because
-                // the optimizer affordance below needs the same numbers. They must not be re-derived
-                // separately: the whole point of NEW-1 is that the button and the cards read ONE
-                // source, so the button can never again depend on what the cards happen to look like.
-                // E2(a) — a requirement that ROUNDS TO 0 at the 1dp we display is treated as absent
-                // (a "of 0.0 ac-ft required" card is meaningless). Floor 0.05 ac-ft, aligned with f1.
-                const sc_detReqRaw = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
-                  : detReq && detReq.kind === "band" ? detReq.bandAcFt[1] : null;
-                const sc_detReqAcFt = sc_detReqRaw != null && sc_detReqRaw >= 0.05 ? sc_detReqRaw : null;
-                const sc_mitReqAcFt = drainMitDisplay && drainMitDisplay.volumeCf > 0 && drainMitDisplay.volumeAcFt >= 0.05 ? drainMitDisplay.volumeAcFt : null;
-                const statusCards = (() => {
-                  const split = pondSplitFor(selEl);
-                  const thisHoldsAcFt = r.vol / CF_PER_ACFT;
-                  const thisInundated = !!(split.mode === "anchored" && split.bands && split.bands.fullyInundated);
-                  const floodLevel = split.mode === "anchored" && split.wseFt != null ? split.wseFt : null;
-                  const floodEst = !!(split.mode === "anchored" && isEstimatedWseSrc(split.wseSrc));
-                  // E2(a) — the requirement floor is applied once, above (sc_detReqAcFt/sc_mitReqAcFt).
-                  const detReqAcFt = sc_detReqAcFt;
-                  const mitReqAcFt = sc_mitReqAcFt;
-                  const out = [];
-                  if (detReqAcFt != null && providedUsableCf != null) {
-                    const provAcFt = providedUsableCf / CF_PER_ACFT;
-                    const short = provAcFt < detReqAcFt - 0.005;
-                    // PR-K — GREEN "Buildable" requires (1) the volume met, (2) no HARD envelope limit
-                    // broken (rim above the drainage cap, outlet below the 100-yr receiving water), and
-                    // (3) no outstanding REQUIREMENT. The floodway is now case (3): a mapped regulatory
-                    // floodway lets the pond berm WITH a no-rise certification, so it's buildable but the
-                    // verdict stays amber (naming the no-rise study) until that's provided — never the old
-                    // flat "no fill". Zone A / AE fringe fill is compensating-storage debt (the mitigation
-                    // ledger), not a verdict block, so those ponds can read green once the volume is met.
-                    const bld = assessPondBuildable(selEl);
-                    const inFloodway = pondFloodplainTier(ring, fmZones).inFloodway;
-                    const hardBlocked = !bld.buildable;                 // drainage cap / outfall-tailwater
-                    const needsNoRise = bld.requirements.length > 0;    // floodway berm → no-rise cert
-                    const hardReasons = bld.hard.map((h) => h.label).join(" ");
-                    const reqReasons = requirementNote({ requirements: bld.requirements });
-                    const body = short && thisInundated && floodLevel != null && !hardBlocked
-                      ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} AC-FT don't count. Raising the rim creates storage that does.${inFloodway ? " Berming inside a mapped regulatory floodway needs a no-rise certification (an engineering study showing the berm adds zero rise to the 100-yr flood level)." : ""}`
-                      : hardBlocked
-                        ? `${hardReasons} ${makeItBuildableOptions({})}${needsNoRise ? ` ${reqReasons}` : ""}`.trim()
-                        : needsNoRise
-                          ? reqReasons
-                          : "";
-                    // I5 — the HEADLINE states the outcome; the achieved-vs-required figure is its OWN
-                    // styled sub-line (never a wrapped dangling parenthesis). Every card carries both.
-                    // NEW-1/NEW-2 — the strings now come from the ONE pure derivation
-                    // (lib/pondVerdict.js): the heading NAMES this row's ledger ("Detention covered" /
-                    // "Detention short 4.6 ac-ft" / "Detention not achievable here") instead of
-                    // headlining the BUILDABILITY answer over a VOLUME sub-line, and buildability is
-                    // demoted (never deleted) to the card's qualifier line. The over-provision state
-                    // rides the same qualifier slot. `body` (the flood-level / make-it-buildable gloss)
-                    // is unchanged and still renders underneath.
-                    const vSlack = (() => {
-                      // NEW-2 — the over-provision threshold is CRITERIA-CONFIGURABLE (the
-                      // screeningPondDepthFt precedent), never an inline constant here.
-                      const cx = critAll;
-                      return { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value };
-                    })();
-                    const earthPerCyRaw = (settings.prices || {}).earthworkCy;
-                    const earthPerCy = earthPerCyRaw == null || earthPerCyRaw === "" || !Number.isFinite(+earthPerCyRaw) ? null : +earthPerCyRaw;
-                    const dv = detentionVerdict({
-                      providedAcFt: provAcFt,
-                      requiredAcFt: detReqAcFt,
-                      hardBlocked,
-                      needsNoRise,
-                      slack: vSlack,
-                      earthPerCy,
-                    });
-                    out.push({ ...dv, body });
-                  }
-                  if (mitReqAcFt != null && pondLedger.creditedMitCf != null) {
-                    const provMitAcFt = pondLedger.creditedMitCf / CF_PER_ACFT;
-                    out.push({ ...mitigationVerdict({ providedAcFt: provMitAcFt, requiredAcFt: mitReqAcFt }), body: "" });
-                  }
-                  return out;
-                })();
-                // FINAL UI SPEC Part A — the condensed inspector's top-of-panel facts (the
-                // "At a glance" table + the watch-out chips) come off ONE computation, reusing
-                // the SAME pure helpers the detailed groups below use, so nothing can disagree.
-                // Presentation only — no value / threshold / solver change.
-                const g_split = pondSplitFor(selEl);
-                const g_critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
-                // D2 — INWARD berm split: the drawn footprint is the FIXED land take; a rim above
-                // grade fills a berm ring INSIDE it, so the water surface shrinks. Water + berm ring
-                // always sum to the drawn footprint (nothing is ever computed outside it).
-                const g_gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
-                const g_bermH = g_gradeFt != null && Number.isFinite(det.tobElev) && det.tobElev > g_gradeFt + 0.02 ? det.tobElev - g_gradeFt : 0;
-                const g_inward = inwardBermSplit(ring, g_bermH, { extSlope: EXT_BERM_SLOPE });
-                const g_footprintSf = g_inward.footprintSf;      // FIXED drawn footprint = land take
-                const g_waterSf = g_bermH > 0 ? g_inward.waterSf : g_footprintSf; // shrinking water surface
-                const g_bermRingSf = g_inward.bermRingSf;        // interior berm ring (0 with no berm)
-                const g_holdsAcFt = (g_split && g_split.grossCf != null ? g_split.grossCf : r.vol) / CF_PER_ACFT;
-                const g_roleInfo = effectivePondRole(det, g_split);
-                // PR-I (I1) — COMPUTE, don't interrogate: every engineering criterion the developer
-                // can't know gets a pre-filled screening ESTIMATE from data the app already holds, so
-                // no input box is ever an empty blank demanding expertise. Shown pre-filled + EST tag;
-                // the developer's typed value always overrides. These feed the same PR-H envelope (I6).
-                const g_wseForTw = g_split.mode === "anchored" && Number.isFinite(g_split.wseFt) ? g_split.wseFt : null;
-                const g_dtwEst = estDepthToWaterFt({ measuredFt: det.depthToWaterFt });         // depth to water (ft below grade)
-                const g_twEst = pondTailwaterResult(selEl, g_gradeFt);   // PR-N/O5 — channel tailwater ladder (never grade)
-                const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });  // don't dig below groundwater
-                const g_poolRelevant = poolRelevantForRole(g_roleInfo.role);                    // permanent pool only for wet ponds
-                const estPillStyle = { fontSize: 9.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.04em", border: `1px solid ${PAL.panelLine}`, borderRadius: 4, padding: "1px 4px", whiteSpace: "nowrap", cursor: "help" };
-                // PR-K — the "In floodway" watch-out now keys off the PRECISE floodway tier (a mapped
-                // ZONE_SUBTY = "FLOODWAY" polygon), not the broad 1% trigger. Approximate Zone A gets
-                // its own "BFE study required" chip. The 1% fringe (Zone AE outside a floodway) shows
-                // neither — its compensating-storage debt lives in the mitigation card, not a chip.
-                const g_tier = pondFloodplainTier(ring, fmZones);
-                const g_facts = {
-                  floodEstimated: g_split.mode === "anchored" && isEstimatedWseSrc(g_split.wseSrc),
-                  rimBelowFlood: !!(g_split.mode === "anchored" && g_split.bands && g_split.bands.fullyInundated),
-                  criteriaUnverified: !!(g_critRule && g_critRule.verified === false),
-                  inFloodway: g_tier.inFloodway,
-                  zoneA: g_tier.zoneA,
-                };
-                const g_chips = pondInspectorChips(g_facts);
-                const g_chipRow = g_chips.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "10px 0 2px" }}>
-                    {g_chips.map((c) => <Chip key={c.id} tone={c.tone} text={c.text} popover={c.popover} />)}
-                  </div>
-                );
-                // v3 UI SPEC B3 — DIMENSIONS rows (label left, value right, bold tabular; value+
-                // unit nowrap G3). Provenance tags are quiet outlined chips (G7) whose definition
-                // rides a hover title; sf/cf conversions live ONLY in the value's hover title (G4).
-                // The geometry-help ⓘ moved to the header (B1).
-                const provTag = (label, title) => (
-                  <span title={title} style={{ flex: "none", display: "inline-block", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", lineHeight: 1.5, borderRadius: 4, padding: "1.5px 5px", whiteSpace: "nowrap", color: PAL.muted, border: `1px solid ${PAL.border}`, cursor: "help" }}>{label}</span>
-                );
-                const g_glanceRow = (label, value, info, valueTitle) => (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: `1px solid ${PAL.panelLine}`, minHeight: 26 }}>
-                    <span style={{ fontSize: 11.5, color: PAL.muted, display: "inline-flex", alignItems: "center", gap: 3 }}>{label}{info ? <RowInfo label={typeof label === "string" ? label : "Pond"} sections={[{ text: info }]} /> : null}</span>
-                    <span title={valueTitle || undefined} style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", cursor: valueTitle ? "help" : undefined }}>{value}</span>
-                  </div>
-                );
-                const g_glanceNum = (s) => <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{s}</span>;
-                const g_purposeBtn = (v, label, tip) => {
-                  const active = v === null ? g_roleInfo.source === "auto" : g_roleInfo.source === "owner" && det.role === v;
-                  return (
-                    <button key={String(v)} title={tip} style={{ ...chip, flex: "0 0 auto", padding: "3px 7px", fontSize: 10, ...(active ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }}
-                      onClick={() => setDet({ role: v })}>{label}</button>
-                  );
-                };
-                const g_grade = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
-                const g_rim = tobEff;
-                const g_rimVsGrade = g_rim != null && g_grade != null ? g_rim - g_grade : null;
-                const g_floodLevel = g_split.mode === "anchored" && g_split.wseFt != null ? g_split.wseFt : null;
-                const g_rimText = g_rim == null ? "not set"
-                  : g_rimVsGrade == null ? `${f1(g_rim)}′ NAVD88`
-                  : Math.abs(g_rimVsGrade) < 0.05 ? "at grade"
-                  : g_rimVsGrade > 0 ? `+${f1(g_rimVsGrade)} ft above grade`
-                  : `−${f1(Math.abs(g_rimVsGrade))} ft below grade`;
-                const g_purposeDescriptor = g_roleInfo.source === "auto" ? POND_PURPOSE_DESCRIPTOR.auto
-                  : POND_PURPOSE_DESCRIPTOR[det.role === "dual" ? "hybrid" : det.role] || POND_PURPOSE_DESCRIPTOR.auto;
-                const g_atAGlance = (
-                  <div style={{ marginBottom: 4 }}>
-                    {/* D2 — Water area is the (shrinking) open water; Berm ring is the interior
-                        annulus; Land take is the FIXED drawn footprint (water + berm ring = footprint). */}
-                    {g_glanceRow("Water area",
-                      <>{g_glanceNum(`${f2(g_waterSf / SQFT_PER_ACRE)} AC`)}{provTag(g_bermH > 0 ? "EST" : "PLAN", g_bermH > 0 ? "Open water inside the berm; it shrinks as the berm rises." : "Measured from your drawn shape")}</>,
-                      null, `${f0(g_waterSf)} SF water surface`)}
-                    {g_bermH > 0 && g_bermRingSf > 0 && g_glanceRow("Berm ring",
-                      <>{g_glanceNum(`${f2(g_bermRingSf / SQFT_PER_ACRE)} AC`)}{provTag("EST", "The earthen berm ring INSIDE the drawn outline. Grows as the berm rises; water + berm ring equal the drawn footprint.")}</>,
-                      null, `${f0(g_bermRingSf)} SF`)}
-                    {g_glanceRow("Land take",
-                      <>{g_glanceNum(`${f2(g_footprintSf / SQFT_PER_ACRE)} AC`)}{provTag("PLAN", "Your drawn footprint: the fixed outer limit of disturbance. It never changes; the berm builds inward.")}</>,
-                      null, `${f0(g_footprintSf)} SF drawn footprint`)}
-                    {g_glanceRow("Total depth",
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                        <NumInput allowClear style={{ ...numInput, width: 60 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
-                        <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                        {det.depth != null && <button style={chipSm} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
-                      </span>,
-                      "water depth + freeboard")}
-                    {g_glanceRow("Rim",
-                      // id (the `pond-release-field-` precedent): the Rim row IS the pond's
-                      // top-of-bank anchor — the field B934 renamed from "Top-of-bank elev. (ft)"
-                      // — and every outlet/routing spec has to set it. Addressing it by its label
-                      // text is not possible (the label span also holds its ⓘ button), so it
-                      // carries a stable id like the release field beside it.
-                      <span id={`pond-rim-field-${selEl.id}`} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                        <NumInput allowClear style={{ ...numInput, width: 58 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "opt."} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
-                        <span style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap" }}>{g_rimText}{g_floodLevel != null ? ` · flood ${f1(g_floodLevel)}′${g_facts.floodEstimated ? " est." : ""}` : ""}</span>
-                        {det.tobElev != null && <button style={chipSm} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
-                      </span>,
-                      "Set the top-of-bank elevation to label rings as real elevations instead of depths. Rim vs grade and the flood level read to the right.")}
-                    {g_glanceRow("Holds (gross)", g_glanceNum(`${f1(g_holdsAcFt)} AC-FT`), "The full geometric tub volume before the flood / tailwater dead-storage split. The USABLE / achievable storage (what counts toward detention, and what the map + verdict report) is lower; see the verdict.", `${f0(r.vol)} cf stored`)}
-                    {g_glanceRow(
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>Purpose <RowInfo label="Purpose" sections={[{ text: POND_PURPOSE_TOOLTIP }]} /></span>,
-                      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-                        <span style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          {g_purposeBtn(null, "Auto", POND_PURPOSE_DESCRIPTOR.auto)}
-                          {g_purposeBtn("detention", POND_ROLE_LABEL.detention, POND_PURPOSE_DESCRIPTOR.detention)}
-                          {g_purposeBtn("mitigation", POND_ROLE_LABEL.mitigation, POND_PURPOSE_DESCRIPTOR.mitigation)}
-                          {g_purposeBtn("dual", POND_ROLE_LABEL.dual, POND_PURPOSE_DESCRIPTOR.hybrid)}
-                        </span>
-                        <span style={{ fontSize: 10, color: PAL.muted }}>picks by site needs · now: {POND_ROLE_LABEL[g_roleInfo.role] || g_purposeDescriptor}</span>
-                      </span>)}
-                  </div>
-                );
-                const g_sizingSummary = pondGroupSummary.sizing({});
-                const g_outletStages = det.outlet && Array.isArray(det.outlet.stages) ? det.outlet.stages.length : 0;
-                // v3 B5 — the closed OUTLET & STORMS summary names the storm outcome, not just the
-                // stage count. Route the same way the expanded group does (same pure helper, no solver
-                // change) so the summary reads "N stages · all storms PASS" / "N stages · M FAIL"; a
-                // non-routable outlet (no TOB anchor) stays "N stages".
-                // One routed pass feeds BOTH the outlet-fail count and the C3 FFE-proximity
-                // screen (the routed peak water-surface elevation) — same pure helper, no solver
-                // change. Null when the pond has no routable outlet / no TOB anchor.
-                const g_routed = (() => {
-                  if (g_outletStages === 0) return null;
-                  const effDetO = detWithAuto(selEl.det);
-                  if (!(effDetO.tobElev != null && Number.isFinite(effDetO.tobElev))) return null;
-                  const critO = critAll;
-                  const daO = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
-                  const impO = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
-                  const tcO = computeTimeOfConcentration({ areaAcres: daO, impPct: impO, criteria: critO });
-                  const twO = g_split && g_split.wseFt != null ? g_split.wseFt : null;
-                  const routedO = assessRoutedDetention({ ring, det: effDetO, outlet: det.outlet, criteria: critO, areaAcres: daO, impPct: impO, tailwaterElevFt: twO, tcMin: tcO?.tcMin });
-                  return routedO.kind === "routed" ? routedO : null;
-                })();
-                const g_outletFails = g_routed ? g_routed.perStorm.filter((s) => s.status !== "pass").length : null;
-                const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, fails: g_outletFails });
-                // v3 C3 — screening guards (warnings only): a rim above grade → gravity-inflow
-                // (inlets-through-the-berm) chip; if the routed peak water climbs to within 1 ft of
-                // the lowest building's finished floor, name that building. Pure decision layer; the
-                // peak WSE is the worst routed max across the modeled storms (null if not routable).
-                const g_peakWseFt = g_routed
-                  ? g_routed.perStorm.reduce((mx, s) => (Number.isFinite(s.maxElevFt) && (mx == null || s.maxElevFt > mx) ? s.maxElevFt : mx), null)
-                  : null;
-                const g_bldgNums = buildingNumbers(els);
-                const g_dockDropFt = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
-                const g_ffeBuildings = els
-                  .filter((e) => e.type === "building")
-                  .map((e) => ({ label: String(g_bldgNums.get(e.id) ?? ""), ffeFt: effectivePadElev(e, { padFfeFt: fmElev.padElevFt, dockDropFt: g_dockDropFt }) }))
-                  .filter((b) => b.label && Number.isFinite(b.ffeFt));
-                const g_guards = pondScreeningGuards({ rimVsGradeFt: g_rimVsGrade, peakWseFt: g_peakWseFt, buildings: g_ffeBuildings });
-                const g_guardRow = g_guards.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "2px 0 2px" }}>
-                    {g_guards.map((c) => <Chip key={c.id} tone={c.tone} text={c.text} popover={c.popover} />)}
-                  </div>
-                );
-                const g_floodSummary = pondGroupSummary.flood({ wse: g_split.mode === "anchored" && g_split.wseFt != null ? f1(g_split.wseFt) : null, estimated: g_facts.floodEstimated });
-                return (
-                  <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                    {/* v3 UI SPEC B1 — header: subtitle (water area) + ⓘ geometry help · pin · Delete. */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                      <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }} title="The open-water surface at the design water level (shrinks as the berm rises); distinct from the drawn footprint at the outer toe.">{f2(g_waterSf / SQFT_PER_ACRE)} AC water surface</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-                        {/* NEW-1/B649504 — "click + on an edge" / "Shift-click to delete" described gestures
-                            this app doesn't have: adding is Shift-click an edge, removing is right-click a
-                            dot (or select it and press Delete). */}
-                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; Shift-click an edge to add a point; right-click a dot to remove one." }]} />
-                        <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
-                        <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={() => deleteSel(null, { entry: "panel:pond" })}>Delete</button>
-                      </span>
-                    </div>
-                    {/* v3 UI SPEC B2 — status card(s): the ONE provided/required statement in this panel (G1).
-                        E2(c) — EXACTLY ONE ⚡ Optimize pond button per panel. NEW-1 (2026-07-28) — that
-                        button no longer lives INSIDE a card. It used to mount on the first NON-GREEN card
-                        (`statusCards.findIndex(tone !== "ok")`), which meant an all-green panel had nothing
-                        for it to attach to and the optimizer VANISHED. It is now a standalone action row
-                        below the cards whose availability is decided by lib/pondOptimizeAffordance.js from
-                        POSSIBILITY alone (drawn ring · known requirement · resolved split) — never tone. */}
-                    {statusCards.length > 0 && (() => {
-                      const toneColorOf = (c) => { const t = c.tone ?? (c.short ? "short" : "ok"); return t === "short" ? PAL.danger : t === "amber" ? PAL.warn : PAL.success; };
-                      return (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 11 }}>
-                        {statusCards.map((c, i) => (
-                          <div key={i} data-testid="pond-verdict-card" style={{ borderLeft: `3px solid ${toneColorOf(c)}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
-                            {/* I5 — HEADLINE (outcome) + a separate styled achieved-vs-required sub-line; never a
-                                wrapped dangling parenthesis. overflowWrap keeps it inside the panel at any width. */}
-                            <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.35, color: toneColorOf(c), overflowWrap: "anywhere" }}>{c.heading}</div>
-                            {c.subline ? <div title={c.basisNote || undefined} style={{ fontSize: 11, color: PAL.muted, fontWeight: 700, lineHeight: 1.4, marginTop: 2, letterSpacing: "0.02em", cursor: c.basisNote ? "help" : undefined }}>{c.subline}</div> : null}
-                            {/* NEW-1 — the buildability answer, DEMOTED off the headline to its own
-                                qualifier line (never deleted: floodway hard stops / the no-rise
-                                certification are real and load-bearing). NEW-2 — the over-provision
-                                state rides the same slot in WARN tone: as visible as a shortfall's
-                                sub-line, never louder than a shortfall's headline. */}
-                            {c.qualifier ? (
-                              <div title={c.qualifier.title || undefined} style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.4, marginTop: 4, color: PAL.warn, cursor: c.qualifier.title ? "help" : undefined, overflowWrap: "anywhere" }}>▲ {c.qualifier.text}</div>
-                            ) : null}
-                            {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                      );
-                    })()}
-                    {/* NEW-1 — THE OPTIMIZER, as ONE LINE (owner decision, 2026-07-28: "I actually don't
-                        even need a button necessarily... I want to lay out my buildings and then fill in
-                        with my ponds"). Not a control to hunt for: a single suggestion that appears only
-                        when the search finds a MATERIALLY smaller basin holding the same required volume,
-                        states the delta plainly, and applies in one atomically-undoable click.
-
-                        Its condition mentions no tone anywhere, which is the whole point — the button this
-                        replaced mounted on `statusCards.findIndex(tone !== "ok")`, so once B1031 kept an
-                        over-dug ledger GREEN the optimizer silently vanished from an all-green panel.
-                        Availability is POSSIBILITY only (drawn ring · known requirement · resolved split),
-                        and the mode that gets a line is "rightsize" — a COVERED or OVER-DUG pond, which is
-                        exactly the case where land can come back. A SHORT pond is not silently dropped: it
-                        keeps the Sizing assistant's raise/deepen/grow Apply chips below, which are that
-                        same one-line-plus-Apply idiom, so nothing is stated twice.
-
-                        Nothing materially better → NOTHING renders. Silence is information. */}
-                    {(() => {
-                      const provAcFt = providedUsableCf != null ? providedUsableCf / CF_PER_ACFT : null;
-                      const provMitAcFt = pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / CF_PER_ACFT : null;
-                      const aff = optimizeAffordance({
-                        hasRing: Array.isArray(ring) && ring.length >= 3,
-                        detRequiredAcFt: sc_detReqAcFt,
-                        mitRequiredAcFt: sc_mitReqAcFt,
-                        splitKnown: provAcFt != null && (sc_mitReqAcFt == null || provMitAcFt != null),
-                        detShort: sc_detReqAcFt != null && provAcFt != null && provAcFt < sc_detReqAcFt - 0.005,
-                        mitShort: sc_mitReqAcFt != null && provMitAcFt != null && provMitAcFt < sc_mitReqAcFt - 0.005,
-                      });
-                      if (!aff.available || aff.mode !== "rightsize") return null;
-                      const alt = materialAlternative(rightSizeResultFor(selEl));
-                      if (!alt) return null;
-                      // The tool PROPOSES. One click writes through the normal element-sync path (one
-                      // atomic undo); the drawn outline is never reshaped without it.
-                      const apply = () => {
-                        pushHistory();
-                        if (selEl.points) setSelEl({ points: scaleRing(ring, alt.scale), depth: alt.depthFt });
-                        else setSelEl({ w: selEl.w * alt.scale, h: selEl.h * alt.scale, depth: alt.depthFt });
-                        flashWarn(`Pond resized to a ${f1(alt.depthFt)}′-deep basin on ${f2(alt.landTakeAc)} AC. One Ctrl+Z reverts.`, 6000);
-                      };
-                      return (
-                        <div data-pond-card="rightsize" data-testid="pond-rightsize" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 11, fontSize: 11, color: PAL.text, lineHeight: 1.5 }}>
-                          <span title={`Screening: a ${f1(alt.depthFt)}′-deep basin holds the same ${f2(alt.achievedAcFt)} AC-FT required volume on ${f2(alt.landTakeAc)} AC instead of ${f2(alt.baseLandTakeAc)} AC. An engineer redraws the chosen basin for real.`}>
-                            {f1(alt.depthFt)}′ deep frees {f2(alt.landSavedAc)} AC
-                            {alt.buildableSfDelta > 0 ? ` · ~${alt.buildableSfDelta.toLocaleString()} SF buildable` : ""}
-                            {alt.earthworkCost != null ? ` · ~$${alt.earthworkCost.toLocaleString()} dirt` : ""}
-                          </span>
-                          <button type="button" onClick={apply} title="Resize this pond to that basin. One Ctrl+Z reverts."
-                            style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Apply</button>
-                        </div>
-                      );
-                    })()}
-                    {designChangeSummary && designChangeSummary.pondId === selEl.id && (
-                      <DesignChangeSummaryCard
-                        summary={designChangeSummary}
-                        onDismiss={() => setDesignChangeSummary(null)}
-                        onUndo={() => { undo(); setDesignChangeSummary(null); }}
-                      />
-                    )}
-                    {g_atAGlance}
-                    {g_chipRow}
-                    {g_guardRow}
-                    {/* PR-G (d) — SOFT geotech warnings (deep excavation below likely groundwater);
-                        never a hard block, but surfaced so the design isn't silently over-optimistic. */}
-                    {(() => {
-                      const soft = assessPondBuildable(selEl).soft;
-                      return soft.length ? (
-                        <div style={{ margin: "3px 0 2px" }}>
-                          {soft.map((s) => <div key={s.code} style={{ fontSize: 11, color: PAL.warn, lineHeight: 1.45, fontWeight: 600 }}>▲ {s.label}</div>)}
-                        </div>
-                      ) : null;
-                    })()}
-                    {/* PR-L — the developer-readable pond SECTION: grade datum, the berm as fill above
-                        grade, the excavation to the floor, storage bands at their true elevations, the
-                        flood + groundwater + receiving-water levels, the outlet, the depth dimension, and
-                        earthwork call-outs. SAME component (+ same facts source) as the ⚡ Optimize card,
-                        so the picture never disagrees with the panel. Open by default (it's the headline
-                        visual); collapsible for space. */}
-                    <Collapse sectionId="pond-section" title="Section" defaultOpen={true} summary="grade · berm · storage bands">
-                      <div style={{ padding: "4px 0 2px" }}>
-                        <Suspense fallback={null}><PondSection facts={sectionFactsFor(selEl)} /></Suspense>
-                      </div>
-                    </Collapse>
-                    {/* PR-J — "Engineering assumptions" is an ENGINEER-ONLY override section: it must
-                        start CLOSED on every fresh load for every pond, so a developer never sees the
-                        criteria unless they open it. persist={false} ignores any stale stored "open"
-                        (e.g. from when this was "Sizing & criteria") — the in-session toggle still works. */}
-                    <Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} persist={false} summary={g_sizingSummary}>
-                    {/* PR-I (I2) — TIER 2: a developer never needs to open this. Every criterion below is
-                        pre-filled with a computed screening estimate (EST) and is editable purely as an
-                        OVERRIDE. Plain-English header, no em dashes. */}
-                    <div style={{ fontSize: 11, color: PAL.ink, lineHeight: 1.5, marginBottom: 8 }}>The app estimated these from the site data. Open only if you want to override a value.</div>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
-                    {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
-                      <div style={{ fontSize: 10.5, color: PAL.info, lineHeight: 1.45, margin: "1px 0 3px" }}>
-                        Solver: ≈{f1(depthSolve.depthFt)}′ deep closes the site's remaining deficit.
-                        <button style={{ ...chip, marginLeft: 6, padding: "2px 8px", fontSize: 10.5 }} onClick={() => setDet({ depth: depthSolve.depthFt })}>Apply</button>
-                      </div>
-                    )}
-                    {depthSolve && !depthSolve.ok && depthSolve.reason === "slopes-collapse" && (
-                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "1px 0 3px", fontWeight: 700 }}>
-                        Solver clamped: this footprint maxes out at ≈{f1(depthSolve.maxUsableDepthFt)}′ ({slope}:1 slopes meet) — even that depth can't close the site deficit. Enlarge the footprint or add a pond.
-                      </div>
-                    )}
-                    <Field label="Freeboard (ft)">
-                      <span style={ROW6}>
-                        <NumInput allowClear style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
-                        {det.freeboard != null
-                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
-                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
-                      </span>
-                    </Field>
-                    <Field label="Side slope (n:1 H:V)">
-                      <span style={ROW6}>
-                        <NumInput allowClear style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
-                        {det.slope != null
-                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
-                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
-                      </span>
-                    </Field>
-                    {/* v3 D5 — the "Max berm (ft)" input was REMOVED. The berm-height cap is COMPUTED,
-                        never a user setting: the smaller of the drainage cap (runoff must still reach
-                        the pond by gravity) and the geometric ceiling (where the inward berm closes the
-                        footprint). Optimize applies up to that cap and the toast names the binding one. */}
-                    {/* Stage contours on the plan — depth rings inside the basin. Default ON
-                        (only `false` is ever stored to hide). Interval + top-of-bank elevation
-                        only show when contours are on (progressive disclosure). */}
-                    {(() => {
-                      const on = det.contours !== false;
-                      return (
-                        <div style={{ marginTop: 6 }}>
-                          <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.ink, cursor: "pointer", alignItems: "center" }} title="Draw depth rings (like a topographic map) inside the pond, and seat the stored volume on it">
-                            <input type="checkbox" checked={on} onChange={(e) => setDet({ contours: e.target.checked ? true : false })} /> Show stage contours on plan
-                          </label>
-                          {on && (
-                            <div style={{ marginTop: 6 }}>
-                              <Field label="Contour interval (ft)">
-                                <span style={ROW6}>
-                                  <NumInput style={{ ...numInput, width: 56 }} value={det.contourInterval ?? autoContourInterval(depth)} min={0.5} onCommit={(n) => setDet({ contourInterval: Math.max(0.5, n) })} />
-                                  {det.contourInterval != null && (
-                                    <button style={chipSm} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
-                                  )}
-                                </span>
-                              </Field>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {det.availDepth != null && (
-                      <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′.</div>
-                    )}
-                    {/* I3 — a permanent pool is only meaningful for a WET pond (retention). A dry
-                        Detention basin has no standing water, so this input does NOT render for it. */}
-                    {g_poolRelevant && (() => {
-                      const poolEst = g_gradeFt != null ? Math.round((g_gradeFt - g_dtwEst.valueFt) * 10) / 10 : (g_wseForTw ?? null);
-                      const usingEst = det.poolElev == null && Number.isFinite(poolEst);
-                      return (
-                        <Field label="Permanent pool elev. (ft)">
-                          <span style={ROW6}>
-                            <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? (Number.isFinite(poolEst) ? poolEst : "")} placeholder="water table" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
-                            {det.poolElev != null
-                              ? <button style={chipSm} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
-                              : usingEst && <span title="Screening estimate: the seasonal-high water table (grade minus depth to water). Refine with a geotech boring." style={estPillStyle}>EST</span>}
-                          </span>
-                        </Field>
-                      );
-                    })()}
-                    {/* PR-G/PR-I — the 100-yr receiving-water (tailwater) elevation the pond must discharge
-                        above by gravity; storage below it is DEAD. PR-I (I1): pre-filled with a screening
-                        estimate (the flood WSE, else existing grade) so it's never a blank demanding an
-                        expert value — the developer's typed value overrides. */}
-                    <Field label="Receiving water (100-yr tailwater) elev. (ft)">
-                      <span style={ROW6}>
-                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? (Number.isFinite(g_twEst.valueFt) ? Math.round(g_twEst.valueFt * 10) / 10 : "")} placeholder="outfall elev" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
-                        {det.receivingFlowlineElev != null
-                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
-                          : Number.isFinite(g_twEst.valueFt)
-                            ? <span title={`Estimated from ${g_twEst.sourceLabel || "channel data"}. ${g_twEst.sourceTip || ""} The receiving channel's stage at the outfall; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>
-                            : <span title="The receiving-water level comes from the drainage district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline (never site grade). None resolved here, so enter the outfall elevation or check the Drainage district group. Leaving it blank means the gravity-discharge check is skipped, not failed." style={{ ...estPillStyle, color: PAL.warn }}>needs channel data</span>}
-                      </span>
-                    </Field>
-                    {/* NEW-26 (owner directive 2026-07-24) — the outfall's flood connection. By DEFAULT a pond
-                        is hydraulically CONNECTED to the floodplain through this outfall: during a flood the
-                        receiving water backs IN through the outlet and its below-flood cut counts as
-                        compensating (mitigation) storage. Ticking this marks the outfall as GATED (a flap
-                        valve / backflow preventer keeps the flood out), which zeroes that in-pond mitigation
-                        credit. Stored only when true — an unmarked pond stays connected. */}
-                    <div style={{ marginTop: 6 }}>
-                      <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.ink, cursor: "pointer", alignItems: "center" }} title="Tick only if the outfall carries a flap valve or backflow preventer (or is otherwise sealed against the receiving water). Sealed means the flood cannot back into the pond, so the pond's below-flood storage no longer counts as compensating (mitigation) storage. Left unticked, the pond is treated as an open, connected outfall (the default) and its below-flood cut is credited.">
-                        <input type="checkbox" checked={!!det.outletGated} onChange={(e) => setDet({ outletGated: e.target.checked ? true : null })} /> Outfall gated (flap valve, no floodplain backflow)
-                      </label>
-                    </div>
-                    {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
-                        below groundwater"), else the 12-ft fallback. A warning, never a hard block. */}
-                    <Field label="Max excavation depth (ft)">
-                      <span style={ROW6}>
-                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? (Number.isFinite(g_maxExcavEst.valueFt) ? Math.round(g_maxExcavEst.valueFt * 10) / 10 : "")} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT}`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
-                        {det.maxExcavDepthFt != null
-                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
-                          : Number.isFinite(g_maxExcavEst.valueFt) && <span title={`Screening estimate: ${g_maxExcavEst.source === "depth-to-water" ? "the seasonal-high depth to water (don't dig below groundwater)" : "a conservative default"}. Refine with a geotech boring.`} style={estPillStyle}>EST</span>}
-                      </span>
-                    </Field>
-                    <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: RADIUS.md, padding: "8px 10px" }}>
-                      {pondRow("Top-of-bank area", `${f0(r.aTop)} SF`)}
-                      {pondRow("Water-surface area", `${f0(r.aWater)} SF`)}
-                      {pondRow("Bottom area", `${f0(r.aBottom)} SF`)}
-                      {pondRow("Water depth", `${f1(r.dw)} ft`)}
-                      <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
-                      {tobEff != null && pondRow("Pond floor", `${f1(tobEff - depth)}′ NAVD88`,
-                        det.tobElev != null ? { code: "yours" } : { code: "survey", basis: "Top of bank ≈ existing grade — site 3DEP elevation median." })}
-                      {pondRow("Stored volume", `${f1(r.vol / CF_PER_ACFT)} AC-FT`, { code: "plan", basis: `${f0(r.vol)} cf. Prismoidal (average-end-area) volume off this pond's drawn top-of-bank footprint; the basin tapers ${slope}:1 to its floor.` })}
-                    </div>
-                    {!r.feasible && (
-                      <div style={{ fontSize: 10.5, color: PAL.danger, lineHeight: 1.4, marginTop: 4, fontWeight: 700 }}>
-                        ⚠ This footprint can't hold an {f1(depth)}′ pond at {slope}:1 side slopes — the opposing slopes meet at about {f1(r.maxDepth)}′ deep. The volume above is for that {f1(r.maxDepth)}′ basin. Reduce the depth, flatten the side slope, or enlarge the footprint.
-                      </div>
-                    )}
-                    {/* B708/B709 — the anchored flood-WSE split, criteria conformance, the
-                        maintenance-berm land take, and the drawdown / berm-as-fill screens.
-                        Salience tracks importance: flags are loud + solid, never faded. */}
-                    {(() => {
-                      const split = pondSplitFor(selEl);
-                      const critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
-                      const crit = checkPondCriteria(det, critRule);
-                      const dd = drawdownWarning(det);
-                      const berm = bermAsFillHeight(det, fmElev.existGradeFt);
-                      // D2 — INWARD berm: land take is the FIXED drawn footprint. The berm builds
-                      // INSIDE the outline (never an outward ring), so it can never overlap the layout
-                      // and there is no outward-ring overlap check to run.
-                      const landTakeSf = ringsArea([ring]);
-                      // The materialized-berm fill facts (height/crest/fill volume/below-WSE displacement)
-                      // still come from the fill-cell model for the "Bermed basin" note + mitigation.
-                      const matBerm = pondBermById.get(selEl.id) || null;
-                      // B895 — WatchOutChip supplies its own ⚠ glyph, so callers no longer prefix one.
-                      const warnLine = (txt, key, danger) => <WatchOutChip key={key} danger={danger}>{txt}</WatchOutChip>;
-                      const noteLine = (txt, key) => (
-                        <div key={key} style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 3 }}>{txt}</div>
-                      );
-                      const out = [];
-                      if (split.mode === "anchored" && split.bands && split.wseFt != null) {
-                        out.push(
-                          <div key="split" style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / CF_PER_ACFT)} AC-FT`)}
-                            {pondRow("Below flood WSE", `${f1(split.bands.mitigationCandidateCf / CF_PER_ACFT)} AC-FT`)}
-                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f1(split.bands.poolDeadCf / CF_PER_ACFT)} AC-FT`)}
-                          </div>
-                        );
-                        // FINAL UI SPEC A2 — the flood-WSE caption, the ESTIMATE warning, and the
-                        // fully-inundated warning move OUT of visible prose: their text now rides the
-                        // "Flood level is estimated" / "Rim below flood level" chip popovers (A3) and
-                        // the Flood & datum group. The value rows above stay.
-                      } else if (split.mode === "unknown") {
-                        // NEW-9 — a restored check without this pond's persisted facts: the split is
-                        // unknown, and the gross figure above must not read as usable.
-                        out.push(warnLine("Remembered check — this pond's usable/dead split wasn't saved with it. Usable detention is unknown until the next live check; the gross number above OVERSTATES usable.", "split-unknown", false));
-                      } else if (split.mode === "anchored" && split.bands && split.bands.poolDeadCf > 0) {
-                        out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / CF_PER_ACFT)} AC-FT of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
-                      } else if (split.inTrigger) {
-                        // B822 — an auto-anchored pond (3DEP TOB) reaches here only when the reach's
-                        // flood elevation is unknown; the truly-unanchored copy fires only when there
-                        // is NO anchor at all (no manual, no 3DEP median).
-                        out.push(warnLine(tobEff != null
-                          ? "This pond sits in the mapped floodplain and its top of bank is anchored, but the reach's flood elevation is unknown — enter the BFE (drainage inputs in Yield) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention."
-                          : "This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
-                      }
-                      if (crit.slope) out.push(warnLine(`${crit.slope.slope}:1 interior side slopes are steeper than the ${crit.slope.maxSideSlope}:1 criteria cap (${critRule.label}).`, "crit-slope", false));
-                      if (crit.freeboard) out.push(warnLine(`${f1(crit.freeboard.freeboard)}′ freeboard is under the ${f1(crit.freeboard.minFreeboardFt)}′ criteria minimum (${critRule.label}).`, "crit-fb", false));
-                      if (landTakeSf != null) {
-                        // FINAL UI SPEC A1.4 — the land-take value lives in the At-a-glance table.
-                        // D2 — the inward berm never overlaps the layout, so the old outward-ring
-                        // overlap watch-out is gone; fee-in-lieu / optimizer notes below stay.
-                        // NEW-C2 (Phase C) — if the jurisdiction has a regional-detention / fee-in-lieu
-                        // program, show the deal trade: paying in lieu of this on-site pond recovers its
-                        // land-take back to buildable ground.
-                        const rdAuthId = ({ harris: "hcfcd", fortbend: "fortbend", coh: "coh" })[floodJurKey] || floodJurKey;
-                        const rd = regionalDetentionFor(rdAuthId);
-                        if (rd && rd.available === true) {
-                          const cmp = feeInLieuCompare({ pondLandTakeAc: landTakeSf / SQFT_PER_ACRE, requiredAcFt: detReq && detReq.kind === "point" ? detReq.requiredAcFt : null, coverageRatio: 0.4 });
-                          if (cmp.buildableSfRecovered != null) {
-                            out.push(noteLine(`Fee-in-lieu may be available (${rd.authorityLabel}): paying in lieu of this on-site pond could recover ~${cmp.buildableSfRecovered.toLocaleString()} SF buildable from its ${f2(cmp.landRecoveredAc)}-ac land take (screening, 40% coverage). ${rd.eligibilityNote} Verify the fee + eligibility with the district.`, "fee-in-lieu"));
-                          }
-                        }
-                        // NEW-D1 (Phase D) — the pond economics optimizer USED to render its answer
-                        // here, buried as one gray sentence inside "Engineering assumptions" where a
-                        // developer never looks. NEW-1 (2026-07-28) promoted it to the ONE apply-gated
-                        // suggestion line beside the status cards, so this copy is DELETED rather than
-                        // duplicated: PANEL-BREVITY forbids stating the same fact in two places.
-                      }
-                      if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
-                        out.push(noteLine("Criteria values are unverified placeholders: confirm in Standards against the county criteria manual (PCPM / DCM).", "crit-unv"));
-                      }
-                      // NEW-B (Phase B) — soils/groundwater wet-vs-dry pond screen + subsidence-district
-                      // flag. Depth-to-water is manual here (auto-fills from SSURGO once the /api/soils
-                      // proxy is live — SDA is egress-blocked in the sandbox); grade + county come from
-                      // facts the app already holds, so this adds no new fetch.
-                      {
-                        const gwCounties = drainCtxData?.authority?.jurisdiction?.county || [];
-                        const dtw = Number.isFinite(det.depthToWaterFt) ? det.depthToWaterFt : null;
-                        const gw = pondGroundwaterScreen({ depthToWaterFt: dtw, gradeElevFt: fmElev.existGradeFt, tobElevFt: tobEff, pondDepthFt: Number.isFinite(det.depth) ? det.depth : 8 });
-                        // PR-I (I1) — pre-fill with the regional seasonal-high screening estimate so the
-                        // developer never faces a blank; the measured value (SSURGO/TWDB) overrides + drives
-                        // the detailed wet/dry message above.
-                        const dtwEstField = estDepthToWaterFt({ measuredFt: det.depthToWaterFt });
-                        out.push(
-                          <div key="gw-dtw" style={{ marginTop: 6 }}>
-                            <Field label="Depth to water (ft)">
-                              <span style={ROW6}>
-                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? (Number.isFinite(dtwEstField.valueFt) ? dtwEstField.valueFt : "")} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
-                                {dtw == null && dtwEstField.estimated && <span title="Screening estimate: a shallow Gulf-Coast seasonal-high water table. Refine with SSURGO / a TWDB well / a geotech boring." style={estPillStyle}>EST</span>}
-                                <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well). Pre-filled with a regional screening estimate until a measured value is entered." }]} />
-                              </span>
-                            </Field>
-                          </div>
-                        );
-                        if (gw.known) out.push(gw.wetPond ? warnLine(gw.message, "gw-wet", false) : noteLine(gw.message, "gw-dry"));
-                        else if (dtw != null) out.push(noteLine(gw.message, "gw-note"));
-                        const subs = subsidenceFlag(gwCounties);
-                        if (subs) out.push(noteLine(`Subsidence: ${subs.message}`, "subsidence"));
-                      }
-                      // NEW-11/B831 — this pond vs drawn easements + the assumed pipeline corridor.
-                      {
-                        const enc = pondEncumbrances.find((c) => c.pondId === selEl.id);
-                        if (enc) {
-                          out.push(warnLine(`Pond overlaps a pipeline/easement corridor by ~${f2(enc.totalSf / SQFT_PER_ACRE)} AC — operator approval / relocation risk.`, "pond-enc", false));
-                          out.push(noteLine("Verify the recorded easement width — the pipeline corridor is an ASSUMED screening band off a schematic centerline (not a surveyed easement). Applies to detention and mitigation basins alike.", "pond-enc-note"));
-                        }
-                      }
-                      if (dd) out.push(warnLine(`Gravity drawdown unlikely below ${f1(dd.flowlineElev)}′ — the pond bottom sits ${f1(dd.belowByFt)}′ below the receiving flowline. Pump station or a shallower basin (≤ ${f1(dd.suggestedMaxDepthFt)}′ deep).`, "drawdown", false));
-                      if (matBerm && matBerm.maxHeightFt > 0.25) {
-                        // NEW-6 — the berm is now MODELED dirt: crest at TOB, per-cell height off the
-                        // grade grid, priced into the fill heat map + earthwork + (in-trigger) mitigation.
-                        out.push(warnLine(`Bermed basin: crest ${f1(matBerm.crestElevFt)}′ NAVD88, up to ${f1(matBerm.maxHeightFt)}′ above existing grade. The berm is modeled fill (~${f0(matBerm.volCf / 27)} cy)${matBerm.floodCf > 0 ? `, ~${f2((matBerm.floodCf * (fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1)) / CF_PER_ACFT)} AC-FT of it below the flood WSE; 1:1 offset applies` : ""}.`, "berm-fill", false));
-                        if (split.inTrigger) {
-                          // Waller §A(9) note + the conveyance caution (a ring levee in the floodplain
-                          // can block flow — engineer's check).
-                          if (floodJurKey === "waller") out.push(noteLine("Berms are fill — the 1:1 offset applies; §A(9) targets structural fill for structures, but confirm berm treatment with the County Engineer.", "berm-waller"));
-                          out.push(noteLine("Conveyance caution: a ring levee in the mapped floodplain can block flow (a no-rise / H&H check is your engineer's call) — this screening models the fill volume, not the hydraulic effect.", "berm-conveyance"));
-                        }
-                      } else if (berm != null) {
-                        out.push(warnLine(`Bermed basin: the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
-                      }
-                      return out.length ? <>{out}</> : null;
-                    })()}
-                    {/* FINAL UI SPEC A1.4 — the Purpose 4-way toggle moved to the At-a-glance
-                        table (with per-option tooltips); the "Auto from elevation ~X%…" explanation
-                        paragraph is deleted. The one-time Hybrid teaching hint is preserved here. */}
-                    {g_roleInfo.role === "dual" && !hybridHintSeen && (
-                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                        <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
-                        <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: RADIUS.pill, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
-                      </div>
-                    )}
-                    {/* NEW-13/B830 — the one-click berm: when the site is SHORT and this pond is
-                        part of the solved joint berm, offer the apply chip right here (and in the
-                        Yield balancer card — same payload, same click). Fringe ponds render the
-                        exclusion reason instead of a suggestion; an applied berm shows its
-                        provenance (× on the elevation field restores auto). */}
-                    {(() => {
-                      const bal = drainBalancer;
-                      if (!bal) return null;
-                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "3px 0 0" };
-                      const out = [];
-                      const bermApplied = det.tobBerm && (det.tobBerm.applied == null ? selEl.det?.tobElev == null : Math.abs((selEl.det?.tobElev ?? NaN) - det.tobBerm.applied) < 0.01);
-                      if (bermApplied) {
-                        out.push(<div key="berm-prov" style={smallNote}>Berm — auto-solved: +{f1(det.tobBerm.h)}′ over the pre-berm bank rides this pond's top of bank. × on the elevation field restores auto.</div>);
-                      }
-                      const bermMove = !bermApplied && bal.moves ? bal.moves.find((m) => m.kind === "berm-raise" && m.apply && m.apply.perPond.some((t) => t.id === selEl.id)) : null;
-                      if (bermMove) {
-                        const mine = bermMove.apply.perPond.find((t) => t.id === selEl.id);
-                        out.push(
-                          <button key="berm-chip" style={{ ...chip, width: "100%", marginTop: 8, padding: "7px 10px", fontWeight: 700, textAlign: "center" }} title={bermMove.info}
-                            onClick={() => applyBermMove(bermMove.apply)}>{bermMove.label} — Apply</button>
-                        );
-                        out.push(<div key="berm-note" style={smallNote}>Applies jointly to {bermMove.apply.perPond.length} upland detention pond{bermMove.apply.perPond.length > 1 ? "s" : ""} (one shared height — volume lands in proportion to area); this pond takes +{f2((mine?.addCf || 0) / CF_PER_ACFT)} AC-FT. The berm itself is fill.</div>);
-                      }
-                      const excl = bal.bermExcluded && bal.bermExcluded.find((x) => x.id === selEl.id);
-                      if (excl && excl.reason === "floodplain-fringe") {
-                        out.push(
-                          <div key="berm-excl" title="Berming below the flood WSE changes how the floodplain itself behaves (levee-adjacent hydraulics): the auto-suggest won't propose it; that is engineer territory." style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 6, fontWeight: 700, cursor: "help" }}>
-                            Excluded from the berm auto-suggest: floodplain fringe.<span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4, fontWeight: 400 }} aria-hidden="true">ⓘ</span>
-                          </div>
-                        );
-                      }
-                      return out.length ? <>{out}</> : null;
-                    })()}
-                    {/* NEW-4 — the sizing assistant: solve the pond's TWO banded targets (below-WSE
-                        mitigation, above-WSE usable detention) from the SAME bands the audit rows
-                        read, so the assistant can never disagree with the ledger. Proposals only —
-                        the owner redraws (the one apply affordance stays the B830 berm chip above). */}
-                    {(() => {
-                      const split = pondSplitFor(selEl);
-                      const effDet = detWithAuto(selEl.det);
-                      // Bands only exist on an anchored pond with a water surface — the assistant
-                      // refuses (with the reason) rather than designing off gross (LOUD-FAILURE).
-                      const mitReqCf = fmResultView && fmResultView.volumeCf != null ? fmResultView.volumeCf : null;
-                      const detReqCf = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * CF_PER_ACFT : null;
-                      if (mitReqCf == null && detReqCf == null) return null; // nothing to solve toward
-                      if (split.wseFt == null && !split.inTrigger) return null; // upland pond — no bands; the B633 auto-size covers detention-only sizing
-                      const mineCredited = split.mode === "anchored" && split.bands ? split.bands.mitigationCandidateCf : 0;
-                      const eff = effectivePondRole(effDet, split);
-                      const mineCounted = eff.role === "mitigation" || eff.role === "dual" ? mineCredited : 0;
-                      const othersCredited = pondLedger.creditedMitCf != null ? Math.max(0, pondLedger.creditedMitCf - mineCounted) : null;
-                      const othersUsable = providedUsableCf != null && split.usableCf != null ? Math.max(0, providedUsableCf - split.usableCf) : null;
-                      const mitTargetCf = mitReqCf != null && othersCredited != null ? Math.max(0, mitReqCf - othersCredited) : 0;
-                      const detTargetCf = detReqCf != null && othersUsable != null ? Math.max(0, detReqCf - othersUsable) : 0;
-                      if (!(mitTargetCf > 0) && !(detTargetCf > 0) && split.wseFt == null) return null;
-                      const assist = sizePondForTargets({
-                        ring, det: effDet,
-                        wseFt: split.wseFt, wseProvider: split.wseSrc ?? null,
-                        inTrigger: !!split.inTrigger,
-                        gradeFt: fmElev.existGradeFt,
-                        mitTargetCf, detTargetCf,
-                        mitRatio: fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1,
-                        coincidentStorm, // R1 — solver honors the same coincident-storm policy as the split
-                      });
-                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 0" };
-                      const actLine = (txt, key, warn) => (
-                        <div key={key} style={{ fontSize: 10.5, color: warn ? "var(--warn-text)" : PAL.text, lineHeight: 1.5, marginTop: 3 }}>{txt}</div>
-                      );
-                      const head = (
-                        <div key="assist-head" style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 4 }}>
-                          Sizing assistant (screening){assist.estimated ? <span style={{ color: "var(--warn-text)" }}>{" · est. WSE"}</span> : null}
-                        </div>
-                      );
-                      const body = [];
-                      if (!assist.ok) {
-                        body.push(actLine(`Assistant unavailable: ${assist.reason}.`, "assist-refuse", true));
-                      } else {
-                        // FINAL UI SPEC A2 — the "mitigation covered ✓" status is redundant with the
-                        // status card at the top of the inspector; keep only the detention status.
-                        const detTxt = detTargetCf > 0 || detReqCf != null
-                          ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / CF_PER_ACFT)} AC-FT`}`
-                          : null;
-                        // v3 A4 — the bare no-target fallback line is deleted; render the status
-                        // line only when there is a detention target to speak to.
-                        if (detTxt) body.push(actLine(detTxt, "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
-                        // NEW-5 — the remedies are one-click APPLICABLE (apply-gated, never auto):
-                        // each Apply writes the real element fields through the normal element-sync
-                        // path (setDet = pushHistory + setSelEl → ONE atomic undo), auto-recompute
-                        // re-runs, and the changed verdicts flash. A compact preview diff rides the
-                        // hover title. Grow ghosts nothing blind — it collision-checks (B709) and
-                        // disables on a hit; solver-infeasible (pinch-off) never renders Apply.
-                        const grade = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
-                        const ratio = fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1;
-                        const use0 = assist.detention.providedCf;
-                        const applyChip = (onApply, title, disabled, disabledReason) => (
-                          <button type="button" disabled={disabled} title={disabled ? disabledReason : title} onClick={disabled ? undefined : onApply}
-                            style={{ marginLeft: 8, flex: "none", cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: `1px solid ${disabled ? PAL.panelLine : "var(--accent)"}`, background: disabled ? "transparent" : "var(--accent)", color: disabled ? PAL.muted : "var(--on-accent)", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1 }}>Apply</button>
-                        );
-                        const actApply = (txt, key, warn, chip) => (
-                          <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 10.5, color: warn ? "var(--warn-text)" : PAL.text, lineHeight: 1.5, marginTop: 3 }}>
-                            <span>{txt}</span>{chip}
-                          </div>
-                        );
-                        for (const a of assist.actions) {
-                          // v3 A4 — the "usable detention is ZERO — flood WSE at/above the top of bank"
-                          // notice is deleted here: the pond status card and Flood & datum already say
-                          // the rim sits below flood, so repeating it in the assistant is redundant.
-                          if (a.kind === "inundated") { /* not rendered */ }
-                          else if (a.kind === "raise-tob") {
-                            const newTob = effDet.tobElev + a.hFt;
-                            const newBermH = grade != null ? newTob - grade : null;
-                            const mitAdd = a.bermFillBelowWseCf ? (a.bermFillBelowWseCf * ratio) / CF_PER_ACFT : 0;
-                            const preview = `TOB ${f1(effDet.tobElev)} → ${f1(newTob)}${newBermH != null ? ` · berm ${f1(newBermH)}′ above grade` : ""} · usable ${f2(use0 / CF_PER_ACFT)} → ${f2((use0 + a.addCf) / CF_PER_ACFT)} AC-FT${mitAdd > 0.005 ? ` · mitigation req +${f2(mitAdd)} AC-FT (berm fill)` : ""}. One Ctrl+Z reverts.`;
-                            const onApply = () => setDet({ tobElev: Math.round(newTob * 100) / 100, depth: (Number.isFinite(effDet.depth) ? effDet.depth : depth) + a.hFt, tobBerm: { h: a.hFt, applied: Math.round(newTob * 100) / 100 } });
-                            body.push(actApply(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / CF_PER_ACFT)} AC-FT usable${a.partial ? `; the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / CF_PER_ACFT)} AC-FT) folded into the mitigation requirement` : ""}.`, "assist-tob", false, applyChip(onApply, preview, false)));
-                          }
-                          else if (a.kind === "deepen") {
-                            const preview = `depth ${f1(Number.isFinite(effDet.depth) ? effDet.depth : depth)}′ → ${f1(a.depthFt)}′ · below-WSE +${f2(a.addCf / CF_PER_ACFT)} AC-FT (pinch-off ceiling ${f1(a.maxDepthFt)}′). One Ctrl+Z reverts.`;
-                            const onApply = () => setDet({ depth: a.depthFt });
-                            body.push(actApply(`→ deepen the floor to ${f1(a.depthFt)}′ design depth → +${f2(a.addCf / CF_PER_ACFT)} AC-FT below the WSE (pinch-off ceiling ${f1(a.maxDepthFt)}′).`, "assist-deepen", false, applyChip(onApply, preview, false)));
-                          }
-                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label}: the floor can only add ${f2((a.ceilingCf || 0) / CF_PER_ACFT)} AC-FT more.`, "assist-pinch", true));
-                          else if (a.kind === "grow") {
-                            const candRing = scaleRing(ring, a.factor);
-                            const hits = els.filter((e2) => e2.id !== selEl.id && ["building", "parking", "trailer"].includes(e2.type) && ringsOverlap(candRing, ringOf(e2)));
-                            const pastLine = parcels.length && candRing.some((p) => !parcels.some((pc) => pc.points && pointInRing(p, pc.points)));
-                            const collideReason = hits.length ? `grown footprint overlaps ${hits.length === 1 ? "an element" : hits.length + " elements"} in your layout` : pastLine ? "grown footprint extends past the property line" : null;
-                            const preview = `footprint +${f2(a.addAcres)} AC (×${a.factor.toFixed(2)}) at the current depth. Collision-checked (B709); one Ctrl+Z reverts.`;
-                            const onApply = () => { pushHistory(); if (selEl.points) setSelEl({ points: candRing }); else setSelEl({ w: selEl.w * a.factor, h: selEl.h * a.factor }); };
-                            body.push(actApply(`→ or grow the footprint ~+${f2(a.addAcres)} AC (at the current depth) to reach the mitigation target.`, "assist-grow", false, applyChip(onApply, preview, !!collideReason, collideReason || "")));
-                          }
-                          else if (a.kind === "grow-infeasible") body.push(actLine("→ even ~3× the footprint can't reach the mitigation target at these slopes. Rethink the basin.", "assist-grow-inf", true));
-                        }
-                        if (assist.ok && assist.mitigation.covered && assist.detention.covered && !assist.actions.length) {
-                          body.push(actLine("Both bands cover their remaining site targets. No resize needed.", "assist-ok"));
-                        }
-                        if (mitTargetCf > 0 && eff.role === "detention") {
-                          body.push(actLine("This pond's purpose is Detention: its below-WSE cut is NOT credited to mitigation. Switch the purpose to Mitigation or Hybrid to count it.", "assist-role", true));
-                        }
-                        if (split.inTrigger && floodJurKey === "waller" && assist.actions.some((a) => a.kind === "raise-tob")) {
-                          body.push(<div key="assist-waller" style={smallNote}>Unincorporated Waller: berms are fill — the 1:1 offset applies; the no-structural-fill rule (Art. 5 §A(9)) targets structures, but confirm berm treatment with the County Engineer.</div>);
-                        }
-                      }
-                      return (
-                        <div data-pond-card="assistant" style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          {head}
-                          {body}
-                        </div>
-                      );
-                    })()}
-                    {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
-                        Modified Rational (rate-based) method in detentionRules.js; the authority
-                        site total (detReq) is shown for reference. A pumped outfall credits its
-                        constant discharge and suppresses the Regime-B tailwater penalty (noted). */}
-                    {(() => {
-                      const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
-                      const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
-                      const storm = det.designStorm || 100;
-                      const rel = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
-                      // B902 — AUTO-SUGGEST: the site's own pre-development peak discharge (a
-                      // screening estimate), offered as a placeholder + one-click "Use" for districts
-                      // (Waller, BKDD) that publish no cfs/ac cap. Never overrides a stored release.
-                      const detCriteria = critAll;
-                      // B905 — COMPUTED time of concentration (Kirpich) — see the RATE CONTROL
-                      // section below for the full explanation; used here so this card's suggested
-                      // release agrees with the one the outlet solver actually targets.
-                      const detTc = rel == null ? computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria: detCriteria }) : null;
-                      const suggested = rel == null ? suggestedPreDevReleaseCfs({ requiredStorms: detCriteria.requiredStorms, areaAcres: da, tcMin: detTc?.tcMin }) : null;
-                      // v3 A3 — the rate-based required-vs-provided card was RELOCATED: its result now
-                      // renders as ONE row in "Outlet & storms" (Outlet sizing check · rate control),
-                      // where the outlet that answers it lives, and no longer restates the site's
-                      // volumetric detention requirement here. What stays are the runoff / rate inputs
-                      // that feed both the outlet routing and that row.
-                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" };
-                      return (
-                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Sizing inputs (screening)</div>
-                          <Field label="Drainage area (ac)">
-                            <span style={ROW6}>
-                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
-                              {det.daAcres != null && <button style={chipSm} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
-                            </span>
-                          </Field>
-                          <Field label="Impervious %">
-                            <span style={ROW6}>
-                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
-                              {det.daImpPct != null && <button style={chipSm} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
-                            </span>
-                          </Field>
-                          {det.daImpPct == null && <div style={smallNote}>Impervious % auto from the plan.</div>}
-                          <Field label="Design storm">
-                            <select style={{ ...numInput, width: 88 }} value={storm} onChange={(e) => setDet({ designStorm: +e.target.value })}>
-                              {DESIGN_STORM_PERIODS.map((p) => <option key={p} value={p}>{p}-yr</option>)}
-                            </select>
-                          </Field>
-                          <div id={`pond-release-field-${selEl.id}`}>
-                            <Field label="Allowable release (cfs)">
-                              <span style={ROW6}>
-                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder={suggested ? `≈${suggested.cfs}` : "—"} min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
-                                {suggested && (
-                                  <SourceTag code="estimate" label="Allowable release (cfs)" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each of ${detCriteria.label}'s required design storms (${detCriteria.requiredStorms.join("/")}-yr) — the smallest (most restrictive), the ${suggested.governingStormYr}-yr storm, governs. ${detCriteria.label} publishes no cfs/ac release cap, so Post ≤ Pre screens the outlet against the site's own computed pre-development peak. A screening estimate — type your own release to override.`} />
-                                )}
-                              </span>
-                            </Field>
-                          </div>
-                          {suggested && (
-                            <div style={smallNote}>
-                              ≈ {suggested.cfs} cfs — suggested (pre-development peak) · <ActionLink onClick={() => setDet({ releaseRateCfs: suggested.cfs })}>Use this →</ActionLink>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
-                        (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
-                    {!inMode ? (
-                      <div style={{ marginTop: 11 }}>
-                        <button style={{ ...chip, width: "100%", padding: "8px 10px", fontWeight: 700 }} onClick={startExpand} title="See how much more detention you'd gain by enlarging this pond: it snapshots today's size, then you push the banks out or dig deeper.">Expand this pond</button>
-                        {/* B633 — auto-size: solve the expand offset that closes the SITE's
-                            detention shortfall (B630's required-vs-provided), then land the
-                            user in the normal expand mode (baseline + ghost + overlap /
-                            property-line warnings) to review and press Done. */}
-                        {(() => {
-                          if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
-                          const requiredCf = detReq.requiredAcFt * CF_PER_ACFT;
-                          // Regime B (B632): the permanent pool below the static water surface
-                          // stores nothing — and it GROWS with the footprint (fixed water
-                          // surface, bigger basin), so the solver must target USABLE volume =
-                          // gross − dead AT EACH candidate size, not subtract a frozen constant.
-                          // Missing elevations → poolDepthFt null → REFUSE (never a fabricated pool).
-                          const regimeB = detRegime && detRegime.regime === "B";
-                          const poolDepthFt = regimeB
-                            ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: depth, freeboardFt: fb })
-                            : 0;
-                          // B708: current usable via the ONE shared helper (anchored split when
-                          // the pond carries a real WSE; the Regime-B estimate otherwise) — the
-                          // same number the metrics loop and the B655 card show.
-                          const thisSplit = pondSplitFor(selEl);
-                          const anchoredThis = thisSplit.mode === "anchored";
-                          const thisDeadCf = thisSplit.deadCf;
-                          const thisUsableCf = thisSplit.usableCf;
-                          // NEW-9 — a restored view without the per-pond split facts has an UNKNOWN
-                          // usable (null, not zero): refuse to auto-size against it (the readout
-                          // already says "re-check"); manual expand stays available.
-                          if (providedUsableCf == null || thisUsableCf == null) return null;
-                          // Target THIS pond's usable so the SITE meets required: other ponds'
-                          // usable is the site total minus this pond's current usable.
-                          const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
-                          const targetUsableCf = requiredCf - otherUsableCf;
-                          if (targetUsableCf <= thisUsableCf) return null; // this pond already covers its share
-                          const regimeUnsure = !detRegime || detRegime.regime === "unknown" || drainFacts()?.floodFailed;
-                          const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
-                          const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
-                          const sizeForRequired = () => {
-                            // An ANCHORED pond needs no estimated pool — its split is real.
-                            if (!anchoredThis && regimeB && poolDepthFt == null) {
-                              flashWarn("⚠ In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
-                              return;
-                            }
-                            // volumeAt returns USABLE volume (gross − permanent pool) at the candidate footprint.
-                            const grossAt = (N) => {
-                              if (selEl.points) {
-                                const g = N > 0 ? expandPolygon(ring, N) : ring;
-                                if (!g || polySelfIntersects(g)) return null;
-                                return { g, res: detentionStorage(g, depth, fb, slope) };
-                              }
-                              const g = elCorners({ ...selEl, w: selEl.w + 2 * N, h: selEl.h + 2 * N });
-                              return { g, res: detentionStorage(g, depth, fb, slope) };
-                            };
-                            const volumeAt = (N) => {
-                              const gr = grossAt(N);
-                              if (!gr) return null;
-                              // Same shared split at the CANDIDATE footprint: anchored ponds keep
-                              // their real WSE (screening: the current reach's governing WSE), the
-                              // rest subtract the Regime-B pool that grows with the footprint.
-                              const u = usablePondVolume(gr.g, { ...det, depth, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolDepthFt });
-                              return { ...gr.res, vol: u.usableCf };
-                            };
-                            const s = solvePondExpansion({ requiredCf: targetUsableCf, volumeAt });
-                            if (s.ok) {
-                              pushHistory();
-                              const baseline = { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope };
-                              const detNext = { ...det, depth, freeboard: fb, slope, expandFt: s.expandFt, baseline };
-                              if (selEl.points) setSelEl({ points: expandPolygon(ring, s.expandFt), det: detNext });
-                              else setSelEl({ w: selEl.w + 2 * s.expandFt, h: selEl.h + 2 * s.expandFt, det: detNext });
-                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - thisUsableCf) / CF_PER_ACFT)} AC-FT usable). Review the ghost, then press Done to keep it.`, 7000);
-                            } else if (s.reason === "already-sufficient") {
-                              flashWarn("This pond already covers the site's required detention.", 4000);
-                            } else {
-                              // Depth fallback: as you dig deeper the floor drops below the fixed
-                              // water surface, so the permanent pool grows with depth too.
-                              const poolAt = (dd) => (regimeB ? Math.max(0, Math.min(detRegime.elevations.bfeFt - (detRegime.elevations.groundFt - dd), dd - fb)) : 0);
-                              const usableAtDepth = (dd) => {
-                                const g = detentionStorage(ring, dd, fb, slope);
-                                const u = usablePondVolume(ring, { ...det, depth: dd, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolAt(dd) });
-                                return { ...g, vol: u.usableCf };
-                              };
-                              const dAlt = solvePondDepth({ requiredCf: targetUsableCf, volumeAtDepth: usableAtDepth, startDepthFt: depth });
-                              flashWarn(
-                                s.reason === "geometry-failed"
-                                  ? `Can't push the banks out cleanly past ${s.atFt}′ on this shape.${dAlt.ok ? ` Alternative: dig to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′).` : ""}`
-                                  : dAlt.ok
-                                    ? `Pushing the banks out isn't enough — but digging to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′) gets there. Use "Expand this pond" → Dig deeper.`
-                                    : `This pond can't reach the required volume: at ${slope}:1 the side slopes meet at ${f1(dAlt.maxUsableDepthFt ?? r.maxDepth)}′ before enough storage exists. Enlarge the footprint or flatten the slopes.`,
-                                8500
-                              );
-                            }
-                          };
-                          const shortfallUsableCf = targetUsableCf - thisUsableCf;
-                          return (
-                            <div style={{ marginTop: 8 }}>
-                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
-                                ⇱ Size for required detention ({f2(shortfallUsableCf / CF_PER_ACFT)} AC-FT short)
-                              </button>
-                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / CF_PER_ACFT)} AC-FT permanent pool grows with the footprint and stays uncredited; Regime B)` : ""}, then lets you review before keeping it.
-                              </div>
-                              {regimeUnsure && (
-                                <div style={{ fontSize: 10, color: PAL.warn || PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                  ⚠ Flood facts aren't established (regime unknown) — this sizes for a dry (Regime-A) outfall. If the site is in a floodplain, usable storage could be less; check the drainage criteria.
-                                </div>
-                              )}
-                              {defaultsDiffer && (
-                                <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span>{(detReq.rule?.authorityLabel || "Authority")} defaults: {authDefaults.sideSlope}:1 slopes · {authDefaults.freeboardFt}′ freeboard.</span>
-                                  <button style={{ ...chip, padding: "1px 8px", fontSize: 10 }} onClick={() => setDet({ slope: authDefaults.sideSlope, freeboard: authDefaults.freeboardFt })}>Apply</button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : (() => {
-                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
-                      const inc = r.vol - baseVol, sign = inc >= 0 ? "+" : "−", mag = Math.abs(inc);
-                      const digVal = Math.max(0, Math.round(depth - base.depth));
-                      const expandVal = Math.max(0, Math.round(det.expandFt || 0));
-                      const warns = [];
-                      const overlaps = els.filter((e) => e.id !== selEl.id && ["building", "parking", "trailer"].includes(e.type) && ringsOverlap(ring, ringOf(e)));
-                      if (overlaps.length) warns.push(overlaps.length === 1 ? `Overlaps a ${TYPE[overlaps[0].type].label.toLowerCase()} — the expanded pond runs into your layout.` : `Overlaps ${overlaps.length} other elements — the expanded pond runs into your layout.`);
-                      if (parcels.length && ring.some((p) => !parcels.some((pc) => pc.points && pc.points.length >= 3 && pointInRing(p, pc.points)))) warns.push("Extends past the property line.");
-                      return (
-                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 7 }}>Expanding · existing locked</div>
-                          {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
-                          {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
-                          <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
-                          <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Existing storage", `${f2(baseVol / CF_PER_ACFT)} AC-FT`, { code: "plan" })}
-                            {pondRow("Proposed storage", `${f2(r.vol / CF_PER_ACFT)} AC-FT`, { code: "plan" })}
-                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
-                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
-                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / CF_PER_ACFT)} AC-FT</span>
-                            </div>
-                            {pondRow("", `${sign}${f0(mag)} cf`)}
-                          </div>
-                          {warns.map((w, i) => <WatchOutChip key={i} style={{ marginTop: 5 }}>{w}</WatchOutChip>)}
-                          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 7 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
-                              <ColorField value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")} title="Existing basin fill"
-                                {...colorCtl((v) => setDetLive({ existFill: v }))} seed={COLOR_SEED} swatchSize={12}
-                                style={{ width: 30, height: 22, borderRadius: 5 }} />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
-                              <ColorField value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)} title="Added area fill"
-                                {...colorCtl((v) => setDetLive({ addFill: v }))} seed={COLOR_SEED} swatchSize={12}
-                                style={{ width: 30, height: 22, borderRadius: 5 }} />
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-                            <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
-                            <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    </Collapse>
-                    <Collapse sectionId="pond-outlet" title="Outlet & storms" defaultOpen={false} summary={g_outletSummary}>
-                    {/* NEW-A (Phase A) — RATE control (Post ≤ Pre): route each required storm through
-                        the pond's OUTLET STRUCTURE and prove the routed post-development peak ≤ the
-                        pre-development peak, per storm. This is what a rate-control district (FBCDD,
-                        Brookshire–Katy DD, Waller) actually regulates — the volume band above is a
-                        screening proxy. Criteria come from the cited jurisdiction registry
-                        (detentionCriteria); the outlet is the additive det.outlet, persisted via setDet. */}
-                    {(() => {
-                      const effDet = detWithAuto(selEl.det);
-                      const split = pondSplitFor(selEl);
-                      const criteria = critAll;
-                      const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
-                      const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
-                      // B905 — COMPUTED time of concentration (Kirpich), replacing the flat 15-min
-                      // screening assumption everywhere Tc feeds this pond's routing below — the
-                      // Rational intensity, the suggested pre-dev release, and the outlet solver.
-                      const tc = computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria });
-                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "2px 0 0" };
-                      const head = (
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Rate control · Post ≤ Pre (screening)</div>
-                      );
-                      const wrap = (kids) => (
-                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>{head}{kids}</div>
-                      );
-                      const anchored = effDet.tobElev != null && Number.isFinite(effDet.tobElev);
-                      if (!anchored) {
-                        return wrap(<div style={smallNote}>Set the pond's top-of-bank elevation (above) to route storms and prove Post ≤ Pre through an outlet.</div>);
-                      }
-                      const depthEff = Number.isFinite(effDet.depth) ? effDet.depth : 8;
-                      const fbEff = Number.isFinite(effDet.freeboard) ? effDet.freeboard : 1;
-                      const r2 = (n) => Math.round(n * 100) / 100;
-                      const floorApprox = r2(effDet.tobElev - depthEff);
-                      const designWs = r2(effDet.tobElev - fbEff);
-                      // The allowable release the outlet is sized/checked against, in priority order:
-                      // (1) a manual release rate the user typed; (2) the jurisdiction's published
-                      // cfs/ac cap × drainage area, when one exists; (3) B902 AUTO-SUGGEST — the site's
-                      // own pre-development peak discharge (a screening estimate), so a Post ≤ Pre
-                      // district that publishes NO cfs/ac cap (Waller, BKDD) never leaves the button
-                      // dead — the allowable release IS the site's pre-development peak in that regime.
-                      const suggested = suggestedPreDevReleaseCfs({ requiredStorms: criteria.requiredStorms, areaAcres: da, tcMin: tc?.tcMin });
-                      const relCap = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs
-                        : criteria.allowableReleaseCfsPerAc && da > 0 ? r2(criteria.allowableReleaseCfsPerAc.value * da)
-                        : suggested ? suggested.cfs : null;
-                      const relSource = Number.isFinite(det.releaseRateCfs) ? "manual"
-                        : criteria.allowableReleaseCfsPerAc && da > 0 ? "code"
-                        : suggested ? "suggested" : null;
-                      const tailwaterElevFt = split && split.wseFt != null ? split.wseFt : null; // drowned-outlet regime
-                      const outlet = det.outlet && Array.isArray(det.outlet.stages) && det.outlet.stages.length ? det.outlet : null;
-                      const stages = outlet ? outlet.stages : [];
-                      const writeOutlet = (next) => setDet({ outlet: next && next.stages && next.stages.length ? next : null });
-                      // B903 — MULTI-STAGE OUTLET: a genuine editable LIST of stages (any mix of
-                      // orifice/weir/restrictor, any length) rather than a fixed "primary + one
-                      // optional weir" pair — real compound structures stack a low-flow orifice, a
-                      // control weir, and an emergency spillway, and the auto-size solver below can
-                      // produce exactly that.
-                      const updateStage = (idx, patch) => { const s = [...stages]; s[idx] = { ...s[idx], ...patch }; writeOutlet({ stages: s }); };
-                      const removeStage = (idx) => writeOutlet({ stages: stages.filter((_, i) => i !== idx) });
-                      const addStage = (kind) => writeOutlet({
-                        stages: [...stages, kind === "orifice"
-                          ? { kind: "orifice", invertElevFt: floorApprox, diameterIn: 6, count: 1 }
-                          : { kind: "weir", crestElevFt: designWs, lengthFt: 5 }],
-                      });
-                      const roleLabel = (s, i) => {
-                        if (s.role === "primary") return "Low-flow orifice";
-                        if (s.role === "control") return "Control weir";
-                        if (s.role === "spillway") return "Emergency spillway";
-                        const kindLabel = s.kind === "orifice" ? "Orifice" : s.kind === "weir" ? "Weir" : "Restrictor";
-                        return i === 0 ? `Primary ${kindLabel.toLowerCase()}` : `${kindLabel} #${i + 1}`;
-                      };
-                      // B903 — "Auto-size" now solves the WHOLE compound structure (orifice + a
-                      // control weir when needed + an emergency spillway) so EVERY required storm
-                      // passes at once, reusing autoSizeCompoundOutlet (lib/pondRouting.js) — never a
-                      // single orifice sized to one governing storm that can silently fail another.
-                      // A manual "Allowable release" seeds the solve (still meaningfully honored)
-                      // but the solver still iterates toward whatever ACTUALLY satisfies Post ≤ Pre
-                      // for every storm, since that's the same check the routed table below proves.
-                      const autosize = () => {
-                        const overrideCfs = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
-                        const r = autoSizeCompoundOutlet({ ring, det: effDet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, overrideCfs, tcMin: tc?.tcMin });
-                        if (!r.outlet) { flashWarn(r.reason || "Could not size an outlet — check the drainage area and top-of-bank elevation.", 6000); return; }
-                        // Same one-setDet-call rule as B902: setDet rebuilds `det` from this
-                        // render's closure, so a second synchronous call would clobber the first.
-                        const patch = { outlet: r.outlet };
-                        if (relSource === "suggested") patch.releaseRateCfs = relCap;
-                        setDet(patch);
-                        if (!r.ok) flashWarn(r.reason, 8000); // honest partial result — outlet still written, best attempt
-                      };
-                      const critLine = (
-                        <div style={smallNote}>
-                          Criteria: {criteria.label}{criteria.governingManual && criteria.governingManual.section ? ` · ${criteria.governingManual.section}` : ""}
-                          {criteria.allowableReleaseCfsPerAc ? ` · release ${criteria.allowableReleaseCfsPerAc.value} cfs/ac${criteria.allowableReleaseCfsPerAc.verified ? "" : " (unverified)"}` : criteria.postLePre ? " · Post ≤ Pre (rate-match)" : ""}
-                          {" · storms "}{criteria.requiredStorms.join("/")}-yr.
-                        </div>
-                      );
-                      // B904 — CE roadmap #2's method-by-area guardrail: the Rational method
-                      // (what routes above) is only valid for a small, quick-responding tributary
-                      // area. Past the jurisdiction's screening ceiling, flag it loudly — the
-                      // routed numbers above still ride the Rational proxy until a real NRCS
-                      // unit-hydrograph inflow is wired into the routing pass (a follow-on).
-                      const methodInfo = selectDetentionMethod({ areaAcres: da, criteria });
-                      const methodLine = methodInfo.method === "nrcs" ? (
-                        <WatchOutChip info={`NRCS Type III unit-hydrograph analysis is the correct method past this size (curve number + a design-storm hyetograph, convolved into a runoff hydrograph) — the Modified Rational method (Q=C·i·A) this pond's routing still uses is a peak-flow-only screening tool meant for small, quick-responding areas. The routed PRE/ROUTED numbers above are NOT yet re-derived from a true NRCS hydrograph — confirm this pond's detention with an HEC-HMS model.`}>
-                          Tributary area ({r2(da)} AC) exceeds the Rational method's screening range (≤{methodInfo.ceilingAcres} AC) — NRCS unit-hydrograph indicated; the routing above still uses the Rational-method proxy.
-                        </WatchOutChip>
-                      ) : methodInfo.method === "rational" ? (
-                        <div style={smallNote}>Method: Modified Rational (tributary area {r2(da)} AC, within the {methodInfo.ceilingAcres}-ac screening range for this criteria).</div>
-                      ) : null;
-                      // B905 — computed Tc provenance: replaces the old flat "Time of concentration
-                      // = 15 min" text with the actual Kirpich inputs, tagged ESTIMATE while the flow
-                      // path / grade are still screening estimates (not yet traced from real
-                      // geometry / a DEM sample — a future wire-up; the tag flips to CODE on its own
-                      // once real inputs are supplied, no caller change needed).
-                      const tcLine = tc ? (
-                        <div style={smallNote}>
-                          Time of concentration: {tc.tcMin} min
-                          <SourceTag code={tc.lengthEstimated || tc.slopeEstimated ? "estimate" : "code"} label="Time of concentration" basis={tc.basis} />
-                        </div>
-                      ) : null;
-                      // NEW-27 (owner directive 2026-07-24) — PUMPED OUTFALL, criteria-DERIVED so the
-                      // developer is never asked for a pump discharge he doesn't know ("that's not
-                      // something I need to be calculating"). The allowed pump rate = the jurisdiction's
-                      // pumped share of the allowable release; an OPTIONAL advanced override is honored +
-                      // flagged. The gravity-vs-pump feasibility line consumes the derived value. All copy
-                      // is em-dash-free (this renders in the property panel, which the harness scans).
-                      const pumpAllow = pumpAllowance(criteria, {
-                        releaseRateCfs: relCap,
-                        overrideCfs: Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null,
-                      });
-                      const gravityImpaired = Number.isFinite(tailwaterElevFt) && floorApprox < tailwaterElevFt;
-                      const pumpBlock = relCap != null && pumpAllow.sharePct != null ? (
-                        <div style={{ marginTop: 10, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                            <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pumped outfall (screening)</span>
-                            {pumpAllow.overridden
-                              ? <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: PAL.accent }}>YOUR RATE</span>
-                              : <SourceTag code={pumpAllow.verified ? "code" : "estimate"} label="Pumped share of the allowable release" basis={pumpAllow.source} />}
-                          </div>
-                          <div style={{ fontSize: 11, color: PAL.text, lineHeight: 1.4 }}>
-                            Up to <b>{f1(pumpAllow.allowedPumpCfs)} cfs</b> can be pumped
-                            {pumpAllow.overridden
-                              ? " (the rate you entered)."
-                              : `: ${pumpAllow.sharePct}% of the ${relCap} cfs allowable release for ${criteria.label}${pumpAllow.verified ? "." : " (ASSUMED)."}`}
-                            {" "}The rest leaves by gravity.
-                          </div>
-                          <div style={smallNote}>You don't calculate this; it comes from the criteria. A pump is a reviewer exception (reliability, backup power). Confirm with your engineer.</div>
-                          <div style={{ ...smallNote, color: gravityImpaired ? PAL.warn : PAL.muted, marginTop: 3 }}>
-                            {gravityImpaired
-                              ? `Gravity outfall looks unlikely here (the pond floor sits below the receiving water), so a pump up to ${f1(pumpAllow.allowedPumpCfs)} cfs is indicated.`
-                              : `Gravity outfall looks feasible here, so a pump is optional (up to ${f1(pumpAllow.allowedPumpCfs)} cfs if used).`}
-                          </div>
-                          <Field label="Override pump rate (cfs, optional)">
-                            <span style={ROW6}>
-                              <NumInput allowClear style={{ ...numInput, width: 72 }} value={det.pumpRateCfs ?? ""} placeholder={`≈${f1(pumpAllow.derivedCfs)}`} min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) && n >= 0 ? n : null })} />
-                              {pumpAllow.overridden && <button style={chipSm} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
-                            </span>
-                          </Field>
-                        </div>
-                      ) : null;
-
-                      if (!outlet) {
-                        const primaryLabel = relSource === "suggested" ? "⚡ Auto-size detention" : "+ Propose outlet";
-                        const primaryTitle = relCap == null
-                          ? "Enter a drainage area (above) so a pre-development release can be estimated"
-                          : relSource === "suggested"
-                            ? `One click: solves a compound outlet (orifice, plus a control weir if needed) so EVERY required storm (${criteria.requiredStorms.join("/")}-yr) passes Post ≤ Pre against the site's own pre-development peaks`
-                            : `One click: solves a compound outlet so every required storm (${criteria.requiredStorms.join("/")}-yr) passes, seeded from the ${relCap} cfs allowable release`;
-                        return wrap(
-                          <>
-                            <div style={smallNote}>Add a screening outlet to route storms through the pond and check Post ≤ Pre.</div>
-                            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                              <button style={{ ...chip, padding: "6px 10px", ...(relSource === "suggested" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent, fontWeight: 700 } : null) }} onClick={autosize} disabled={relCap == null} title={primaryTitle}>{primaryLabel}</button>
-                              <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "orifice", invertElevFt: floorApprox, diameterIn: 12, count: 1 }] })}>+ Orifice</button>
-                              <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "restrictor", invertElevFt: floorApprox, maxCfs: relCap ?? 1 }] })}>+ Restrictor</button>
-                            </div>
-                            {relCap != null && (
-                              <div style={smallNote}>
-                                Allowable release ≈ {relCap} cfs
-                                {relSource === "code" ? ` (${criteria.allowableReleaseCfsPerAc.value} cfs/ac × ${r2(da)} AC)`
-                                  : relSource === "suggested" ? ` — suggested (pre-development peak, ${suggested.governingStormYr}-yr governing)` : " (manual)"}.
-                                {relSource === "suggested" && (
-                                  <SourceTag code="estimate" label="Allowable release" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each required design storm (${criteria.requiredStorms.join("/")}-yr); the smallest (${suggested.governingStormYr}-yr) governs. ${criteria.label} publishes no cfs/ac release cap. A screening estimate — click Auto-size detention to accept it, or type your own release to override.`} />
-                                )}
-                              </div>
-                            )}
-                            {critLine}
-                            {methodLine}
-                            {tcLine}
-                            {pumpBlock}
-                          </>
-                        );
-                      }
-
-                      const routed = assessRoutedDetention({ ring, det: effDet, outlet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, tcMin: tc?.tcMin });
-                      const oProbs = outletProblems(outlet);
-                      const passChip = (ok) => (
-                        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: ok ? PAL.success : PAL.danger }}>{ok ? "PASS" : "SHORT"}</span>
-                      );
-                      // B903 — an OVERTOPPED storm is a different failure than a plain rate
-                      // exceedance (too little storage vs. too much outflow) — say which, honestly.
-                      const statusChip = (s) => {
-                        if (s.status === "unknown") return <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span>;
-                        if (s.status === "pass") return passChip(true);
-                        return s.overtopped
-                          ? <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: PAL.danger }}>OVERTOPS</span>
-                          : passChip(false);
-                      };
-
-                      return wrap(
-                        <>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                            <span style={{ fontSize: 10.5, color: PAL.muted }}>{stages.length} outlet stage{stages.length === 1 ? "" : "s"}</span>
-                            <button style={{ ...chip, padding: "3px 8px", fontSize: 10, fontWeight: 700 }} onClick={autosize} title="Re-solve a compound outlet so every required storm passes">⚡ Auto-size</button>
-                          </div>
-                          {stages.map((s, i) => (
-                            <div key={i} style={{ marginTop: i > 0 ? 10 : 0, paddingTop: i > 0 ? 8 : 0, borderTop: i > 0 ? `1px solid ${PAL.panelLine}` : "none" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                                <span style={{ fontSize: 10.5, fontWeight: 700, color: PAL.text }}>{roleLabel(s, i)}</span>
-                                <button style={{ ...chip, padding: "1px 6px", fontSize: 9.5 }} onClick={() => removeStage(i)} title="Remove this stage">× Remove</button>
-                              </div>
-                              {s.kind === "orifice" && (
-                                <>
-                                  <Field label="Orifice ⌀ (in)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
-                                  <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.invertElevFt) ? s.invertElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
-                                </>
-                              )}
-                              {s.kind === "weir" && (
-                                <>
-                                  <Field label="Weir length (ft)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.lengthFt ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { lengthFt: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
-                                  <Field label="Crest elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.crestElevFt) ? s.crestElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { crestElevFt: Number.isFinite(n) ? n : null })} /></Field>
-                                </>
-                              )}
-                              {s.kind === "restrictor" && (
-                                <>
-                                  <Field label="Max release (cfs)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
-                                  <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.invertElevFt) ? s.invertElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => addStage("orifice")}>+ Add orifice</button>
-                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => addStage("weir")}>+ Add weir</button>
-                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => writeOutlet(null)} title="Remove the outlet">× Clear outlet</button>
-                          </div>
-                          {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
-                          {routed.kind === "routed" ? (
-                            <div style={{ marginTop: 8, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, padding: "8px 10px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall: Post ≤ Pre</span>
-                                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS: every storm" : "FAIL"}</span>
-                              </div>
-                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr 1fr auto", gap: "2px 8px", fontSize: 11, alignItems: "center" }}>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700 }}>STORM</span>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ALLOWABLE</span>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ROUTED</span>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>PEAK WSE</span>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>STORAGE</span>
-                                <span />
-                                {routed.perStorm.map((s) => (
-                                  <Fragment key={s.returnPeriodYr}>
-                                    <span style={{ fontWeight: 700 }}>{s.returnPeriodYr}-yr</span>
-                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.preCfs ?? "—"}</span>
-                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
-                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.maxElevFt ?? "—"}</span>
-                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.peakStorageAcFt != null ? `${f2(s.peakStorageAcFt)} AC-FT` : "—"}</span>
-                                    <span style={{ textAlign: "right" }}>{statusChip(s)}</span>
-                                  </Fragment>
-                                ))}
-                              </div>
-                              {!routed.allPass && (
-                                <div style={{ ...smallNote, color: PAL.danger, marginTop: 4 }}>
-                                  {routed.perStorm.filter((s) => s.status !== "pass").map((s) => (
-                                    <div key={s.returnPeriodYr}>{s.returnPeriodYr}-yr {s.overtopped ? "overtops the basin before the outlet can pass it" : `is short by ${s.shortByCfs} cfs`} — click ⚡ Auto-size above, or deepen/enlarge this pond ("Expand this pond" below).</div>
-                                  ))}
-                                </div>
-                              )}
-                              {routed.flags.includes("impervious-conservative") && <div style={{ ...smallNote, color: PAL.warn }}>Impervious % unknown — post-development runoff taken at the conservative upper bound.</div>}
-                            </div>
-                          ) : (
-                            <div style={{ ...smallNote, color: PAL.warn }}>Can't route yet: {routed.reason || "missing inputs"}.</div>
-                          )}
-                          {/* v3 A3 — the rate-control storage question, as ONE row where it belongs
-                              (next to the outlet that answers it), NOT conflated with the site's
-                              volumetric detention requirement in Sizing. The ⓘ spells out that the
-                              two are different questions and both must hold. */}
-                          {(() => {
-                            const rcStorm = det.designStorm || 100;
-                            const rcReq = computeRateBasedDetention({ acres: da, impPct: imp, allowableReleaseCfs: relCap, returnPeriodYr: rcStorm });
-                            const rcVal = rcReq.kind === "rate-based" ? rcReq.requiredAcFt : null;
-                            const bandAcFt = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
-                              : detReq && detReq.kind === "band" && Array.isArray(detReq.bandAcFt) ? detReq.bandAcFt[1] : null;
-                            const rcTitle = `Storage needed to throttle the ${rcStorm}-yr release to the allowable rate. This is a different question from the site's volumetric detention requirement (${bandAcFt != null ? f1(bandAcFt) : "—"} AC-FT): both must hold.`;
-                            return (
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 7, borderTop: `1px solid ${PAL.panelLine}` }}>
-                                <span style={{ fontSize: 11.5, color: PAL.muted, display: "inline-flex", alignItems: "center", gap: 3 }}>
-                                  Outlet sizing check (rate control)
-                                  <RowInfo label="Outlet sizing check (rate control)" sections={[{ text: rcTitle }]} />
-                                </span>
-                                <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: PAL.ink, whiteSpace: "nowrap" }}>{rcVal != null ? `${f1(rcVal)} AC-FT` : "—"}</span>
-                              </div>
-                            );
-                          })()}
-                          {/* FINAL UI SPEC A1.6 — the assumption sentences (pre-development runoff
-                              coefficient, criteria, screening reservoir-routing caveat, time of
-                              concentration) collapse into ONE Basis ⓘ; the actionable NRCS
-                              method-by-area warning stays inline. */}
-                          {methodLine}
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 5 }}>
-                            <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>Basis &amp; assumptions</span>
-                            <RowInfo label="Rate control — basis & assumptions" sections={[
-                              ...(routed.kind === "routed" && routed.assumptions.length > 0 ? [{ text: routed.assumptions.join(" ") }] : []),
-                              { text: `Criteria: ${criteria.label}${criteria.governingManual && criteria.governingManual.section ? ` · ${criteria.governingManual.section}` : ""}${criteria.allowableReleaseCfsPerAc ? ` · release ${criteria.allowableReleaseCfsPerAc.value} cfs/ac${criteria.allowableReleaseCfsPerAc.verified ? "" : " (unverified)"}` : criteria.postLePre ? " · Post ≤ Pre (rate-match)" : ""} · storms ${criteria.requiredStorms.join("/")}-yr.` },
-                              ...(tc ? [{ text: `Time of concentration: ${tc.tcMin} min.${tc.basis ? ` ${tc.basis}` : ""}` }] : []),
-                              ...(routed.caveat ? [{ text: routed.caveat }] : []),
-                            ]} />
-                          </div>
-                          {pumpBlock}
-                        </>
-                      );
-                    })()}
-                    </Collapse>
-                    {/* v3 UI SPEC B5.3 — FLOOD & DATUM: no visible paragraphs. Each note reads as
-                        a one-line entry whose ⓘ carries the full text; the standalone NAVD88 chip
-                        relocated here (B4). */}
-                    <Collapse sectionId="pond-flood" title="Flood & datum" defaultOpen={false} summary={g_floodSummary}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }}>
-                        {g_split.mode === "anchored" && g_split.bands && g_split.wseFt != null && (
-                          <Chip tone="neutral" text={`Detention split at ${f1(g_split.wseFt)}′`} popover={POND_FLOOD_NOTES.split} />
-                        )}
-                        {g_facts.floodEstimated && <Chip tone="neutral" text="Flood level estimated" popover={POND_FLOOD_NOTES.estimate} />}
-                        {g_facts.inFloodway && <Chip tone="amber" text={POND_CHIP_DEFS.find((c) => c.id === "floodway").text} popover={POND_CHIP_DEFS.find((c) => c.id === "floodway").popover} />}
-                        {g_facts.zoneA && <Chip tone="amber" text={POND_CHIP_DEFS.find((c) => c.id === "zonea").text} popover={POND_CHIP_DEFS.find((c) => c.id === "zonea").popover} />}
-                        <Chip tone="neutral" text="Elevations: NAVD88" popover={POND_FLOOD_NOTES.datum} />
-                      </div>
-                    </Collapse>
-                    {/* PR-N (FOLD IN) — surface the drainage-district data the server already resolves:
-                        which district governs, the criteria it applies, and the receiving-channel /
-                        outfall tailwater SOURCE (EST + source-tagged). No more silent server-side-only
-                        district logic. */}
-                    {(() => {
-                      const dOverlays = (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "drainage-district");
-                      const dFailed = (drainCtxData?.authority?.flags || []).includes("bkdd-unverified");
-                      const inDistrict = dOverlays.length > 0;
-                      const critD = critAll;
-                      const authLabel = dOverlays[0]?.name || detReq?.rule?.authorityLabel || null;
-                      const twR = g_twEst;
-                      const dSummary = inDistrict ? dOverlays[0].name.replace("Drainage District", "DD") : dFailed ? "membership unverified" : "county criteria";
-                      const critRow = (label, cell, unit) => (cell && Number.isFinite(cell.value)) ? (
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
-                          <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                          <span style={ROW6}>
-                            <span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{cell.value}{unit}</span>
-                            <SourceTag code={cell.verified ? "code" : "unverified"} label={label} basis={cell.source ? [{ text: String(cell.source) }] : undefined} />
-                          </span>
-                        </div>
-                      ) : null;
-                      return (
-                        <Collapse sectionId="pond-district" title="Drainage district" defaultOpen={false} summary={dSummary}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "2px 0" }}>
-                            <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5 }}>
-                              {inDistrict ? <>Governing district: <strong>{authLabel}</strong>. {dOverlays[0].short}</>
-                                : dFailed ? "Drainage-district membership could not be verified (the boundary source was unavailable). Confirm with the county."
-                                  : "This parcel is not inside a mapped drainage district; county criteria govern detention."}
-                            </div>
-                            {inDistrict && critRow("Freeboard", critD.freeboardFt, "′")}
-                            {inDistrict && critRow("Max side slope", critD.maxSideSlope, ":1")}
-                            {inDistrict && dOverlays[0].detail && (
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>{dOverlays[0].detail}</div>
-                            )}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 2 }}>
-                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Receiving water (outfall)</span>
-                              <span style={ROW6}>
-                                {Number.isFinite(twR.valueFt)
-                                  ? <><span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{f1(twR.valueFt)}′</span><SourceTag code={twR.estimated ? "estimate" : "yours"} label={twR.sourceLabel || "Receiving water"} basis={twR.sourceTip ? [{ text: twR.sourceTip }] : undefined} /></>
-                                  : <span style={{ fontSize: 11, color: PAL.warn, fontWeight: 600, cursor: "help" }} title={tailwaterNote(twR)}>needs channel data</span>}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4 }}>
-                              Receiving-water level is sourced from the district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline. Never site grade.
-                            </div>
-                          </div>
-                        </Collapse>
-                      );
-                    })()}
-                    {curStyle && (
-                    <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
-                      <PairedFieldHead left="Outline" right="Fill" />
-                      <PairedField label="Colour"
-                        left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
-                        right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
-                      />
-                      <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
-                      {strokeWidthRow}
-                      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
-                        <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
-                        <button style={linkBtn} onClick={() => jumpToStandards("colors")} title="New detention pond elements start from Standards → Colors">Standards → Colors ↗</button>
-                        <RowInfo label="New pond defaults" sections={[{ text: "New detention pond elements start from Standards → Colors." }]} />
-                      </div>
-                    </Collapse>
-                    )}
-                    {/* v3 B7 — the shared provenance legend at the bottom of the pond panel. */}
-                    <ProvenanceLegend style={{ marginTop: 12, paddingTop: 9, borderTop: `1px solid ${PAL.panelLine}` }} />
-                  </div>
-                );
-              })()}
+              {selEl.type === "pond" && (
+                <PondInspector
+                  PAL={PAL}
+                  acresActive={acresActive}
+                  applyBermMove={applyBermMove}
+                  assessPondBuildable={assessPondBuildable}
+                  chip={chip}
+                  chipSm={chipSm}
+                  clearElStyle={clearElStyle}
+                  coincidentStorm={coincidentStorm}
+                  colorCtl={colorCtl}
+                  critAll={critAll}
+                  curStyle={curStyle}
+                  deleteSel={deleteSel}
+                  designChangeSummary={designChangeSummary}
+                  detRegime={detRegime}
+                  detReq={detReq}
+                  detWithAuto={detWithAuto}
+                  dismissHybridHint={dismissHybridHint}
+                  drainAuthorityId={drainAuthorityId}
+                  drainBalancer={drainBalancer}
+                  drainCtxData={drainCtxData}
+                  drainFacts={drainFacts}
+                  drainMitDisplay={drainMitDisplay}
+                  els={els}
+                  fillOpacityCell={fillOpacityCell}
+                  flashWarn={flashWarn}
+                  floodJurKey={floodJurKey}
+                  fmElev={fmElev}
+                  fmResultView={fmResultView}
+                  fmRule={fmRule}
+                  fmSettings={fmSettings}
+                  fmZones={fmZones}
+                  hybridHintSeen={hybridHintSeen}
+                  impPct={impPct}
+                  jumpToStandards={jumpToStandards}
+                  linkBtn={linkBtn}
+                  numInput={numInput}
+                  parcels={parcels}
+                  pondAuto={pondAuto}
+                  pondBermById={pondBermById}
+                  pondCriteria={pondCriteria}
+                  pondEncumbrances={pondEncumbrances}
+                  pondLedger={pondLedger}
+                  pondSplitFor={pondSplitFor}
+                  pondTailwaterResult={pondTailwaterResult}
+                  providedDetCf={providedDetCf}
+                  providedUsableCf={providedUsableCf}
+                  pushHistory={pushHistory}
+                  rightSizeResultFor={rightSizeResultFor}
+                  sectionFactsFor={sectionFactsFor}
+                  selEl={selEl}
+                  setDesignChangeSummary={setDesignChangeSummary}
+                  setSelEl={setSelEl}
+                  setStyleDefault={setStyleDefault}
+                  settings={settings}
+                  spinBtn={spinBtn}
+                  strokeOpacityCell={strokeOpacityCell}
+                  strokeWidthRow={strokeWidthRow}
+                  toggleLock={toggleLock}
+                  undo={undo}
+                />
+              )}
             </Section>
           )}
           </>)}
@@ -30174,219 +26495,64 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </ContextMenu>
       )}
 
-      {parcelMenu && (() => {
-        /* NEW-1 (2026-10-22) — the SAME menu as the panel row's ⋯ and a right-click on a row (lib/parcelMenu.js, one component). */
-        const pc = parcels.find((p) => p.id === parcelMenu.id);
-        if (!pc) return null;
-        const row = parcelRows.find((r) => r.id === pc.id);
-        const id = pc.id;
-        const pick = (what) => {
-          setParcelMenu(null);
-          if (what === "properties" || what === "rename") openParcelPage(id);
-          else if (what === "zoom") zoomToElements([{ kind: "parcel", id }]);
-          else if (what === "lock") parcelActsRef.current.onToggleLock(id);
-          else if (what === "chip") setParcelChipHidden(id, !pc.chipHidden);
-          else if (what === "chipReset") resetParcelChipOffset(id);
-          else if (what === "merge") mergeParcels();
-          else if (what === "clearSel") setCombineSel([]);
-          else if (what === "uncombine") restoreCombinedOriginals(id);
-          else if (what === "delete") deleteParcels([id], "menu:parcel");
-        };
-        return <ParcelContextMenu x={parcelMenu.x} y={parcelMenu.y} pc={pc} renameable={isRenameable(row)} mergeCount={combineSel.length} onPick={pick} onClose={() => setParcelMenu(null)} testId="parcel-menu" />;
-      })()}
+      {parcelMenu && <ParcelMenuHost
+                  combineSel={combineSel}
+                  deleteParcels={deleteParcels}
+                  mergeParcels={mergeParcels}
+                  openParcelPage={openParcelPage}
+                  parcelActsRef={parcelActsRef}
+                  parcelMenu={parcelMenu}
+                  parcelRows={parcelRows}
+                  parcels={parcels}
+                  resetParcelChipOffset={resetParcelChipOffset}
+                  restoreCombinedOriginals={restoreCombinedOriginals}
+                  setCombineSel={setCombineSel}
+                  setParcelChipHidden={setParcelChipHidden}
+                  setParcelMenu={setParcelMenu}
+                  zoomToElements={zoomToElements}
+                />}
 
-      {mapMenu && (() => {
-        const MW = 214;
-        const close = () => setMapMenu(null);
-        const row = ({ text, on, danger, dis, hint, title }) => (
-          <button title={title} disabled={!!dis}
-            style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled, ...disabledRow } : danger ? { color: PAL.danger } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-            onClick={dis ? undefined : on}>
-            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>}
-          </button>
-        );
-        /* NEW-1/NEW-2 — ONE Arrange group, rendered identically for every family that has one.
-         * Before this each menu hand-rolled its own: the markup menu offered all four modes, the
-         * measurement menu offered TWO of them, and the callout menu offered none at all — the
-         * "same right menu options" drift the owner reported, in its purest form. Building the
-         * group once is what stops the fourth menu drifting away again.
-         *
-         * ⛔ AND IT NEVER RENDERS AS AN EMPTY SPACE. The old markup/measurement menus hid the whole
-         * group behind `count > 1`, so right-clicking the only object on its layer showed no
-         * ordering rows and no reason — which is what "the layers / order feature doesn't work at
-         * all" looked like from the outside. A lone object now gets the four rows GREYED with a
-         * plain-English hover reason, so the answer is visible instead of absent. */
-        const arrangeGroup = (ref, { hdr }) => {
-          const info = arrangePeers(ref);
-          if (!info) return null;
-          const af = info.flags;
-          const alone = info.alone;
-          // B1788912 (NEW-1) — an element's peer set is the whole plan now (no more type-band
-          // wording), same shape as the annotation families below.
-          const why = alone ? (ref.kind === "el" ? "This is the only element on the plan, so there is nothing to reorder it against."
-            : `This is the only one on the ${info.band} layer, so there is nothing to reorder it against.`) : "";
-          /* NEW-1 — a disabled row now says what END it is at, in the terms the user is thinking in:
-             the WHOLE drawing ("behind everything on the plan"), because with cross-band Arrange
-             (annotations) and the retired type layer (elements, B1788912) there is nothing invisible
-             left to do, and a row that greys while something is still underneath is exactly the
-             claim of completion this item exists to kill. */
-          const endWord = (mode) => {
-            const back = mode === "back" || mode === "backward";
-            if (ref.kind === "el") return `Already at the ${back ? "back" : "front"} of the plan.`;
-            return `Already ${back ? "behind" : "in front of"} everything on the plan.`;
-          };
-          const r = (text, mode, dis, hint) => row({
-            text, hint, dis: dis || alone, title: dis && !alone ? endWord(mode) : why,
-            on: () => { arrangeSel(mode, ref); close(); },
-          });
-          // B806080 round 2 — "Bring to Front" on a CALLOUT is answered by the absolute-front
-          // escape hatch, never by `af.atTop` (the top of the callout family alone): `af.atTop`
-          // was true of the owner's WETLANDS callout the entire time it still painted under an
-          // area measurement, which is exactly the toast that was wrong. `calloutAtAbsoluteFront`
-          // is the one fact this row and `arrangeSel`'s own toast are both built from, so they
-          // cannot independently drift about what "already at the front" means.
-          const bringToFrontDis = ref.kind === "callout" ? calloutAtAbsoluteFront(callouts, ref.id) : af.atTop;
-          return <>
-            {hdr}
-            {r("Bring to Front", "front", bringToFrontDis, `${MOD_LABEL}⇧]`)}
-            {r("Bring Forward", "forward", af.atTop, `${MOD_LABEL}]`)}
-            {r("Send Backward", "backward", af.atBottom, `${MOD_LABEL}[`)}
-            {r("Send to Back", "back", af.atBottom, `${MOD_LABEL}⇧[`)}
-          </>;
-        };
-        const sep = <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />;
-        // NEW-1 (2026-10-22) — a right-click along an easement / markup line / measurement leads with "Add control point" at the spot.
-        const addPointRows = mapMenu.edge ? (<>
-          <button data-testid="map-menu-add-control-point" title="Drop a control point on the line at the spot you clicked"
-            style={{ ...menuItem(false), cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
-            onClick={() => { const ed = mapMenu.edge; close(); insertVtx(ed.layer, ed.id, ed.index, ed.pt); }}>
-            <span aria-hidden="true">＋</span><span>Add control point</span>
-          </button>
-          {sep}
-        </>) : null;
-        let header = "", body = null;
-        if (mapMenu.kind === "markup") {
-          const m = markups.find((x) => x.id === mapMenu.id);
-          if (!m) return null;
-          const isDeed = m.kind === "encumbrance";
-          const dm = isDeed ? deedMainOf(deedGroupMembers(m), m) : m;
-          const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
-          const groupN = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).length : 1;
-          header = isDeed ? "Deed (metes & bounds)" : m.kind === "easement" ? "Easement" : "Markup";
-          const delText = isDeed ? `Delete deed${groupN > 1 ? " + exceptions" : ""}` : `Delete ${m.kind === "easement" ? "easement" : "markup"}`;
-          // B820/NEW-1 — Arrange (z-order) among the markups IN THIS BAND (see arrangePeers), plus
-          // the one cross-band command (a markup normally floats over the elements; this drops it —
-          // the whole deed group, if it's a deed — beneath them).
-          // NEW-2 — one named setter, shared with the covering element's "Bring it back in front"
-          // row (see setMarkupBand). It also gained the re-stack its two siblings always had: the
-          // old inline version flipped the flag and left `z` alone, so a markup brought back in
-          // front could land underneath a markup it used to be above.
-          const setBehind = () => { setMarkupBand(m.id, !m.behindEls); close(); };
-          body = <>
-            {addPointRows}
-            {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
-            {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
-            {row({ text: "Properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
-            {/* NEW-2 — the way out when the county service is down: the legal description IS the
-                boundary, so turn the plotted deed into a real parcel. Sits beside Align because the
-                two are the same decision from opposite sides (fit MY deed to THEIR map · make my
-                deed the map). Already-promoted deeds say so instead of silently making a second. */}
-            {isDeed && row({
-              text: deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary",
-              dis: deedAlreadyPromoted(dm),
-              title: deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it",
-              on: () => { promoteDeedToParcel(dm.id); close(); },
-            })}
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMarkupLock(m.id); close(); } })}
-            {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
-            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
-            {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
-            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "markup", id: m.id }); close(); } })}
-            {arrangeGroup({ kind: "markup", id: m.id }, { hdr: sep })}
-            {row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND, on: setBehind })}
-            {sep}
-            {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
-          </>;
-        } else if (mapMenu.kind === "easeLabel") {
-          // NEW-1/NEW-2 — the easement LABEL's own menu: snap it back to the strip, show/hide its area line.
-          const m = markups.find((x) => x.id === mapMenu.id);
-          if (!m) return null;
-          const pulled = !!pullOf(m), areaOn = showAreaOn(m);
-          header = "Easement label";
-          body = <>
-            {row({ text: areaOn ? "Hide area" : "Show area", dis: !!m.locked, title: m.locked ? "Unlock this easement first" : "", on: () => { setEaseShowArea(m.id, !areaOn); close(); } })}
-            {row({ text: "Snap back to strip", dis: !pulled || !!m.locked, title: !pulled ? "The label is already on the strip" : m.locked ? "Unlock this easement first" : "Return the label to the strip and remove its leader", on: () => { snapBackEaseLabel(m.id); close(); } })}
-            {sep}
-            {row({ text: "Easement properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
-          </>;
-        } else if (mapMenu.kind === "measure") {
-          // NEW — measurements get a right-click menu just like every other element.
-          const m = measures[mapMenu.i];
-          if (!m) return null;
-          header = "Measurement";
-          /* NEW-1 — Arrange, from the ONE shared group. This menu used to render TWO of the four
-             modes (front/back, and in different wording: "Bring to front" against the markup
-             menu's "Bring to Front"), which is the drift in miniature — same concept, same
-             keyboard chords already wired, half the rows and a different capitalisation. */
-          body = <>
-            {addPointRows}
-            {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); openInspector(); close(); } })}
-            {m.id && arrangeGroup({ kind: "measure", id: m.id }, { hdr: sep })}
-            {m.id && row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND,
-              title: m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it",
-              on: () => { setMeasureBand(m.id, !m.behindEls); close(); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMeasureLock(m.id); close(); } })}
-            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
-            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }, { entry: "menu:measure" }); close(); } })}
-          </>;
-        } else if (mapMenu.kind === "callout") {
-          // Multi-leader — Add / Delete Leader for the SEPARATE `callouts` collection.
-          const c = callouts.find((x) => x.id === mapMenu.id);
-          if (!c) return null;
-          header = c.noLeader ? "Text box" : "Callout";
-          /* NEW-1/NEW-2 — THE MENU THE AUDIT FOUND EMPTIEST. An annotation had Add Leader, Copy and
-             Delete and nothing else: no Properties row, no Lock (while the code has honoured
-             `c.locked` all along, with no way to set or clear it), no Duplicate, and — the
-             structural one — no ordering of any kind, because callouts were rendered from the raw
-             state array. All four are the same drift, closed together. */
-          body = <>
-            {row({ text: "Properties…", on: () => { setSel({ kind: "callout", id: c.id }); openInspector(); close(); } })}
-            {row({ text: "Add Leader", dis: !!c.locked, title: c.locked ? "Unlock this note first" : "", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
-            {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, dis: !!c.locked, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
-            {row({ text: c.locked ? "Unlock" : "Lock", hint: c.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleCalloutLock(c.id); close(); } })}
-            {/* NEW-2 (B1765729) \u2014 the SAME align-rotation mechanism a building's own right-click
-                menu offers (AlignRotationIcon/alignFor/alignToElement/alignToParcelEdge), extended
-                so a text box or callout can be the align SOURCE too: click a building, another
-                callout/text box, or a parcel edge next to match this one's angle to it. */}
-            {row({ text: "Align rotation\u2026", on: () => { setAlignFor({ kind: "callout", id: c.id }); close(); } })}
-            {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
-            {row({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
-            {arrangeGroup({ kind: "callout", id: c.id }, { hdr: sep })}
-            {row({ text: c.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND,
-              title: c.behindEls ? "Draw this note over the buildings again" : "Draw this note under the buildings, so the plan sits on top of it",
-              on: () => { setCalloutBand(c.id, !c.behindEls); close(); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }, { entry: "menu:callout" }); close(); } })}
-          </>;
-        } else {
-          const hasClip = hasCanvasClip() || hasOverlayClip();
-          header = "Map";
-          body = <>
-            {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
-            {row({ text: "Paste", hint: `${MOD_LABEL}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); close(); } })}
-            {/* Google Earth (KMZ) export is NOT here — owner decision 2026-10-22 (NEW-1): File ▾ is its ONE home in the planner. */}
-          </>;
-        }
-        return (
-          <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={close} width={MW} zIndex={1998} className="menu" panelStyle={menuPanel}>
-            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px" }}>{header}</div>
-            {body}
-          </ContextMenu>
-        );
-      })()}
+      {mapMenu && <MapContextMenu
+                  PAL={PAL}
+                  alignDeedToParcel={alignDeedToParcel}
+                  arrangePeers={arrangePeers}
+                  arrangeSel={arrangeSel}
+                  callouts={callouts}
+                  copyRef={copyRef}
+                  deedAlreadyPromoted={deedAlreadyPromoted}
+                  deedGroupMembers={deedGroupMembers}
+                  deedMainOf={deedMainOf}
+                  deleteMarkupById={deleteMarkupById}
+                  deleteSel={deleteSel}
+                  disabledRow={disabledRow}
+                  duplicateRef={duplicateRef}
+                  fit={fit}
+                  flashWarn={flashWarn}
+                  insertVtx={insertVtx}
+                  mapMenu={mapMenu}
+                  markups={markups}
+                  measures={measures}
+                  menuItem={menuItem}
+                  menuPanel={menuPanel}
+                  openInspector={openInspector}
+                  parcels={parcels}
+                  pasteClip={pasteClip}
+                  pasteOverlay={pasteOverlay}
+                  promoteDeedToParcel={promoteDeedToParcel}
+                  removeLeaderFromCallout={removeLeaderFromCallout}
+                  setAddLeaderFor={setAddLeaderFor}
+                  setAlignFor={setAlignFor}
+                  setCalloutBand={setCalloutBand}
+                  setEaseShowArea={setEaseShowArea}
+                  setMapMenu={setMapMenu}
+                  setMarkupBand={setMarkupBand}
+                  setMeasureBand={setMeasureBand}
+                  setSel={setSel}
+                  snapBackEaseLabel={snapBackEaseLabel}
+                  toggleCalloutLock={toggleCalloutLock}
+                  toggleMarkupLock={toggleMarkupLock}
+                  toggleMeasureLock={toggleMeasureLock}
+                />}
 
       {/* B845584 — the element context-menu rebuild. Skeleton is IDENTICAL for every element type:
           1) element-specific content (varies), 2) Arrange — exactly four rows, always, 3) common
@@ -30613,42 +26779,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* Site-plan overlay right-click menu (B461). Mirrors the element typeMenu: a portalled,
           viewport-clamped floating menu at the cursor. Opens from the canvas overlay (unlocked) or
           its Overlay-panel row (works even when locked, which is pointer-inert on the map). */}
-      {ovMenu && (() => {
-        const MW = 220;
-        const o = sheetOverlays.find((x) => x.id === ovMenu.id);
-        if (!o) return null;
-        // NEW-2 — front/back are WITHIN this reference's band (below vs above the plan), so the
-        // greying matches what the ops actually do; crossing the plan is the separate toggle below.
-        const { atFront, atBack } = overlayOrderFlags(sheetOverlays, ovMenu.id);
-        const isAbove = overlayBand(o) === "above";
-        const isAerialRow = !!o.fromMap; // B848736 — the pinned map reference: no promote, no align (see the panel row for the full rationale)
-        const locked = !!o.locked, hasParcel = parcels.length > 0;
-        const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
-        const item = ({ text, hint, on, dis, danger, title }) => (
-          <button title={title} disabled={!!dis}
-            style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled, ...disabledRow } : danger ? { color: PAL.danger } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-            onClick={dis ? undefined : on}>
-            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>}
-          </button>
-        );
-        return (
-          <ContextMenu x={ovMenu.x} y={ovMenu.y} onClose={() => setOvMenu(null)} width={MW} zIndex={1998} className="menu" panelStyle={menuPanel}>
-            <div style={hdr(false)}>Edit</div>
-            {item({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
-            {item({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
-            {item({ text: "Paste", hint: `${MOD_LABEL}V`, dis: !hasOverlayClip(), title: hasOverlayClip() ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
-            <div style={hdr(true)}>Arrange</div>
-            {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
-            {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
-            {!isAerialRow && item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this overlay back under the parcel and the site elements" : "Lift this overlay over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
-            <div style={hdr(true)}>Place</div>
-            {item({ text: locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!locked} size={13} />, on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
-            {item({ text: "Align to base edge…", dis: locked || !hasParcel || isAerialRow, title: isAerialRow ? "This aerial came from the map — it's already to scale, so manual alignment is disabled" : locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); if (isAerialRow) setShowAerial(true); setOvMenu(null); } })}
-          </ContextMenu>
-        );
-      })()}
+      {ovMenu && <OverlayContextMenu
+                  PAL={PAL}
+                  copyOverlay={copyOverlay}
+                  disabledRow={disabledRow}
+                  duplicateOverlay={duplicateOverlay}
+                  flashWarn={flashWarn}
+                  menuItem={menuItem}
+                  menuPanel={menuPanel}
+                  ovMenu={ovMenu}
+                  parcels={parcels}
+                  pasteOverlay={pasteOverlay}
+                  patchOverlay={patchOverlay}
+                  removeOverlay={removeOverlay}
+                  reorderOverlay={reorderOverlay}
+                  setOvAlignBase={setOvAlignBase}
+                  setOvMenu={setOvMenu}
+                  setSelOverlay={setSelOverlay}
+                  setShowAerial={setShowAerial}
+                  sheetOverlays={sheetOverlays}
+                  toggleOverlayBand={toggleOverlayBand}
+                />}
 
       {/* NEW-1 (2026-11-11) — the owner-only 3D cut-and-fill viewer. Mounted only while grading is ON for this plan (`grOn` = the owner gate AND the
           per-plan switch), so it closes itself if grading is switched off and a non-owner can never reach it. Portalled to <body> (a fixed overlay

@@ -362,6 +362,20 @@ export const ETJ_SOURCES = [
     coverage: "Fort Bend County (20 cities' ETJ)",
     note: "Fort Bend County GIS's City ETJs table — fresher than H-GAC's regional layer (newest edit 2026-04-23). Screening only; verify with the city.",
   },
+  /* ⛔ Waller County (sweep 2026-11-22) — the Fort Bend pattern: the county's own ETJ table is FIRST inside Waller County, H-GAC the backup (#39).
+   * H-GAC has no Brookshire ETJ polygon; the county's table answers "BROOKSHIRE ETJ" (the " ETJ" suffix is the layer's own — stripped for display). */
+  {
+    id: "etj_waller", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Waller County", bbox: [29.775, -96.3, 30.3, -95.7],   // south edge 29.775: Waller's own southern line sits near 29.78; trimmed so Fort Bend sites (Bain, 29.771) never ask the Waller rows
+    url: GIS_SOURCES.etj_waller.serviceUrl,
+    fields: { name: "Name" }, nameStrip: GIS_SOURCES.etj_waller.nameStrip, titleCaseName: true,
+    roster: GIS_SOURCES.etj_waller.roster,
+    softFail: true, supersedes: ["etj_hgac"], supersedeCounty: "Waller", supersedeClipUrl: GIS_SOURCES.county_waller.serviceUrl, supersedeClipWhere: GIS_SOURCES.county_waller.where,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Waller County GIS", dataLastEdited: GIS_SOURCES.etj_waller.dataLastEdited,
+    coverage: "Waller County (10 cities' ETJ)",
+    note: "Waller County GIS's ETJ table — H-GAC's regional layer has no Brookshire ETJ (newest county edit 2026-09-02). Screening only; verify with the city.",
+  },
   /* NEW-1 (Fort Bend) — THE SB 2038 EVIDENCE. `release: true` is the same contract as Fort Worth's row below: a point inside one never reads as a
    * plain ETJ (`identifyJurisdiction` → `etjReleased`), and the share pass never counts it. What the county's Land Ordinances layer records is a
    * filed removal from "<City> ETJ" — the city's name is the polygon's own `City` column with " ETJ" stripped, so it reads "Fulshear ETJ release
@@ -801,6 +815,21 @@ CITY_SOURCES.push({
   coverage: "Fort Bend County — full-purpose city limits",
   note: "Fort Bend County GIS's City Limits table. Full-purpose limits only (limited-purpose annexation is a separate county layer, not wired). Screening only — verify with the city.",
 });
+/* ⛔ Waller County (sweep 2026-11-22) — the county's own city-limits table, FIRST inside Waller County with TxGIO the backup (#39). The name column was not
+ * recorded when the layer was measured, so the row reads the first present of `nameFallbackFields` (see normalizeFeature). */
+CITY_SOURCES.push({
+  id: "city_waller", role: "city", label: "City limits — Waller County", kind: "polygon",
+  region: "Waller County", bbox: [29.775, -96.3, 30.3, -95.7],
+  url: GIS_SOURCES.city_waller.serviceUrl,
+  fields: { name: "CityName" }, nameFallbackFields: ["CITY", "City", "NAME", "Name", "CITY_NAME", "City_Name", "CITYNAME"], titleCaseName: true,
+  fullPurposeOnly: GIS_SOURCES.city_waller.fullPurposeOnly,
+  needGeometry: true,
+  supersedes: ["city"], supersedeCounty: "Waller",
+  ttl: 7 * 24 * 3600 * 1000,
+  sourceName: "Waller County GIS",
+  coverage: "Waller County — city limits (7 cities)",
+  note: "Waller County GIS's city-limits table (edited 2025-11-06). Screening only — verify with the city.",
+});
 export function citySourcesForPoint(lat, lng) {
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
@@ -1006,7 +1035,7 @@ const closeRing = (r) => (r.length && (r[0][0] !== r[r.length - 1][0] || r[0][1]
  * parcel when a ring is given → straddle); line sources buffer the point by the
  * source tolerance and return geometry so the caller can pick the nearest. Pure. */
 export function buildIdentifyParams(source, geom) {
-  const outFields = Object.values(source.fields).filter(Boolean).join(",") || "*";
+  const outFields = Array.isArray(source.nameFallbackFields) ? "*" : (Object.values(source.fields).filter(Boolean).join(",") || "*");
   const p = {
     outFields,
     inSR: 4326, outSR: 4326,
@@ -1067,6 +1096,9 @@ const titleCase = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpp
 export function normalizeFeature(source, attrs) {
   const out = { role: source.role };
   for (const [key, col] of Object.entries(source.fields)) out[key] = col ? (attrs?.[col] ?? null) : null;
+  if ((out.name == null || out.name === "") && Array.isArray(source.nameFallbackFields)) {
+    for (const c of source.nameFallbackFields) { const v = attrs?.[c]; if (v != null && v !== "") { out.name = v; break; } }
+  }
   // A single-jurisdiction layer (one with no per-feature name column) carries no name;
   // every matched feature IS that jurisdiction, so fall back to the source constant.
   if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;

@@ -1,33 +1,40 @@
-/* TEST-ONLY (aliased over lazyLayerPreload.js by vitest.config.js): every lazy layer file imported statically, so the unit suites see the full registry synchronously. */
-import * as m0 from "../../src/workspaces/site-planner/lib/desotoLayers.js";
-import * as m1 from "../../src/workspaces/site-planner/lib/sugarLandLayers.js";
-import * as m2 from "../../src/workspaces/site-planner/lib/fortBendLayers.js";
-import * as m3 from "../../src/workspaces/site-planner/lib/nashvilleLayers.js";
-import * as m4 from "../../src/workspaces/site-planner/lib/nashvilleBufferLayers.js";
-import * as m5 from "../../src/workspaces/site-planner/lib/georgiaLayers.js";
-import * as m6 from "../../src/workspaces/site-planner/lib/coloradoLayers.js";
-import * as m7 from "../../src/workspaces/site-planner/lib/tennesseeLayers.js";
-import * as m8 from "../../src/workspaces/site-planner/lib/mississippiLayers.js";
-import * as m9 from "../../src/workspaces/site-planner/lib/floridaLayers.js";
-import * as m10 from "../../src/workspaces/site-planner/lib/oklahomaLayers.js";
-import * as m11 from "../../src/workspaces/site-planner/lib/chambersLayers.js";
-import * as m12 from "../../src/workspaces/site-planner/lib/houstonMetroLayers.js";
-import * as m13 from "../../src/workspaces/site-planner/lib/txCityZoningLayers.js";
-// A suite that wants the production-shaped "nothing loaded yet" registry sets globalThis.__PLANYR_NO_LAZY_PRELOAD__ before importing layers.js
-// (test/lazyLayerRegistry.test.js does, after vi.resetModules()).
-export const PRELOADED = globalThis.__PLANYR_NO_LAZY_PRELOAD__ ? null : {
-  desoto: m0,
-  sugarland: m1,
-  fortbend: m2,
-  nashville: m3,
-  nashvilleBuffers: m4,
-  georgia: m5,
-  colorado: m6,
-  tennessee: m7,
-  mississippi: m8,
-  florida: m9,
-  oklahoma: m10,
-  chambers: m11,
-  houstonMetro: m12,
-  txCityZoning: m13,
+/* TEST-ONLY (aliased over lazyLayerPreload.js by vitest.config.js): every lazy layer file imported, so the unit suites see the full registry synchronously.
+ * Imported DYNAMICALLY (top-level await) and only when the preload is wanted: a layer file reads its GIS_SOURCES rows at module load (batch K stage 3), so a suite that
+ * asks for the production-shaped "nothing loaded yet" registry (globalThis.__PLANYR_NO_LAZY_PRELOAD__ — test/lazyLayerRegistry.test.js, test/sourcePacks.test.js, after
+ * vi.resetModules()) must not evaluate them here. */
+const LIB = "../../src/workspaces/site-planner/lib/";
+const NO = !!globalThis.__PLANYR_NO_LAZY_PRELOAD__;
+const mods = NO ? [] : await Promise.all([
+  import(LIB + "desotoLayers.js"),
+  import(LIB + "sugarLandLayers.js"),
+  import(LIB + "fortBendLayers.js"),
+  import(LIB + "nashvilleLayers.js"),
+  import(LIB + "nashvilleBufferLayers.js"),
+  import(LIB + "georgiaLayers.js"),
+  import(LIB + "coloradoLayers.js"),
+  import(LIB + "tennesseeLayers.js"),
+  import(LIB + "mississippiLayers.js"),
+  import(LIB + "floridaLayers.js"),
+  import(LIB + "oklahomaLayers.js"),
+  import(LIB + "chambersLayers.js"),
+  import(LIB + "houstonMetroLayers.js"),
+  import(LIB + "txCityZoningLayers.js"),
+  import(LIB + "wallerLayers.js"),
+]);
+export const PRELOADED = NO ? null : {
+  desoto: mods[0],
+  sugarland: mods[1],
+  fortbend: mods[2],
+  nashville: mods[3],
+  nashvilleBuffers: mods[4],
+  georgia: mods[5],
+  colorado: mods[6],
+  tennessee: mods[7],
+  mississippi: mods[8],
+  florida: mods[9],
+  oklahoma: mods[10],
+  chambers: mods[11],
+  houstonMetro: mods[12],
+  txCityZoning: mods[13],
+  waller: mods[14],
 };

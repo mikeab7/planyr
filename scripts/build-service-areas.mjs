@@ -59,6 +59,12 @@ if (want("fortbend")) {
   if (!rec) throw new Error("Fort Bend County TX not found in the county polygon asset");
   areas.fortbend = { label: "Fort Bend County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
 }
+/* NEW-1 (Waller County layers, 2026-11-24): `waller` — Waller County TX, from the SAME bundled county polygons as `harris` (no network). Rebuild just it with `--only=waller`. */
+if (want("waller")) {
+  const rec = index.counties.find((c) => c.state === "TX" && /^waller$/i.test(c.name.replace(/ county$/i, "")));
+  if (!rec) throw new Error("Waller County TX not found in the county polygon asset");
+  areas.waller = { label: "Waller County, TX", source: "Planyr's bundled county polygons (public/geo/county-polygons.json)", polys: rec.rings.map((ring) => [ring.map(([x, y]) => [round(x / index.scale), round(y / index.scale)])]) };
+}
 /* NEW-1 (Rutherford County TN zoning): `rutherford` = Rutherford County TN, from the SAME bundled county polygons as `harris` (no network). The county / Murfreesboro / Smyrna / La Vergne
  * zoning rows are declared for this area, so a Texas, Georgia, Mississippi or Nashville-side Tennessee site never lists them. */
 if (want("rutherford")) {
@@ -117,6 +123,19 @@ for (const [key, name] of [["richmond", "Richmond"], ["fulshear", "Fulshear"], [
   const gj = await q("https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0/query", { where: `city_name='${name}'`, maxAllowableOffset: 0.0004 });
   if (!gj.features.length) throw new Error(`TxGIO City_Boundaries holds no city_name='${name}'`);
   areas[key] = { label: `City of ${name} limits`, source: `TxGIO Texas_City_Boundaries (city_name='${name}'), full-purpose city limits`, polys: polysOf(gj) };
+}
+if (want("katy")) {
+  /* NEW-1 / NEW-2 (Katy zoning, future land use, thoroughfare plan, 2026-11-24): the City of Katy's limits (layer 7) ∪ its ETJ (layer 8), both from the city's own Planning_Map service (public ArcGIS Online,
+   * services8.arcgis.com/ihZy0ZJt5Ea5u0dK, CORS-open). Zoning applies inside the limits; the city's future land use and thoroughfare plan also cover its ETJ — one area serves all three rows. Esri JSON; every ring is its
+   * own polygon (a hole is filled — an area may only err toward SHOWING a layer). */
+  const KT = "https://services8.arcgis.com/ihZy0ZJt5Ea5u0dK/arcgis/rest/services/Planning_Map/FeatureServer";
+  const polys = [];
+  for (const layer of [7, 8]) {
+    const gj = await q(`${KT}/${layer}/query`, { f: "json", where: "1=1", outFields: "OBJECTID", returnGeometry: "true", maxAllowableOffset: 0.0004 });
+    if (!gj.features || !gj.features.length) throw new Error(`Katy Planning_Map layer ${layer} holds no features`);
+    for (const f of gj.features) for (const ring of f.geometry.rings) polys.push([ring.map(([x, y]) => [round(x), round(y)])]);
+  }
+  areas.katy = { label: "City of Katy limits and ETJ", source: "City of Katy Planning_Map layers 7 (City Limits) and 8 (Katy ETJ), services8.arcgis.com/ihZy0ZJt5Ea5u0dK", polys };
 }
 if (want("sugarland")) {
   /* NEW-1 (Sugar Land city layers, 2026-11-02): the City of Sugar Land's limits (layer 0, one polygon) ∪ its ETJ (layer 1, 14 polygons), from the city's own CityLimits_ETJ map service.

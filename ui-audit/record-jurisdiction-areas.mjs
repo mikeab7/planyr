@@ -29,7 +29,7 @@ import ClipperLib from "clipper-lib";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const { feetToLatLngPair } = await import(path.join(ROOT, "src/workspaces/site-planner/lib/mapLock.js"));
-const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sources.js"));
+const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sourcesAll.js"));
 
 const args = process.argv.slice(2);
 const OUT = args.includes("--out") ? args[args.indexOf("--out") + 1] : path.join(ROOT, "test/fixtures/jurisdictionAreas.json");

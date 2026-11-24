@@ -25,6 +25,7 @@ import { OK_FIXTURES, OK_DOCS } from "./sourceFixturesOk.js"; // NEW-1 (Oklahoma
 import { TX_CITY_ZONING_FIXTURES, TX_CITY_ZONING_DOCS } from "./sourceFixturesTxCityZoning.js"; // NEW-1 (Texas city zoning)
 import { SUGARLAND_FIXTURES, SUGARLAND_DOCS } from "./sourceFixturesSugarLand.js"; // NEW-1 (City of Sugar Land layers)
 import { FORTBEND_FIXTURES, FORTBEND_DOCS } from "./sourceFixturesFortBend.js"; // NEW-1 (Fort Bend County layers)
+import { WALLER_FIXTURES, WALLER_DOCS } from "./sourceFixturesWaller.js"; // NEW-1 (Waller County layers)
 import { NASHVILLE_BUFFER_FIXTURES, NASHVILLE_BUFFER_DOCS } from "./sourceFixturesNashvilleBuffers.js"; // B2671266 / B2671267 (Metro Nashville buffers + pending flood maps)
 import { RUTHERFORD_FIXTURES, RUTHERFORD_DOCS } from "./sourceFixturesRutherford.js"; // NEW-1 (Rutherford County TN zoning)
 import { NASHVILLE_FIXTURES, NASHVILLE_DOCS } from "./sourceFixturesNashville.js"; // NEW-1/NEW-3 (Metro Nashville zoning sweep)
@@ -42,6 +43,7 @@ export const SOURCE_FIXTURES = {
   ...TX_CITY_ZONING_FIXTURES,
   ...SUGARLAND_FIXTURES,
   ...FORTBEND_FIXTURES,
+  ...WALLER_FIXTURES,
   ...NASHVILLE_BUFFER_FIXTURES,
   ...RUTHERFORD_FIXTURES,
   ...NASHVILLE_FIXTURES, // NEW-1/NEW-3 (Metro Nashville zoning sweep)
@@ -978,6 +980,27 @@ export const SOURCE_FIXTURES = {
     { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
   ],
   },
+  /* Waller County (2026-11-22) — points read live from the county's own layers. */
+  etj_waller: {
+  fixtures: [
+    { label: "Brookshire ETJ (Donigan Rd — H-GAC answers nothing here)", point: [-95.98, 29.78], expectMinCount: 1 },
+    { label: "Houston ETJ (H-GAC agrees)", point: [-95.86, 29.79], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris — outside Waller)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  county_waller: {
+  fixtures: [
+    { label: "Brookshire area (inside Waller County)", point: [-95.98, 29.78], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  city_waller: {
+  fixtures: [
+    // No inside-limits point was measured in the sweep brief (only "agrees with TxGIO at the Katy and Brookshire points"); the live check adds one.
+    { label: "Donigan Rd Brookshire-area ETJ point (outside the city limits)", point: [-95.98, 29.78], expectMinCount: 0 },
+    { label: "Downtown Houston (outside Waller)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
   etj_harris: {
   fixtures: [
     { label: "Houston ETJ, north Harris (the owner's sweep point)", point: [-95.75, 30.05], expectMinCount: 1 },
@@ -1562,6 +1585,7 @@ export const SOURCE_DOCS = {
   ...TX_CITY_ZONING_DOCS,
   ...SUGARLAND_DOCS,
   ...FORTBEND_DOCS,
+  ...WALLER_DOCS,
   ...NASHVILLE_BUFFER_DOCS,
   ...RUTHERFORD_DOCS,
   ...NASHVILLE_DOCS, // NEW-1/NEW-3 (Metro Nashville zoning sweep)

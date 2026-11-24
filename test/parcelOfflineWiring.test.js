@@ -63,7 +63,7 @@ describe("NEW-1 — a plan's location is SETTABLE, and everything gated on it re
   /* Mutation: remove `origin` from stateRef / histKey / applySnapshot → red.
      Without all three, a placement change is not undoable as one frame. */
   it("the anchor rides the undo snapshot — recorded, keyed, and restored", () => {
-    expect(planner).toMatch(/stateRef\.current = \{[^}]*, origin \};/);              // recorded
+    expect(planner).toMatch(/const stateRef = useLatestRender\(\{[^}]*, origin \}\);/);              // recorded
     expect(planner).toMatch(/"\|O:" \+ \(s\.origin \?/);                              // keyed (a change is its own frame)
     expect(planner).toMatch(/if \(s\.origin !== undefined\) \{\s*\n\s*const o = normalizeOrigin\(s\.origin\);/); // restored
   });

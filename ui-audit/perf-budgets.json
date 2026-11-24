@@ -74,7 +74,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2248014,
+      "baseline": 2181362,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -1024,6 +1024,17 @@
           "commit": "111cc4b5507df377ab57fd0c927c215537448f51",
           "sourceHash": "61a156cf5c5d42d0",
           "reason": "Batch K stage 2: the 19 per-state county parcel tables (Alabama through Kentucky) load on demand instead of in the Site route first download"
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2248014,
+          "to": 2181362,
+          "direction": "ratchet",
+          "item": "B2671306",
+          "date": "2026-11-23",
+          "commit": "2d26313194012080f750738cb1ab7903e952e284",
+          "sourceHash": "f98369d841041f40",
+          "reason": "Audit batch K stage 3: GIS source rows for Colorado, Georgia, Tennessee, Mississippi, Oklahoma, Florida and the Fort Bend / Sugar Land / Nashville / Texas-city sets load as on-demand packs with their layer file instead of in the Site route's first download"
         }
       ]
     }

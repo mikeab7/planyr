@@ -1,4 +1,4 @@
-/* NEW-1 / NEW-2 (Texas city zoning — Richmond, Fulshear, Stafford, Webster; 2026-11-12, Webster measured 2026-11-15) — THE GIS REGISTRY ROWS of the Texas city zoning layers (lib/txCityZoning.js reads them).
+/* NEW-1 / NEW-2 (Texas city zoning — Richmond, Fulshear, Stafford, Webster; 2026-11-12, Webster measured 2026-11-15; Katy 2026-11-24) — THE GIS REGISTRY ROWS of the Texas city zoning layers (lib/txCityZoning.js reads them).
  *
  * Every row is `states: ["TX"]`, production tier. Spread into `GIS_SOURCES` (sources.js) in one line so this block does not share a patch hunk with another state's rows; fixtures and
  * notes live in `sourceFixturesTxCityZoning.js`, off the app bundle, like every other row.
@@ -10,13 +10,17 @@
  *   · Webster   — the city's own ArcGIS Server (www1.cityofwebster.com): Landbase/Zoning/MapServer, layers 0 (base districts, 226) and 1 (planned developments, 45), last edited 2025-12-29.
  *                 It sends no CORS header and the build sandbox's egress refuses it (403 on CONNECT), so it is read through the same-origin /gis-proxy relay (the host is on its ALLOWED_HOSTS) and was
  *                 MEASURED through the branch preview's relay on 2026-11-15 (fields, counts, codes, geometry, overlap of the two layers).
- * NOT FOUND, and so not here (each measured): Rosenberg (maps.rosenbergtx.gov publishes no zoning layer), Katy (none public), Missouri City (gis.missouricitytx.gov refuses non-browser clients).
+ *   · Katy      — the city's ArcGIS Online org (services8.arcgis.com/ihZy0ZJt5Ea5u0dK), ONE service, Planning_Map/FeatureServer, public and CORS-open, measured 2026-11-24: layer 11 Zoning (18 polygons),
+ *                 layer 15 Future Land Use (10,967 parcel-shaped polygons), layer 25 Thoroughfare Plan (391 centrelines). Its layers 7 (City Limits), 8 (ETJ) and 4 (MUDs) are NOT rows here:
+ *                 limits / ETJ / MUDs are already drawn from other sources; layers 7 and 8 are the `katy` service area (regions) the three rows are gated to.
+ * NOT FOUND, and so not here (each measured): Rosenberg (maps.rosenbergtx.gov publishes no zoning layer), Missouri City (gis.missouricitytx.gov refuses non-browser clients).
  * Unincorporated Fort Bend County keeps the "Texas counties have no zoning" sentence — these layers are drawn only inside a city's limits (lib/txCityZoningLayers.js, `regions`). */
 
 const RICHMOND = "https://services6.arcgis.com/riku34rn6C8cs2t5/arcgis/rest/services/CORZONINGDISTRICTS020320/FeatureServer/0";
 const FULSHEAR_OLD = "https://services5.arcgis.com/k1ZyjVw1fpWcwy7h/arcgis/rest/services/ZONING/FeatureServer/0";
 const FULSHEAR_NEW = "https://services5.arcgis.com/k1ZyjVw1fpWcwy7h/arcgis/rest/services/ZONING_NEWER/FeatureServer/0";
 const STAFFORD = "https://services.arcgis.com/Ga5PFntoooL0Dlwu/arcgis/rest/services/Zoning_Designations_Current/FeatureServer/0";
+const KATY = "https://services8.arcgis.com/ihZy0ZJt5Ea5u0dK/arcgis/rest/services/Planning_Map/FeatureServer";
 const WEBSTER = "https://www1.cityofwebster.com/arcgis/rest/services/Landbase/Zoning/MapServer";
 
 const base = { states: ["TX"], tier: "production", lastVerified: "2026-11-12", layerId: null, geometryType: "polygon" };
@@ -64,8 +68,29 @@ export const TX_CITY_ZONING_SOURCES = {
     ...base,
     // Live 2026-11-15 (through the relay): 45 PD polygons (17 with a named development guide). They do not overlap the base layer. PD_Guide_Hyperlink is typed with backslashes on 16 of 17.
   },
+  katyZoning: {
+    key: "katyZoning", label: "Zoning districts (City of Katy)", provider: "City of Katy — Planning (zoning, Planning_Map layer 11)",
+    serviceUrl: `${KATY}/11`, coverage: "katy",
+    fields: { code: "ZONECODE", description: "ZONDESC", link: "LINK" },
+    ...base, lastVerified: "2026-11-24",
+    // Live 2026-11-24: 18 polygons — C-1 · C-2 · M · R-1 · MH · OKD and 10 planned districts (PDD / MPC) whose ZONECODE is the development's name. Layer edited 2024-12-02. LINK = an ecode360 section.
+  },
+  katyFutureLandUse: {
+    key: "katyFutureLandUse", label: "Future land use (City of Katy)", provider: "City of Katy — Planning (future land use, Planning_Map layer 15)",
+    serviceUrl: `${KATY}/15`, coverage: "katy",
+    fields: { code: "FLU", jurisdiction: "Jurisdiction" },
+    ...base, lastVerified: "2026-11-24",
+    // Live 2026-11-24: 10,967 parcel-shaped polygons (City of Katy 9,451 · Katy ETJ 1,505 · Fulshear ETJ 3 · NOT IN 8). 15 legend classes + ROW (21) + 7 blank. Owner / address / parcel-number fields exist and are never requested.
+  },
+  katyThoroughfare: {
+    key: "katyThoroughfare", label: "Thoroughfare plan (City of Katy)", provider: "City of Katy — Planning (thoroughfare plan, Planning_Map layer 25)",
+    serviceUrl: `${KATY}/25`, coverage: "katy",
+    fields: { class: "ThoroClass", street: "FullStreet" },
+    ...base, geometryType: "line", lastVerified: "2026-11-24",
+    // Live 2026-11-24: 391 centrelines — Major 330 · Collector 53 · Proposed Collector 3 · Proposed Major 4 · Interstate Freeway 1.
+  },
 };
 
 /* Every row's real coverage is one city's limits — a "local" fixture class (≥2 points, ≥2 km apart), not the state class a Texas scope implies. */
 const CITY_ONLY = (what, city) => ["local", `${what} — the City of ${city} only; probing it in Dallas or elsewhere in Houston would assert a guaranteed zero.`];
-export const TX_CITY_ZONING_FIXTURE_REACH = Object.fromEntries(Object.entries(TX_CITY_ZONING_SOURCES).map(([k, s]) => [k, CITY_ONLY(s.label, /Richmond|Fulshear|Stafford|Webster/.exec(s.label)[0])]));
+export const TX_CITY_ZONING_FIXTURE_REACH = Object.fromEntries(Object.entries(TX_CITY_ZONING_SOURCES).map(([k, s]) => [k, CITY_ONLY(s.label, /Richmond|Fulshear|Stafford|Webster|Katy/.exec(s.label)[0])]));

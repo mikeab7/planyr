@@ -15,7 +15,7 @@ const at = (needle) => {
   return i;
 };
 // The pond inspector render body, delimited by its opening arrow and the appearance group.
-const pondStart = at('{selEl.type === "pond" && (() => {');
+const pondStart = at('export const PondInspector = memo(function PondInspector');
 const pondEnd = at('sectionId="pond-appearance"');
 const pondBody = src.slice(pondStart, pondEnd);
 

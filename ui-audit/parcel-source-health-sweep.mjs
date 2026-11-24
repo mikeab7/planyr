@@ -3,7 +3,7 @@
  * source in counties.js, so a source that has quietly gone empty is caught by a scheduled build
  * rather than by Michael clicking on a map. (Same shape/purpose as gis-verify/gis-source-
  * coverage-verify.mjs — the drainage/utility screening registry's own weekly drift check — but
- * that verifier reads a completely different registry, src/shared/gis/sources.js, which carries
+ * that verifier reads a completely different registry, src/shared/gis/sourcesAll.js, which carries
  * no parcel rows; this is the parcel registry's equivalent.)
  *
  * THE CASE THIS WAS BUILT FOR. Nevada's wired parcel layer went from 1,394,188 features to ZERO

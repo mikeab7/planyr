@@ -12,7 +12,7 @@
  * exits 2 if a source cannot be reached, so an unreachable host is never read as "no overlap". Pure Node — no browser. */
 import { createRequire } from "node:module";
 import { esriPolygons, normalizePolys, SQM_PER_ACRE } from "../src/workspaces/site-planner/lib/jurisdictionShare.js";
-import { GIS_SOURCES } from "../src/shared/gis/sources.js";
+import { GIS_SOURCES } from "../src/shared/gis/sourcesAll.js";
 
 const ClipperLib = createRequire(import.meta.url)("clipper-lib");
 const arg = process.argv.indexOf("--bbox");

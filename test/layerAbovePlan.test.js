@@ -366,7 +366,7 @@ describe("NEW-1 — the lift is remembered PER SITE, like every other per-plan d
 
   it("the planner persists and undoes it alongside the visibility set", () => {
     const sp = plannerSource();
-    expect(sp).toMatch(/stateRef\.current = \{[^}]*layerAbove[^}]*\};/);
+    expect(sp).toMatch(/const stateRef = useLatestRender\(\{[^}]*layerAbove[^}]*\}\);/);   // G2 — lib/useLatest.js
     expect(sp).toMatch(/const payload = \{[^}]*layerAbove \};/);
     expect(sp).toMatch(/"\|A:" \+ aboveSig\(s\.layerAbove\)/); // its own undo frame
     expect(sp).toMatch(/applyAboveOverrides\(applyOnOverrides\(cur, snapOverrides\), snapAbove\)/);

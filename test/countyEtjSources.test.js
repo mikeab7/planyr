@@ -286,3 +286,64 @@ describe("the DRAWN ETJ layer reads the same rows (the line you see is the line 
     expect(pointInPolygons([-95.925, 29.475], esriPolygons(COUNTY))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+describe("Waller County (sweep 2026-11-22) · the county's own ETJ + city limits, H-GAC / TxGIO the backup", () => {
+  const WC = "ETJ_WC/FeatureServer/3/query", WCITY = "City_Limits_Updated/FeatureServer/0/query";
+  const BROOKSHIRE = [-95.98, 29.78];   // Donigan Rd: H-GAC and TxGIO answer nothing; the county's table says BROOKSHIRE ETJ
+  const HOUSTON_WALLER = [-95.86, 29.79];   // H-GAC = HOUSTON and the county = HOUSTON ETJ (they agree)
+  const wallerCounty = () => attr({ CNTY_NM: "Waller" });
+  const r = (over = {}) => ({
+    [N.txCounty]: wallerCounty, [N.txCity]: NONE, [WCITY]: NONE, [WC]: () => attr({ Name: "BROOKSHIRE ETJ" }), [N.hgac]: NONE, [N.fbEtj]: NONE, [N.fbRelease]: NONE, [N.fbCity]: NONE, ...over,
+  });
+  it("registry rows exist on the county's own URLs with fixtures", () => {
+    expect(ETJ_SOURCES.find((s) => s.id === "etj_waller").url).toBe(GIS_SOURCES.etj_waller.serviceUrl);
+    expect(CITY_SOURCES.find((s) => s.id === "city_waller").url).toBe(GIS_SOURCES.city_waller.serviceUrl);
+    for (const k of ["etj_waller", "county_waller", "city_waller"]) expect(SOURCE_FIXTURES[k].fixtures.length, k).toBeGreaterThanOrEqual(1);
+  });
+  it("29.78,-95.98 reads Brookshire ETJ (H-GAC and TxGIO empty)", async () => {
+    const j = await run(...BROOKSHIRE, r());
+    expect(j.etj).toEqual(["Brookshire"]);
+    expect(j.city).toEqual([]);
+  });
+  it("29.79,-95.86 reads Houston ETJ once — county and H-GAC agree, no double answer", async () => {
+    const j = await run(...HOUSTON_WALLER, r({ [WC]: () => attr({ Name: "HOUSTON ETJ" }), [N.hgac]: () => attr({ CITY: "HOUSTON" }) }));
+    expect(j.etj).toEqual(["Houston"]);
+  });
+  it("inside Brookshire's limits the city reads, and no ETJ (limits outrank ETJ, #38)", async () => {
+    const j = await run(...BROOKSHIRE, r({ [WCITY]: () => attr({ CityName: "Brookshire" }) }));
+    expect(j.city).toEqual(["Brookshire"]);
+    expect(j.etj).toEqual([]);
+  });
+  it("the city name is read from whichever common name column the county layer carries", async () => {
+    const j = await run(...BROOKSHIRE, r({ [WCITY]: () => attr({ CITY_NAME: "KATY" }) }));
+    expect(j.city).toEqual(["Katy"]);
+  });
+  it("RED PROOF · with the county rows dead the H-GAC answer comes straight back (and the miss is recorded)", async () => {
+    const j = await run(...HOUSTON_WALLER, r({ [WC]: boom(), [WCITY]: boom(), [N.hgac]: () => attr({ CITY: "HOUSTON" }) }));
+    expect(j.etj).toEqual(["Houston"]);
+    expect(j.etjSourceErrors).toContain("etj_waller");
+    const c = await run(...HOUSTON_WALLER, r({ [WC]: boom(), [WCITY]: boom(), [N.txCity]: () => attr({ city_name: "Katy" }) }));
+    expect(c.city).toEqual(["Katy"]);   // TxGIO straight back; (a city hit outranks any ETJ, #38)
+    expect(c.citySourceErrors.map((e) => e.id)).toContain("city_waller");
+  });
+  it("supersession is by county: at a Harris point the Waller rows never replace H-GAC", async () => {
+    const j = await run(-95.8, 29.75, r({ [N.txCounty]: harrisCounty, [WC]: NONE, [N.hgac]: () => attr({ CITY: "HOUSTON" }) }));
+    expect(j.etj).toEqual(["Houston"]);
+  });
+  it("the drawn layer cuts H-GAC by the Waller county line only (where = Waller), and Waller's own polygon draws", async () => {
+    const sq = (w, s, e, n) => ({ rings: [[[w, s], [w, n], [e, n], [e, s], [w, s]]] });
+    const seen = [];
+    const fetchJson = async (u) => {
+      seen.push(u);
+      if (u.includes("Texas_County_Boundaries")) return { features: [{ attributes: { OBJECTID: 1 }, geometry: sq(-96.3, 29.7, -95.7, 30.3) }] };
+      if (u.includes(WC)) return { features: [{ attributes: { Name: "BROOKSHIRE ETJ" }, geometry: sq(-96.0, 29.76, -95.95, 29.8) }] };
+      if (u.includes(N.hgac)) return { features: [{ attributes: { CITY: "KATY" }, geometry: sq(-95.99, 29.77, -95.96, 29.79) }] };
+      return { features: [] };
+    };
+    const fc = (await fetchCached(VECTOR_SOURCES.jur_etj, { w: -96.1, s: 29.7, e: -95.9, n: 29.85 }, { cache: freshCache(), fetchJson, zoom: 15 })).data;
+    expect(fc.features.filter((f) => f.properties.CITY === "Brookshire")).toHaveLength(1);
+    expect(fc.features.filter((f) => f.properties.CITY === "Katy")).toHaveLength(0);
+    expect(seen.some((u) => u.includes("Texas_County_Boundaries") && decodeURIComponent(u).toUpperCase().includes("WALLER"))).toBe(true);
+  });
+});

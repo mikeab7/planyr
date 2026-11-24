@@ -13,6 +13,7 @@
     "src/workspaces/site-planner/SitePlanner.jsx": 30,
     "src/workspaces/site-planner/SitePlannerApp.jsx": 1,
     "src/workspaces/site-planner/components/PondSection.jsx": 1,
+    "src/workspaces/site-planner/components/PondInspector.jsx": 2,
     "src/workspaces/site-planner/components/YieldDrainagePanels.jsx": 1,
     "src/workspaces/site-planner/components/elementRender.jsx": 2,
     "src/workspaces/site-planner/lib/cloudSync.js": 3,

@@ -6,9 +6,9 @@ import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 import { buildFixtureQuery, judgeParcelFixture, sameOwner, acresMatch, checkParcelFixtures, summariseFixtureChecks } from "../ui-audit/lib/parcelFixtureCheck.mjs";
 
 describe("the fixture block", () => {
-  it("is exported beside the registry fixtures and covers the six swept areas", () => {
+  it("is exported beside the registry fixtures and covers the seven swept areas", () => {
     expect(parcelFixtures).toBe(PARCEL_FIXTURES);
-    expect(Object.keys(PARCEL_FIXTURES).sort()).toEqual(["chambers", "fortbend", "ga_bartow", "harris", "tn_davidson", "tn_rutherford"]);
+    expect(Object.keys(PARCEL_FIXTURES).sort()).toEqual(["chambers", "fortbend", "ga_bartow", "ga_meriwether", "harris", "tn_davidson", "tn_rutherford"]);
   });
   it("every county key is in the registry, with a layerUrl, an id field, an acres field and a measured date", () => {
     for (const [k, f] of Object.entries(PARCEL_FIXTURES)) {

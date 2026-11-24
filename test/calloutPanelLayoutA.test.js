@@ -159,8 +159,9 @@ describe("the planner wiring (source guards)", () => {
     expect(SP).not.toMatch(/ariaLabel="Line weight"[^>]*unit="pt"|unit="pt"[^>]*ariaLabel="Line weight"/);
   });
   it("the neutral markup panel has an Appearance and a Size & position section and no opacity slider", () => {
-    const start = SP.indexOf("NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {");
-    const end = SP.indexOf("selected markup shape — geometry + style", start);
+    // G5b: the neutral-markup block is the NeutralMarkupInspector component now.
+    const start = SP.indexOf("export const NeutralMarkupInspector");
+    const end = SP.indexOf("export const MarkupStyleInspector", start);
     const body = SP.slice(start, end);
     expect(body).toMatch(/section="appearance"/);
     expect(body).toMatch(/section="size"/);
@@ -208,8 +209,9 @@ describe("NEW-1 — the value columns are a fixed compact width, fixed in the sh
 });
 
 describe("NEW-2 — the measurement panel is layout A", () => {
-  const start = SP.indexOf("{!multiStyleable && selMeasure && (() => {");
-  const body = SP.slice(start, SP.indexOf("{/* selected element */}", start));
+  // G5c: the measurement block is the MeasureInspector component now.
+  const start = SP.indexOf("export const MeasureInspector");
+  const body = SP.slice(start, SP.indexOf("export const DriveInRampInspector", start));
   it("has a Label input, then Appearance, then Size & position, in that order", () => {
     expect(start).toBeGreaterThan(-1);
     const lab = body.indexOf('<Field label="Label">'), ap = body.indexOf('section="appearance"'), sz = body.indexOf('section="size"');
@@ -268,13 +270,14 @@ describe("NEW-3 — every element panel takes layout A's control rules", () => {
     expect(SP).toMatch(/data-panel-section=\{label === "Appearance" \? "appearance" : label === "Size & position" \? "size" : undefined\}/);
   });
   it("the easement and deed panels use Appearance / Size & position, a typed % box (never a slider) and right-aligned pattern selects", () => {
-    const e0 = SP.indexOf('kind === "easement" && (() => {');
-    const easement = SP.slice(e0, SP.indexOf("NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && (() => {", e0));
+    // G5b: the easement block is the EasementInspector component now.
+    const e0 = SP.indexOf("export const EasementInspector");
+    const easement = SP.slice(e0, SP.indexOf("export const NeutralMarkupInspector", e0));
     expect(easement).toMatch(/section="appearance"/); expect(easement).toMatch(/section="size"/);
     expect(easement).toMatch(/<PercentField boxed /); expect(easement).toMatch(/textAlignLast: "right"/);
     expect(easement).not.toMatch(/Drag a centerline dot to reshape \(the strip|Drag a boundary dot to reshape;/);
-    const d0 = SP.indexOf("remaining non-neutral kind (a deed encumbrance)");
-    const deed = SP.slice(d0, SP.indexOf("{/* NEW-1 (layout \"A\", owner-approved 2026-10-20) — the Properties panel for text boxes", d0) > 0 ? SP.indexOf("{/* NEW-1 (layout \"A\", owner-approved 2026-10-20) — the Properties panel for text boxes", d0) : d0 + 12000);
+    const d0 = SP.indexOf("export const MarkupStyleInspector"); // G5b: the deed-encumbrance block
+    const deed = SP.slice(d0, d0 + 12000);
     expect(deed).toMatch(/section="appearance"/); expect(deed).toMatch(/section="size"/);
     expect(deed).toMatch(/<PercentField boxed /); expect(deed).not.toMatch(/type="range"/);
     expect(deed).not.toMatch(/Move the deed as one piece/);

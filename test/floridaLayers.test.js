@@ -26,7 +26,10 @@ import {
   EVAC_OTHER, BROWARD_WELLFIELD_RAMP, browardWellfieldStyle, MDC_TRAVEL_RAMP, mdcWellfieldStyle, mdcTravelDays, erpTypeLabel, ERP_TYPES as ERP_TYPES_FOR_TEST, niceCase, restrictionWords, epochDate, cleanupCategory, cleanupStatus, noiseLabel, sinkholeAreaStyle, SINKHOLE_AREA_RAMP, NOISE_RAMP, noiseStyle,
 } from "../src/workspaces/site-planner/lib/floridaLayers.js";
 import { GIS_SOURCES, statesFor, auditRegistry } from "../src/shared/gis/sources.js";
-import { FLORIDA_SOURCES } from "../src/shared/gis/sourcesFlorida.js";
+import { FLORIDA_SOURCES as FLORIDA_PACK } from "../src/shared/gis/sourcesFlorida.js";
+import { GIS_SOURCES as REGISTRY } from "../src/shared/gis/sources.js";
+// All Florida rows: countyFl / cityFl stay in the eager registry core (jurisdiction + vectorLayers read them at load); the rest are the `florida` source pack (batch K stage 3).
+const FLORIDA_SOURCES = { countyFl: REGISTRY.countyFl, cityFl: REGISTRY.cityFl, ...FLORIDA_PACK };
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { SERVICE_AREAS } from "../src/workspaces/site-planner/lib/serviceAreaData.js";
 import { _setServiceAreas } from "../src/workspaces/site-planner/lib/serviceAreas.js";

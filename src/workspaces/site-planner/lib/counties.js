@@ -1935,7 +1935,11 @@ const COUNTIES_RAW = {
     state: "GA", label: "Meriwether County (Greenville, GA), GA",
     layerUrl: "https://services9.arcgis.com/Xv8vRekQ4FVHSSIe/arcgis/rest/services/MeriwetherParcels/FeatureServer/0",
     idField: "Parcel_No", pinIdField: true,
-    help: "Meriwether County (Greenville, GA) parcels (Esri-hosted). Search by parcel number.",
+    // NEW-1 — Parcel_No is SPACE-PADDED in the data ("023    012", "069A   009"); `idPadded` lets a typed "023012" match across the gap (parcelQuery.idLikePattern).
+    idPadded: true,
+    // NEW-2 — the situs is split across house_no (0 = none) / stdirect / street_nam / sttype / zip. address1 / city / state are the MAILING address: never situs.
+    addrParts: { num: "house_no", dir: "stdirect", name: "street_nam", sfx: "sttype", zip: "zip" },
+    help: "Meriwether County (Greenville, GA) parcels (Esri-hosted). Search by parcel number or address.",
   },
   ga_sumter: {
     // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
@@ -2544,7 +2548,7 @@ const JURISDICTION_LAYERS_RAW = {
   waller: {
     label: "Waller County",
     layers: {},
-    note: "No public GIS is published for Waller County. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Waller County's own layers (proposed thoroughfares, Katy Prairie Conservancy land, water and sewer service areas, municipal utility districts, floodway buffer) sit in the Access, Environmental, Utilities and Flood & Drainage groups, shown only on a Waller site, and its ETJ, city-limit and drainage maps feed the site's jurisdiction. FEMA, wetlands and TxRRC layers above still apply.",
   },
 };
 

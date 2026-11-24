@@ -18,7 +18,7 @@ const chip = readFileSync(fileURLToPath(new URL("../src/shared/ui/Chip.jsx", imp
 
 describe("I1 — every engineering criterion is pre-filled with a computed estimate (never a blank)", () => {
   it("the screening-defaults are computed for the panel", () => {
-    expect(src).toContain('import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";');
+    expect(src).toContain('import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "../lib/pondScreeningDefaults.js";');
     // PR-N/O5 — the receiving-water tailwater now comes from the never-grade channel ladder helper.
     expect(src).toContain("const g_twEst = pondTailwaterResult(selEl, g_gradeFt);");
     expect(src).toContain("const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });");
